@@ -1,0 +1,45 @@
+import Fastify from 'fastify'
+import cookie from '@fastify/cookie'
+import cors from '@fastify/cors'
+import fastifyStatic from '@fastify/static'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import fs from 'node:fs'
+import { config } from './config.js'
+import { authRoutes } from './routes/auth.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const app = Fastify({ logger: true })
+
+await app.register(cookie)
+await app.register(cors, {
+  origin: config.frontendOrigin,
+  credentials: true,
+})
+
+// Health — must return exactly 200 (200-only rule + Railway healthcheck)
+app.get('/health', async () => ({ status: 'ok' }))
+
+await app.register(authRoutes)
+
+// In production, serve the built frontend (SPA) from FRONTEND_DIST.
+const distPath = path.resolve(__dirname, '..', config.frontendDist)
+if (config.isProd && fs.existsSync(distPath)) {
+  await app.register(fastifyStatic, { root: distPath, prefix: '/' })
+  // SPA fallback — any non-API route returns index.html
+  app.setNotFoundHandler((req, reply) => {
+    if (req.raw.url?.startsWith('/auth') || req.raw.url?.startsWith('/health')) {
+      return reply.code(404).send({ error: 'not_found' })
+    }
+    return reply.sendFile('index.html')
+  })
+}
+
+try {
+  await app.listen({ port: config.port, host: '0.0.0.0' })
+  app.log.info(`Kelionai backend on :${config.port}`)
+} catch (err) {
+  app.log.error(err)
+  process.exit(1)
+}
