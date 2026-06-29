@@ -22,7 +22,9 @@ interface ChatMessage {
 }
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { messages?: ChatMessage[] } }>('/api/chat', async (req, reply) => {
+  app.post<{ Body: { messages?: ChatMessage[]; image?: string } }>(
+    '/api/chat',
+    async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
@@ -33,8 +35,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const messages = req.body?.messages
+    const image = req.body?.image
     if (!Array.isArray(messages) || messages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
+    }
+
+    // Permanent vision: attach the latest camera frame to the last user turn so
+    // Claude (native vision) can see. The frame is a base64 JPEG data URL.
+    const params: Anthropic.MessageParam[] = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }))
+    if (image && params.length > 0) {
+      const lastIdx = params.length - 1
+      const lm = params[lastIdx]
+      if (lm.role === 'user' && typeof lm.content === 'string') {
+        const data = image.includes(',') ? image.slice(image.indexOf(',') + 1) : image
+        params[lastIdx] = {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
+            { type: 'text', text: lm.content },
+          ],
+        }
+      }
     }
 
     // Stream Claude's reply back as plain UTF-8 text chunks.

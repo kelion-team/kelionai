@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { streamChat, type ChatMessage } from '../lib/chat'
 import { strings, type Lang } from '../lib/i18n'
 import {
   enqueueSpeech,
   stopSpeaking,
   isSpeaking,
-  setOnSpeechIdle,
-  listenOnce,
   startContinuous,
   speechSupported,
   type ContinuousHandle,
@@ -14,14 +12,29 @@ import {
 import CameraView from './CameraView'
 import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
 
-// Index just past the last completed sentence in `s` (ends on . ! ? … then
-// whitespace). Used to feed whole sentences to TTS as the reply streams in.
+// "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
+// low-power engine is Picovoice Porcupine). Accepts the documented variants.
+const WAKE = /\b(hey\s+|hei\s+)?(kelion|kelian|kelyon|hey\s*k(ey)?)\b/i
+// Spoken interrupt while Kelion is talking (barge-in).
+const STOP = /\b(stop|stai|opre[sș]te|opreste|gata|taci|destul)\b/i
+const IDLE_MS = 60_000 // back to standby after this much silence (spec: ~1 min)
+
 function lastSentenceEnd(s: string): number {
   const re = /[.!?…]["'”’)\]]?\s/g
   let end = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(s)) !== null) end = m.index + m[0].length
   return end
+}
+
+function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const R = 6371000
+  const dLat = ((bLat - aLat) * Math.PI) / 180
+  const dLon = ((bLon - aLon) * Math.PI) / 180
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(s))
 }
 
 export default function ChatPanel({ lang }: { readonly lang: Lang }) {
@@ -31,66 +44,44 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [voiceOut, setVoiceOut] = useState(true)
-  const [listening, setListening] = useState(false) // push-to-talk active
-  const [continuous, setContinuous] = useState(false) // permanent listening
+  const [awake, setAwake] = useState(false) // post wake-word active conversation
   const [cameraOn, setCameraOn] = useState(false)
-  const [facing, setFacing] = useState<Facing>('user') // front by default
+  const [facing, setFacing] = useState<Facing>('user')
   const [canSwitchCam, setCanSwitchCam] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false) // ⊕ functions menu
-  const pttRef = useRef<{ stop: () => void } | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+
   const contRef = useRef<ContinuousHandle | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const captureRef = useRef<(() => string | null) | null>(null)
+  const latestFrameRef = useRef<string | null>(null)
+  const idleRef = useRef<number | null>(null)
+  // Refs mirror state for the always-on voice callback (registered once).
   const voiceOutRef = useRef(voiceOut)
   voiceOutRef.current = voiceOut
+  const awakeRef = useRef(awake)
+  awakeRef.current = awake
+  const busyRef = useRef(busy)
+  busyRef.current = busy
+  const cameraOnRef = useRef(cameraOn)
+  cameraOnRef.current = cameraOn
 
-  // When Kelion finishes speaking, re-open the continuous mic (anti-echo guard).
-  useEffect(() => {
-    setOnSpeechIdle(() => contRef.current?.setMuted(false))
-    return () => setOnSpeechIdle(null)
-  }, [])
-
-  // Release mic + voice on unmount.
-  useEffect(
-    () => () => {
-      contRef.current?.stop()
-      pttRef.current?.stop()
-      stopSpeaking()
-    },
-    [],
-  )
-
-  // Show the front/back switch only when the device has more than one camera.
-  useEffect(() => {
-    if (cameraSupported()) void hasMultipleCameras().then(setCanSwitchCam)
-  }, [])
-
-  // Close the functions menu on an outside click.
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDown = (e: PointerEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown)
-    return () => document.removeEventListener('pointerdown', onDown)
-  }, [menuOpen])
-
-  const onCameraError = useCallback(() => setCameraOn(false), [])
-
-  async function send(override?: string): Promise<void> {
-    const text = (override ?? input).trim()
-    if (!text || busy) return
+  async function send(text: string): Promise<void> {
+    const msg = text.trim()
+    if (!msg || busyRef.current) return
     setInput('')
     stopSpeaking()
-    contRef.current?.setMuted(true) // don't hear ourselves while replying
     const speak = voiceOutRef.current
+    const image = cameraOnRef.current
+      ? (latestFrameRef.current ?? captureRef.current?.() ?? undefined)
+      : undefined
 
-    const next: ChatMessage[] = [...messages, { role: 'user', content: text }]
+    const next: ChatMessage[] = [...messages, { role: 'user', content: msg }]
     setMessages([...next, { role: 'assistant', content: '' }])
     setBusy(true)
     try {
       let acc = ''
       let spoken = 0
-      for await (const chunk of streamChat(next)) {
+      for await (const chunk of streamChat(next, image ?? undefined)) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc }])
         if (speak) {
@@ -104,85 +95,151 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), speechLang)
     } catch (err) {
       const code = err instanceof Error ? err.message : 'error'
-      const msg = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
-      setMessages([...next, { role: 'assistant', content: `⚠️ ${msg}` }])
+      const m = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
+      setMessages([...next, { role: 'assistant', content: `⚠️ ${m}` }])
     } finally {
       setBusy(false)
-      if (!speak || !isSpeaking()) contRef.current?.setMuted(false)
     }
   }
-
-  // Stable reference to the latest send for the voice callbacks (registered once).
   const sendRef = useRef(send)
   sendRef.current = send
 
-  function togglePtt(): void {
-    if (listening) {
-      pttRef.current?.stop()
-      return
-    }
-    stopSpeaking()
-    const handle = listenOnce(
-      speechLang,
-      (heard) => void sendRef.current(heard),
-      () => {
-        setListening(false)
-        pttRef.current = null
-      },
-    )
-    if (handle) {
-      pttRef.current = handle
-      setListening(true)
-    }
+  function armIdle(): void {
+    if (idleRef.current) window.clearTimeout(idleRef.current)
+    idleRef.current = window.setTimeout(() => setAwake(false), IDLE_MS)
   }
 
-  function toggleContinuous(): void {
-    if (continuous) {
-      contRef.current?.stop()
-      contRef.current = null
-      setContinuous(false)
-      setCameraOn(false) // closing the channel closes the camera too
+  // Heard a final utterance from the permanent mic.
+  function onHeard(raw: string): void {
+    const text = raw.trim()
+    if (!text) return
+    if (isSpeaking()) {
+      // While Kelion talks, only a stop-word counts (echo guard / barge-in).
+      if (STOP.test(text)) stopSpeaking()
       return
     }
-    stopSpeaking()
-    const handle = startContinuous(speechLang, (heard) => void sendRef.current(heard))
-    if (handle) {
-      contRef.current = handle
-      setContinuous(true)
-      // Spec: camera turns ON by default (front) when the channel opens.
-      if (cameraSupported()) {
-        setFacing('user')
-        setCameraOn(true)
+    if (!awakeRef.current) {
+      if (WAKE.test(text)) {
+        setAwake(true)
+        armIdle()
+        const rest = text.replace(WAKE, '').trim()
+        if (rest.length > 1) void sendRef.current(rest)
       }
+      return
     }
+    armIdle()
+    void sendRef.current(text)
   }
+
+  // Permanent listening — starts once, no button (spec: hands-free wake word).
+  useEffect(() => {
+    if (!speechSupported()) return
+    const h = startContinuous(speechLang, (heard) => onHeard(heard))
+    contRef.current = h
+    return () => {
+      h?.stop()
+      contRef.current = null
+      if (idleRef.current) window.clearTimeout(idleRef.current)
+      stopSpeaking()
+    }
+    // run once for the session
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Permanent vision — camera ON by default; detect a second camera for switch.
+  useEffect(() => {
+    if (cameraSupported()) {
+      setCameraOn(true)
+      void hasMultipleCameras().then(setCanSwitchCam)
+    }
+  }, [])
+
+  // Capture frames at a GPS-driven rate (1 fps still, 4 fps moving, scaling up
+  // with speed). Frames are buffered locally; the latest is sent to Claude on a
+  // turn (continuous send would be cost-prohibitive — see spec).
+  useEffect(() => {
+    if (!cameraOn) return
+    let timer: number | null = null
+    let watchId: number | null = null
+    let fps = 1
+    let last: { lat: number; lon: number; t: number } | null = null
+
+    const tick = (): void => {
+      const f = captureRef.current?.()
+      if (f) latestFrameRef.current = f
+    }
+    const arm = (): void => {
+      if (timer) window.clearInterval(timer)
+      timer = window.setInterval(tick, Math.round(1000 / fps))
+    }
+    arm()
+
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, speed } = pos.coords
+          let mps = typeof speed === 'number' && speed >= 0 ? speed : 0
+          if (!mps && last) {
+            const dt = (pos.timestamp - last.t) / 1000
+            if (dt > 0) mps = metersBetween(last.lat, last.lon, latitude, longitude) / dt
+          }
+          last = { lat: latitude, lon: longitude, t: pos.timestamp }
+          const next = mps < 0.5 ? 1 : Math.min(8, 4 + Math.floor(mps / 2))
+          if (next !== fps) {
+            fps = next
+            arm()
+          }
+        },
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 10_000 },
+      )
+    }
+
+    return () => {
+      if (timer) window.clearInterval(timer)
+      if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId)
+    }
+  }, [cameraOn])
+
+  // Close the functions menu on an outside click.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: PointerEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [menuOpen])
 
   function toggleCamera(): void {
     setCameraOn((v) => !v)
   }
-
   function switchCamera(): void {
     setFacing((f) => (f === 'user' ? 'environment' : 'user'))
   }
-
   function toggleVoiceOut(): void {
     setVoiceOut((v) => {
-      if (v) {
-        stopSpeaking()
-        contRef.current?.setMuted(false) // we won't speak; reopen mic
-      }
+      if (v) stopSpeaking()
       return !v
     })
   }
+  function onCameraError(): void {
+    setCameraOn(false)
+  }
 
-  // Only the latest message is shown on screen (history stays in state).
   const last = messages.at(-1)
+  const hint = speechSupported() ? t.wakeHint : t.chatHint
 
   return (
     <div className="chat">
-      <CameraView active={cameraOn} facing={facing} onError={onCameraError} />
+      <CameraView
+        active={cameraOn}
+        facing={facing}
+        onError={onCameraError}
+        captureRef={captureRef}
+      />
       <div className="chat-log">
-        {messages.length === 0 && <p className="chat-hint">{t.chatHint}</p>}
+        {messages.length === 0 && <p className="chat-hint">{hint}</p>}
         {last && (
           <div className={`bubble ${last.role}`}>
             {last.content || (busy ? '…' : '')}
@@ -193,7 +250,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
         <div className="fn-wrap" ref={menuRef}>
           <button
             type="button"
-            className={`chat-icon ${menuOpen ? 'live' : ''}`}
+            className={`chat-icon ${menuOpen || awake ? 'live' : ''}`}
             onClick={() => setMenuOpen((o) => !o)}
             title={t.functionsTitle}
             aria-label={t.functionsTitle}
@@ -202,21 +259,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
             ⊕
           </button>
           {menuOpen && (
-            <div className="fn-menu" role="menu">
-              {speechSupported() && (
-                <>
-                  <button type="button" className="fn-item" onClick={togglePtt} disabled={continuous}>
-                    <span className="ico">🎤</span>
-                    {t.micTitle}
-                    {listening && <span className="dot" />}
-                  </button>
-                  <button type="button" className="fn-item" onClick={toggleContinuous}>
-                    <span className="ico">{continuous ? '👂' : '∞'}</span>
-                    {t.listenTitle}
-                    {continuous && <span className="dot" />}
-                  </button>
-                </>
-              )}
+            <div className="fn-menu">
               <button type="button" className="fn-item" onClick={toggleVoiceOut}>
                 <span className="ico">{voiceOut ? '🔊' : '🔇'}</span>
                 {t.voiceTitle}
@@ -225,8 +268,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
               {cameraSupported() && (
                 <>
                   <button type="button" className="fn-item" onClick={toggleCamera}>
-                    <span className="ico">{cameraOn ? '📸' : '📷'}</span>
-                    {t.cameraTitle}
+                    <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
+                    {cameraOn ? t.disconnectCamTitle : t.connectCamTitle}
                     {cameraOn && <span className="dot" />}
                   </button>
                   {cameraOn && canSwitchCam && (
@@ -250,13 +293,13 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              void send()
+              void send(input)
             }
           }}
           placeholder={t.chatPlaceholder}
           disabled={busy}
         />
-        <button type="button" onClick={() => void send()} disabled={busy || !input.trim()}>
+        <button type="button" onClick={() => void send(input)} disabled={busy || !input.trim()}>
           {t.send}
         </button>
       </div>

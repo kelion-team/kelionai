@@ -11,7 +11,8 @@ import { chatRoutes } from './routes/chat.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const app = Fastify({ logger: true })
+// bodyLimit raised so a base64 camera frame (permanent vision) fits the POST.
+const app = Fastify({ logger: true, bodyLimit: 8_000_000 })
 
 await app.register(cookie)
 await app.register(cors, {

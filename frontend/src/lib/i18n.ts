@@ -19,6 +19,9 @@ export interface Strings {
   switchCamTitle: string
   functionsTitle: string
   attachTitle: string
+  disconnectCamTitle: string
+  connectCamTitle: string
+  wakeHint: string
   chatError: string
   brainNotActive: string
   brainError: string
@@ -46,6 +49,9 @@ const dict: Record<Lang, Strings> = {
     switchCamTitle: 'Switch camera',
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
+    disconnectCamTitle: 'Disconnect camera',
+    connectCamTitle: 'Connect camera',
+    wakeHint: 'Say “Hey Kelion” to start — or just type.',
     chatError: 'Error.',
     brainNotActive: 'The brain is not active yet (Anthropic key missing).',
     brainError: 'Brain error. Please try again.',
@@ -71,6 +77,9 @@ const dict: Record<Lang, Strings> = {
     switchCamTitle: 'Schimbă camera',
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
+    disconnectCamTitle: 'Deconectează camera',
+    connectCamTitle: 'Conectează camera',
+    wakeHint: 'Spune „Hey Kelion” ca să începi — sau scrie.',
     chatError: 'Eroare.',
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Anthropic).',
     brainError: 'Eroare la creier. Încearcă din nou.',

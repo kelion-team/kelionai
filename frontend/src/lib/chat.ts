@@ -4,12 +4,16 @@ export interface ChatMessage {
 }
 
 // POST the conversation to the backend and yield streamed text chunks.
-export async function* streamChat(messages: ChatMessage[]): AsyncGenerator<string> {
+// `image` (base64 JPEG data URL) is the latest camera frame for Claude's vision.
+export async function* streamChat(
+  messages: ChatMessage[],
+  image?: string,
+): AsyncGenerator<string> {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, image }),
   })
 
   if (!res.ok || !res.body) {
