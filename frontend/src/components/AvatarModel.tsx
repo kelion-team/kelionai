@@ -3,9 +3,24 @@ import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
 
-// v1 avatar: fresh idle animation only (breathing, blink, micro head motion).
-// Lipsync + gestures arrive with the voice milestone. No old code reused —
-// only the .glb asset is carried over.
+// Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
+// asset's skeleton. The GLB bind pose ships with arms raised, so we override
+// the arm bone rotations to bring the hands down beside the body.
+const ARM_NAMES: Record<string, string[]> = {
+  LeftArm: ['LeftArm', 'LeftUpperArm', 'mixamorigLeftArm'],
+  RightArm: ['RightArm', 'RightUpperArm', 'mixamorigRightArm'],
+  LeftForeArm: ['LeftForeArm', 'mixamorigLeftForeArm'],
+  RightForeArm: ['RightForeArm', 'mixamorigRightForeArm'],
+}
+const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
+  LeftArm: { x: 1.477, y: 0.973, z: -0.147 },
+  RightArm: { x: 1.477, y: -0.973, z: 0.147 },
+  LeftForeArm: { x: 0.2, y: 0, z: 0 },
+  RightForeArm: { x: 0.2, y: 0, z: 0 },
+}
+
+// v1 avatar: fresh idle animation (breathing, blink, micro head motion) +
+// arms-down rest pose. Lipsync + gestures arrive with the voice milestone.
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const root = useRef<Group>(null)
@@ -13,22 +28,44 @@ export default function AvatarModel() {
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
 
+  const applyArms = (b: Record<string, Bone>) => {
+    for (const key of Object.keys(ARM_REST)) {
+      const target = ARM_REST[key]
+      for (const name of ARM_NAMES[key]) {
+        const bone = b[name]
+        if (bone) {
+          bone.rotation.set(target.x, target.y, target.z)
+          break
+        }
+      }
+    }
+  }
+
   useLayoutEffect(() => {
     const b: Record<string, Bone> = {}
     const m: (Mesh | SkinnedMesh)[] = []
     scene.traverse((o) => {
       const obj = o as Bone & Mesh & SkinnedMesh
       if (obj.isBone) b[obj.name] = obj as Bone
+      if (obj.isSkinnedMesh && obj.skeleton) {
+        obj.skeleton.bones.forEach((bn) => {
+          b[bn.name] = bn
+        })
+      }
       if ((obj.isMesh || obj.isSkinnedMesh) && obj.morphTargetDictionary) m.push(obj)
       if (obj.isMesh) obj.castShadow = true
     })
     bones.current = b
     morphs.current = m
+    applyArms(b) // snap arms down before the first paint (no T-pose flash)
   }, [scene])
 
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime
     const b = bones.current
+
+    // Keep arms at the rest pose every frame
+    applyArms(b)
 
     // Breathing — gentle chest/spine rise (~8s cycle)
     const breath = Math.sin(t * 0.8) * 0.03
