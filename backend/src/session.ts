@@ -9,6 +9,8 @@ export interface SessionUser {
   name: string
   picture: string
   role: 'admin' | 'customer'
+  // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
+  locale: string
 }
 
 export function setSession(reply: FastifyReply, user: SessionUser): void {

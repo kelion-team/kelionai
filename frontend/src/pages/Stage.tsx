@@ -5,8 +5,11 @@ import AvatarModel from '../components/AvatarModel'
 import ChatPanel from '../components/ChatPanel'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
+import { resolveLang, strings } from '../lib/i18n'
 
 export default function Stage({ user }: { user: User }) {
+  const lang = resolveLang(user.locale)
+  const t = strings(lang)
   return (
     <div className="stage">
       <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
@@ -33,12 +36,12 @@ export default function Stage({ user }: { user: User }) {
           <span>{user.name}</span>
           {user.role === 'admin' && <span className="badge">admin</span>}
           <button type="button" className="ghost" onClick={() => void logout()}>
-            Sign out
+            {t.signOut}
           </button>
         </div>
       </header>
 
-      <ChatPanel />
+      <ChatPanel lang={lang} />
     </div>
   )
 }

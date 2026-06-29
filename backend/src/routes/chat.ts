@@ -61,7 +61,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       app.log.error(err)
       if (!reply.raw.writableEnded) {
-        reply.raw.write('\n[Eroare la creier. Încearcă din nou.]')
+        reply.raw.write('\n[connection error]')
         reply.raw.end()
       }
     }

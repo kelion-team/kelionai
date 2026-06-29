@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamChat, type ChatMessage } from '../lib/chat'
+import { strings, type Lang } from '../lib/i18n'
 
-export default function ChatPanel() {
+export default function ChatPanel({ lang }: { lang: Lang }) {
+  const t = strings(lang)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -25,7 +27,8 @@ export default function ChatPanel() {
         setMessages([...next, { role: 'assistant', content: acc }])
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Eroare.'
+      const code = err instanceof Error ? err.message : 'error'
+      const msg = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
       setMessages([...next, { role: 'assistant', content: `⚠️ ${msg}` }])
     } finally {
       setBusy(false)
@@ -35,9 +38,7 @@ export default function ChatPanel() {
   return (
     <div className="chat">
       <div className="chat-log" ref={scrollRef}>
-        {messages.length === 0 && (
-          <p className="chat-hint">Scrie-i lui Kelion ceva…</p>
-        )}
+        {messages.length === 0 && <p className="chat-hint">{t.chatHint}</p>}
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
             {m.content || (busy && i === messages.length - 1 ? '…' : '')}
@@ -54,11 +55,11 @@ export default function ChatPanel() {
               void send()
             }
           }}
-          placeholder="Scrie un mesaj…"
+          placeholder={t.chatPlaceholder}
           disabled={busy}
         />
         <button type="button" onClick={() => void send()} disabled={busy || !input.trim()}>
-          Send
+          {t.send}
         </button>
       </div>
     </div>

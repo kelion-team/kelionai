@@ -5,7 +5,7 @@ import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 
-function decodeIdToken(idToken: string): { email?: string; email_verified?: boolean; name?: string; picture?: string } {
+function decodeIdToken(idToken: string): { email?: string; email_verified?: boolean; name?: string; picture?: string; locale?: string } {
   const payload = idToken.split('.')[1]
   if (!payload) return {}
   const json = Buffer.from(payload, 'base64url').toString('utf8')
@@ -83,6 +83,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         name: claims.name ?? email,
         picture: claims.picture ?? '',
         role: roleFor(email),
+        locale: claims.locale ?? 'en',
       })
       return reply.redirect(`${config.frontendOrigin}/`)
     },

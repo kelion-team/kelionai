@@ -13,18 +13,15 @@ export async function* streamChat(messages: ChatMessage[]): AsyncGenerator<strin
   })
 
   if (!res.ok || !res.body) {
-    let msg = 'Eroare la creier.'
+    let code = 'error'
     try {
-      const j = (await res.json()) as { message?: string; error?: string }
-      if (j.error === 'brain_not_configured') {
-        msg = 'Creierul nu e încă activat (lipsește cheia Anthropic).'
-      } else if (j.message) {
-        msg = j.message
-      }
+      const j = (await res.json()) as { error?: string }
+      if (j.error === 'brain_not_configured') code = 'brain_not_configured'
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(msg)
+    // Throw a stable code; the UI maps it to the user's language.
+    throw new Error(code)
   }
 
   const reader = res.body.getReader()
