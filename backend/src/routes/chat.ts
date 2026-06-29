@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { googleTools, runGoogleTool } from '../services/google.js'
+import { saveMessage } from '../db.js'
 
 const SYSTEM_PROMPT = `You are Kelion — a highly capable personal AI assistant in the spirit of Jarvis from Iron Man.
 
@@ -74,8 +75,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       'X-Accel-Buffering': 'no',
     })
 
+    // Persist the user's new message (last turn).
+    const lastTurn = messages[messages.length - 1]
+    if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+
     const client = new Anthropic({ apiKey: config.anthropicKey })
     const token = user.googleAccessToken ?? ''
+    let assistantText = ''
     try {
       // Tool-use loop: stream text each round; if Claude requests Google tools,
       // run them and feed the results back, then continue, until it's done.
@@ -88,6 +94,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           messages: params,
         })
         stream.on('text', (delta) => {
+          assistantText += delta
           reply.raw.write(delta)
         })
         const final = await stream.finalMessage()
@@ -104,6 +111,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         params.push({ role: 'user', content: results })
       }
       reply.raw.end()
+      if (assistantText.trim()) void saveMessage(user.email, 'assistant', assistantText)
     } catch (err) {
       app.log.error(err)
       if (!reply.raw.writableEnded) {

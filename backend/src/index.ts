@@ -9,6 +9,8 @@ import { config } from './config.js'
 import { authRoutes } from './routes/auth.js'
 import { chatRoutes } from './routes/chat.js'
 import { ttsRoutes } from './routes/tts.js'
+import { adminRoutes } from './routes/admin.js'
+import { initDb } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -27,6 +29,14 @@ app.get('/health', async () => ({ status: 'ok' }))
 await app.register(authRoutes)
 await app.register(chatRoutes)
 await app.register(ttsRoutes)
+await app.register(adminRoutes)
+
+// Create tables if a database is configured (non-fatal if it isn't / is down).
+try {
+  await initDb()
+} catch (err) {
+  app.log.error({ err }, 'initDb failed — chat persistence disabled')
+}
 
 // In production, serve the built frontend (SPA) from FRONTEND_DIST.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)

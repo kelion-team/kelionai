@@ -22,6 +22,8 @@ export const config = {
   // Optional so the app still boots before the key is added. The /api/chat
   // route returns a clear error if it's missing.
   anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
+  // Optional so the app boots without a DB (chat just isn't persisted then).
+  databaseUrl: process.env.DATABASE_URL ?? '',
   // Google Cloud Text-to-Speech (Chirp 3 HD). Two auth paths (prefer the
   // service account, which is what the backup provides). When neither is set,
   // the frontend falls back to the browser voice.
