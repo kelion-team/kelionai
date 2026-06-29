@@ -12,6 +12,9 @@ export interface Strings {
   chatHint: string
   chatPlaceholder: string
   send: string
+  micTitle: string
+  listenTitle: string
+  voiceTitle: string
   chatError: string
   brainNotActive: string
   brainError: string
@@ -32,6 +35,9 @@ const dict: Record<Lang, Strings> = {
     chatHint: 'Say something to Kelion…',
     chatPlaceholder: 'Type a message…',
     send: 'Send',
+    micTitle: 'Hold to talk',
+    listenTitle: 'Continuous listening',
+    voiceTitle: 'Kelion’s voice',
     chatError: 'Error.',
     brainNotActive: 'The brain is not active yet (Anthropic key missing).',
     brainError: 'Brain error. Please try again.',
@@ -50,6 +56,9 @@ const dict: Record<Lang, Strings> = {
     chatHint: 'Spune-i ceva lui Kelion…',
     chatPlaceholder: 'Scrie un mesaj…',
     send: 'Trimite',
+    micTitle: 'Ține apăsat ca să vorbești',
+    listenTitle: 'Ascultare continuă',
+    voiceTitle: 'Vocea lui Kelion',
     chatError: 'Eroare.',
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Anthropic).',
     brainError: 'Eroare la creier. Încearcă din nou.',

@@ -268,3 +268,24 @@ body {
   opacity: 0.45;
   cursor: default;
 }
+.chat-icon {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.chat-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.chat-icon.live {
+  color: #ff5d5d;
+  animation: rec 1s ease-in-out infinite;
+}
+@keyframes rec {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}

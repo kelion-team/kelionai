@@ -10,10 +10,16 @@ KelionAI v3 — a clean, independent rewrite. 3D voice/chat AI assistant (Jarvis
 The full, locked product + engineering spec lives in Claude's project memory
 (`kelion-rewrite-spec.md`). It is the authoritative contract — build to it exactly.
 
-## v1 scope (current milestone)
+## Current status
 
-Only: **Google login** (allowlisted to `adrianenc11@gmail.com`, the permanent sole admin)
-+ the **3D avatar** rendered. Nothing else yet.
+Live: **Google login** (allowlisted to `adrianenc11@gmail.com`, the permanent sole admin),
+the **3D avatar**, and **Brain v1** — streaming chat with Claude in a text tab, plus a
+first **voice** increment (browser Web Speech API: Kelion speaks replies and listens,
+with a **continuous-listening** toggle; voice and text are delivered in parallel).
+
+Next voice steps: Google Chirp 3 HD male voice, "Hey Kelion" wake word, and the
+LiveKit full-duplex transmission. The `speak()` layer is isolated so the TTS engine
+can be swapped to Chirp 3 HD without touching the chat UI.
 
 ## Stack
 
