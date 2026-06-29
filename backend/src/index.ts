@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import { config } from './config.js'
 import { authRoutes } from './routes/auth.js'
 import { chatRoutes } from './routes/chat.js'
+import { ttsRoutes } from './routes/tts.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -25,6 +26,7 @@ app.get('/health', async () => ({ status: 'ok' }))
 
 await app.register(authRoutes)
 await app.register(chatRoutes)
+await app.register(ttsRoutes)
 
 // In production, serve the built frontend (SPA) from FRONTEND_DIST.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)

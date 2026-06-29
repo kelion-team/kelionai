@@ -1,71 +1,123 @@
-// Browser-native voice — interim increment. ASR = Web Speech API (Chrome uses
-// Google's engine, free + accurate). TTS = SpeechSynthesis. The spec target is
-// Google Chirp 3 HD (male, academic) + "Hey Kelion" wake word + LiveKit
-// full-duplex. Everything here is isolated behind small functions so the TTS
-// engine and ASR transport can be swapped later without touching the chat UI.
+// Voice I/O. ASR = Web Speech API (Chrome uses Google's engine, free + accurate;
+// the spec primary). TTS = Google Chirp 3 HD via the backend /api/tts (male,
+// academic — the spec voice), with the browser voice as an automatic fallback
+// when no Google TTS key is configured. Spec next steps: Picovoice wake word +
+// LiveKit full-duplex transport.
 
 // ──────────────────────────── TTS (speak) ────────────────────────────
-// A sentence queue so Kelion can start speaking the first sentence while the
-// rest of the reply is still streaming (voice + text in parallel).
+// Sentence queue so Kelion starts speaking the first sentence while the rest of
+// the reply is still streaming (voice + text in parallel).
 
-let ttsQueue: string[] = []
-let ttsSpeaking = false
-let ttsLang = 'en-US'
+interface TtsItem {
+  text: string
+  lang: string
+}
+
+let ttsQueue: TtsItem[] = []
+let ttsBusy = false
+let curAudio: HTMLAudioElement | null = null
+let chirpMode: 'unknown' | 'on' | 'off' = 'unknown'
 let onIdle: (() => void) | null = null
 
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const base = lang.slice(0, 2).toLowerCase()
   const voices = window.speechSynthesis.getVoices()
   const sameLang = voices.filter((v) => v.lang.toLowerCase().startsWith(base))
-  // Prefer a male voice when one exists (academic register, per spec).
   const male = sameLang.find((v) =>
     /male|b[aă]rbat|masculin|david|george|andrei|paul|daniel/i.test(v.name),
   )
   return male ?? sameLang[0] ?? null
 }
 
-function drain(): void {
-  const synth = window.speechSynthesis
-  const next = ttsQueue.shift()
-  if (next === undefined) {
-    ttsSpeaking = false
+function browserSpeak(text: string, lang: string): Promise<void> {
+  return new Promise((resolve) => {
+    const synth = window.speechSynthesis
+    if (!synth) {
+      resolve()
+      return
+    }
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = lang
+    const v = pickVoice(lang)
+    if (v) u.voice = v
+    u.rate = 1.0
+    u.onend = () => resolve()
+    u.onerror = () => resolve()
+    synth.speak(u)
+  })
+}
+
+// Returns true if it played via Chirp; false means "fall back to the browser".
+async function chirpSpeak(text: string, lang: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ text, lang }),
+    })
+    if (res.status === 503) {
+      chirpMode = 'off' // no key configured — stop trying for this session
+      return false
+    }
+    if (!res.ok) return false
+    chirpMode = 'on'
+    const url = URL.createObjectURL(await res.blob())
+    await new Promise<void>((resolve) => {
+      const audio = new Audio(url)
+      curAudio = audio
+      const done = (): void => {
+        URL.revokeObjectURL(url)
+        if (curAudio === audio) curAudio = null
+        resolve()
+      }
+      audio.onended = done
+      audio.onerror = done
+      void audio.play().catch(done)
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function drain(): Promise<void> {
+  const item = ttsQueue.shift()
+  if (!item) {
+    ttsBusy = false
     onIdle?.()
     return
   }
-  ttsSpeaking = true
-  const u = new SpeechSynthesisUtterance(next)
-  u.lang = ttsLang
-  const v = pickVoice(ttsLang)
-  if (v) u.voice = v
-  u.rate = 1.0
-  u.onend = () => drain()
-  u.onerror = () => drain()
-  synth.speak(u)
+  ttsBusy = true
+  let played = false
+  if (chirpMode !== 'off') played = await chirpSpeak(item.text, item.lang)
+  if (!played) await browserSpeak(item.text, item.lang)
+  void drain()
 }
 
-/** Queue a piece of text to be spoken. Safe to call repeatedly while streaming. */
+/** Queue text to speak. Safe to call repeatedly while a reply streams in. */
 export function enqueueSpeech(text: string, lang: string): void {
-  const synth = window.speechSynthesis
-  if (!synth) return
   const clean = text.trim()
   if (!clean) return
-  ttsLang = lang
-  ttsQueue.push(clean)
-  if (!ttsSpeaking) drain()
+  ttsQueue.push({ text: clean, lang })
+  if (!ttsBusy) void drain()
 }
 
-/** Called once the whole TTS queue has finished playing. */
 export function setOnSpeechIdle(cb: (() => void) | null): void {
   onIdle = cb
 }
 
 export function isSpeaking(): boolean {
-  return ttsSpeaking || window.speechSynthesis?.speaking === true
+  return ttsBusy || curAudio !== null || window.speechSynthesis?.speaking === true
 }
 
 export function stopSpeaking(): void {
   ttsQueue = []
-  ttsSpeaking = false
+  ttsBusy = false
+  if (curAudio) {
+    curAudio.pause()
+    curAudio = null
+  }
   window.speechSynthesis?.cancel()
 }
 
@@ -137,18 +189,13 @@ export function listenOnce(
 }
 
 export interface ContinuousHandle {
-  /** Permanently stop listening and release the mic. */
   stop(): void
-  /** Temporarily mute (e.g. while Kelion is speaking) without losing the session. */
   setMuted(muted: boolean): void
 }
 
 /**
  * Permanent (continuous) listening. Streams the mic and fires `onFinal` for
- * every completed utterance. Auto-restarts when the browser ends a segment
- * (Chrome stops after silence/~60s). `setMuted(true)` is used while Kelion
- * speaks so its own TTS voice is not picked up (interim echo guard — true
- * echo-cancelled barge-in arrives with the LiveKit milestone).
+ * every completed utterance, auto-restarting when the browser ends a segment.
  */
 export function startContinuous(
   lang: string,
@@ -177,7 +224,6 @@ export function startContinuous(
         }
       }
     }
-    // 'no-speech' / 'aborted' are normal; onend handles restart.
     r.onerror = () => {}
     r.onend = () => {
       rec = null

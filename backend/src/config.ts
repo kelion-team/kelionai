@@ -22,6 +22,13 @@ export const config = {
   // Optional so the app still boots before the key is added. The /api/chat
   // route returns a clear error if it's missing.
   anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
+  // Google Cloud Text-to-Speech (Chirp 3 HD). Two auth paths (prefer the
+  // service account, which is what the backup provides). When neither is set,
+  // the frontend falls back to the browser voice.
+  googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? '',
+  googleTtsKey: process.env.GOOGLE_TTS_API_KEY ?? process.env.GOOGLE_API_KEY ?? '',
+  // Chirp 3 HD voice style (male, academic). Voice = `${lang}-Chirp3-HD-${style}`.
+  ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
   // v1 access gate — only these emails may enter. Lower-cased for comparison.
   allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
     .split(',')
