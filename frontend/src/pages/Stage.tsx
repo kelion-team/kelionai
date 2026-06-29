@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Environment, OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
+import ChatPanel from '../components/ChatPanel'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 
@@ -36,6 +37,8 @@ export default function Stage({ user }: { user: User }) {
           </button>
         </div>
       </header>
+
+      <ChatPanel />
     </div>
   )
 }

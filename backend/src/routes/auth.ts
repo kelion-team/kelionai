@@ -1,34 +1,15 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
-import jwt from 'jsonwebtoken'
 import { config, isAllowed, roleFor } from '../config.js'
+import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
 
-const SESSION_COOKIE = 'kelionai_session'
 const STATE_COOKIE = 'kelionai_oauth_state'
-
-interface SessionUser {
-  email: string
-  name: string
-  picture: string
-  role: 'admin' | 'customer'
-}
 
 function decodeIdToken(idToken: string): { email?: string; email_verified?: boolean; name?: string; picture?: string } {
   const payload = idToken.split('.')[1]
   if (!payload) return {}
   const json = Buffer.from(payload, 'base64url').toString('utf8')
   return JSON.parse(json)
-}
-
-function setSession(reply: FastifyReply, user: SessionUser): void {
-  const token = jwt.sign(user, config.sessionSecret, { expiresIn: '30d' })
-  reply.setCookie(SESSION_COOKIE, token, {
-    path: '/',
-    httpOnly: true,
-    secure: config.isProd,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 30,
-  })
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -109,14 +90,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // Who am I? (frontend calls this on load)
   app.get('/auth/me', async (req, reply) => {
-    const token = req.cookies[SESSION_COOKIE]
-    if (!token) return reply.code(401).send({ authenticated: false })
-    try {
-      const user = jwt.verify(token, config.sessionSecret) as SessionUser
-      return reply.send({ authenticated: true, user })
-    } catch {
-      return reply.code(401).send({ authenticated: false })
-    }
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ authenticated: false })
+    return reply.send({ authenticated: true, user })
   })
 
   app.post('/auth/logout', async (_req, reply) => {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { config } from './config.js'
 import { authRoutes } from './routes/auth.js'
+import { chatRoutes } from './routes/chat.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -22,6 +23,7 @@ await app.register(cors, {
 app.get('/health', async () => ({ status: 'ok' }))
 
 await app.register(authRoutes)
+await app.register(chatRoutes)
 
 // In production, serve the built frontend (SPA) from FRONTEND_DIST.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
@@ -29,7 +31,8 @@ if (config.isProd && fs.existsSync(distPath)) {
   await app.register(fastifyStatic, { root: distPath, prefix: '/' })
   // SPA fallback — any non-API route returns index.html
   app.setNotFoundHandler((req, reply) => {
-    if (req.raw.url?.startsWith('/auth') || req.raw.url?.startsWith('/health')) {
+    const url = req.raw.url ?? ''
+    if (url.startsWith('/auth') || url.startsWith('/api') || url.startsWith('/health')) {
       return reply.code(404).send({ error: 'not_found' })
     }
     return reply.sendFile('index.html')

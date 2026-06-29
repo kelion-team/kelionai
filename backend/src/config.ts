@@ -19,6 +19,9 @@ export const config = {
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
+  // Optional so the app still boots before the key is added. The /api/chat
+  // route returns a clear error if it's missing.
+  anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
   // v1 access gate — only these emails may enter. Lower-cased for comparison.
   allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
     .split(',')
