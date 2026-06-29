@@ -49,6 +49,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [facing, setFacing] = useState<Facing>('user')
   const [canSwitchCam, setCanSwitchCam] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [listening, setListening] = useState(false)
 
   const contRef = useRef<ContinuousHandle | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -64,6 +65,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   busyRef.current = busy
   const cameraOnRef = useRef(cameraOn)
   cameraOnRef.current = cameraOn
+  const listeningRef = useRef(listening)
+  listeningRef.current = listening
 
   async function send(text: string): Promise<void> {
     const msg = text.trim()
@@ -106,7 +109,10 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
 
   function armIdle(): void {
     if (idleRef.current) window.clearTimeout(idleRef.current)
-    idleRef.current = window.setTimeout(() => setAwake(false), IDLE_MS)
+    idleRef.current = window.setTimeout(() => {
+      // Don't drop to standby while the mic channel is explicitly ON.
+      if (!listeningRef.current) setAwake(false)
+    }, IDLE_MS)
   }
 
   // Heard a final utterance from the permanent mic.
@@ -131,19 +137,38 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     void sendRef.current(text)
   }
 
-  // Permanent listening — starts once, no button (spec: hands-free wake word).
-  useEffect(() => {
-    if (!speechSupported()) return
+  // The mic is button-driven: starting on a user click reliably gets the
+  // browser mic permission (auto-start on mount was being blocked silently).
+  function startVoice(): void {
+    contRef.current?.stop()
     const h = startContinuous(speechLang, (heard) => onHeard(heard))
     contRef.current = h
+    if (h) {
+      setListening(true)
+      setAwake(true) // channel ON = active conversation, no wake word needed
+      armIdle()
+    }
+  }
+  function stopVoice(): void {
+    contRef.current?.stop()
+    contRef.current = null
+    setListening(false)
+    setAwake(false)
+    stopSpeaking()
+  }
+  function toggleVoice(): void {
+    if (listening) stopVoice()
+    else startVoice()
+  }
+
+  // Clean up the mic + timers when the panel unmounts.
+  useEffect(() => {
     return () => {
-      h?.stop()
+      contRef.current?.stop()
       contRef.current = null
       if (idleRef.current) window.clearTimeout(idleRef.current)
       stopSpeaking()
     }
-    // run once for the session
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Permanent vision — camera ON by default; detect a second camera for switch.
@@ -287,6 +312,17 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
             </div>
           )}
         </div>
+        {speechSupported() && (
+          <button
+            type="button"
+            className={`chat-icon ${listening ? 'live' : ''}`}
+            onClick={toggleVoice}
+            title={t.micTitle}
+            aria-label={t.micTitle}
+          >
+            {listening ? '●' : '🎤'}
+          </button>
+        )}
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}

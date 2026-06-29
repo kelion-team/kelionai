@@ -43,6 +43,18 @@ export const googleTools: Anthropic.Tool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'get_weather',
+    description:
+      'Get the current weather and a short multi-day forecast for a place (city name). Use for any weather question.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        location: { type: 'string', description: 'City name, e.g. "Bucharest" or "Witney, UK".' },
+      },
+      required: ['location'],
+    },
+  },
 ]
 
 function num(v: unknown, fallback: number): number {
@@ -129,6 +141,58 @@ async function webSearch(query: string, max: number): Promise<string> {
   return JSON.stringify({ answer, results })
 }
 
+const WEATHER_CODES: Record<number, string> = {
+  0: 'clear sky', 1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast',
+  45: 'fog', 48: 'rime fog', 51: 'light drizzle', 53: 'drizzle', 55: 'dense drizzle',
+  61: 'light rain', 63: 'rain', 65: 'heavy rain', 66: 'freezing rain', 67: 'freezing rain',
+  71: 'light snow', 73: 'snow', 75: 'heavy snow', 77: 'snow grains',
+  80: 'rain showers', 81: 'rain showers', 82: 'violent rain showers',
+  85: 'snow showers', 86: 'snow showers', 95: 'thunderstorm', 96: 'thunderstorm w/ hail', 99: 'thunderstorm w/ hail',
+}
+
+async function weather(location: string): Promise<string> {
+  if (!location) return JSON.stringify({ error: 'empty_location' })
+  // Open-Meteo: free, keyless geocoding + forecast.
+  const geoUrl = new URL('https://geocoding-api.open-meteo.com/v1/search')
+  geoUrl.searchParams.set('name', location)
+  geoUrl.searchParams.set('count', '1')
+  const geoRes = await fetch(geoUrl)
+  if (!geoRes.ok) return JSON.stringify({ error: `geo_http_${geoRes.status}` })
+  const geo = (await geoRes.json()) as {
+    results?: { latitude: number; longitude: number; name: string; country?: string }[]
+  }
+  const place = geo.results?.[0]
+  if (!place) return JSON.stringify({ error: 'location_not_found' })
+  const wUrl = new URL('https://api.open-meteo.com/v1/forecast')
+  wUrl.searchParams.set('latitude', String(place.latitude))
+  wUrl.searchParams.set('longitude', String(place.longitude))
+  wUrl.searchParams.set('current', 'temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m')
+  wUrl.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,weather_code')
+  wUrl.searchParams.set('forecast_days', '3')
+  wUrl.searchParams.set('timezone', 'auto')
+  const wRes = await fetch(wUrl)
+  if (!wRes.ok) return JSON.stringify({ error: `weather_http_${wRes.status}` })
+  const w = (await wRes.json()) as {
+    current?: { temperature_2m: number; weather_code: number; wind_speed_10m: number; relative_humidity_2m: number }
+    daily?: { time: string[]; temperature_2m_max: number[]; temperature_2m_min: number[]; weather_code: number[] }
+  }
+  const code = (n: number): string => WEATHER_CODES[n] ?? `code ${n}`
+  const c = w.current
+  const forecast = (w.daily?.time ?? []).map((d, i) => ({
+    date: d,
+    max_c: w.daily?.temperature_2m_max?.[i],
+    min_c: w.daily?.temperature_2m_min?.[i],
+    condition: code(w.daily?.weather_code?.[i] ?? -1),
+  }))
+  return JSON.stringify({
+    location: `${place.name}${place.country ? ', ' + place.country : ''}`,
+    current: c
+      ? { temp_c: c.temperature_2m, condition: code(c.weather_code), wind_kmh: c.wind_speed_10m, humidity_pct: c.relative_humidity_2m }
+      : null,
+    forecast,
+  })
+}
+
 export async function runGoogleTool(
   name: string,
   input: unknown,
@@ -136,8 +200,9 @@ export async function runGoogleTool(
 ): Promise<string> {
   const args = (input ?? {}) as Record<string, unknown>
   try {
-    // web_search uses Serper, not the user's Google token.
+    // These don't use the user's Google token.
     if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5))
+    if (name === 'get_weather') return await weather(str(args.location))
 
     if (!token) {
       return JSON.stringify({
