@@ -24,7 +24,7 @@ function lastSentenceEnd(s: string): number {
   return end
 }
 
-export default function ChatPanel({ lang }: { lang: Lang }) {
+export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const t = strings(lang)
   const speechLang = lang === 'ro' ? 'ro-RO' : 'en-US'
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -36,15 +36,12 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
   const [cameraOn, setCameraOn] = useState(false)
   const [facing, setFacing] = useState<Facing>('user') // front by default
   const [canSwitchCam, setCanSwitchCam] = useState(false)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [menuOpen, setMenuOpen] = useState(false) // ⊕ functions menu
   const pttRef = useRef<{ stop: () => void } | null>(null)
   const contRef = useRef<ContinuousHandle | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const voiceOutRef = useRef(voiceOut)
   voiceOutRef.current = voiceOut
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages])
 
   // When Kelion finishes speaking, re-open the continuous mic (anti-echo guard).
   useEffect(() => {
@@ -66,6 +63,16 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
   useEffect(() => {
     if (cameraSupported()) void hasMultipleCameras().then(setCanSwitchCam)
   }, [])
+
+  // Close the functions menu on an outside click.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: PointerEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [menuOpen])
 
   const onCameraError = useCallback(() => setCameraOn(false), [])
 
@@ -101,14 +108,11 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
       setMessages([...next, { role: 'assistant', content: `⚠️ ${msg}` }])
     } finally {
       setBusy(false)
-      // If we aren't (or won't be) speaking, reopen the mic now; otherwise the
-      // speech-idle handler reopens it when TTS drains.
       if (!speak || !isSpeaking()) contRef.current?.setMuted(false)
     }
   }
 
-  // Keep a stable reference to the latest send for the voice callbacks, which
-  // are registered once but must see current state (messages/busy).
+  // Stable reference to the latest send for the voice callbacks (registered once).
   const sendRef = useRef(send)
   sendRef.current = send
 
@@ -171,78 +175,75 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
     })
   }
 
+  // Only the latest message is shown on screen (history stays in state).
+  const last = messages.at(-1)
+
   return (
     <div className="chat">
       <CameraView active={cameraOn} facing={facing} onError={onCameraError} />
-      <div className="chat-log" ref={scrollRef}>
+      <div className="chat-log">
         {messages.length === 0 && <p className="chat-hint">{t.chatHint}</p>}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+        {last && (
+          <div className={`bubble ${last.role}`}>
+            {last.content || (busy ? '…' : '')}
           </div>
-        ))}
+        )}
       </div>
       <div className="chat-input">
-        {speechSupported() && (
-          <>
-            {!continuous && (
-              <button
-                type="button"
-                className={`chat-icon ${listening ? 'live' : ''}`}
-                onClick={togglePtt}
-                title={t.micTitle}
-                aria-label={t.micTitle}
-              >
-                {listening ? '●' : '🎤'}
+        <div className="fn-wrap" ref={menuRef}>
+          <button
+            type="button"
+            className={`chat-icon ${menuOpen ? 'live' : ''}`}
+            onClick={() => setMenuOpen((o) => !o)}
+            title={t.functionsTitle}
+            aria-label={t.functionsTitle}
+            aria-expanded={menuOpen}
+          >
+            ⊕
+          </button>
+          {menuOpen && (
+            <div className="fn-menu" role="menu">
+              {speechSupported() && (
+                <>
+                  <button type="button" className="fn-item" onClick={togglePtt} disabled={continuous}>
+                    <span className="ico">🎤</span>
+                    {t.micTitle}
+                    {listening && <span className="dot" />}
+                  </button>
+                  <button type="button" className="fn-item" onClick={toggleContinuous}>
+                    <span className="ico">{continuous ? '👂' : '∞'}</span>
+                    {t.listenTitle}
+                    {continuous && <span className="dot" />}
+                  </button>
+                </>
+              )}
+              <button type="button" className="fn-item" onClick={toggleVoiceOut}>
+                <span className="ico">{voiceOut ? '🔊' : '🔇'}</span>
+                {t.voiceTitle}
+                {voiceOut && <span className="dot" />}
               </button>
-            )}
-            <button
-              type="button"
-              className={`chat-icon ${continuous ? 'live' : ''}`}
-              onClick={toggleContinuous}
-              title={t.listenTitle}
-              aria-label={t.listenTitle}
-              aria-pressed={continuous}
-            >
-              {continuous ? '👂' : '∞'}
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className="chat-icon"
-          onClick={toggleVoiceOut}
-          title={t.voiceTitle}
-          aria-label={t.voiceTitle}
-          aria-pressed={voiceOut}
-        >
-          {voiceOut ? '🔊' : '🔇'}
-        </button>
-        {cameraSupported() && (
-          <>
-            <button
-              type="button"
-              className={`chat-icon ${cameraOn ? 'live' : ''}`}
-              onClick={toggleCamera}
-              title={t.cameraTitle}
-              aria-label={t.cameraTitle}
-              aria-pressed={cameraOn}
-            >
-              {cameraOn ? '📸' : '📷'}
-            </button>
-            {cameraOn && canSwitchCam && (
-              <button
-                type="button"
-                className="chat-icon"
-                onClick={switchCamera}
-                title={t.switchCamTitle}
-                aria-label={t.switchCamTitle}
-              >
-                🔄
+              {cameraSupported() && (
+                <>
+                  <button type="button" className="fn-item" onClick={toggleCamera}>
+                    <span className="ico">{cameraOn ? '📸' : '📷'}</span>
+                    {t.cameraTitle}
+                    {cameraOn && <span className="dot" />}
+                  </button>
+                  {cameraOn && canSwitchCam && (
+                    <button type="button" className="fn-item" onClick={switchCamera}>
+                      <span className="ico">🔄</span>
+                      {t.switchCamTitle}
+                    </button>
+                  )}
+                </>
+              )}
+              <button type="button" className="fn-item" disabled>
+                <span className="ico">📎</span>
+                {t.attachTitle}
               </button>
-            )}
-          </>
-        )}
+            </div>
+          )}
+        </div>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
