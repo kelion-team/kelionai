@@ -11,6 +11,10 @@ export interface SessionUser {
   role: 'admin' | 'customer'
   // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
   locale: string
+  // Google OAuth access token + expiry (ms) for calling Google skills on the
+  // user's behalf. Valid ~1h; refresh-token persistence needs the DB milestone.
+  googleAccessToken?: string
+  googleTokenExp?: number
 }
 
 export function setSession(reply: FastifyReply, user: SessionUser): void {

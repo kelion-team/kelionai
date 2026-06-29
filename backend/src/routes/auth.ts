@@ -27,9 +27,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      scope: 'openid email profile',
+      scope: [
+        'openid',
+        'email',
+        'profile',
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ].join(' '),
       access_type: 'offline',
-      prompt: 'select_account',
+      include_granted_scopes: 'true',
+      prompt: 'consent',
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
@@ -62,7 +69,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (!tokenRes.ok) {
         return reply.redirect(`${config.frontendOrigin}/?error=token_exchange`)
       }
-      const tokens = (await tokenRes.json()) as { id_token?: string }
+      const tokens = (await tokenRes.json()) as {
+        id_token?: string
+        access_token?: string
+        expires_in?: number
+      }
       if (!tokens.id_token) {
         return reply.redirect(`${config.frontendOrigin}/?error=no_id_token`)
       }
@@ -84,6 +95,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         picture: claims.picture ?? '',
         role: roleFor(email),
         locale: claims.locale ?? 'en',
+        googleAccessToken: tokens.access_token ?? '',
+        googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
       })
       return reply.redirect(`${config.frontendOrigin}/`)
     },

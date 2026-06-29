@@ -29,6 +29,8 @@ export const config = {
   googleTtsKey: process.env.GOOGLE_TTS_API_KEY ?? process.env.GOOGLE_API_KEY ?? '',
   // Chirp 3 HD voice style (male, academic). Voice = `${lang}-Chirp3-HD-${style}`.
   ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
+  // Serper.dev — real live Google web search for the web_search tool. Optional.
+  serperKey: process.env.SERPER_API_KEY ?? '',
   // v1 access gate — only these emails may enter. Lower-cased for comparison.
   allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
     .split(',')
