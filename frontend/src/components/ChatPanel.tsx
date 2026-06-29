@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { streamChat, type ChatMessage } from '../lib/chat'
 import { strings, type Lang } from '../lib/i18n'
 import {
@@ -11,6 +11,8 @@ import {
   speechSupported,
   type ContinuousHandle,
 } from '../lib/voice'
+import CameraView from './CameraView'
+import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
 
 // Index just past the last completed sentence in `s` (ends on . ! ? … then
 // whitespace). Used to feed whole sentences to TTS as the reply streams in.
@@ -31,6 +33,9 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
   const [voiceOut, setVoiceOut] = useState(true)
   const [listening, setListening] = useState(false) // push-to-talk active
   const [continuous, setContinuous] = useState(false) // permanent listening
+  const [cameraOn, setCameraOn] = useState(false)
+  const [facing, setFacing] = useState<Facing>('user') // front by default
+  const [canSwitchCam, setCanSwitchCam] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pttRef = useRef<{ stop: () => void } | null>(null)
   const contRef = useRef<ContinuousHandle | null>(null)
@@ -56,6 +61,13 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
     },
     [],
   )
+
+  // Show the front/back switch only when the device has more than one camera.
+  useEffect(() => {
+    if (cameraSupported()) void hasMultipleCameras().then(setCanSwitchCam)
+  }, [])
+
+  const onCameraError = useCallback(() => setCameraOn(false), [])
 
   async function send(override?: string): Promise<void> {
     const text = (override ?? input).trim()
@@ -125,6 +137,7 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
       contRef.current?.stop()
       contRef.current = null
       setContinuous(false)
+      setCameraOn(false) // closing the channel closes the camera too
       return
     }
     stopSpeaking()
@@ -132,7 +145,20 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
     if (handle) {
       contRef.current = handle
       setContinuous(true)
+      // Spec: camera turns ON by default (front) when the channel opens.
+      if (cameraSupported()) {
+        setFacing('user')
+        setCameraOn(true)
+      }
     }
+  }
+
+  function toggleCamera(): void {
+    setCameraOn((v) => !v)
+  }
+
+  function switchCamera(): void {
+    setFacing((f) => (f === 'user' ? 'environment' : 'user'))
   }
 
   function toggleVoiceOut(): void {
@@ -147,6 +173,7 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
 
   return (
     <div className="chat">
+      <CameraView active={cameraOn} facing={facing} onError={onCameraError} />
       <div className="chat-log" ref={scrollRef}>
         {messages.length === 0 && <p className="chat-hint">{t.chatHint}</p>}
         {messages.map((m, i) => (
@@ -191,6 +218,31 @@ export default function ChatPanel({ lang }: { lang: Lang }) {
         >
           {voiceOut ? '🔊' : '🔇'}
         </button>
+        {cameraSupported() && (
+          <>
+            <button
+              type="button"
+              className={`chat-icon ${cameraOn ? 'live' : ''}`}
+              onClick={toggleCamera}
+              title={t.cameraTitle}
+              aria-label={t.cameraTitle}
+              aria-pressed={cameraOn}
+            >
+              {cameraOn ? '📸' : '📷'}
+            </button>
+            {cameraOn && canSwitchCam && (
+              <button
+                type="button"
+                className="chat-icon"
+                onClick={switchCamera}
+                title={t.switchCamTitle}
+                aria-label={t.switchCamTitle}
+              >
+                🔄
+              </button>
+            )}
+          </>
+        )}
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}

@@ -15,6 +15,8 @@ export interface Strings {
   micTitle: string
   listenTitle: string
   voiceTitle: string
+  cameraTitle: string
+  switchCamTitle: string
   chatError: string
   brainNotActive: string
   brainError: string
@@ -38,6 +40,8 @@ const dict: Record<Lang, Strings> = {
     micTitle: 'Hold to talk',
     listenTitle: 'Continuous listening',
     voiceTitle: 'Kelion’s voice',
+    cameraTitle: 'Camera',
+    switchCamTitle: 'Switch camera',
     chatError: 'Error.',
     brainNotActive: 'The brain is not active yet (Anthropic key missing).',
     brainError: 'Brain error. Please try again.',
@@ -59,6 +63,8 @@ const dict: Record<Lang, Strings> = {
     micTitle: 'Ține apăsat ca să vorbești',
     listenTitle: 'Ascultare continuă',
     voiceTitle: 'Vocea lui Kelion',
+    cameraTitle: 'Cameră',
+    switchCamTitle: 'Schimbă camera',
     chatError: 'Eroare.',
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Anthropic).',
     brainError: 'Eroare la creier. Încearcă din nou.',

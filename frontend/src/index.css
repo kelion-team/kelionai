@@ -289,3 +289,26 @@ body {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
 }
+
+/* Floating glass camera preview — top-right so it never covers the avatar face. */
+.camera-card {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  width: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(10, 12, 18, 0.55);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+.camera-card video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.camera-card video.mirror {
+  transform: scaleX(-1);
+}
