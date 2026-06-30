@@ -36,3 +36,6 @@ export function ttsCost(chars: number): number {
 
 // Chirp STT — estimate per recognition call (~a few seconds of audio).
 export const ASR_USD_PER_CALL = 0.0015
+
+// Serper.dev web/YouTube search — estimate per query (paid credits).
+export const SERPER_USD_PER_CALL = 0.001

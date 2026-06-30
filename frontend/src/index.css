@@ -213,6 +213,35 @@ body {
   height: 26px;
   border-radius: 50%;
 }
+.cost-meter {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 46vw;
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.cost-total {
+  color: #3ad29f;
+  font-weight: 600;
+}
+.cost-today {
+  color: var(--text);
+}
+.cost-kinds {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .badge {
   font-size: 11px;
   text-transform: uppercase;

@@ -9,7 +9,7 @@ import {
   reverseGeocode,
 } from '../services/google.js'
 import { saveMessage, recordCost, getCostSummary } from '../db.js'
-import { claudeCost } from '../services/cost.js'
+import { claudeCost, SERPER_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 
 const MODEL = 'claude-opus-4-8'
@@ -226,6 +226,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         for (const block of final.content) {
           if (block.type === 'tool_use') {
             const out = await runTool(block, isAdmin, token, reply)
+            // Meter paid Serper searches (web + youtube) into the credit monitor.
+            if (
+              (block.name === 'web_search' || block.name === 'youtube_search') &&
+              !out.includes('"error"')
+            ) {
+              void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
+            }
             results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
           }
         }

@@ -4,6 +4,7 @@ import { Environment, OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
+import CostMeter from '../components/CostMeter'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
@@ -86,6 +87,7 @@ export default function Stage({ user }: { user: User }) {
 
       <header className="topbar">
         <span className="brand">Kelionai</span>
+        {user.role === 'admin' && <CostMeter />}
         <div className="who">
           {user.picture && <img src={user.picture} alt="" className="avatar-pic" />}
           <span>{user.name}</span>
