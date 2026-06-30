@@ -200,6 +200,7 @@ export interface ContinuousHandle {
 export function startContinuous(
   lang: string,
   onFinal: (text: string) => void,
+  onError?: (error: string) => void,
 ): ContinuousHandle | null {
   const Ctor = getCtor()
   if (!Ctor) return null
@@ -207,6 +208,8 @@ export function startContinuous(
   let stopped = false
   let muted = false
   let rec: RecognitionLike | null = null
+  // Permission/availability failures are permanent — don't busy-loop restart.
+  const FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture'])
 
   const start = (): void => {
     if (stopped || muted || rec) return
@@ -224,7 +227,13 @@ export function startContinuous(
         }
       }
     }
-    r.onerror = () => {}
+    r.onerror = (e) => {
+      onError?.(e.error)
+      if (FATAL.has(e.error)) {
+        stopped = true // give up; surfaced to the UI via onError
+        rec = null
+      }
+    }
     r.onend = () => {
       rec = null
       if (!stopped && !muted) start()
@@ -233,7 +242,9 @@ export function startContinuous(
     try {
       r.start()
     } catch {
+      // start() throws if a previous instance hasn't fully released; retry once.
       rec = null
+      if (!stopped && !muted) window.setTimeout(start, 250)
     }
   }
 

@@ -22,6 +22,10 @@ export interface Strings {
   disconnectCamTitle: string
   connectCamTitle: string
   wakeHint: string
+  micBlocked: string
+  micNoDevice: string
+  micUnsupported: string
+  hearingLabel: string
   chatError: string
   brainNotActive: string
   brainError: string
@@ -52,6 +56,10 @@ const dict: Record<Lang, Strings> = {
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
     wakeHint: 'Say “Hey Kelion” to start — or just type.',
+    micBlocked: 'Microphone blocked. Allow mic access in the browser, then tap the mic again.',
+    micNoDevice: 'No microphone found.',
+    micUnsupported: 'Speech recognition is not supported in this browser. Use Chrome.',
+    hearingLabel: 'Kelion is hearing',
     chatError: 'Error.',
     brainNotActive: 'The brain is not active yet (Anthropic key missing).',
     brainError: 'Brain error. Please try again.',
@@ -80,6 +88,10 @@ const dict: Record<Lang, Strings> = {
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
     wakeHint: 'Spune „Hey Kelion” ca să începi — sau scrie.',
+    micBlocked: 'Microfonul e blocat. Permite accesul la microfon în browser, apoi apasă din nou pe microfon.',
+    micNoDevice: 'Niciun microfon găsit.',
+    micUnsupported: 'Recunoașterea vocală nu e suportată în acest browser. Folosește Chrome.',
+    hearingLabel: 'Kelion aude',
     chatError: 'Eroare.',
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia Anthropic).',
     brainError: 'Eroare la creier. Încearcă din nou.',

@@ -234,6 +234,45 @@ body {
   border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
+.mic-meter {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0 2px;
+}
+.mic-meter-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+}
+.mic-meter-bars span {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(to top, #6ea8fe, #9ed0ff);
+  transform: scaleY(0.06);
+  transform-origin: bottom;
+  transition: transform 60ms linear;
+}
+.mic-meter-label {
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.mic-error {
+  pointer-events: auto;
+  color: #ffb4b4;
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 13px;
+  text-align: center;
+}
 .chat-input {
   pointer-events: auto;
   display: flex;

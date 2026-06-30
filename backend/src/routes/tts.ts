@@ -36,7 +36,11 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
     const text = req.body?.text?.trim()
     if (!text) return reply.code(400).send({ error: 'bad_request' })
     const lang = (req.body?.lang ?? 'en').toLowerCase().startsWith('ro') ? 'ro-RO' : 'en-US'
-    const voiceName = `${lang}-Chirp3-HD-${config.ttsVoiceStyle}`
+    // A valid Chirp 3 HD style is a single capitalised name (e.g. Charon). Guard
+    // against legacy/invalid values (e.g. "chirp_3") that would make Google
+    // reject the voice → robotic browser fallback. Fall back to the spec voice.
+    const style = /^[A-Z][a-z]+$/.test(config.ttsVoiceStyle) ? config.ttsVoiceStyle : 'Charon'
+    const voiceName = `${lang}-Chirp3-HD-${style}`
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }

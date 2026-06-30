@@ -10,6 +10,7 @@ import {
   type ContinuousHandle,
 } from '../lib/voice'
 import CameraView from './CameraView'
+import MicMeter from './MicMeter'
 import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
@@ -50,6 +51,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [canSwitchCam, setCanSwitchCam] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [listening, setListening] = useState(false)
+  const [micError, setMicError] = useState<string | null>(null)
 
   const contRef = useRef<ContinuousHandle | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -141,12 +143,30 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // browser mic permission (auto-start on mount was being blocked silently).
   function startVoice(): void {
     contRef.current?.stop()
-    const h = startContinuous(speechLang, (heard) => onHeard(heard))
+    setMicError(null)
+    const h = startContinuous(
+      speechLang,
+      (heard) => onHeard(heard),
+      (error) => {
+        // Permanent failures (permission blocked, no mic) — tell the user.
+        if (error === 'not-allowed' || error === 'service-not-allowed') {
+          setMicError(t.micBlocked)
+          setListening(false)
+          setAwake(false)
+        } else if (error === 'audio-capture') {
+          setMicError(t.micNoDevice)
+          setListening(false)
+          setAwake(false)
+        }
+      },
+    )
     contRef.current = h
     if (h) {
       setListening(true)
       setAwake(true) // channel ON = active conversation, no wake word needed
       armIdle()
+    } else {
+      setMicError(t.micUnsupported)
     }
   }
   function stopVoice(): void {
@@ -271,6 +291,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
           </div>
         )}
       </div>
+      <MicMeter active={listening} label={t.hearingLabel} />
+      {micError && <p className="mic-error">{micError}</p>}
       <div className="chat-input">
         <div className="fn-wrap" ref={menuRef}>
           <button
