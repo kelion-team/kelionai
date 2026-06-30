@@ -19,6 +19,7 @@ export interface Strings {
   switchCamTitle: string
   functionsTitle: string
   attachTitle: string
+  monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
   wakeHint: string
@@ -53,6 +54,7 @@ const dict: Record<Lang, Strings> = {
     switchCamTitle: 'Switch camera',
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
+    monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
     wakeHint: 'Say “Hey Kelion” to start — or just type.',
@@ -85,6 +87,7 @@ const dict: Record<Lang, Strings> = {
     switchCamTitle: 'Schimbă camera',
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
+    monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
     wakeHint: 'Spune „Hey Kelion” ca să începi — sau scrie.',

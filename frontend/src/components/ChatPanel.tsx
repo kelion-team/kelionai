@@ -16,6 +16,7 @@ import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
 import { detectLanguageFromMic } from '../lib/langDetect'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
+import { toggleWorkspace } from '../lib/workspace'
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
 // low-power engine is Picovoice Porcupine). Accepts the documented variants.
@@ -418,6 +419,17 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
                   )}
                 </>
               )}
+              <button
+                type="button"
+                className="fn-item"
+                onClick={() => {
+                  toggleWorkspace(t.monitorTitle)
+                  setMenuOpen(false)
+                }}
+              >
+                <span className="ico">🖥️</span>
+                {t.monitorTitle}
+              </button>
               <button type="button" className="fn-item" disabled>
                 <span className="ico">📎</span>
                 {t.attachTitle}
