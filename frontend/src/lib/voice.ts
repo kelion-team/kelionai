@@ -27,13 +27,23 @@ export function setOnSpeakingChange(cb: ((speaking: boolean) => void) | null): v
   onSpeaking = cb
 }
 
-// ── Lip-sync: expose a 0..1 "mouth openness" while Kelion speaks. For Chirp
-// audio we tap the real waveform (accurate); for browser TTS (no analysable
-// stream) we drive a procedural mouth so the avatar still talks. ──
+// ── Lip-sync (viseme-aware): from the live TTS spectrum we classify each
+// instant as a VOWEL (energy in low formants → open jaw + open mouth), a
+// CONSONANT (energy shifts to high frequencies, e.g. fricatives s/f/ș → narrow
+// mouth, less jaw) or SILENCE/space (no energy → closed). For browser TTS (no
+// analysable stream) we drive a procedural vowel/consonant alternation. ──
 let speakCtx: AudioContext | null = null
 let speakAnalyser: AnalyserNode | null = null
-let speakData: Uint8Array<ArrayBuffer> | null = null
+let speakFreq: Uint8Array<ArrayBuffer> | null = null
 let browserSpeaking = false
+
+/** Mouth shape for the avatar: 0..1 jaw openness + vowel/consonant weights. */
+export interface MouthState {
+  jaw: number
+  vowel: number
+  consonant: number
+}
+const MOUTH_SILENT: MouthState = { jaw: 0, vowel: 0, consonant: 0 }
 
 function ensureSpeakCtx(): AudioContext | null {
   if (speakCtx) return speakCtx
@@ -44,28 +54,43 @@ function ensureSpeakCtx(): AudioContext | null {
   speakCtx = new AC()
   speakAnalyser = speakCtx.createAnalyser()
   speakAnalyser.fftSize = 256
-  speakData = new Uint8Array(new ArrayBuffer(speakAnalyser.frequencyBinCount))
+  speakFreq = new Uint8Array(new ArrayBuffer(speakAnalyser.frequencyBinCount))
   return speakCtx
 }
 
-/** 0..1 mouth openness for the avatar; 0 when Kelion is silent. */
-export function getSpeakingLevel(): number {
-  if (speakAnalyser && speakData && curAudio && !curAudio.paused) {
-    speakAnalyser.getByteTimeDomainData(speakData)
+export function getMouthState(): MouthState {
+  if (speakAnalyser && speakFreq && curAudio && !curAudio.paused) {
+    speakAnalyser.getByteFrequencyData(speakFreq)
     let sum = 0
-    for (let i = 0; i < speakData.length; i++) {
-      const v = (speakData[i] - 128) / 128
-      sum += v * v
+    let weighted = 0
+    for (let i = 0; i < speakFreq.length; i++) {
+      const m = speakFreq[i]
+      sum += m
+      weighted += m * i
     }
-    const rms = Math.sqrt(sum / speakData.length) // 0..~0.5 typical speech
-    return Math.min(1, rms * 3.2)
+    if (sum < 220) return MOUTH_SILENT // space / pause → mouth closed
+    const energy = Math.min(1, sum / speakFreq.length / 60) // 0..1 loudness
+    const centroid = weighted / sum / speakFreq.length // 0..1; low=vowel, high=consonant
+    // Above ~0.28 the spectrum is high-frequency dominated → consonant/fricative.
+    const consonant = Math.min(1, Math.max(0, (centroid - 0.28) / 0.35))
+    const vowel = 1 - consonant
+    return {
+      jaw: energy * (1 - 0.65 * consonant) * 0.9, // consonants close the jaw
+      vowel: energy * vowel,
+      consonant: energy * consonant,
+    }
   }
   if (browserSpeaking) {
-    // Procedural flap (no waveform to read from SpeechSynthesis).
     const t = performance.now() / 1000
-    return 0.3 + 0.25 * Math.abs(Math.sin(t * 11)) + 0.15 * Math.abs(Math.sin(t * 6.3))
+    const energy = 0.3 + 0.3 * Math.abs(Math.sin(t * 11))
+    const consonant = Math.sin(t * 7) > 0.45 ? 1 : 0 // alternate vowel/consonant
+    return {
+      jaw: energy * (1 - 0.65 * consonant) * 0.9,
+      vowel: energy * (1 - consonant),
+      consonant: energy * consonant,
+    }
   }
-  return 0
+  return MOUTH_SILENT
 }
 
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
