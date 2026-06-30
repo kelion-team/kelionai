@@ -25,9 +25,6 @@ export interface Strings {
   functionsTitle: string
   attachTitle: string
   imagePrompt: string
-  audioAuto: string
-  micDeviceTitle: string
-  speakerDeviceTitle: string
   monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
@@ -69,9 +66,6 @@ const dict: Record<Lang, Strings> = {
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
     imagePrompt: 'What do you see in this image?',
-    audioAuto: 'Default (system)',
-    micDeviceTitle: 'Microphone',
-    speakerDeviceTitle: 'Speaker',
     monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
@@ -111,9 +105,6 @@ const dict: Record<Lang, Strings> = {
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     imagePrompt: 'Ce vezi în această imagine?',
-    audioAuto: 'Implicit (sistem)',
-    micDeviceTitle: 'Microfon',
-    speakerDeviceTitle: 'Difuzor',
     monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',

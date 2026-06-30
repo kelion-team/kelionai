@@ -4,8 +4,6 @@
 // when no Google TTS key is configured. Spec next steps: Picovoice wake word +
 // LiveKit full-duplex transport.
 
-import { applyOutput } from './audio'
-
 // ──────────────────────────── TTS (speak) ────────────────────────────
 // Sentence queue so Kelion starts speaking the first sentence while the rest of
 // the reply is still streaming (voice + text in parallel).
@@ -228,10 +226,7 @@ async function chirpSpeak(text: string, lang: string): Promise<boolean> {
             /* source already exists / unavailable — element plays on its own */
           }
         }
-        // Honour the chosen output device (Bluetooth speaker / headset), then play.
-        void applyOutput(ctx, audio).finally(() => {
-          void audio.play().catch(() => finish(false))
-        })
+        void audio.play().catch(() => finish(false))
       }
       if (ctx && ctx.state === 'suspended') void ctx.resume().finally(route)
       else route()
@@ -251,9 +246,16 @@ async function drain(): Promise<void> {
     return
   }
   ttsBusy = true
-  let played = false
-  if (chirpMode !== 'off') played = await chirpSpeak(item.text, item.lang)
-  if (!played) await browserSpeak(item.text, item.lang)
+  // ONE consistent voice. Use Chirp 3 HD whenever it's available. Only use the
+  // browser voice when Chirp is unavailable for the whole session (no key). If
+  // Chirp is on but a single sentence fails transiently, do NOT switch to the
+  // browser voice mid-reply — that's what made the voice sound mixed/unintelligible.
+  if (chirpMode === 'off') {
+    await browserSpeak(item.text, item.lang)
+  } else {
+    const played = await chirpSpeak(item.text, item.lang)
+    if (!played && chirpMode === 'off') await browserSpeak(item.text, item.lang)
+  }
   void drain()
 }
 
@@ -274,12 +276,6 @@ export function setOnSpeechIdle(cb: (() => void) | null): void {
 
 export function isSpeaking(): boolean {
   return ttsBusy || curAudio !== null || globalThis.speechSynthesis?.speaking === true
-}
-
-/** Re-route the currently playing audio to the chosen output device (called when
- *  the user switches the output, e.g. to a Bluetooth speaker, mid-session). */
-export function reapplyOutput(): void {
-  void applyOutput(speakCtx, curAudio)
 }
 
 export function stopSpeaking(): void {

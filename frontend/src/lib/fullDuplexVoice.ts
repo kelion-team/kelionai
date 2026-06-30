@@ -8,8 +8,6 @@
 // language detection. This is the professional path (vs the browser Web Speech
 // recognizer, which can't be fed an echo-cancelled stream).
 
-import { inputConstraint } from './audio'
-
 export interface FullDuplexHandle {
   stop(): void
 }
@@ -49,12 +47,7 @@ export async function startFullDuplex(
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        ...inputConstraint(), // chosen input device (e.g. a Bluetooth mic)
-      },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
   } catch {
     onError?.('not-allowed')

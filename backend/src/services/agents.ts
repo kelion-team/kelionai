@@ -3,37 +3,12 @@ import { config } from '../config.js'
 import { getMemories, addMemory, recordCost } from '../db.js'
 import { claudeCost } from './cost.js'
 
-// Kelion's brain is a small set of cooperating agents (see routes/chat.ts):
-//   1. Router      — classifies each turn so deep reasoning is used only when it
-//                    helps (keeps simple/voice turns instant).
-//   2. Conversation— the Opus persona that talks (the main streamed response).
-//   3. Reasoning   — Opus extended thinking, switched on for COMPLEX turns.
-//   4. Skills      — the tool-use loop (Google, web, maps…).
-//   5. Memory      — recalls what Kelion knows about the user, and learns +
-//                    saves new durable facts after each turn.
-// This module hosts the Router and Memory agents (cheap Haiku work); the
-// Conversation/Reasoning/Skills agents live in the chat route's streaming loop.
+// Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
+// route's streaming loop (low-latency Opus); this module hosts the Memory agent
+// — it recalls what Kelion knows about the user and, after each turn, learns +
+// saves new durable facts (cheap Haiku, off the response path).
 
 const HAIKU = 'claude-haiku-4-5-20251001'
-
-// ── Router agent ──────────────────────────────────────────────────────────
-// Instant, deterministic complexity gate. A serial LLM classifier on every turn
-// would add latency to the realtime voice path; this catches the cases where
-// deep reasoning earns its cost (analysis, multi-step problems, planning, math).
-const COMPLEX = new RegExp(
-  [
-    'de ce', 'explic', 'analiz', 'compar', 'demonstr', 'calcul', 'rezolv',
-    'strateg', 'pas cu pas', 'argument', 'pro (si|și) contra', 'planuie',
-    'why', 'explain', 'analyz', 'compare', 'prove', 'calculate', 'reason',
-    'step by step', 'design', 'architect', 'trade-?off', 'debug', 'optimi',
-  ].join('|'),
-  'i',
-)
-
-export function routeComplexity(text: string): 'simple' | 'complex' {
-  if (text.length > 320) return 'complex'
-  return COMPLEX.test(text) ? 'complex' : 'simple'
-}
 
 // ── Memory agent (recall) ─────────────────────────────────────────────────
 // Pull durable facts about the user into the system prompt so Kelion is

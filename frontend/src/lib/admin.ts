@@ -2,7 +2,6 @@ export interface UserSummary {
   email: string
   count: number
   last: string
-  cost: number // real provider cost (USD) attributed to this user
 }
 
 export interface HistoryRow {
@@ -27,18 +26,3 @@ export async function fetchHistory(email: string): Promise<HistoryRow[]> {
   return j.history ?? []
 }
 
-export interface CostSummary {
-  total: number
-  today: number
-  byKind: Record<string, number>
-}
-
-export async function fetchCosts(): Promise<CostSummary | null> {
-  try {
-    const r = await fetch('/api/admin/costs', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as CostSummary
-  } catch {
-    return null
-  }
-}

@@ -10,7 +10,7 @@ import {
 } from '../services/google.js'
 import { saveMessage, recordCost, getCostSummary } from '../db.js'
 import { claudeCost } from '../services/cost.js'
-import { routeComplexity, recallMemories, learnFromTurn } from '../services/agents.js'
+import { recallMemories, learnFromTurn } from '../services/agents.js'
 
 const MODEL = 'claude-opus-4-8'
 
@@ -193,13 +193,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
-    // Router + Reasoning agents: simple/voice turns answer instantly; only
-    // genuinely complex turns spend extended thinking (deep reasoning) — that's
-    // the "deep on hard problems, instant on simple ones" contract.
-    const complex = routeComplexity(lastUserText) === 'complex'
-    const thinking = complex ? ({ type: 'enabled', budget_tokens: 3000 } as const) : undefined
-    const maxTokens = complex ? 5000 : 2048
-
     const client = new Anthropic({ apiKey: config.anthropicKey })
     const isAdmin = user.role === 'admin'
     const tools: Anthropic.Tool[] = isAdmin
@@ -214,11 +207,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       for (let round = 0; round < 5; round++) {
         const stream = client.messages.stream({
           model: MODEL,
-          max_tokens: maxTokens,
+          max_tokens: 2048,
           system: systemPrompt,
           tools,
           messages: params,
-          ...(thinking ? { thinking } : {}),
         })
         stream.on('text', (delta) => {
           assistantText += delta

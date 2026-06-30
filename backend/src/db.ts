@@ -150,29 +150,15 @@ export interface UserSummary {
   email: string
   count: number
   last: string
-  cost: number // real provider cost (USD) attributed to this user
 }
 
 export async function listUsers(): Promise<UserSummary[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<{
-    email: string
-    count: number
-    last: string
-    cost: string | null
-  }>(
-    `SELECT m.user_email AS email,
-            COUNT(*)::int AS count,
-            MAX(m.created_at) AS last,
-            COALESCE((SELECT SUM(cost_usd) FROM cost_events c WHERE c.user_email = m.user_email), 0) AS cost
-     FROM messages m GROUP BY m.user_email ORDER BY last DESC`,
+  const r = await getPool().query<UserSummary>(
+    `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
+     FROM messages GROUP BY user_email ORDER BY last DESC`,
   )
-  return r.rows.map((row) => ({
-    email: row.email,
-    count: row.count,
-    last: row.last,
-    cost: Number(row.cost ?? 0),
-  }))
+  return r.rows
 }
 
 export interface HistoryRow {

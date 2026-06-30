@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { inputConstraint } from '../lib/audio'
 
 // Live "what Kelion hears" bar graph. Taps the mic with a Web Audio
 // AnalyserNode (separate from the Web Speech recognizer, which manages its own
@@ -39,7 +38,7 @@ export default function MicMeter({
 
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { ...inputConstraint() } })
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
