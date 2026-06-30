@@ -11,6 +11,26 @@ import { getSessionUser } from '../session.js'
 
 const TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
 
+// Default region per language for 2-letter shorthand (the frontend normally
+// sends a full BCP-47 tag; this is a safety net).
+const DEFAULT_REGION: Record<string, string> = {
+  en: 'US', ro: 'RO', fr: 'FR', de: 'DE', es: 'ES', it: 'IT', pt: 'BR', nl: 'NL',
+  pl: 'PL', ru: 'RU', uk: 'UA', tr: 'TR', ar: 'XA', hi: 'IN', ja: 'JP', ko: 'KR',
+  zh: 'CN', sv: 'SE', da: 'DK', nb: 'NO', fi: 'FI', cs: 'CZ', el: 'GR', hu: 'HU',
+  id: 'ID', th: 'TH', vi: 'VN',
+}
+
+// Normalise a locale to a BCP-47 `ll-RR` tag (e.g. "ro" → "ro-RO", "fr-fr" →
+// "fr-FR"). Falls back to en-US for anything malformed.
+function normalizeLang(raw: string | undefined): string {
+  const s = (raw ?? '').trim()
+  const m = /^([a-z]{2})(?:[-_]([a-z]{2}))?$/i.exec(s)
+  if (!m) return 'en-US'
+  const lng = m[1].toLowerCase()
+  const region = (m[2]?.toUpperCase() ?? DEFAULT_REGION[lng] ?? lng.toUpperCase())
+  return `${lng}-${region}`
+}
+
 let auth: GoogleAuth | null = null
 function getAuth(): GoogleAuth | null {
   if (!config.googleServiceAccountJson) return null
@@ -35,7 +55,9 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
 
     const text = req.body?.text?.trim()
     if (!text) return reply.code(400).send({ error: 'bad_request' })
-    const lang = (req.body?.lang ?? 'en').toLowerCase().startsWith('ro') ? 'ro-RO' : 'en-US'
+    // Accept any BCP-47 language so Kelion can speak every language Chirp 3 HD
+    // supports. Normalise "ro" → "ro-RO", "fr-fr" → "fr-FR"; default en-US.
+    const lang = normalizeLang(req.body?.lang)
     // A valid Chirp 3 HD style is a single capitalised name (e.g. Charon). Guard
     // against legacy/invalid values (e.g. "chirp_3") that would make Google
     // reject the voice → robotic browser fallback. Fall back to the spec voice.

@@ -19,9 +19,50 @@ let curAudio: HTMLAudioElement | null = null
 let chirpMode: 'unknown' | 'on' | 'off' = 'unknown'
 let onIdle: (() => void) | null = null
 
+// ── Lip-sync: expose a 0..1 "mouth openness" while Kelion speaks. For Chirp
+// audio we tap the real waveform (accurate); for browser TTS (no analysable
+// stream) we drive a procedural mouth so the avatar still talks. ──
+let speakCtx: AudioContext | null = null
+let speakAnalyser: AnalyserNode | null = null
+let speakData: Uint8Array<ArrayBuffer> | null = null
+let browserSpeaking = false
+
+function ensureSpeakCtx(): AudioContext | null {
+  if (speakCtx) return speakCtx
+  const AC =
+    globalThis.AudioContext ??
+    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AC) return null
+  speakCtx = new AC()
+  speakAnalyser = speakCtx.createAnalyser()
+  speakAnalyser.fftSize = 256
+  speakData = new Uint8Array(new ArrayBuffer(speakAnalyser.frequencyBinCount))
+  return speakCtx
+}
+
+/** 0..1 mouth openness for the avatar; 0 when Kelion is silent. */
+export function getSpeakingLevel(): number {
+  if (speakAnalyser && speakData && curAudio && !curAudio.paused) {
+    speakAnalyser.getByteTimeDomainData(speakData)
+    let sum = 0
+    for (let i = 0; i < speakData.length; i++) {
+      const v = (speakData[i] - 128) / 128
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / speakData.length) // 0..~0.5 typical speech
+    return Math.min(1, rms * 3.2)
+  }
+  if (browserSpeaking) {
+    // Procedural flap (no waveform to read from SpeechSynthesis).
+    const t = performance.now() / 1000
+    return 0.3 + 0.25 * Math.abs(Math.sin(t * 11)) + 0.15 * Math.abs(Math.sin(t * 6.3))
+  }
+  return 0
+}
+
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const base = lang.slice(0, 2).toLowerCase()
-  const voices = window.speechSynthesis.getVoices()
+  const voices = globalThis.speechSynthesis.getVoices()
   const sameLang = voices.filter((v) => v.lang.toLowerCase().startsWith(base))
   const male = sameLang.find((v) =>
     /male|b[aă]rbat|masculin|david|george|andrei|paul|daniel/i.test(v.name),
@@ -31,7 +72,7 @@ function pickVoice(lang: string): SpeechSynthesisVoice | null {
 
 function browserSpeak(text: string, lang: string): Promise<void> {
   return new Promise((resolve) => {
-    const synth = window.speechSynthesis
+    const synth = globalThis.speechSynthesis
     if (!synth) {
       resolve()
       return
@@ -40,9 +81,16 @@ function browserSpeak(text: string, lang: string): Promise<void> {
     u.lang = lang
     const v = pickVoice(lang)
     if (v) u.voice = v
-    u.rate = 1.0
-    u.onend = () => resolve()
-    u.onerror = () => resolve()
+    u.rate = 1
+    const finish = (): void => {
+      browserSpeaking = false
+      resolve()
+    }
+    u.onstart = () => {
+      browserSpeaking = true
+    }
+    u.onend = finish
+    u.onerror = finish
     synth.speak(u)
   })
 }
@@ -65,7 +113,20 @@ async function chirpSpeak(text: string, lang: string): Promise<boolean> {
     const url = URL.createObjectURL(await res.blob())
     await new Promise<void>((resolve) => {
       const audio = new Audio(url)
+      audio.crossOrigin = 'anonymous'
       curAudio = audio
+      // Route through the analyser so the avatar lip-syncs to the real waveform.
+      const ctx = ensureSpeakCtx()
+      if (ctx && speakAnalyser) {
+        void ctx.resume()
+        try {
+          const node = ctx.createMediaElementSource(audio)
+          node.connect(speakAnalyser)
+          speakAnalyser.connect(ctx.destination)
+        } catch {
+          /* fall through — audio still plays via the element below */
+        }
+      }
       const done = (): void => {
         URL.revokeObjectURL(url)
         if (curAudio === audio) curAudio = null
@@ -108,7 +169,7 @@ export function setOnSpeechIdle(cb: (() => void) | null): void {
 }
 
 export function isSpeaking(): boolean {
-  return ttsBusy || curAudio !== null || window.speechSynthesis?.speaking === true
+  return ttsBusy || curAudio !== null || globalThis.speechSynthesis?.speaking === true
 }
 
 export function stopSpeaking(): void {
@@ -118,7 +179,7 @@ export function stopSpeaking(): void {
     curAudio.pause()
     curAudio = null
   }
-  window.speechSynthesis?.cancel()
+  globalThis.speechSynthesis?.cancel()
 }
 
 // ──────────────────────────── STT (listen) ────────────────────────────
@@ -154,7 +215,7 @@ interface RecognitionLike {
 type RecognitionCtor = new () => RecognitionLike
 
 function getCtor(): RecognitionCtor | null {
-  const w = window as unknown as {
+  const w = globalThis as unknown as {
     SpeechRecognition?: RecognitionCtor
     webkitSpeechRecognition?: RecognitionCtor
   }
@@ -244,7 +305,7 @@ export function startContinuous(
     } catch {
       // start() throws if a previous instance hasn't fully released; retry once.
       rec = null
-      if (!stopped && !muted) window.setTimeout(start, 250)
+      if (!stopped && !muted) globalThis.setTimeout(start, 250)
     }
   }
 

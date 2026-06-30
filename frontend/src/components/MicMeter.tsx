@@ -43,7 +43,7 @@ export default function MicMeter({
           stream.getTracks().forEach((t) => t.stop())
           return
         }
-        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        const AC = globalThis.AudioContext ?? (globalThis as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
         ctx = new AC()
         const src = ctx.createMediaStreamSource(stream)
         const analyser = ctx.createAnalyser()
@@ -68,8 +68,8 @@ export default function MicMeter({
   if (!active) return null
 
   return (
-    <div className="mic-meter" role="status" aria-label={label} title={label}>
-      <div className="mic-meter-bars">
+    <output className="mic-meter" aria-label={label} title={label}>
+      <span className="mic-meter-bars">
         {Array.from({ length: BARS }, (_, i) => (
           <span
             key={i}
@@ -78,8 +78,8 @@ export default function MicMeter({
             }}
           />
         ))}
-      </div>
+      </span>
       <span className="mic-meter-label">{label}</span>
-    </div>
+    </output>
   )
 }

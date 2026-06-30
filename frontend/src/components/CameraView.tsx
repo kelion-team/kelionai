@@ -1,10 +1,11 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
 import { startCamera, stopStream, type Facing } from '../lib/camera'
 
-// Floating glass preview of the device camera. Acquires the stream while
-// `active`, releases it otherwise (and on unmount / facing change). Exposes a
-// frame grabber via `captureRef` so the chat can send what the camera sees to
-// Claude (permanent vision). Frames are downscaled to keep the payload small.
+// Device camera capture — NOT shown on screen. The feed is for Kelion's vision
+// only: the <video> element is kept playing but visually hidden, and frames are
+// grabbed via `captureRef` and sent to Claude (permanent vision). The element
+// stays off-screen (not display:none) so the browser keeps decoding frames.
+// Frames are downscaled to keep the payload small.
 export default function CameraView({
   active,
   facing,
@@ -73,14 +74,7 @@ export default function CameraView({
   }, [captureRef])
 
   if (!active) return null
-  return (
-    <div className="camera-card">
-      <video
-        ref={videoRef}
-        muted
-        playsInline
-        className={facing === 'user' ? 'mirror' : ''}
-      />
-    </div>
-  )
+  // Hidden from the user — Kelion's eyes only. Kept off-screen (not display:none)
+  // so the browser keeps decoding frames for capture.
+  return <video ref={videoRef} muted playsInline aria-hidden className="camera-hidden" />
 }

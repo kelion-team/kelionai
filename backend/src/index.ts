@@ -10,6 +10,8 @@ import { authRoutes } from './routes/auth.js'
 import { chatRoutes } from './routes/chat.js'
 import { ttsRoutes } from './routes/tts.js'
 import { adminRoutes } from './routes/admin.js'
+import { prefsRoutes } from './routes/prefs.js'
+import { asrRoutes } from './routes/asr.js'
 import { initDb } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -30,6 +32,8 @@ await app.register(authRoutes)
 await app.register(chatRoutes)
 await app.register(ttsRoutes)
 await app.register(adminRoutes)
+await app.register(prefsRoutes)
+await app.register(asrRoutes)
 
 // Create tables if a database is configured (non-fatal if it isn't / is down).
 try {

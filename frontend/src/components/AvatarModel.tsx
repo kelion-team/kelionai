@@ -2,6 +2,7 @@ import { useRef, useLayoutEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
+import { getSpeakingLevel } from '../lib/voice'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -27,6 +28,7 @@ export default function AvatarModel() {
   const bones = useRef<Record<string, Bone>>({})
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
+  const mouth = useRef(0) // smoothed jaw openness for lip-sync
 
   const applyArms = (b: Record<string, Bone>) => {
     for (const key of Object.keys(ARM_REST)) {
@@ -96,6 +98,14 @@ export default function AvatarModel() {
         bl.nextAt = 2.5 + Math.random() * 4.5
       }
     }
+
+    // Lip-sync — open the jaw to the current speaking level, smoothed so it
+    // tracks speech without jitter. Zero when Kelion is silent.
+    const target = getSpeakingLevel()
+    const k = target > mouth.current ? 0.5 : 0.25 // open fast, close softer
+    mouth.current += (target - mouth.current) * k
+    const jaw = mouth.current
+
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
       const inf = mesh.morphTargetInfluences
@@ -104,6 +114,9 @@ export default function AvatarModel() {
       const r = d['eyeBlinkRight'] ?? d['eyeBlink_R']
       if (l !== undefined) inf[l] = eye
       if (r !== undefined) inf[r] = eye
+      // RPM/ARKit mouth morphs — use whichever the asset exposes.
+      const jawOpen = d['jawOpen'] ?? d['mouthOpen'] ?? d['viseme_aa']
+      if (jawOpen !== undefined) inf[jawOpen] = jaw
     }
   })
 

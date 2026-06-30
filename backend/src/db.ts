@@ -29,7 +29,41 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_messages_user ON messages (user_email, created_at);
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      user_email TEXT PRIMARY KEY,
+      speech_lang TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `)
+}
+
+// Per-user speech language — persists across sessions for as long as the user
+// exists. Returns null when unset (the client then auto-detects).
+export async function getSpeechLang(email: string): Promise<string | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ speech_lang: string | null }>(
+      'SELECT speech_lang FROM user_prefs WHERE user_email = $1',
+      [email],
+    )
+    return r.rows[0]?.speech_lang ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function setSpeechLangPref(email: string, lang: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO user_prefs (user_email, speech_lang, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_email) DO UPDATE SET speech_lang = $2, updated_at = now()`,
+      [email, lang],
+    )
+  } catch {
+    // Never break the chat because persistence failed.
+  }
 }
 
 export async function saveMessage(

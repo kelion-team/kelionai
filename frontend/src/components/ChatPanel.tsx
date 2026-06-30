@@ -12,6 +12,9 @@ import {
 import CameraView from './CameraView'
 import MicMeter from './MicMeter'
 import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
+import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
+import { detectLanguageFromMic } from '../lib/langDetect'
+import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
 // low-power engine is Picovoice Porcupine). Accepts the documented variants.
@@ -40,7 +43,9 @@ function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): 
 
 export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const t = strings(lang)
-  const speechLang = lang === 'ro' ? 'ro-RO' : 'en-US'
+  // Speech language (recognition + Kelion's voice). Defaults to the browser
+  // locale; the user can switch to any supported language in the ⊕ menu.
+  const [speechLang, setSpeechLang] = useState(() => defaultSpeechLang(lang))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -69,12 +74,19 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   cameraOnRef.current = cameraOn
   const listeningRef = useRef(listening)
   listeningRef.current = listening
+  const speechLangRef = useRef(speechLang)
+  speechLangRef.current = speechLang
 
   async function send(text: string): Promise<void> {
     const msg = text.trim()
     if (!msg || busyRef.current) return
     setInput('')
     stopSpeaking()
+    // Auto-switch the voice/recognizer language from the message text (cheap;
+    // audio-based detection on the mic covers the speak-first case).
+    const detected = detectLangFromText(msg)
+    if (detected) changeSpeechLang(detected)
+    const ttsLang = speechLangRef.current
     const speak = voiceOutRef.current
     const image = cameraOnRef.current
       ? (latestFrameRef.current ?? captureRef.current?.() ?? undefined)
@@ -92,12 +104,12 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
         if (speak) {
           const end = lastSentenceEnd(acc)
           if (end > spoken) {
-            enqueueSpeech(acc.slice(spoken, end), speechLang)
+            enqueueSpeech(acc.slice(spoken, end), ttsLang)
             spoken = end
           }
         }
       }
-      if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), speechLang)
+      if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), ttsLang)
     } catch (err) {
       const code = err instanceof Error ? err.message : 'error'
       const m = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
@@ -110,8 +122,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   sendRef.current = send
 
   function armIdle(): void {
-    if (idleRef.current) window.clearTimeout(idleRef.current)
-    idleRef.current = window.setTimeout(() => {
+    if (idleRef.current) globalThis.clearTimeout(idleRef.current)
+    idleRef.current = globalThis.setTimeout(() => {
       // Don't drop to standby while the mic channel is explicitly ON.
       if (!listeningRef.current) setAwake(false)
     }, IDLE_MS)
@@ -145,7 +157,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     contRef.current?.stop()
     setMicError(null)
     const h = startContinuous(
-      speechLang,
+      speechLangRef.current,
       (heard) => onHeard(heard),
       (error) => {
         // Permanent failures (permission blocked, no mic) — tell the user.
@@ -165,6 +177,12 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       setListening(true)
       setAwake(true) // channel ON = active conversation, no wake word needed
       armIdle()
+      // Detect the spoken language from the audio itself (handles speaking a
+      // language the browser recognizer isn't set to, e.g. Chinese on an EN
+      // browser) and switch hearing + voice to it.
+      void detectLanguageFromMic().then((code) => {
+        if (code) changeSpeechLang(code)
+      })
     } else {
       setMicError(t.micUnsupported)
     }
@@ -180,15 +198,40 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     if (listening) stopVoice()
     else startVoice()
   }
+  // Switch the language Kelion hears + speaks; restart the recognizer live and
+  // persist the choice per user. No-op if it's already the active language.
+  function changeSpeechLang(code: string): void {
+    if (code === speechLangRef.current) return
+    speechLangRef.current = code // apply immediately for startVoice below
+    setSpeechLang(code)
+    saveLang(code)
+    if (listeningRef.current) {
+      contRef.current?.stop()
+      startVoice()
+    }
+  }
 
   // Clean up the mic + timers when the panel unmounts.
   useEffect(() => {
     return () => {
       contRef.current?.stop()
       contRef.current = null
-      if (idleRef.current) window.clearTimeout(idleRef.current)
+      if (idleRef.current) globalThis.clearTimeout(idleRef.current)
       stopSpeaking()
     }
+  }, [])
+
+  // Load the user's persisted speech language (localStorage instantly, then the
+  // server which follows the user across devices). Auto-detection still refines
+  // it from what's actually spoken/typed.
+  useEffect(() => {
+    const apply = (code: string | null): void => {
+      if (!code || code === speechLangRef.current) return
+      speechLangRef.current = code
+      setSpeechLang(code)
+    }
+    apply(loadLocalLang())
+    void loadServerLang().then(apply)
   }, [])
 
   // Permanent vision — camera ON by default; detect a second camera for switch.
@@ -214,8 +257,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       if (f) latestFrameRef.current = f
     }
     const arm = (): void => {
-      if (timer) window.clearInterval(timer)
-      timer = window.setInterval(tick, Math.round(1000 / fps))
+      if (timer) globalThis.clearInterval(timer)
+      timer = globalThis.setInterval(tick, Math.round(1000 / fps))
     }
     arm()
 
@@ -241,7 +284,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     }
 
     return () => {
-      if (timer) window.clearInterval(timer)
+      if (timer) globalThis.clearInterval(timer)
       if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId)
     }
   }, [cameraOn])
