@@ -8,8 +8,18 @@ import {
   startContinuous,
   speechSupported,
   setOnSpeakingChange,
+  reapplyOutput,
   type ContinuousHandle,
 } from '../lib/voice'
+import {
+  listAudioDevices,
+  getInputId,
+  getOutputId,
+  setInputId,
+  setOutputId,
+  outputSelectable,
+  type AudioDeviceList,
+} from '../lib/audio'
 import CameraView from './CameraView'
 import MicMeter from './MicMeter'
 import { cameraSupported, type Facing } from '../lib/camera'
@@ -67,6 +77,10 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
   const [attachments, setAttachments] = useState<{ id: string; url: string; name: string }[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Audio routing (Bluetooth / external mic + speaker on phones).
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceList>({ inputs: [], outputs: [] })
+  const [audioIn, setAudioIn] = useState(getInputId())
+  const [audioOut, setAudioOut] = useState(getOutputId())
 
   const contRef = useRef<ContinuousHandle | null>(null)
   const fdRef = useRef<FullDuplexHandle | null>(null)
@@ -170,6 +184,18 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   }
   function removeAttachment(id: string): void {
     setAttachments((cur) => cur.filter((a) => a.id !== id))
+  }
+
+  // ── Audio routing (Bluetooth / external devices) ──
+  function changeAudioIn(id: string): void {
+    setInputId(id)
+    setAudioIn(id)
+    if (listeningRef.current) void startVoice() // reopen the mic on the new device
+  }
+  function changeAudioOut(id: string): void {
+    setOutputId(id)
+    setAudioOut(id)
+    reapplyOutput() // re-route any audio playing right now
   }
 
   async function send(text: string): Promise<void> {
@@ -532,6 +558,21 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     }
   }, [cameraOn])
 
+  // Keep the audio-device list fresh: on mount, when a device is plugged/removed
+  // (e.g. a Bluetooth headset connects), and when the functions menu opens (so
+  // labels appear once mic permission is granted).
+  useEffect(() => {
+    const md = navigator.mediaDevices
+    if (!md?.enumerateDevices) return
+    const refresh = (): void => void listAudioDevices().then(setAudioDevices)
+    refresh()
+    md.addEventListener?.('devicechange', refresh)
+    return () => md.removeEventListener?.('devicechange', refresh)
+  }, [])
+  useEffect(() => {
+    if (menuOpen) void listAudioDevices().then(setAudioDevices)
+  }, [menuOpen])
+
   // Close the functions menu on an outside click.
   useEffect(() => {
     if (!menuOpen) return
@@ -630,6 +671,42 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
                     his own (show_on_screen), and the camera is switched by voice or
                     text command ("switch camera", "comută camera", "camera spate"). */}
+                {audioDevices.inputs.length > 0 && (
+                  <div className="fn-audio">
+                    <label className="fn-audio-row">
+                      <span className="ico" aria-hidden>🎙️</span>
+                      <select
+                        value={audioIn}
+                        onChange={(e) => changeAudioIn(e.target.value)}
+                        aria-label={t.micDeviceTitle}
+                      >
+                        <option value="">{t.audioAuto}</option>
+                        {audioDevices.inputs.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {outputSelectable() && audioDevices.outputs.length > 0 && (
+                      <label className="fn-audio-row">
+                        <span className="ico" aria-hidden>🔈</span>
+                        <select
+                          value={audioOut}
+                          onChange={(e) => changeAudioOut(e.target.value)}
+                          aria-label={t.speakerDeviceTitle}
+                        >
+                          <option value="">{t.audioAuto}</option>
+                          {audioDevices.outputs.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

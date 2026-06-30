@@ -4,6 +4,8 @@
 // when no Google TTS key is configured. Spec next steps: Picovoice wake word +
 // LiveKit full-duplex transport.
 
+import { applyOutput } from './audio'
+
 // ──────────────────────────── TTS (speak) ────────────────────────────
 // Sentence queue so Kelion starts speaking the first sentence while the rest of
 // the reply is still streaming (voice + text in parallel).
@@ -226,7 +228,10 @@ async function chirpSpeak(text: string, lang: string): Promise<boolean> {
             /* source already exists / unavailable — element plays on its own */
           }
         }
-        void audio.play().catch(() => finish(false))
+        // Honour the chosen output device (Bluetooth speaker / headset), then play.
+        void applyOutput(ctx, audio).finally(() => {
+          void audio.play().catch(() => finish(false))
+        })
       }
       if (ctx && ctx.state === 'suspended') void ctx.resume().finally(route)
       else route()
@@ -269,6 +274,12 @@ export function setOnSpeechIdle(cb: (() => void) | null): void {
 
 export function isSpeaking(): boolean {
   return ttsBusy || curAudio !== null || globalThis.speechSynthesis?.speaking === true
+}
+
+/** Re-route the currently playing audio to the chosen output device (called when
+ *  the user switches the output, e.g. to a Bluetooth speaker, mid-session). */
+export function reapplyOutput(): void {
+  void applyOutput(speakCtx, curAudio)
 }
 
 export function stopSpeaking(): void {

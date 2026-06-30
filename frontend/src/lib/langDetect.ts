@@ -1,4 +1,5 @@
 import { LANGS } from './languages'
+import { inputConstraint } from './audio'
 
 // Audio-based language detection. Records a few seconds of mic audio and asks
 // the backend (Google STT v2 chirp, auto language ID) which language was spoken.
@@ -37,7 +38,7 @@ export async function detectLanguageFromMic(ms = 4500): Promise<string | null> {
   if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) return null
   let stream: MediaStream | null = null
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { ...inputConstraint() } })
     const chunks: Blob[] = []
     const rec = new MediaRecorder(stream)
     const stopped = new Promise<void>((resolve) => {
