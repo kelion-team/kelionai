@@ -105,8 +105,10 @@ export default function AvatarModel() {
     // Snappy attack, quick release so syllables register; values smoothed.
     const m = getMouthState()
     const cur = mouth.current
+    // Snappy attack on a vowel/consonant onset, even faster release so the mouth
+    // shuts cleanly at the end of a word/phrase (the "guard at start and end").
     const sm = (now: number, next: number): number =>
-      now + (next - now) * (next > now ? 0.6 : 0.4)
+      now + (next - now) * (next > now ? 0.55 : 0.65)
     cur.jaw = sm(cur.jaw, m.jaw)
     cur.vowel = sm(cur.vowel, m.vowel)
     cur.consonant = sm(cur.consonant, m.consonant)

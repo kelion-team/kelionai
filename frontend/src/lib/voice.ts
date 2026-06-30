@@ -49,10 +49,14 @@ export interface MouthState {
 const MOUTH_SILENT: MouthState = { jaw: 0, vowel: 0, consonant: 0 }
 
 // Amplitude caps for the RPM mouth morphs. A full jawOpen/viseme of ~1 looks
-// like a scream; real speech barely parts the lips. Keep the opening subtle.
-const JAW_MAX = 0.3
-const VOWEL_MAX = 0.42
-const CONS_MAX = 0.5
+// like a scream; real speech barely parts the lips. Keep the opening small.
+const JAW_MAX = 0.22
+const VOWEL_MAX = 0.3
+const CONS_MAX = 0.35
+// Silence gate (start/end guard): below this total spectral energy the mouth is
+// fully closed, so it opens cleanly at speech onset and shuts at the end — no
+// lingering half-open jaw between words.
+const SILENCE_SUM = 260
 
 function ensureSpeakCtx(): AudioContext | null {
   if (speakCtx) return speakCtx
@@ -77,7 +81,7 @@ export function getMouthState(): MouthState {
       sum += m
       weighted += m * i
     }
-    if (sum < 220) return MOUTH_SILENT // space / pause → mouth closed
+    if (sum < SILENCE_SUM) return MOUTH_SILENT // space / pause → mouth closed
     const energy = Math.min(1, sum / speakFreq.length / 60) // 0..1 loudness
     const centroid = weighted / sum / speakFreq.length // 0..1; low=vowel, high=consonant
     // Above ~0.28 the spectrum is high-frequency dominated → consonant/fricative.

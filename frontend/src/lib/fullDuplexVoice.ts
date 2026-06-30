@@ -24,11 +24,13 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-// VAD tuning (RMS in 0..1; ms thresholds).
-const START_RMS = 0.045 // speech onset
-const END_RMS = 0.03 // below this counts as silence
-const SILENCE_END_MS = 700 // trailing silence that ends an utterance
-const MIN_VOICED_MS = 250 // ignore blips shorter than this
+// VAD tuning (RMS in 0..1; ms thresholds). Onset is deliberately sensitive so
+// the FIRST word isn't clipped ("guard at start"); the trailing-silence window
+// guards the end so a word isn't cut while you pause mid-thought.
+const START_RMS = 0.035 // speech onset (sensitive — catch the first syllable)
+const END_RMS = 0.025 // below this counts as silence
+const SILENCE_END_MS = 750 // trailing silence that ends an utterance (guard end)
+const MIN_VOICED_MS = 150 // ignore blips shorter than this
 const FRAME_MS = 1000 / 60
 
 /**
@@ -107,7 +109,7 @@ export async function startFullDuplex(
     }
     rec.onstop = () => {
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' })
-      if (voicedAtStop() >= MIN_VOICED_MS && blob.size > 1500) void sendUtterance(blob)
+      if (voicedAtStop() >= MIN_VOICED_MS && blob.size > 1200) void sendUtterance(blob)
     }
     rec.start()
   }
