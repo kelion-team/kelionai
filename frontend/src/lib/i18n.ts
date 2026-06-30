@@ -24,6 +24,7 @@ export interface Strings {
   camSwitchMsg: string
   functionsTitle: string
   attachTitle: string
+  imagePrompt: string
   monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
@@ -64,6 +65,7 @@ const dict: Record<Lang, Strings> = {
     camSwitchMsg: 'Camera switched.',
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
+    imagePrompt: 'What do you see in this image?',
     monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
@@ -102,6 +104,7 @@ const dict: Record<Lang, Strings> = {
     camSwitchMsg: 'Am schimbat camera.',
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
+    imagePrompt: 'Ce vezi în această imagine?',
     monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',

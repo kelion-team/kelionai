@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { strings, type Lang } from '../lib/i18n'
 import {
@@ -64,6 +64,9 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [listening, setListening] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
+  // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
+  const [attachments, setAttachments] = useState<{ id: string; url: string; name: string }[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const contRef = useRef<ContinuousHandle | null>(null)
   const fdRef = useRef<FullDuplexHandle | null>(null)
@@ -91,6 +94,10 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   speechLangRef.current = speechLang
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+  // Once the user has an established language (stored pref, or one actively
+  // detected/chosen), the noisy startup mic auto-detect must NOT override it —
+  // the spec requires the detected language to persist, not flip every load.
+  const langPinnedRef = useRef(false)
 
   // Kelion drives the monitor himself (no manual button): a control frame from
   // the stream opens/clears the workspace surface behind the avatar.
@@ -143,39 +150,70 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     return false
   }
 
+  // ── File attachment (ChatGPT-style) ──
+  function openFilePicker(): void {
+    setMenuOpen(false)
+    fileInputRef.current?.click()
+  }
+  function onFilesPicked(e: ChangeEvent<HTMLInputElement>): void {
+    const files = [...(e.target.files ?? [])].filter((f) => f.type.startsWith('image/'))
+    e.target.value = '' // let the same file be picked again later
+    for (const file of files) {
+      const reader = new FileReader()
+      reader.onload = () =>
+        setAttachments((cur) => [
+          ...cur,
+          { id: `${Date.now()}-${file.name}-${cur.length}`, url: String(reader.result), name: file.name },
+        ])
+      reader.readAsDataURL(file)
+    }
+  }
+  function removeAttachment(id: string): void {
+    setAttachments((cur) => cur.filter((a) => a.id !== id))
+  }
+
   async function send(text: string): Promise<void> {
     const msg = text.trim()
-    if (!msg) return
+    const atts = attachments
+    if (!msg && atts.length === 0) return
     // Typed interrupt: while Kelion is speaking, "stop/stai/oprește" just halts
     // him (it's a command, not a question — don't send it to Claude).
-    if (isSpeaking() && STOP.test(msg) && msg.split(/\s+/).length <= 2) {
+    if (msg && isSpeaking() && STOP.test(msg) && msg.split(/\s+/).length <= 2) {
       stopSpeaking()
       setInput('')
       return
     }
     // Local camera commands (verbal or typed) — handled without a round-trip.
-    if (tryCameraCommand(msg)) {
+    if (msg && tryCameraCommand(msg)) {
       setInput('')
       return
     }
     if (busyRef.current || inFlightRef.current) return
     inFlightRef.current = true
     setInput('')
+    setAttachments([])
     stopSpeaking()
     // A new turn returns the avatar to center; Kelion reopens the monitor via
     // show_on_screen if THIS turn needs it (otherwise it stays centered).
     closeWorkspace()
     // Auto-switch the voice/recognizer language from the message text (cheap;
     // audio-based detection on the mic covers the speak-first case).
-    const detected = detectLangFromText(msg)
-    if (detected) changeSpeechLang(detected)
+    if (msg) {
+      const detected = detectLangFromText(msg)
+      if (detected) changeSpeechLang(detected)
+    }
     const ttsLang = speechLangRef.current
     const speak = voiceOutRef.current
-    const image = cameraOnRef.current
-      ? (latestFrameRef.current ?? captureRef.current?.() ?? undefined)
-      : undefined
+    // An attached image takes priority over the live camera frame for this turn.
+    const attached = atts.find((a) => a.url.startsWith('data:image'))?.url
+    const image =
+      attached ??
+      (cameraOnRef.current
+        ? (latestFrameRef.current ?? captureRef.current?.() ?? undefined)
+        : undefined)
+    const outgoing = msg || t.imagePrompt
 
-    const next: ChatMessage[] = [...messages, { role: 'user', content: msg }]
+    const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing }]
     setMessages([...next, { role: 'assistant', content: '' }])
     setBusy(true)
     try {
@@ -322,9 +360,13 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       setListening(true)
       setAwake(true)
       armIdle()
-      void detectLanguageFromMic().then((code) => {
-        if (code) changeSpeechLang(code)
-      })
+      // Only auto-detect the language from the mic when the user has no
+      // established/stored language yet — otherwise we'd clobber their choice.
+      if (!langPinnedRef.current) {
+        void detectLanguageFromMic().then((code) => {
+          if (code) changeSpeechLang(code)
+        })
+      }
     } else {
       setMicError(t.micUnsupported)
     }
@@ -345,6 +387,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // Switch the language Kelion hears + speaks; restart the recognizer live and
   // persist the choice per user. No-op if it's already the active language.
   function changeSpeechLang(code: string): void {
+    langPinnedRef.current = true // a language is now established — keep it
     if (code === speechLangRef.current) return
     speechLangRef.current = code
     setSpeechLang(code) // updates Kelion's voice (TTS) language immediately
@@ -411,7 +454,9 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // it from what's actually spoken/typed.
   useEffect(() => {
     const apply = (code: string | null): void => {
-      if (!code || code === speechLangRef.current) return
+      if (!code) return
+      langPinnedRef.current = true // an established preference — don't auto-override
+      if (code === speechLangRef.current) return
       speechLangRef.current = code
       setSpeechLang(code)
     }
@@ -534,68 +579,102 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       </div>
       <MicMeter active={listening} label={t.hearingLabel} />
       {micError && <p className="mic-error">{micError}</p>}
-      <div className="chat-input">
-        <div className="fn-wrap" ref={menuRef}>
-          <button
-            type="button"
-            className={`chat-icon ${menuOpen || awake ? 'live' : ''}`}
-            onClick={() => setMenuOpen((o) => !o)}
-            title={t.functionsTitle}
-            aria-label={t.functionsTitle}
-            aria-expanded={menuOpen}
-          >
-            ⊕
-          </button>
-          {menuOpen && (
-            <div className="fn-menu">
-              <button type="button" className="fn-item" onClick={toggleVoiceOut}>
-                <span className="ico">{voiceOut ? '🔊' : '🔇'}</span>
-                {t.voiceTitle}
-                {voiceOut && <span className="dot" />}
-              </button>
-              {cameraSupported() && (
-                <button type="button" className="fn-item" onClick={toggleCamera}>
-                  <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
-                  {cameraOn ? t.disconnectCamTitle : t.connectCamTitle}
-                  {cameraOn && <span className="dot" />}
+      <div className="composer">
+        {attachments.length > 0 && (
+          <div className="composer-atts">
+            {attachments.map((a) => (
+              <div className="att-chip" key={a.id}>
+                <img src={a.url} alt={a.name} />
+                <button
+                  type="button"
+                  className="att-remove"
+                  onClick={() => removeAttachment(a.id)}
+                  aria-label="Remove"
+                >
+                  ×
                 </button>
-              )}
-              {/* No monitor or camera-switch buttons: Kelion opens the monitor on
-                  his own (show_on_screen), and the camera is switched by voice or
-                  text command ("switch camera", "comută camera", "camera spate"). */}
-              <button type="button" className="fn-item" disabled>
-                <span className="ico">📎</span>
-                {t.attachTitle}
-              </button>
-            </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          <div className="fn-wrap" ref={menuRef}>
+            <button
+              type="button"
+              className={`composer-icon ${menuOpen || awake ? 'live' : ''}`}
+              onClick={() => setMenuOpen((o) => !o)}
+              title={t.functionsTitle}
+              aria-label={t.functionsTitle}
+              aria-expanded={menuOpen}
+            >
+              +
+            </button>
+            {menuOpen && (
+              <div className="fn-menu">
+                <button type="button" className="fn-item" onClick={openFilePicker}>
+                  <span className="ico">📎</span>
+                  {t.attachTitle}
+                </button>
+                <button type="button" className="fn-item" onClick={toggleVoiceOut}>
+                  <span className="ico">{voiceOut ? '🔊' : '🔇'}</span>
+                  {t.voiceTitle}
+                  {voiceOut && <span className="dot" />}
+                </button>
+                {cameraSupported() && (
+                  <button type="button" className="fn-item" onClick={toggleCamera}>
+                    <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
+                    {cameraOn ? t.disconnectCamTitle : t.connectCamTitle}
+                    {cameraOn && <span className="dot" />}
+                  </button>
+                )}
+                {/* No monitor or camera-switch buttons: Kelion opens the monitor on
+                    his own (show_on_screen), and the camera is switched by voice or
+                    text command ("switch camera", "comută camera", "camera spate"). */}
+              </div>
+            )}
+          </div>
+          <input
+            className="composer-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void send(input)
+              }
+            }}
+            placeholder={t.chatPlaceholder}
+          />
+          {speechSupported() && (
+            <button
+              type="button"
+              className={`composer-icon ${listening ? 'live' : ''}`}
+              onClick={toggleVoice}
+              title={t.micTitle}
+              aria-label={t.micTitle}
+            >
+              {listening ? '●' : '🎤'}
+            </button>
           )}
-        </div>
-        {speechSupported() && (
           <button
             type="button"
-            className={`chat-icon ${listening ? 'live' : ''}`}
-            onClick={toggleVoice}
-            title={t.micTitle}
-            aria-label={t.micTitle}
+            className="composer-send"
+            onClick={() => void send(input)}
+            disabled={busy || (!input.trim() && attachments.length === 0)}
+            aria-label={t.send}
+            title={t.send}
           >
-            {listening ? '●' : '🎤'}
+            ↑
           </button>
-        )}
+        </div>
         <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              void send(input)
-            }
-          }}
-          placeholder={t.chatPlaceholder}
-          disabled={busy}
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={onFilesPicked}
         />
-        <button type="button" onClick={() => void send(input)} disabled={busy || !input.trim()}>
-          {t.send}
-        </button>
       </div>
     </div>
   )
