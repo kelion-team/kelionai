@@ -211,6 +211,32 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     }
   }
 
+  // Hands-free: auto-open the mic on load IF permission is already granted.
+  // The browser blocks mic access without a user gesture on the very first
+  // visit, so the 🎤 button stays for that one-time grant; after that, every
+  // visit starts listening automatically (no button needed) — per the spec.
+  useEffect(() => {
+    if (!speechSupported()) return
+    let cancelled = false
+    const perms = navigator.permissions
+    if (!perms?.query) return
+    void perms
+      .query({ name: 'microphone' as PermissionName })
+      .then((st) => {
+        if (cancelled) return
+        if (st.state === 'granted' && !listeningRef.current) startVoice()
+        st.onchange = () => {
+          if (st.state === 'granted' && !listeningRef.current) startVoice()
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+    // Mount-only auto-start; startVoice is stable for this purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Clean up the mic + timers when the panel unmounts.
   useEffect(() => {
     return () => {
