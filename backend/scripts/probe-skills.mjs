@@ -23,6 +23,9 @@ const tests = [
   ['web_search', { query: 'latest technology news', max_results: 2 }],
   ['youtube_search', { query: 'lofi beats', max_results: 1 }],
   ['translate_text', { text: 'good morning', target: 'Romanian' }],
+  ['wikipedia_lookup', { query: 'Witney' }],
+  ['convert_currency', { amount: 100, from: 'USD', to: 'EUR' }],
+  ['get_time', { timezone: 'Europe/Bucharest' }],
 ]
 
 let fails = 0

@@ -179,6 +179,44 @@ export const googleTools: Anthropic.Tool[] = [
       required: ['text', 'target'],
     },
   },
+  {
+    name: 'wikipedia_lookup',
+    description:
+      'Look up reliable factual / encyclopedic information about a person, place, thing, event or concept on Wikipedia. Use for "who/what/where is…" knowledge questions and to get accurate facts instead of guessing.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'The topic or title to look up.' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'convert_currency',
+    description:
+      'Convert an amount between two currencies at the live exchange rate. Use for any money/currency conversion.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'Amount to convert (default 1).' },
+        from: { type: 'string', description: '3-letter currency code, e.g. "USD".' },
+        to: { type: 'string', description: '3-letter currency code, e.g. "EUR".' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'get_time',
+    description:
+      'Get the current date and time in a given IANA timezone. Use whenever the user asks the time/date anywhere, or you need the real current time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        timezone: {
+          type: 'string',
+          description: 'IANA timezone, e.g. "Europe/Bucharest". Defaults to UTC.',
+        },
+      },
+    },
+  },
 ]
 
 // Exchange a refresh token for a fresh access token. Returns null on failure
@@ -589,6 +627,76 @@ async function translateText(text: string, target: string): Promise<string> {
   return JSON.stringify({ translation: out ?? '', target })
 }
 
+// Knowledge lookup — keyless Wikipedia REST API (search → page summary). Gives
+// Kelion reliable facts to use instead of guessing, and helps while web search
+// is unavailable.
+async function wikipediaLookup(query: string): Promise<string> {
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  try {
+    const s = new URL('https://en.wikipedia.org/w/rest.php/v1/search/page')
+    s.searchParams.set('q', query)
+    s.searchParams.set('limit', '1')
+    const sr = await fetch(s, { headers: { 'User-Agent': OSM_UA } })
+    if (!sr.ok) return JSON.stringify({ error: `wiki_http_${sr.status}` })
+    const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
+    const page = sj.pages?.[0]
+    if (!page?.key) return JSON.stringify({ error: 'not_found' })
+    const u = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page.key)}`
+    const r = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+    if (!r.ok) return JSON.stringify({ error: `wiki_http_${r.status}` })
+    const j = (await r.json()) as {
+      title?: string
+      extract?: string
+      content_urls?: { desktop?: { page?: string } }
+    }
+    return JSON.stringify({
+      title: j.title ?? page.title ?? query,
+      summary: j.extract ?? '',
+      url: j.content_urls?.desktop?.page ?? '',
+    })
+  } catch {
+    return JSON.stringify({ error: 'wiki_failed' })
+  }
+}
+
+// Live FX conversion — keyless, no signup (open.er-api.com).
+async function convertCurrency(amount: number, from: string, to: string): Promise<string> {
+  const f = from.trim().toUpperCase()
+  const t = to.trim().toUpperCase()
+  if (!/^[A-Z]{3}$/.test(f) || !/^[A-Z]{3}$/.test(t)) return JSON.stringify({ error: 'bad_currency_code' })
+  const amt = Number.isFinite(amount) && amount > 0 ? amount : 1
+  try {
+    const r = await fetch(`https://open.er-api.com/v6/latest/${f}`)
+    if (!r.ok) return JSON.stringify({ error: `fx_http_${r.status}` })
+    const j = (await r.json()) as { result?: string; rates?: Record<string, number> }
+    const rate = j.rates?.[t]
+    if (j.result !== 'success' || typeof rate !== 'number') {
+      return JSON.stringify({ error: 'rate_unavailable' })
+    }
+    return JSON.stringify({
+      from: f, to: t, amount: amt, rate,
+      converted: Math.round(amt * rate * 100) / 100,
+    })
+  } catch {
+    return JSON.stringify({ error: 'fx_failed' })
+  }
+}
+
+// Current date/time in any IANA timezone (the model otherwise has no reliable clock).
+function getTime(timezone: string): string {
+  const tz = timezone.trim() || 'UTC'
+  try {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      dateStyle: 'full',
+      timeStyle: 'long',
+    })
+    return JSON.stringify({ timezone: tz, datetime: fmt.format(new Date()), iso: new Date().toISOString() })
+  } catch {
+    return JSON.stringify({ error: 'bad_timezone' })
+  }
+}
+
 export async function runGoogleTool(
   name: string,
   input: unknown,
@@ -604,6 +712,10 @@ export async function runGoogleTool(
       return await mapsDirections(str(args.origin), str(args.destination))
     if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
     if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
+    if (name === 'wikipedia_lookup') return await wikipediaLookup(str(args.query))
+    if (name === 'convert_currency')
+      return await convertCurrency(num(args.amount, 1), str(args.from), str(args.to))
+    if (name === 'get_time') return getTime(str(args.timezone))
 
     if (!token) {
       return JSON.stringify({
