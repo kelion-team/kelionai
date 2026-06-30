@@ -25,6 +25,11 @@ export interface Strings {
   functionsTitle: string
   attachTitle: string
   imagePrompt: string
+  scenarioTitle: string
+  scenarioHint: string
+  scenarioRecord: string
+  scenarioStop: string
+  scenarioRecording: string
   monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
@@ -66,6 +71,11 @@ const dict: Record<Lang, Strings> = {
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
     imagePrompt: 'What do you see in this image?',
+    scenarioTitle: 'Promo scenario (record)',
+    scenarioHint: 'One step per line — Kelion runs them while recording. Keep it short (~15s).',
+    scenarioRecord: 'Record',
+    scenarioStop: 'Stop',
+    scenarioRecording: 'Recording scenario…',
     monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
@@ -105,6 +115,11 @@ const dict: Record<Lang, Strings> = {
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     imagePrompt: 'Ce vezi în această imagine?',
+    scenarioTitle: 'Scenariu promo (înregistrare)',
+    scenarioHint: 'Câte un pas pe linie — Kelion le rulează în timp ce înregistrează. Ține-l scurt (~15s).',
+    scenarioRecord: 'Înregistrează',
+    scenarioStop: 'Stop',
+    scenarioRecording: 'Înregistrez scenariul…',
     monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',

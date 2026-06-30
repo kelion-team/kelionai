@@ -446,6 +446,74 @@ body {
   50% { opacity: 1; }
 }
 
+/* Admin promo-scenario recorder panel. */
+.scenario-panel {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(10, 12, 18, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  margin-bottom: 8px;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.scenario-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.scenario-text {
+  width: 100%;
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+.scenario-text::placeholder {
+  color: var(--muted);
+}
+.scenario-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.scenario-rec {
+  width: auto;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 14px;
+}
+.scenario-live {
+  pointer-events: none;
+  text-align: center;
+  color: #ff5d5d;
+  font-size: 13px;
+  margin: 0 0 6px;
+  animation: rec 1.2s ease-in-out infinite;
+}
+.scenario-stop {
+  pointer-events: auto;
+  align-self: center;
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 93, 93, 0.6);
+  background: rgba(255, 93, 93, 0.15);
+  color: #ff8a8a;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* "Working" indicator: a luminous arc that travels around the composer's
    contour while Kelion is thinking/responding (the ChatGPT-style activity cue). */
 .composer.working {

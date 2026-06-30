@@ -19,6 +19,11 @@ import { startFullDuplex, type FullDuplexHandle } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
 import { openWorkspace, closeWorkspace } from '../lib/workspace'
+import { startRecording, type RecordingHandle } from '../lib/recorder'
+
+// Promo scenario recording: hard cap so a clip never runs away (a short clip is
+// ~15s; a full landing demo can use the whole window).
+const SCENARIO_MAX_MS = 60_000
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
 // low-power engine is Picovoice Porcupine). Accepts the documented variants.
@@ -49,7 +54,7 @@ function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): 
   return 2 * R * Math.asin(Math.sqrt(s))
 }
 
-export default function ChatPanel({ lang }: { readonly lang: Lang }) {
+export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; readonly isAdmin: boolean }) {
   const t = strings(lang)
   // Speech language (recognition + Kelion's voice). Defaults to the browser
   // locale; the user can switch to any supported language in the ⊕ menu.
@@ -67,6 +72,14 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
   const [attachments, setAttachments] = useState<{ id: string; url: string; name: string }[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Admin promo-scenario recorder: type steps, hit Record, Kelion runs them while
+  // the screen + voice are recorded, then it saves an MP4 to Downloads.
+  const [scenarioOpen, setScenarioOpen] = useState(false)
+  const [scenarioText, setScenarioText] = useState('')
+  const [scenarioRunning, setScenarioRunning] = useState(false)
+  const scenarioRunningRef = useRef(false)
+  scenarioRunningRef.current = scenarioRunning
+  const scenarioRecRef = useRef<RecordingHandle | null>(null)
 
   const contRef = useRef<ContinuousHandle | null>(null)
   const fdRef = useRef<FullDuplexHandle | null>(null)
@@ -170,6 +183,50 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   }
   function removeAttachment(id: string): void {
     setAttachments((cur) => cur.filter((a) => a.id !== id))
+  }
+
+  // ── Admin promo-scenario recorder ──
+  // Records the screen + voice and AUTO-RUNS the typed scenario (one step per
+  // line) through Kelion, then saves the clip. The click is the gesture
+  // getDisplayMedia needs.
+  async function runScenario(): Promise<void> {
+    const steps = scenarioText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (steps.length === 0 || scenarioRunningRef.current) return
+    const handle = await startRecording(
+      () => {
+        scenarioRunningRef.current = false
+        setScenarioRunning(false)
+        scenarioRecRef.current = null
+      },
+      () => {
+        scenarioRunningRef.current = false
+        setScenarioRunning(false)
+      },
+    )
+    if (!handle) return
+    scenarioRecRef.current = handle
+    scenarioRunningRef.current = true
+    setScenarioRunning(true)
+    setScenarioOpen(false)
+    const hardStop = globalThis.setTimeout(() => handle.stop(), SCENARIO_MAX_MS)
+    for (const step of steps) {
+      if (!scenarioRunningRef.current) break
+      await sendRef.current(step) // waits for Kelion's full reply to stream in
+      await new Promise((r) => globalThis.setTimeout(r, 1200))
+    }
+    // Let the final sentence finish speaking, then stop + save.
+    await new Promise((r) => globalThis.setTimeout(r, 2500))
+    globalThis.clearTimeout(hardStop)
+    handle.stop()
+  }
+  function stopScenario(): void {
+    scenarioRunningRef.current = false
+    scenarioRecRef.current?.stop()
+    scenarioRecRef.current = null
+    setScenarioRunning(false)
   }
 
   async function send(text: string): Promise<void> {
@@ -579,6 +636,39 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       </div>
       <MicMeter active={listening} label={t.hearingLabel} />
       {micError && <p className="mic-error">{micError}</p>}
+      {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
+      {isAdmin && scenarioOpen && (
+        <div className="scenario-panel">
+          <div className="scenario-head">
+            <span>{t.scenarioTitle}</span>
+            <button type="button" className="ghost" onClick={() => setScenarioOpen(false)}>
+              ✕
+            </button>
+          </div>
+          <textarea
+            className="scenario-text"
+            value={scenarioText}
+            onChange={(e) => setScenarioText(e.target.value)}
+            placeholder={t.scenarioHint}
+            rows={4}
+          />
+          <div className="scenario-actions">
+            <button
+              type="button"
+              className="composer-send scenario-rec"
+              onClick={() => void runScenario()}
+              disabled={!scenarioText.trim()}
+            >
+              ● {t.scenarioRecord}
+            </button>
+          </div>
+        </div>
+      )}
+      {scenarioRunning && (
+        <button type="button" className="scenario-stop" onClick={stopScenario}>
+          ■ {t.scenarioStop}
+        </button>
+      )}
       <div className={`composer ${busy ? 'working' : ''}`}>
         {attachments.length > 0 && (
           <div className="composer-atts">
@@ -632,6 +722,19 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
                     text command ("switch camera", "comută camera", "camera spate").
                     Audio routing (incl. Bluetooth) follows the system default —
                     automatic, no picker. */}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="fn-item"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setScenarioOpen(true)
+                    }}
+                  >
+                    <span className="ico">🎬</span>
+                    {t.scenarioTitle}
+                  </button>
+                )}
               </div>
             )}
           </div>

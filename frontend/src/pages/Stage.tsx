@@ -111,7 +111,7 @@ export default function Stage({ user }: { user: User }) {
         </div>
       </header>
 
-      <ChatPanel lang={lang} />
+      <ChatPanel lang={lang} isAdmin={user.role === 'admin'} />
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
     </div>
