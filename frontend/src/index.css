@@ -133,11 +133,13 @@ body {
   position: absolute;
   inset: 0;
   z-index: 1;
-  transform-origin: top right;
+  transform-origin: top left;
   transition: transform 700ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+/* Top-LEFT corner, below the topbar, so it never covers the top-right buttons
+   (sign out / admin) or the login button. */
 .stage-canvas.pip {
-  transform: translate(-14px, 14px) scale(0.26);
+  transform: translate(14px, 56px) scale(0.26);
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {

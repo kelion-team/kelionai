@@ -130,6 +130,55 @@ export const googleTools: Anthropic.Tool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'maps_search',
+    description:
+      'Find places, addresses or points of interest on the map and their coordinates. Use for "where is X", addresses, or locating a place.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Place or address, e.g. "Athenaeum Bucharest".' },
+        max_results: { type: 'number', description: 'How many places (default 5).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'maps_directions',
+    description: 'Get driving distance and travel time between two places.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        origin: { type: 'string', description: 'Start place or address.' },
+        destination: { type: 'string', description: 'Destination place or address.' },
+      },
+      required: ['origin', 'destination'],
+    },
+  },
+  {
+    name: 'youtube_search',
+    description: 'Search YouTube for videos. Returns titles and links.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to search for on YouTube.' },
+        max_results: { type: 'number', description: 'How many videos (default 5, max 10).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'translate_text',
+    description: 'Translate text into another language.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The text to translate.' },
+        target: { type: 'string', description: 'Target language, e.g. "English", "Romanian", "French".' },
+      },
+      required: ['text', 'target'],
+    },
+  },
 ]
 
 function num(v: unknown, fallback: number): number {
@@ -383,6 +432,106 @@ async function searchContacts(query: string, max: number, token: string): Promis
   return JSON.stringify({ contacts })
 }
 
+// ── Keyless / shared-key skills (no user OAuth token needed) ──
+
+const OSM_UA = 'KelionAI/1.0 (kelionai.app)'
+
+interface NominatimPlace {
+  display_name?: string
+  lat?: string
+  lon?: string
+  type?: string
+}
+
+async function geocodeOne(query: string): Promise<NominatimPlace | null> {
+  const u = new URL('https://nominatim.openstreetmap.org/search')
+  u.searchParams.set('q', query)
+  u.searchParams.set('format', 'json')
+  u.searchParams.set('limit', '1')
+  const res = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+  if (!res.ok) return null
+  const arr = (await res.json()) as NominatimPlace[]
+  return arr[0] ?? null
+}
+
+async function mapsSearch(query: string, max: number): Promise<string> {
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  const u = new URL('https://nominatim.openstreetmap.org/search')
+  u.searchParams.set('q', query)
+  u.searchParams.set('format', 'json')
+  u.searchParams.set('limit', String(Math.min(Math.max(max, 1), 10)))
+  const res = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+  if (!res.ok) return JSON.stringify({ error: `maps_http_${res.status}` })
+  const arr = (await res.json()) as NominatimPlace[]
+  const places = arr.map((p) => ({
+    name: p.display_name ?? '',
+    lat: p.lat ?? '',
+    lon: p.lon ?? '',
+    type: p.type ?? '',
+  }))
+  return JSON.stringify({ places })
+}
+
+async function mapsDirections(origin: string, destination: string): Promise<string> {
+  if (!origin || !destination) return JSON.stringify({ error: 'missing_origin_or_destination' })
+  const [a, b] = await Promise.all([geocodeOne(origin), geocodeOne(destination)])
+  if (!a?.lat || !b?.lat) return JSON.stringify({ error: 'could_not_geocode' })
+  const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`
+  const res = await fetch(url)
+  if (!res.ok) return JSON.stringify({ error: `directions_http_${res.status}` })
+  const j = (await res.json()) as { routes?: { distance?: number; duration?: number }[] }
+  const r = j.routes?.[0]
+  if (!r) return JSON.stringify({ error: 'no_route' })
+  return JSON.stringify({
+    origin: a.display_name ?? origin,
+    destination: b.display_name ?? destination,
+    distance_km: Math.round((r.distance ?? 0) / 100) / 10,
+    duration_min: Math.round((r.duration ?? 0) / 60),
+  })
+}
+
+async function youtubeSearch(query: string, max: number): Promise<string> {
+  if (!config.serperKey) return JSON.stringify({ error: 'search_not_configured' })
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  const res = await fetch('https://google.serper.dev/search', {
+    method: 'POST',
+    headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: `${query} site:youtube.com` }),
+  })
+  if (!res.ok) return JSON.stringify({ error: `youtube_http_${res.status}` })
+  const j = (await res.json()) as { organic?: SerperResult[] }
+  const n = Math.min(Math.max(max, 1), 10)
+  const videos = (j.organic ?? [])
+    .filter((r) => (r.link ?? '').includes('youtube.com/watch') || (r.link ?? '').includes('youtu.be/'))
+    .slice(0, n)
+    .map((r) => ({ title: r.title ?? '', link: r.link ?? '' }))
+  return JSON.stringify({ videos })
+}
+
+async function translateText(text: string, target: string): Promise<string> {
+  if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
+  if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: `Translate the following text into ${target}. Return ONLY the translation:\n\n${text}` },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0, maxOutputTokens: 1024 },
+    }),
+  })
+  if (!res.ok) return JSON.stringify({ error: `translate_http_${res.status}` })
+  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+  return JSON.stringify({ translation: out ?? '', target })
+}
+
 export async function runGoogleTool(
   name: string,
   input: unknown,
@@ -393,6 +542,11 @@ export async function runGoogleTool(
     // These don't use the user's Google token.
     if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5))
     if (name === 'get_weather') return await weather(str(args.location))
+    if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
+    if (name === 'maps_directions')
+      return await mapsDirections(str(args.origin), str(args.destination))
+    if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
+    if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
 
     if (!token) {
       return JSON.stringify({
