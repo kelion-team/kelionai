@@ -256,9 +256,27 @@ async function drain(): Promise<void> {
   void drain()
 }
 
+// Strip any markdown/symbols so the voice never reads "asterisk", "hash", etc.
+// (Belt-and-braces: the model is already told to speak in plain text.)
+function stripForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ') // code fences
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → label
+    .replace(/(\*\*|__)(.*?)\1/g, '$2') // bold
+    .replace(/(\*|_)(.*?)\1/g, '$2') // italic
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '') // headings
+    .replace(/^\s*[-*•+]\s+/gm, '') // bullet lists
+    .replace(/^\s*\d+\.\s+/gm, '') // numbered lists
+    .replace(/[*_#`~>]/g, '') // any stray markdown chars (incl. lone asterisks)
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
 /** Queue text to speak. Safe to call repeatedly while a reply streams in. */
 export function enqueueSpeech(text: string, lang: string): void {
-  const clean = text.trim()
+  const clean = stripForSpeech(text)
   if (!clean) return
   ttsQueue.push({ text: clean, lang })
   if (!ttsBusy) {
