@@ -11,10 +11,16 @@ _Last updated: 2026-06-30_
   Google **refresh token** stored in the session; chat route mints a fresh access
   token per turn, so skills survive past the ~1h access-token expiry.
 - **Avatar** — 3D Ready Player Me, idle animation (breathing, blink, micro-motion),
-  viseme-aware lip-sync (vowel/consonant/space from the TTS spectrum).
-- **Brain** — streaming chat with Claude (Opus 4.8), adaptive Jarvis persona.
-  History is sanitized server-side (drop empty turns, merge same-role, force a
-  user-first start) so multi-turn voice chat no longer 400s after a turn or two.
+  professional formant-based viseme lip-sync (Oculus visemes aa/E/I/O/U/SS/FF).
+- **Brain — multi-agent + memory** (`services/agents.ts`). Five cooperating
+  agents: Router (instant complexity gate), Conversation (Opus persona),
+  Reasoning (Opus extended thinking on complex turns only — deep on hard,
+  instant on simple), Skills (tool-use loop), Memory (cross-session). The Memory
+  agent recalls durable facts about the user into the prompt and, after each
+  turn, a Haiku pass distils + saves new facts (`memories` table). History is
+  sanitized server-side so multi-turn voice chat no longer 400s.
+- **Audio routing** — Bluetooth / external mic + speaker selectable in the ⊕
+  menu (input deviceId on all capture paths; output via setSinkId on Chromium).
 - **Chat tab** — always-on-top, shows only the latest message, ChatGPT-style ⊕
   functions menu. UI language follows the Google account locale (en/ro).
 - **Voice — hearing** — permanent, hands-free listening (no button). "Hey Kelion"
