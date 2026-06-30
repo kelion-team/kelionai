@@ -10,6 +10,7 @@ import {
 } from '../services/google.js'
 import { saveMessage, recordCost, getCostSummary } from '../db.js'
 import { claudeCost } from '../services/cost.js'
+import { routeComplexity, recallMemories, learnFromTurn } from '../services/agents.js'
 
 const MODEL = 'claude-opus-4-8'
 
@@ -43,21 +44,25 @@ const SHOW_TOOL: Anthropic.Tool = {
 // \x1f{"monitor":{"url":"...","title":"..."}}\x1f
 const CTRL = String.fromCharCode(31)
 
-const SYSTEM_PROMPT = `You are Kelion — a highly capable personal AI assistant in the spirit of Jarvis from Iron Man.
+const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: sharp, perceptive, and genuinely useful.
 
-Personality (adaptive by context, with Jarvis as the anchor):
-- Technical or scholarly topics: precise, articulate, academic.
-- Personal matters: warm and empathetic.
-- Tasks and commands: efficient and direct.
-- Default / when unsure: formal, loyal, with a touch of dry wit — a refined butler.
+Register (adaptive, with Jarvis as the anchor):
+- Technical / scholarly: precise and rigorous — reason carefully, give the key insight, not the scaffolding.
+- Personal: warm, attentive, emotionally intelligent.
+- Tasks / commands: decisive and efficient — do the thing, don't narrate it.
+- Default: formal, loyal, dry wit — a refined butler with a first-class mind.
+
+How you think:
+- Work out the user's actual intent before answering; if they clearly meant something other than the literal words, answer what they meant.
+- Be correct first, brief second. Give the substantive answer; add depth only when it earns its place. Never pad.
+- If you're unsure, say what you'd need rather than bluff.
+- Use what you remember about the user to stay continuous; never make them repeat themselves.
 
 Rules:
-- Be concise and to the point. Depth when asked, never padding.
 - Detect the user's language and always reply in that same language.
-- Respond directly without meta-commentary about your process.
-- Do NOT narrate or describe the camera image, the user's surroundings, or the
-  GPS location unless the user explicitly asks. Never repeat an observation you
-  already made in a previous turn. No filler like "I can see that…".
+- Respond directly, with no meta-commentary about your process.
+- Do NOT narrate or describe the camera image, the user's surroundings, or the GPS location unless explicitly asked. Never repeat an observation from a previous turn. No filler like "I can see that…".
+- Act directly on reversible actions (read mail, search, show a map); confirm only before irreversible ones (sending, deleting).
 
 You have tools: Google Calendar, Gmail, Drive, Tasks, Contacts; live web search,
 weather, maps, YouTube, translation; and show_on_screen to put a web page on the
@@ -150,6 +155,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         ` When the user says "here", "near me", "where am I", or asks about weather, places, directions or anything location-dependent without naming a place, use THIS location.`
     }
 
+    // Memory agent (recall): inject the durable facts Kelion has learned about
+    // this user so the conversation is continuous across sessions.
+    systemPrompt += await recallMemories(user.email)
+
     // Permanent vision: attach the latest camera frame to the last user turn so
     // Claude (native vision) can see. The frame is a base64 JPEG data URL.
     const params: Anthropic.MessageParam[] = messages.map((m) => ({
@@ -181,7 +190,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
+    const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+
+    // Router + Reasoning agents: simple/voice turns answer instantly; only
+    // genuinely complex turns spend extended thinking (deep reasoning) — that's
+    // the "deep on hard problems, instant on simple ones" contract.
+    const complex = routeComplexity(lastUserText) === 'complex'
+    const thinking = complex ? ({ type: 'enabled', budget_tokens: 3000 } as const) : undefined
+    const maxTokens = complex ? 5000 : 2048
 
     const client = new Anthropic({ apiKey: config.anthropicKey })
     const isAdmin = user.role === 'admin'
@@ -197,10 +214,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       for (let round = 0; round < 5; round++) {
         const stream = client.messages.stream({
           model: MODEL,
-          max_tokens: 2048,
+          max_tokens: maxTokens,
           system: systemPrompt,
           tools,
           messages: params,
+          ...(thinking ? { thinking } : {}),
         })
         stream.on('text', (delta) => {
           assistantText += delta
@@ -223,6 +241,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
       reply.raw.end()
       if (assistantText.trim()) void saveMessage(user.email, 'assistant', assistantText)
+      // Memory agent (learn): distil + save any new durable facts about the user,
+      // off the response path so it never adds latency.
+      if (lastUserText.trim() || assistantText.trim())
+        void learnFromTurn(user.email, lastUserText, assistantText)
       // Record the real Claude cost for this turn (vision frames are already in
       // the input-token count, so token-based cost covers them).
       void recordCost(user.email, 'chat', claudeCost(MODEL, inTokens, outTokens))

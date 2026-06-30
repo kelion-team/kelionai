@@ -42,6 +42,17 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_events (created_at);
+    -- Cross-session memory: durable facts Kelion learns about each user and
+    -- recalls in later conversations (the Memory agent writes here).
+    CREATE TABLE IF NOT EXISTS memories (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, content);
+    CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, last_seen DESC);
   `)
 }
 
@@ -164,4 +175,38 @@ export async function getHistory(email: string, limit = 1000): Promise<HistoryRo
     [email, limit],
   )
   return r.rows
+}
+
+// ── Cross-session memory (the Memory agent's store) ──
+export interface Memory {
+  content: string
+}
+
+/** Most recently relevant durable facts about a user. */
+export async function getMemories(email: string, limit = 40): Promise<Memory[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<Memory>(
+      `SELECT content FROM memories WHERE user_email = $1 ORDER BY last_seen DESC LIMIT $2`,
+      [email, limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+/** Save a learned fact (idempotent: re-learning just refreshes its recency). */
+export async function addMemory(email: string, content: string): Promise<void> {
+  const c = content.trim()
+  if (!dbEnabled() || !c) return
+  try {
+    await getPool().query(
+      `INSERT INTO memories (user_email, content) VALUES ($1, $2)
+       ON CONFLICT (user_email, content) DO UPDATE SET last_seen = now()`,
+      [email, c],
+    )
+  } catch {
+    // Never break the chat because memory write failed.
+  }
 }
