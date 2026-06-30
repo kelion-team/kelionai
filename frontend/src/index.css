@@ -182,6 +182,8 @@ body {
   top: 0;
   left: 0;
   right: 0;
+  z-index: 35; /* above the full-screen avatar canvas (z-index:1) so the
+                  admin / sign-out buttons are never covered */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -437,6 +439,36 @@ body {
 @keyframes rec {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
+}
+
+/* "Working" indicator: a luminous arc that travels around the composer's
+   contour while Kelion is thinking/responding (the ChatGPT-style activity cue). */
+.composer.working {
+  position: relative;
+}
+.composer.working::before {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 27px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 250deg,
+    var(--accent) 310deg,
+    #cfe0ff 340deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: contour-run 1.4s linear infinite;
+  pointer-events: none;
+}
+@keyframes contour-run {
+  to { transform: rotate(1turn); }
 }
 
 /* Floating glass camera preview — top-right so it never covers the avatar face. */

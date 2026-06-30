@@ -27,11 +27,13 @@ export function setOnSpeakingChange(cb: ((speaking: boolean) => void) | null): v
   onSpeaking = cb
 }
 
-// ── Lip-sync (viseme-aware): from the live TTS spectrum we classify each
-// instant as a VOWEL (energy in low formants → open jaw + open mouth), a
-// CONSONANT (energy shifts to high frequencies, e.g. fricatives s/f/ș → narrow
-// mouth, less jaw) or SILENCE/space (no energy → closed). For browser TTS (no
-// analysable stream) we drive a procedural vowel/consonant alternation. ──
+// ── Lip-sync (formant-based visemes) ──────────────────────────────────────
+// Real-time viseme estimation from the TTS audio spectrum: we measure energy in
+// the formant bands (F1 ≈ mouth openness, F2 ≈ front/back, plus the fricative
+// and sibilant bands) and resolve weights for the Ready Player Me Oculus
+// visemes (aa, E, I, O, U, SS, FF) instead of one crude "open jaw" amount. This
+// is the same principle pro RPM lip-sync uses. Browser-TTS fallback (no
+// analysable stream) drives a gentle procedural vowel cycle.
 let speakCtx: AudioContext | null = null
 let speakAnalyser: AnalyserNode | null = null
 let speakFreq: Uint8Array<ArrayBuffer> | null = null
@@ -40,23 +42,25 @@ let browserSpeaking = false
 // the duplicate connects were part of why playback got flaky over a session.
 let analyserWired = false
 
-/** Mouth shape for the avatar: 0..1 jaw openness + vowel/consonant weights. */
+/** Per-viseme weights (0..1) for the avatar mouth, plus overall jaw openness. */
 export interface MouthState {
   jaw: number
-  vowel: number
-  consonant: number
+  aa: number
+  E: number
+  I: number
+  O: number
+  U: number
+  SS: number
+  FF: number
 }
-const MOUTH_SILENT: MouthState = { jaw: 0, vowel: 0, consonant: 0 }
+const MOUTH_SILENT: MouthState = { jaw: 0, aa: 0, E: 0, I: 0, O: 0, U: 0, SS: 0, FF: 0 }
+export const VISEME_KEYS = ['aa', 'E', 'I', 'O', 'U', 'SS', 'FF'] as const
 
-// Amplitude caps for the RPM mouth morphs. A full jawOpen/viseme of ~1 looks
-// like a scream; real speech barely parts the lips. Keep the opening small.
-const JAW_MAX = 0.22
-const VOWEL_MAX = 0.3
-const CONS_MAX = 0.35
-// Silence gate (start/end guard): below this total spectral energy the mouth is
-// fully closed, so it opens cleanly at speech onset and shuts at the end — no
-// lingering half-open jaw between words.
-const SILENCE_SUM = 260
+// Caps: visemes are already strong mouth shapes, so keep them subtle; jaw is a
+// light extra openness on top. Real speech barely parts the lips.
+const VISEME_MAX = 0.5
+const JAW_MAX = 0.16
+const SILENCE = 0.05 // below this band energy → mouth closed (start/end guard)
 
 function ensureSpeakCtx(): AudioContext | null {
   if (speakCtx) return speakCtx
@@ -66,41 +70,76 @@ function ensureSpeakCtx(): AudioContext | null {
   if (!AC) return null
   speakCtx = new AC()
   speakAnalyser = speakCtx.createAnalyser()
-  speakAnalyser.fftSize = 256
+  speakAnalyser.fftSize = 1024 // ~47 Hz/bin at 48 kHz — enough to resolve formants
+  speakAnalyser.smoothingTimeConstant = 0.5
   speakFreq = new Uint8Array(new ArrayBuffer(speakAnalyser.frequencyBinCount))
   return speakCtx
 }
 
+// Average normalized (0..1) magnitude over a frequency band [loHz, hiHz).
+function bandEnergy(freq: Uint8Array, binHz: number, loHz: number, hiHz: number): number {
+  const lo = Math.max(1, Math.floor(loHz / binHz))
+  const hi = Math.min(freq.length, Math.ceil(hiHz / binHz))
+  if (hi <= lo) return 0
+  let s = 0
+  for (let i = lo; i < hi; i++) s += freq[i]
+  return s / (hi - lo) / 255
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n
+}
+
+function visemesFromSpectrum(freq: Uint8Array, sampleRate: number): MouthState {
+  const binHz = sampleRate / (freq.length * 2)
+  const f1 = bandEnergy(freq, binHz, 250, 900) //   openness  (a/o)
+  const f2 = bandEnergy(freq, binHz, 900, 2500) //  frontness (e/i)
+  const fric = bandEnergy(freq, binHz, 2500, 4500) // f/v/th
+  const sib = bandEnergy(freq, binHz, 4500, 9000) //  s/z/sh
+  const loud = Math.max(f1, f2, fric, sib)
+  if (loud < SILENCE) return MOUTH_SILENT
+
+  const sibW = clamp01(sib * 2.4)
+  const fricW = clamp01(fric * 2.0) * (1 - sibW)
+  const vowel = clamp01(1 - sibW - fricW * 0.7)
+
+  const open = clamp01(f1 * 2.6) //          how open the jaw is
+  const front = f1 + f2 > 0 ? f2 / (f1 + f2) : 0 //  0 back … 1 front
+  const round = clamp01(1 - front * 2) //    low F2 → rounded back vowel (o/u)
+
+  const v = VISEME_MAX
+  return {
+    jaw: clamp01(open * loud) * JAW_MAX,
+    aa: clamp01(vowel * open * (1 - round) * (1 - Math.max(0, front - 0.5) * 1.6)) * v,
+    E: clamp01(vowel * front * (1 - open * 0.4)) * v,
+    I: clamp01(vowel * Math.max(0, front - 0.55) * 1.8) * v,
+    O: clamp01(vowel * round * Math.min(1, open + 0.3) * 0.8) * v,
+    U: clamp01(vowel * round * (1 - open) * 0.7) * v,
+    SS: clamp01(sibW * loud) * v,
+    FF: clamp01(fricW * loud) * v,
+  }
+}
+
 export function getMouthState(): MouthState {
-  if (speakAnalyser && speakFreq && curAudio && !curAudio.paused) {
+  if (speakAnalyser && speakFreq && speakCtx && curAudio && !curAudio.paused) {
     speakAnalyser.getByteFrequencyData(speakFreq)
-    let sum = 0
-    let weighted = 0
-    for (let i = 0; i < speakFreq.length; i++) {
-      const m = speakFreq[i]
-      sum += m
-      weighted += m * i
-    }
-    if (sum < SILENCE_SUM) return MOUTH_SILENT // space / pause → mouth closed
-    const energy = Math.min(1, sum / speakFreq.length / 60) // 0..1 loudness
-    const centroid = weighted / sum / speakFreq.length // 0..1; low=vowel, high=consonant
-    // Above ~0.28 the spectrum is high-frequency dominated → consonant/fricative.
-    const consonant = Math.min(1, Math.max(0, (centroid - 0.28) / 0.35))
-    const vowel = 1 - consonant
-    return {
-      jaw: energy * (1 - 0.65 * consonant) * JAW_MAX, // consonants close the jaw
-      vowel: energy * vowel * VOWEL_MAX,
-      consonant: energy * consonant * CONS_MAX,
-    }
+    return visemesFromSpectrum(speakFreq, speakCtx.sampleRate)
   }
   if (browserSpeaking) {
+    // No analysable stream from the browser voice — cycle a/e/o gently so the
+    // mouth still articulates instead of flapping.
     const t = performance.now() / 1000
-    const energy = 0.3 + 0.3 * Math.abs(Math.sin(t * 11))
-    const consonant = Math.sin(t * 7) > 0.45 ? 1 : 0 // alternate vowel/consonant
+    const e = 0.4 + 0.35 * Math.abs(Math.sin(t * 9))
+    const phase = (Math.sin(t * 3.3) + 1) / 2
     return {
-      jaw: energy * (1 - 0.65 * consonant) * JAW_MAX,
-      vowel: energy * (1 - consonant) * VOWEL_MAX,
-      consonant: energy * consonant * CONS_MAX,
+      jaw: JAW_MAX * e,
+      aa: phase > 0.62 ? VISEME_MAX * e : 0,
+      E: phase <= 0.62 && phase > 0.3 ? VISEME_MAX * e : 0,
+      O: phase <= 0.3 ? VISEME_MAX * e : 0,
+      I: 0,
+      U: 0,
+      SS: 0,
+      FF: 0,
     }
   }
   return MOUTH_SILENT

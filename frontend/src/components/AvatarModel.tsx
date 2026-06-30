@@ -2,7 +2,7 @@ import { useRef, useLayoutEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
-import { getMouthState } from '../lib/voice'
+import { getMouthState, VISEME_KEYS } from '../lib/voice'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -28,8 +28,10 @@ export default function AvatarModel() {
   const bones = useRef<Record<string, Bone>>({})
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
-  // Smoothed lip-sync channels: jaw openness + vowel/consonant viseme weights.
-  const mouth = useRef({ jaw: 0, vowel: 0, consonant: 0 })
+  // Smoothed lip-sync channels: jaw openness + per-viseme weights.
+  const mouth = useRef<Record<string, number>>({
+    jaw: 0, aa: 0, E: 0, I: 0, O: 0, U: 0, SS: 0, FF: 0,
+  })
 
   const applyArms = (b: Record<string, Bone>) => {
     for (const key of Object.keys(ARM_REST)) {
@@ -100,18 +102,15 @@ export default function AvatarModel() {
       }
     }
 
-    // Lip-sync — viseme-aware: VOWEL → open jaw + open mouth (viseme_aa);
-    // CONSONANT → narrow mouth, less jaw (viseme_SS); SPACE/silence → closed.
-    // Snappy attack, quick release so syllables register; values smoothed.
+    // Lip-sync — formant-based Oculus visemes (aa/E/I/O/U/SS/FF) + jaw. Snappy
+    // attack on an onset, faster release so the mouth shuts cleanly at the end
+    // of a word (the "guard at start and end"); each channel smoothed.
     const m = getMouthState()
     const cur = mouth.current
-    // Snappy attack on a vowel/consonant onset, even faster release so the mouth
-    // shuts cleanly at the end of a word/phrase (the "guard at start and end").
     const sm = (now: number, next: number): number =>
       now + (next - now) * (next > now ? 0.55 : 0.65)
     cur.jaw = sm(cur.jaw, m.jaw)
-    cur.vowel = sm(cur.vowel, m.vowel)
-    cur.consonant = sm(cur.consonant, m.consonant)
+    for (const k of VISEME_KEYS) cur[k] = sm(cur[k], m[k])
 
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
@@ -121,13 +120,12 @@ export default function AvatarModel() {
       const r = d['eyeBlinkRight'] ?? d['eyeBlink_R']
       if (l !== undefined) inf[l] = eye
       if (r !== undefined) inf[r] = eye
-      // Jaw drives overall openness; visemes shape vowel vs consonant.
       const jawOpen = d['jawOpen'] ?? d['mouthOpen']
       if (jawOpen !== undefined) inf[jawOpen] = cur.jaw
-      const vAa = d['viseme_aa'] ?? d['viseme_E'] ?? d['viseme_O']
-      if (vAa !== undefined) inf[vAa] = cur.vowel
-      const vCons = d['viseme_SS'] ?? d['viseme_FF'] ?? d['mouthFunnel']
-      if (vCons !== undefined) inf[vCons] = cur.consonant * 0.8
+      for (const k of VISEME_KEYS) {
+        const idx = d[`viseme_${k}`]
+        if (idx !== undefined) inf[idx] = cur[k]
+      }
     }
   })
 

@@ -579,7 +579,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       </div>
       <MicMeter active={listening} label={t.hearingLabel} />
       {micError && <p className="mic-error">{micError}</p>}
-      <div className="composer">
+      <div className={`composer ${busy ? 'working' : ''}`}>
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (
