@@ -2,6 +2,7 @@ export interface UserSummary {
   email: string
   count: number
   last: string
+  cost: number // real provider cost (USD) attributed to this user
 }
 
 export interface HistoryRow {

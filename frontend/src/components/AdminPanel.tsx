@@ -71,7 +71,9 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 onClick={() => setSelected(u.email)}
               >
                 <span className="admin-user-email">{u.email}</span>
-                <span className="admin-user-meta">{u.count} msg</span>
+                <span className="admin-user-meta">
+                  {u.count} msg · ${u.cost.toFixed(4)}
+                </span>
               </button>
             ))}
           </aside>

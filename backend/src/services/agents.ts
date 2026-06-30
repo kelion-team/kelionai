@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import { getMemories, addMemory } from '../db.js'
+import { getMemories, addMemory, recordCost } from '../db.js'
+import { claudeCost } from './cost.js'
 
 // Kelion's brain is a small set of cooperating agents (see routes/chat.ts):
 //   1. Router      — classifies each turn so deep reasoning is used only when it
@@ -80,6 +81,8 @@ export async function learnFromTurn(
         },
       ],
     })
+    // Meter the Memory agent's real cost too (admin accounting completeness).
+    void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)

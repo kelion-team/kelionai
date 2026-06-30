@@ -17,7 +17,9 @@ const PRICES: Record<string, ModelPrice> = {
 }
 
 export function claudeCost(model: string, inputTokens: number, outputTokens: number): number {
-  const p = PRICES[model] ?? PRICES['claude-opus-4-8']
+  // Accept dated model ids (e.g. claude-haiku-4-5-20251001) by stripping the suffix.
+  const base = model.replace(/-\d{6,}$/, '')
+  const p = PRICES[base] ?? PRICES[model] ?? PRICES['claude-opus-4-8']
   return inputTokens * p.input + outputTokens * p.output
 }
 
