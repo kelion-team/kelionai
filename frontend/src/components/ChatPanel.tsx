@@ -44,6 +44,17 @@ function lastSentenceEnd(s: string): number {
   return end
 }
 
+// Spec: only ONE phrase on screen. Show the current/last sentence (live caption),
+// updating as it streams.
+function latestSentence(s: string): string {
+  const parts = s.split(/(?<=[.!?…]["'”’)\]]?)\s+/)
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i].trim()
+    if (p) return p
+  }
+  return s.trim()
+}
+
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -258,8 +269,13 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
     // language), not a drifting global setting — so a Romanian reply is never
     // read by an English voice (the "defective ro"). Seed from the user's
     // message, then refine from the reply once enough text has streamed.
-    let replyLang = detectLangFromText(msg) ?? speechLangRef.current
-    let langFixed = false
+    // If the user's message is long enough to detect, lock the reply language now;
+    // otherwise wait until enough reply text has streamed. We do NOT speak until
+    // the language is locked, so the WHOLE reply uses one voice (no mid-reply
+    // switch from a wrong seed → the "two voices" bug).
+    const seedLang = detectLangFromText(msg)
+    let replyLang = seedLang ?? speechLangRef.current
+    let langFixed = seedLang !== null
     // An attached image takes priority over the live camera frame for this turn.
     const attached = atts.find((a) => a.url.startsWith('data:image'))?.url
     const image =
@@ -288,14 +304,19 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
             replyLang = detectLangFromText(acc) ?? replyLang
             langFixed = true
           }
-          const end = lastSentenceEnd(acc)
-          if (end > spoken) {
-            enqueueSpeech(acc.slice(spoken, end), replyLang)
-            spoken = end
+          if (langFixed) {
+            const end = lastSentenceEnd(acc)
+            if (end > spoken) {
+              enqueueSpeech(acc.slice(spoken, end), replyLang)
+              spoken = end
+            }
           }
         }
       }
-      if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), replyLang)
+      if (speak) {
+        if (!langFixed) replyLang = detectLangFromText(acc) ?? replyLang
+        if (acc.length > spoken) enqueueSpeech(acc.slice(spoken), replyLang)
+      }
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
@@ -633,7 +654,7 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
         {messages.length === 0 && <p className="chat-hint">{hint}</p>}
         {last && (
           <div className={`bubble ${last.role}`}>
-            {last.content || (busy ? '…' : '')}
+            {last.content ? latestSentence(last.content) : busy ? '…' : ''}
           </div>
         )}
       </div>

@@ -152,7 +152,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       systemPrompt +=
         `\n\nThe user's current device location (live GPS) is latitude ${coords.lat.toFixed(5)}, longitude ${coords.lon.toFixed(5)}` +
         (place ? ` — approximately ${place}.` : '.') +
-        ` When the user says "here", "near me", "where am I", or asks about weather, places, directions or anything location-dependent without naming a place, use THIS location.`
+        ` When the user says "here", "near me", "where am I", or asks about weather, places, directions or anything location-dependent without naming a place, use THIS location. For local weather, pass these exact lat/lon to get_weather (don't rely on a place name).`
     }
 
     // Memory agent (recall): inject the durable facts Kelion has learned about

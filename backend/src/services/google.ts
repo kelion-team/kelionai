@@ -46,13 +46,14 @@ export const googleTools: Anthropic.Tool[] = [
   {
     name: 'get_weather',
     description:
-      'Get the current weather and a short multi-day forecast for a place (city name). Use for any weather question.',
+      'Get the current weather and a short multi-day forecast. For a named place pass "location"; for the user\'s current location ("here"/"near me") pass their device "lat" and "lon" (given in your context) instead — that always resolves.',
     input_schema: {
       type: 'object',
       properties: {
         location: { type: 'string', description: 'City name, e.g. "Bucharest" or "Witney, UK".' },
+        lat: { type: 'number', description: 'Latitude (use the device GPS for local weather).' },
+        lon: { type: 'number', description: 'Longitude (use the device GPS for local weather).' },
       },
-      required: ['location'],
     },
   },
   {
@@ -283,6 +284,21 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
+// Small retry for flaky free APIs (e.g. Open-Meteo) so a transient hiccup doesn't
+// surface to the user as "service unavailable".
+async function fetchRetry(url: string | URL, tries = 3): Promise<Response | null> {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(url)
+      if (r.ok) return r
+    } catch {
+      /* network blip — retry */
+    }
+    if (i < tries - 1) await new Promise((res) => setTimeout(res, 250 * (i + 1)))
+  }
+  return null
+}
+
 interface CalendarItem {
   summary?: string
   location?: string
@@ -369,28 +385,37 @@ const WEATHER_CODES: Record<number, string> = {
   85: 'snow showers', 86: 'snow showers', 95: 'thunderstorm', 96: 'thunderstorm w/ hail', 99: 'thunderstorm w/ hail',
 }
 
-async function weather(location: string): Promise<string> {
-  if (!location) return JSON.stringify({ error: 'empty_location' })
-  // Open-Meteo: free, keyless geocoding + forecast.
-  const geoUrl = new URL('https://geocoding-api.open-meteo.com/v1/search')
-  geoUrl.searchParams.set('name', location)
-  geoUrl.searchParams.set('count', '1')
-  const geoRes = await fetch(geoUrl)
-  if (!geoRes.ok) return JSON.stringify({ error: `geo_http_${geoRes.status}` })
-  const geo = (await geoRes.json()) as {
-    results?: { latitude: number; longitude: number; name: string; country?: string }[]
+async function weather(location: string, lat: number, lon: number): Promise<string> {
+  // Resolve to coordinates: device GPS (always works) takes priority; otherwise
+  // geocode the place name.
+  let latitude = lat
+  let longitude = lon
+  let label = 'your location'
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    if (!location) return JSON.stringify({ error: 'empty_location' })
+    const geoUrl = new URL('https://geocoding-api.open-meteo.com/v1/search')
+    geoUrl.searchParams.set('name', location)
+    geoUrl.searchParams.set('count', '1')
+    const geoRes = await fetchRetry(geoUrl)
+    if (!geoRes) return JSON.stringify({ error: 'geo_unavailable' })
+    const geo = (await geoRes.json()) as {
+      results?: { latitude: number; longitude: number; name: string; country?: string }[]
+    }
+    const place = geo.results?.[0]
+    if (!place) return JSON.stringify({ error: 'location_not_found' })
+    latitude = place.latitude
+    longitude = place.longitude
+    label = `${place.name}${place.country ? ', ' + place.country : ''}`
   }
-  const place = geo.results?.[0]
-  if (!place) return JSON.stringify({ error: 'location_not_found' })
   const wUrl = new URL('https://api.open-meteo.com/v1/forecast')
-  wUrl.searchParams.set('latitude', String(place.latitude))
-  wUrl.searchParams.set('longitude', String(place.longitude))
+  wUrl.searchParams.set('latitude', String(latitude))
+  wUrl.searchParams.set('longitude', String(longitude))
   wUrl.searchParams.set('current', 'temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m')
   wUrl.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,weather_code')
   wUrl.searchParams.set('forecast_days', '3')
   wUrl.searchParams.set('timezone', 'auto')
-  const wRes = await fetch(wUrl)
-  if (!wRes.ok) return JSON.stringify({ error: `weather_http_${wRes.status}` })
+  const wRes = await fetchRetry(wUrl)
+  if (!wRes) return JSON.stringify({ error: 'weather_unavailable' })
   const w = (await wRes.json()) as {
     current?: { temperature_2m: number; weather_code: number; wind_speed_10m: number; relative_humidity_2m: number }
     daily?: { time: string[]; temperature_2m_max: number[]; temperature_2m_min: number[]; weather_code: number[] }
@@ -404,7 +429,7 @@ async function weather(location: string): Promise<string> {
     condition: code(w.daily?.weather_code?.[i] ?? -1),
   }))
   return JSON.stringify({
-    location: `${place.name}${place.country ? ', ' + place.country : ''}`,
+    location: label,
     current: c
       ? { temp_c: c.temperature_2m, condition: code(c.weather_code), wind_kmh: c.wind_speed_10m, humidity_pct: c.relative_humidity_2m }
       : null,
@@ -706,7 +731,8 @@ export async function runGoogleTool(
   try {
     // These don't use the user's Google token.
     if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5))
-    if (name === 'get_weather') return await weather(str(args.location))
+    if (name === 'get_weather')
+      return await weather(str(args.location), num(args.lat, Number.NaN), num(args.lon, Number.NaN))
     if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
     if (name === 'maps_directions')
       return await mapsDirections(str(args.origin), str(args.destination))
