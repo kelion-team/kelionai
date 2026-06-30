@@ -14,7 +14,7 @@ import CameraView from './CameraView'
 import MicMeter from './MicMeter'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
-import { detectLanguageFromMic, mapDetectedToSupported } from '../lib/langDetect'
+import { detectLanguageFromMic } from '../lib/langDetect'
 import { startFullDuplex, type FullDuplexHandle } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
@@ -253,14 +253,13 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
     // A new turn returns the avatar to center; Kelion reopens the monitor via
     // show_on_screen if THIS turn needs it (otherwise it stays centered).
     closeWorkspace()
-    // Auto-switch the voice/recognizer language from the message text (cheap;
-    // audio-based detection on the mic covers the speak-first case).
-    if (msg) {
-      const detected = detectLangFromText(msg)
-      if (detected) changeSpeechLang(detected)
-    }
-    const ttsLang = speechLangRef.current
     const speak = voiceOutRef.current
+    // The voice follows the LANGUAGE OF THIS REPLY (Kelion mirrors the user's
+    // language), not a drifting global setting — so a Romanian reply is never
+    // read by an English voice (the "defective ro"). Seed from the user's
+    // message, then refine from the reply once enough text has streamed.
+    let replyLang = detectLangFromText(msg) ?? speechLangRef.current
+    let langFixed = false
     // An attached image takes priority over the live camera frame for this turn.
     const attached = atts.find((a) => a.url.startsWith('data:image'))?.url
     const image =
@@ -285,14 +284,18 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc }])
         if (speak) {
+          if (!langFixed && acc.trim().length >= 24) {
+            replyLang = detectLangFromText(acc) ?? replyLang
+            langFixed = true
+          }
           const end = lastSentenceEnd(acc)
           if (end > spoken) {
-            enqueueSpeech(acc.slice(spoken, end), ttsLang)
+            enqueueSpeech(acc.slice(spoken, end), replyLang)
             spoken = end
           }
         }
       }
-      if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), ttsLang)
+      if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), replyLang)
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
@@ -354,10 +357,10 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
   }
 
   // Heard a full utterance from the full-duplex (AEC + Chirp) channel. Chirp
-  // gives an accurate transcript + the spoken language, so we switch language
-  // per turn and send straight to Claude. Barge-in is automatic: send() stops
-  // any current speech, and the AEC lets the mic capture the user over Kelion.
-  function onHeardFull(text: string, lang: string | null): void {
+  // gives an accurate transcript; we send it straight to Claude. The reply's
+  // voice language is detected from the reply text (see send), so we no longer
+  // flip a global language per utterance.
+  function onHeardFull(text: string): void {
     const clean = text.trim()
     if (!clean) return
     // While Kelion is speaking, only a stop-word counts — otherwise his own TTS
@@ -366,8 +369,8 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
       if (STOP.test(clean)) stopSpeaking()
       return
     }
-    const mapped = lang ? mapDetectedToSupported(lang) : null
-    if (mapped) changeSpeechLang(mapped)
+    // Don't flip the global language per utterance (it landed on a wrong/defective
+    // language). The reply's voice language is detected from the reply text in send().
     armIdle()
     void sendRef.current(clean)
   }
@@ -383,7 +386,7 @@ export default function ChatPanel({ lang, isAdmin }: { readonly lang: Lang; read
     setMicError(null)
 
     const fd = await startFullDuplex(
-      (text, lang) => onHeardFull(text, lang),
+      (text) => onHeardFull(text),
       (error) => {
         if (error === 'not-allowed') setMicError(t.micBlocked)
       },
