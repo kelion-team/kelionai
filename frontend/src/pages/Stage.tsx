@@ -7,7 +7,12 @@ import AdminPanel from '../components/AdminPanel'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
-import { getWorkspace, subscribeWorkspace, closeWorkspace } from '../lib/workspace'
+import {
+  getWorkspace,
+  subscribeWorkspace,
+  closeWorkspace,
+  normalizeEmbedUrl,
+} from '../lib/workspace'
 
 export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
@@ -22,14 +27,21 @@ export default function Stage({ user }: { user: User }) {
           <div className="workspace-inner">
             <div className="workspace-head">
               <span>{ws.title}</span>
-              <button type="button" className="ghost" onClick={closeWorkspace}>
-                ✕
-              </button>
+              <span className="workspace-actions">
+                {ws.url && (
+                  <a className="ghost" href={ws.url} target="_blank" rel="noreferrer" title="Open in a new tab">
+                    ↗
+                  </a>
+                )}
+                <button type="button" className="ghost" onClick={closeWorkspace}>
+                  ✕
+                </button>
+              </span>
             </div>
             {ws.url && (
               <iframe
                 title={ws.title}
-                src={ws.url}
+                src={normalizeEmbedUrl(ws.url)}
                 className="workspace-frame"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               />

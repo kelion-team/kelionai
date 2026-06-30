@@ -45,6 +45,12 @@ export interface MouthState {
 }
 const MOUTH_SILENT: MouthState = { jaw: 0, vowel: 0, consonant: 0 }
 
+// Amplitude caps for the RPM mouth morphs. A full jawOpen/viseme of ~1 looks
+// like a scream; real speech barely parts the lips. Keep the opening subtle.
+const JAW_MAX = 0.3
+const VOWEL_MAX = 0.42
+const CONS_MAX = 0.5
+
 function ensureSpeakCtx(): AudioContext | null {
   if (speakCtx) return speakCtx
   const AC =
@@ -75,9 +81,9 @@ export function getMouthState(): MouthState {
     const consonant = Math.min(1, Math.max(0, (centroid - 0.28) / 0.35))
     const vowel = 1 - consonant
     return {
-      jaw: energy * (1 - 0.65 * consonant) * 0.9, // consonants close the jaw
-      vowel: energy * vowel,
-      consonant: energy * consonant,
+      jaw: energy * (1 - 0.65 * consonant) * JAW_MAX, // consonants close the jaw
+      vowel: energy * vowel * VOWEL_MAX,
+      consonant: energy * consonant * CONS_MAX,
     }
   }
   if (browserSpeaking) {
@@ -85,9 +91,9 @@ export function getMouthState(): MouthState {
     const energy = 0.3 + 0.3 * Math.abs(Math.sin(t * 11))
     const consonant = Math.sin(t * 7) > 0.45 ? 1 : 0 // alternate vowel/consonant
     return {
-      jaw: energy * (1 - 0.65 * consonant) * 0.9,
-      vowel: energy * (1 - consonant),
-      consonant: energy * consonant,
+      jaw: energy * (1 - 0.65 * consonant) * JAW_MAX,
+      vowel: energy * (1 - consonant) * VOWEL_MAX,
+      consonant: energy * consonant * CONS_MAX,
     }
   }
   return MOUTH_SILENT

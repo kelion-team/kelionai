@@ -170,6 +170,11 @@ body {
   font-size: 14px;
   padding: 4px 6px 10px;
 }
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .workspace-frame {
   flex: 1;
   width: 100%;
