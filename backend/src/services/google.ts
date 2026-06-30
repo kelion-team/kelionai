@@ -55,6 +55,81 @@ export const googleTools: Anthropic.Tool[] = [
       required: ['location'],
     },
   },
+  {
+    name: 'send_email',
+    description:
+      "Send an email from the user's Gmail account. Confirm the recipient and content with the user before sending if there is any doubt.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address.' },
+        subject: { type: 'string', description: 'Email subject line.' },
+        body: { type: 'string', description: 'Email body (plain text).' },
+      },
+      required: ['to', 'body'],
+    },
+  },
+  {
+    name: 'create_calendar_event',
+    description:
+      "Create an event in the user's Google Calendar. Times must be ISO 8601 (e.g. 2026-07-02T15:00:00). If no end is given, a 1-hour event is created.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Event title.' },
+        start: { type: 'string', description: 'Start datetime, ISO 8601.' },
+        end: { type: 'string', description: 'End datetime, ISO 8601 (optional).' },
+        location: { type: 'string', description: 'Location (optional).' },
+      },
+      required: ['summary', 'start'],
+    },
+  },
+  {
+    name: 'get_drive_files',
+    description:
+      "Search or list the user's Google Drive files. Use for questions about their documents, files, or to find something on Drive.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional name search, e.g. "budget".' },
+        max_results: { type: 'number', description: 'How many files (default 10, max 25).' },
+      },
+    },
+  },
+  {
+    name: 'get_tasks',
+    description: "List the user's Google Tasks (to-dos). Use for questions about their tasks or to-do list.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        max_results: { type: 'number', description: 'How many tasks (default 20).' },
+      },
+    },
+  },
+  {
+    name: 'add_task',
+    description: "Add a new task to the user's Google Tasks (to-do list).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The task text.' },
+        due: { type: 'string', description: 'Optional due date, ISO 8601 (e.g. 2026-07-05).' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'search_contacts',
+    description: "Search the user's Google Contacts by name. Returns names, emails and phone numbers.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name to search for.' },
+        max_results: { type: 'number', description: 'How many contacts (default 5).' },
+      },
+      required: ['query'],
+    },
+  },
 ]
 
 function num(v: unknown, fallback: number): number {
@@ -193,6 +268,121 @@ async function weather(location: string): Promise<string> {
   })
 }
 
+async function sendEmail(to: string, subject: string, body: string, token: string): Promise<string> {
+  if (!to || !body) return JSON.stringify({ error: 'missing_to_or_body' })
+  // RFC 2822 message, base64url-encoded, as Gmail's send API expects.
+  const headers = [`To: ${to}`, `Subject: ${subject || '(no subject)'}`, 'Content-Type: text/plain; charset="UTF-8"']
+  const raw = Buffer.from(`${headers.join('\r\n')}\r\n\r\n${body}`)
+    .toString('base64')
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '')
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw }),
+  })
+  if (!res.ok) return JSON.stringify({ error: `gmail_send_http_${res.status}` })
+  return JSON.stringify({ sent: true, to, subject })
+}
+
+async function createCalendarEvent(
+  summary: string,
+  start: string,
+  end: string,
+  location: string,
+  token: string,
+): Promise<string> {
+  if (!summary || !start) return JSON.stringify({ error: 'missing_summary_or_start' })
+  const startMs = Date.parse(start)
+  if (Number.isNaN(startMs)) return JSON.stringify({ error: 'bad_start_datetime' })
+  const endIso = end && !Number.isNaN(Date.parse(end))
+    ? new Date(end).toISOString()
+    : new Date(startMs + 3_600_000).toISOString()
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      summary,
+      location: location || undefined,
+      start: { dateTime: new Date(startMs).toISOString() },
+      end: { dateTime: endIso },
+    }),
+  })
+  if (!res.ok) return JSON.stringify({ error: `calendar_create_http_${res.status}` })
+  const j = (await res.json()) as { htmlLink?: string }
+  return JSON.stringify({ created: true, summary, start, link: j.htmlLink ?? '' })
+}
+
+async function driveFiles(query: string, max: number, token: string): Promise<string> {
+  const url = new URL('https://www.googleapis.com/drive/v3/files')
+  url.searchParams.set('pageSize', String(Math.min(Math.max(max, 1), 25)))
+  url.searchParams.set('fields', 'files(name,mimeType,modifiedTime,webViewLink)')
+  url.searchParams.set('orderBy', 'modifiedTime desc')
+  if (query) {
+    const safe = query.replaceAll("'", String.raw`\'`)
+    url.searchParams.set('q', `name contains '${safe}' and trashed = false`)
+  } else {
+    url.searchParams.set('q', 'trashed = false')
+  }
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return JSON.stringify({ error: `drive_http_${res.status}` })
+  const j = (await res.json()) as {
+    files?: { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
+  }
+  return JSON.stringify({ files: j.files ?? [] })
+}
+
+async function getTasks(max: number, token: string): Promise<string> {
+  const url = new URL('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks')
+  url.searchParams.set('maxResults', String(Math.min(Math.max(max, 1), 100)))
+  url.searchParams.set('showCompleted', 'false')
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
+  const j = (await res.json()) as { items?: { title?: string; due?: string; status?: string }[] }
+  const tasks = (j.items ?? []).map((t) => ({ title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
+  return JSON.stringify({ tasks })
+}
+
+async function addTask(title: string, due: string, token: string): Promise<string> {
+  if (!title) return JSON.stringify({ error: 'missing_title' })
+  const body: { title: string; due?: string } = { title }
+  if (due && !Number.isNaN(Date.parse(due))) body.due = new Date(due).toISOString()
+  const res = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return JSON.stringify({ error: `tasks_add_http_${res.status}` })
+  return JSON.stringify({ added: true, title })
+}
+
+interface PersonName { displayName?: string }
+interface PersonEmail { value?: string }
+interface PersonPhone { value?: string }
+interface Person {
+  names?: PersonName[]
+  emailAddresses?: PersonEmail[]
+  phoneNumbers?: PersonPhone[]
+}
+
+async function searchContacts(query: string, max: number, token: string): Promise<string> {
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  const url = new URL('https://people.googleapis.com/v1/people:searchContacts')
+  url.searchParams.set('query', query)
+  url.searchParams.set('pageSize', String(Math.min(Math.max(max, 1), 25)))
+  url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers')
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return JSON.stringify({ error: `contacts_http_${res.status}` })
+  const j = (await res.json()) as { results?: { person?: Person }[] }
+  const contacts = (j.results ?? []).map((r) => ({
+    name: r.person?.names?.[0]?.displayName ?? '',
+    email: r.person?.emailAddresses?.[0]?.value ?? '',
+    phone: r.person?.phoneNumbers?.[0]?.value ?? '',
+  }))
+  return JSON.stringify({ contacts })
+}
+
 export async function runGoogleTool(
   name: string,
   input: unknown,
@@ -212,6 +402,15 @@ export async function runGoogleTool(
     if (name === 'get_calendar_events') return await calendarEvents(num(args.max_results, 10), token)
     if (name === 'get_recent_emails')
       return await recentEmails(str(args.query), num(args.max_results, 5), token)
+    if (name === 'send_email')
+      return await sendEmail(str(args.to), str(args.subject), str(args.body), token)
+    if (name === 'create_calendar_event')
+      return await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
+    if (name === 'get_drive_files') return await driveFiles(str(args.query), num(args.max_results, 10), token)
+    if (name === 'get_tasks') return await getTasks(num(args.max_results, 20), token)
+    if (name === 'add_task') return await addTask(str(args.title), str(args.due), token)
+    if (name === 'search_contacts')
+      return await searchContacts(str(args.query), num(args.max_results, 5), token)
     return JSON.stringify({ error: 'unknown_tool' })
   } catch (e) {
     return JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })

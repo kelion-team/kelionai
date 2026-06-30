@@ -31,8 +31,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         'openid',
         'email',
         'profile',
+        // Calendar read + event create; Gmail read + send; Drive read; Tasks;
+        // Contacts read — the skills Kelion can run on the user's behalf.
+        'https://www.googleapis.com/auth/calendar.events',
         'https://www.googleapis.com/auth/calendar.readonly',
         'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/tasks',
+        'https://www.googleapis.com/auth/contacts.readonly',
       ].join(' '),
       access_type: 'offline',
       include_granted_scopes: 'true',
