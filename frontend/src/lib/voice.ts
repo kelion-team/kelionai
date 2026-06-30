@@ -246,16 +246,13 @@ async function drain(): Promise<void> {
     return
   }
   ttsBusy = true
-  // ONE consistent voice. Use Chirp 3 HD whenever it's available. Only use the
-  // browser voice when Chirp is unavailable for the whole session (no key). If
-  // Chirp is on but a single sentence fails transiently, do NOT switch to the
-  // browser voice mid-reply — that's what made the voice sound mixed/unintelligible.
-  if (chirpMode === 'off') {
-    await browserSpeak(item.text, item.lang)
-  } else {
-    const played = await chirpSpeak(item.text, item.lang)
-    if (!played && chirpMode === 'off') await browserSpeak(item.text, item.lang)
-  }
+  // ONE consistent voice. Use Chirp 3 HD whenever it's available; only use the
+  // browser voice when Chirp is off for the WHOLE session (no key) — never as a
+  // mid-reply substitute, which is what made the voice sound mixed/unintelligible.
+  // (chirpSpeak() may flip chirpMode to 'off' if there's no key; re-check after.)
+  let played = false
+  if (chirpMode !== 'off') played = await chirpSpeak(item.text, item.lang)
+  if (!played && chirpMode === 'off') await browserSpeak(item.text, item.lang)
   void drain()
 }
 
