@@ -36,6 +36,9 @@ let speakCtx: AudioContext | null = null
 let speakAnalyser: AnalyserNode | null = null
 let speakFreq: Uint8Array<ArrayBuffer> | null = null
 let browserSpeaking = false
+// analyser → destination is wired once; re-connecting every turn is wasteful and
+// the duplicate connects were part of why playback got flaky over a session.
+let analyserWired = false
 
 /** Mouth shape for the avatar: 0..1 jaw openness + vowel/consonant weights. */
 export interface MouthState {
@@ -150,32 +153,42 @@ async function chirpSpeak(text: string, lang: string): Promise<boolean> {
     if (!res.ok) return false
     chirpMode = 'on'
     const url = URL.createObjectURL(await res.blob())
-    await new Promise<void>((resolve) => {
+    // Resolves true if the clip actually played, false if it errored/couldn't —
+    // false makes drain() fall back to the browser voice (alternate voice).
+    const played = await new Promise<boolean>((resolve) => {
       const audio = new Audio(url)
       audio.crossOrigin = 'anonymous'
       curAudio = audio
-      // Route through the analyser so the avatar lip-syncs to the real waveform.
       const ctx = ensureSpeakCtx()
-      if (ctx && speakAnalyser) {
-        void ctx.resume()
-        try {
-          const node = ctx.createMediaElementSource(audio)
-          node.connect(speakAnalyser)
-          speakAnalyser.connect(ctx.destination)
-        } catch {
-          /* fall through — audio still plays via the element below */
-        }
-      }
-      const done = (): void => {
+      const finish = (ok: boolean): void => {
         URL.revokeObjectURL(url)
         if (curAudio === audio) curAudio = null
-        resolve()
+        resolve(ok)
       }
-      audio.onended = done
-      audio.onerror = done
-      void audio.play().catch(done)
+      audio.onended = () => finish(true)
+      audio.onerror = () => finish(false)
+      const route = (): void => {
+        // Route through the analyser so the avatar lip-syncs to the real
+        // waveform. Once an element is routed into Web Audio its output goes
+        // ONLY through the graph, so the context must be running or it's silent.
+        if (ctx && speakAnalyser) {
+          try {
+            const node = ctx.createMediaElementSource(audio)
+            node.connect(speakAnalyser)
+            if (!analyserWired) {
+              speakAnalyser.connect(ctx.destination)
+              analyserWired = true
+            }
+          } catch {
+            /* source already exists / unavailable — element plays on its own */
+          }
+        }
+        void audio.play().catch(() => finish(false))
+      }
+      if (ctx && ctx.state === 'suspended') void ctx.resume().finally(route)
+      else route()
     })
-    return true
+    return played
   } catch {
     return false
   }

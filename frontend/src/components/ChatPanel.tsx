@@ -79,6 +79,10 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   awakeRef.current = awake
   const busyRef = useRef(busy)
   busyRef.current = busy
+  // Synchronous guard against overlapping turns. `busy` state lags a render, so
+  // two voice utterances firing in the same tick could both start a stream and
+  // fragment the reply ("chat starts from several parts"). This ref locks now.
+  const inFlightRef = useRef(false)
   const cameraOnRef = useRef(cameraOn)
   cameraOnRef.current = cameraOn
   const listeningRef = useRef(listening)
@@ -154,9 +158,13 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       setInput('')
       return
     }
-    if (busyRef.current) return
+    if (busyRef.current || inFlightRef.current) return
+    inFlightRef.current = true
     setInput('')
     stopSpeaking()
+    // A new turn returns the avatar to center; Kelion reopens the monitor via
+    // show_on_screen if THIS turn needs it (otherwise it stays centered).
+    closeWorkspace()
     // Auto-switch the voice/recognizer language from the message text (cheap;
     // audio-based detection on the mic covers the speak-first case).
     const detected = detectLangFromText(msg)
@@ -198,6 +206,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       const m = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
       setMessages([...next, { role: 'assistant', content: `⚠️ ${m}` }])
     } finally {
+      inFlightRef.current = false
       setBusy(false)
     }
   }
@@ -256,6 +265,12 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   function onHeardFull(text: string, lang: string | null): void {
     const clean = text.trim()
     if (!clean) return
+    // While Kelion is speaking, only a stop-word counts — otherwise his own TTS
+    // leaking through the mic (imperfect AEC) restarts the turn over and over.
+    if (isSpeaking()) {
+      if (STOP.test(clean)) stopSpeaking()
+      return
+    }
     const mapped = lang ? mapDetectedToSupported(lang) : null
     if (mapped) changeSpeechLang(mapped)
     armIdle()
