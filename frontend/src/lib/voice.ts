@@ -186,6 +186,7 @@ export function stopSpeaking(): void {
 
 interface RecAlternative {
   readonly transcript: string
+  readonly confidence?: number
 }
 interface RecResult {
   readonly isFinal: boolean
@@ -260,7 +261,7 @@ export interface ContinuousHandle {
  */
 export function startContinuous(
   lang: string,
-  onFinal: (text: string) => void,
+  onFinal: (text: string, confidence: number) => void,
   onError?: (error: string) => void,
 ): ContinuousHandle | null {
   const Ctor = getCtor()
@@ -284,7 +285,9 @@ export function startContinuous(
         const item = e.results[i]
         if (item?.isFinal) {
           const text = item[0]?.transcript?.trim() ?? ''
-          if (text) onFinal(text)
+          // Chrome reports a confidence in [0,1]; default to 1 when absent.
+          const conf = typeof item[0]?.confidence === 'number' ? item[0].confidence : 1
+          if (text) onFinal(text, conf)
         }
       }
     }

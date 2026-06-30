@@ -15,6 +15,7 @@ import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
 import { detectLanguageFromMic } from '../lib/langDetect'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
+import { correctTranscript } from '../lib/correct'
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
 // low-power engine is Picovoice Porcupine). Accepts the documented variants.
@@ -22,6 +23,10 @@ const WAKE = /\b(hey\s+|hei\s+)?(kelion|kelian|kelyon|hey\s*k(ey)?)\b/i
 // Spoken interrupt while Kelion is talking (barge-in).
 const STOP = /\b(stop|stai|opre[sș]te|opreste|gata|taci|destul)\b/i
 const IDLE_MS = 60_000 // back to standby after this much silence (spec: ~1 min)
+// Below this recognizer confidence, clean the transcript with Gemini before it
+// reaches Claude (the spec's transcript-validation layer). Above it, pass
+// straight through to keep latency low.
+const CONF_MIN = 0.85
 
 function lastSentenceEnd(s: string): number {
   const re = /[.!?…]["'”’)\]]?\s/g
@@ -76,6 +81,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   listeningRef.current = listening
   const speechLangRef = useRef(speechLang)
   speechLangRef.current = speechLang
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   async function send(text: string): Promise<void> {
     const msg = text.trim()
@@ -129,26 +136,41 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     }, IDLE_MS)
   }
 
+  // Send a heard utterance to Kelion, cleaning it first only when the recognizer
+  // wasn't confident (the spec's transcript-validation step — Google/Gemini).
+  async function dispatchHeard(text: string, confidence: number): Promise<void> {
+    let toSend = text
+    if (confidence > 0 && confidence < CONF_MIN) {
+      const context = messagesRef.current
+        .slice(-2)
+        .map((m) => m.content)
+        .join('\n')
+      toSend = await correctTranscript(text, context, speechLangRef.current)
+    }
+    void sendRef.current(toSend)
+  }
+
   // Heard a final utterance from the permanent mic.
-  function onHeard(raw: string): void {
+  function onHeard(raw: string, confidence: number): void {
     const text = raw.trim()
     if (!text) return
+    // While Kelion talks, only a stop-word counts (echo guard / barge-in).
     if (isSpeaking()) {
-      // While Kelion talks, only a stop-word counts (echo guard / barge-in).
       if (STOP.test(text)) stopSpeaking()
       return
     }
+    // Asleep: wait for the wake word, then send anything said after it.
     if (!awakeRef.current) {
-      if (WAKE.test(text)) {
-        setAwake(true)
-        armIdle()
-        const rest = text.replace(WAKE, '').trim()
-        if (rest.length > 1) void sendRef.current(rest)
-      }
+      if (!WAKE.test(text)) return
+      setAwake(true)
+      armIdle()
+      const rest = text.replace(WAKE, '').trim()
+      if (rest.length > 1) void dispatchHeard(rest, confidence)
       return
     }
+    // Awake: send the utterance (validated if low-confidence).
     armIdle()
-    void sendRef.current(text)
+    void dispatchHeard(text, confidence)
   }
 
   // The mic is button-driven: starting on a user click reliably gets the
@@ -158,7 +180,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     setMicError(null)
     const h = startContinuous(
       speechLangRef.current,
-      (heard) => onHeard(heard),
+      (heard, conf) => onHeard(heard, conf),
       (error) => {
         // Permanent failures (permission blocked, no mic) — tell the user.
         if (error === 'not-allowed' || error === 'service-not-allowed') {

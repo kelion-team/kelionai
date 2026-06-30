@@ -27,6 +27,9 @@ export default function Stage({ user }: { user: User }) {
           enableZoom={false}
           minPolarAngle={Math.PI / 2.3}
           maxPolarAngle={Math.PI / 1.95}
+          // Kelion may only be turned ±3° around its axis (left/right).
+          minAzimuthAngle={-Math.PI / 60}
+          maxAzimuthAngle={Math.PI / 60}
           target={[0, 0.7, 0]}
         />
       </Canvas>
