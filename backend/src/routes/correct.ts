@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { recordCost } from '../db.js'
+import { geminiCost } from '../services/cost.js'
 
 // Transcript validation/correction ("audio equalization in Kelion's ear"). A
 // speech-to-text transcript can contain mishearings; before it reaches Claude
@@ -50,6 +52,15 @@ export async function correctRoutes(app: FastifyInstance): Promise<void> {
         }
         const j = (await res.json()) as {
           candidates?: { content?: { parts?: { text?: string }[] } }[]
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
+        }
+        const um = j.usageMetadata
+        if (um) {
+          void recordCost(
+            user.email,
+            'correct',
+            geminiCost(um.promptTokenCount ?? 0, um.candidatesTokenCount ?? 0),
+          )
         }
         const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
         return reply.send({ text: out && out.length > 0 ? out : text })

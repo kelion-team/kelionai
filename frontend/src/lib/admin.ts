@@ -25,3 +25,19 @@ export async function fetchHistory(email: string): Promise<HistoryRow[]> {
   const j = (await r.json()) as { history?: HistoryRow[] }
   return j.history ?? []
 }
+
+export interface CostSummary {
+  total: number
+  today: number
+  byKind: Record<string, number>
+}
+
+export async function fetchCosts(): Promise<CostSummary | null> {
+  try {
+    const r = await fetch('/api/admin/costs', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as CostSummary
+  } catch {
+    return null
+  }
+}

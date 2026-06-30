@@ -34,7 +34,60 @@ export async function initDb(): Promise<void> {
       speech_lang TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS cost_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      cost_usd DOUBLE PRECISION NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_events (created_at);
   `)
+}
+
+// Record the real provider cost of one AI call (admin-only accounting).
+export async function recordCost(email: string, kind: string, costUsd: number): Promise<void> {
+  if (!dbEnabled() || !(costUsd > 0)) return
+  try {
+    await getPool().query(
+      'INSERT INTO cost_events (user_email, kind, cost_usd) VALUES ($1, $2, $3)',
+      [email, kind, costUsd],
+    )
+  } catch {
+    // Never break a request because metering failed.
+  }
+}
+
+export interface CostSummary {
+  total: number
+  today: number
+  byKind: Record<string, number>
+}
+
+export async function getCostSummary(): Promise<CostSummary> {
+  const empty: CostSummary = { total: 0, today: 0, byKind: {} }
+  if (!dbEnabled()) return empty
+  try {
+    const pool = getPool()
+    const totals = await pool.query<{ total: string | null; today: string | null }>(
+      `SELECT
+         COALESCE(SUM(cost_usd), 0) AS total,
+         COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= date_trunc('day', now())), 0) AS today
+       FROM cost_events`,
+    )
+    const kinds = await pool.query<{ kind: string; sum: string }>(
+      'SELECT kind, SUM(cost_usd) AS sum FROM cost_events GROUP BY kind',
+    )
+    const byKind: Record<string, number> = {}
+    for (const r of kinds.rows) byKind[r.kind] = Number(r.sum)
+    return {
+      total: Number(totals.rows[0]?.total ?? 0),
+      today: Number(totals.rows[0]?.today ?? 0),
+      byKind,
+    }
+  } catch {
+    return empty
+  }
 }
 
 // Per-user speech language — persists across sessions for as long as the user

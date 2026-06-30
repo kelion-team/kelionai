@@ -181,6 +181,63 @@ export const googleTools: Anthropic.Tool[] = [
   },
 ]
 
+// Exchange a refresh token for a fresh access token. Returns null on failure
+// (e.g. the user revoked access) so the caller can fall back to asking them to
+// sign in again. Google does not return a new refresh token here — we keep the
+// existing one.
+export async function refreshGoogleAccessToken(
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresIn: number } | null> {
+  if (!refreshToken) return null
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.google.clientId,
+        client_secret: config.google.clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    })
+    if (!res.ok) return null
+    const j = (await res.json()) as { access_token?: string; expires_in?: number }
+    if (!j.access_token) return null
+    return { accessToken: j.access_token, expiresIn: j.expires_in ?? 3600 }
+  } catch {
+    return null
+  }
+}
+
+// Best-effort reverse geocode (device GPS → human place name) so Claude knows
+// where "here" is. Keyless OpenStreetMap Nominatim; short timeout, never throws.
+// Cached by ~100 m (3 decimals) so only the first chat turn at a location pays
+// the network cost — keeps the chat hot path low-latency.
+const geoCache = new Map<string, string>()
+export async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
+  const hit = geoCache.get(key)
+  if (hit !== undefined) return hit
+  try {
+    const u = new URL('https://nominatim.openstreetmap.org/reverse')
+    u.searchParams.set('lat', String(lat))
+    u.searchParams.set('lon', String(lon))
+    u.searchParams.set('format', 'json')
+    u.searchParams.set('zoom', '14')
+    const res = await fetch(u, {
+      headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return ''
+    const j = (await res.json()) as { display_name?: string }
+    const name = j.display_name ?? ''
+    geoCache.set(key, name)
+    return name
+  } catch {
+    return ''
+  }
+}
+
 function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }

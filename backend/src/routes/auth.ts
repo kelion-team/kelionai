@@ -80,6 +80,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         id_token?: string
         access_token?: string
         expires_in?: number
+        refresh_token?: string
       }
       if (!tokens.id_token) {
         return reply.redirect(`${config.frontendOrigin}/?error=no_id_token`)
@@ -104,6 +105,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         locale: claims.locale ?? 'en',
         googleAccessToken: tokens.access_token ?? '',
         googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+        // Persist the refresh token so the chat route can mint fresh access
+        // tokens for the Google skills past the first hour. Google only returns
+        // it on the first consent (prompt=consent forces it on every login).
+        googleRefreshToken: tokens.refresh_token ?? '',
       })
       return reply.redirect(`${config.frontendOrigin}/`)
     },

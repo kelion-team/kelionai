@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { streamChat, type ChatMessage } from '../lib/chat'
+import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { strings, type Lang } from '../lib/i18n'
 import {
   enqueueSpeech,
@@ -12,13 +12,13 @@ import {
 } from '../lib/voice'
 import CameraView from './CameraView'
 import MicMeter from './MicMeter'
-import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
+import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
 import { detectLanguageFromMic, mapDetectedToSupported } from '../lib/langDetect'
 import { startFullDuplex, type FullDuplexHandle } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
-import { toggleWorkspace } from '../lib/workspace'
+import { openWorkspace, closeWorkspace } from '../lib/workspace'
 
 // "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
 // low-power engine is Picovoice Porcupine). Accepts the documented variants.
@@ -61,7 +61,6 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [awake, setAwake] = useState(false) // post wake-word active conversation
   const [cameraOn, setCameraOn] = useState(false)
   const [facing, setFacing] = useState<Facing>('user')
-  const [canSwitchCam, setCanSwitchCam] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [listening, setListening] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
@@ -71,6 +70,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
+  const coordsRef = useRef<Coords | null>(null)
   const idleRef = useRef<number | null>(null)
   // Refs mirror state for the always-on voice callback (registered once).
   const voiceOutRef = useRef(voiceOut)
@@ -88,6 +88,57 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
+  // Kelion drives the monitor himself (no manual button): a control frame from
+  // the stream opens/clears the workspace surface behind the avatar.
+  function handleControl(c: ChatControl): void {
+    if (!c.monitor) return
+    if (c.monitor.url) openWorkspace(c.monitor.title || t.monitorTitle, c.monitor.url)
+    else closeWorkspace()
+  }
+
+  // Short spoken + on-screen acknowledgement for a local command (camera, etc.).
+  function ack(text: string): void {
+    setMessages((cur) => [...cur, { role: 'assistant', content: text }])
+    if (voiceOutRef.current) enqueueSpeech(text, speechLangRef.current)
+  }
+
+  // Camera is controlled by voice/text command (no switch button). Returns true
+  // when the message was a camera command and was handled locally (not sent to
+  // Claude). Requires both the word "camera" and an action verb so normal
+  // questions like "ce vezi pe cameră?" still reach Claude.
+  function tryCameraCommand(msg: string): boolean {
+    const m = msg.toLowerCase()
+    if (!/\bcamer/.test(m) && !/\bwebcam/.test(m)) return false
+    if (/\b(închide|inchide|opre[sșț]te|opreste|stinge|dezactiv|close|turn off|disconnect)\b/.test(m)) {
+      setCameraOn(false)
+      ack(t.camOffMsg)
+      return true
+    }
+    if (/\b(spate|exterior|back|rear|environment)\b/.test(m)) {
+      setFacing('environment')
+      setCameraOn(true)
+      ack(t.camBackMsg)
+      return true
+    }
+    if (/\b(fa[țt][ăa]|frontal|front|selfie|user)\b/.test(m)) {
+      setFacing('user')
+      setCameraOn(true)
+      ack(t.camFrontMsg)
+      return true
+    }
+    if (/\b(comut|schimb|switch|flip|toggle|întoarce|intoarce)\b/.test(m)) {
+      switchCamera()
+      ack(t.camSwitchMsg)
+      return true
+    }
+    if (/\b(deschide|porne[sș]te|porneste|activ|open|turn on|connect|start)\b/.test(m)) {
+      setCameraOn(true)
+      ack(t.camOnMsg)
+      return true
+    }
+    return false
+  }
+
   async function send(text: string): Promise<void> {
     const msg = text.trim()
     if (!msg) return
@@ -95,6 +146,11 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     // him (it's a command, not a question — don't send it to Claude).
     if (isSpeaking() && STOP.test(msg) && msg.split(/\s+/).length <= 2) {
       stopSpeaking()
+      setInput('')
+      return
+    }
+    // Local camera commands (verbal or typed) — handled without a round-trip.
+    if (tryCameraCommand(msg)) {
       setInput('')
       return
     }
@@ -117,7 +173,12 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     try {
       let acc = ''
       let spoken = 0
-      for await (const chunk of streamChat(next, image ?? undefined)) {
+      for await (const chunk of streamChat(
+        next,
+        image ?? undefined,
+        coordsRef.current ?? undefined,
+        handleControl,
+      )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc }])
         if (speak) {
@@ -340,12 +401,25 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     void loadServerLang().then(apply)
   }, [])
 
-  // Permanent vision — camera ON by default; detect a second camera for switch.
+  // Permanent vision — camera ON by default. The camera is switched by voice/
+  // text command (no button), so no need to probe for a second camera here.
   useEffect(() => {
-    if (cameraSupported()) {
-      setCameraOn(true)
-      void hasMultipleCameras().then(setCanSwitchCam)
-    }
+    if (cameraSupported()) setCameraOn(true)
+  }, [])
+
+  // Permanent device GPS for the location-aware skills. Runs independently of the
+  // camera so "weather/where am I/near me" works even with the camera off. The
+  // latest fix is sent with each chat turn; the backend resolves the place name.
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+      },
+      () => undefined,
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 10_000 },
+    )
+    return () => navigator.geolocation.clearWatch(id)
   }, [])
 
   // Capture frames at a GPS-driven rate (1 fps still, 4 fps moving, scaling up
@@ -462,31 +536,15 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
                 {voiceOut && <span className="dot" />}
               </button>
               {cameraSupported() && (
-                <>
-                  <button type="button" className="fn-item" onClick={toggleCamera}>
-                    <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
-                    {cameraOn ? t.disconnectCamTitle : t.connectCamTitle}
-                    {cameraOn && <span className="dot" />}
-                  </button>
-                  {cameraOn && canSwitchCam && (
-                    <button type="button" className="fn-item" onClick={switchCamera}>
-                      <span className="ico">🔄</span>
-                      {t.switchCamTitle}
-                    </button>
-                  )}
-                </>
+                <button type="button" className="fn-item" onClick={toggleCamera}>
+                  <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
+                  {cameraOn ? t.disconnectCamTitle : t.connectCamTitle}
+                  {cameraOn && <span className="dot" />}
+                </button>
               )}
-              <button
-                type="button"
-                className="fn-item"
-                onClick={() => {
-                  toggleWorkspace(t.monitorTitle)
-                  setMenuOpen(false)
-                }}
-              >
-                <span className="ico">🖥️</span>
-                {t.monitorTitle}
-              </button>
+              {/* No monitor or camera-switch buttons: Kelion opens the monitor on
+                  his own (show_on_screen), and the camera is switched by voice or
+                  text command ("switch camera", "comută camera", "camera spate"). */}
               <button type="button" className="fn-item" disabled>
                 <span className="ico">📎</span>
                 {t.attachTitle}

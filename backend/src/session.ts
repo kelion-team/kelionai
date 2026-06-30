@@ -12,9 +12,12 @@ export interface SessionUser {
   // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
   locale: string
   // Google OAuth access token + expiry (ms) for calling Google skills on the
-  // user's behalf. Valid ~1h; refresh-token persistence needs the DB milestone.
+  // user's behalf. The access token is valid ~1h; the refresh token (kept in the
+  // signed, httpOnly session cookie) lets the chat route mint a fresh access
+  // token transparently so the Google skills keep working past the first hour.
   googleAccessToken?: string
   googleTokenExp?: number
+  googleRefreshToken?: string
 }
 
 export function setSession(reply: FastifyReply, user: SessionUser): void {

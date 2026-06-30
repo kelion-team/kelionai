@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { recordCost } from '../db.js'
+import { ASR_USD_PER_CALL } from '../services/cost.js'
 
 // Audio language identification + transcription via Google Cloud Speech-to-Text
 // v2 (chirp_2, automatic language detection). This is what lets Kelion detect
@@ -58,6 +60,7 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
         results?: { languageCode?: string; alternatives?: { transcript?: string }[] }[]
       }
       const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
+      void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
       return reply.send({
         lang: r0?.languageCode ?? null,
         transcript: r0?.alternatives?.[0]?.transcript ?? '',

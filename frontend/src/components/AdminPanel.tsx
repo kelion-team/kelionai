@@ -1,14 +1,32 @@
 import { useEffect, useState } from 'react'
-import { fetchUsers, fetchHistory, type UserSummary, type HistoryRow } from '../lib/admin'
+import {
+  fetchUsers,
+  fetchHistory,
+  fetchCosts,
+  type UserSummary,
+  type HistoryRow,
+  type CostSummary,
+} from '../lib/admin'
 
-export default function AdminPanel({ onClose }: { onClose: () => void }) {
+export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [costs, setCosts] = useState<CostSummary | null>(null)
 
   useEffect(() => {
     void fetchUsers().then(setUsers)
+  }, [])
+
+  // Live real-cost counter — refresh every 5s while the panel is open.
+  useEffect(() => {
+    const load = (): void => {
+      void fetchCosts().then(setCosts)
+    }
+    load()
+    const id = globalThis.setInterval(load, 5000)
+    return () => globalThis.clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -25,6 +43,19 @@ export default function AdminPanel({ onClose }: { onClose: () => void }) {
       <div className="admin-panel">
         <header className="admin-head">
           <strong>Admin — chat history</strong>
+          {costs && (
+            <span className="admin-cost" title="Real provider cost (live)">
+              💲 ${costs.total.toFixed(4)} total · ${costs.today.toFixed(4)} today
+              {Object.keys(costs.byKind).length > 0 && (
+                <span className="admin-cost-kinds">
+                  {' '}
+                  ({Object.entries(costs.byKind)
+                    .map(([k, v]) => `${k} $${v.toFixed(3)}`)
+                    .join(' · ')})
+                </span>
+              )}
+            </span>
+          )}
           <button type="button" className="ghost" onClick={onClose}>
             Close
           </button>

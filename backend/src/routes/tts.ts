@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { recordCost } from '../db.js'
+import { ttsCost } from '../services/cost.js'
 
 // Google Cloud Text-to-Speech — Chirp 3 HD (male, academic). Returns MP3 audio.
 // Auth: service-account JSON (preferred — what the backup provides) via an OAuth
@@ -90,6 +92,7 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
       }
       const j = (await res.json()) as { audioContent?: string }
       if (!j.audioContent) return reply.code(502).send({ error: 'tts_empty' })
+      void recordCost(user.email, 'tts', ttsCost(text.length))
       reply.header('Content-Type', 'audio/mpeg')
       reply.header('Cache-Control', 'no-store')
       return reply.send(Buffer.from(j.audioContent, 'base64'))

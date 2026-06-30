@@ -17,6 +17,11 @@ export interface Strings {
   voiceTitle: string
   cameraTitle: string
   switchCamTitle: string
+  camOnMsg: string
+  camOffMsg: string
+  camFrontMsg: string
+  camBackMsg: string
+  camSwitchMsg: string
   functionsTitle: string
   attachTitle: string
   monitorTitle: string
@@ -52,6 +57,11 @@ const dict: Record<Lang, Strings> = {
     voiceTitle: 'Kelion’s voice',
     cameraTitle: 'Camera',
     switchCamTitle: 'Switch camera',
+    camOnMsg: 'Camera on.',
+    camOffMsg: 'Camera off.',
+    camFrontMsg: 'Front camera.',
+    camBackMsg: 'Rear camera.',
+    camSwitchMsg: 'Camera switched.',
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
     monitorTitle: 'Monitor mode',
@@ -85,6 +95,11 @@ const dict: Record<Lang, Strings> = {
     voiceTitle: 'Vocea lui Kelion',
     cameraTitle: 'Cameră',
     switchCamTitle: 'Schimbă camera',
+    camOnMsg: 'Cameră pornită.',
+    camOffMsg: 'Cameră oprită.',
+    camFrontMsg: 'Camera din față.',
+    camBackMsg: 'Camera din spate.',
+    camSwitchMsg: 'Am schimbat camera.',
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     monitorTitle: 'Mod monitor',
