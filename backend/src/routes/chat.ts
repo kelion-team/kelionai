@@ -72,6 +72,26 @@ interface Coords {
   lon: number
 }
 
+// Anthropic rejects empty-content messages and non-alternating roles, and the
+// first message must be a user turn. The client can produce all three: a
+// monitor-only / tool-only reply leaves an empty assistant turn, and a local
+// camera "ack" injects an assistant turn with no matching user turn (two
+// assistants in a row, or a leading assistant). Any of these poisons the
+// history and makes every later turn 400. Clean it here, centrally: drop empty
+// turns, merge consecutive same-role turns, and drop leading assistant turns.
+function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = []
+  for (const m of messages) {
+    const content = (m.content ?? '').trim()
+    if (!content) continue
+    const prev = out.at(-1)
+    if (prev && prev.role === m.role) prev.content = `${prev.content}\n${content}`
+    else out.push({ role: m.role, content })
+  }
+  while (out.length > 0 && out[0].role !== 'user') out.shift()
+  return out
+}
+
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { messages?: ChatMessage[]; image?: string; coords?: Coords } }>(
     '/api/chat',
@@ -85,10 +105,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .send({ error: 'brain_not_configured', message: 'ANTHROPIC_API_KEY is not set yet.' })
     }
 
-    const messages = req.body?.messages
+    const rawMessages = req.body?.messages
     const image = req.body?.image
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
+    }
+    const messages = sanitizeHistory(rawMessages)
+    if (messages.length === 0) {
+      return reply.code(400).send({ error: 'bad_request', message: 'no usable messages' })
     }
 
     // Keep the Google skills alive past the first hour: if the access token has

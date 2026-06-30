@@ -54,6 +54,13 @@ Just shipped, on top of the voice/vision/skills build:
    frame on the chat stream that the frontend strips and acts on).
 4. **Camera switch is by voice/text** — the switch-camera button is gone; say or
    type "switch/comută/schimbă camera", "camera spate/față", "open/close camera".
+5. **Multi-turn chat no longer dies after a turn or two** — the history is now
+   sanitized in `backend/src/routes/chat.ts` (`sanitizeHistory`): empty turns are
+   dropped, consecutive same-role turns merged, leading assistant turns removed,
+   so Anthropic stops 400-ing. Root causes were a monitor-only (`show_on_screen`)
+   reply leaving an empty assistant turn, and a local camera "ack" injecting an
+   assistant turn with no user turn. The frontend also no longer stores an empty
+   assistant bubble (`ChatPanel.tsx`).
 
 ## Known external config (NOT code — must be set in Google Cloud Console)
 

@@ -190,6 +190,9 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
         }
       }
       if (speak && acc.length > spoken) enqueueSpeech(acc.slice(spoken), ttsLang)
+      // A monitor-only / tool-only reply streams no visible text. Don't leave an
+      // empty assistant turn in the history (it would 400 the next request).
+      if (!acc.trim()) setMessages(next)
     } catch (err) {
       const code = err instanceof Error ? err.message : 'error'
       const m = code === 'brain_not_configured' ? t.brainNotActive : t.brainError
