@@ -99,12 +99,13 @@ export default function AvatarModel() {
       }
     }
 
-    // Lip-sync — open the jaw to the current speaking level, smoothed so it
-    // tracks speech without jitter. Zero when Kelion is silent.
+    // Lip-sync — jaw follows the live speech envelope so it tracks each vowel
+    // (loud → open), consonant (quieter → partly closed) and pause (silence →
+    // closed). Snappy attack + quick release so individual syllables register.
     const target = getSpeakingLevel()
-    const k = target > mouth.current ? 0.5 : 0.25 // open fast, close softer
+    const k = target > mouth.current ? 0.6 : 0.4
     mouth.current += (target - mouth.current) * k
-    const jaw = mouth.current
+    const jaw = mouth.current * 0.9 // 10% less mouth opening
 
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
