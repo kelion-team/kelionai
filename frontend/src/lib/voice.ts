@@ -18,6 +18,14 @@ let ttsBusy = false
 let curAudio: HTMLAudioElement | null = null
 let chirpMode: 'unknown' | 'on' | 'off' = 'unknown'
 let onIdle: (() => void) | null = null
+// Fires true when Kelion starts speaking, false when he stops. The mic layer
+// uses this to go half-duplex (mute the recognizer while he talks) so his own
+// voice from the speakers never feeds back into recognition (anti-echo).
+let onSpeaking: ((speaking: boolean) => void) | null = null
+
+export function setOnSpeakingChange(cb: ((speaking: boolean) => void) | null): void {
+  onSpeaking = cb
+}
 
 // ── Lip-sync: expose a 0..1 "mouth openness" while Kelion speaks. For Chirp
 // audio we tap the real waveform (accurate); for browser TTS (no analysable
@@ -146,6 +154,7 @@ async function drain(): Promise<void> {
   const item = ttsQueue.shift()
   if (!item) {
     ttsBusy = false
+    onSpeaking?.(false) // Kelion finished — mic may reopen (anti-echo half-duplex)
     onIdle?.()
     return
   }
@@ -161,7 +170,10 @@ export function enqueueSpeech(text: string, lang: string): void {
   const clean = text.trim()
   if (!clean) return
   ttsQueue.push({ text: clean, lang })
-  if (!ttsBusy) void drain()
+  if (!ttsBusy) {
+    onSpeaking?.(true) // Kelion starts — mute the mic so his voice doesn't feed back
+    void drain()
+  }
 }
 
 export function setOnSpeechIdle(cb: (() => void) | null): void {

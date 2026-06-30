@@ -7,13 +7,15 @@ import {
   isSpeaking,
   startContinuous,
   speechSupported,
+  setOnSpeakingChange,
   type ContinuousHandle,
 } from '../lib/voice'
 import CameraView from './CameraView'
 import MicMeter from './MicMeter'
 import { cameraSupported, hasMultipleCameras, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
-import { detectLanguageFromMic } from '../lib/langDetect'
+import { detectLanguageFromMic, mapDetectedToSupported } from '../lib/langDetect'
+import { startFullDuplex, type FullDuplexHandle } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
 import { toggleWorkspace } from '../lib/workspace'
@@ -65,6 +67,7 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   const [micError, setMicError] = useState<string | null>(null)
 
   const contRef = useRef<ContinuousHandle | null>(null)
+  const fdRef = useRef<FullDuplexHandle | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
@@ -87,7 +90,15 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
 
   async function send(text: string): Promise<void> {
     const msg = text.trim()
-    if (!msg || busyRef.current) return
+    if (!msg) return
+    // Typed interrupt: while Kelion is speaking, "stop/stai/oprește" just halts
+    // him (it's a command, not a question — don't send it to Claude).
+    if (isSpeaking() && STOP.test(msg) && msg.split(/\s+/).length <= 2) {
+      stopSpeaking()
+      setInput('')
+      return
+    }
+    if (busyRef.current) return
     setInput('')
     stopSpeaking()
     // Auto-switch the voice/recognizer language from the message text (cheap;
@@ -174,16 +185,48 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     void dispatchHeard(text, confidence)
   }
 
-  // The mic is button-driven: starting on a user click reliably gets the
-  // browser mic permission (auto-start on mount was being blocked silently).
-  function startVoice(): void {
+  // Heard a full utterance from the full-duplex (AEC + Chirp) channel. Chirp
+  // gives an accurate transcript + the spoken language, so we switch language
+  // per turn and send straight to Claude. Barge-in is automatic: send() stops
+  // any current speech, and the AEC lets the mic capture the user over Kelion.
+  function onHeardFull(text: string, lang: string | null): void {
+    const clean = text.trim()
+    if (!clean) return
+    const mapped = lang ? mapDetectedToSupported(lang) : null
+    if (mapped) changeSpeechLang(mapped)
+    armIdle()
+    void sendRef.current(clean)
+  }
+
+  // Start listening. Prefer the professional full-duplex path (browser AEC +
+  // Google Chirp STT) so the user can talk over Kelion with no echo; fall back
+  // to the Web Speech recognizer (half-duplex) where that's unavailable.
+  async function startVoice(): Promise<void> {
+    fdRef.current?.stop()
+    fdRef.current = null
     contRef.current?.stop()
+    contRef.current = null
     setMicError(null)
+
+    const fd = await startFullDuplex(
+      (text, lang) => onHeardFull(text, lang),
+      (error) => {
+        if (error === 'not-allowed') setMicError(t.micBlocked)
+      },
+    )
+    if (fd) {
+      fdRef.current = fd
+      setListening(true)
+      setAwake(true)
+      armIdle()
+      return
+    }
+
+    // Fallback: Web Speech (half-duplex; mic muted while Kelion speaks).
     const h = startContinuous(
       speechLangRef.current,
       (heard, conf) => onHeard(heard, conf),
       (error) => {
-        // Permanent failures (permission blocked, no mic) — tell the user.
         if (error === 'not-allowed' || error === 'service-not-allowed') {
           setMicError(t.micBlocked)
           setListening(false)
@@ -198,11 +241,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     contRef.current = h
     if (h) {
       setListening(true)
-      setAwake(true) // channel ON = active conversation, no wake word needed
+      setAwake(true)
       armIdle()
-      // Detect the spoken language from the audio itself (handles speaking a
-      // language the browser recognizer isn't set to, e.g. Chinese on an EN
-      // browser) and switch hearing + voice to it.
       void detectLanguageFromMic().then((code) => {
         if (code) changeSpeechLang(code)
       })
@@ -211,6 +251,8 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
     }
   }
   function stopVoice(): void {
+    fdRef.current?.stop()
+    fdRef.current = null
     contRef.current?.stop()
     contRef.current = null
     setListening(false)
@@ -219,18 +261,21 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   }
   function toggleVoice(): void {
     if (listening) stopVoice()
-    else startVoice()
+    else void startVoice()
   }
   // Switch the language Kelion hears + speaks; restart the recognizer live and
   // persist the choice per user. No-op if it's already the active language.
   function changeSpeechLang(code: string): void {
     if (code === speechLangRef.current) return
-    speechLangRef.current = code // apply immediately for startVoice below
-    setSpeechLang(code)
+    speechLangRef.current = code
+    setSpeechLang(code) // updates Kelion's voice (TTS) language immediately
     saveLang(code)
-    if (listeningRef.current) {
-      contRef.current?.stop()
-      startVoice()
+    // Only the Web Speech fallback needs a restart to change recognition
+    // language; full-duplex (Chirp) auto-detects, so leave it running.
+    if (listeningRef.current && contRef.current && !fdRef.current) {
+      contRef.current.stop()
+      contRef.current = null
+      void startVoice()
     }
   }
 
@@ -247,9 +292,9 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
       .query({ name: 'microphone' as PermissionName })
       .then((st) => {
         if (cancelled) return
-        if (st.state === 'granted' && !listeningRef.current) startVoice()
+        if (st.state === 'granted' && !listeningRef.current) void startVoice()
         st.onchange = () => {
-          if (st.state === 'granted' && !listeningRef.current) startVoice()
+          if (st.state === 'granted' && !listeningRef.current) void startVoice()
         }
       })
       .catch(() => undefined)
@@ -263,11 +308,23 @@ export default function ChatPanel({ lang }: { readonly lang: Lang }) {
   // Clean up the mic + timers when the panel unmounts.
   useEffect(() => {
     return () => {
+      fdRef.current?.stop()
+      fdRef.current = null
       contRef.current?.stop()
       contRef.current = null
       if (idleRef.current) globalThis.clearTimeout(idleRef.current)
       stopSpeaking()
     }
+  }, [])
+
+  // Anti-echo for the Web Speech fallback only: mute the recognizer while Kelion
+  // speaks (it can't be echo-cancelled). Full-duplex uses real AEC, so it stays
+  // open and the user can talk over Kelion.
+  useEffect(() => {
+    setOnSpeakingChange((speaking) => {
+      if (!fdRef.current) contRef.current?.setMuted(speaking)
+    })
+    return () => setOnSpeakingChange(null)
   }, [])
 
   // Load the user's persisted speech language (localStorage instantly, then the
