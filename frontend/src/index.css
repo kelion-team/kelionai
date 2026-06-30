@@ -234,6 +234,11 @@ body {
 .ghost:hover {
   background: rgba(255, 255, 255, 0.06);
 }
+.ghost.rec-on {
+  color: #ff5d5d;
+  border-color: rgba(255, 93, 93, 0.6);
+  animation: rec 1.2s ease-in-out infinite;
+}
 
 /* ---------- chat (text tab) ---------- */
 .chat {

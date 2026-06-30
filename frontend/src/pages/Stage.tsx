@@ -1,4 +1,4 @@
-import { Suspense, useState, useSyncExternalStore } from 'react'
+import { Suspense, useRef, useState, useSyncExternalStore } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Environment, OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
@@ -8,12 +8,36 @@ import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
 import { getWorkspace, subscribeWorkspace, closeWorkspace, normalizeEmbedUrl } from '../lib/workspace'
+import { startRecording, type RecordingHandle } from '../lib/recorder'
 
 export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const recRef = useRef<RecordingHandle | null>(null)
   const ws = useSyncExternalStore(subscribeWorkspace, getWorkspace)
+
+  // Admin-only: record the screen + Kelion's voice + mic to an MP4 in Downloads,
+  // for promo clips (TikTok / Instagram / Facebook).
+  async function toggleRecording(): Promise<void> {
+    if (recording) {
+      recRef.current?.stop()
+      recRef.current = null
+      return
+    }
+    const handle = await startRecording(
+      () => {
+        setRecording(false)
+        recRef.current = null
+      },
+      () => setRecording(false),
+    )
+    if (handle) {
+      recRef.current = handle
+      setRecording(true)
+    }
+  }
   return (
     <div className="stage">
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
@@ -66,6 +90,16 @@ export default function Stage({ user }: { user: User }) {
           {user.picture && <img src={user.picture} alt="" className="avatar-pic" />}
           <span>{user.name}</span>
           {user.role === 'admin' && <span className="badge">admin</span>}
+          {user.role === 'admin' && (
+            <button
+              type="button"
+              className={`ghost ${recording ? 'rec-on' : ''}`}
+              onClick={() => void toggleRecording()}
+              title={recording ? 'Stop recording' : 'Record a promo clip'}
+            >
+              {recording ? '■ Rec' : '● Rec'}
+            </button>
+          )}
           {user.role === 'admin' && (
             <button type="button" className="ghost" onClick={() => setAdminOpen(true)}>
               Admin
