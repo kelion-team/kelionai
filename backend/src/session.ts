@@ -21,7 +21,21 @@ export interface SessionUser {
 }
 
 export function setSession(reply: FastifyReply, user: SessionUser): void {
-  const token = jwt.sign(user, config.sessionSecret, { expiresIn: '30d' })
+  // `user` may have been read back from a verified JWT (e.g. on token refresh),
+  // so it can carry reserved claims (iat/exp/nbf). jsonwebtoken refuses to sign a
+  // payload that already has `exp` together with `expiresIn`, so sign ONLY the
+  // SessionUser fields — a clean payload regardless of where `user` came from.
+  const payload: SessionUser = {
+    email: user.email,
+    name: user.name,
+    picture: user.picture,
+    role: user.role,
+    locale: user.locale,
+    googleAccessToken: user.googleAccessToken,
+    googleTokenExp: user.googleTokenExp,
+    googleRefreshToken: user.googleRefreshToken,
+  }
+  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: '30d' })
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
