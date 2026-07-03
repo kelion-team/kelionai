@@ -1,0 +1,15 @@
+{
+  "name": "kelionai-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kelionai desktop shell — native window around the live app (always up to date, no store re-upload needed for app changes).",
+  "scripts": {
+    "icon": "node make-icon.mjs && tauri icon src-tauri/icons/source.png -o src-tauri/icons",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "sharp": "^0.33"
+  }
+}

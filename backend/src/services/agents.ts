@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import { getMemories, addMemory, recordCost } from '../db.js'
+import { getMemories, searchMemories, addMemory, recordCost } from '../db.js'
 import { claudeCost } from './cost.js'
+import { withAnthropicFallback } from './anthropic.js'
 
 // Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
 // route's streaming loop (low-latency Opus); this module hosts the Memory agent
@@ -13,13 +14,25 @@ const HAIKU = 'claude-haiku-4-5-20251001'
 // ── Memory agent (recall) ─────────────────────────────────────────────────
 // Pull durable facts about the user into the system prompt so Kelion is
 // continuous across sessions instead of amnesiac every time.
-export async function recallMemories(email: string): Promise<string> {
-  const mems = await getMemories(email, 40)
+// RECENT + RELEVANT: the latest facts, PLUS any older fact matching the words
+// of the current question — so "what's my cat called?" still finds a fact
+// learned hundreds of turns ago (recency alone pushed old facts out).
+export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
+  const recent = await getMemories(email, 40, agent)
+  let mems = recent
+  if (hint.trim()) {
+    const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
+    const relevant = await searchMemories(email, agent, words, 12)
+    const seen = new Set(recent.map((m) => m.content))
+    mems = [...recent, ...relevant.filter((m) => !seen.has(m.content))]
+  }
   if (mems.length === 0) return ''
   const lines = mems.map((m) => `- ${m.content}`).join('\n')
   return (
-    `\n\nWhat you already know about this user from earlier conversations ` +
-    `(use it naturally to stay continuous — do NOT recite it back):\n${lines}`
+    `\n\nWhat you already know about this user from earlier conversations. ` +
+    `Use it naturally to stay continuous, and when the user asks about one of ` +
+    `these facts, answer with it directly — just never volunteer recitations of ` +
+    `this list unprompted:\n${lines}`
   )
 }
 
@@ -30,13 +43,21 @@ export async function learnFromTurn(
   email: string,
   userMsg: string,
   assistantMsg: string,
+  agent = 'kelion',
 ): Promise<void> {
   if (!config.anthropicKey || (!userMsg.trim() && !assistantMsg.trim())) return
+  // An EXPLICIT "remember this" is a guarantee, not a judgement call — store the
+  // user's own words deterministically (upsert refreshes recency if repeated).
+  // Haiku below still distils implicit facts; this path can never be skipped.
+  const explicit = userMsg.match(
+    /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
+  )
+  if (explicit?.[1]) await addMemory(email, explicit[1].trim(), agent)
   try {
-    const existing = await getMemories(email, 80)
+    const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
-    const client = new Anthropic({ apiKey: config.anthropicKey })
-    const res = await client.messages.create({
+    const res = await withAnthropicFallback((c) =>
+      c.messages.create({
       model: HAIKU,
       max_tokens: 400,
       system:
@@ -44,9 +65,14 @@ export async function learnFromTurn(
         'From the latest exchange, extract only DURABLE, reusable facts about the ' +
         'user — identity, stable preferences, relationships, ongoing projects, ' +
         'recurring context. Ignore ephemeral/one-off details and anything already ' +
-        'known. Output ONLY a JSON array of short factual strings about the user ' +
-        '(e.g. ["Lives in Witney, UK","Prefers concise answers"]). Output [] if ' +
-        'there is nothing genuinely new and durable.',
+        "known. Write each fact in the USER'S OWN language (the language they " +
+        'speak in the exchange), so their own words can find it again later. ' +
+        'EXCEPTION to "already known": if the user EXPLICITLY asks to remember ' +
+        'something ("remember this", "reține", "ține minte"), ALWAYS output that ' +
+        'fact even if it is already known — restating refreshes it. Output ONLY a ' +
+        'JSON array of short factual strings about the user ' +
+        '(e.g. ["Locuiește în Witney, UK","Prefers concise answers"]). Output [] ' +
+        'if there is nothing new and nothing explicitly asked to be remembered.',
       messages: [
         {
           role: 'user',
@@ -55,14 +81,15 @@ export async function learnFromTurn(
             `Latest exchange:\nUser: ${userMsg}\nAssistant: ${assistantMsg}`,
         },
       ],
-    })
+      }),
+    )
     // Meter the Memory agent's real cost too (admin accounting completeness).
     void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)
       .join('')
-    for (const fact of parseFacts(text).slice(0, 6)) await addMemory(email, fact)
+    for (const fact of parseFacts(text).slice(0, 6)) await addMemory(email, fact, agent)
   } catch {
     // Memory is best-effort — a failure must never affect the conversation.
   }

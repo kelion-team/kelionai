@@ -60,6 +60,10 @@ const PRIVACY = page(
       location/visual questions. Camera frames are sent per turn, not streamed.</li>
     <li><strong>Usage + cost metering</strong> — technical counts used to operate
       and bill the service.</li>
+    <li><strong>Free-trial visitors</strong> — if you start a free trial without
+      signing in, we record your IP address, approximate country/city and a device
+      fingerprint. We use these only to run the trial, prevent repeat abuse and
+      understand where interest comes from — never to identify you personally.</li>
   </ul>
 
   <h2>How we use it</h2>
@@ -77,7 +81,12 @@ const PRIVACY = page(
   requirements. We use Google user data only to provide and improve user-facing
   features you request; we do not sell it, use it for advertising, or allow humans
   to read it except where required for security, to comply with law, or with your
-  consent. AI providers process the data solely to generate your response.</p>
+  consent. AI providers process the data solely to generate your response.
+  Data obtained through <strong>restricted scopes</strong> (Gmail and Drive) is
+  used only to provide the features you invoke and is <strong>never</strong> used
+  to train, develop or improve generalized or non-personalized AI/ML models, nor
+  transferred to any third party except the service providers strictly needed to
+  operate the feature at your request.</p>
 
   <h2>Sub-processors</h2>
   <ul>

@@ -105,10 +105,12 @@ export default function AvatarModel() {
     // Lip-sync — formant-based Oculus visemes (aa/E/I/O/U/SS/FF) + jaw. Snappy
     // attack on an onset, faster release so the mouth shuts cleanly at the end
     // of a word (the "guard at start and end"); each channel smoothed.
+    // Gentler smoothing (was 0.55/0.65) so the mouth glides between shapes
+    // instead of snapping every frame — the snappiness read as "flapping".
     const m = getMouthState()
     const cur = mouth.current
     const sm = (now: number, next: number): number =>
-      now + (next - now) * (next > now ? 0.55 : 0.65)
+      now + (next - now) * (next > now ? 0.32 : 0.42)
     cur.jaw = sm(cur.jaw, m.jaw)
     for (const k of VISEME_KEYS) cur[k] = sm(cur[k], m[k])
 

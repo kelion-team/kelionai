@@ -4,6 +4,8 @@
 // into one track, and saves an MP4 (the format those platforms accept) to the
 // Downloads folder. Falls back to WebM only if the browser can't record MP4.
 
+import { setVoiceTap } from './voice'
+
 export interface RecordingHandle {
   stop(): void
 }
@@ -24,6 +26,7 @@ function pickMime(): string {
 export async function startRecording(
   onStop: () => void,
   onError: (reason: string) => void,
+  baseName?: string,
 ): Promise<RecordingHandle | null> {
   if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === 'undefined') {
     onError('unsupported')
@@ -56,11 +59,22 @@ export async function startRecording(
   let ctx: AudioContext | null = null
   let mixedTrack: MediaStreamTrack | null = null
   const displayAudio = display.getAudioTracks()
-  if (AC && (displayAudio.length > 0 || mic)) {
+  if (AC) {
+    // The mixer ALWAYS exists: tab/system audio (if shared) + the mic + a direct
+    // tap of Kelion's own voice (see setVoiceTap below) — so the clip has his
+    // voice even when "share tab audio" wasn't ticked in the picker.
     ctx = new AC()
     const dest = ctx.createMediaStreamDestination()
     if (displayAudio.length > 0) ctx.createMediaStreamSource(new MediaStream(displayAudio)).connect(dest)
     if (mic) ctx.createMediaStreamSource(mic).connect(dest)
+    const mixCtx = ctx
+    setVoiceTap((s) => {
+      try {
+        mixCtx.createMediaStreamSource(s).connect(dest)
+      } catch {
+        /* a failed tap must never break the recording */
+      }
+    })
     mixedTrack = dest.stream.getAudioTracks()[0] ?? null
   }
 
@@ -71,12 +85,24 @@ export async function startRecording(
 
   const mime = pickMime()
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+  // Browser's own "Stop sharing" bar ends the capture track — save the clip
+  // then too, never lose a take.
+  const vid = display.getVideoTracks()[0]
+  if (vid)
+    vid.onended = () => {
+      try {
+        if (rec.state !== 'inactive') rec.stop()
+      } catch {
+        /* already stopped */
+      }
+    }
   const chunks: Blob[] = []
   rec.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data)
   }
 
   const cleanup = (): void => {
+    setVoiceTap(null) // stop feeding TTS clips into the (now gone) mixer
     display.getTracks().forEach((t) => t.stop())
     mic?.getTracks().forEach((t) => t.stop())
     void ctx?.close()
@@ -92,7 +118,9 @@ export async function startRecording(
       .slice(0, 15)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `kelion-${stamp}.${ext}`
+    // Suggestive name when the promo pipeline provided one (subject + length +
+    // date — ready for TikTok/Instagram uploads); timestamp fallback otherwise.
+    a.download = `${baseName ?? `kelion-${stamp}`}.${ext}`
     document.body.appendChild(a)
     a.click()
     a.remove()

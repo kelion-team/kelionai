@@ -11,6 +11,7 @@ interface ModelPrice {
 }
 
 const PRICES: Record<string, ModelPrice> = {
+  'claude-fable-5': { input: 10 / 1e6, output: 50 / 1e6 },
   'claude-opus-4-8': { input: 5 / 1e6, output: 25 / 1e6 },
   'claude-haiku-4-5': { input: 1 / 1e6, output: 5 / 1e6 },
   'gemini-2.5-flash': { input: 0.3 / 1e6, output: 2.5 / 1e6 },
@@ -39,3 +40,6 @@ export const ASR_USD_PER_CALL = 0.0015
 
 // Serper.dev web/YouTube search — estimate per query (paid credits).
 export const SERPER_USD_PER_CALL = 0.001
+
+// Gemini image generation (gemini-2.5-flash-image) — approx per image.
+export const IMAGE_USD_PER_CALL = 0.04

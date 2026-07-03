@@ -1,0 +1,11 @@
+Microsoft Store — Kelionai (Product ID 9NBW313FHN44)
+Store URL: https://apps.microsoft.com/detail/9NBW313FHN44
+
+Values for the MSIX package manifest (PWABuilder):
+  Package/Identity/Name            = AdrianEnciulescu.KelionaiKelionai
+  Package/Identity/Publisher       = CN=6FE97675-4B8B-48C2-86CE-95E4A4455CF4
+  Package/Properties/PublisherDisplayName = Adrian Enciulescu
+  Package Family Name (PFN)        = AdrianEnciulescu.KelionaiKelionai_rhjkh4wr2px36
+
+Display name shown to users: Kelionai
+(The internal identity name is doubled but never shown to users.)

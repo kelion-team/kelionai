@@ -10,6 +10,10 @@
 
 export interface FullDuplexHandle {
   stop(): void
+  // Pause/resume capture. While muted the mic records NOTHING and drops any
+  // utterance in progress — so Kelion's own voice (or noise) during his turn can
+  // never be transcribed into a second, parallel turn.
+  setMuted(muted: boolean): void
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -76,6 +80,8 @@ export async function startFullDuplex(
   let silenceMs = 0
   let raf = 0
   let stopped = false
+  let muted = false
+  let discard = false // when true, the utterance being closed is thrown away unsent
 
   const sendUtterance = async (blob: Blob): Promise<void> => {
     try {
@@ -97,6 +103,7 @@ export async function startFullDuplex(
 
   const startUtterance = (): void => {
     chunks = []
+    discard = false
     try {
       recorder = new MediaRecorder(stream)
     } catch {
@@ -109,6 +116,8 @@ export async function startFullDuplex(
       if (e.data.size > 0) chunks.push(e.data)
     }
     rec.onstop = () => {
+      // Dropped on purpose (muted mid-utterance) — never transcribe it.
+      if (discard) return
       const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' })
       if (voicedAtStop() >= MIN_VOICED_MS && blob.size > 2400) void sendUtterance(blob)
     }
@@ -126,6 +135,16 @@ export async function startFullDuplex(
 
   const tick = (): void => {
     if (stopped) return
+    // Muted (Kelion's turn): capture nothing; abandon any utterance in progress.
+    if (muted) {
+      if (speaking) {
+        speaking = false
+        discard = true
+        endUtterance()
+      }
+      raf = requestAnimationFrame(tick)
+      return
+    }
     analyser.getByteTimeDomainData(data)
     let sum = 0
     for (let i = 0; i < data.length; i++) {
@@ -168,6 +187,9 @@ export async function startFullDuplex(
       recorder = null
       stream.getTracks().forEach((t) => t.stop())
       void ctx.close()
+    },
+    setMuted(m: boolean) {
+      muted = m
     },
   }
 }

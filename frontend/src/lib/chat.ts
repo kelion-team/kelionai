@@ -10,8 +10,43 @@ export interface Coords {
 
 // Control commands Kelion can push on the stream (stripped from the visible
 // text; never shown or spoken). Currently: drive the monitor surface.
+// A structured "skill card" Kelion renders on the monitor (emails, calendar,
+// tasks, Drive files, contacts, web results). One generic shape for all types.
+export interface CardItem {
+  primary: string
+  secondary?: string
+  meta?: string
+  url?: string
+}
+export interface SkillCard {
+  type: string
+  title: string
+  items: CardItem[]
+}
+
 export interface ChatControl {
   monitor?: { url: string; title: string }
+  // A generated image to show inline in the chat (in addition to the monitor).
+  image?: { url: string }
+  // A structured skill result to render as a card on the monitor.
+  card?: SkillCard
+  // A readable text deliverable from an agent (email, translation, findings),
+  // shown as a copyable panel on the monitor.
+  doc?: { title: string; text: string }
+  // Out of credit — the client should open the top-up (buy credit) flow.
+  paywall?: boolean
+  // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
+  // when recording starts the script is spoken (voice only, no text on screen)
+  // while the scenes appear on the monitor at their times.
+  promo?: {
+    subject: string
+    duration: number
+    script: string
+    // The script's own language (BCP-47/2-letter) — the clip is narrated in it
+    // so the voice always matches the text (a mismatch is what silenced it).
+    lang?: string | null
+    scenes?: { at: number; title: string; url?: string; close?: boolean }[]
+  }
 }
 
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
@@ -21,18 +56,44 @@ const CTRL = String.fromCharCode(31)
 // `image` (base64 JPEG data URL) is the latest camera frame for Claude's vision.
 // `coords` is the live device GPS so location-dependent skills work.
 // `onControl` receives any control frames Kelion emits (e.g. open the monitor).
+// A snapshot of the monitor tabs currently open, sent with each turn so Kelion
+// knows what it's already showing (and which surface is active) — it works inside
+// whichever task is active and swaps content instead of re-opening.
+export interface ScreenTask {
+  kind: string
+  title: string
+  active: boolean
+}
+
 export async function* streamChat(
   messages: ChatMessage[],
   image?: string,
   coords?: Coords,
   onControl?: (c: ChatControl) => void,
+  screen?: ScreenTask[],
 ): AsyncGenerator<string> {
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ messages, image, coords }),
-  })
+  let res: Response
+  try {
+    res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        messages,
+        image,
+        coords,
+        screen,
+        // Kelion's built-in sense of "now": the client's real local time + zone,
+        // sent every turn so he always knows today's date and the current time.
+        now: new Date().toISOString(),
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    })
+  } catch {
+    // The request never reached the server — no connection (e.g. a tunnel while
+    // driving). Signal 'offline' so the UI says so clearly (and speaks it).
+    throw new Error('offline')
+  }
 
   if (!res.ok || !res.body) {
     let code = 'error'
@@ -46,9 +107,16 @@ export async function* streamChat(
     throw new Error(code)
   }
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
+  let reader = res.body.getReader()
+  let decoder = new TextDecoder()
   let buf = ''
+  // Resumable stream: the server sends a {turn} frame first; we remember it and
+  // count every raw character received, so if the mobile link drops mid-reply we
+  // reconnect to /api/chat/resume and continue from exactly where we left off —
+  // the "buffer + resume" behaviour of internet radio, no words lost.
+  let turnId: string | null = null
+  let rawReceived = 0
+  let resumeTries = 0
 
   // Split the buffer into visible text (yielded) and control frames (parsed),
   // holding back any partial frame until its closing separator arrives.
@@ -70,7 +138,9 @@ export async function* streamChat(
       }
       const json = buf.slice(i + 1, j)
       try {
-        onControl?.(JSON.parse(json) as ChatControl)
+        const frame = JSON.parse(json) as ChatControl & { turn?: string }
+        if (typeof frame.turn === 'string') turnId = frame.turn // internal — not a control
+        else onControl?.(frame)
       } catch {
         /* malformed control frame — ignore */
       }
@@ -79,12 +149,42 @@ export async function* streamChat(
     return out
   }
 
+  // Reconnect to the resume endpoint after a drop; returns a fresh reader that
+  // continues the SAME reply from `rawReceived`, or null if it can't.
+  async function resume(): Promise<boolean> {
+    if (!turnId || resumeTries >= 6) return false
+    resumeTries++
+    await new Promise((r) => setTimeout(r, Math.min(4000, 400 * resumeTries)))
+    try {
+      const rr = await fetch(
+        `/api/chat/resume?turn=${encodeURIComponent(turnId)}&from=${rawReceived}`,
+        { credentials: 'include' },
+      )
+      if (!rr.ok || !rr.body) return false
+      reader = rr.body.getReader()
+      decoder = new TextDecoder() // fresh — the dropped one may hold a partial byte
+      return true
+    } catch {
+      return false
+    }
+  }
+
   for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const text = drain(false)
-    if (text) yield text
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch {
+      // The stream dropped mid-reply (signal lost). Try to resume where we left
+      // off; only if that fails do we surface 'offline' (partial answer stays).
+      if (await resume()) continue
+      throw new Error('offline')
+    }
+    if (chunk.done) break
+    const text = decoder.decode(chunk.value, { stream: true })
+    rawReceived += text.length
+    buf += text
+    const out = drain(false)
+    if (out) yield out
   }
   buf += decoder.decode()
   const tail = drain(true)

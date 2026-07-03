@@ -14,6 +14,12 @@ import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
 import { correctRoutes } from './routes/correct.js'
 import { legalRoutes } from './routes/legal.js'
+import { imageRoutes } from './routes/image.js'
+import { billingRoutes } from './routes/billing.js'
+import { demoRoutes } from './routes/demo.js'
+import { mapviewRoutes } from './routes/mapview.js'
+import { ingestRoutes } from './routes/ingest.js'
+import { browserRoutes } from './routes/browser.js'
 import { initDb } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -27,6 +33,30 @@ await app.register(cors, {
   credentials: true,
 })
 
+// Keep the raw JSON body around (Stripe webhook signature verification needs the
+// exact bytes) while still parsing JSON for every other route.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+  ;(req as unknown as { rawBody?: string }).rawBody = body as string
+  try {
+    done(null, body ? JSON.parse(body as string) : {})
+  } catch (err) {
+    done(err as Error, undefined)
+  }
+})
+
+// Security headers on every response: force HTTPS (HSTS), block clickjacking of
+// our pages (the login screen especially), stop MIME sniffing, and trim the
+// referrer. CSP is intentionally left off for now — the app uses WebGL, camera/
+// mic media and embeds arbitrary https pages in the monitor iframe, which a
+// strict CSP would break; add it later in report-only mode first.
+app.addHook('onRequest', async (_req, reply) => {
+  reply.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload')
+  reply.header('X-Content-Type-Options', 'nosniff')
+  reply.header('X-Frame-Options', 'SAMEORIGIN')
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)')
+})
+
 // Health — must return exactly 200 (200-only rule + Railway healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
 
@@ -38,6 +68,12 @@ await app.register(prefsRoutes)
 await app.register(asrRoutes)
 await app.register(correctRoutes)
 await app.register(legalRoutes)
+await app.register(imageRoutes)
+await app.register(billingRoutes)
+await app.register(demoRoutes)
+await app.register(mapviewRoutes)
+await app.register(ingestRoutes)
+await app.register(browserRoutes)
 
 // Create tables if a database is configured (non-fatal if it isn't / is down).
 try {
@@ -50,6 +86,17 @@ try {
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
 if (config.isProd && fs.existsSync(distPath)) {
   await app.register(fastifyStatic, { root: distPath, prefix: '/' })
+  // App downloads live at /dl/* with NO-STORE: installers and the self-update
+  // manifest must always be the LATEST version — never a CDN-cached one (the
+  // /downloads path got frozen by Cloudflare's edge cache; /dl replaces it).
+  await app.register(fastifyStatic, {
+    root: path.join(distPath, 'downloads'),
+    prefix: '/dl/',
+    decorateReply: false,
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-store')
+    },
+  })
   // SPA fallback — any non-API route returns index.html
   app.setNotFoundHandler((req, reply) => {
     const url = req.raw.url ?? ''

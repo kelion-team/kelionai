@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
-import Login from './pages/Login'
+import Landing from './pages/Landing'
 import Stage from './pages/Stage'
+import { watchForUpdate } from './lib/updateCheck'
+import { strings, resolveLang, browserLang } from './lib/i18n'
 
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
+  const [updateReady, setUpdateReady] = useState(false)
 
   const error = new URLSearchParams(window.location.search).get('error')
 
@@ -22,6 +25,9 @@ export default function App() {
     }
   }, [error])
 
+  // Notify already-installed users (any platform) when a new version ships.
+  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+
   if (loading) {
     return (
       <div className="boot">
@@ -31,5 +37,20 @@ export default function App() {
     )
   }
 
-  return user ? <Stage user={user} /> : <Login error={error} />
+  // Language for the banner: the signed-in user's, else the browser's.
+  const t = strings(user ? resolveLang(user.locale) : browserLang())
+
+  return (
+    <>
+      {updateReady && (
+        <div className="update-bar" role="status">
+          <span>{t.updateReady}</span>
+          <button type="button" onClick={() => window.location.reload()}>
+            {t.updateNow}
+          </button>
+        </div>
+      )}
+      {user ? <Stage user={user} /> : <Landing error={error} />}
+    </>
+  )
 }

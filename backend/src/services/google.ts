@@ -59,15 +59,19 @@ export const googleTools: Anthropic.Tool[] = [
   {
     name: 'send_email',
     description:
-      "Send an email from the user's Gmail account. Confirm the recipient and content with the user before sending if there is any doubt.",
+      "Send an email from the user's Gmail account. Always include a clear subject. Confirm the recipient and content with the user before sending if there is any doubt.",
     input_schema: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Recipient email address.' },
-        subject: { type: 'string', description: 'Email subject line.' },
-        body: { type: 'string', description: 'Email body (plain text).' },
+        subject: { type: 'string', description: 'Email subject line (concise, relevant).' },
+        body: {
+          type: 'string',
+          description:
+            'A properly structured, business-appropriate email — NOT one unformatted blob and NOT written like speech. Use real line breaks (\\n): a greeting line (e.g. "Bună ziua," / "Dear ..."), then the message in clear short paragraphs separated by a blank line, then a courteous closing (e.g. "Cu stimă," / "Kind regards,") and the sender\'s name on the next line. Match the user\'s language.',
+        },
       },
-      required: ['to', 'body'],
+      required: ['to', 'subject', 'body'],
     },
   },
   {
@@ -356,24 +360,95 @@ interface SerperResult {
   snippet?: string
 }
 
+// Live web search via Gemini's built-in Google Search grounding. Uses the
+// GEMINI_API_KEY (no Serper key needed). Returns a grounded answer plus the
+// real source pages Google used. Returns null on any failure so callers can
+// fall back.
+interface GeminiGroundResult {
+  text: string
+  sources: { title: string; link: string }[]
+}
+
+async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
+  if (!config.geminiKey) return null
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+      }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  const j = (await res.json()) as {
+    candidates?: {
+      content?: { parts?: { text?: string }[] }
+      groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
+    }[]
+  }
+  const cand = j.candidates?.[0]
+  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  const seen = new Set<string>()
+  const sources: { title: string; link: string }[] = []
+  for (const c of cand?.groundingMetadata?.groundingChunks ?? []) {
+    const link = c.web?.uri ?? ''
+    if (!link || seen.has(link)) continue
+    seen.add(link)
+    sources.push({ title: c.web?.title ?? '', link })
+  }
+  if (!text && sources.length === 0) return null
+  return { text, sources }
+}
+
 async function webSearch(query: string, max: number): Promise<string> {
-  if (!config.serperKey) return JSON.stringify({ error: 'search_not_configured' })
   if (!query) return JSON.stringify({ error: 'empty_query' })
-  const res = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: query }),
-  })
-  if (!res.ok) return JSON.stringify({ error: `search_http_${res.status}` })
-  const j = (await res.json()) as { organic?: SerperResult[]; answerBox?: { answer?: string; snippet?: string } }
   const n = Math.min(Math.max(max, 1), 10)
-  const results = (j.organic ?? []).slice(0, n).map((r) => ({
-    title: r.title ?? '',
-    link: r.link ?? '',
-    snippet: r.snippet ?? '',
-  }))
-  const answer = j.answerBox?.answer ?? j.answerBox?.snippet ?? ''
-  return JSON.stringify({ answer, results })
+
+  // Primary: Serper.dev (the paid plan) when a key is set and accepted.
+  if (config.serperKey) {
+    try {
+      const res = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query }),
+      })
+      if (res.ok) {
+        const j = (await res.json()) as {
+          organic?: SerperResult[]
+          answerBox?: { answer?: string; snippet?: string }
+        }
+        const results = (j.organic ?? []).slice(0, n).map((r) => ({
+          title: r.title ?? '',
+          link: r.link ?? '',
+          snippet: r.snippet ?? '',
+        }))
+        return JSON.stringify({ answer: j.answerBox?.answer ?? j.answerBox?.snippet ?? '', results, source: 'serper' })
+      }
+      // Non-OK (e.g. 403 bad key) → fall through to Gemini so search still works.
+    } catch {
+      /* network error → fall through to Gemini */
+    }
+  }
+
+  // Fallback: Gemini Google Search grounding (uses the Gemini key). Guarantees
+  // search keeps working even if the Serper key is missing or rejected.
+  const g = await geminiGroundedSearch(query)
+  if (g) {
+    return JSON.stringify({
+      answer: g.text,
+      results: g.sources.slice(0, n).map((s) => ({ title: s.title, link: s.link, snippet: '' })),
+      source: 'google',
+    })
+  }
+
+  return JSON.stringify({ error: 'search_unavailable' })
 }
 
 const WEATHER_CODES: Record<number, string> = {
@@ -393,19 +468,37 @@ async function weather(location: string, lat: number, lon: number): Promise<stri
   let label = 'your location'
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     if (!location) return JSON.stringify({ error: 'empty_location' })
-    const geoUrl = new URL('https://geocoding-api.open-meteo.com/v1/search')
-    geoUrl.searchParams.set('name', location)
-    geoUrl.searchParams.set('count', '1')
-    const geoRes = await fetchRetry(geoUrl)
-    if (!geoRes) return JSON.stringify({ error: 'geo_unavailable' })
-    const geo = (await geoRes.json()) as {
-      results?: { latitude: number; longitude: number; name: string; country?: string }[]
+    // Open-Meteo's geocoder wants a bare place name, but users say "Witney,
+    // Anglia" / "Paris, Frankreich" — country in THEIR language, with a comma.
+    // Resolve in three steps so no phrasing ever breaks the weather: the full
+    // string → the part before the comma → free-form Nominatim (any language).
+    const tryOpenMeteo = async (
+      name: string,
+    ): Promise<{ latitude: number; longitude: number; name: string; country?: string } | null> => {
+      const geoUrl = new URL('https://geocoding-api.open-meteo.com/v1/search')
+      geoUrl.searchParams.set('name', name)
+      geoUrl.searchParams.set('count', '1')
+      const geoRes = await fetchRetry(geoUrl)
+      if (!geoRes) return null
+      const geo = (await geoRes.json()) as {
+        results?: { latitude: number; longitude: number; name: string; country?: string }[]
+      }
+      return geo.results?.[0] ?? null
     }
-    const place = geo.results?.[0]
-    if (!place) return JSON.stringify({ error: 'location_not_found' })
-    latitude = place.latitude
-    longitude = place.longitude
-    label = `${place.name}${place.country ? ', ' + place.country : ''}`
+    let place = await tryOpenMeteo(location)
+    const bare = location.split(',')[0]?.trim() ?? ''
+    if (!place && bare && bare !== location) place = await tryOpenMeteo(bare)
+    if (place) {
+      latitude = place.latitude
+      longitude = place.longitude
+      label = `${place.name}${place.country ? ', ' + place.country : ''}`
+    } else {
+      const nom = await geocodeOne(location)
+      if (!nom?.lat || !nom?.lon) return JSON.stringify({ error: 'location_not_found' })
+      latitude = Number(nom.lat)
+      longitude = Number(nom.lon)
+      label = location
+    }
   }
   const wUrl = new URL('https://api.open-meteo.com/v1/forecast')
   wUrl.searchParams.set('latitude', String(latitude))
@@ -428,12 +521,23 @@ async function weather(location: string, lat: number, lon: number): Promise<stri
     min_c: w.daily?.temperature_2m_min?.[i],
     condition: code(w.daily?.weather_code?.[i] ?? -1),
   }))
+  // A live, embeddable weather map centred on the REAL coordinates (Windy's free
+  // public embed — no API key, iframe-friendly). chat.ts shows this on the
+  // monitor automatically, so Kelion never has to guess a weather website URL.
+  const la = Math.round(latitude * 10000) / 10000
+  const lo = Math.round(longitude * 10000) / 10000
+  const screen_url =
+    `https://embed.windy.com/embed2.html?lat=${la}&lon=${lo}&detailLat=${la}&detailLon=${lo}` +
+    `&zoom=8&level=surface&overlay=temp&marker=true&type=map&location=coordinates&metricTemp=%C2%B0C`
   return JSON.stringify({
     location: label,
+    lat: la,
+    lon: lo,
     current: c
       ? { temp_c: c.temperature_2m, condition: code(c.weather_code), wind_kmh: c.wind_speed_10m, humidity_pct: c.relative_humidity_2m }
       : null,
     forecast,
+    screen_url,
   })
 }
 
@@ -592,40 +696,170 @@ async function mapsSearch(query: string, max: number): Promise<string> {
   return JSON.stringify({ places })
 }
 
+// Build a ready-to-embed monitor URL for a promo-clip scene (map or weather) —
+// the exact same surfaces the live skills use, resolved server-side so a clip
+// scene can never 404 from a guessed URL.
+export async function promoSceneUrl(kind: 'map' | 'weather', query: string): Promise<string | null> {
+  const p = await geocodeOne(query)
+  if (!p?.lat || !p?.lon) return null
+  const lat = Number(p.lat)
+  const lon = Number(p.lon)
+  if (kind === 'weather') {
+    return (
+      `https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&detailLat=${lat}&detailLon=${lon}` +
+      `&zoom=8&level=surface&overlay=temp&marker=true&type=map&location=coordinates&metricTemp=%C2%B0C`
+    )
+  }
+  const d = 0.02
+  const bbox = `${lon - d},${lat - d},${lon + d},${lat + d}`
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lon}`
+}
+
+// OSRM servers, tried in order: the classic demo (rate-limited under load — the
+// cause of intermittent "service down") then the FOSSGIS production instance.
+// Same API on both. Exported for the /api/route map page too.
+export const OSRM_BASES = [
+  'https://router.project-osrm.org/route/v1/driving',
+  'https://routing.openstreetmap.de/routed-car/route/v1/driving',
+]
+
+interface OsrmStep {
+  distance?: number
+  name?: string
+  maneuver?: { type?: string; modifier?: string }
+}
+
+export async function osrmRoute(
+  fromLon: number,
+  fromLat: number,
+  toLon: number,
+  toLat: number,
+  params: string,
+): Promise<Record<string, unknown> | null> {
+  for (const base of OSRM_BASES) {
+    try {
+      const ctrl = new AbortController()
+      const to = setTimeout(() => ctrl.abort(), 8000)
+      const res = await fetch(`${base}/${fromLon},${fromLat};${toLon},${toLat}?${params}`, {
+        signal: ctrl.signal,
+      })
+      clearTimeout(to)
+      if (!res.ok) continue // rate-limited/down → next server
+      const j = (await res.json()) as Record<string, unknown>
+      if ((j as { routes?: unknown[] }).routes?.length) return j
+    } catch {
+      /* timeout/network — next server */
+    }
+  }
+  return null
+}
+
+// One OSRM maneuver → a short human instruction Kelion can speak.
+function stepText(s: OsrmStep): string {
+  const t = s.maneuver?.type ?? ''
+  const mod = s.maneuver?.modifier ?? ''
+  const road = s.name ? ` onto ${s.name}` : ''
+  const dist = s.distance && s.distance > 0 ? ` (${s.distance >= 950 ? `${(s.distance / 1000).toFixed(1)} km` : `${Math.round(s.distance / 10) * 10} m`})` : ''
+  if (t === 'depart') return `Start${road}${dist}`
+  if (t === 'arrive') return 'Arrive at destination'
+  if (t === 'roundabout' || t === 'rotary') return `At the roundabout take the exit${road}${dist}`
+  if (t === 'merge') return `Merge ${mod}${road}${dist}`
+  if (t === 'on ramp') return `Take the ramp ${mod}${road}${dist}`
+  if (t === 'off ramp') return `Take the exit ${mod}${road}${dist}`
+  if (t === 'fork') return `Keep ${mod} at the fork${road}${dist}`
+  if (mod) return `${t === 'continue' ? 'Continue' : 'Turn'} ${mod}${road}${dist}`
+  return `Continue${road}${dist}`
+}
+
 async function mapsDirections(origin: string, destination: string): Promise<string> {
   if (!origin || !destination) return JSON.stringify({ error: 'missing_origin_or_destination' })
   const [a, b] = await Promise.all([geocodeOne(origin), geocodeOne(destination)])
   if (!a?.lat || !b?.lat) return JSON.stringify({ error: 'could_not_geocode' })
-  const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`
-  const res = await fetch(url)
-  if (!res.ok) return JSON.stringify({ error: `directions_http_${res.status}` })
-  const j = (await res.json()) as { routes?: { distance?: number; duration?: number }[] }
-  const r = j.routes?.[0]
-  if (!r) return JSON.stringify({ error: 'no_route' })
+  const [aLat, aLon, bLat, bLon] = [Number(a.lat), Number(a.lon), Number(b.lat), Number(b.lon)]
+  // steps=true → REAL turn-by-turn instructions, not just distance/duration.
+  const j = (await osrmRoute(aLon, aLat, bLon, bLat, 'overview=false&steps=true')) as {
+    routes?: { distance?: number; duration?: number; legs?: { steps?: OsrmStep[] }[] }[]
+  } | null
+  const r = j?.routes?.[0]
+  if (!r) return JSON.stringify({ error: 'routing_unavailable_all_servers' })
+  const steps = (r.legs?.[0]?.steps ?? []).map(stepText)
+  // Long routes: keep the first 25 maneuvers (the start matters when driving).
+  const directions = steps.length > 25 ? [...steps.slice(0, 25), `… +${steps.length - 25} more steps`] : steps
   return JSON.stringify({
     origin: a.display_name ?? origin,
     destination: b.display_name ?? destination,
     distance_km: Math.round((r.distance ?? 0) / 100) / 10,
     duration_min: Math.round((r.duration ?? 0) / 60),
+    directions,
+    // Our own live Leaflet/OSRM map — it draws the route AND follows the car's
+    // GPS (a blue dot + remaining distance), so it's a real driving copilot, not
+    // the static Google Embed preview.
+    screen_url: `/api/route?from=${aLat},${aLon}&to=${bLat},${bLon}`,
   })
 }
 
 async function youtubeSearch(query: string, max: number): Promise<string> {
-  if (!config.serperKey) return JSON.stringify({ error: 'search_not_configured' })
   if (!query) return JSON.stringify({ error: 'empty_query' })
-  const res = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: `${query} site:youtube.com` }),
-  })
-  if (!res.ok) return JSON.stringify({ error: `youtube_http_${res.status}` })
-  const j = (await res.json()) as { organic?: SerperResult[] }
   const n = Math.min(Math.max(max, 1), 10)
-  const videos = (j.organic ?? [])
-    .filter((r) => (r.link ?? '').includes('youtube.com/watch') || (r.link ?? '').includes('youtu.be/'))
-    .slice(0, n)
-    .map((r) => ({ title: r.title ?? '', link: r.link ?? '' }))
-  return JSON.stringify({ videos })
+
+  // Primary: Serper.dev (the paid plan) when a key is set and accepted.
+  if (config.serperKey) {
+    try {
+      const res = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: `${query} site:youtube.com` }),
+      })
+      if (res.ok) {
+        const j = (await res.json()) as { organic?: SerperResult[] }
+        const videos = (j.organic ?? [])
+          .filter((r) => (r.link ?? '').includes('youtube.com/watch') || (r.link ?? '').includes('youtu.be/'))
+          .slice(0, n)
+          .map((r) => ({ title: r.title ?? '', link: r.link ?? '' }))
+        if (videos.length > 0) return JSON.stringify({ videos })
+      }
+    } catch {
+      /* fall through to Gemini */
+    }
+  }
+
+  // Fallback: Gemini grounded search, asked for real YouTube watch links.
+  const g = await geminiGroundedSearch(
+    `Find the best YouTube videos for: "${query}". ` +
+      `Reply ONLY as a list, one per line, in the form: Title — https://www.youtube.com/watch?v=ID ` +
+      `using real, currently-available videos.`,
+  )
+  if (g) {
+    const videos: { title: string; link: string }[] = []
+    const seen = new Set<string>()
+    const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
+    // Prefer "Title — URL" / "Title - URL" / "[Title](URL)" so we keep titles.
+    const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = labelled.exec(g.text)) !== null) {
+      const title = (m[1] ?? m[3] ?? '').trim()
+      let link = (m[2] ?? m[4] ?? '').trim()
+      if (!link.startsWith('http')) link = `https://${link}`
+      if (seen.has(link)) continue
+      seen.add(link)
+      videos.push({ title, link })
+    }
+    // Catch any bare URLs we missed.
+    const bare = new RegExp(ytUrl, 'g')
+    while ((m = bare.exec(g.text)) !== null) {
+      let link = m[0]
+      if (!link.startsWith('http')) link = `https://${link}`
+      if (seen.has(link)) continue
+      seen.add(link)
+      videos.push({ title: '', link })
+    }
+    if (videos.length > 0) return JSON.stringify({ videos: videos.slice(0, n) })
+  }
+
+  // Nothing playable found. Signal not_found so Kelion says so in his own voice —
+  // NOT a YouTube results-page URL, which refuses to embed and breaks playback
+  // (that was the "voice fails when the song isn't found" case).
+  return JSON.stringify({ videos: [], not_found: true })
 }
 
 async function translateText(text: string, target: string): Promise<string> {
@@ -657,16 +891,37 @@ async function translateText(text: string, target: string): Promise<string> {
 // is unavailable.
 async function wikipediaLookup(query: string): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
+  const norm = (s: string): string => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const qWords = new Set(norm(query).split(/[^a-z0-9]+/).filter((w) => w.length > 2))
   try {
-    const s = new URL('https://en.wikipedia.org/w/rest.php/v1/search/page')
-    s.searchParams.set('q', query)
-    s.searchParams.set('limit', '1')
-    const sr = await fetch(s, { headers: { 'User-Agent': OSM_UA } })
-    if (!sr.ok) return JSON.stringify({ error: `wiki_http_${sr.status}` })
-    const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
-    const page = sj.pages?.[0]
-    if (!page?.key) return JSON.stringify({ error: 'not_found' })
-    const u = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page.key)}`
+    // Search BOTH the Romanian and English Wikipedia (the app is Romanian-primary,
+    // so English-only search returned wrong pages for terms like "Turnul Eiffel").
+    // Gather candidates from both editions and pick the title that best overlaps
+    // the query (accent-insensitive); fetch that page's summary from its edition.
+    const editions = ['ro', 'en']
+    const candidates: { ed: string; key: string; title: string }[] = []
+    for (const ed of editions) {
+      const s = new URL(`https://${ed}.wikipedia.org/w/rest.php/v1/search/page`)
+      s.searchParams.set('q', query)
+      s.searchParams.set('limit', '3')
+      const sr = await fetch(s, { headers: { 'User-Agent': OSM_UA } })
+      if (!sr.ok) continue
+      const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
+      for (const p of sj.pages ?? []) if (p.key) candidates.push({ ed, key: p.key, title: p.title ?? '' })
+    }
+    if (candidates.length === 0) return JSON.stringify({ error: 'not_found' })
+    let best = candidates[0]
+    let bestScore = -1
+    for (const c of candidates) {
+      const score = norm(c.title)
+        .split(/[^a-z0-9]+/)
+        .filter((w) => qWords.has(w)).length
+      if (score > bestScore) {
+        bestScore = score
+        best = c
+      }
+    }
+    const u = `https://${best.ed}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(best.key)}`
     const r = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
     if (!r.ok) return JSON.stringify({ error: `wiki_http_${r.status}` })
     const j = (await r.json()) as {
@@ -675,7 +930,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       content_urls?: { desktop?: { page?: string } }
     }
     return JSON.stringify({
-      title: j.title ?? page.title ?? query,
+      title: j.title ?? best.title ?? query,
       summary: j.extract ?? '',
       url: j.content_urls?.desktop?.page ?? '',
     })

@@ -2,8 +2,11 @@ export interface User {
   email: string
   name: string
   picture: string
-  role: 'admin' | 'customer'
+  role: 'admin' | 'customer' | 'demo'
   locale: string
+  // Free-trial sessions only: epoch-ms when the 3 minutes end (drives the
+  // countdown and the conversion overlay).
+  demoUntil?: number
 }
 
 export interface MeResponse {
@@ -23,6 +26,27 @@ export async function fetchMe(): Promise<MeResponse> {
 
 export function startGoogleLogin(): void {
   window.location.href = '/auth/google/login'
+}
+
+// Start a free trial. Returns 'ok', or a reason the trial was refused.
+// `ref` = document.referrer, so the owner's analytics show which ad brought them.
+export async function startDemo(
+  fp: string,
+  ref = '',
+): Promise<'ok' | 'cap_reached' | 'already_used' | 'error'> {
+  try {
+    const res = await fetch('/api/demo/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ fp, ref }),
+    })
+    if (res.ok) return 'ok'
+    const j = (await res.json().catch(() => ({}))) as { error?: string }
+    return j.error === 'cap_reached' ? 'cap_reached' : j.error === 'already_used' ? 'already_used' : 'error'
+  } catch {
+    return 'error'
+  }
 }
 
 export async function logout(): Promise<void> {

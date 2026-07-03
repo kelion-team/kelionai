@@ -1,0 +1,21 @@
+[package]
+name = "kelionai-desktop"
+version = "1.0.0"
+description = "Kelionai — personal AI assistant"
+authors = ["AE Studio"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+serde_json = "1"
+
+[profile.release]
+# Small, fast shell — the app itself lives at kelionai.app.
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

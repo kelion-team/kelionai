@@ -1,0 +1,85 @@
+// ── Deterministic language guardian ───────────────────────────────────────
+// A tiny, dependency-free language detector used to GUARANTEE Kelion never
+// answers in a language other than the one set on the user. It scores a piece
+// of text against the languages Kelion realistically uses (the ones that have
+// actually caused drift: Romanian, Spanish, Portuguese, French, Italian,
+// English, German) using high-frequency function words plus a few script
+// signals. It is intentionally CONSERVATIVE: it returns a code only when one
+// language clearly wins, and null when unsure — so the guardian never "fixes"
+// a reply it isn't confident about.
+
+const STOPWORDS: Record<string, string[]> = {
+  ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră'],
+  es: ['el', 'la', 'los', 'las', 'que', 'para', 'con', 'una', 'por', 'usted', 'gracias', 'hola', 'está', 'puedo', 'ahora', 'aquí', 'buenos', 'días', 'tarea', 'listo', 'desarrollador'],
+  pt: ['você', 'não', 'para', 'com', 'uma', 'obrigado', 'olá', 'está', 'agora', 'aqui', 'bom', 'dia', 'posso', 'coisa', 'então', 'boa', 'noite'],
+  fr: ['le', 'la', 'les', 'des', 'que', 'pour', 'avec', 'une', 'vous', 'merci', 'bonjour', 'est', 'maintenant', 'ici', 'je', 'suis', 'nous'],
+  it: ['il', 'la', 'che', 'per', 'con', 'una', 'lei', 'grazie', 'ciao', 'sono', 'adesso', 'qui', 'posso', 'buongiorno', 'cosa'],
+  en: ['the', 'and', 'you', 'for', 'with', 'that', 'this', 'thanks', 'hello', 'now', 'here', 'can', 'your', 'good', 'morning', 'done', 'task', 'developer'],
+  de: ['der', 'die', 'das', 'und', 'für', 'mit', 'nicht', 'sie', 'danke', 'hallo', 'jetzt', 'hier', 'kann', 'ich', 'guten'],
+}
+
+// Characters that strongly indicate a specific language (cheap tie-breakers).
+const SCRIPT_HINTS: { re: RegExp; lang: string; w: number }[] = [
+  { re: /[țțşșăîâ]/gi, lang: 'ro', w: 2 },
+  { re: /[ñ¿¡]/gi, lang: 'es', w: 3 },
+  { re: /[ãõ]/gi, lang: 'pt', w: 3 },
+  { re: /[àâçéèêëîïôûùü]/gi, lang: 'fr', w: 1 },
+  { re: /[àèéìòù]/gi, lang: 'it', w: 1 },
+  { re: /[äöüß]/gi, lang: 'de', w: 2 },
+]
+
+/** Normalise any locale/tag to a 2-letter primary code ("ro-RO" → "ro"). */
+export function primaryLang(tag: string | undefined | null): string | null {
+  const m = /^([a-z]{2})/i.exec((tag ?? '').trim())
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * Best-guess language of `text`, or null when not confident. Returns a 2-letter
+ * code. Needs a real amount of text and a clear winner to commit.
+ */
+export function detectLang(text: string): string | null {
+  const clean = text
+    .toLowerCase()
+    .replace(/[^\p{L}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (clean.length < 8) return null // too little to judge
+
+  const tokens = clean.split(' ')
+  const set = new Set(tokens)
+  const scores: Record<string, number> = {}
+  for (const [lang, words] of Object.entries(STOPWORDS)) {
+    let s = 0
+    for (const w of words) if (set.has(w)) s += 1
+    scores[lang] = s
+  }
+  for (const h of SCRIPT_HINTS) {
+    const n = (text.match(h.re) ?? []).length
+    if (n > 0) scores[h.lang] = (scores[h.lang] ?? 0) + Math.min(4, n) * h.w
+  }
+
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1])
+  const [topLang, topScore] = ranked[0]
+  const second = ranked[1]?.[1] ?? 0
+  // Commit only on a clear, non-trivial win (guards against false positives on
+  // proper nouns, code, or mixed short text).
+  if (topScore >= 2 && topScore >= second + 2) return topLang
+  return null
+}
+
+/**
+ * The guardian verdict for a produced reply against the user's SET language.
+ * Returns 'ok' (matches or nothing to judge), or 'wrong' with the detected
+ * language when it is confidently a DIFFERENT language.
+ */
+export function checkLang(
+  text: string,
+  setLangTag: string | null | undefined,
+): { ok: true } | { ok: false; detected: string } {
+  const want = primaryLang(setLangTag)
+  if (!want) return { ok: true } // no established language → nothing to enforce
+  const got = detectLang(text)
+  if (got && got !== want) return { ok: false, detected: got }
+  return { ok: true }
+}

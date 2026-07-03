@@ -1,0 +1,10 @@
+{
+  "version": "1.1.0",
+  "pub_date": "2026-07-02T10:39:27Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUEJsRE8wa1lnNVFLanMremJzOElEN0g4THZYS3d0SHJVS3lCQi9la2ZuTVhMSDhlSU5QZ1B1ZldHOXN1TEpPTUQ1MWxOUEMwa3B3MEZKaThROVN0N3RweWFvaHdVb0FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyOTg4NzY2CWZpbGU6S2VsaW9uYWlfMS4xLjBfeDY0LXNldHVwLmV4ZQozby9MUzl6ZW9kdmhlZnhlOHhZUHhlTG15Kzllek9DWG9YTGZwM1ozbk41TUt0VHJFS3pGMksxUXYyRno1L2dHOUNQOEhYRTJBOC9UUERPWkc2N2JBdz09Cg==",
+      "url": "https://kelionai.app/dl/Kelionai-Setup.exe"
+    }
+  }
+}

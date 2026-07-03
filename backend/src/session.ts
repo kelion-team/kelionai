@@ -8,9 +8,12 @@ export interface SessionUser {
   email: string
   name: string
   picture: string
-  role: 'admin' | 'customer'
+  role: 'admin' | 'customer' | 'demo'
   // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
   locale: string
+  // For a free trial ("demo") session only: the epoch-ms when the 3 minutes end,
+  // so the frontend can show a live countdown and the conversion overlay at zero.
+  demoUntil?: number
   // Google OAuth access token + expiry (ms) for calling Google skills on the
   // user's behalf. The access token is valid ~1h; the refresh token (kept in the
   // signed, httpOnly session cookie) lets the chat route mint a fresh access
@@ -31,6 +34,7 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     picture: user.picture,
     role: user.role,
     locale: user.locale,
+    demoUntil: user.demoUntil,
     googleAccessToken: user.googleAccessToken,
     googleTokenExp: user.googleTokenExp,
     googleRefreshToken: user.googleRefreshToken,
@@ -42,6 +46,28 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     secure: config.isProd,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 30,
+  })
+}
+
+// Issue a short-lived free-trial ("demo") session: full access for `seconds`,
+// no Google skills, its own throwaway identity. The JWT itself expires a little
+// after the trial so the very last request doesn't 401 early.
+export function setDemoSession(reply: FastifyReply, seconds: number): void {
+  const payload: SessionUser = {
+    email: `demo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}@demo.kelionai.app`,
+    name: 'Guest',
+    picture: '',
+    role: 'demo',
+    locale: 'en',
+    demoUntil: Date.now() + seconds * 1000,
+  }
+  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: seconds + 15 })
+  reply.setCookie(SESSION_COOKIE, token, {
+    path: '/',
+    httpOnly: true,
+    secure: config.isProd,
+    sameSite: 'lax',
+    maxAge: seconds + 15,
   })
 }
 

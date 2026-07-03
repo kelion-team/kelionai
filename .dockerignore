@@ -3,3 +3,4 @@
 **/.env
 **/*.log
 .git
+desktop/src-tauri/target

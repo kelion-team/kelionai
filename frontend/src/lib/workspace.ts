@@ -6,17 +6,53 @@
 //
 // Subscribe from React with useSyncExternalStore(subscribeWorkspace, getWorkspace).
 
-export interface WorkspaceState {
-  readonly open: boolean
+import type { SkillCard } from './chat'
+
+// One open surface on the monitor. Several can be open at once (a map, a YouTube
+// video, the weather…) and the user switches between them like tabs — one voice
+// throughout, Kelion works inside whichever task is active.
+export interface WorkspaceTask {
+  readonly id: string
+  readonly kind: string // 'map' | 'youtube' | 'weather' | 'image' | 'web' | 'doc' | card.type
   readonly title: string
-  readonly url: string // optional content to render (sandboxed iframe)
+  readonly url: string
+  readonly card: SkillCard | null
+  readonly text?: string // a readable text deliverable (agent result), rendered as a panel
 }
 
-let state: WorkspaceState = { open: false, title: '', url: '' }
+export interface WorkspaceState {
+  readonly open: boolean
+  readonly tasks: readonly WorkspaceTask[]
+  readonly activeId: string
+  // Derived from the active task, so the renderer reads the shown surface directly.
+  readonly kind: string
+  readonly title: string
+  readonly url: string
+  readonly card: SkillCard | null
+  readonly text?: string
+}
+
+const EMPTY: WorkspaceState = { open: false, tasks: [], activeId: '', kind: '', title: '', url: '', card: null }
+let state: WorkspaceState = EMPTY
 const subscribers = new Set<() => void>()
 
 function emit(): void {
   for (const fn of subscribers) fn()
+}
+
+function setTasks(tasks: WorkspaceTask[], activeId: string): void {
+  const active = tasks.find((t) => t.id === activeId) ?? tasks[tasks.length - 1]
+  state = {
+    open: tasks.length > 0,
+    tasks,
+    activeId: active ? active.id : '',
+    kind: active ? active.kind : '',
+    title: active ? active.title : '',
+    url: active ? active.url : '',
+    card: active ? active.card : null,
+    text: active ? active.text : undefined,
+  }
+  emit()
 }
 
 export function getWorkspace(): WorkspaceState {
@@ -30,20 +66,78 @@ export function subscribeWorkspace(fn: () => void): () => void {
   }
 }
 
+// Classify a URL into a task kind so same-kind surfaces share one tab (a new map
+// replaces the old map, a new video swaps the current one — "just swap the video").
+export function kindForUrl(raw: string): string {
+  try {
+    const u = new URL(raw, typeof location !== 'undefined' ? location.origin : 'http://x')
+    const host = u.hostname.replace(/^www\./, '')
+    if (host.includes('youtube') || host === 'youtu.be') return 'youtube'
+    if (host.includes('windy') || u.pathname.includes('weather')) return 'weather'
+    if (u.pathname.startsWith('/api/image')) return 'image'
+    if (u.pathname.startsWith('/api/route')) return 'map'
+    if (host.includes('openstreetmap') || u.pathname.includes('/maps')) return 'map'
+  } catch {
+    /* relative or malformed — fall through */
+  }
+  return 'web'
+}
+
+// Add/replace a task (dedup by kind) and make it the active surface.
+function upsert(task: WorkspaceTask): void {
+  const rest = state.tasks.filter((t) => t.id !== task.id)
+  setTasks([...rest, task], task.id)
+}
+
 export function openWorkspace(title: string, url = ''): void {
-  state = { open: true, title, url }
-  emit()
+  const kind = kindForUrl(url)
+  upsert({ id: kind, kind, title, url, card: null })
 }
 
+// Open the workspace showing a structured skill card (no iframe).
+export function openWorkspaceCard(title: string, card: SkillCard): void {
+  const kind = card.type || 'card'
+  upsert({ id: kind, kind, title, url: '', card })
+}
+
+// Open the workspace showing a readable text deliverable (an agent's written
+// result — an email, a translation, findings) that the user can read and copy.
+export function openWorkspaceDoc(title: string, text: string): void {
+  upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text })
+}
+
+// Close the ACTIVE task (back-compat for the single-close / voice-command paths).
 export function closeWorkspace(): void {
-  if (!state.open) return
-  state = { ...state, open: false }
-  emit()
+  if (state.open) closeTask(state.activeId)
 }
 
-export function toggleWorkspace(title: string, url = ''): void {
-  if (state.open) closeWorkspace()
-  else openWorkspace(title, url)
+export function closeTask(id: string): void {
+  const tasks = state.tasks.filter((t) => t.id !== id)
+  setTasks(tasks, tasks.length ? tasks[tasks.length - 1].id : '')
+}
+
+export function closeTasksByKind(kind: string): boolean {
+  const tasks = state.tasks.filter((t) => t.kind !== kind)
+  if (tasks.length === state.tasks.length) return false
+  setTasks(tasks, tasks.length ? tasks[tasks.length - 1].id : '')
+  return true
+}
+
+export function closeAllTasks(): void {
+  if (state.open) setTasks([], '')
+}
+
+export function switchToId(id: string): void {
+  if (state.tasks.some((t) => t.id === id)) setTasks([...state.tasks], id)
+}
+
+// Switch the monitor to an already-open task of this kind. Returns false when no
+// such task is open (so the caller can let Kelion open it instead).
+export function switchToKind(kind: string): boolean {
+  const t = state.tasks.find((x) => x.kind === kind)
+  if (!t) return false
+  setTasks([...state.tasks], t.id)
+  return true
 }
 
 // Most sites refuse to load in an <iframe> (X-Frame-Options / CSP
@@ -61,17 +155,21 @@ export function normalizeEmbedUrl(raw: string): string {
   }
   const host = u.hostname.replace(/^www\./, '')
 
-  // YouTube → /embed/<id>
+  // YouTube → /embed/<id>. enablejsapi=1 lets us duck its volume (postMessage)
+  // while Kelion speaks, so his voice sits in front — like a car radio dropping
+  // the music when the nav talks.
   if (host === 'youtube.com' || host === 'm.youtube.com') {
     const id = u.searchParams.get('v')
-    if (id) return `https://www.youtube.com/embed/${id}`
+    if (id) return `https://www.youtube.com/embed/${id}?enablejsapi=1`
   }
   if (host === 'youtu.be') {
     const id = u.pathname.slice(1)
-    if (id) return `https://www.youtube.com/embed/${id}`
+    if (id) return `https://www.youtube.com/embed/${id}?enablejsapi=1`
   }
 
-  // Google Maps → output=embed (renders in an iframe with no API key)
+  // Google Maps Embed API URLs (/maps/embed/…) are already embeddable — leave them.
+  if (u.pathname.startsWith('/maps/embed')) return raw
+  // Other Google Maps → output=embed (renders in an iframe with no API key)
   if ((host === 'google.com' || host.endsWith('.google.com')) && u.pathname.startsWith('/maps')) {
     u.searchParams.set('output', 'embed')
     return u.toString()
@@ -89,4 +187,24 @@ export function normalizeEmbedUrl(raw: string): string {
   }
 
   return raw
+}
+
+// Google's normal pages (www.google.com, maps.google.com) send X-Frame-Options
+// and refuse to load in an iframe → a broken "refused to connect" panel. Detect
+// those so the UI can show an "open in a new tab" link instead of a dead frame.
+export function isEmbeddable(raw: string): boolean {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return true // relative URL (e.g. /api/image/…) — same-origin, safe to frame
+  }
+  // Only ever frame http(s). Block javascript:, data:, blob:, etc.
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+  const host = u.hostname.replace(/^www\./, '')
+  if (host === 'google.com' || host === 'maps.google.com' || host.endsWith('.google.com')) {
+    // Only the keyed Maps Embed API path is frameable.
+    return u.pathname.startsWith('/maps/embed')
+  }
+  return true
 }

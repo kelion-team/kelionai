@@ -114,6 +114,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // Public: are sales open? The real, DEPLOYED state of the sign-up gate — so
+  // "the doors are open" can be verified live, not just promised.
+  app.get('/auth/signup-status', async (_req, reply) =>
+    reply.send({ open: config.openSignup }),
+  )
+
   // Who am I? (frontend calls this on load)
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)

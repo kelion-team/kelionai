@@ -44,16 +44,577 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_events (created_at);
     -- Cross-session memory: durable facts Kelion learns about each user and
     -- recalls in later conversations (the Memory agent writes here).
+    -- the agent column namespaces memory: Kelion keeps its own (kelion), and each
+    -- specialist agent (secretary/navigator/researcher) keeps a SEPARATE memory.
     CREATE TABLE IF NOT EXISTS memories (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
+      agent TEXT NOT NULL DEFAULT 'kelion',
       content TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, content);
-    CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, last_seen DESC);
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS agent TEXT NOT NULL DEFAULT 'kelion';
+    DROP INDEX IF EXISTS uniq_memory;
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, agent, content);
+    CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, agent, last_seen DESC);
+    -- Prepaid credit wallet (Stripe). Balance is in the display currency (GBP);
+    -- topup_ref = the credited amount of the LAST top-up, so we can show the
+    -- "% of credit left" for the escalating low-credit alerts (30/20/10/5%).
+    CREATE TABLE IF NOT EXISTS wallets (
+      user_email TEXT PRIMARY KEY,
+      balance NUMERIC(14,6) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'gbp',
+      topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0,
+      stripe_customer_id TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE wallets ADD COLUMN IF NOT EXISTS topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0;
+    -- The owner's provider-credit pool (REAL money): the admin loads it; every
+    -- AI call's real cost draws it down. remaining = loaded − total cost. Singleton.
+    CREATE TABLE IF NOT EXISTS admin_pool (
+      id INT PRIMARY KEY DEFAULT 1,
+      loaded NUMERIC(14,6) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'gbp',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    INSERT INTO admin_pool (id, loaded) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+    -- Free-trial usage: one row per demo started — enforces the daily cost cap
+    -- and a light anti-reuse (a fingerprint or IP that already tried is refused).
+    CREATE TABLE IF NOT EXISTS demo_uses (
+      id BIGSERIAL PRIMARY KEY,
+      fingerprint TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      country_code TEXT NOT NULL DEFAULT '',
+      city TEXT NOT NULL DEFAULT '',
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS country_code TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS city TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS region TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS isp TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS tz TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS browser TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS device TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS lang TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS referrer TEXT NOT NULL DEFAULT '';
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT false;
+    CREATE INDEX IF NOT EXISTS idx_demo_fp ON demo_uses (fingerprint, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_demo_started ON demo_uses (started_at DESC);
+    -- EVERY visitor who opens the site (not just demo starters) — the owner's
+    -- real traffic analytics. Same profile columns as demo_uses.
+    CREATE TABLE IF NOT EXISTS visits (
+      id BIGSERIAL PRIMARY KEY,
+      fingerprint TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      country_code TEXT NOT NULL DEFAULT '',
+      city TEXT NOT NULL DEFAULT '',
+      region TEXT NOT NULL DEFAULT '',
+      isp TEXT NOT NULL DEFAULT '',
+      tz TEXT NOT NULL DEFAULT '',
+      browser TEXT NOT NULL DEFAULT '',
+      os TEXT NOT NULL DEFAULT '',
+      device TEXT NOT NULL DEFAULT '',
+      lang TEXT NOT NULL DEFAULT '',
+      referrer TEXT NOT NULL DEFAULT '',
+      is_bot BOOLEAN NOT NULL DEFAULT false,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_visits_started ON visits (started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_visits_fp ON visits (fingerprint, started_at DESC);
+    -- Ledger of top-ups (+) and usage (−). stripe_ref makes top-ups idempotent
+    -- so a webhook retry can never double-credit.
+    CREATE TABLE IF NOT EXISTS billing_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      amount NUMERIC(14,6) NOT NULL,
+      stripe_ref TEXT,
+      meta TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
+    -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
+    -- logs them here (via the log_unsupported_request tool); only the owner/admin
+    -- reads them, to prioritise what to build next. Never shown to end users.
+    CREATE TABLE IF NOT EXISTS capability_gaps (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      request TEXT NOT NULL,
+      reason TEXT,
+      hits INT NOT NULL DEFAULT 1,
+      resolved BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
+    -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
+    -- memories table: memories are auto-learned facts Kelion recalls silently;
+    -- notes are things the user deliberately asked to save and can list/delete.
+    CREATE TABLE IF NOT EXISTS notes (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      title TEXT,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_notes_user ON notes (user_email, created_at DESC);
   `)
+}
+
+// ── Prepaid wallet (Stripe credit) ──
+
+export async function getBalance(email: string): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ balance: string }>(
+      'SELECT balance FROM wallets WHERE user_email = $1',
+      [email],
+    )
+    return Number(r.rows[0]?.balance ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Credit a top-up, atomically and idempotently. `stripeRef` (the Checkout
+ * Session / PaymentIntent id) guards against a webhook retry double-crediting.
+ * Returns true only when it actually credited.
+ */
+export async function creditWallet(
+  email: string,
+  amount: number,
+  currency: string,
+  stripeRef: string,
+  meta = '',
+): Promise<boolean> {
+  if (!dbEnabled() || !(amount > 0) || !stripeRef) return false
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'topup', $2, $3, $4)`,
+      [email, amount, stripeRef, meta],
+    )
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency) VALUES ($1, $2, $3)
+       ON CONFLICT (user_email) DO UPDATE SET balance = wallets.balance + $2, updated_at = now()`,
+      [email, amount, currency],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
+/** Deduct usage from the wallet (in display currency). Never throws. */
+export async function debitWallet(email: string, amount: number, meta = ''): Promise<void> {
+  if (!dbEnabled() || !(amount > 0)) return
+  try {
+    const pool = getPool()
+    // NOTE: the parameter MUST be cast — Postgres cannot type a bare unary
+    // "-$2" (\"operator is not unique: - unknown\") and the whole debit silently
+    // failed, letting customers consume without ever being charged.
+    await pool.query(
+      `INSERT INTO wallets (user_email, balance) VALUES ($1, -($2::numeric))
+       ON CONFLICT (user_email) DO UPDATE SET balance = wallets.balance - $2::numeric, updated_at = now()`,
+      [email, amount],
+    )
+    await pool.query(
+      `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
+      [email, -amount, meta],
+    )
+  } catch {
+    // Never break the chat because metering failed.
+  }
+}
+
+export async function getStripeCustomer(email: string): Promise<string | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ stripe_customer_id: string | null }>(
+      'SELECT stripe_customer_id FROM wallets WHERE user_email = $1',
+      [email],
+    )
+    return r.rows[0]?.stripe_customer_id ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function setStripeCustomer(email: string, id: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO wallets (user_email, stripe_customer_id) VALUES ($1, $2)
+       ON CONFLICT (user_email) DO UPDATE SET stripe_customer_id = $2, updated_at = now()`,
+      [email, id],
+    )
+  } catch {
+    // Non-fatal.
+  }
+}
+
+/**
+ * User top-up (Stripe). The user KEEPS `userShare` (75%) as spendable credit;
+ * the remaining 25% is our profit, taken up front. Idempotent on stripeRef.
+ * topup_ref becomes the new full balance — the reference for the % alerts.
+ */
+export async function topUpUser(
+  email: string,
+  gross: number,
+  currency: string,
+  stripeRef: string,
+): Promise<boolean> {
+  if (!dbEnabled() || !(gross > 0) || !stripeRef) return false
+  const userCredit = gross * config.stripe.userShare
+  const profit = gross - userCredit
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'topup', $2, $3, 'user 75%')`,
+      [email, userCredit, stripeRef],
+    )
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, $2)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
+      [email, userCredit, currency],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
+      [email, profit, `${stripeRef}:profit`],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
+/** Wallet balance + the last-top-up reference, for the low-credit % alerts. */
+export async function getWalletStatus(email: string): Promise<{ balance: number; topupRef: number }> {
+  if (!dbEnabled()) return { balance: 0, topupRef: 0 }
+  try {
+    const r = await getPool().query<{ balance: string; topup_ref: string }>(
+      'SELECT balance, topup_ref FROM wallets WHERE user_email = $1',
+      [email],
+    )
+    return { balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }
+  } catch {
+    return { balance: 0, topupRef: 0 }
+  }
+}
+
+/** Owner loads the provider-credit pool (real money he put at the AI providers). */
+export async function loadAdminPool(amount: number): Promise<void> {
+  if (!dbEnabled() || !(amount > 0)) return
+  try {
+    await getPool().query('UPDATE admin_pool SET loaded = loaded + $1, updated_at = now() WHERE id = 1', [amount])
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Owner's real-money view: pool loaded, remaining (loaded − real cost) and profit. */
+// Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
+// anti-reuse: a fingerprint or IP that already tried within 30 days is refused.
+// Fails OPEN (allows the trial) if there's no DB or a transient error, so a
+// hiccup never blocks a visitor — the 3-minute limit still bounds each trial.
+// Everything we know about one trial visit — the owner's professional
+// analytics: who (human/bot), from where (flag/country/region/city/ISP), on
+// what (browser/OS/device), speaking what, and which ad brought them (referrer).
+export interface DemoVisit {
+  country: string
+  code: string
+  city: string
+  region: string
+  isp: string
+  tz: string
+  browser: string
+  os: string
+  device: string
+  lang: string
+  referrer: string
+  isBot: boolean
+}
+
+const EMPTY_VISIT: DemoVisit = {
+  country: '', code: '', city: '', region: '', isp: '', tz: '',
+  browser: '', os: '', device: '', lang: '', referrer: '', isBot: false,
+}
+
+export async function tryStartDemo(
+  fingerprint: string,
+  ip: string,
+  capPerDay: number,
+  visit: DemoVisit = EMPTY_VISIT,
+): Promise<{ ok: boolean; reason?: 'cap' | 'used' }> {
+  if (!dbEnabled()) return { ok: true }
+  try {
+    const pool = getPool()
+    const today = Number(
+      (
+        await pool.query<{ n: string }>(
+          "SELECT COUNT(*) AS n FROM demo_uses WHERE started_at >= date_trunc('day', now())",
+        )
+      ).rows[0]?.n ?? 0,
+    )
+    if (today >= capPerDay) return { ok: false, reason: 'cap' }
+    if (fingerprint || ip) {
+      const used = Number(
+        (
+          await pool.query<{ n: string }>(
+            `SELECT COUNT(*) AS n FROM demo_uses
+             WHERE started_at >= now() - interval '30 days'
+               AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))`,
+            [fingerprint, ip],
+          )
+        ).rows[0]?.n ?? 0,
+      )
+      if (used > 0) return { ok: false, reason: 'used' }
+    }
+    await pool.query(
+      `INSERT INTO demo_uses
+         (fingerprint, ip, country, country_code, city, region, isp, tz,
+          browser, os, device, lang, referrer, is_bot)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
+        visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
+        visit.referrer, visit.isBot,
+      ],
+    )
+    return { ok: true }
+  } catch {
+    return { ok: true }
+  }
+}
+
+/**
+ * Record a plain SITE VISIT (anyone who opens the landing page — not just demo
+ * starters). Deduped: the same fingerprint/IP within 6 hours counts once, so a
+ * refresh doesn't inflate the numbers. Fire-and-forget; never throws.
+ */
+export async function logVisit(
+  fingerprint: string,
+  ip: string,
+  visit: DemoVisit = EMPTY_VISIT,
+): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    const pool = getPool()
+    if (fingerprint || ip) {
+      const seen = Number(
+        (
+          await pool.query<{ n: string }>(
+            `SELECT COUNT(*) AS n FROM visits
+             WHERE started_at >= now() - interval '6 hours'
+               AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))`,
+            [fingerprint, ip],
+          )
+        ).rows[0]?.n ?? 0,
+      )
+      if (seen > 0) return
+    }
+    await pool.query(
+      `INSERT INTO visits
+         (fingerprint, ip, country, country_code, city, region, isp, tz,
+          browser, os, device, lang, referrer, is_bot)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
+        visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
+        visit.referrer, visit.isBot,
+      ],
+    )
+  } catch {
+    /* analytics must never break the page */
+  }
+}
+
+export interface DemoRecent {
+  kind: 'visit' | 'demo'
+  ip: string
+  country: string
+  code: string
+  city: string
+  region: string
+  isp: string
+  browser: string
+  os: string
+  device: string
+  lang: string
+  referrer: string
+  is_bot: boolean
+  started_at: string
+}
+
+export interface DemoStats {
+  total: number
+  today: number
+  bots: number
+  visitsTotal: number
+  visitsToday: number
+  byCountry: { country: string; code: string; count: number }[]
+  recent: DemoRecent[]
+}
+
+// The owner's visitor analytics (admin only): EVERY site visit + every demo
+// try — totals, a breakdown by country across both, and the latest arrivals
+// (each row tagged visit/demo) with their full profile.
+export async function getDemoStats(): Promise<DemoStats> {
+  const empty: DemoStats = {
+    total: 0, today: 0, bots: 0, visitsTotal: 0, visitsToday: 0, byCountry: [], recent: [],
+  }
+  if (!dbEnabled()) return empty
+  try {
+    const pool = getPool()
+    const counts = (
+      await pool.query<{ total: string; today: string; bots: string }>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE started_at >= date_trunc('day', now())) AS today,
+                COUNT(*) FILTER (WHERE is_bot) AS bots
+         FROM demo_uses`,
+      )
+    ).rows[0]
+    const vCounts = (
+      await pool.query<{ total: string; today: string; bots: string }>(
+        `SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE started_at >= date_trunc('day', now())) AS today,
+                COUNT(*) FILTER (WHERE is_bot) AS bots
+         FROM visits`,
+      )
+    ).rows[0]
+    const byCountry = (
+      await pool.query<{ country: string; country_code: string; n: string }>(
+        `SELECT COALESCE(NULLIF(country,''),'Unknown') AS country, country_code,
+                COUNT(*) AS n
+         FROM (SELECT country, country_code FROM demo_uses
+               UNION ALL SELECT country, country_code FROM visits) AS x
+         GROUP BY country, country_code ORDER BY COUNT(*) DESC LIMIT 30`,
+      )
+    ).rows.map((r) => ({ country: r.country, code: r.country_code, count: Number(r.n) }))
+    const recent = (
+      await pool.query<{
+        kind: 'visit' | 'demo'
+        ip: string
+        country: string
+        country_code: string
+        city: string
+        region: string
+        isp: string
+        browser: string
+        os: string
+        device: string
+        lang: string
+        referrer: string
+        is_bot: boolean
+        started_at: string
+      }>(
+        `SELECT * FROM (
+           SELECT 'demo'::text AS kind, ip, country, country_code, city, region, isp,
+                  browser, os, device, lang, referrer, is_bot, started_at
+           FROM demo_uses
+           UNION ALL
+           SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
+                  browser, os, device, lang, referrer, is_bot, started_at
+           FROM visits
+         ) AS x ORDER BY started_at DESC LIMIT 60`,
+      )
+    ).rows.map((r) => ({
+      kind: r.kind,
+      ip: r.ip,
+      country: r.country,
+      code: r.country_code,
+      city: r.city,
+      region: r.region,
+      isp: r.isp,
+      browser: r.browser,
+      os: r.os,
+      device: r.device,
+      lang: r.lang,
+      referrer: r.referrer,
+      is_bot: r.is_bot,
+      started_at: r.started_at,
+    }))
+    return {
+      total: Number(counts?.total ?? 0),
+      today: Number(counts?.today ?? 0),
+      bots: Number(counts?.bots ?? 0) + Number(vCounts?.bots ?? 0),
+      visitsTotal: Number(vCounts?.total ?? 0),
+      visitsToday: Number(vCounts?.today ?? 0),
+      byCountry,
+      recent,
+    }
+  } catch {
+    return empty
+  }
+}
+
+export async function getAdminAccount(): Promise<{
+  loaded: number
+  remaining: number
+  spent: number
+  profit: number
+}> {
+  const empty = { loaded: 0, remaining: 0, spent: 0, profit: 0 }
+  if (!dbEnabled()) return empty
+  try {
+    const pool = getPool()
+    const loaded = Number(
+      (await pool.query<{ loaded: string }>('SELECT loaded FROM admin_pool WHERE id = 1')).rows[0]?.loaded ?? 0,
+    )
+    const costUsd = Number(
+      (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
+    )
+    const spent = costUsd * config.stripe.usdToCurrency
+    const profit = Number(
+      (
+        await pool.query<{ t: string | null }>(
+          "SELECT COALESCE(SUM(amount),0) AS t FROM billing_events WHERE kind = 'profit'",
+        )
+      ).rows[0]?.t ?? 0,
+    )
+    return { loaded, remaining: loaded - spent, spent, profit }
+  } catch {
+    return empty
+  }
 }
 
 // Record the real provider cost of one AI call (admin-only accounting).
@@ -182,13 +743,13 @@ export interface Memory {
   content: string
 }
 
-/** Most recently relevant durable facts about a user. */
-export async function getMemories(email: string, limit = 40): Promise<Memory[]> {
+/** Most recently relevant durable facts, for one agent's memory namespace. */
+export async function getMemories(email: string, limit = 40, agent = 'kelion'): Promise<Memory[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<Memory>(
-      `SELECT content FROM memories WHERE user_email = $1 ORDER BY last_seen DESC LIMIT $2`,
-      [email, limit],
+      `SELECT content FROM memories WHERE user_email = $1 AND agent = $2 ORDER BY last_seen DESC LIMIT $3`,
+      [email, agent, limit],
     )
     return r.rows
   } catch {
@@ -196,17 +757,161 @@ export async function getMemories(email: string, limit = 40): Promise<Memory[]> 
   }
 }
 
+// Relevance recall: memories whose content matches any of the given words
+// (names, places, specifics from the user's question). This is what keeps an
+// OLD but important fact findable once the recency window has moved past it —
+// long-term memory must scale beyond "the last 40 things learned".
+export async function searchMemories(
+  email: string,
+  agent: string,
+  words: string[],
+  limit = 12,
+): Promise<Memory[]> {
+  if (!dbEnabled() || words.length === 0) return []
+  try {
+    const patterns = words.slice(0, 8).map((w) => `%${w.replaceAll('%', '').replaceAll('_', '')}%`)
+    const r = await getPool().query<Memory>(
+      `SELECT content FROM memories
+       WHERE user_email = $1 AND agent = $2 AND content ILIKE ANY($3)
+       ORDER BY last_seen DESC LIMIT $4`,
+      [email, agent, patterns, limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+// ── Capability gaps (admin-only "what Kelion can't do yet" monitor) ──
+export interface CapabilityGap {
+  id: number
+  user_email: string
+  request: string
+  reason: string | null
+  hits: number
+  resolved: boolean
+  created_at: string
+  last_seen: string
+}
+
+/**
+ * Record a request Kelion couldn't fulfil. Near-identical open requests are
+ * de-duplicated (hits++ and recency refreshed) so the list stays a signal, not
+ * a flood. Never throws — logging a gap must never affect the conversation.
+ */
+export async function logCapabilityGap(email: string, request: string, reason = ''): Promise<void> {
+  const req = request.trim().slice(0, 500)
+  if (!dbEnabled() || !req) return
+  try {
+    const pool = getPool()
+    const dup = await pool.query<{ id: number }>(
+      `SELECT id FROM capability_gaps
+       WHERE resolved = false AND lower(request) = lower($1) LIMIT 1`,
+      [req],
+    )
+    if ((dup.rowCount ?? 0) > 0) {
+      await pool.query(
+        'UPDATE capability_gaps SET hits = hits + 1, last_seen = now() WHERE id = $1',
+        [dup.rows[0].id],
+      )
+      return
+    }
+    await pool.query(
+      'INSERT INTO capability_gaps (user_email, request, reason) VALUES ($1, $2, $3)',
+      [email, req, reason.trim().slice(0, 500) || null],
+    )
+  } catch {
+    // Best-effort — never break the chat because gap logging failed.
+  }
+}
+
+/** Open capability gaps, most-requested / most-recent first (admin only). */
+export async function getCapabilityGaps(includeResolved = false, limit = 200): Promise<CapabilityGap[]> {
+  if (!dbEnabled()) return []
+  try {
+    const where = includeResolved ? '' : 'WHERE resolved = false'
+    const r = await getPool().query<CapabilityGap>(
+      `SELECT id, user_email, request, reason, hits, resolved, created_at, last_seen
+       FROM capability_gaps ${where}
+       ORDER BY resolved ASC, hits DESC, last_seen DESC LIMIT $1`,
+      [limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+/** Mark a gap resolved (or reopen it) — admin only. */
+export async function setGapResolved(id: number, resolved: boolean): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query('UPDATE capability_gaps SET resolved = $2 WHERE id = $1', [id, resolved])
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** Save a learned fact (idempotent: re-learning just refreshes its recency). */
-export async function addMemory(email: string, content: string): Promise<void> {
+export async function addMemory(email: string, content: string, agent = 'kelion'): Promise<void> {
   const c = content.trim()
   if (!dbEnabled() || !c) return
   try {
     await getPool().query(
-      `INSERT INTO memories (user_email, content) VALUES ($1, $2)
-       ON CONFLICT (user_email, content) DO UPDATE SET last_seen = now()`,
-      [email, c],
+      `INSERT INTO memories (user_email, agent, content) VALUES ($1, $2, $3)
+       ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
+      [email, agent, c],
     )
   } catch {
     // Never break the chat because memory write failed.
+  }
+}
+
+// ── Explicit user notes ("reține asta") ──
+
+export interface Note {
+  id: number
+  title: string | null
+  content: string
+  createdAt: string
+}
+
+/** Save a note the user explicitly asked Kelion to remember. Returns its id. */
+export async function saveNote(email: string, content: string, title?: string): Promise<number | null> {
+  const c = content.trim()
+  if (!dbEnabled() || !c) return null
+  try {
+    const r = await getPool().query<{ id: number }>(
+      'INSERT INTO notes (user_email, title, content) VALUES ($1, $2, $3) RETURNING id',
+      [email, title?.trim() || null, c],
+    )
+    return r.rows[0]?.id ?? null
+  } catch {
+    return null
+  }
+}
+
+/** List a user's saved notes, most recent first. */
+export async function listNotes(email: string, limit = 50): Promise<Note[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<{ id: number; title: string | null; content: string; created_at: string }>(
+      'SELECT id, title, content, created_at FROM notes WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2',
+      [email, limit],
+    )
+    return r.rows.map((row) => ({ id: row.id, title: row.title, content: row.content, createdAt: row.created_at }))
+  } catch {
+    return []
+  }
+}
+
+/** Delete one of the user's own notes. Returns whether a row was actually removed. */
+export async function deleteNote(email: string, id: number): Promise<boolean> {
+  if (!dbEnabled()) return false
+  try {
+    const r = await getPool().query('DELETE FROM notes WHERE id = $1 AND user_email = $2', [id, email])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
   }
 }
