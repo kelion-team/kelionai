@@ -26,6 +26,7 @@ import {
   isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
+import { startMic, playVoice, stopVoice, type MicHandle } from '../lib/audioIO'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
 // ~15s; a full landing demo can use the whole window).
@@ -101,6 +102,9 @@ export default function ChatPanel({
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
+  const [listening, setListening] = useState(false)
+  const micRef = useRef<MicHandle | null>(null)
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
@@ -178,6 +182,16 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     if (c.receipt) {
       setDelivered(true)
+      return
+    }
+    // VOCEA CREIERULUI: MP3 gata sintetizat pe server (Chirp 3) — DOAR îl redăm.
+    // Cât vorbește, microfonul e mut (anti-ecou); revine singur la final.
+    if (c.audio) {
+      playVoice(
+        c.audio,
+        () => micRef.current?.setMuted(true),
+        () => micRef.current?.setMuted(false),
+      )
       return
     }
     if (c.paywall) {
@@ -739,6 +753,35 @@ export default function ChatPanel({
   const sendRef = useRef(send)
   sendRef.current = send
 
+  // Microfonul: pornește captarea (full-duplex, filtru zgomot, VOX, buffer mare).
+  // Ce transcrie serverul (STT) e trimis ca mesaj către creier. NU produce voce.
+  async function toggleMic(): Promise<void> {
+    if (micRef.current) {
+      micRef.current.stop()
+      micRef.current = null
+      setListening(false)
+      return
+    }
+    const h = await startMic(
+      (text) => void sendRef.current(text),
+      () => setListening(false),
+      () => speechLangRef.current,
+    )
+    if (h) {
+      micRef.current = h
+      setListening(true)
+    }
+  }
+  // Curăță microfonul + orice redare la demontare.
+  useEffect(
+    () => () => {
+      micRef.current?.stop()
+      micRef.current = null
+      stopVoice()
+    },
+    [],
+  )
+
   // Adopt a newly confirmed language and persist the choice per user. No-op if
   // it's already the active language.
   function changeSpeechLang(code: string): void {
@@ -1045,6 +1088,15 @@ export default function ChatPanel({
             }}
             placeholder={t.chatPlaceholder}
           />
+          <button
+            type="button"
+            className={`composer-mic ${listening ? 'live' : ''}`}
+            onClick={() => void toggleMic()}
+            aria-label="Microfon"
+            title={listening ? 'Oprește microfonul' : 'Vorbește (microfon)'}
+          >
+            {listening ? '●' : '🎤'}
+          </button>
           <button
             type="button"
             className="composer-send"

@@ -36,6 +36,7 @@ import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang } from '../services/lang.js'
 import { geoLookupCached } from './demo.js'
+import { synthesize } from '../services/tts.js'
 import {
   browserOpen,
   browserClick,
@@ -410,6 +411,32 @@ const DELEGATE_TOOL: Anthropic.Tool = {
 // of the text stream (never shown, never spoken), e.g.
 // \x1f{"monitor":{"url":"...","title":"..."}}\x1f
 const CTRL = String.fromCharCode(31)
+
+// VOCEA CREIERULUI (Adrian, 4 iul): sinteza se face pe SERVER (Chirp 3 HD, limba
+// userului), audio-ul se trimite prin punte ca UN CADRU {audio} și aplicația
+// doar îl decodează + redă. Frontul NU sintetizează nimic (TTS de front = mort).
+async function streamVoice(
+  reply: { raw: { write(c: string): void } },
+  text: string,
+  lang: string | undefined,
+): Promise<void> {
+  // Ce se rostește: textul, curățat de etichete de unelte și de markdown.
+  const spoken = text
+    .replace(/\[[A-Z][^\]]*\]/g, '')
+    .replace(/[*_#`~>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1800)
+  if (!spoken) return
+  try {
+    const r = await synthesize(spoken, lang)
+    if (r.ok) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+    }
+  } catch {
+    /* vocea e best-effort — dacă pică sinteza, textul rămâne */
+  }
+}
 
 const SYSTEM_PROMPT = `You are Kelion — a brilliant personal AI assistant in the spirit of Jarvis from Iron Man: a courteous, refined GENTLEMAN — sharp, perceptive, genuinely useful, and always impeccably well-mannered.
 
@@ -1325,6 +1352,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         reply.raw.write(a)
       }
+      // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).
+      await streamVoice(reply, a, speechPref || user.locale)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', a)
       return
@@ -1519,6 +1548,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           `${CTRL}${JSON.stringify({ doc: { title: 'Sandbox — cod și rezultat', text: sandboxLog.slice(0, 8000) } })}${CTRL}`,
         )
       }
+      // Vocea creierului și pentru clienți: sintetizată pe server, redată în app.
+      if (assistantText.trim()) await streamVoice(reply, assistantText, userLang)
       reply.raw.end()
       if (assistantText.trim()) void saveMessage(user.email, 'assistant', assistantText)
       // Memory agent (learn): distil + save any new durable facts about the user,
