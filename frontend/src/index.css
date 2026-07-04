@@ -1145,14 +1145,10 @@ body {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 93, 93, 0.7); transform: scale(1); }
   50% { box-shadow: 0 0 14px 5px rgba(255, 93, 93, 0.45); transform: scale(1.12); }
 }
-/* Clean recording frame: no admin details, no chat text — the clip shows only
-   Kelion, the demo scenes and the site address. */
-.stage.rec-clean .topbar {
-  display: none;
-}
-.stage.rec-clean .chat-log {
-  display: none;
-}
+/* Recording frame (Adrian's rule: the Rec must capture EVERYTHING the AI does).
+   We keep the site-address watermark for branding, but NO LONGER hide the
+   topbar (bridge/server/Linux status + the live work ticker) or the chat — so
+   the clip is a full, honest document of the work, not a stripped promo. */
 .rec-watermark {
   position: fixed;
   top: 18px;
