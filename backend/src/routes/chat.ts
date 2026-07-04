@@ -52,6 +52,7 @@ import {
   bridgeAskStream,
   bridgeRepair,
   noteBrainActivity,
+  resetBrainActivity,
   getReadyDeploy,
   triggerDeploy,
   recentDevLog,
@@ -870,6 +871,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // addressed Kelion by name — removed.)
     if (isAdmin) {
       let a = ''
+      // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
+      // feed so this command starts clean and shows ONLY its own flow. History
+      // is kept (Jurnal Claude) and the telemetry bars keep running.
+      resetBrainActivity()
       // OK → DEPLOY: if a fix is BUILT and READY, a short affirmative from
       // Adrian ("ok", "da", "publică", "deploy", "dă-i drumul") publishes it on
       // the spot — no brain round-trip, no approval tab.

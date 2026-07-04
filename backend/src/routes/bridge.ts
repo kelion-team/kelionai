@@ -295,6 +295,21 @@ export function noteBrainActivity(line: string): void {
   logDevLines([stamped])
 }
 
+// Adrian's rule (4 iul): EACH new command starts with an EMPTY monitor — the
+// live execution feed is wiped so he sees ONLY the current command's flow. The
+// full history is untouched (it lives in devLog / "Jurnal Claude") and the
+// server-load bars keep pulsing (they're ambient telemetry, not command output).
+export function resetBrainActivity(): void {
+  // Seed a single intake marker (never the raw message) so the panel stays open
+  // — the live bars keep showing — while the feed is otherwise blank and fills
+  // with THIS command's real steps.
+  const stamped = `[${new Date().toISOString().slice(11, 16)}] 📥 Comandă nouă — pornesc curat`
+  devActivity = [stamped]
+  lastRichFeed = Date.now()
+  lastDevBeat = Date.now()
+  logDevLines([stamped])
+}
+
 function authed(req: FastifyRequest): boolean {
   return config.bridgeSecret !== '' && req.headers['x-bridge-secret'] === config.bridgeSecret
 }
