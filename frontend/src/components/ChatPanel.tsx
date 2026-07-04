@@ -1015,7 +1015,11 @@ export default function ChatPanel({
     const fd = await startFullDuplex(
       (text) => onHeardFull(text),
       (error) => {
+        // Micul se vindecă singur (pista moartă se redeschide în fullDuplexVoice);
+        // aici doar anunțăm: pierdut de tot → mesaj, revenit → mesajul dispare.
         if (error === 'not-allowed') setMicError(t.micBlocked)
+        else if (error === 'mic-lost') setMicError(t.micNoDevice)
+        else if (error === 'mic-recovered') setMicError(null)
       },
       (status) => setVoiceStatus(status),
       // Anchor recognition on the user's established language — no more

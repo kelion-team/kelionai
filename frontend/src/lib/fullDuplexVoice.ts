@@ -10,7 +10,13 @@
 // Loss-proof: each finished utterance is queued and POSTed to /api/asr. If the
 // network is down (GSM lost — tunnel, poor signal), utterances stay in a queue
 // that holds up to ~10 minutes of speech and is flushed automatically the moment
-// connectivity returns. Nothing the user said is lost.
+// connectivity returns. Nothing the user said is lost. HTTP errors never jam the
+// queue: a clip the server refuses is dropped (after a few retries for 5xx) so
+// the rest keeps flowing — only the network being down holds the queue.
+//
+// Self-healing: if the mic track dies (phone call, another app grabbing the mic,
+// Bluetooth headset unplugged) it is detected and the mic is reopened
+// automatically — the "listening but deaf" state can no longer persist.
 
 export interface FullDuplexHandle {
   stop(): void
@@ -110,11 +116,12 @@ export async function startFullDuplex(
 ): Promise<FullDuplexHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) return null
 
+  const AUDIO_CONSTRAINTS: MediaStreamConstraints = {
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  }
   let stream: MediaStream
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    })
+    stream = await navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS)
   } catch {
     onError?.('not-allowed')
     return null
@@ -129,7 +136,7 @@ export async function startFullDuplex(
   }
   const ctx = new AC()
   const sr = ctx.sampleRate
-  const source = ctx.createMediaStreamSource(stream)
+  let source = ctx.createMediaStreamSource(stream)
 
   // VAD path.
   const analyser = ctx.createAnalyser()
@@ -157,7 +164,7 @@ export async function startFullDuplex(
   sink.connect(ctx.destination)
 
   // ── loss-proof send queue ────────────────────────────────────────────────
-  const queue: { wav: string; ms: number }[] = []
+  const queue: { wav: string; ms: number; fails: number }[] = []
   let queuedMs = 0
   let sending = false
   let stopped = false
@@ -179,7 +186,23 @@ export async function startFullDuplex(
           credentials: 'include',
           body: JSON.stringify({ audio: item.wav, lang: getLang?.() || undefined }),
         })
-        if (!res.ok) break // server hiccup — keep it, retry later
+        if (!res.ok) {
+          // „MIC NU MERGE" (Adrian, 4 iul): un clip refuzat de server bloca
+          // coada LA NESFÂRȘIT — se relua veșnic același clip din cap, iar tot
+          // ce spuneai după stătea prizonier în spate. Micul părea mort deși
+          // totul rula. Regula acum: eroare de client (4xx — clip prost,
+          // sesiune expirată) → clipul cade imediat; eroare de server (5xx) →
+          // câteva reîncercări, apoi cade ca să treacă restul. DOAR lipsa de
+          // rețea (catch, mai jos) mai ține coada pe loc — asta e plasa
+          // anti-pierdere, nu erorile HTTP.
+          item.fails++
+          if (res.status < 500 || item.fails >= 5) {
+            queue.shift()
+            queuedMs -= item.ms
+            continue
+          }
+          break // server hiccup — keep it, retry later
+        }
         queue.shift()
         queuedMs -= item.ms
         const j = (await res.json()) as { transcript?: string; lang?: string | null }
@@ -194,7 +217,7 @@ export async function startFullDuplex(
   }
 
   const enqueue = (wav: string, ms: number): void => {
-    queue.push({ wav, ms })
+    queue.push({ wav, ms, fails: 0 })
     queuedMs += ms
     // Cap the hold at ~10 minutes — drop the OLDEST if we somehow overflow.
     while (queuedMs > MAX_QUEUE_MS && queue.length > 1) {
@@ -208,6 +231,75 @@ export async function startFullDuplex(
   window.addEventListener('online', onOnline)
   const retry = window.setInterval(() => {
     if (queue.length > 0) void flush()
+  }, 5000)
+
+  // ── self-healing mic ─────────────────────────────────────────────────────
+  // „MIC NU MERGE" (Adrian, 4 iul): fluxul getUserMedia se deschidea O SINGURĂ
+  // dată, la pornire. Pe telefon un apel, altă aplicație care ia microfonul sau
+  // o cască Bluetooth deconectată OMOARĂ pista — analizatorul primește doar
+  // zero, dar UI-ul arată în continuare „ascult". Acum pista moartă (ended) sau
+  // mută prelungit e detectată și microfonul se redeschide SINGUR, la
+  // nesfârșit; utilizatorul e anunțat doar dacă redeschiderea chiar eșuează.
+  let reacquiring = false
+  let reacquireFails = 0
+  let mutedTicks = 0
+  const watchTrack = (track: MediaStreamTrack): void => {
+    track.addEventListener('ended', () => {
+      if (!stopped) void reacquire()
+    })
+  }
+  const reacquire = async (): Promise<void> => {
+    if (stopped || reacquiring) return
+    reacquiring = true
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia(AUDIO_CONSTRAINTS)
+      if (stopped) {
+        fresh.getTracks().forEach((t) => t.stop())
+        return
+      }
+      try {
+        source.disconnect()
+      } catch {
+        /* pista veche e deja moartă */
+      }
+      stream.getTracks().forEach((t) => t.stop())
+      stream = fresh
+      source = ctx.createMediaStreamSource(stream)
+      source.connect(analyser)
+      source.connect(proc)
+      stream.getTracks().forEach(watchTrack)
+      mutedTicks = 0
+      if (reacquireFails >= 3) onError?.('mic-recovered')
+      reacquireFails = 0
+      reacquiring = false
+    } catch {
+      reacquireFails++
+      if (reacquireFails === 3) onError?.('mic-lost')
+      window.setTimeout(() => {
+        reacquiring = false
+        if (!stopped) void reacquire()
+      }, 3000)
+    }
+  }
+  stream.getTracks().forEach(watchTrack)
+  // Plasă de siguranță: pista dispărută/terminată fără eveniment, sau mută
+  // continuu >10s (mute tranzitoriu la schimbat de tab NU declanșează nimic).
+  const health = window.setInterval(() => {
+    if (stopped || reacquiring) return
+    const track = stream.getAudioTracks()[0]
+    if (!track || track.readyState === 'ended') {
+      void reacquire()
+      return
+    }
+    if (track.muted) {
+      mutedTicks++
+      if (mutedTicks >= 2) {
+        mutedTicks = 0
+        void reacquire()
+      }
+    } else {
+      mutedTicks = 0
+    }
   }, 5000)
 
   // ── VAD segmentation over the ring buffer ────────────────────────────────
@@ -309,6 +401,7 @@ export async function startFullDuplex(
       window.removeEventListener('online', onOnline)
       window.clearInterval(retry)
       window.clearInterval(resumeTimer)
+      window.clearInterval(health)
       try {
         proc.disconnect()
         sink.disconnect()
