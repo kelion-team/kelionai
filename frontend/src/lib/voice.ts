@@ -410,17 +410,26 @@ function armGestureUnlock(): void {
 }
 // chirpSpeak calls this when play() is rejected by the autoplay policy — the
 // line is parked (NOT dropped) and replays on the first gesture.
+// CAP DUR (bug 4 iul: „vocea din front trebuie oprită acum"): se păstrează DOAR
+// ultima replică. Fără cap, orele de blocaj adunau un maldăr de clipuri și la
+// primul click Kelion recita TOT istoricul neîntrerupt.
 function parkBlocked(text: string, lang: string): void {
   audioBlocked = true
+  blockedItems.length = 0
   blockedItems.push({ text, lang })
   armGestureUnlock()
 }
 
 async function drain(): Promise<void> {
-  // Audio is gesture-locked: park everything quietly (no wasted TTS fetches);
-  // the unlock handler re-queues and restarts the moment Adrian touches once.
+  // Audio is gesture-locked: park ONLY the newest line (the rest is stale — a
+  // backlog replay was the runaway-voice bug); no wasted TTS fetches either.
   if (audioBlocked) {
-    blockedItems.push(...ttsQueue.splice(0, ttsQueue.length))
+    const newest = ttsQueue.length > 0 ? ttsQueue[ttsQueue.length - 1] : null
+    ttsQueue = []
+    if (newest) {
+      blockedItems.length = 0
+      blockedItems.push(newest)
+    }
     ttsBusy = false
     prefetch = null
     onSpeaking?.(false)
