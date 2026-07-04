@@ -23,6 +23,7 @@ import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
 import { bridgeRoutes } from './routes/bridge.js'
 import { contactRoutes } from './routes/contact.js'
+import { startMailbox } from './services/mailbox.js'
 import { greetRoutes } from './routes/greet.js'
 import { initDb, recordDownload, initAppFiles, getAppFile } from './db.js'
 import { getSessionUser } from './session.js'
@@ -216,6 +217,8 @@ if (config.isProd && fs.existsSync(distPath)) {
 try {
   await app.listen({ port: config.port, host: '0.0.0.0' })
   app.log.info(`Kelionai backend on :${config.port}`)
+  // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
+  startMailbox()
 } catch (err) {
   app.log.error(err)
   process.exit(1)

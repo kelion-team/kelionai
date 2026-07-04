@@ -174,6 +174,22 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_notes_user ON notes (user_email, created_at DESC);
+    -- INBOUND EMAIL (row 19): every message that lands in the contact@ mailbox,
+    -- stored with the Secretary's drafted/sent reply, so the admin SEES what came
+    -- in and how Kelion answered. uid is the IMAP UID (dedupe — never reply twice).
+    CREATE TABLE IF NOT EXISTS inbound_emails (
+      id BIGSERIAL PRIMARY KEY,
+      uid TEXT NOT NULL UNIQUE,
+      from_addr TEXT NOT NULL,
+      from_name TEXT,
+      subject TEXT,
+      body TEXT,
+      reply TEXT,
+      replied BOOLEAN NOT NULL DEFAULT false,
+      lang TEXT,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_inbound_recent ON inbound_emails (received_at DESC);
     -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH Claudes —
     -- the laptop builder and the always-on server bridge. Either writes an entry;
     -- both read the latest entries. This is how "write here, appears there; write
@@ -1317,5 +1333,68 @@ export async function deleteNote(email: string, id: number): Promise<boolean> {
     return (r.rowCount ?? 0) > 0
   } catch {
     return false
+  }
+}
+
+export interface InboundEmail {
+  id: number
+  uid: string
+  from_addr: string
+  from_name: string | null
+  subject: string | null
+  body: string | null
+  reply: string | null
+  replied: boolean
+  lang: string | null
+  received_at: string
+}
+
+// Record an inbound email. Returns true if it was NEW (inserted) — false if the
+// UID was already seen, so the mailbox poller never replies to the same mail twice.
+export async function saveInboundEmail(m: {
+  uid: string
+  from_addr: string
+  from_name?: string
+  subject?: string
+  body?: string
+}): Promise<boolean> {
+  if (!dbEnabled() || !m.uid) return false
+  try {
+    const r = await getPool().query(
+      `INSERT INTO inbound_emails (uid, from_addr, from_name, subject, body)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (uid) DO NOTHING`,
+      [m.uid, m.from_addr.slice(0, 300), m.from_name?.slice(0, 200) ?? null, m.subject?.slice(0, 500) ?? null, m.body?.slice(0, 20000) ?? null],
+    )
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+// Mark an inbound email answered, storing the reply text + detected language.
+export async function setInboundReplied(uid: string, reply: string, lang: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      'UPDATE inbound_emails SET replied = true, reply = $2, lang = $3 WHERE uid = $1',
+      [uid, reply.slice(0, 20000), lang.slice(0, 5)],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Recent inbound emails + their replies, newest first (admin panel). */
+export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<InboundEmail>(
+      `SELECT id, uid, from_addr, from_name, subject, body, reply, replied, lang, received_at
+       FROM inbound_emails ORDER BY received_at DESC LIMIT $1`,
+      [limit],
+    )
+    return r.rows
+  } catch {
+    return []
   }
 }

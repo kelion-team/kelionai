@@ -195,6 +195,27 @@ export async function fetchReleases(): Promise<StagedRelease[]> {
   }
 }
 
+export interface InboundEmail {
+  id: number
+  from_addr: string
+  from_name: string | null
+  subject: string | null
+  body: string | null
+  reply: string | null
+  replied: boolean
+  received_at: string
+}
+
+export async function fetchInbound(): Promise<InboundEmail[]> {
+  try {
+    const r = await fetch('/api/admin/inbound', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { emails?: InboundEmail[] }).emails ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function decideRelease(id: string, decision: 'approve' | 'reject'): Promise<void> {
   try {
     await fetch('/api/admin/releases/decide', {

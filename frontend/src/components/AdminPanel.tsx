@@ -23,6 +23,8 @@ import {
   type StoresData,
   fetchWorkOrders,
   type WorkOrder,
+  fetchInbound,
+  type InboundEmail,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -92,8 +94,9 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases' | 'stores'
+    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases' | 'stores' | 'inbox'
   >('finance')
+  const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -255,10 +258,25 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
             >
               Magazine
             </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('inbox')
+                void fetchInbound().then(setInbound)
+              }}
+            >
+              Inbox
+            </button>
           </div>
-          <button type="button" className="ghost" onClick={onClose}>
-            Close
-          </button>
+          <div className="admin-head-actions">
+            <a className="admin-connect-google" href="/auth/google/login">
+              Conectează Google
+            </a>
+            <button type="button" className="ghost" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </header>
         {tab === 'finance' && (
           <section className="admin-finance">
@@ -434,6 +452,36 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 )}
               </>
             )}
+          </section>
+        )}
+        {tab === 'inbox' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Inbox contact@kelionai.app — emailurile PRIMITE și răspunsul redactat
+                automat de Secretar (row 19). Se citesc la fiecare 3 minute.
+              </div>
+              {inbound.length === 0 && (
+                <p className="chat-hint">Nicio scrisoare încă (sau MAIL_PASS nesetat).</p>
+              )}
+              {inbound.map((m) => (
+                <div className="inbox-item" key={m.id}>
+                  <div className="inbox-top">
+                    <span className="inbox-from">{m.from_name || m.from_addr}</span>
+                    <span className={`inbox-flag ${m.replied ? 'ok' : 'wait'}`}>
+                      {m.replied ? '✅ răspuns trimis' : '⏳ fără răspuns'}
+                    </span>
+                  </div>
+                  <div className="inbox-subj">{m.subject || '(fără subiect)'}</div>
+                  {m.body && <div className="inbox-body">{m.body.slice(0, 300)}</div>}
+                  {m.reply && (
+                    <div className="inbox-reply">
+                      <b>Răspuns:</b> {m.reply.slice(0, 300)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </section>
         )}
         {tab === 'jurnal' && (

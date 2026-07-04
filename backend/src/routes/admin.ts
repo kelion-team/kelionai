@@ -11,6 +11,7 @@ import {
   getDemoStats,
   getUserActivity,
   getDownloadStats,
+  listInboundEmails,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
@@ -59,6 +60,13 @@ async function checkStores(): Promise<StoreCheck[]> {
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
+  // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).
+  app.get('/api/admin/inbound', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ emails: await listInboundEmails(50) })
+  })
+
   // Market control: live store presence + direct-download counts + WHO
   // downloaded (email when signed in, else IP + country). Store installs are
   // aggregate-only by design — no store exposes user identities.
