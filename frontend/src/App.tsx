@@ -45,7 +45,15 @@ export default function App() {
       {updateReady && (
         <div className="update-bar" role="status">
           <span>{t.updateReady}</span>
-          <button type="button" onClick={() => window.location.reload()}>
+          <button
+            type="button"
+            onClick={() => {
+              // Update refresh — restore the running conversation after reload
+              // (fresh logins still start with a clean page).
+              sessionStorage.setItem('kelion_restore_chat', '1')
+              window.location.reload()
+            }}
+          >
             {t.updateNow}
           </button>
         </div>

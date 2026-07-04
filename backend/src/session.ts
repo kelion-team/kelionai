@@ -49,12 +49,19 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
   })
 }
 
+// The throwaway identity for one free trial. Generated up front so the SAME
+// email is stored on the visitor's analytics row AND used for the session —
+// that's the link that lets the owner click a trial and read its conversation.
+export function makeDemoEmail(): string {
+  return `demo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}@demo.kelionai.app`
+}
+
 // Issue a short-lived free-trial ("demo") session: full access for `seconds`,
 // no Google skills, its own throwaway identity. The JWT itself expires a little
 // after the trial so the very last request doesn't 401 early.
-export function setDemoSession(reply: FastifyReply, seconds: number): void {
+export function setDemoSession(reply: FastifyReply, seconds: number, email = makeDemoEmail()): void {
   const payload: SessionUser = {
-    email: `demo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}@demo.kelionai.app`,
+    email,
     name: 'Guest',
     picture: '',
     role: 'demo',

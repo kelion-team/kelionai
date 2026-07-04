@@ -150,7 +150,7 @@ export type BrowserResult = BrowserSnapshot | { error: string }
 // type by index hits exactly what was just read — a stable, reliable handle
 // without needing pixel-coordinate guessing. Passed as a STRING to evaluate()
 // (not a typed function) since this Node project has no "dom" lib in tsconfig.
-const COLLECT_SCRIPT = `() => {
+const COLLECT_SCRIPT = `(() => {
   const sel = 'a[href], button, input, textarea, select, [role="button"], [onclick]'
   const nodes = Array.from(document.querySelectorAll(sel))
   const out = []
@@ -169,14 +169,14 @@ const COLLECT_SCRIPT = `() => {
     i++
   }
   return out
-}`
-const TEXT_SCRIPT = `() => document.body ? document.body.innerText : ''`
+})()`
+const TEXT_SCRIPT = `(() => document.body ? document.body.innerText : '')()`
 
 async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
   const title = await page.title()
   const url = page.url()
-  const elements = (await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]
-  const text = ((await page.evaluate(TEXT_SCRIPT)) as string).trim().slice(0, 3000)
+  const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
+  const text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
   return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }
@@ -194,14 +194,28 @@ export async function browserOpen(
   } catch {
     return { error: 'blocked_url' }
   }
-  const session = await ensureSession(email)
+  let session: Session
+  try {
+    session = await ensureSession(email)
+  } catch (e) {
+    // Launch failures (missing Chromium, missing libs) must be visible in the
+    // server logs — this is the difference between diagnosable and blind.
+    console.error('[browser] chromium launch failed:', e instanceof Error ? e.message : e)
+    return { error: `launch_failed: ${e instanceof Error ? e.message.slice(0, 200) : 'unknown'}` }
+  }
   try {
     await session.page.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 15000 })
     await session.page.waitForTimeout(500)
-  } catch {
+  } catch (e) {
+    console.error('[browser] navigation failed:', e instanceof Error ? e.message.slice(0, 300) : e)
     return { error: 'navigation_failed' }
   }
-  return snapshot(session.page, baseUrl)
+  try {
+    return await snapshot(session.page, baseUrl)
+  } catch (e) {
+    console.error('[browser] snapshot failed:', e instanceof Error ? e.message.slice(0, 300) : e)
+    return { error: 'snapshot_failed' }
+  }
 }
 
 export async function browserClick(
@@ -272,7 +286,7 @@ export async function browserScroll(
   if (!session) return { error: 'no_session' }
   session.lastUsed = Date.now()
   const dy = direction === 'down' ? 700 : -700
-  await session.page.evaluate(`() => window.scrollBy(0, ${dy})`).catch(() => {})
+  await session.page.evaluate(`window.scrollBy(0, ${dy})`).catch(() => {})
   await session.page.waitForTimeout(200)
   return snapshot(session.page, baseUrl)
 }

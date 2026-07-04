@@ -26,6 +26,8 @@ import {
   saveNote,
   listNotes,
   deleteNote,
+  getRecentHistory,
+  getSharedMemory,
 } from '../db.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
@@ -42,6 +44,14 @@ import {
   browserClose,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/replayStore.js'
+import {
+  bridgeOnline,
+  bridgeAsk,
+  bridgeRepair,
+  recentDevLog,
+  stashAdminFiles,
+  type BridgeFile,
+} from './bridge.js'
 import { randomUUID } from 'node:crypto'
 
 // The brain: Claude Fable 5 — Anthropic's most capable model. If Fable has ANY
@@ -74,7 +84,7 @@ const COST_TOOL: Anthropic.Tool = {
 const SHOW_TOOL: Anthropic.Tool = {
   name: 'show_on_screen',
   description:
-    'Display a web page on the user\'s monitor (the screen behind you). Use this on your OWN initiative whenever showing something visually helps — a map, a website, a YouTube video, a document, search results. The user does NOT press any button and does NOT have to ask you to "open the monitor"; you decide when a visual is useful and call this. Pass an empty url to clear the screen.',
+    'Display a web page on the user\'s monitor (the screen behind you). Use this on your OWN initiative whenever showing something visually helps — a map, a website, a YouTube video, a document, search results. The user does NOT press any button and does NOT have to ask you to "open the monitor"; you decide when a visual is useful and call this. Pass an empty url to clear the screen. NOTE: for a regular website this automatically opens the LIVE browser (most sites refuse iframes), so for actual browsing/reading/clicking prefer browser_open directly — it also returns the page text and clickable elements.',
   input_schema: {
     type: 'object',
     properties: {
@@ -211,6 +221,25 @@ const BROWSER_CLOSE_TOOL: Anthropic.Tool = {
   name: 'browser_close',
   description: 'Close the live browser and clear it from the monitor, when done browsing.',
   input_schema: { type: 'object', properties: {} },
+}
+
+// ADMIN ONLY. When the owner asks to FIX, CHANGE or ADD something in the
+// Kelionai APP ITSELF (a bug, a feature, the code/site) — not an ordinary task —
+// hand the request to the owner's developer (Claude Code) through the bridge.
+const REPAIR_TOOL: Anthropic.Tool = {
+  name: 'request_repair',
+  description:
+    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer (Claude Code) who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, in his own words plus any detail he gave.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      description: {
+        type: 'string',
+        description: 'Clear, complete description of the fix/change the owner wants, with any detail he gave.',
+      },
+    },
+    required: ['description'],
+  },
 }
 
 // ── Kelion's team of specialist agents ──────────────────────────────────────
@@ -447,6 +476,15 @@ over show_on_screen whenever the user wants to actually browse, read inside,
 search within, or click through a real website — show_on_screen only displays a
 static page and cannot click, type or read it back to you.
 
+REPAIRS (owner only): if the request_repair tool is available and the OWNER asks
+you to fix, change, repair or add something in the Kelionai APP ITSELF (a bug, a
+broken feature, the code or the website — not an ordinary task), call
+request_repair with a clear, complete description of what he wants. That hands it
+to his developer, who does the real fix. After calling it, tell him plainly you
+have sent the repair request to be worked on. Never pretend YOU changed the app's
+code — you can't; you only forward it. This is ONLY for changes to the app itself,
+never for normal tasks (search, maps, email, notes, browsing).
+
 CRITICAL — SHOWING THINGS: You can put something on the user's monitor ONLY by
 calling a tool. If the user asks to SEE, SHOW, or display a place, a route, a
 video, the weather, or an image, you MUST call the matching tool (maps_search,
@@ -540,6 +578,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // The signed-in user's own recent history — the chat panel loads it at
+  // start, so a page refresh (now automatic on every release!) never shows an
+  // empty chat again: everything said stays on screen.
+  app.get('/api/chat/history', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const rows = await getRecentHistory(user.email, 60)
+    return reply.send({ history: rows.map((r) => ({ role: r.role, content: r.content })) })
+  })
+
   app.post<{
     Body: {
       messages?: ChatMessage[]
@@ -548,9 +596,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       screen?: { kind: string; title: string; active: boolean }[]
       now?: string
       tz?: string
+      // Raw attachments for the ADMIN bridge: photos, archives, video — any
+      // file rides the bridge to Claude (saved server-side by the worker).
+      files?: { name?: string; type?: string; data?: string }[]
     }
   }>(
     '/api/chat',
+    {
+      // This is the ONE route allowed a big body (admin bridge photos/archives/
+      // video). And it is the most cost-sensitive one, so it gets a tighter
+      // rate limit than the global default — 40/min per IP is far more than a
+      // human types, but stops an automated flood from burning API/subscription.
+      bodyLimit: 100_000_000,
+      config: { rateLimit: { max: 40, timeWindow: '1 minute' } },
+    },
     async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
@@ -571,7 +630,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // hundreds of messages) would blow the token limit and make EVERY turn fail
     // with a "connection error" — especially when a big pasted page is added.
     // Long-term continuity comes from the memory agent, not the raw transcript.
-    const MAX_HISTORY = 24
+    // Raised from 24 → 60: the models have a 1M-token context, and 24 was cutting
+    // off important earlier context inside a single working session (the user
+    // reported losing information mid-conversation). 60 keeps far more context
+    // while staying well clear of any limit.
+    const MAX_HISTORY = 60
     if (messages.length > MAX_HISTORY) {
       messages = messages.slice(-MAX_HISTORY)
       while (messages.length > 0 && messages[0].role !== 'user') messages.shift()
@@ -642,10 +705,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // app's default is English — start there, and switch ONLY when the user
     // clearly writes or speaks in another language, then keep that one.
     const defaultName = langName ?? 'English'
-    systemPrompt +=
-      speechPref && langName
-        ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. Foreign place names, foreign search or ticket results, foreign email addresses, foreign words in a tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language — you stay in ${langName}. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}.`
-        : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
+    // The ADMIN's locale IS his language, so he ALWAYS gets the absolute lock —
+    // otherwise, without a saved speech preference, opening a foreign-language
+    // web page (e.g. a French Google) could drift his reply into that language.
+    const absoluteLock = (speechPref || user.role === 'admin') && langName
+    systemPrompt += absoluteLock
+      ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
+      : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
     const coords = req.body?.coords
     if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
       const place = await reverseGeocode(coords.lat, coords.lon)
@@ -692,8 +758,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         `\n\nCURRENT DATE & TIME: right now it is ${human} (timezone ${tzName}). You ALWAYS know the current date and time — when the user directly asks what time or date it is, or if you know it, ANSWER with this exact value, confidently, never deny knowing it. Otherwise use it silently only when relevant (scheduling, "today", "tomorrow"). When you state a clock time, ALWAYS write it numerically (e.g. "15:04"), never spelled out in words. Just don't volunteer or narrate it unprompted (e.g. in greetings) when the user hasn't asked.`
     }
 
-    // Owner-only: the promo-clip pipeline (script → authorization → recording).
+    // Owner-only: never refuse the owner. If something can't be done on the spot,
+    // it is handled off-band (his developer builds it) — so Kelion says he's on
+    // it / has sent it to be built, NEVER "I can't". This is the fallback path;
+    // when the owner's bridge is online his messages are answered by it directly.
     if (user.role === 'admin') {
+      systemPrompt +=
+        `\n\nOWNER — NEVER REFUSE: you are talking to Adrian, your owner. You must NEVER tell him "I can't do that" or "I don't have access". If it is something you can do, do it. If it is something that needs building or fixing in the app, tell him plainly that you are taking care of it / have sent it to be built (and silently log_unsupported_request so it reaches his developer) — but frame it as handled, never as a refusal. Always give him a real, helpful spoken answer; never a dead end.`
       systemPrompt +=
         `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes, then ask for authorization. Do NOT call any tool yet. Step 2: ONLY when the owner explicitly approves (da / yes / autorizez): if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the approved script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
     }
@@ -728,8 +799,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // actually asking about what's visible. If we attached it every turn, Claude
     // would keep volunteering observations about what he sees — which the user
     // explicitly does NOT want. No frame attached = nothing to comment on.
+    // Extended for BLIND users (their daily reality): describe surroundings,
+    // what's ahead / in the way, obstacles, traffic lights, crossing safely,
+    // reading signs and labels — all must summon Kelion's eyes instantly.
     const VISION_INTENT =
-      /(\bsee\b|\blook\b|\bwatch\b|show me what|what('?s| is) this|what am i|what do you see|\bcamera\b|\bpicture\b|\bphoto\b|\bimage\b|colou?r|read this|\bscan\b)|vezi|vede|uit[aăâ]|uite|prive[sșş]te|ce (e|este|am|[țt]in|ai[ -])|camer[aă]|imagin|poz[aă]|culoar|cite[sșş]te|scanea/i
+      /(\bsee\b|\blook\b|\bwatch\b|show me what|what('?s| is) this|what am i|what do you see|\bcamera\b|\bpicture\b|\bphoto\b|\bimage\b|colou?r|read this|\bscan\b|describe|in front of|ahead of me|obstacle|traffic light|cross(ing)? the (street|road)|\bsign\b|\blabel\b|\bdanger\b)|vezi|vede|uit[aăâ]|uite|prive[sșş]te|ce (e|este|am|[țt]in|ai[ -])|camer[aă]|imagin|poz[aă]|culoar|cite[sșş]te|scanea|descrie|[îi]n fa[țt][aă]|ce se afl[aă]|obstacol|pericol|semafor|trec(e|i)? strada|indicator|etichet[aă]|panou|u[șs][aă]|sc[aă]ri|trotuar|bordur[aă]/i
     if (image && params.length > 0) {
       const lastIdx = params.length - 1
       const lm = params[lastIdx]
@@ -779,6 +853,101 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
     const isAdmin = user.role === 'admin'
+
+    // ADMIN BRIDGE + DECISION SYSTEM. The admin writes ANYTHING, no prefixes;
+    // the bridge brain DECIDES per message: (a) answer directly in chat,
+    // (b) [SKILL] → fall through to Kelion's tool brain (maps, browser,
+    // monitor…), (c) [EXECUT] → queue a WORK ORDER for laptop-Claude (the
+    // builder) and confirm "mă ocup". The "kelion" prefix stays as a manual
+    // shortcut straight to the tools. NO silent fallback to the paid brain:
+    // bridge down → Kelion says exactly that and stops.
+    if (isAdmin && !/^kelion\b/i.test(lastUserText.trim())) {
+      let a = ''
+      if (bridgeOnline()) {
+        const convo = messages
+          .slice(-20)
+          .map((m) => `${m.role === 'user' ? 'Adrian' : 'Kelion'}: ${m.content}`)
+          .join('\n')
+        // Explicit language lock so the bridge answer is ALWAYS in the admin's
+        // established language (the bridge bypasses the normal brain's guardian).
+        const langLock = langName
+          ? `RĂSPUNDE EXCLUSIV în ${langName} — fiecare cuvânt în ${langName}, indiferent de limba în care e scris acest context.\n\n`
+          : ''
+        // The Claude answering in chat gets the LIVE work journal, so he knows
+        // exactly what laptop-Claude built today and what's in progress — no
+        // more "the chat doesn't know what's happening here".
+        const journal = recentDevLog(15)
+        const journalBlock =
+          journal.length > 0
+            ? `JURNALUL LUCRULUI DE AZI (Claude pe laptop, live):\n${journal.join('\n')}\n\n`
+            : ''
+        // SHARED MEMORY ("caietul comun"): everything either Claude wrote — the
+        // laptop builder and this server brain read the SAME notebook, so what
+        // was learned/done in one place is known in the other.
+        const shared = await getSharedMemory(30)
+        const sharedBlock =
+          shared.length > 0
+            ? 'MEMORIA COMUNĂ (caietul pe care-l împărțiți tu și Claude-constructorul de pe laptop):\n' +
+              shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n') +
+              '\n\n'
+            : ''
+        // THE DECISION SYSTEM: the bridge brain classifies every message.
+        const decision =
+          'DECIZIE (alege UNA, la fiecare mesaj):\n' +
+          '1. Dacă cererea are nevoie de UNELTELE lui Kelion (hartă/navigație, deschis pagini/browser/YouTube, afișat ceva pe monitor, generat imagini, vreme, cameră, notițe, înregistrare) → răspunde EXACT cu textul [SKILL] și NIMIC altceva.\n' +
+          '2. Dacă cererea e o SARCINĂ DE LUCRU pe aplicație/servere (repară, construiește, adaugă, schimbă, publică, un bug, „nu merge X") → răspunde cu [EXECUT] urmat de o confirmare scurtă în limba lui Adrian (ex: „Mă ocup — am trimis la execuție. Vezi progresul pe monitor.").\n' +
+          '3. Altfel → răspunde normal la conversație.\n\n'
+        // ANY attachment rides the bridge to Claude: photos, texts, archives,
+        // video (voice arrives already transcribed as text). Base64 payloads —
+        // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
+        const files: BridgeFile[] = []
+        let budget = 95_000_000 // ~70MB decoded — maximul fizic al țevii
+        const addFile = (name: string, type: string, raw: string): void => {
+          const data = raw.includes(',') ? raw.slice(raw.indexOf(',') + 1) : raw
+          if (!data || data.length > budget) return
+          budget -= data.length
+          files.push({ name: name.slice(0, 120), type: type.slice(0, 80), data })
+        }
+        for (const f of req.body?.files ?? []) {
+          if (typeof f?.data === 'string') {
+            addFile(f.name || 'fisier', f.type || 'application/octet-stream', f.data)
+          }
+        }
+        if (image && files.length === 0) addFile('captura.jpg', 'image/jpeg', image)
+        // TOTAL ACCESS: everything the admin drops in chat (photos, pasted
+        // screenshots, archives, video) is stashed for laptop-Claude too, so
+        // the builder sees exactly what the voice saw.
+        if (files.length > 0) stashAdminFiles(files)
+        const answer = await bridgeAsk(
+          decision + sharedBlock + langLock + journalBlock + convo,
+          files,
+        )
+        if (answer && answer.trim()) a = answer.trim()
+      }
+      // Interpret the brain's verdict. [SKILL] → do NOT return: execution
+      // falls through to Kelion's tool-capable brain below, same turn.
+      if (!/^\[SKILL\]/i.test(a)) {
+        if (/^\[EXECUT\]/i.test(a)) {
+          // A build/fix task → work order for laptop-Claude, confirm in chat.
+          bridgeRepair(lastUserText)
+          a = a.replace(/^\[EXECUT\]\s*/i, '').trim()
+          if (!a) a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
+        }
+        if (!a) {
+          a =
+            !langName || /rom/i.test(langName)
+              ? 'Puntea către Claude e căzută — nu vorbesc în numele lui. Becul Bridge e stins; paznicul o repornește în cel mult un minut.'
+              : 'The bridge to Claude is down — I will not speak on his behalf. The Bridge light is off; the watchdog restarts it within a minute.'
+        }
+        // The reply shows written in the chat AND is spoken — no separate
+        // "Claude" monitor panel (that duplicated the orange "Claude" indicator).
+        reply.raw.write(a)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', a)
+        return
+      }
+    }
+
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL]
     const BROWSER_TOOLS = [
       BROWSER_OPEN_TOOL,
@@ -789,8 +958,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_SCROLL_TOOL,
       BROWSER_CLOSE_TOOL,
     ]
+    // request_repair is offered ONLY to the admin AND only when his local
+    // developer bridge is actually online — no point otherwise.
+    const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
     const tools: Anthropic.Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     let assistantText = ''
@@ -1209,6 +1381,30 @@ async function runAgent(
   }
 }
 
+// URLs that actually render inside the monitor iframe: our own pages (relative
+// or same-host), YouTube (the frontend rewrites to /embed/), Waze's live-map
+// embed, OpenStreetMap embeds and Google's keyed Maps Embed API. Everything
+// else on the open web almost always sends X-Frame-Options/CSP and would show
+// a broken panel — those go through the live browser instead (see
+// show_on_screen in runTool).
+function iframeSafe(raw: string): boolean {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return true // relative URL (/api/image/…, /api/route…) — same-origin, safe
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+  const host = u.hostname.replace(/^www\./, '')
+  if (host === 'kelionai.app' || host.endsWith('.kelionai.app')) return true
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be') return true
+  if (host === 'embed.waze.com') return true
+  if (host === 'openstreetmap.org') return true
+  if ((host === 'google.com' || host.endsWith('.google.com')) && u.pathname.startsWith('/maps/embed'))
+    return true
+  return false
+}
+
 // Shared by every browser_* tool: puts the fresh screenshot on the monitor (a
 // plain <img>-safe same-origin URL, so it renders even for sites that block
 // iframes) and hands Kelion back the page text + numbered clickable elements.
@@ -1333,8 +1529,20 @@ async function runTool(
     const inp = (block.input ?? {}) as { url?: string; title?: string }
     const url = typeof inp.url === 'string' ? inp.url : ''
     const title = typeof inp.title === 'string' ? inp.title : ''
+    // Empty URL or known-embeddable content (YouTube, our own pages, Waze,
+    // OSM…) → the plain iframe works, show it directly.
+    if (!url || iframeSafe(url)) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
+      return JSON.stringify({ shown: true, url })
+    }
+    // Anything else (an arbitrary website) almost always refuses to load in an
+    // iframe (X-Frame-Options/CSP) and would show a broken panel — so open it
+    // in the LIVE browser instead and show the real page. If even that fails,
+    // fall back to the iframe attempt as a last resort.
+    const live = await browserOpen(email, baseUrl, url)
+    if (!('error' in live)) return browserToolResult(reply, live)
     reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-    return JSON.stringify({ shown: true, url })
+    return JSON.stringify({ shown: true, url, note: 'live_browser_failed_iframe_fallback' })
   }
   if (block.name === 'generate_image') {
     const inp = (block.input ?? {}) as { prompt?: string }
@@ -1382,6 +1590,16 @@ async function runTool(
     await browserClose(email)
     reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
     return JSON.stringify({ closed: true })
+  }
+  if (block.name === 'request_repair') {
+    if (!isAdmin) return JSON.stringify({ error: 'forbidden' })
+    const inp = (block.input ?? {}) as { description?: string }
+    const desc = typeof inp.description === 'string' ? inp.description.trim() : ''
+    if (!desc) return JSON.stringify({ error: 'empty_description' })
+    const jobId = bridgeRepair(desc)
+    return jobId
+      ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer (Claude Code). It will be worked on now.' })
+      : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
   }
   const out = await runGoogleTool(block.name, block.input, token)
   // Weather map or route map: if the tool returned an embeddable screen_url, show

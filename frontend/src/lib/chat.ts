@@ -71,6 +71,8 @@ export async function* streamChat(
   coords?: Coords,
   onControl?: (c: ChatControl) => void,
   screen?: ScreenTask[],
+  // ADMIN only: raw attachments (any file type) that ride the bridge to Claude.
+  files?: { name: string; type: string; data: string }[],
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -83,6 +85,7 @@ export async function* streamChat(
         image,
         coords,
         screen,
+        files,
         // Kelion's built-in sense of "now": the client's real local time + zone,
         // sent every turn so he always knows today's date and the current time.
         now: new Date().toISOString(),

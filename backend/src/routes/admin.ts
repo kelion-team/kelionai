@@ -9,9 +9,11 @@ import {
   getAdminAccount,
   loadAdminPool,
   getDemoStats,
+  getUserActivity,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
+import { bridgeRepair } from './bridge.js'
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // List users with message counts (admin only).
@@ -44,7 +46,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
   })
 
-  // Mark a gap resolved / reopen it (admin only).
+  // Mark a gap resolved / reopen it (admin only). Used by the "Reject" button.
   app.post<{ Body: { id?: number; resolved?: boolean } }>('/api/admin/gaps/resolve', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -52,6 +54,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
     await setGapResolved(id, req.body?.resolved !== false)
     return reply.send({ ok: true })
+  })
+
+  // Escalate a gap to the owner's developer (Claude Code) through the bridge —
+  // the "Escaladează către Claude" button. Forwards the request text as a
+  // build/repair task and marks the gap resolved. If the bridge isn't running,
+  // nothing is sent and the gap stays open (the UI tells the admin to start it).
+  app.post<{ Body: { id?: number } }>('/api/admin/gaps/escalate', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.body?.id)
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
+    const gap = (await getCapabilityGaps(true)).find((g) => g.id === id)
+    if (!gap) return reply.code(404).send({ error: 'not_found' })
+    const jobId = bridgeRepair(
+      `Cerere de la utilizatori (din culegerea de dorințe a lui Kelion), escaladată de admin — ` +
+        `construiește/adaugă această capacitate în aplicația Kelionai: "${gap.request}"` +
+        (gap.reason ? ` (motiv notat: ${gap.reason})` : ''),
+    )
+    if (!jobId) return reply.send({ escalated: false, online: false })
+    await setGapResolved(id, true)
+    return reply.send({ escalated: true, online: true })
   })
 
   // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
@@ -80,6 +103,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       currency: stripe?.currency ?? 'gbp',
       byKind: costs.byKind,
     })
+  })
+
+  // Per-USER activity (admin only): who signed in, last IP/place/device, how
+  // long they stayed (sum of presence-ping time), plus their latest sessions.
+  app.get('/api/admin/activity', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await getUserActivity())
   })
 
   // Free-trial visitor analytics (admin only): where trials come from — country,

@@ -5,13 +5,30 @@ import {
   fetchGaps,
   fetchFinance,
   fetchDemos,
+  fetchActivity,
+  fetchDevLog,
+  fetchReleases,
+  decideRelease,
   resolveGap,
+  escalateGap,
+  type StagedRelease,
   type UserSummary,
   type HistoryRow,
   type CapabilityGap,
   type Finance,
   type DemoStats,
+  type DemoRecent,
+  type UserActivity,
 } from '../lib/admin'
+
+// "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
+function fmtDur(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
+}
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
 // text). flagcdn serves every ISO country; on any failure we fall back to a dot.
@@ -70,7 +87,9 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 }
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
-  const [tab, setTab] = useState<'finance' | 'visitors' | 'history' | 'gaps' | 'share'>('finance')
+  const [tab, setTab] = useState<
+    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases'
+  >('finance')
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -79,12 +98,36 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [finance, setFinance] = useState<Finance | null>(null)
   const [demos, setDemos] = useState<DemoStats | null>(null)
+  const [activity, setActivity] = useState<UserActivity | null>(null)
+  const [devLog, setDevLog] = useState<string[]>([])
+  const [releases, setReleases] = useState<StagedRelease[]>([])
+
+  async function decide(id: string, d: 'approve' | 'reject'): Promise<void> {
+    await decideRelease(id, d)
+    setReleases((cur) => cur.map((r) => (r.id === id ? { ...r, status: d === 'approve' ? 'approved' : 'rejected' } : r)))
+  }
+  // The conversation of a clicked TRIAL visitor — what interested them, and in
+  // what language they wrote / Kelion answered.
+  const [convo, setConvo] = useState<{ v: DemoRecent; rows: HistoryRow[] } | null>(null)
+  const [convoLoading, setConvoLoading] = useState(false)
+
+  async function openVisitorConvo(v: DemoRecent): Promise<void> {
+    if (!v.session_email) return
+    setConvoLoading(true)
+    setConvo({ v, rows: [] })
+    const rows = await fetchHistory(v.session_email)
+    setConvo({ v, rows })
+    setConvoLoading(false)
+  }
 
   useEffect(() => {
     void fetchUsers().then(setUsers)
     void fetchGaps().then(setGaps)
     void fetchFinance().then(setFinance)
     void fetchDemos().then(setDemos)
+    void fetchActivity().then(setActivity)
+    void fetchDevLog().then(setDevLog)
+    void fetchReleases().then(setReleases)
   }, [])
 
   const sym = finance?.currency === 'usd' ? '$' : '£'
@@ -97,6 +140,17 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   async function markResolved(id: number): Promise<void> {
     await resolveGap(id, true)
     setGaps((cur) => cur.filter((g) => g.id !== id))
+  }
+
+  async function sendToClaude(id: number): Promise<void> {
+    const res = await escalateGap(id)
+    if (res.escalated) {
+      setGaps((cur) => cur.filter((g) => g.id !== id))
+    } else {
+      alert(
+        'Nu am putut trimite: puntea către Claude nu rulează acum. Pornește puntea (butonul PORNESTE-PUNTEA sau serverul cloud) și încearcă din nou.',
+      )
+    }
   }
 
   useEffect(() => {
@@ -119,6 +173,13 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => setTab('finance')}
             >
               Bani
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'users' ? 'sel' : ''}`}
+              onClick={() => setTab('users')}
+            >
+              Utilizatori{activity && activity.users.length > 0 ? ` (${activity.users.length})` : ''}
             </button>
             <button
               type="button"
@@ -150,6 +211,29 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => setTab('gaps')}
             >
               Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'jurnal' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('jurnal')
+                void fetchDevLog().then(setDevLog)
+              }}
+            >
+              Jurnal Claude
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'releases' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('releases')
+                void fetchReleases().then(setReleases)
+              }}
+            >
+              Release-uri
+              {releases.filter((r) => r.status === 'pending').length > 0
+                ? ` (${releases.filter((r) => r.status === 'pending').length})`
+                : ''}
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -203,6 +287,162 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
             )}
           </section>
         )}
+        {tab === 'releases' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Release-uri — modificări construite de Claude, în așteptarea aprobării tale. Nimic nu
+                intră live până nu apeși „Aprobă și publică".
+              </div>
+              {releases.length === 0 && (
+                <div className="chat-hint">
+                  Niciun release în așteptare. Aici apar modificările pe care Claude le-a construit
+                  headless pe server; le vezi, le aprobi (→ se publică) sau le respingi.
+                </div>
+              )}
+              {releases.map((r) => (
+                <div key={r.id} className={`release-row status-${r.status}`}>
+                  <div className="release-main">
+                    <span className="release-title">{r.title}</span>
+                    <span className={`release-badge b-${r.status}`}>
+                      {r.status === 'pending'
+                        ? 'ÎN AȘTEPTARE'
+                        : r.status === 'approved'
+                          ? 'APROBAT'
+                          : r.status === 'deployed'
+                            ? 'PUBLICAT'
+                            : 'RESPINS'}
+                    </span>
+                    <span className="release-time">
+                      {new Date(r.at).toLocaleString('ro-RO', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  {r.detail && <pre className="release-detail">{r.detail}</pre>}
+                  {r.status === 'pending' && (
+                    <div className="release-actions">
+                      <button
+                        type="button"
+                        className="composer-send"
+                        onClick={() => void decide(r.id, 'approve')}
+                      >
+                        Aprobă și publică
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => void decide(r.id, 'reject')}
+                      >
+                        Respinge
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {tab === 'jurnal' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Jurnal Claude — istoricul complet al lucrului (monitorul arată doar lucrul curent)
+              </div>
+              {devLog.length === 0 && (
+                <div className="chat-hint">
+                  Jurnalul e gol — se umple cât timp Claude lucrează (de la ultima repornire a
+                  serverului).
+                </div>
+              )}
+              {[...devLog].reverse().map((l, i) => (
+                <div className="devlog-line" key={i}>
+                  {l}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {tab === 'users' && (
+          <section className="admin-finance">
+            {!activity && <p className="chat-hint">Se încarcă…</p>}
+            {activity && activity.users.length === 0 && (
+              <p className="chat-hint">
+                Încă nu s-a strâns activitate pe conturi — se adună de la prima intrare a fiecărui
+                utilizator după această actualizare.
+              </p>
+            )}
+            {activity && activity.users.length > 0 && (
+              <>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">
+                    Pe utilizator — ultima intrare, IP, loc, cât a stat în total
+                  </div>
+                  {activity.users.map((u) => (
+                    <div className="vis-row" key={u.email}>
+                      <div className="vis-main">
+                        <span className="vis-flagline">
+                          <Flag code={u.code} />
+                          <strong>{u.email}</strong>
+                        </span>
+                        <span className="vis-time">
+                          {new Date(u.last_seen).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <div className="vis-meta">
+                        <span>{u.last_ip || '—'}</span>
+                        <span>{[u.city, u.country].filter(Boolean).join(', ') || '—'}</span>
+                        <span>
+                          {u.browser || '—'}
+                          {u.device ? ` · ${u.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
+                        </span>
+                        <span>{u.sessions} sesiuni</span>
+                        <span>timp total {fmtDur(u.seconds)}</span>
+                        <span>{u.messages} mesaje</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">Sesiuni recente — cine, când, cât a stat</div>
+                  {activity.sessions.length === 0 && <div className="chat-hint">—</div>}
+                  {activity.sessions.map((s, i) => (
+                    <div className="vis-row" key={i}>
+                      <div className="vis-main">
+                        <span className="vis-flagline">
+                          <Flag code={s.code} />
+                          <strong>{s.email}</strong>
+                        </span>
+                        <span className="vis-time">
+                          {new Date(s.started_at).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <div className="vis-meta">
+                        <span>a stat {fmtDur(s.seconds)}</span>
+                        <span>{s.ip || '—'}</span>
+                        <span>{[s.city, s.country].filter(Boolean).join(', ') || '—'}</span>
+                        <span>{s.device === 'mobile' ? 'mobil' : 'desktop'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
+        )}
         {tab === 'visitors' && (
           <section className="admin-finance">
             {!demos && <p className="chat-hint">Se încarcă…</p>}
@@ -245,46 +485,66 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   ))}
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Vizite recente — profil complet</div>
+                  <div className="fin-breakdown-head">
+                    Vizite recente — profil complet · click pe o PROBĂ ca să vezi conversația
+                  </div>
                   {demos.recent.length === 0 && <div className="chat-hint">—</div>}
-                  {demos.recent.map((r, i) => (
-                    <div className="vis-row" key={i}>
-                      <div className="vis-main">
-                        <span className="vis-flagline">
-                          <Flag code={r.code} />
-                          <strong>
-                            {r.country || 'Necunoscut'}
-                            {r.region && r.region !== r.city ? ` · ${r.region}` : ''}
-                            {r.city ? ` · ${r.city}` : ''}
-                          </strong>
-                        </span>
-                        <span className={`vis-badge ${r.kind === 'demo' ? 'kind-demo' : 'kind-visit'}`}>
-                          {r.kind === 'demo' ? 'DEMO' : 'VIZITĂ'}
-                        </span>
-                        <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
-                          {r.is_bot ? 'BOT' : 'UMAN'}
-                        </span>
-                        <span className="vis-time">
-                          {new Date(r.started_at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+                  {demos.recent.map((r, i) => {
+                    const clickable = r.kind === 'demo' && !!r.session_email
+                    return (
+                      <div
+                        className={`vis-row ${clickable ? 'vis-clickable' : ''}`}
+                        key={i}
+                        role={clickable ? 'button' : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onClick={clickable ? () => void openVisitorConvo(r) : undefined}
+                        onKeyDown={
+                          clickable
+                            ? (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') void openVisitorConvo(r)
+                              }
+                            : undefined
+                        }
+                        title={clickable ? 'Vezi ce l-a interesat' : undefined}
+                      >
+                        <div className="vis-main">
+                          <span className="vis-flagline">
+                            <Flag code={r.code} />
+                            <strong>
+                              {r.country || 'Necunoscut'}
+                              {r.region && r.region !== r.city ? ` · ${r.region}` : ''}
+                              {r.city ? ` · ${r.city}` : ''}
+                            </strong>
+                          </span>
+                          <span className={`vis-badge ${r.kind === 'demo' ? 'kind-demo' : 'kind-visit'}`}>
+                            {r.kind === 'demo' ? 'DEMO' : 'VIZITĂ'}
+                          </span>
+                          <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
+                            {r.is_bot ? 'BOT' : 'UMAN'}
+                          </span>
+                          {clickable && <span className="vis-open">deschide ›</span>}
+                          <span className="vis-time">
+                            {new Date(r.started_at).toLocaleString('ro-RO', {
+                              day: 'numeric',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <div className="vis-meta">
+                          <span>{r.ip}</span>
+                          {r.isp && <span>{r.isp}</span>}
+                          <span>
+                            {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
+                            {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
+                          </span>
+                          {r.lang && <span>limbă {r.lang}</span>}
+                          <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                        </div>
                       </div>
-                      <div className="vis-meta">
-                        <span>{r.ip}</span>
-                        {r.isp && <span>{r.isp}</span>}
-                        <span>
-                          {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
-                          {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
-                        </span>
-                        {r.lang && <span>limbă {r.lang}</span>}
-                        <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </>
             )}
@@ -388,9 +648,19 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                     {new Date(g.last_seen).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short' })}
                   </span>
                 </div>
-                <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
-                  Rezolvat
-                </button>
+                <div className="admin-gap-actions">
+                  <button
+                    type="button"
+                    className="composer-send"
+                    onClick={() => void sendToClaude(g.id)}
+                    title="Trimite cererea către Claude (dezvoltatorul) ca s-o construiască"
+                  >
+                    Escaladează către Claude
+                  </button>
+                  <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
+                    Reject
+                  </button>
+                </div>
               </div>
             ))}
           </section>
@@ -434,6 +704,51 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
           </section>
         </div>
       </div>
+      {convo && (
+        <div className="convo-overlay" onClick={() => setConvo(null)}>
+          <div className="convo-panel" onClick={(e) => e.stopPropagation()}>
+            <header className="admin-head">
+              <div className="convo-title">
+                <strong>Ce l-a interesat</strong>
+                <span className="convo-sub">
+                  {convo.v.country || 'Necunoscut'}
+                  {convo.v.city ? ` · ${convo.v.city}` : ''} ·{' '}
+                  {convo.v.lang ? `limbă browser: ${convo.v.lang}` : 'limbă necunoscută'} ·{' '}
+                  {convo.v.device === 'mobile' ? 'mobil' : 'desktop'}
+                </span>
+              </div>
+              <button type="button" className="ghost" onClick={() => setConvo(null)}>
+                Close
+              </button>
+            </header>
+            <div className="convo-insight">
+              {convoLoading
+                ? 'Se încarcă…'
+                : convo.rows.length === 0
+                  ? 'A intrat în probă dar nu a scris nimic — doar a privit.'
+                  : `A scris ${convo.rows.filter((r) => r.role === 'user').length} mesaje. ` +
+                    `Limba lui (din browser): ${convo.v.lang || 'necunoscută'}. ` +
+                    'Vezi mai jos ce a întrebat și în ce limbă i-a răspuns Kelion — așa afli dacă a descoperit că-și poate folosi limba.'}
+            </div>
+            <div className="admin-history convo-body">
+              {!convoLoading && convo.rows.length === 0 && (
+                <p className="chat-hint">— fără conversație —</p>
+              )}
+              {convo.rows.map((h, i) => (
+                <div key={i} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
+                  <span className="admin-msg-time">
+                    {new Date(h.created_at).toLocaleTimeString('ro-RO', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  {h.content}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

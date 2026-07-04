@@ -2,9 +2,11 @@ import { Suspense, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
+import ContactModal from '../components/ContactModal'
 import { startGoogleLogin, startDemo } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
-import { strings, browserLang } from '../lib/i18n'
+import { strings } from '../lib/i18n'
+import { greetOnHover } from '../lib/voice'
 
 const ERR_KEY: Record<string, keyof ReturnType<typeof strings>> = {
   closed: 'errClosed',
@@ -20,30 +22,14 @@ const ERR_KEY: Record<string, keyof ReturnType<typeof strings>> = {
 // (en/ro/es/fr/de/it/pt; anything else falls back to English). The conversation
 // itself adapts to dozens of languages independently of the UI.
 export default function Landing({ error }: { error?: string | null }) {
-  const t = strings(browserLang())
+  // The start page is ALWAYS English — the professional international default.
+  // (The conversation itself still adapts to the visitor's own language.)
+  const t = strings('en')
   const [busy, setBusy] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
-
-  // PWA install: when the browser offers native install (Android/desktop
-  // Chrome), the app button triggers IT — no APK sideload, no Android
-  // developer-verification block, no warnings. APK stays as the fallback.
-  const [installEvt, setInstallEvt] = useState<{ prompt: () => Promise<void> } | null>(null)
-  // iOS can't offer a programmatic install (Apple policy) — show the two-tap
-  // Safari guide instead. Hidden when already running as the installed app.
-  const isIos =
-    /iphone|ipad|ipod/i.test(navigator.userAgent) &&
-    !window.matchMedia('(display-mode: standalone)').matches
-  const [iosHelp, setIosHelp] = useState(false)
-  useEffect(() => {
-    const h = (e: Event): void => {
-      e.preventDefault()
-      setInstallEvt(e as unknown as { prompt: () => Promise<void> })
-    }
-    window.addEventListener('beforeinstallprompt', h)
-    return () => window.removeEventListener('beforeinstallprompt', h)
-  }, [])
 
   // Visit beacon: every arrival lands in the owner's analytics (server dedupes
   // 6h; the sessionStorage guard just avoids re-firing on SPA re-renders).
@@ -77,7 +63,9 @@ export default function Landing({ error }: { error?: string | null }) {
 
   return (
     <div className="landing">
-      <div className="landing-hero">
+      {/* Hover over Kelion → he greets you, time-appropriately, in his own voice
+          with his mouth moving (landing page only, never after login). */}
+      <div className="landing-hero" onMouseEnter={() => void greetOnHover()}>
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
         <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
@@ -160,58 +148,49 @@ export default function Landing({ error }: { error?: string | null }) {
             </ul>
           </div>
 
-          <p className="landing-download">
-            {installEvt && (
-              <button
-                type="button"
-                className="install-btn"
-                onClick={() => void installEvt.prompt()}
-              >
-                📱 {t.installApp}
-              </button>
-            )}
-            {isIos && (
-              <button type="button" className="install-btn" onClick={() => setIosHelp((v) => !v)}>
-                 {t.iosInstall}
-              </button>
-            )}
-            <a href="/dl/Kelionai-Setup.exe" download>
-              ⊞ {t.downloadWin}
-            </a>
-            {!installEvt && !isIos && (
-              <a href="/dl/Kelionai.apk" download>
-                🤖 {t.downloadAndroid}
+          {/* One tidy download section, four DISTINCT platforms, no duplicates.
+              Desktop (Windows, Linux) as click-to-install; mobile (iOS, Android)
+              as scan codes. Every target is a stable URL that always serves the
+              latest build. */}
+          <div className="landing-download">
+            <div className="dl-desktop">
+              <a className="dl-tile" href="/dl/Kelionai-Setup.exe" download>
+                <span className="dl-ico">⊞</span>
+                <span className="dl-name">Windows</span>
+                <span className="dl-sub">Download .exe</span>
               </a>
-            )}
-          </p>
-          {iosHelp && <p className="ios-steps">{t.iosSteps}</p>}
-
-          {/* Scan to install on a phone/tablet — shown next to the desktop
-              downloads so a visitor can jump straight to the mobile app. */}
-          <div className="landing-qr">
-            <span className="landing-qr-hint">{t.scanHint}</span>
-            <div className="landing-qr-row">
-              <figure>
-                <img src="/dl/qr-site.png" alt="QR — Kelionai app" width="96" height="96" />
-                <figcaption>{t.installApp}</figcaption>
-              </figure>
-              <figure>
-                <img src="/dl/qr-play.png" alt="QR — Google Play" width="96" height="96" />
-                <figcaption>Google Play</figcaption>
-              </figure>
-              <figure>
-                <img src="/dl/qr-apk.png" alt="QR — Android APK" width="96" height="96" />
-                <figcaption>APK</figcaption>
-              </figure>
+              <a className="dl-tile" href="https://kelionai.app" target="_blank" rel="noreferrer">
+                <span className="dl-ico">🐧</span>
+                <span className="dl-name">Linux</span>
+                <span className="dl-sub">Open web app</span>
+              </a>
+            </div>
+            <div className="landing-qr">
+              <span className="landing-qr-hint">Or scan to install on your phone or tablet</span>
+              <div className="landing-qr-row">
+                <figure>
+                  <img src="/dl/qr-ios.png" alt="QR — iOS" width="96" height="96" />
+                  <figcaption> iOS</figcaption>
+                </figure>
+                <figure>
+                  <img src="/dl/qr-apk.png" alt="QR — Android" width="96" height="96" />
+                  <figcaption>🤖 Android</figcaption>
+                </figure>
+              </div>
             </div>
           </div>
 
           <p className="landing-legal">
-            {t.cookieNote}{' '}
-            <a href="/privacy">{t.privacyLabel}</a> · <a href="/terms">{t.termsLabel}</a>
+            <button type="button" className="landing-contact-link" onClick={() => setContactOpen(true)}>
+              Contact
+            </button>{' '}
+            · <a href="/privacy">{t.privacyLabel}</a> · <a href="/terms">{t.termsLabel}</a>
+            <br />
+            {t.cookieNote}
           </p>
         </div>
       </div>
+      {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
     </div>
   )
 }

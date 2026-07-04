@@ -64,6 +64,9 @@ export interface DemoRecent {
   referrer: string
   is_bot: boolean
   started_at: string
+  // For a DEMO row: the throwaway email whose conversation the owner can open
+  // (click the row). Empty for plain visits.
+  session_email: string
 }
 
 export interface DemoStats {
@@ -81,6 +84,95 @@ export async function fetchDemos(): Promise<DemoStats | null> {
     const r = await fetch('/api/admin/demos', { credentials: 'include' })
     if (!r.ok) return null
     return (await r.json()) as DemoStats
+  } catch {
+    return null
+  }
+}
+
+// Per-USER activity (admin only): who signed in, last IP/place/device, how
+// long they stayed in total, and their latest sessions one by one.
+export interface UserActivityRow {
+  email: string
+  sessions: number
+  seconds: number
+  actions: number
+  messages: number
+  last_seen: string
+  last_ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+  browser: string
+}
+
+export interface UserSessionRow {
+  email: string
+  started_at: string
+  seconds: number
+  actions: number
+  ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+}
+
+export interface UserActivity {
+  users: UserActivityRow[]
+  sessions: UserSessionRow[]
+}
+
+// Approval gate: releases the server builder staged, awaiting the owner's OK.
+export interface StagedRelease {
+  id: string
+  title: string
+  detail: string
+  status: 'pending' | 'approved' | 'rejected' | 'deployed'
+  at: string
+}
+
+export async function fetchReleases(): Promise<StagedRelease[]> {
+  try {
+    const r = await fetch('/api/admin/releases', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { releases?: StagedRelease[] }).releases ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function decideRelease(id: string, decision: 'approve' | 'reject'): Promise<void> {
+  try {
+    await fetch('/api/admin/releases/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ id, decision }),
+    })
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// Claude's full work journal (admin only) — the history the live monitor
+// deliberately does not carry around.
+export async function fetchDevLog(): Promise<string[]> {
+  try {
+    const r = await fetch('/api/admin/devlog', { credentials: 'include' })
+    if (!r.ok) return []
+    const j = (await r.json()) as { log?: string[] }
+    return j.log ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchActivity(): Promise<UserActivity | null> {
+  try {
+    const r = await fetch('/api/admin/activity', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as UserActivity
   } catch {
     return null
   }
@@ -135,6 +227,23 @@ export async function resolveGap(id: number, resolved = true): Promise<void> {
     })
   } catch {
     /* non-fatal */
+  }
+}
+
+// Escalate a gap to the developer (Claude Code) via the bridge. Returns whether
+// it was actually sent (online) so the UI can tell the admin to start the bridge.
+export async function escalateGap(id: number): Promise<{ escalated: boolean; online: boolean }> {
+  try {
+    const r = await fetch('/api/admin/gaps/escalate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ id }),
+    })
+    if (!r.ok) return { escalated: false, online: false }
+    return (await r.json()) as { escalated: boolean; online: boolean }
+  } catch {
+    return { escalated: false, online: false }
   }
 }
 

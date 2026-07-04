@@ -65,6 +65,22 @@ export const config = {
     // USD→display-currency conversion (provider costs are USD; wallet is GBP).
     usdToCurrency: Number(process.env.USD_TO_CURRENCY ?? 0.8),
   },
+  // Email (contact@kelionai.app on Namecheap Private Email — IMAP/SMTP). Kelion
+  // reads incoming mail, replies in the sender's language in the royal-letter
+  // format, and forwards the important ones to the admin. The PASSWORD is never
+  // in code — set MAIL_PASS in the deploy env; empty = the mail feature is off.
+  mail: {
+    imapHost: process.env.MAIL_IMAP_HOST ?? 'mail.privateemail.com',
+    imapPort: Number(process.env.MAIL_IMAP_PORT ?? 993),
+    smtpHost: process.env.MAIL_SMTP_HOST ?? 'mail.privateemail.com',
+    smtpPort: Number(process.env.MAIL_SMTP_PORT ?? 465),
+    user: (process.env.MAIL_USER ?? 'contact@kelionai.app').trim(),
+    pass: process.env.MAIL_PASS ?? '',
+    // Where "truly important" mail gets forwarded (defaults to the admin).
+    forwardTo: (process.env.MAIL_FORWARD_TO ?? process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
+      .trim()
+      .toLowerCase(),
+  },
   // Free trial ("demo") for the landing page: a full-access taste, time-boxed,
   // with a daily cap so it can never drain the provider pool.
   demo: {
@@ -81,6 +97,10 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
+  // Admin bridge: routes the ADMIN's Kelion chat to the owner's local Claude
+  // Code (his subscription) instead of the paid API. Shared secret between this
+  // server and the local worker on the owner's PC. Optional — unset = bridge off.
+  bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
 } as const

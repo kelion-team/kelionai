@@ -4,6 +4,7 @@ import { Environment, OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
+import ContactModal from '../components/ContactModal'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
@@ -20,12 +21,56 @@ import {
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { keepScreenOn } from '../lib/wakelock'
+import { deviceFingerprint } from '../lib/fingerprint'
+
+// Live-work feed shown ON KELION'S MONITOR. A line shaped "[NN%] text" is a
+// WORK ITEM: it stays on the monitor permanently, its bar fills 0→100% in
+// place (the same text at a new percent replaces the old line), and at 100%
+// it is ticked off (dimmed + strikethrough) but remains listed. Plain lines
+// are status notes — only the latest few stay; stale ones disappear.
+interface LiveItem {
+  key: string
+  text: string
+  pct: number
+}
+function parseLive(lines: string[]): { tasks: LiveItem[]; status: string[] } {
+  const tasks: LiveItem[] = []
+  const status: string[] = []
+  const seen = new Set<string>()
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\s*\[(\d{1,3})%\]\s*(.*)$/.exec(lines[i])
+    const text = (m ? m[2] : lines[i]).trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (m) tasks.unshift({ key, text, pct: Math.min(100, Number(m[1])) })
+    else if (status.length < 1) status.unshift(text)
+  }
+  return { tasks: tasks.slice(-30), status }
+}
 
 export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const [recording, setRecording] = useState(false)
+  // Lit ORANGE when the laptop Claude Code session is actively writing code, so
+  // the owner sees when Claude is working on his behalf (admin only). The live
+  // work steps are shown on the monitor while active.
+  const [claudeActive, setClaudeActive] = useState(false)
+  // TWO LIGHTS, one per link in the chain. "Bridge" = Claude's bridge worker
+  // (lit = reachable, pulsing = writing code, OFF = down — the watchdog
+  // restarts it and the light re-lights by itself). "Server" = kelionai.app
+  // itself (poll failing = OFF; Railway auto-restarts it, light comes back).
+  const [claudeBridge, setClaudeBridge] = useState(false)
+  const [serverUp, setServerUp] = useState(true)
+  const [claudeActivity, setClaudeActivity] = useState<string[]>([])
+  // The live-work console is NOT permanent on the owner's monitor — the AIs
+  // see the journal server-side regardless. He opens it only when he wants:
+  // one click on the "● Bridge" light shows/hides it.
+  const [showWork, setShowWork] = useState(false)
   // Voice-armed recorder: "înregistrează" makes the Rec button pulse red — one
   // click starts (the browser demands a real click to pick the screen);
   // "oprește înregistrarea" stops fully hands-free.
@@ -130,13 +175,160 @@ export default function Stage({ user }: { user: User }) {
     window.addEventListener('kelion:rec', onRec)
     return () => window.removeEventListener('kelion:rec', onRec)
   }, [recording])
+
+  // Poll whether the laptop Claude Code session is actively writing code.
+  useEffect(() => {
+    if (user.role !== 'admin') return
+    const check = (): void => {
+      void fetch('/api/dev/status', { credentials: 'include' })
+        .then((r) => {
+          // 429 = rate-limited, NOT down. A transient throttle must never
+          // flicker the lights — keep the last known state and move on.
+          if (r.status === 429) return null
+          if (!r.ok) throw new Error('server')
+          return r.json()
+        })
+        .then((j: { active?: boolean; bridge?: boolean; activity?: string[] } | null) => {
+          if (!j) return // 429 — state unchanged
+          setServerUp(true)
+          setClaudeActive(!!j.active)
+          setClaudeBridge(!!j.bridge)
+          setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
+        })
+        .catch(() => {
+          // A real failure (network / 5xx) → the SERVER light goes off (and with
+          // it the bridge). Transient 429s are handled above and never reach here.
+          setServerUp(false)
+          setClaudeBridge(false)
+          setClaudeActive(false)
+        })
+    }
+    check()
+    const id = window.setInterval(check, 4_000)
+    return () => window.clearInterval(id)
+  }, [user.role])
+
+  // AUTO-REFRESH on release: when the served bundle name changes (a deploy
+  // landed), the page reloads ITSELF — nobody has to press F5 ever again.
+  useEffect(() => {
+    const current = document.querySelector('script[src*="index-"]')?.getAttribute('src') ?? ''
+    if (!current) return
+    const id = window.setInterval(() => {
+      void fetch('/index.html', { cache: 'no-store' })
+        .then((r) => r.text())
+        .then((html) => {
+          const m = html.match(/index-[A-Za-z0-9_-]+\.js/)
+          if (m && !current.includes(m[0])) {
+            // Release refresh — mark it so ChatPanel restores the conversation
+            // (a plain login/new visit starts clean instead).
+            sessionStorage.setItem('kelion_restore_chat', '1')
+            window.location.reload()
+          }
+        })
+        .catch(() => {})
+    }, 45_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it fires
+  // the activation command by itself — no manual switch. Two legal channels,
+  // both automatic: (1) a server flag the laptop wake-agent polls; (2) the
+  // kelionai:// protocol (like Zoom's "open in app") so a browser tab launches
+  // the local builder after a one-time "always allow". Re-armed every 90s while
+  // the admin stays, so the builder wakes even if it was closed meanwhile.
+  useEffect(() => {
+    if (user.role !== 'admin') return
+    const wake = (): void => {
+      void fetch('/api/bridge/request-wake', { method: 'POST', credentials: 'include' }).catch(
+        () => {},
+      )
+      try {
+        const f = document.createElement('iframe')
+        f.style.display = 'none'
+        f.src = 'kelionai://wake'
+        document.body.appendChild(f)
+        window.setTimeout(() => f.remove(), 1500)
+      } catch {
+        /* protocol not registered yet — the server flag still wakes it */
+      }
+    }
+    wake()
+    const id = window.setInterval(wake, 90_000)
+    return () => window.clearInterval(id)
+  }, [user.role])
+
+  // Presence ping (every 60s): feeds the owner's per-USER analytics — who is
+  // signed in, from what IP/place/device, and for how long they stayed.
+  useEffect(() => {
+    let stopped = false
+    const ping = (): void => {
+      void deviceFingerprint()
+        .then((fp) => {
+          if (stopped) return
+          return fetch('/api/visit/ping', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fp }),
+          })
+        })
+        .catch(() => {})
+    }
+    ping()
+    const id = window.setInterval(ping, 60_000)
+    return () => {
+      stopped = true
+      window.clearInterval(id)
+    }
+  }, [])
+  // Claude's live work shows on Kelion's MONITOR (the workspace surface) ONLY
+  // when the owner opens it (click on the ● Bridge light) and code is being
+  // written: the avatar shrinks to its corner and the monitor lists every work
+  // item with its live 0→100% bar. A real task (map, page, doc) always wins
+  // the monitor back; nothing is displayed permanently.
+  // OBLIGATORY: while there is active work, the monitor shows it BY ITSELF (no
+  // click). The Bridge-light click only lets the owner FORCE it open when idle.
+  const claudeShow =
+    user.role === 'admin' &&
+    !recording &&
+    ((claudeActive && claudeActivity.length > 0) || showWork)
+  const live = claudeShow && !ws.open ? parseLive(claudeActivity) : null
+  const monitorOn = ws.open || (claudeShow && claudeActivity.length > 0)
   return (
     // rec-clean: while a clip records, everything "admin" disappears (topbar,
     // chat bubbles) and the site address is watermarked into the frame.
     <div className={`stage ${recording ? 'rec-clean' : ''}`}>
       {recording && <div className="rec-watermark">kelionai.app</div>}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
-      <div className={`workspace-bg ${ws.open ? 'open' : ''}`}>
+      <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
+        {!ws.open && live && (
+          <div className="workspace-inner claude-console">
+            <div className="claude-console-head">● Claude — lucru în direct</div>
+            <div className="claude-rows">
+              {live.tasks.length === 0 && (
+                <div className="claude-status-line">Pornesc lucrul…</div>
+              )}
+              {live.tasks.map((it) => (
+                <div key={it.key} className={`claude-row ${it.pct >= 100 ? 'done' : ''}`}>
+                  <span className="claude-row-text">{it.text}</span>
+                  <span className="claude-row-bar">
+                    <span className="claude-row-fill" style={{ width: `${it.pct}%` }} />
+                  </span>
+                  <span className="claude-row-pct">{it.pct >= 100 ? '✓ 100%' : `${it.pct}%`}</span>
+                </div>
+              ))}
+            </div>
+            {live.status.length > 0 && (
+              <div className="claude-status">
+                {live.status.map((s) => (
+                  <div key={s} className="claude-status-line">
+                    {s}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {ws.open && (
           <div className="workspace-inner">
             <div className="workspace-head">
@@ -220,9 +412,11 @@ export default function Stage({ user }: { user: User }) {
         )}
       </div>
       {/* Avatar canvas — shrinks to the top-right corner in monitor mode. */}
-      <div ref={stageRef} className={`stage-canvas ${ws.open ? 'pip' : ''}`}>
-      <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
-        <color attach="background" args={['#0b0d12']} />
+      <div ref={stageRef} className={`stage-canvas ${monitorOn ? 'pip' : ''}`}>
+      <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
+        {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
+            Kelion floats over the monitor content instead of sitting in a black box. */}
+        {!monitorOn && <color attach="background" args={['#0b0d12']} />}
         <ambientLight intensity={0.6} />
         <directionalLight position={[2, 3, 2]} intensity={1.4} castShadow />
         <Suspense fallback={null}>
@@ -264,11 +458,49 @@ export default function Stage({ user }: { user: User }) {
               <a href="/dl/Kelionai.apk" download title={t.downloadAndroid}>
                 🤖
               </a>
+              <a
+                href="https://kelionai.app"
+                title="iOS — add to Home Screen (Safari: Share → Add to Home Screen)"
+              >
+
+              </a>
             </span>
           )}
           {user.picture && <img src={user.picture} alt="" className="avatar-pic" />}
           <span>{user.name}</span>
           {user.role === 'admin' && <span className="badge">admin</span>}
+          {user.role === 'admin' && (
+            <span
+              className={`claude-ind clickable ${claudeBridge ? 'on' : ''} ${claudeActive ? 'work' : ''}`}
+              onClick={() => setShowWork((v) => !v)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setShowWork((v) => !v)
+              }}
+              title={
+                claudeBridge
+                  ? claudeActive
+                    ? 'Claude is writing code — click to show/hide the live work monitor'
+                    : 'Bridge up — Claude is reachable in chat'
+                  : 'BRIDGE DOWN — auto-restarting (watchdog), light returns by itself'
+              }
+            >
+              ● Bridge
+            </span>
+          )}
+          {user.role === 'admin' && (
+            <span
+              className={`claude-ind ${serverUp ? 'on' : ''}`}
+              title={
+                serverUp
+                  ? 'Server up — kelionai.app is running'
+                  : 'SERVER DOWN — Railway restarts it automatically, light returns by itself'
+              }
+            >
+              ● Server
+            </span>
+          )}
           {user.role === 'admin' && (
             <button
               type="button"
@@ -287,15 +519,24 @@ export default function Stage({ user }: { user: User }) {
               Admin
             </button>
           )}
+          <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
+            Contact
+          </button>
           <button type="button" className="ghost" onClick={() => void logout()}>
             {t.signOut}
           </button>
         </div>
       </header>
 
+      {/* FULL-MONITOR live work feed (admin only): every step Claude executes on
+          the laptop is mirrored here in real time. Floats over the whole monitor
+          but never blocks clicks (pointer-events: none), so the owner keeps
+          talking to Kelion while WATCHING the work happen. */}
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} isDemo={user.role === 'demo'} />
 
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
+
+      {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
 
       {demoOver && (
         <div className="demo-over">

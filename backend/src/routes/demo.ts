@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { config } from '../config.js'
-import { setDemoSession } from '../session.js'
-import { tryStartDemo, logVisit, type DemoVisit } from '../db.js'
+import { setDemoSession, getSessionUser, makeDemoEmail } from '../session.js'
+import { tryStartDemo, logVisit, touchVisit, type DemoVisit } from '../db.js'
 
 // Look up the visitor's location from their IP for the owner's analytics:
 // country/city/region, ISP and timezone. Free, no key (ipwho.is). Short
@@ -106,6 +106,25 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
+  // Presence ping (signed-in app, every ~60s): builds the owner's per-USER
+  // analytics — WHO is on, from what IP/place/device, and for HOW LONG. The
+  // cheap path just extends the current session row; geo is only looked up
+  // when a brand-new session row must be created.
+  app.post<{ Body: { fp?: string } }>('/api/visit/ping', async (req, reply) => {
+    const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
+    const email = getSessionUser(req)?.email ?? ''
+    const hdr = (name: string): string =>
+      ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
+    const ip =
+      hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+    const touched = await touchVisit(fp, ip, email)
+    if (!touched) {
+      const { ip: fullIp, visit } = await visitorProfile(req, '')
+      void logVisit(fp, fullIp, visit, email)
+    }
+    return reply.send({ ok: true })
+  })
+
   // Start a free trial (default 3 minutes of full access). Collects the owner's
   // visitor analytics (human/bot, geo, device, language, referrer), enforces the
   // daily cap and a light per-fingerprint/IP anti-reuse.
@@ -113,11 +132,14 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
     const referrer = typeof req.body?.ref === 'string' ? req.body.ref.slice(0, 300) : ''
     const { ip, visit } = await visitorProfile(req, referrer)
-    const res = await tryStartDemo(fp, ip, config.demo.capPerDay, visit)
+    // Same email on the analytics row AND the session — the link that lets the
+    // owner click a trial and read its conversation.
+    const sessionEmail = makeDemoEmail()
+    const res = await tryStartDemo(fp, ip, config.demo.capPerDay, visit, sessionEmail)
     if (!res.ok) {
       return reply.code(429).send({ error: res.reason === 'cap' ? 'cap_reached' : 'already_used' })
     }
-    setDemoSession(reply, config.demo.seconds)
+    setDemoSession(reply, config.demo.seconds, sessionEmail)
     return reply.send({ ok: true, seconds: config.demo.seconds })
   })
 }

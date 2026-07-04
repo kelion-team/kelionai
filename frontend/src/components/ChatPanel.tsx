@@ -22,7 +22,7 @@ import MicMeter from './MicMeter'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
 import { detectLanguageFromMic } from '../lib/langDetect'
-import { startFullDuplex, type FullDuplexHandle } from '../lib/fullDuplexVoice'
+import { startFullDuplex, type FullDuplexHandle, type VoiceStatus } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
 import { correctTranscript } from '../lib/correct'
 import {
@@ -104,17 +104,6 @@ function lastSentenceEnd(s: string): number {
   return end
 }
 
-// Spec: only ONE phrase on screen. Show the current/last sentence (live caption),
-// updating as it streams.
-function latestSentence(s: string): string {
-  const parts = s.split(/(?<=[.!?…]["'”’)\]]?)\s+/)
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const p = parts[i].trim()
-    if (p) return p
-  }
-  return s.trim()
-}
-
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -149,11 +138,16 @@ export default function ChatPanel({
   const [menuOpen, setMenuOpen] = useState(false)
   const [listening, setListening] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
+  // Voice capture status — drives the "Recording" indicator shown while the
+  // signal is down and we're holding the user's speech locally (GSM loss).
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('online')
   // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
-  // Attachments are either images (url = data URL, used for vision) or documents
-  // (text = the Markdown extracted by MarkItDown, prepended to the message).
+  // Attachments are images (url = data URL, used for vision), documents
+  // (text = the Markdown extracted by MarkItDown, prepended to the message),
+  // or — for the ADMIN — ANY raw file (url = data URL, type set): photos,
+  // texts, archives, video, everything rides the bridge to Claude.
   const [attachments, setAttachments] = useState<
-    { id: string; url: string; name: string; text?: string }[]
+    { id: string; url: string; name: string; text?: string; type?: string }[]
   >([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Admin promo-scenario recorder: type steps, hit Record, Kelion runs them while
@@ -294,6 +288,56 @@ export default function ChatPanel({
     setMessages((cur) => [...cur, { role: 'assistant', content: text }])
     if (voiceOutRef.current) enqueueSpeech(text, speechLangRef.current)
   }
+
+  // The conversation SURVIVES a RELEASE refresh — and ONLY that. The release
+  // auto-reload (and the update bar) set a one-shot sessionStorage flag right
+  // before reloading; when we mount WITH the flag we restore the saved history
+  // so mid-conversation releases stay seamless. Any other arrival — login, new
+  // tab, manual refresh — starts with a CLEAN page: Kelion still remembers
+  // everything server-side, but old messages never litter a fresh session.
+  useEffect(() => {
+    if (sessionStorage.getItem('kelion_restore_chat') !== '1') return
+    sessionStorage.removeItem('kelion_restore_chat')
+    void fetch('/api/chat/history', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : { history: [] }))
+      .then((j: { history?: { role?: string; content?: string }[] }) => {
+        const h = (j.history ?? [])
+          .filter(
+            (m): m is { role: 'user' | 'assistant'; content: string } =>
+              (m.role === 'user' || m.role === 'assistant') &&
+              typeof m.content === 'string' &&
+              m.content.trim() !== '',
+          )
+          .map((m) => ({ role: m.role, content: m.content }))
+        if (h.length > 0) setMessages((cur) => (cur.length === 0 ? h : cur))
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Claude can WALK IN first (admin only): messages Claude leaves through the
+  // bridge are picked up here and Kelion says them — written in chat, spoken
+  // aloud, already persisted to history by the server. The owner's rule:
+  // "când intri, mă strigi" — Claude calls him, not only answers.
+  useEffect(() => {
+    if (!isAdmin) return
+    const id = window.setInterval(() => {
+      void fetch('/api/chat/incoming', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : { messages: [] }))
+        .then((j: { messages?: string[] }) => {
+          const arr = j.messages ?? []
+          if (arr.length === 0) return
+          // ONE mouth, never two voices: when Claude cuts in, whatever is
+          // being spoken right now is CUT OFF, and Claude's words come out
+          // through Kelion's own voice.
+          stopSpeaking()
+          for (const m of arr) ack(m)
+        })
+        .catch(() => {})
+    }, 8_000)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
 
   // Arm the recorder for an approved promo take (also used by "reluăm" to redo
   // the same take): remember the script + scenes and light up the Rec button
@@ -450,7 +494,12 @@ export default function ChatPanel({
     }
   }
   // Documents (PDF / Word / Excel / PowerPoint / …) are converted to Markdown by
-  // the backend (MarkItDown) and attached as text so Kelion can read them.
+  // the backend (MarkItDown) and attached as text so Kelion can read them. For
+  // the ADMIN, a file that can't be converted (archive, video, audio, anything)
+  // is kept RAW — it rides the bridge to Claude as-is.
+  // The REAL pipe maximum: Cloudflare hard-caps a request at 100MB — one file
+  // may fill nearly the whole pipe (~70MB real content as base64).
+  const MAX_RAW_FILE = 90_000_000
   async function addDocFiles(files: File[]): Promise<void> {
     for (const file of files) {
       if (file.type.startsWith('image/')) continue
@@ -461,22 +510,36 @@ export default function ChatPanel({
           r.onerror = () => rej(new Error('read'))
           r.readAsDataURL(file)
         })
-        const resp = await fetch('/api/ingest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ filename: file.name, data }),
-        })
-        if (!resp.ok) continue
-        const j = (await resp.json()) as { markdown?: string }
-        if (j.markdown?.trim()) {
+        let markdown = ''
+        try {
+          const resp = await fetch('/api/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ filename: file.name, data }),
+          })
+          if (resp.ok) markdown = ((await resp.json()) as { markdown?: string }).markdown ?? ''
+        } catch {
+          /* conversion unavailable — fall through to raw for admin */
+        }
+        if (markdown.trim()) {
           setAttachments((cur) => [
             ...cur,
-            { id: `${Date.now()}-${file.name}-doc`, url: '', name: file.name || 'document', text: j.markdown },
+            { id: `${Date.now()}-${file.name}-doc`, url: '', name: file.name || 'document', text: markdown },
+          ])
+        } else if (isAdmin && data.length <= MAX_RAW_FILE) {
+          setAttachments((cur) => [
+            ...cur,
+            {
+              id: `${Date.now()}-${file.name}-raw`,
+              url: data,
+              name: file.name || 'fisier',
+              type: file.type || 'application/octet-stream',
+            },
           ])
         }
       } catch {
-        /* skip a file that couldn't be read/converted */
+        /* skip a file that couldn't be read */
       }
     }
   }
@@ -495,10 +558,11 @@ export default function ChatPanel({
     }
   }
   function onDropFiles(e: ReactDragEvent): void {
-    const imgs = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'))
-    if (imgs.length > 0) {
+    const all = [...e.dataTransfer.files]
+    if (all.length > 0) {
       e.preventDefault()
-      addImageFiles(imgs)
+      addImageFiles(all.filter((f) => f.type.startsWith('image/')))
+      void addDocFiles(all.filter((f) => !f.type.startsWith('image/')))
     }
   }
   function removeAttachment(id: string): void {
@@ -714,6 +778,13 @@ export default function ChatPanel({
     const docBlock = docs.map((d) => `[Document: ${d.name}]\n${d.text}`).join('\n\n')
     const base = msg || (docBlock ? 'Am atașat un document — citește-l și spune-mi ce conține.' : t.imagePrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
+    // ADMIN: every raw attachment (photo, arhivă, video, orice) rides the
+    // bridge to Claude alongside the text.
+    const bridgeFiles = isAdmin
+      ? atts
+          .filter((a) => a.url.startsWith('data:'))
+          .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url }))
+      : undefined
 
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing }]
     setMessages([...next, { role: 'assistant', content: '' }])
@@ -732,6 +803,7 @@ export default function ChatPanel({
         coordsRef.current ?? undefined,
         handleControl,
         screen,
+        bridgeFiles,
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc }])
@@ -897,6 +969,7 @@ export default function ChatPanel({
       (error) => {
         if (error === 'not-allowed') setMicError(t.micBlocked)
       },
+      (status) => setVoiceStatus(status),
     )
     if (fd) {
       fdRef.current = fd
@@ -1164,7 +1237,11 @@ export default function ChatPanel({
     setCameraOn(false)
   }
 
-  const last = messages.at(-1)
+  // Show the CURRENT exchange in writing: the user's request (so he sees it
+  // arrived correctly the instant he speaks/types) AND Kelion's reply, which
+  // updates live as Kelion speaks — not audio-only, not just one sentence.
+  const lastUser = messages.filter((m) => m.role === 'user').at(-1)
+  const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1)
   const hint = speechSupported() ? t.wakeHint : t.chatHint
 
   return (
@@ -1177,9 +1254,12 @@ export default function ChatPanel({
       />
       <div className="chat-log">
         {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-        {last && (
-          <div className={`bubble ${last.role}`}>
-            {last.content ? latestSentence(last.content) : busy ? '…' : ''}
+        {lastUser && lastUser.content && (
+          <div className="bubble user">{lastUser.content.slice(0, 600)}</div>
+        )}
+        {(lastAssistant || busy) && (
+          <div className="bubble assistant">
+            {lastAssistant?.content ? lastAssistant.content : busy ? '…' : ''}
           </div>
         )}
         {chatImage && (
@@ -1187,6 +1267,11 @@ export default function ChatPanel({
         )}
       </div>
       <MicMeter active={listening} label={t.hearingLabel} />
+      {voiceStatus !== 'online' && (
+        <p className="voice-recording">
+          ● {voiceStatus === 'buffering' ? 'Recording — no signal, saving your words' : 'Reconnected — sending what you said'}
+        </p>
+      )}
       {micError && <p className="mic-error">{micError}</p>}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
       {isAdmin && scenarioOpen && (

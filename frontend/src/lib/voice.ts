@@ -471,6 +471,78 @@ export function stopSpeaking(): void {
   globalThis.speechSynthesis?.cancel()
 }
 
+// ── Landing hover-greeting ────────────────────────────────────────────────
+// The public /api/greet endpoint returns a canned, time-appropriate English
+// greeting as MP3 (+ the spoken text in X-Greet-Text). We play it through the
+// SAME machinery the app uses for Kelion's speech — curAudio + the decoded
+// energy envelope + buildWeights — so getMouthState() animates his mouth with
+// zero duplicated code. Landing page ONLY (never after login).
+let lastGreet = 0
+
+function greetSlot(): 'morning' | 'afternoon' | 'evening' | 'night' {
+  const h = new Date().getHours()
+  if (h >= 5 && h < 12) return 'morning'
+  if (h >= 12 && h < 18) return 'afternoon'
+  if (h >= 18 && h < 22) return 'evening'
+  return 'night'
+}
+
+/**
+ * Speak the time-appropriate greeting (call on avatar hover). No-ops if already
+ * speaking or within the cooldown, so re-hovering doesn't stack greetings.
+ * Audio may be blocked until the visitor's first interaction (browser autoplay
+ * policy) — it fails silently and simply speaks on a later hover.
+ */
+export async function greetOnHover(): Promise<void> {
+  if (isSpeaking()) return
+  const now = Date.now()
+  if (now - lastGreet < 12_000) return
+  lastGreet = now
+  try {
+    const res = await fetch(`/api/greet?slot=${greetSlot()}`)
+    if (!res.ok) return
+    const text = res.headers.get('X-Greet-Text') ?? ''
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    // Decode a copy for the millisecond mouth envelope before playing.
+    curEnv = null
+    curEnvCum = null
+    curEnvTotal = 0
+    curEnvPeak = 0
+    try {
+      decodeCtx ??= new (globalThis.AudioContext ??
+        (globalThis as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+      buildEnvelope(await decodeCtx.decodeAudioData(await blob.arrayBuffer()))
+    } catch {
+      /* envelope optional — the phoneme-weighted time mapping still drives the mouth */
+    }
+    const audio = new Audio(url)
+    curAudio = audio
+    curText = text
+    buildWeights(text)
+    const done = (): void => {
+      URL.revokeObjectURL(url)
+      if (curAudio === audio) {
+        curAudio = null
+        curText = ''
+        curWeights = null
+        curTotal = 0
+        curVoiced = null
+        curVoicedTotal = 0
+        curEnv = null
+        curEnvCum = null
+        curEnvTotal = 0
+        curEnvPeak = 0
+      }
+    }
+    audio.onended = done
+    audio.onerror = done
+    void audio.play().catch(done) // autoplay may be blocked pre-interaction
+  } catch {
+    /* network hiccup — silent; greeting is a nicety, never an error */
+  }
+}
+
 // ──────────────────────────── STT (listen) ────────────────────────────
 
 interface RecAlternative {

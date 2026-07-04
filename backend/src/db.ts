@@ -102,6 +102,9 @@ export async function initDb(): Promise<void> {
     ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS lang TEXT NOT NULL DEFAULT '';
     ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS referrer TEXT NOT NULL DEFAULT '';
     ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT false;
+    -- The trial's throwaway session email — the LINK to its conversation in the
+    -- messages table, so the owner can click a trial and read what interested it.
+    ALTER TABLE demo_uses ADD COLUMN IF NOT EXISTS session_email TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_demo_fp ON demo_uses (fingerprint, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_demo_started ON demo_uses (started_at DESC);
     -- EVERY visitor who opens the site (not just demo starters) — the owner's
@@ -126,6 +129,13 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_visits_started ON visits (started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_visits_fp ON visits (fingerprint, started_at DESC);
+    -- Per-USER analytics: tie a visit to the signed-in account, measure how
+    -- long they stayed (presence pings move last_seen_at) and how active they
+    -- were. The owner sees WHO was on, from what IP/place, and for how long.
+    ALTER TABLE visits ADD COLUMN IF NOT EXISTS user_email TEXT NOT NULL DEFAULT '';
+    ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
+    CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
     -- Ledger of top-ups (+) and usage (−). stripe_ref makes top-ups idempotent
     -- so a webhook retry can never double-credit.
     CREATE TABLE IF NOT EXISTS billing_events (
@@ -164,7 +174,61 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_notes_user ON notes (user_email, created_at DESC);
+    -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH Claudes —
+    -- the laptop builder and the always-on server bridge. Either writes an entry;
+    -- both read the latest entries. This is how "write here, appears there; write
+    -- there, appears here" works: one store, two readers/writers.
+    CREATE TABLE IF NOT EXISTS shared_memory (
+      id BIGSERIAL PRIMARY KEY,
+      source TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_shared_mem ON shared_memory (created_at DESC);
   `)
+}
+
+// ── Shared memory: the common notebook both Claudes read + write ──
+
+export async function appendSharedMemory(source: string, content: string): Promise<void> {
+  if (!dbEnabled()) return
+  const c = content.trim()
+  if (!c) return
+  try {
+    await getPool().query(
+      'INSERT INTO shared_memory (source, content) VALUES ($1, $2)',
+      [source.slice(0, 40), c.slice(0, 8000)],
+    )
+    // Keep it bounded — the last 400 entries are plenty of shared context.
+    await getPool().query(
+      `DELETE FROM shared_memory WHERE id NOT IN
+         (SELECT id FROM shared_memory ORDER BY created_at DESC LIMIT 400)`,
+    )
+  } catch {
+    /* shared memory is best-effort, never breaks a turn */
+  }
+}
+
+export interface SharedMemoryRow {
+  source: string
+  content: string
+  created_at: string
+}
+
+export async function getSharedMemory(limit = 30): Promise<SharedMemoryRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<SharedMemoryRow>(
+      `SELECT source, content, created_at FROM (
+         SELECT source, content, created_at FROM shared_memory
+         ORDER BY created_at DESC LIMIT $1
+       ) x ORDER BY created_at ASC`,
+      [limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // ── Prepaid wallet (Stripe credit) ──
@@ -384,6 +448,7 @@ export async function tryStartDemo(
   ip: string,
   capPerDay: number,
   visit: DemoVisit = EMPTY_VISIT,
+  sessionEmail = '',
 ): Promise<{ ok: boolean; reason?: 'cap' | 'used' }> {
   if (!dbEnabled()) return { ok: true }
   try {
@@ -412,12 +477,12 @@ export async function tryStartDemo(
     await pool.query(
       `INSERT INTO demo_uses
          (fingerprint, ip, country, country_code, city, region, isp, tz,
-          browser, os, device, lang, referrer, is_bot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          browser, os, device, lang, referrer, is_bot, session_email)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
         visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
-        visit.referrer, visit.isBot,
+        visit.referrer, visit.isBot, sessionEmail,
       ],
     )
     return { ok: true }
@@ -435,6 +500,7 @@ export async function logVisit(
   fingerprint: string,
   ip: string,
   visit: DemoVisit = EMPTY_VISIT,
+  userEmail = '',
 ): Promise<void> {
   if (!dbEnabled()) return
   try {
@@ -455,16 +521,124 @@ export async function logVisit(
     await pool.query(
       `INSERT INTO visits
          (fingerprint, ip, country, country_code, city, region, isp, tz,
-          browser, os, device, lang, referrer, is_bot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          browser, os, device, lang, referrer, is_bot, user_email)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
         visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
-        visit.referrer, visit.isBot,
+        visit.referrer, visit.isBot, userEmail,
       ],
     )
   } catch {
     /* analytics must never break the page */
+  }
+}
+
+/**
+ * Presence ping from the signed-in app: extends the CURRENT session row (same
+ * user/fingerprint/IP within 6h) — last_seen_at is how the owner sees "how
+ * long they stayed"; actions counts the pings. Also stamps the account email
+ * onto a session that started anonymously on the landing page. Returns false
+ * when no session row matched (caller then inserts a fresh one, WITH geo).
+ */
+export async function touchVisit(
+  fingerprint: string,
+  ip: string,
+  email: string,
+): Promise<boolean> {
+  if (!dbEnabled()) return true
+  try {
+    const r = await getPool().query(
+      `UPDATE visits
+       SET last_seen_at = now(), actions = actions + 1,
+           user_email = CASE WHEN user_email = '' THEN $3 ELSE user_email END
+       WHERE id = (SELECT id FROM visits
+                   WHERE started_at >= now() - interval '6 hours'
+                     AND ((user_email <> '' AND user_email = $3)
+                          OR (fingerprint <> '' AND fingerprint = $1)
+                          OR (ip <> '' AND ip = $2))
+                   ORDER BY started_at DESC LIMIT 1)`,
+      [fingerprint, ip, email],
+    )
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return true /* analytics must never break the app */
+  }
+}
+
+export interface UserActivityRow {
+  email: string
+  sessions: number
+  seconds: number
+  actions: number
+  messages: number
+  last_seen: string
+  last_ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+  browser: string
+}
+
+export interface UserSessionRow {
+  email: string
+  started_at: string
+  seconds: number
+  actions: number
+  ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+}
+
+// The owner's per-USER activity: WHO signed in, from what IP/place/device,
+// how long they stayed (presence pings), how active they were, plus their
+// latest sessions one by one. Admin only.
+export async function getUserActivity(): Promise<{
+  users: UserActivityRow[]
+  sessions: UserSessionRow[]
+}> {
+  if (!dbEnabled()) return { users: [], sessions: [] }
+  try {
+    const pool = getPool()
+    const users = (
+      await pool.query<UserActivityRow>(
+        `SELECT v.user_email AS email,
+                COUNT(*)::int AS sessions,
+                COALESCE(SUM(EXTRACT(EPOCH FROM (v.last_seen_at - v.started_at))), 0)::float AS seconds,
+                COALESCE(SUM(v.actions), 0)::int AS actions,
+                COALESCE(MAX(m.n), 0)::int AS messages,
+                MAX(v.last_seen_at)::text AS last_seen,
+                (ARRAY_AGG(v.ip ORDER BY v.last_seen_at DESC))[1] AS last_ip,
+                (ARRAY_AGG(v.city ORDER BY v.last_seen_at DESC))[1] AS city,
+                (ARRAY_AGG(v.country ORDER BY v.last_seen_at DESC))[1] AS country,
+                (ARRAY_AGG(v.country_code ORDER BY v.last_seen_at DESC))[1] AS code,
+                (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
+                (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser
+         FROM visits v
+         LEFT JOIN (SELECT user_email, COUNT(*)::int AS n
+                    FROM messages GROUP BY user_email) m
+           ON m.user_email = v.user_email
+         WHERE v.user_email <> ''
+         GROUP BY v.user_email
+         ORDER BY MAX(v.last_seen_at) DESC
+         LIMIT 200`,
+      )
+    ).rows
+    const sessions = (
+      await pool.query<UserSessionRow>(
+        `SELECT user_email AS email, started_at::text,
+                EXTRACT(EPOCH FROM (last_seen_at - started_at))::float AS seconds,
+                actions, ip, city, country, country_code AS code, device
+         FROM visits WHERE user_email <> ''
+         ORDER BY started_at DESC LIMIT 100`,
+      )
+    ).rows
+    return { users, sessions }
+  } catch {
+    return { users: [], sessions: [] }
   }
 }
 
@@ -483,6 +657,9 @@ export interface DemoRecent {
   referrer: string
   is_bot: boolean
   started_at: string
+  // For a DEMO row: the throwaway email whose conversation the owner can open.
+  // Empty for plain visits (they never chatted).
+  session_email: string
 }
 
 export interface DemoStats {
@@ -546,14 +723,15 @@ export async function getDemoStats(): Promise<DemoStats> {
         referrer: string
         is_bot: boolean
         started_at: string
+        session_email: string
       }>(
         `SELECT * FROM (
            SELECT 'demo'::text AS kind, ip, country, country_code, city, region, isp,
-                  browser, os, device, lang, referrer, is_bot, started_at
+                  browser, os, device, lang, referrer, is_bot, started_at, session_email
            FROM demo_uses
            UNION ALL
            SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
-                  browser, os, device, lang, referrer, is_bot, started_at
+                  browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email
            FROM visits
          ) AS x ORDER BY started_at DESC LIMIT 60`,
       )
@@ -572,6 +750,7 @@ export async function getDemoStats(): Promise<DemoStats> {
       referrer: r.referrer,
       is_bot: r.is_bot,
       started_at: r.started_at,
+      session_email: r.session_email,
     }))
     return {
       total: Number(counts?.total ?? 0),
@@ -734,6 +913,20 @@ export async function getHistory(email: string, limit = 1000): Promise<HistoryRo
     `SELECT role, content, created_at FROM messages
      WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
     [email, limit],
+  )
+  return r.rows
+}
+
+// The LAST n messages (chronological) — what the chat panel reloads at start
+// so a page refresh never "loses" the conversation on screen again.
+export async function getRecentHistory(email: string, n = 60): Promise<HistoryRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<HistoryRow>(
+    `SELECT role, content, created_at FROM (
+       SELECT role, content, created_at FROM messages
+       WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2
+     ) AS x ORDER BY created_at ASC`,
+    [email, n],
   )
   return r.rows
 }

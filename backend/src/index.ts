@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
+import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,17 +21,60 @@ import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
+import { bridgeRoutes } from './routes/bridge.js'
+import { contactRoutes } from './routes/contact.js'
+import { greetRoutes } from './routes/greet.js'
 import { initDb } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// bodyLimit raised so a base64 camera frame (permanent vision) fits the POST.
-const app = Fastify({ logger: true, bodyLimit: 8_000_000 })
+// GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
+// payloads — covers audio buffers, documents and camera frames. The ONE route
+// that legitimately needs big bodies (the admin bridge carrying photos/archives/
+// video to Claude) raises its own limit to 100MB per-route (see chat.ts).
+const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 await app.register(cookie)
 await app.register(cors, {
   origin: config.frontendOrigin,
   credentials: true,
+  // The landing greeting returns the spoken line in this header so the client
+  // can drive the avatar's mouth; expose it for cross-origin reads.
+  exposedHeaders: ['X-Greet-Text'],
+})
+
+// RATE LIMITING — the first line of defence against cost-abuse and DoS. Keyed on
+// the REAL client IP (Cloudflare puts it in cf-connecting-ip; req.ip is only the
+// CF edge, shared by everyone). A generous global cap absorbs legitimate polling
+// (dev-status, presence, bridge) while stopping floods; the expensive /api/chat
+// route sets a tighter per-route limit of its own (see chat.ts).
+await app.register(rateLimit, {
+  global: true,
+  max: 120,
+  timeWindow: '1 minute',
+  // Exempt the HIGH-FREQUENCY legitimate pollers so they never trip the limit
+  // (which would flicker the Bridge/Server lights): the health check, the
+  // dev-status/heartbeat presence, the admin chat-incoming poll, and every
+  // secret-protected /api/bridge/* endpoint (already gated by the shared secret,
+  // not an abuse vector). The cost-sensitive /api/chat keeps its own tighter cap.
+  allowList: (req) => {
+    const u = (req.url || '').split('?')[0]
+    return (
+      u === '/health' ||
+      u === '/api/dev/status' ||
+      u === '/api/dev/heartbeat' ||
+      u === '/api/chat/incoming' ||
+      u === '/api/visit/ping' ||
+      u.startsWith('/api/bridge/')
+    )
+  },
+  keyGenerator: (req) => {
+    const hdr = (n: string): string =>
+      ((req.headers[n] as string | undefined) ?? '').split(',')[0]?.trim() ?? ''
+    return (
+      hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || 'unknown'
+    )
+  },
 })
 
 // Keep the raw JSON body around (Stripe webhook signature verification needs the
@@ -40,6 +84,8 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, 
   try {
     done(null, body ? JSON.parse(body as string) : {})
   } catch (err) {
+    // Malformed JSON is a CLIENT error → 400, never a 500 server crash.
+    ;(err as Error & { statusCode?: number }).statusCode = 400
     done(err as Error, undefined)
   }
 })
@@ -74,6 +120,9 @@ await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
 await app.register(browserRoutes)
+await app.register(bridgeRoutes)
+await app.register(contactRoutes)
+await app.register(greetRoutes)
 
 // Create tables if a database is configured (non-fatal if it isn't / is down).
 try {

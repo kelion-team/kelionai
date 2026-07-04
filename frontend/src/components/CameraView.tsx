@@ -55,7 +55,10 @@ export default function CameraView({
     if (!captureRef) return
     captureRef.current = () => {
       const v = videoRef.current
-      if (!v || !v.videoWidth) return null
+      // The frame is only real once the camera has actually decoded a picture.
+      // videoWidth alone isn't enough — readyState < 2 (HAVE_CURRENT_DATA) means
+      // no frame is painted yet, and drawImage would grab a BLACK rectangle.
+      if (!v || !v.videoWidth || v.readyState < 2) return null
       const maxDim = 768
       const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight))
       const w = Math.round(v.videoWidth * scale)
@@ -66,6 +69,22 @@ export default function CameraView({
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
       ctx.drawImage(v, 0, 0, w, h)
+      // GUARD against sending a black frame (camera warming up, covered, or a
+      // decode gap): read the pixels ONCE and sample every ~64th; if virtually
+      // all are near-black the frame is useless — return null so Kelion never
+      // receives a black image.
+      try {
+        const data = ctx.getImageData(0, 0, w, h).data
+        let lit = 0
+        let total = 0
+        for (let i = 0; i < data.length; i += 256) {
+          total++
+          if (data[i] + data[i + 1] + data[i + 2] > 36) lit++ // above near-black
+        }
+        if (total > 0 && lit / total < 0.02) return null // <2% lit = black frame
+      } catch {
+        /* getImageData can throw on a tainted canvas — then just trust the frame */
+      }
       return canvas.toDataURL('image/jpeg', 0.6)
     }
     return () => {
