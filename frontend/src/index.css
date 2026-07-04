@@ -1506,58 +1506,55 @@ body {
   0%, 100% { box-shadow: 0 0 6px rgba(53, 224, 127, 0.5); }
   50% { box-shadow: 0 0 16px rgba(53, 224, 127, 0.95); }
 }
-/* LIVE resource bars 0–100% — real VPS telemetry, animated fluidly. */
-.live-gauges {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+/* PROCESS PROGRESS 0→100% — the current job from intake to finish. One big
+   bar that glides forward as the process advances through its stages. */
+.proc-progress {
   padding: 12px 2px 14px;
   border-bottom: 1px solid rgba(255, 157, 46, 0.18);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
-.gauge {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.gauge-top {
+.proc-top {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
+  margin-bottom: 7px;
 }
-.gauge-label {
-  font-size: 11px;
+.proc-label {
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  color: #cfd6dd;
-  text-transform: uppercase;
+  color: #ffe3c2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.gauge-val {
-  font-size: 15px;
+.proc-file {
+  color: #8fe9ff;
+  font-weight: 600;
+}
+.proc-pct {
+  font-size: 20px;
   font-weight: 800;
   color: #fff;
   font-variant-numeric: tabular-nums;
 }
-.gauge-track {
-  height: 10px;
+.proc-track {
+  height: 14px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
-.gauge-fill {
+.proc-fill {
   height: 100%;
   border-radius: 999px;
-  /* fluid ease over the 2s poll gap, so the bar glides to each new value */
-  transition: width 1.9s linear;
-  background: linear-gradient(90deg, #35e07f, #7dffb0);
+  /* fluid glide toward each new percentage as stages complete */
+  transition: width 0.9s ease;
+  background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
+  box-shadow: 0 0 12px rgba(255, 157, 46, 0.5);
 }
-.gauge-fill.g-cpu { background: linear-gradient(90deg, #35c8e0, #8fe9ff); }
-.gauge-fill.g-mem { background: linear-gradient(90deg, #7c8cff, #b9c2ff); }
-.gauge-fill.g-disk { background: linear-gradient(90deg, #ffb020, #ffd98a); }
-.gauge-fill.g-bridge { background: linear-gradient(90deg, #35e07f, #7dffb0); }
-.gauge-fill.hot { background: linear-gradient(90deg, #ff5d5d, #ff9a9a) !important; }
-@media (max-width: 720px) {
-  .live-gauges { grid-template-columns: repeat(2, 1fr); }
+.proc-fill.done {
+  background: linear-gradient(90deg, #35e07f, #7dffb0);
+  box-shadow: 0 0 12px rgba(53, 224, 127, 0.6);
 }
 .claude-rows {
   flex: 1;

@@ -54,6 +54,7 @@ import {
   bridgeRepair,
   noteBrainActivity,
   resetBrainActivity,
+  setProgress,
   sayToAdmin,
   getReadyDeploy,
   triggerDeploy,
@@ -1205,6 +1206,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // Monitor shows the brain is on it the instant Adrian sends (his rule:
         // never the raw message text — just that the brain is answering).
         noteBrainActivity('Creierul de pe Linux răspunde la mesajul tău…')
+        setProgress(30, 'Creierul analizează')
+        let firstWord = false
         // NICIO CERERE FĂRĂ RĂSPUNS (Adrian, 4 iul): if 30s pass with TOTAL
         // silence, re-analyze — a fresh job hits a fresh worker poll (or the
         // watchdog-restarted worker), up to 4 times. A request is never left to
@@ -1212,6 +1215,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // word has streamed we stop retrying (a slow-but-flowing reply is fine).
         let answer: string | null = null
         const onChunk = (chunk: string): void => {
+          if (!firstWord) {
+            firstWord = true
+            setProgress(65, 'Compun răspunsul')
+          }
           if (headDone) emit(chunk)
           else {
             head += chunk
@@ -1244,9 +1251,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // saved reply would miss the numbers/list.
         await Promise.all(pendingTags)
         a = streamed.trim()
-        if (!a && /\[EXECUT\]/i.test(answer ?? '')) {
-          a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
-          emit(a)
+        if (/\[EXECUT\]/i.test(answer ?? '')) {
+          // Handed to the builder — the process bar continues from the builder
+          // (agent → files → build → deploy → live), so don't jump to 100 here.
+          setProgress(15, 'Trimis la constructor')
+          if (!a) {
+            a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
+            emit(a)
+          }
+        } else {
+          // A plain chat answer is a complete process — the bar reaches the end.
+          setProgress(100, 'Gata')
         }
       }
       if (!a) {

@@ -69,15 +69,11 @@ export default function Stage({ user }: { user: User }) {
   const [claudeActivity, setClaudeActivity] = useState<string[]>([])
   // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
   const [srvLoad, setSrvLoad] = useState('')
-  // Real numeric telemetry (0–100) → the LIVE bar graphs on the monitor. `live`
-  // is false when the paznic feed is stale, so a frozen bar never fakes motion.
-  const [metrics, setMetrics] = useState<{
-    cpu: number
-    mem: number
-    disk: number
-    bridge: number
-    live: boolean
-  } | null>(null)
+  // The CURRENT process, 0→100%, from intake to finish (his real requirement:
+  // the bar tracks what's being executed, start to end — not server resources).
+  const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
+    null,
+  )
   // The live-work console is NOT permanent on the owner's monitor — the AIs
   // see the journal server-side regardless. He opens it only when he wants:
   // one click on the "● Bridge" light shows/hides it.
@@ -205,7 +201,7 @@ export default function Stage({ user }: { user: User }) {
             bridge?: boolean
             activity?: string[]
             srv?: string
-            metrics?: { cpu?: number; mem?: number; disk?: number; bridge?: number; live?: boolean }
+            progress?: { pct?: number; label?: string; file?: string }
           } | null) => {
             if (!j) return // 429 — state unchanged
             setServerUp(true)
@@ -213,16 +209,10 @@ export default function Stage({ user }: { user: User }) {
             setClaudeBridge(!!j.bridge)
             setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
             setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
-            const mm = j.metrics
-            setMetrics(
-              mm
-                ? {
-                    cpu: Number(mm.cpu ?? 0),
-                    mem: Number(mm.mem ?? 0),
-                    disk: Number(mm.disk ?? 0),
-                    bridge: Number(mm.bridge ?? 0),
-                    live: !!mm.live,
-                  }
+            const p = j.progress
+            setProgress(
+              p && typeof p.pct === 'number'
+                ? { pct: Number(p.pct), label: String(p.label ?? ''), file: String(p.file ?? '') }
                 : null,
             )
           },
@@ -330,36 +320,31 @@ export default function Stage({ user }: { user: User }) {
           <div className="workspace-inner claude-console">
             <div className="claude-console-head">
               ● Creierul Linux — execuție în direct
-              <span className={`live-dot ${metrics?.live ? 'on' : ''}`}>
-                {metrics?.live ? 'LIVE' : 'fără semnal'}
+              <span className={`live-dot ${claudeActive ? 'on' : ''}`}>
+                {claudeActive ? 'LIVE' : 'în așteptare'}
               </span>
             </div>
-            {/* BARE LIVE 0–100% — CPU/RAM/disc/punte măsurate REAL pe VPS
-                (paznicul postează la 2s); fiecare bară se animează fluid la
-                fiecare valoare nouă. NU se inventează nimic pe client. */}
-            <div className="live-gauges">
-              {(
-                [
-                  ['CPU', metrics?.cpu ?? 0, 'g-cpu'],
-                  ['RAM', metrics?.mem ?? 0, 'g-mem'],
-                  ['Disc', metrics?.disk ?? 0, 'g-disk'],
-                  ['Punte', metrics?.bridge ?? 0, 'g-bridge'],
-                ] as const
-              ).map(([label, val, cls]) => (
-                <div className="gauge" key={label}>
-                  <div className="gauge-top">
-                    <span className="gauge-label">{label}</span>
-                    <span className="gauge-val">{Math.round(val)}%</span>
-                  </div>
-                  <div className="gauge-track">
-                    <div
-                      className={`gauge-fill ${cls} ${val >= 90 ? 'hot' : ''}`}
-                      style={{ width: `${Math.max(0, Math.min(100, val))}%` }}
-                    />
-                  </div>
+            {/* BARA PROCESULUI 0→100% — CE SE EXECUTĂ acum, de la început
+                (preluare) până la final (live/gata). Se umple fluid pe măsură ce
+                procesul trece prin etape; arată și fișierul la care se lucrează.
+                Asta a cerut Adrian: procesul de la început la sfârșit, nu resurse. */}
+            {progress && progress.pct > 0 && (
+              <div className="proc-progress">
+                <div className="proc-top">
+                  <span className="proc-label">
+                    {progress.label || 'În lucru'}
+                    {progress.file ? <span className="proc-file"> · {progress.file}</span> : null}
+                  </span>
+                  <span className="proc-pct">{progress.pct}%</span>
                 </div>
-              ))}
-            </div>
+                <div className="proc-track">
+                  <div
+                    className={`proc-fill ${progress.pct >= 100 ? 'done' : ''}`}
+                    style={{ width: `${Math.max(0, Math.min(100, progress.pct))}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {/* JURNAL LIVE: fiecare pas al creierului, în ordine, nu o singură
                 linie. Progres cu bară pentru pașii cu procent; restul ca log. */}
             <div className="claude-rows">

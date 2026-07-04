@@ -84,11 +84,19 @@ let lastDevBeat = 0
 // Real Linux server load, posted by the VPS paznic every ~2s.
 let srvLoad = ''
 let srvLoadAt = 0
-// Real numeric telemetry (0–100) for the LIVE bar graphs on Adrian's monitor.
-// These are measured on the VPS (paznic) — never invented on the client.
-let srvCpu = 0
-let srvMem = 0
-let srvDisk = 0
+// THE PROCESS PROGRESS BAR (Adrian's real requirement, 4 iul): the current job,
+// 0→100%, from intake to finish — NOT server resources. chat/builder/deployer
+// push the percentage as the process moves through its stages.
+let procPct = 0
+let procLabel = ''
+let procFile = ''
+let procAt = 0
+export function setProgress(pct: number, label: string, file = ''): void {
+  procPct = Math.max(0, Math.min(100, Math.round(pct)))
+  procLabel = label.slice(0, 80)
+  procFile = file.slice(0, 80)
+  procAt = Date.now()
+}
 
 // ── OK → DEPLOY (Adrian, 4 iul): NO approval tab. A finished fix is "ready";
 // Adrian just replies "ok" in chat and the server publishes it immediately.
@@ -328,6 +336,8 @@ export function resetBrainActivity(): void {
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
   logDevLines([stamped])
+  // New command → the process bar restarts at the intake stage.
+  setProgress(6, 'Preluare')
 }
 
 // Kelion speaks a line into the admin's chat by himself (delivered by the
@@ -583,23 +593,17 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // reachable on the bridge, OFF = bridge down (the owner sees it instantly),
   // pulsing = code is being written right now (dev heartbeat active).
   // REAL Linux server load (the paznic on the VPS posts it every minute) —
-  // shown bottom-left on the admin's work monitor, in real percentages.
-  app.post<{ Body: { line?: string; cpu?: number; mem?: number; disk?: number } }>(
+  // shown bottom-left on the admin's work monitor as a text readout. (The old
+  // numeric cpu/mem/disk bars were replaced by the process progress bar, so any
+  // extra fields the paznic still sends are simply ignored.)
+  app.post<{ Body: { line?: string } }>(
     '/api/bridge/server-load',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const b = req.body ?? {}
       const line = typeof b.line === 'string' ? b.line.slice(0, 200) : ''
-      const clamp = (n: unknown): number | null =>
-        typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null
-      const cpu = clamp(b.cpu)
-      const mem = clamp(b.mem)
-      const disk = clamp(b.disk)
-      if (line || cpu !== null || mem !== null || disk !== null) {
-        if (line) srvLoad = line
-        if (cpu !== null) srvCpu = cpu
-        if (mem !== null) srvMem = mem
-        if (disk !== null) srvDisk = disk
+      if (line) {
+        srvLoad = line
         srvLoadAt = Date.now()
       }
       return { ok: true }
@@ -608,21 +612,30 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
-    // Telemetry is "live" only if the paznic posted within the last 12s (it
-    // posts every ~2s). Stale → send nulls so the monitor shows "no signal"
-    // instead of a frozen bar pretending to be live.
-    const fresh = Date.now() - srvLoadAt < 12_000
     return {
       active,
       bridge: bridgeOnline(),
       activity: active ? devActivity : [],
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
-      // Real 0–100 metrics for the live bar graphs (null when no fresh signal).
-      metrics: fresh
-        ? { cpu: srvCpu, mem: srvMem, disk: srvDisk, bridge: bridgeOnline() ? 100 : 0, live: true }
-        : { cpu: 0, mem: 0, disk: 0, bridge: bridgeOnline() ? 100 : 0, live: false },
+      // THE process bar 0→100% (what's executing, start→finish). Kept for 2 min
+      // after the last update so a just-finished job stays visible, then clears.
+      progress:
+        procAt && Date.now() - procAt < 120_000
+          ? { pct: procPct, label: procLabel, file: procFile }
+          : null,
     }
   })
+
+  // chat/builder/deployer → push the process progress (secret-protected).
+  app.post<{ Body: { pct?: number; label?: string; file?: string } }>(
+    '/api/bridge/progress',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const b = req.body ?? {}
+      if (typeof b.pct === 'number') setProgress(b.pct, String(b.label ?? ''), String(b.file ?? ''))
+      return { ok: true }
+    },
+  )
 
   // Watchdog probe (secret-protected): is the worker ACTUALLY polling? The
   // server-side watchdog restarts the worker when this says online:false —
