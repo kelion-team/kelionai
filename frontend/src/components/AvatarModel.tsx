@@ -2,7 +2,6 @@ import { useRef, useLayoutEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
-import { getMouthState, VISEME_KEYS } from '../lib/voice'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -21,17 +20,13 @@ const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
 }
 
 // v1 avatar: fresh idle animation (breathing, blink, micro head motion) +
-// arms-down rest pose. Lipsync + gestures arrive with the voice milestone.
+// arms-down rest pose.
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const root = useRef<Group>(null)
   const bones = useRef<Record<string, Bone>>({})
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
-  // Smoothed lip-sync channels: jaw openness + per-viseme weights.
-  const mouth = useRef<Record<string, number>>({
-    jaw: 0, aa: 0, E: 0, I: 0, O: 0, U: 0, SS: 0, FF: 0,
-  })
 
   const applyArms = (b: Record<string, Bone>) => {
     for (const key of Object.keys(ARM_REST)) {
@@ -102,18 +97,6 @@ export default function AvatarModel() {
       }
     }
 
-    // Lip-sync — formant-based Oculus visemes (aa/E/I/O/U/SS/FF) + jaw. Snappy
-    // attack on an onset, faster release so the mouth shuts cleanly at the end
-    // of a word (the "guard at start and end"); each channel smoothed.
-    // Gentler smoothing (was 0.55/0.65) so the mouth glides between shapes
-    // instead of snapping every frame — the snappiness read as "flapping".
-    const m = getMouthState()
-    const cur = mouth.current
-    const sm = (now: number, next: number): number =>
-      now + (next - now) * (next > now ? 0.32 : 0.42)
-    cur.jaw = sm(cur.jaw, m.jaw)
-    for (const k of VISEME_KEYS) cur[k] = sm(cur[k], m[k])
-
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
       const inf = mesh.morphTargetInfluences
@@ -122,12 +105,6 @@ export default function AvatarModel() {
       const r = d['eyeBlinkRight'] ?? d['eyeBlink_R']
       if (l !== undefined) inf[l] = eye
       if (r !== undefined) inf[r] = eye
-      const jawOpen = d['jawOpen'] ?? d['mouthOpen']
-      if (jawOpen !== undefined) inf[jawOpen] = cur.jaw
-      for (const k of VISEME_KEYS) {
-        const idx = d[`viseme_${k}`]
-        if (idx !== undefined) inf[idx] = cur[k]
-      }
     }
   })
 

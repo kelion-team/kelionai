@@ -6,7 +6,6 @@ import ContactModal from '../components/ContactModal'
 import { startGoogleLogin, startDemo } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
-import { greetOnHover } from '../lib/voice'
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
@@ -73,9 +72,7 @@ export default function Landing({ error }: { error?: string | null }) {
 
   return (
     <div className="landing">
-      {/* Hover over Kelion → he greets you, time-appropriately, in his own voice
-          with his mouth moving (landing page only, never after login). */}
-      <div className="landing-hero" onMouseEnter={() => void greetOnHover()}>
+      <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
         <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
