@@ -51,10 +51,15 @@ try {
 const HEADERS = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 
 async function api(pathname, body) {
+  // Timeout OBLIGATORIU: un fetch fără limită rămânea agățat pentru totdeauna
+  // la un sughiț de rețea și bucla murea „vie" — puntea părea căzută și
+  // mesajele lui Adrian se pierdeau (4 iul). Long-poll-ul serverului ține 25s,
+  // deci 40s acoperă orice răspuns legitim.
   const res = await fetch(BASE + pathname, {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(40_000),
   })
   if (!res.ok) throw new Error(`${pathname} -> HTTP ${res.status}`)
   return res.json()
@@ -83,27 +88,46 @@ function saveFiles(job) {
   return out
 }
 
+// REGULA DE LIVRARE (Adrian, 4 iul): în chat ajunge DOAR mesajul FINAL al
+// turei. Notele de lucru dintre apelurile de unelte („I found the bug, let me
+// fix it…") sunt interne — au scăpat o dată în chat, în engleză, peste regula
+// română-exclusiv. De aceea citim fluxul stream-json și păstrăm EXCLUSIV
+// evenimentul `result` (răspunsul final), nu tot ce scrie modelul pe drum.
 function runClaude(prompt, model, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn('claude', ['-p', prompt, '--model', model, '--allowedTools', 'Read'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
-    })
-    let out = ''
+    const child = spawn(
+      'claude',
+      ['-p', prompt, '--model', model, '--allowedTools', 'Read', '--output-format', 'stream-json', '--verbose'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+      },
+    )
+    let raw = ''
     let err = ''
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
       resolve({ ok: false, text: '', err: 'timeout' })
     }, timeoutMs)
     child.stdout.on('data', (d) => {
-      out += d
+      raw += d
     })
     child.stderr.on('data', (d) => {
       err += d
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      resolve({ ok: code === 0 && out.trim().length > 0, text: out.trim(), err: err.slice(0, 400) })
+      let text = ''
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue
+        try {
+          const ev = JSON.parse(line)
+          if (ev.type === 'result' && typeof ev.result === 'string') text = ev.result.trim()
+        } catch {
+          /* linie non-JSON (zgomot) — o ignorăm, nu ajunge nimic intern în chat */
+        }
+      }
+      resolve({ ok: code === 0 && text.length > 0, text, err: err.slice(0, 400) })
     })
     child.on('error', (e) => {
       clearTimeout(timer)
@@ -168,6 +192,10 @@ async function main() {
       }
       const { job } = await api('/api/bridge/pull')
       if (job) {
+        // Confirmare de primire: serverul știe că jobul A AJUNS. Fără ack, un
+        // job servit pe o conexiune moartă era pierdut definitiv — serverul îl
+        // relivrează acum dacă nu vede confirmarea în 15s.
+        void api('/api/bridge/ack', { id: job.id }).catch(() => {})
         running++
         void handle(job).finally(() => {
           running--

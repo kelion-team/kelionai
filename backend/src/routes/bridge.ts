@@ -47,7 +47,43 @@ interface PendingJob {
 
 const queue: PendingJob[] = []
 const waiters = new Map<string, (text: string | null) => void>()
-let pullWaiter: ((job: PendingJob | null) => void) | null = null
+// FIFO of pending worker long-polls. It was a SINGLE slot: a second concurrent
+// pull silently overwrote the first, whose request then hung FOREVER (its
+// timeout guard no longer matched) — freezing that worker and losing the
+// admin's messages (4 iul). Every waiting poll now gets served or released.
+const pullWaiters: ((job: PendingJob | null) => void)[] = []
+// Jobs handed to a worker but not yet confirmed (no ack/chunk/reply). If the
+// long-poll connection died exactly as the job was served, the job used to
+// vanish — the admin's message was simply never answered. Now it is redelivered
+// ONCE to the next poll while its turn is still waiting.
+interface InFlight {
+  job: PendingJob
+  at: number
+  tries: number
+  confirmed: boolean
+}
+const inFlight = new Map<string, InFlight>()
+// Redelivery arms itself only once a worker has EVER acked (feature-detect the
+// new worker) — an old worker that never acks must not get every job twice.
+let ackSeen = false
+function markServed(job: PendingJob): void {
+  lastJobDispatched = Date.now()
+  const prev = inFlight.get(job.id)
+  inFlight.set(job.id, { job, at: Date.now(), tries: (prev?.tries ?? 0) + 1, confirmed: false })
+}
+// A served-but-unconfirmed job whose turn is still waiting → serve it again.
+function staleJob(): PendingJob | null {
+  if (!ackSeen) return null
+  const now = Date.now()
+  for (const [id, e] of inFlight) {
+    if (!waiters.has(id)) {
+      inFlight.delete(id) // turn finished or timed out — nothing to redeliver
+      continue
+    }
+    if (!e.confirmed && e.tries < 2 && now - e.at > 15_000) return e.job
+  }
+  return null
+}
 let lastWorkerSeen = 0
 // The beat SURVIVES restarts: persisted (throttled) to Postgres and restored at
 // boot — so a deploy never blinks the Bridge light while the worker is alive.
@@ -181,13 +217,9 @@ export function stageRelease(title: string, detail: string): string {
 }
 
 function dispatch(job: PendingJob): void {
-  if (pullWaiter) {
-    const w = pullWaiter
-    pullWaiter = null
-    w(job)
-  } else {
-    queue.push(job)
-  }
+  const w = pullWaiters.shift()
+  if (w) w(job)
+  else queue.push(job)
 }
 
 // The worker polls every ≤30s; seen within 75s = online. CRUCIAL nuance: while
@@ -649,23 +681,44 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/bridge/pull', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()
-    const ready = queue.shift()
+    const ready = staleJob() ?? queue.shift()
     if (ready) {
-      lastJobDispatched = Date.now()
+      markServed(ready)
       return { job: ready }
     }
     const job = await new Promise<PendingJob | null>((resolve) => {
-      pullWaiter = resolve
-      setTimeout(() => {
-        if (pullWaiter === resolve) {
-          pullWaiter = null
+      pullWaiters.push(resolve)
+      // Release exactly once: on the 25s long-poll expiry OR the moment the
+      // worker's connection drops — a job must never be served into a socket
+      // that is already dead. The drop signal is 'close' on the RESPONSE (fires
+      // early only on premature termination); on the request it fires as soon
+      // as the body is consumed and would kill every long-poll instantly.
+      const release = (): void => {
+        const i = pullWaiters.indexOf(resolve)
+        if (i !== -1) {
+          pullWaiters.splice(i, 1)
           resolve(null)
         }
-      }, 25_000)
+      }
+      setTimeout(release, 25_000)
+      reply.raw.once('close', release)
     })
     workerBeat()
-    if (job) lastJobDispatched = Date.now()
+    if (job) markServed(job)
     return { job }
+  })
+
+  // Worker → server: "I received job <id> and I'm on it." From this ack on, the
+  // job is CONFIRMED delivered; without it, the server re-serves the job once
+  // (see staleJob) — so a message can no longer die on a dropped long-poll.
+  app.post('/api/bridge/ack', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    workerBeat()
+    ackSeen = true
+    const body = (req.body ?? {}) as { id?: string }
+    const entry = body.id ? inFlight.get(body.id) : undefined
+    if (entry) entry.confirmed = true
+    return { ok: !!entry }
   })
 
   // Worker → server: a text CHUNK while the model is still writing (streaming).
@@ -674,6 +727,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()
     const body = (req.body ?? {}) as { id?: string; text?: string }
+    const flying = body.id ? inFlight.get(body.id) : undefined
+    if (flying) flying.confirmed = true // a chunk is proof of delivery too
     const sink = body.id ? chunkSinks.get(body.id) : undefined
     if (sink && typeof body.text === 'string' && body.text) sink(body.text)
     return { accepted: !!sink }
@@ -685,6 +740,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()
     const body = (req.body ?? {}) as { id?: string; text?: string }
+    if (body.id) inFlight.delete(body.id)
     const resolve = body.id ? waiters.get(body.id) : undefined
     if (!resolve || !body.id) return { accepted: false }
     waiters.delete(body.id)
