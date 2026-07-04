@@ -88,15 +88,28 @@ async function askClaude(prompt) {
 }
 
 async function pull() {
+  // Timeout obligatoriu: fără el, un sughiț de rețea lăsa fetch-ul agățat pe
+  // veci și bucla murea „vie" — puntea părea căzută (4 iul). Long-poll = 25s.
   const res = await fetch(`${BASE}/api/bridge/pull`, {
     method: 'POST',
     headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
     body: '{}',
+    signal: AbortSignal.timeout(40_000),
   })
   if (res.status === 401) throw new Error('Secret respins de server')
   if (!res.ok) throw new Error(`pull HTTP ${res.status}`)
   const j = await res.json()
-  return j.job ?? null
+  const job = j.job ?? null
+  // Confirmare de primire — serverul relivrează jobul dacă nu vede ack-ul.
+  if (job) {
+    void fetch(`${BASE}/api/bridge/ack`, {
+      method: 'POST',
+      headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: job.id }),
+      signal: AbortSignal.timeout(15_000),
+    }).catch(() => {})
+  }
+  return job
 }
 
 async function sendReply(id, text) {
@@ -104,6 +117,7 @@ async function sendReply(id, text) {
     method: 'POST',
     headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, text }),
+    signal: AbortSignal.timeout(30_000),
   })
 }
 

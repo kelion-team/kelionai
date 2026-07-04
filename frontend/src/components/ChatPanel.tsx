@@ -133,6 +133,9 @@ export default function ChatPanel({
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  // Delivery receipt for the CURRENT turn: the server's first stream frame
+  // ({turn}) sets it, so a small ✓ shows the message actually arrived.
+  const [delivered, setDelivered] = useState(false)
   const [voiceOut, setVoiceOut] = useState(true)
   const [awake, setAwake] = useState(false) // post wake-word active conversation
   const [cameraOn, setCameraOn] = useState(false)
@@ -179,6 +182,10 @@ export default function ChatPanel({
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
   const inFlightRef = useRef(false)
+  // Messages typed/spoken WHILE a turn is still streaming. They are queued here
+  // instead of being dropped by the in-flight guard (that silent drop is how
+  // written messages "never arrived"), and sent as one turn when it finishes.
+  const pendingSendsRef = useRef<string[]>([])
   // Invisible speech accumulation: rapid utterances (you speaking fast, or the mic
   // splitting one sentence into pieces on a short pause) are buffered here and
   // handed to Kelion as ONE coherent message after a brief gap — so he never
@@ -263,6 +270,11 @@ export default function ChatPanel({
   // Kelion drives the monitor himself (no manual button): a control frame from
   // the stream opens/clears the workspace surface behind the avatar.
   function handleControl(c: ChatControl): void {
+    // Delivery receipt: the server's first frame arrived — the message got there.
+    if (c.receipt) {
+      setDelivered(true)
+      return
+    }
     if (c.paywall) {
       window.dispatchEvent(new Event('kelion:paywall'))
       return
@@ -721,11 +733,21 @@ export default function ChatPanel({
         }
       }
     }
-    if (busyRef.current || inFlightRef.current) return
+    if (busyRef.current || inFlightRef.current) {
+      // A turn is already streaming (it can take minutes). NEVER drop the text
+      // silently — queue it; the finally block sends everything queued as the
+      // next turn the moment this one ends. Attachment-only sends still wait.
+      if (msg) {
+        pendingSendsRef.current.push(msg)
+        setInput('')
+      }
+      return
+    }
     inFlightRef.current = true
     turnActiveRef.current = true
     syncMic() // mute the mic for the whole turn (structural anti-echo)
     setInput('')
+    setDelivered(false) // new turn — the ✓ lights only once the server answers
     setAttachments([])
     stopSpeaking()
     // Multi-tasking: whatever is on the monitor (a map, a route, a video) STAYS
@@ -850,6 +872,13 @@ export default function ChatPanel({
       // at the very end. A turn with no speech reopens it right here.
       turnActiveRef.current = false
       syncMic()
+      // Anything written during this turn was queued, not lost — combine it and
+      // start the next turn with it (a beat later, so this one fully unwinds).
+      if (pendingSendsRef.current.length > 0) {
+        const combined = pendingSendsRef.current.join('\n')
+        pendingSendsRef.current = []
+        window.setTimeout(() => void sendRef.current(combined), 50)
+      }
     }
   }
   const sendRef = useRef(send)
@@ -1266,7 +1295,7 @@ export default function ChatPanel({
         <div className="chat-log">
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
           {lastUser && lastUser.content && (
-            <div className="bubble user">{lastUser.content.slice(0, 600)}{lastUser.ts && <span className="bubble-time">{new Date(lastUser.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span>}</div>
+            <div className="bubble user">{lastUser.content.slice(0, 600)}{busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}{lastUser.ts && <span className="bubble-time">{new Date(lastUser.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span>}</div>
           )}
           {(lastAssistant || busy) && (
             <div className="bubble assistant">
@@ -1323,6 +1352,7 @@ export default function ChatPanel({
       {wsOpen && (lastAssistant?.content || busy) && (
         <div className="monitor-speech">
           {lastAssistant?.content ? lastAssistant.content : '…'}
+          {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
         </div>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>

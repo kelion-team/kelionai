@@ -1334,6 +1334,13 @@ body {
   opacity: 0.35;
   cursor: default;
 }
+/* Delivery receipt — a small quiet ✓ once the server confirms it received the
+   message (the {turn} frame). Proof the message left, nothing noisy. */
+.sent-check {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #3ecf72;
+}
 .composer-atts {
   display: flex;
   flex-wrap: wrap;

@@ -37,6 +37,8 @@ export interface ChatControl {
   doc?: { title: string; text: string }
   // Out of credit — the client should open the top-up (buy credit) flow.
   paywall?: boolean
+  // The server has received the message — the delivery check mark in the UI.
+  receipt?: boolean
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
   // when recording starts the script is spoken (voice only, no text on screen)
   // while the scenes appear on the monitor at their times.
@@ -144,8 +146,12 @@ export async function* streamChat(
       const json = buf.slice(i + 1, j)
       try {
         const frame = JSON.parse(json) as ChatControl & { turn?: string }
-        if (typeof frame.turn === 'string') turnId = frame.turn // internal — not a control
-        else onControl?.(frame)
+        if (typeof frame.turn === 'string') {
+          turnId = frame.turn // internal — not a control
+          // The {turn} frame is the FIRST thing the server sends — so it doubles
+          // as proof of receipt: the message reached the server (delivery check).
+          onControl?.({ receipt: true })
+        } else onControl?.(frame)
       } catch {
         /* malformed control frame — ignore */
       }
