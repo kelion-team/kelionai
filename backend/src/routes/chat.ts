@@ -1243,11 +1243,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const bridgePrompt = decision + ctxBlock + sharedBlock + langLock + journalBlock + convo
         // MEMORIA FIRULUI (urgența 2): pachetul turei — context proaspăt + DOAR
         // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume).
-        // BUG REPARAT (Adrian, 4 iul seara): pachetul turei NU ducea Jurnalul
-        // live și caietul comun — creierul era ORB la ce face constructorul CHIAR
-        // ACUM și, împins de contextul „e legat", afirma lucruri pe care Adrian
-        // nu le vedea. Acum FIECARE tură primește starea vie: jurnal + caiet.
-        const turnPacket = `${ctxBlock}${sharedBlock}${journalBlock}${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
+        // Creierul primește starea VIE la fiecare tură (altfel vorbește din
+        // amintiri — bug-ul „minciunii"), dar pachetul e ținut SUBȚIRE: jurnalul
+        // tuns dur (8 linii × 140 car.); caietul întreg vine doar la începutul
+        // sesiunii. Un pachet umflat costa 15s până la primul cuvânt și ture de
+        // 50s+ (Adrian, 4 iul seara).
+        const turnJournal = recentDevLog(8)
+          .map((l) => l.slice(0, 140))
+          .join('\n')
+        const turnPacket =
+          ctxBlock +
+          (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
+          `${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
         reanalyzePrompt = bridgePrompt
         const maxTries = 4
         for (let attempt = 1; attempt <= maxTries; attempt++) {
