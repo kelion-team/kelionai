@@ -1,7 +1,7 @@
 // Languages Kelion can hear (Web Speech recognition) and speak (Chirp 3 HD).
 // BCP-47 tags. The label is the language's own endonym so it's recognisable.
-
-import { franc } from 'franc-min'
+// NB: language DETECTION happens on the server now (services/lang.ts there);
+// the client only picks a sensible starting language from the browser locale.
 
 export interface SpeechLang {
   readonly code: string
@@ -37,27 +37,6 @@ export const LANGS: readonly SpeechLang[] = [
   { code: 'th-TH', label: 'ไทย' },
   { code: 'vi-VN', label: 'Tiếng Việt' },
 ]
-
-// ISO 639-3 (what franc returns) → our BCP-47 codes.
-const ISO3_TO_BCP47: Record<string, string> = {
-  eng: 'en-US', ron: 'ro-RO', fra: 'fr-FR', deu: 'de-DE', spa: 'es-ES',
-  ita: 'it-IT', por: 'pt-BR', nld: 'nl-NL', pol: 'pl-PL', rus: 'ru-RU',
-  ukr: 'uk-UA', tur: 'tr-TR', arb: 'ar-XA', ara: 'ar-XA', hin: 'hi-IN',
-  jpn: 'ja-JP', kor: 'ko-KR', cmn: 'zh-CN', zho: 'zh-CN', swe: 'sv-SE',
-  dan: 'da-DK', nob: 'nb-NO', nor: 'nb-NO', fin: 'fi-FI', ces: 'cs-CZ',
-  ell: 'el-GR', hun: 'hu-HU', ind: 'id-ID', tha: 'th-TH', vie: 'vi-VN',
-}
-
-// Detect the language of a piece of text → a supported BCP-47 code, or null
-// when the text is too short / uncertain to decide. Used to pick the voice +
-// recognizer language automatically (Claude already replies in-language).
-export function detectLangFromText(text: string): string | null {
-  const clean = text.trim()
-  if (clean.length < 8) return null // too short to be reliable
-  const iso3 = franc(clean, { minLength: 8 })
-  if (iso3 === 'und') return null
-  return ISO3_TO_BCP47[iso3] ?? null
-}
 
 // Pick the best starting language: an exact tag match for the browser locale,
 // else a base-language match, else English.

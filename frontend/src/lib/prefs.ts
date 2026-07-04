@@ -1,6 +1,9 @@
-// Per-user speech-language preference. Persists server-side (survives across
-// devices for as long as the user exists) with a localStorage mirror for an
-// instant read on load. Best-effort: never throws.
+// Per-user speech-language preference. The SERVER owns this value end to end
+// now: it detects the language from what the user actually writes, persists
+// it, and announces a change over the chat stream (a {lang} control frame).
+// The client only READS it (instant localStorage mirror + the server copy on
+// load) and mirrors what the server decides — it never writes the server pref
+// itself. Best-effort: never throws.
 
 const LS_KEY = 'kelion.speechLang'
 
@@ -23,16 +26,11 @@ export async function loadServerLang(): Promise<string | null> {
   }
 }
 
-export function saveLang(code: string): void {
+// Mirror the server-decided language locally, for an instant read next load.
+export function mirrorLang(code: string): void {
   try {
     localStorage.setItem(LS_KEY, code)
   } catch {
     /* ignore */
   }
-  void fetch('/api/prefs', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ speechLang: code }),
-  }).catch(() => undefined)
 }

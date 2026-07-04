@@ -68,6 +68,77 @@ export function detectLang(text: string): string | null {
   return null
 }
 
+// ── Server-side speech-language tracking ──────────────────────────────────
+// The speech language (what Kelion hears + speaks) used to be detected in the
+// browser with franc and persisted from there. Moved HERE (owner's order: as
+// much of the app as possible on the server): /api/chat detects the language
+// of every message the user writes and commits a switch only after the SAME
+// new language on TWO consecutive messages — a one-off mis-detection (e.g.
+// diacritic-less Romanian read as Spanish) never flips the remembered choice.
+
+// 2-letter code (what detectLang returns) → the BCP-47 speech tag the client's
+// recognizer + the TTS voice use.
+const BCP47: Record<string, string> = {
+  ro: 'ro-RO', es: 'es-ES', pt: 'pt-BR', fr: 'fr-FR', it: 'it-IT',
+  en: 'en-US', de: 'de-DE',
+}
+
+// Non-Latin scripts identify their language directly — cheap and unambiguous.
+// Order matters: kana before generic CJK (Japanese also uses kanji), the
+// Ukrainian-only letters before generic Cyrillic.
+const SCRIPT_LANGS: { re: RegExp; code: string }[] = [
+  { re: /[぀-ヿ]/, code: 'ja-JP' }, // hiragana + katakana
+  { re: /[가-힯]/, code: 'ko-KR' }, // hangul
+  { re: /[一-鿿]/, code: 'zh-CN' }, // CJK ideographs (after kana!)
+  { re: /[іїєґ]/i, code: 'uk-UA' }, // Ukrainian-only Cyrillic letters
+  { re: /[Ѐ-ӿ]/, code: 'ru-RU' }, // generic Cyrillic
+  { re: /[؀-ۿ]/, code: 'ar-XA' }, // Arabic
+  { re: /[฀-๿]/, code: 'th-TH' }, // Thai
+  { re: /[ऀ-ॿ]/, code: 'hi-IN' }, // Devanagari
+  { re: /[Ͱ-Ͽ]/, code: 'el-GR' }, // Greek
+]
+
+/** Best-guess SPEECH language (BCP-47) of a message, or null when unsure. */
+export function detectSpeechLang(text: string): string | null {
+  const clean = (text ?? '').trim()
+  if (clean.length < 8) return null // too short to be reliable
+  for (const s of SCRIPT_LANGS) if (s.re.test(clean)) return s.code
+  const two = detectLang(clean)
+  return two ? (BCP47[two] ?? null) : null
+}
+
+// Per-user "pending switch" state: a NEW language seen once, waiting for its
+// confirming second message. In-memory is fine — losing it merely re-asks for
+// the confirmation, it can never corrupt the stored preference.
+const pendingSwitch = new Map<string, string>()
+
+/**
+ * Track the language of one incoming user message. Returns the BCP-47 code to
+ * COMMIT (persist + announce to the client) when the same new language has now
+ * been seen on two consecutive messages, else null.
+ */
+export function trackSpeechLang(
+  email: string,
+  text: string,
+  current: string | null | undefined,
+): string | null {
+  const seed = detectSpeechLang(text)
+  if (!seed) return null
+  const base = (c: string): string => c.toLowerCase().split('-')[0]
+  if (current && base(seed) === base(current)) {
+    pendingSwitch.delete(email) // matches the established language — no switch
+    return null
+  }
+  const pending = pendingSwitch.get(email)
+  if (pending && base(pending) === base(seed)) {
+    pendingSwitch.delete(email) // confirmed twice in a row → commit
+    return seed
+  }
+  if (pendingSwitch.size > 1000) pendingSwitch.clear() // bounded, best-effort
+  pendingSwitch.set(email, seed)
+  return null
+}
+
 /**
  * The guardian verdict for a produced reply against the user's SET language.
  * Returns 'ok' (matches or nothing to judge), or 'wrong' with the detected
