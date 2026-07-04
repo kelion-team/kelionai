@@ -803,7 +803,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
-            {gaps.some((g) => !g.escalated) && (
+            {gaps.length > 0 && (
               <div className="gaps-bulk">
                 <span>
                   Verifică cu creierul: ce s-a făcut deja se șterge definitiv; ce nu, pleacă la

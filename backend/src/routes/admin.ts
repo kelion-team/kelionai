@@ -151,7 +151,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/admin/gaps/triage', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const open = (await getCapabilityGaps(false)).filter((g) => !g.escalated)
+    // TOATE cererile deschise (nu doar cele netrimise) — o cerere „trimisă" dar
+    // neconstruită trebuie re-verificată; ce e făcut iese, restul (re)pleacă.
+    const open = await getCapabilityGaps(false)
     if (open.length === 0) return reply.send({ done: 0, sent: 0, checked: 0 })
     if (!bridgeOnline()) return reply.send({ done: 0, sent: 0, checked: 0, offline: true })
 
@@ -172,8 +174,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (isDone) {
         await setGapResolved(g.id, true) // s-a făcut deja → scoasă definitiv
         done++
-      } else {
-        // nu s-a făcut (sau creierul n-a fost sigur) → la constructor, marcată trimis
+      } else if (!g.escalated) {
+        // nefăcut și încă netrimis → la constructor, marcată „trimisă"
         bridgeRepair(
           `Cerere de la utilizatori (culegerea lui Kelion), triată de admin — construiește/adaugă: ` +
             `"${g.request}"${g.reason ? ` (motiv: ${g.reason})` : ''}`,
@@ -181,6 +183,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         await markGapEscalated(g.id)
         sent++
       }
+      // nefăcut ȘI deja trimis → rămâne în listă (așteaptă construirea); nu spamăm.
     }
     return reply.send({ done, sent, checked: open.length })
   })
