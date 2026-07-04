@@ -1356,7 +1356,10 @@ export default function ChatPanel({
       )}
       {/* Monitor mode: Kelion's words in a slim black bar ABOVE the composer,
           so nothing covers what's on the monitor. */}
-      {monitorMode && (lastAssistant?.content || busy) && (
+      {/* Adrian's rule (4 iul): ce e AFIȘAT pe monitor (un surface deschis) NU se
+          mai repetă în bara de chat — dublarea acoperea monitorul. Bara vorbește
+          doar când monitorul arată consola de lucru (fără surface). */}
+      {monitorBusy && !wsOpen && (lastAssistant?.content || busy) && (
         <div className="monitor-speech">
           {lastAssistant?.content ? lastAssistant.content : '…'}
           {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}

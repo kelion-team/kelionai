@@ -1227,6 +1227,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // word has streamed we stop retrying (a slow-but-flowing reply is fine).
         let answer: string | null = null
         const onChunk = (chunk: string): void => {
+          // '' = puls de viață (creierul gândește) — armează doar ceasurile de
+          // stall în bridgeAskStream; nu e text de difuzat.
+          if (!chunk) return
           if (!firstWord) {
             firstWord = true
             setProgress(65, 'Compun răspunsul')
@@ -1238,10 +1241,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           }
         }
         const bridgePrompt = decision + ctxBlock + sharedBlock + langLock + journalBlock + convo
+        // MEMORIA FIRULUI (urgența 2): pachetul turei — context proaspăt + DOAR
+        // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume):
+        // creierul ține minte firul real și răspunde mai repede (prompt mic).
+        const turnPacket = `${ctxBlock}${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
         reanalyzePrompt = bridgePrompt
         const maxTries = 4
         for (let attempt = 1; attempt <= maxTries; attempt++) {
-          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 30_000)
+          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 30_000, turnPacket)
           if (answer === BRIDGE_STALL && !headDone && !streamed.trim()) {
             head = ''
             if (attempt < maxTries) {
