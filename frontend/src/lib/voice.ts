@@ -360,7 +360,13 @@ async function chirpSpeak(
       // an analyser was fragile: it made the volume start loud then drop and some
       // clips go silent ("nu rămâne același personaj"). Plain playback keeps ONE
       // consistent voice at a constant level; lip-sync is driven from the text.
-      void audio.play().catch(() => finish(false))
+      void audio.play().catch((err: unknown) => {
+        // Autoplay blocked after an auto-refresh (no user gesture yet): PARK the
+        // line — it replays by itself at the first touch/keypress. Anything else
+        // stays the old way (skip the line, voice resumes on the next).
+        if ((err as { name?: string } | null)?.name === 'NotAllowedError') parkBlocked(text, lang)
+        finish(false)
+      })
     })
     return played
   } catch {
@@ -372,7 +378,55 @@ async function chirpSpeak(
 let prefetch: { key: string; blob: Promise<Blob | 'off' | null> } | null = null
 const clipKey = (t: string, l: string): string => `${l} ${t}`
 
+// ── AUTOPLAY DEBLOCARE (Adrian, 4 iul: „nu mai am linie de audio") ──────────
+// După o reîncărcare automată la release, browserul BLOCHEAZĂ audio.play()
+// până la primul gest al utilizatorului (politica de autoplay). Înainte, clipul
+// blocat era ARUNCAT → tăcere totală, fără recuperare. Acum: clipurile blocate
+// se PĂSTREAZĂ, iar la primul gest (click/tastă) pornesc singure; UI-ul e
+// anunțat prin 'kelion:audio-blocked' ca să arate „atinge pentru sunet".
+let audioBlocked = false
+let gestureHooked = false
+const blockedItems: TtsItem[] = []
+function armGestureUnlock(): void {
+  if (gestureHooked) return
+  gestureHooked = true
+  const unlock = (): void => {
+    globalThis.removeEventListener?.('pointerdown', unlock)
+    globalThis.removeEventListener?.('keydown', unlock)
+    gestureHooked = false
+    audioBlocked = false
+    void decodeCtx?.resume().catch(() => {})
+    const items = blockedItems.splice(0, blockedItems.length)
+    for (const it of items) ttsQueue.push(it)
+    if (!ttsBusy && ttsQueue.length > 0) {
+      onSpeaking?.(true)
+      void drain()
+    }
+    globalThis.dispatchEvent?.(new Event('kelion:audio-unblocked'))
+  }
+  globalThis.addEventListener?.('pointerdown', unlock)
+  globalThis.addEventListener?.('keydown', unlock)
+  globalThis.dispatchEvent?.(new Event('kelion:audio-blocked'))
+}
+// chirpSpeak calls this when play() is rejected by the autoplay policy — the
+// line is parked (NOT dropped) and replays on the first gesture.
+function parkBlocked(text: string, lang: string): void {
+  audioBlocked = true
+  blockedItems.push({ text, lang })
+  armGestureUnlock()
+}
+
 async function drain(): Promise<void> {
+  // Audio is gesture-locked: park everything quietly (no wasted TTS fetches);
+  // the unlock handler re-queues and restarts the moment Adrian touches once.
+  if (audioBlocked) {
+    blockedItems.push(...ttsQueue.splice(0, ttsQueue.length))
+    ttsBusy = false
+    prefetch = null
+    onSpeaking?.(false)
+    onIdle?.()
+    return
+  }
   const item = ttsQueue.shift()
   if (!item) {
     ttsBusy = false
