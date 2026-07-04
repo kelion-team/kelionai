@@ -304,9 +304,11 @@ export default function Stage({ user }: { user: User }) {
   // the monitor back; nothing is displayed permanently.
   // OBLIGATORY: while there is active work, the monitor shows it BY ITSELF (no
   // click). The Bridge-light click only lets the owner FORCE it open when idle.
+  // Rule (Adrian): the Rec button must capture EVERYTHING the AI does — so the
+  // live execution console stays VISIBLE during recording (was hidden by
+  // `!recording`, which is exactly why the clip showed nothing happening).
   const claudeShow =
     user.role === 'admin' &&
-    !recording &&
     ((claudeActive && claudeActivity.length > 0) || showWork)
   const live = claudeShow && !ws.open ? parseLive(claudeActivity) : null
   const monitorOn = ws.open || (claudeShow && claudeActivity.length > 0)
