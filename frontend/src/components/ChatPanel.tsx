@@ -26,6 +26,7 @@ import {
   isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
+import { startMic, playVoice, stopVoice, type MicHandle } from '../lib/audioIO'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
 // ~15s; a full landing demo can use the whole window).
@@ -77,6 +78,9 @@ export default function ChatPanel({
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
+  const [listening, setListening] = useState(false)
+  const micRef = useRef<MicHandle | null>(null)
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
@@ -942,6 +946,15 @@ export default function ChatPanel({
             }}
             placeholder={t.chatPlaceholder}
           />
+          <button
+            type="button"
+            className={`composer-mic ${listening ? 'live' : ''}`}
+            onClick={() => void toggleMic()}
+            aria-label="Microfon"
+            title={listening ? 'Oprește microfonul' : 'Vorbește (microfon)'}
+          >
+            {listening ? '●' : '🎤'}
+          </button>
           <button
             type="button"
             className="composer-send"

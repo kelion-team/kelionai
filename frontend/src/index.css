@@ -2344,3 +2344,27 @@ a.card-item:hover {
 .inbox-subj { font-size: 13.5px; color: #cfd6dd; margin: 4px 0; }
 .inbox-body { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; }
 .inbox-reply { font-size: 12.5px; color: #bfe8cf; margin-top: 6px; white-space: pre-wrap; }
+
+/* Buton microfon în composer (intrare audio → server → creier; zero voce în front) */
+.composer-mic {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 17px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.composer-mic:hover { background: rgba(255, 255, 255, 0.1); }
+.composer-mic.live {
+  border-color: #ff5d5d;
+  color: #ff5d5d;
+  background: rgba(255, 93, 93, 0.14);
+  animation: rec 1.2s ease-in-out infinite;
+}

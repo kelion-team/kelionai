@@ -48,6 +48,9 @@ export interface ChatControl {
   paywall?: boolean
   // The server has received the message — the delivery check mark in the UI.
   receipt?: boolean
+  // VOCEA CREIERULUI: MP3 (base64) sintetizat pe server (Chirp 3) și trimis prin
+  // punte. Aplicația doar îl decodează + redă — nu sintetizează nimic local.
+  audio?: string
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
   // when recording starts the script is spoken (voice only, no text on screen)
   // while the scenes appear on the monitor at their times.
