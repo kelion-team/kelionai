@@ -159,9 +159,13 @@ export async function initDb(): Promise<void> {
       reason TEXT,
       hits INT NOT NULL DEFAULT 1,
       resolved BOOLEAN NOT NULL DEFAULT false,
+      escalated BOOLEAN NOT NULL DEFAULT false,
+      escalated_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
     -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
     -- memories table: memories are auto-learned facts Kelion recalls silently;
@@ -1210,6 +1214,7 @@ export interface CapabilityGap {
   reason: string | null
   hits: number
   resolved: boolean
+  escalated?: boolean
   created_at: string
   last_seen: string
 }
@@ -1251,7 +1256,7 @@ export async function getCapabilityGaps(includeResolved = false, limit = 200): P
   try {
     const where = includeResolved ? '' : 'WHERE resolved = false'
     const r = await getPool().query<CapabilityGap>(
-      `SELECT id, user_email, request, reason, hits, resolved, created_at, last_seen
+      `SELECT id, user_email, request, reason, hits, resolved, escalated, created_at, last_seen
        FROM capability_gaps ${where}
        ORDER BY resolved ASC, hits DESC, last_seen DESC LIMIT $1`,
       [limit],
@@ -1269,6 +1274,35 @@ export async function setGapResolved(id: number, resolved: boolean): Promise<voi
     await getPool().query('UPDATE capability_gaps SET resolved = $2 WHERE id = $1', [id, resolved])
   } catch {
     /* non-fatal */
+  }
+}
+
+/** Mark a gap as sent to the brain (escalated) — it stays visible, tagged, until
+ * a successful deploy clears it automatically. */
+export async function markGapEscalated(id: number): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      'UPDATE capability_gaps SET escalated = true, escalated_at = now() WHERE id = $1',
+      [id],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Auto-clear: after a deploy passes (healthcheck 200), every request that was
+ * SENT to the brain is considered handled and removed from the open list.
+ * Returns how many were cleared. (Adrian's rule: „dacă a trecut cu 200, scoas-o".) */
+export async function resolveEscalatedGaps(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query(
+      'UPDATE capability_gaps SET resolved = true WHERE escalated = true AND resolved = false',
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
   }
 }
 

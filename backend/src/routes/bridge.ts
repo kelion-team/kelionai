@@ -16,6 +16,7 @@ import {
   saveKv,
   loadKv,
   putAppFile,
+  resolveEscalatedGaps,
 } from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
@@ -622,6 +623,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         sayQueue.push(msg)
         void saveMessage(config.adminEmail, 'assistant', msg)
         noteBrainActivity('🟢 PUBLICAT LIVE')
+        // Adrian's rule: a request SENT to the brain that reaches a healthy
+        // deploy (200) is DONE — clear it from „Cereri neacoperite" by itself.
+        void resolveEscalatedGaps()
+          .then((n) => {
+            if (n > 0) noteBrainActivity(`🧹 ${n} cereri rezolvate și scoase din listă`)
+          })
+          .catch(() => {})
       } else {
         // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
         // — never a silent auto-redeploy. Re-stage the branch so his "ok"

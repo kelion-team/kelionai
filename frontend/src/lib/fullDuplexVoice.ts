@@ -280,19 +280,15 @@ export async function startFullDuplex(
   }
 
   void ctx.resume()
-  // MICUL „BLOCAT PE OFF" (Adrian, 4 iul): după o reîncărcare automată la release
-  // (fără vreun gest), browserul ține AudioContext-ul SUSPENDAT — analizatorul
-  // primește doar zero, deci vocea nu mai e auzită deloc. Reînviem contextul la
-  // primul gest (click/tastă) și reîncercăm singuri la 3s; bannerul 🔊 anunță.
+  // MICROFONUL (intrarea) — trezire TĂCUTĂ: după o reîncărcare, browserul ține
+  // AudioContext-ul suspendat până la primul gest. Îl reînviem SILENȚIOS la
+  // orice click/tastă (tastarea în chat îl trezește singură) + reîncercare la 3s.
+  // Fără banner: vocea din front e interzisă, deci nu mai există „audio" de anunțat.
   if (ctx.state === 'suspended') {
-    globalThis.dispatchEvent?.(new Event('kelion:audio-blocked'))
     const unlock = (): void => {
       globalThis.removeEventListener('pointerdown', unlock)
       globalThis.removeEventListener('keydown', unlock)
-      void ctx
-        .resume()
-        .then(() => globalThis.dispatchEvent?.(new Event('kelion:audio-unblocked')))
-        .catch(() => {})
+      void ctx.resume().catch(() => {})
     }
     globalThis.addEventListener('pointerdown', unlock)
     globalThis.addEventListener('keydown', unlock)

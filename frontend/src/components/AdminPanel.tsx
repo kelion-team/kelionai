@@ -141,6 +141,14 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     void fetchReleases().then(setReleases)
   }, [])
 
+  // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
+  // that reached a successful deploy DISPARE singură din listă (auto-rezolvat).
+  useEffect(() => {
+    if (tab !== 'gaps') return
+    const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
   const sym = finance?.currency === 'usd' ? '$' : '£'
   const aiParts = finance
     ? Object.entries(finance.byKind)
@@ -269,14 +277,9 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               Inbox
             </button>
           </div>
-          <div className="admin-head-actions">
-            <a className="admin-connect-google" href="/auth/google/login">
-              Conectează Google
-            </a>
-            <button type="button" className="ghost" onClick={onClose}>
-              Close
-            </button>
-          </div>
+          <button type="button" className="ghost" onClick={onClose}>
+            Close
+          </button>
         </header>
         {tab === 'finance' && (
           <section className="admin-finance">
@@ -326,6 +329,15 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                       <span>${v.toFixed(4)}</span>
                     </div>
                   ))}
+                </div>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">Contul tău Google (Gmail / Calendar / Drive)</div>
+                  <div className="fin-row">
+                    <span>Conectează-l ca Kelion să-ți citească/trimită emailuri și evenimente.</span>
+                    <a className="admin-connect-google" href="/auth/google/login">
+                      Conectează Google
+                    </a>
+                  </div>
                 </div>
               </>
             )}
@@ -816,16 +828,18 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   </span>
                 </div>
                 <div className="admin-gap-actions">
-                  {escalatedIds.has(g.id) ? (
-                    <span className="gap-sent">✓ Trimisă la execuție — vezi Jurnal; după test, apasă „Rezolvat"</span>
+                  {g.escalated || escalatedIds.has(g.id) ? (
+                    <span className="gap-sent">
+                      ✓ Trimisă la creier — se construiește; dispare singură după deploy reușit
+                    </span>
                   ) : (
                     <button
                       type="button"
                       className="composer-send"
                       onClick={() => void sendToClaude(g.id)}
-                      title="Trimite cererea în registrul de execuție (rămâne aici până o cureți tu, după test)"
+                      title="Trimite cererea la creier: construiește → verifică → publică. Când trece (200) dispare din listă."
                     >
-                      Escaladează către Claude
+                      Trimite la creier
                     </button>
                   )}
                   <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>

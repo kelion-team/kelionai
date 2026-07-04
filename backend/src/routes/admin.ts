@@ -12,6 +12,7 @@ import {
   getUserActivity,
   getDownloadStats,
   listInboundEmails,
+  markGapEscalated,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
@@ -137,6 +138,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         `construiește/adaugă această capacitate în aplicația Kelionai: "${gap.request}"` +
         (gap.reason ? ` (motiv notat: ${gap.reason})` : ''),
     )
+    // Tag it as sent — it stays visible (marcat „trimis la creier") and is
+    // CLEARED automatically când deploy-ul reușește (healthcheck 200).
+    await markGapEscalated(id)
     return reply.send({ escalated: true, online: true })
   })
 

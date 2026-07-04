@@ -504,8 +504,15 @@ function chunkForTts(text: string): string[] {
   return chunks
 }
 
+// VOCEA DIN FRONT E INTERZISĂ ÎN APLICAȚIE (ordin Adrian, 4 iul seara). Kelion
+// NU mai vorbește din browser — conversația rămâne în text. Un singur comutator
+// aici oprește tot TTS-ul de front, definitiv, fără reactivare automată. (Efect
+// bun: fără voce în front, reîncărcarea la deploy nu mai poate „pierde audio".)
+const FRONT_VOICE_FORBIDDEN = true
+
 /** Queue text to speak. Safe to call repeatedly while a reply streams in. */
 export function enqueueSpeech(text: string, lang: string): void {
+  if (FRONT_VOICE_FORBIDDEN) return // vocea din front e interzisă — nimic nu se rostește
   const clean = stripForSpeech(text)
   if (!clean) return
   for (const chunk of chunkForTts(clean)) ttsQueue.push({ text: chunk, lang })

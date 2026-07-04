@@ -276,6 +276,7 @@ export interface CapabilityGap {
   reason: string | null
   hits: number
   resolved: boolean
+  escalated?: boolean
   created_at: string
   last_seen: string
 }
