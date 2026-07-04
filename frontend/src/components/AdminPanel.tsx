@@ -295,6 +295,12 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                         {finance.stripe.pending.toFixed(2)}
                       </span>
                     )}
+                    {finance.stripe && finance.stripe.available < 0 && (
+                      <span className="fin-sub">
+                        sub zero = taxe Stripe reținute la rambursări/dispute (cifra vine direct de
+                        la Stripe)
+                      </span>
+                    )}
                   </div>
                   <div className="fin-card">
                     <span className="fin-label">Consumat la AI (real)</span>

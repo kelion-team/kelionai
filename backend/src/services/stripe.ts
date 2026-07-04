@@ -68,12 +68,18 @@ export async function getStripeBalance(): Promise<{
   const r = await fetch(`${API}/balance`, { headers: authHeaders() })
   if (!r.ok) return null
   const j = (await r.json()) as {
-    available?: { amount: number }[]
-    pending?: { amount: number }[]
+    available?: { amount: number; currency?: string }[]
+    pending?: { amount: number; currency?: string }[]
   }
-  const sum = (arr?: { amount: number }[]): number =>
-    (arr ?? []).reduce((s, x) => s + x.amount, 0) / 100
-  return { available: sum(j.available), pending: sum(j.pending), currency: config.stripe.currency }
+  // BUG FIX (4 iul): Stripe returns one entry PER CURRENCY. Summing them all
+  // into a single figure mixed gbp+usd+eur into one meaningless number (that's
+  // how the panel showed a bogus balance). Count ONLY the account currency.
+  const cur = config.stripe.currency
+  const sum = (arr?: { amount: number; currency?: string }[]): number =>
+    (arr ?? [])
+      .filter((x) => !x.currency || x.currency.toLowerCase() === cur)
+      .reduce((s, x) => s + x.amount, 0) / 100
+  return { available: sum(j.available), pending: sum(j.pending), currency: cur }
 }
 
 export interface StripeEvent {
