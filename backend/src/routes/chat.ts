@@ -973,6 +973,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '- Îi arăți notițele salvate: [NOTES] (le citește serverul, cu numărul lor). Ștergi una: [DELNOTE număr] (ex: [DELNOTE 12]).\n' +
           '- Îi spui cheltuielile reale: [COST] (serverul citește suma exactă din bază).\n' +
           '- Arăți o HARTĂ pe monitor: [MAP numele locului/adresei] (ex: [MAP Londra] sau [MAP Piața Unirii Cluj]).\n' +
+          '- Afișezi TEXT pe monitor (un răspuns, o listă, un plan, un rezumat — orice nu e o pagină web): [DOC titlu scurt] pe prima linie; TOT ce scrii după aceea apare automat și pe monitorul lui ca document. Când Adrian zice „afișează pe monitor" / „pune pe ecran" / „arată-mi pe monitor" și nu cere o pagină web, folosește [DOC] — nu spune că nu poți.\n' +
           '- Cureți ecranul/monitorul: [CLEAR].\n' +
           'ECHIPA TA de 7 agenți specialiști (rulează pe server, pe abonament). Deleagă un task greu/de domeniu cu [AGENT nume: sarcina completă], apoi spune scurt „întreb <agentul>":\n' +
           '  • researcher — căutare web, fapte reale, cifre, actualități\n' +
@@ -983,7 +984,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '  • tester — testează cod și dă verdict PASS/FAIL\n' +
           '  • secretary — redactează emailuri/mesaje (accesul la Gmail-ul real cere contul conectat)\n' +
           'Când Adrian cere ceva din aceste domenii (mai ales căutare/informații actuale, scris serios, cod), FOLOSEȘTE [AGENT …] — nu inventa răspunsul.\n' +
-          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[CLEAR],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
+          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[DOC],[CLEAR],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
         // ANY attachment rides the bridge to Claude: photos, texts, archives,
         // video (voice arrives already transcribed as text). Base64 payloads —
         // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
@@ -1015,6 +1016,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         let streamed = ''
         let head = ''
         let headDone = false
+        // [DOC titlu] pe prima linie = „afișează pe monitor": la finalul
+        // stream-ului, întregul text rostit e trimis și ca document pe monitor.
+        let docTitle: string | null = null
         const pendingTags: Promise<void>[] = []
         const emit = (t: string): void => {
           if (!t) return
@@ -1128,6 +1132,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
             noteBrainActivity('Am curățat monitorul')
           }
+          // [DOC titlu] — textul răspunsului (de la a doua linie) merge și pe
+          // monitor ca document; cadrul se trimite la final, cu textul complet.
+          const docTag = /\[DOC(?:\s+([^\]]*))?\]/i.exec(line)
+          if (docTag) {
+            docTitle = (docTag[1] ?? '').trim()
+            noteBrainActivity(`Afișez pe monitor: ${docTitle || 'răspunsul'}`)
+          }
           if (showTag) {
             const url = showTag[1]
             const title = (showTag[2] ?? '').trim()
@@ -1168,6 +1179,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             .replace(/\[IMG[^\]]*\]/gi, '')
             .replace(/\[NOTE[^\]]*\]/gi, '')
             .replace(/\[MAP[^\]]*\]/gi, '')
+            .replace(/\[DOC[^\]]*\]/gi, '')
             .replace(/\[YT[^\]]*\]/gi, '')
             .replace(/\[COST\]/gi, '')
             .replace(/\[NOTES\]/gi, '')
@@ -1251,6 +1263,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // saved reply would miss the numbers/list.
         await Promise.all(pendingTags)
         a = streamed.trim()
+        // [DOC] cerut pe prima linie → „afișează pe monitor": răspunsul complet
+        // apare și pe monitor ca document (frontend: openWorkspaceDoc), nu doar
+        // în chat. Ordinul lui Adrian (4 iul): „afișează pe monitor".
+        if (docTitle !== null && a) {
+          reply.raw.write(
+            `${CTRL}${JSON.stringify({ doc: { title: docTitle || 'Pe monitor', text: a.slice(0, 9000) } })}${CTRL}`,
+          )
+        }
         if (/\[EXECUT\]/i.test(answer ?? '')) {
           // Handed to the builder — the process bar continues from the builder
           // (agent → files → build → deploy → live), so don't jump to 100 here.
