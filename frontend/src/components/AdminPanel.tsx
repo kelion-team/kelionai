@@ -11,7 +11,7 @@ import {
   decideRelease,
   resolveGap,
   escalateGap,
-  escalateAllGaps,
+  triageGaps,
   type StagedRelease,
   type UserSummary,
   type HistoryRow,
@@ -113,6 +113,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [orders, setOrders] = useState<WorkOrder[]>([])
   // Gaps already sent to execution this session — shown marked, never hidden.
   const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
+  const [triaging, setTriaging] = useState(false)
 
   async function decide(id: string, d: 'approve' | 'reject'): Promise<void> {
     await decideRelease(id, d)
@@ -804,17 +805,24 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
           <section className="admin-gaps">
             {gaps.some((g) => !g.escalated) && (
               <div className="gaps-bulk">
-                <span>Trimite dintr-un click toate cererile deschise la creier — se construiesc și dispar singure după publicare.</span>
+                <span>
+                  Verifică cu creierul: ce s-a făcut deja se șterge definitiv; ce nu, pleacă la
+                  construit (și dispare după publicare).
+                </span>
                 <button
                   type="button"
                   className="composer-send"
+                  disabled={triaging}
                   onClick={() => {
-                    void escalateAllGaps().then((n) => {
-                      if (n > 0) void fetchGaps().then(setGaps)
+                    setTriaging(true)
+                    void triageGaps().then((r) => {
+                      setTriaging(false)
+                      void fetchGaps().then(setGaps)
+                      if (r.offline) alert('Creierul (puntea) e jos acum — reîncearcă în câteva secunde.')
                     })
                   }}
                 >
-                  Trimite toate la creier ({gaps.filter((g) => !g.escalated).length})
+                  {triaging ? 'Verific…' : 'Verifică și curăță (decide creierul)'}
                 </button>
               </div>
             )}

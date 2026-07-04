@@ -322,17 +322,15 @@ export async function escalateGap(id: number): Promise<{ escalated: boolean; onl
   }
 }
 
-// Trimite TOATE cererile deschise la creier dintr-un click. Întoarce câte au plecat.
-export async function escalateAllGaps(): Promise<number> {
+// Triaj decizional: creierul verifică fiecare cerere deschisă — cele DEJA făcute
+// se șterg, restul pleacă la constructor. Întoarce câte s-au curățat / trimis.
+export async function triageGaps(): Promise<{ done: number; sent: number; offline?: boolean }> {
   try {
-    const r = await fetch('/api/admin/gaps/escalate-all', {
-      method: 'POST',
-      credentials: 'include',
-    })
-    if (!r.ok) return 0
-    return ((await r.json()) as { escalated?: number }).escalated ?? 0
+    const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
+    if (!r.ok) return { done: 0, sent: 0 }
+    return (await r.json()) as { done: number; sent: number; offline?: boolean }
   } catch {
-    return 0
+    return { done: 0, sent: 0 }
   }
 }
 

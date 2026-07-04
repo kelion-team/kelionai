@@ -16,7 +16,7 @@ import {
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
-import { bridgeRepair } from './bridge.js'
+import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -144,21 +144,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ escalated: true, online: true })
   })
 
-  // Trimite TOATE cererile deschise la creier dintr-un click (Adrian, 4 iul):
-  // fiecare devine ordin de lucru + e marcată „trimisă"; dispar singure la deploy.
-  app.post('/api/admin/gaps/escalate-all', async (req, reply) => {
+  // CRITERIU DECIZIONAL (Adrian, 4 iul): pentru fiecare cerere deschisă, întreabă
+  // CREIERUL dacă e DEJA implementată. DA → o șterge definitiv din listă. NU → o
+  // trimite la constructor (și rămâne marcată, dispare singură la deploy reușit).
+  // Așa nu se retrimite orbește ce s-a făcut deja, iar lista se curăță singură.
+  app.post('/api/admin/gaps/triage', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const open = (await getCapabilityGaps(false)).filter((g) => !g.escalated)
+    if (open.length === 0) return reply.send({ done: 0, sent: 0, checked: 0 })
+    if (!bridgeOnline()) return reply.send({ done: 0, sent: 0, checked: 0, offline: true })
+
+    const prompt =
+      'Ești creierul Kelionai și cunoști starea REALĂ a aplicației (monitor live pas-cu-pas + bară de proces, ' +
+      'voce sintetizată pe server Chirp 3 trimisă prin punte, microfon full-duplex cu filtru de zgomot și VOX, ' +
+      'punte cu 10 canale, limba userului aplicată, camera→creier, emailuri contact@, etc). ' +
+      'Pentru FIECARE capacitate cerută mai jos, decide dacă e DEJA implementată în aplicația de acum. ' +
+      'Răspunde STRICT o linie pe cerere, exact în formatul: `<id> DONE` sau `<id> TODO` (fără altceva pe linie).\n\n' +
+      open.map((g) => `${g.id}: ${g.request}`).join('\n')
+    const verdict = (await bridgeAsk(prompt, [], 120_000)) || ''
+
+    let done = 0
+    let sent = 0
     for (const g of open) {
-      bridgeRepair(
-        `Cerere de la utilizatori (culegerea de dorințe a lui Kelion), escaladată de admin — ` +
-          `construiește/adaugă această capacitate: "${g.request}"` +
-          (g.reason ? ` (motiv: ${g.reason})` : ''),
-      )
-      await markGapEscalated(g.id)
+      const m = new RegExp(`(?:^|\\n)\\s*${g.id}\\s*[:.\\-]?\\s*(DONE|TODO)`, 'i').exec(verdict)
+      const isDone = m ? m[1].toUpperCase() === 'DONE' : false
+      if (isDone) {
+        await setGapResolved(g.id, true) // s-a făcut deja → scoasă definitiv
+        done++
+      } else {
+        // nu s-a făcut (sau creierul n-a fost sigur) → la constructor, marcată trimis
+        bridgeRepair(
+          `Cerere de la utilizatori (culegerea lui Kelion), triată de admin — construiește/adaugă: ` +
+            `"${g.request}"${g.reason ? ` (motiv: ${g.reason})` : ''}`,
+        )
+        await markGapEscalated(g.id)
+        sent++
+      }
     }
-    return reply.send({ escalated: open.length })
+    return reply.send({ done, sent, checked: open.length })
   })
 
   // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
