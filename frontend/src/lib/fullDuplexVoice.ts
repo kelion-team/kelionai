@@ -104,6 +104,9 @@ export async function startFullDuplex(
   onFinal: (text: string, lang: string | null) => void,
   onError?: (error: string) => void,
   onStatus?: (status: VoiceStatus) => void,
+  // The user's established language — sent with every clip so recognition is
+  // ANCHORED (auto-detect on short utterances mis-guessed Polish/Turkish).
+  getLang?: () => string,
 ): Promise<FullDuplexHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) return null
 
@@ -174,7 +177,7 @@ export async function startFullDuplex(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ audio: item.wav }),
+          body: JSON.stringify({ audio: item.wav, lang: getLang?.() || undefined }),
         })
         if (!res.ok) break // server hiccup — keep it, retry later
         queue.shift()

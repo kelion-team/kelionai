@@ -46,6 +46,59 @@ export async function fetchFinance(): Promise<Finance | null> {
   }
 }
 
+// Market control (admin only): LIVE presence in the four install locations
+// (checked against the real store pages, not dashboards) + the verifiable
+// download log from our own /dl (who: email when signed in, else IP+country).
+export interface StoreRow {
+  key: string
+  name: string
+  store: string
+  url: string
+  listed: boolean
+}
+export interface DownloadRow {
+  file: string
+  user_email: string
+  ip: string
+  country: string
+  created_at: string
+}
+export interface StoresData {
+  stores: StoreRow[]
+  downloads: { counts: { file: string; total: number }[]; recent: DownloadRow[] }
+}
+
+export async function fetchStores(): Promise<StoresData | null> {
+  try {
+    const r = await fetch('/api/admin/stores', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as StoresData
+  } catch {
+    return null
+  }
+}
+
+// The persistent ORDER BOOK: every task sent to execution — what, when, and
+// whether the builder picked it up. Survives every deploy (Postgres).
+export interface WorkOrder {
+  id: string
+  text: string
+  status: string
+  created_at: string
+  delivered_at: string | null
+}
+
+export async function fetchWorkOrders(): Promise<WorkOrder[]> {
+  try {
+    const r = await fetch('/api/admin/workorders', { credentials: 'include' })
+    if (!r.ok) return []
+    const j = (await r.json()) as { orders?: WorkOrder[] }
+    return j.orders ?? []
+  } catch {
+    return []
+  }
+}
+
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.

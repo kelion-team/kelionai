@@ -19,6 +19,10 @@ import {
   type DemoStats,
   type DemoRecent,
   type UserActivity,
+  fetchStores,
+  type StoresData,
+  fetchWorkOrders,
+  type WorkOrder,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -88,7 +92,7 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases'
+    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases' | 'stores'
   >('finance')
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
@@ -101,6 +105,10 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [activity, setActivity] = useState<UserActivity | null>(null)
   const [devLog, setDevLog] = useState<string[]>([])
   const [releases, setReleases] = useState<StagedRelease[]>([])
+  const [stores, setStores] = useState<StoresData | null>(null)
+  const [orders, setOrders] = useState<WorkOrder[]>([])
+  // Gaps already sent to execution this session — shown marked, never hidden.
+  const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
 
   async function decide(id: string, d: 'approve' | 'reject'): Promise<void> {
     await decideRelease(id, d)
@@ -145,11 +153,12 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   async function sendToClaude(id: number): Promise<void> {
     const res = await escalateGap(id)
     if (res.escalated) {
-      setGaps((cur) => cur.filter((g) => g.id !== id))
+      // Adrian's flow: the request STAYS visible, marked as sent — it lands in
+      // the persistent order registry (Jurnal) and HE cleans it here with
+      // "Rezolvat" only after the fix is deployed and he tested it.
+      setEscalatedIds((cur) => new Set(cur).add(id))
     } else {
-      alert(
-        'Nu am putut trimite: puntea către Claude nu rulează acum. Pornește puntea (butonul PORNESTE-PUNTEA sau serverul cloud) și încearcă din nou.',
-      )
+      alert('Nu am putut trimite — încearcă din nou în câteva secunde.')
     }
   }
 
@@ -218,6 +227,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => {
                 setTab('jurnal')
                 void fetchDevLog().then(setDevLog)
+                void fetchWorkOrders().then(setOrders)
               }}
             >
               Jurnal Claude
@@ -234,6 +244,16 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               {releases.filter((r) => r.status === 'pending').length > 0
                 ? ` (${releases.filter((r) => r.status === 'pending').length})`
                 : ''}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('stores')
+                void fetchStores().then(setStores)
+              }}
+            >
+              Magazine
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -346,8 +366,101 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
             </div>
           </section>
         )}
+        {tab === 'stores' && (
+          <section className="admin-finance">
+            {!stores && <p className="chat-hint">Se verifică magazinele live…</p>}
+            {stores && (
+              <>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">
+                    Magazine — verificare LIVE pe paginile publice (nu pe promisiunile
+                    dashboard-urilor), la maxim 5 minute vechime.
+                  </div>
+                  {stores.stores.map((s) => (
+                    <div className="fin-row" key={s.key}>
+                      <span>
+                        {s.name} — {s.store}
+                      </span>
+                      <span>
+                        {s.listed ? (
+                          <a href={s.url} target="_blank" rel="noreferrer" className="store-live">
+                            ● LISTAT — deschide
+                          </a>
+                        ) : (
+                          <span className="store-missing">○ nelistat încă</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">
+                    Descărcări directe de pe site (numărate de serverul nostru — cifre reale).
+                    Instalările DIN magazine sunt doar agregate, prin API-urile lor; niciun magazin
+                    nu dezvăluie identitatea celui care instalează.
+                  </div>
+                  {stores.downloads.counts.length === 0 && (
+                    <div className="chat-hint">
+                      Nicio descărcare înregistrată încă (jurnalul pornește de la acest release).
+                    </div>
+                  )}
+                  {stores.downloads.counts.map((c) => (
+                    <div className="fin-row" key={c.file}>
+                      <span>{c.file}</span>
+                      <span>{c.total} descărcări</span>
+                    </div>
+                  ))}
+                </div>
+                {stores.downloads.recent.length > 0 && (
+                  <div className="fin-breakdown">
+                    <div className="fin-breakdown-head">Cine a descărcat (ultimele 100)</div>
+                    {stores.downloads.recent.map((d, i) => (
+                      <div className="fin-row" key={i}>
+                        <span>
+                          {d.user_email || `${d.ip}${d.country ? ` · ${d.country}` : ''} (nelogat)`}
+                        </span>
+                        <span>
+                          {d.file} ·{' '}
+                          {new Date(d.created_at).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        )}
         {tab === 'jurnal' && (
           <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Ordine de lucru — tot ce s-a trimis la execuție (păstrat permanent, supraviețuiește
+                oricărui restart). Vezi exact CE s-a trimis și dacă constructorul l-a preluat.
+              </div>
+              {orders.length === 0 && (
+                <div className="chat-hint">Niciun ordin înregistrat încă (registrul pornește de la acest release).</div>
+              )}
+              {orders.map((o) => (
+                <div className="fin-row" key={o.id}>
+                  <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
+                  <span>
+                    {o.status === 'pending' ? '⏳ în așteptare' : '✓ preluat'} ·{' '}
+                    {new Date(o.created_at).toLocaleString('ro-RO', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
                 Jurnal Claude — istoricul complet al lucrului (monitorul arată doar lucrul curent)
@@ -649,16 +762,20 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   </span>
                 </div>
                 <div className="admin-gap-actions">
-                  <button
-                    type="button"
-                    className="composer-send"
-                    onClick={() => void sendToClaude(g.id)}
-                    title="Trimite cererea către Claude (dezvoltatorul) ca s-o construiască"
-                  >
-                    Escaladează către Claude
-                  </button>
+                  {escalatedIds.has(g.id) ? (
+                    <span className="gap-sent">✓ Trimisă la execuție — vezi Jurnal; după test, apasă „Rezolvat"</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="composer-send"
+                      onClick={() => void sendToClaude(g.id)}
+                      title="Trimite cererea în registrul de execuție (rămâne aici până o cureți tu, după test)"
+                    >
+                      Escaladează către Claude
+                    </button>
+                  )}
                   <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
-                    Reject
+                    Rezolvat (curăță)
                   </button>
                 </div>
               </div>

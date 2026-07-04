@@ -14,6 +14,7 @@ import {
   refreshGoogleAccessToken,
   reverseGeocodeCached,
   promoSceneUrl,
+  youtubeFirstEmbed,
 } from '../services/google.js'
 import {
   saveMessage,
@@ -47,7 +48,11 @@ import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/rep
 import {
   bridgeOnline,
   bridgeAsk,
+  bridgeAskStream,
   bridgeRepair,
+  noteBrainActivity,
+  getReadyDeploy,
+  triggerDeploy,
   recentDevLog,
   stashAdminFiles,
   type BridgeFile,
@@ -857,20 +862,67 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     const isAdmin = user.role === 'admin'
 
-    // ADMIN BRIDGE + DECISION SYSTEM. The admin writes ANYTHING, no prefixes;
-    // the bridge brain DECIDES per message: (a) answer directly in chat,
-    // (b) [SKILL] → fall through to Kelion's tool brain (maps, browser,
-    // monitor…), (c) [EXECUT] → queue a WORK ORDER for laptop-Claude (the
-    // builder) and confirm "mă ocup". The "kelion" prefix stays as a manual
-    // shortcut straight to the tools. NO silent fallback to the paid brain:
-    // bridge down → Kelion says exactly that and stops.
-    if (isAdmin && !/^kelion\b/i.test(lastUserText.trim())) {
+    // ADMIN BRIDGE. Adrian's ABSOLUTE rule (4 iul): EVERY admin message is
+    // answered by the Linux brain — NO exception, NO "kelion" bypass, NO
+    // fallback to the paid API brain. Bridge down → Kelion says exactly that
+    // and stops. (The old prefix shortcut leaked to the API brain when he
+    // addressed Kelion by name — removed.)
+    if (isAdmin) {
       let a = ''
+      // OK → DEPLOY: if a fix is BUILT and READY, a short affirmative from
+      // Adrian ("ok", "da", "publică", "deploy", "dă-i drumul") publishes it on
+      // the spot — no brain round-trip, no approval tab.
+      const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
+      if (getReadyDeploy() && affirm.test(lastUserText)) {
+        const t = triggerDeploy()
+        const msg = t
+          ? 'Am zis să se publice — serverul dă drumul acum. Îți spun când e live.'
+          : 'Nu mai am nimic pregătit de publicat acum.'
+        reply.raw.write(msg)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', msg)
+        return
+      }
       if (bridgeOnline()) {
-        const convo = messages
-          .slice(-20)
-          .map((m) => `${m.role === 'user' ? 'Adrian' : 'Kelion'}: ${m.content}`)
-          .join('\n')
+        // The conversation comes from the DATABASE, not from the page: the
+        // visible chat can be empty (clean login, refresh, another device) but
+        // the saved history never is — so the bridge brain ALWAYS knows what
+        // was discussed, including "what did I ask 5 minutes ago". The current
+        // turn's text is appended in case it isn't persisted yet.
+        // 15 messages (was 30): half the prompt weight → visibly faster replies.
+        const dbRows = await getRecentHistory(config.adminEmail, 15)
+        const past = dbRows.map(
+          (m) => `${m.role === 'user' ? 'Adrian' : 'Kelion'}: ${m.content.slice(0, 1500)}`,
+        )
+        const lastLine = `Adrian: ${lastUserText}`
+        if (past.length === 0 || !past[past.length - 1].includes(lastUserText.slice(0, 200))) {
+          past.push(lastLine)
+        }
+        const convo = past.join('\n')
+        // ── ONE context packet: everything vital reaches the Linux brain in a
+        // single block — his LIVE GPS (lat/lon + city), his local time, and the
+        // ready-made weather URL. No more guessing, no more Google→CAPTCHA.
+        const bc = req.body?.coords
+        let ctxBlock = ''
+        if (bc && Number.isFinite(bc.lat) && Number.isFinite(bc.lon)) {
+          const place = await reverseGeocode(bc.lat, bc.lon).catch(() => '')
+          const windy = `https://embed.windy.com/embed2.html?lat=${bc.lat.toFixed(4)}&lon=${bc.lon.toFixed(4)}&zoom=9&type=map&location=coordinates&metricTemp=%C2%B0C`
+          ctxBlock +=
+            `LOCUL LUI ADRIAN ACUM (GPS live din aplicație): lat ${bc.lat.toFixed(5)}, lon ${bc.lon.toFixed(5)}` +
+            (place ? ` — aproximativ ${place}` : '') +
+            `. Când zice „aici", „la mine", „vremea afară" fără să numească un loc, ĂSTA e locul.\n` +
+            `PENTRU VREME: pune pe monitor EXACT [SHOW ${windy} | Vremea la tine] — sursă reală, se afișează pe loc. NU căuta NICIODATĂ vremea pe Google (te blochează ca robot).\n`
+        }
+        const nowB = typeof req.body?.now === 'string' ? req.body.now : ''
+        const tzB = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : ''
+        if (nowB && !Number.isNaN(Date.parse(nowB))) {
+          try {
+            ctxBlock += `ORA LOCALĂ A LUI ADRIAN: ${new Date(nowB).toLocaleString('ro-RO', { timeZone: tzB || 'UTC', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}${tzB ? ` (${tzB})` : ''}.\n`
+          } catch {
+            /* fus invalid — sar peste */
+          }
+        }
+        if (ctxBlock) ctxBlock = `CONTEXTUL TĂU LIVE:\n${ctxBlock}\n`
         // Explicit language lock so the bridge answer is ALWAYS in the admin's
         // established language (the bridge bypasses the normal brain's guardian).
         const langLock = langName
@@ -894,12 +946,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
               shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n') +
               '\n\n'
             : ''
-        // THE DECISION SYSTEM: the bridge brain classifies every message.
+        // THE DECISION SYSTEM: the bridge brain is Adrian's ONLY interlocutor
+        // (his explicit order, 4 iul) — there is no hand-off to any other AI.
         const decision =
+          'EȘTI SINGURUL creier al chatului lui Adrian — nu există niciun alt AI pe traseu și nicio predare. Răspunzi TU la orice.\n' +
           'DECIZIE (alege UNA, la fiecare mesaj):\n' +
-          '1. Dacă cererea are nevoie de UNELTELE lui Kelion (hartă/navigație, deschis pagini/browser/YouTube, afișat ceva pe monitor, generat imagini, vreme, cameră, notițe, înregistrare) → răspunde EXACT cu textul [SKILL] și NIMIC altceva.\n' +
-          '2. Dacă cererea e o SARCINĂ DE LUCRU pe aplicație/servere (repară, construiește, adaugă, schimbă, publică, un bug, „nu merge X") → răspunde cu [EXECUT] urmat de o confirmare scurtă în limba lui Adrian (ex: „Mă ocup — am trimis la execuție. Vezi progresul pe monitor.").\n' +
-          '3. Altfel → răspunde normal la conversație.\n\n'
+          '1. Dacă cererea e o SARCINĂ DE LUCRU pe aplicație/servere (repară, construiește, adaugă, schimbă, publică, un bug, „nu merge X") → răspunde cu [EXECUT] urmat de o confirmare scurtă în limba lui Adrian (ex: „Mă ocup — am trimis la execuție.").\n' +
+          '2. Altfel → răspunde direct, cinstit, din ce vezi în cod/istoric.\n\n' +
+          'UNELTELE TALE (le comanzi direct, serverul le execută și taie eticheta din text):\n' +
+          '- Afișezi ceva pe monitorul lui: [SHOW https://adresa | titlu scurt]. Pentru hartă https://embed.waze.com/iframe?zoom=12&lat=LAT&lon=LON, pentru alte site-uri adresa normală (se deschide în browserul live).\n' +
+          '- Pui un clip pe YouTube: [YT ce vrei să pornească] (ex: [YT Coldplay Yellow live]). NU inventa NICIODATĂ un link/ID de YouTube — scrie doar ce vrei, serverul găsește clipul real și îl pornește pe monitor.\n' +
+          '- Generezi o imagine pe monitor: [IMG descriere detaliată în engleză].\n' +
+          '- Salvezi o notiță pentru Adrian: [NOTE textul notiței].\n' +
+          '- Îi arăți notițele salvate: [NOTES] (le citește serverul, cu numărul lor). Ștergi una: [DELNOTE număr] (ex: [DELNOTE 12]).\n' +
+          '- Îi spui cheltuielile reale: [COST] (serverul citește suma exactă din bază).\n' +
+          '- Arăți o HARTĂ pe monitor: [MAP numele locului/adresei] (ex: [MAP Londra] sau [MAP Piața Unirii Cluj]).\n' +
+          '- Cureți ecranul/monitorul: [CLEAR].\n' +
+          'ECHIPA TA de 7 agenți specialiști (rulează pe server, pe abonament). Deleagă un task greu/de domeniu cu [AGENT nume: sarcina completă], apoi spune scurt „întreb <agentul>":\n' +
+          '  • researcher — căutare web, fapte reale, cifre, actualități\n' +
+          '  • scribe — scris, redactare, rezumat, traducere\n' +
+          '  • navigator — locuri, rute, distanțe, trafic\n' +
+          '  • studio — concepte vizuale, logo-uri (imaginea reală o pui tu cu [IMG])\n' +
+          '  • developer — scrie software și îl rulează\n' +
+          '  • tester — testează cod și dă verdict PASS/FAIL\n' +
+          '  • secretary — redactează emailuri/mesaje (accesul la Gmail-ul real cere contul conectat)\n' +
+          'Când Adrian cere ceva din aceste domenii (mai ales căutare/informații actuale, scris serios, cod), FOLOSEȘTE [AGENT …] — nu inventa răspunsul.\n' +
+          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[CLEAR],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
         // ANY attachment rides the bridge to Claude: photos, texts, archives,
         // video (voice arrives already transcribed as text). Base64 payloads —
         // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
@@ -921,34 +993,251 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // screenshots, archives, video) is stashed for laptop-Claude too, so
         // the builder sees exactly what the voice saw.
         if (files.length > 0) stashAdminFiles(files)
-        const answer = await bridgeAsk(
-          decision + sharedBlock + langLock + journalBlock + convo,
+        // ── STREAMING (viteza sunetului): chunks flow straight to the client;
+        // Kelion writes AND speaks from the first sentence (~2s), while the
+        // Linux decision engine may auto-escalate hard questions to Fable.
+        // TOOL TAGS live on the FIRST LINE of the reply (the brain is told so):
+        // once the first newline arrives, tags are executed and the rest of the
+        // stream is released verbatim.
+        const bridgeBase = `https://${req.headers.host ?? 'kelionai.app'}`
+        let streamed = ''
+        let head = ''
+        let headDone = false
+        const pendingTags: Promise<void>[] = []
+        const emit = (t: string): void => {
+          if (!t) return
+          reply.raw.write(t)
+          streamed += t
+        }
+        const runTags = (line: string): string => {
+          if (/\[EXECUT\]/i.test(line)) bridgeRepair(lastUserText)
+          const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
+          const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
+          const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
+          const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
+          if (noteTag) {
+            void saveNote(user.email, noteTag[1].trim())
+            noteBrainActivity(`Am salvat o notiță: ${noteTag[1].trim().slice(0, 80)}`)
+          }
+          if (mapTag) {
+            const place = mapTag[1].trim()
+            noteBrainActivity(`Afișez harta: ${place}`)
+            pendingTags.push(
+              (async () => {
+                let url = config.googleMapsKey
+                  ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
+                  : ''
+                if (!url) {
+                  // No Maps key: geocode the place name → coords (free Nominatim),
+                  // then show a Waze live map (embeddable, no key needed).
+                  try {
+                    const g = await fetch(
+                      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
+                      { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
+                    )
+                    const arr = (await g.json()) as { lat?: string; lon?: string }[]
+                    const lat = arr[0]?.lat
+                    const lon = arr[0]?.lon
+                    url = lat && lon
+                      ? `https://embed.waze.com/iframe?zoom=12&lat=${lat}&lon=${lon}`
+                      : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+                  } catch {
+                    url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+                  }
+                }
+                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
+              })().catch(() => {}),
+            )
+          }
+          // [YT query] — the brain never guesses a video ID (it hallucinates and
+          // the embed fails). It names what to play; the server resolves a REAL,
+          // currently-available video (Serper → Gemini) and shows the embed.
+          const ytTag = /\[YT\s+([^\]]+)\]/i.exec(line)
+          if (ytTag) {
+            const q = ytTag[1].trim()
+            noteBrainActivity(`Caut pe YouTube: ${q}`)
+            pendingTags.push(
+              (async () => {
+                const v = await youtubeFirstEmbed(q)
+                if (v) {
+                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`)
+                } else {
+                  emit(`\nN-am găsit un clip care să pornească pentru „${q}".`)
+                }
+              })().catch(() => {}),
+            )
+          }
+          // [COST] — real spend, read from the cost_events table (not invented).
+          if (/\[COST\]/i.test(line)) {
+            noteBrainActivity('Adun cheltuielile')
+            pendingTags.push(
+              (async () => {
+                const c = await getCostSummary()
+                const kinds = Object.entries(c.byKind)
+                  .map(([k, v]) => `${k} $${v.toFixed(2)}`)
+                  .join(', ')
+                emit(
+                  `\nCheltuieli: total $${c.total.toFixed(2)}, azi $${c.today.toFixed(2)}${kinds ? ` (${kinds})` : ''}.`,
+                )
+              })().catch(() => {}),
+            )
+          }
+          // [NOTES] — read back the saved notes (real rows, with their ids so he
+          // can delete by number).
+          if (/\[NOTES\]/i.test(line)) {
+            noteBrainActivity('Îți citesc notițele')
+            pendingTags.push(
+              (async () => {
+                const notes = await listNotes(user.email, 20)
+                if (notes.length === 0) {
+                  emit('\nNu ai nicio notiță salvată.')
+                  return
+                }
+                const list = notes
+                  .map((n) => `#${n.id} ${n.title ? n.title + ': ' : ''}${n.content.slice(0, 90)}`)
+                  .join('\n')
+                emit(`\nNotițele tale:\n${list}`)
+              })().catch(() => {}),
+            )
+          }
+          // [DELNOTE id] — delete one of his own notes by id.
+          const delTag = /\[DELNOTE\s+(\d+)\]/i.exec(line)
+          if (delTag) {
+            const id = Number(delTag[1])
+            noteBrainActivity(`Șterg notița #${id}`)
+            pendingTags.push(
+              (async () => {
+                const ok = await deleteNote(user.email, id)
+                emit(ok ? `\nAm șters notița #${id}.` : `\nN-am găsit notița #${id} la tine.`)
+              })().catch(() => {}),
+            )
+          }
+          if (/\[CLEAR\]/i.test(line)) {
+            reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
+            noteBrainActivity('Am curățat monitorul')
+          }
+          if (showTag) {
+            const url = showTag[1]
+            const title = (showTag[2] ?? '').trim()
+            noteBrainActivity(`Afișez pe monitor: ${title || url}`)
+            pendingTags.push(
+              (async () => {
+                if (iframeSafe(url)) {
+                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
+                  return
+                }
+                const live = await browserOpen(user.email, bridgeBase, url)
+                if ('error' in live) {
+                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
+                } else {
+                  browserToolResult(reply, live)
+                }
+              })().catch(() => {}),
+            )
+          }
+          if (imgTag) {
+            noteBrainActivity(`Generez o imagine: ${imgTag[1].trim().slice(0, 70)}`)
+            pendingTags.push(
+              (async () => {
+                const result = await generateImage(imgTag[1].trim())
+                if (!('error' in result)) {
+                  const url = `${bridgeBase}/api/image/${result.id}`
+                  reply.raw.write(
+                    `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
+                  )
+                }
+              })().catch(() => {}),
+            )
+          }
+          return line
+            .replace(/\[EXECUT\]/gi, '')
+            .replace(/\[SKILL\]/gi, '')
+            .replace(/\[SHOW[^\]]*\]/gi, '')
+            .replace(/\[IMG[^\]]*\]/gi, '')
+            .replace(/\[NOTE[^\]]*\]/gi, '')
+            .replace(/\[MAP[^\]]*\]/gi, '')
+            .replace(/\[YT[^\]]*\]/gi, '')
+            .replace(/\[COST\]/gi, '')
+            .replace(/\[NOTES\]/gi, '')
+            .replace(/\[DELNOTE[^\]]*\]/gi, '')
+            .replace(/\[CLEAR\]/gi, '')
+            .replace(/\[AGENT[^\]]*\]/gi, '') // agent tag: executed on Linux (subscription)
+            .replace(/[ \t]{2,}/g, ' ')
+            .trim()
+        }
+        const deliver = (text: string): void => {
+          headDone = true
+          const nl = text.indexOf('\n')
+          const first = nl === -1 ? text : text.slice(0, nl)
+          const rest = nl === -1 ? '' : text.slice(nl + 1).trim()
+          const spoken = runTags(first)
+          emit(spoken && rest ? `${spoken}\n${rest}` : spoken || rest)
+        }
+        const releaseHead = (force: boolean): void => {
+          if (headDone) return
+          const s = head.trimStart()
+          // Tool tags ALWAYS start with '[' on the first line. If the reply
+          // doesn't start with '[', there are NO tags → stream from the very
+          // first character (the common case, ~2s to first word). Only a
+          // tag-carrying reply waits for the first newline (line 1 = tags).
+          if (s && !s.startsWith('[')) {
+            deliver(head)
+            head = ''
+            return
+          }
+          const nl = head.indexOf('\n')
+          if (nl !== -1 || head.length > 400 || force) {
+            deliver(head)
+            head = ''
+          }
+        }
+        // Monitor shows the brain is on it the instant Adrian sends (his rule:
+        // never the raw message text — just that the brain is answering).
+        noteBrainActivity('Creierul de pe Linux răspunde la mesajul tău…')
+        const answer = await bridgeAskStream(
+          decision + ctxBlock + sharedBlock + langLock + journalBlock + convo,
           files,
+          (chunk: string) => {
+            if (headDone) emit(chunk)
+            else {
+              head += chunk
+              releaseHead(false)
+            }
+          },
+          240_000,
         )
-        if (answer && answer.trim()) a = answer.trim()
+        // Finalisation: a non-streaming worker (or a short reply that never hit
+        // a newline) lands here with everything still buffered.
+        if (!headDone) {
+          const whole = (answer && answer.trim()) || head
+          if (whole.trim()) deliver(whole)
+        }
+        // Drain side-effect tags FIRST — [COST]/[NOTES]/[DELNOTE]/[YT] emit their
+        // real (spoken) result here, so capture `a` AFTER they've run or the
+        // saved reply would miss the numbers/list.
+        await Promise.all(pendingTags)
+        a = streamed.trim()
+        if (!a && /\[EXECUT\]/i.test(answer ?? '')) {
+          a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
+          emit(a)
+        }
       }
-      // Interpret the brain's verdict. [SKILL] → do NOT return: execution
-      // falls through to Kelion's tool-capable brain below, same turn.
-      if (!/^\[SKILL\]/i.test(a)) {
-        if (/^\[EXECUT\]/i.test(a)) {
-          // A build/fix task → work order for laptop-Claude, confirm in chat.
-          bridgeRepair(lastUserText)
-          a = a.replace(/^\[EXECUT\]\s*/i, '').trim()
-          if (!a) a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
-        }
-        if (!a) {
-          a =
-            !langName || /rom/i.test(langName)
-              ? 'Puntea către Claude e căzută — nu vorbesc în numele lui. Becul Bridge e stins; paznicul o repornește în cel mult un minut.'
-              : 'The bridge to Claude is down — I will not speak on his behalf. The Bridge light is off; the watchdog restarts it within a minute.'
-        }
-        // The reply shows written in the chat AND is spoken — no separate
-        // "Claude" monitor panel (that duplicated the orange "Claude" indicator).
+      if (!a) {
+        // HONEST failure wording: a slow answer is NOT a fallen bridge. If the
+        // worker is polling (light on) the reply simply timed out — say that.
+        const ro = !langName || /rom/i.test(langName)
+        a = bridgeOnline()
+          ? ro
+            ? 'Mi-a luat prea mult la mesajul ăsta și am pierdut rândul — puntea E în picioare (becul e aprins). Spune-mi încă o dată, scurt.'
+            : 'This one took me too long and the turn timed out — the bridge IS up (light on). Tell me once more, briefly.'
+          : ro
+            ? 'Puntea către Claude e căzută — nu vorbesc în numele lui. Becul Bridge e stins; se repornește singură în câteva secunde.'
+            : 'The bridge to Claude is down — I will not speak on his behalf. The Bridge light is off; it restarts itself within seconds.'
         reply.raw.write(a)
-        reply.raw.end()
-        void saveMessage(user.email, 'assistant', a)
-        return
       }
+      reply.raw.end()
+      void saveMessage(user.email, 'assistant', a)
+      return
     }
 
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL]
@@ -1405,6 +1694,8 @@ function iframeSafe(raw: string): boolean {
   if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be') return true
   if (host === 'embed.waze.com') return true
   if (host === 'openstreetmap.org') return true
+  if (host === 'embed.windy.com' || host === 'windy.com') return true
+  if (host === 'wttr.in') return true
   if ((host === 'google.com' || host.endsWith('.google.com')) && u.pathname.startsWith('/maps/embed'))
     return true
   return false

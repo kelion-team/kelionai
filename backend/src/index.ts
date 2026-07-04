@@ -24,7 +24,16 @@ import { browserRoutes } from './routes/browser.js'
 import { bridgeRoutes } from './routes/bridge.js'
 import { contactRoutes } from './routes/contact.js'
 import { greetRoutes } from './routes/greet.js'
-import { initDb } from './db.js'
+import { initDb, recordDownload, initAppFiles, getAppFile } from './db.js'
+import { getSessionUser } from './session.js'
+
+// Content types for the download endpoint (installers + QR images + manifest).
+const DL_TYPES: Record<string, string> = {
+  exe: 'application/octet-stream',
+  apk: 'application/vnd.android.package-archive',
+  png: 'image/png',
+  json: 'application/json',
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -103,6 +112,38 @@ app.addHook('onRequest', async (_req, reply) => {
   reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)')
 })
 
+// Installers and the self-update manifest must ALWAYS be the latest version —
+// the QR codes and the in-app updater depend on it. fastify-static's setHeaders
+// proved unreliable here (the default `public, max-age=0` leaked through and
+// Cloudflare edge-cached the .exe/.apk for 4 hours). onSend runs LAST on every
+// reply, so nothing can override it; `no-store` makes Cloudflare bypass its
+// cache entirely for /dl/*.
+// Same hook LOGS every real installer download (the admin's "who downloaded"
+// view): email when signed in, else IP + country. Full GETs only — Range
+// resumes and HEAD probes don't double-count.
+app.addHook('onSend', async (req, reply) => {
+  const u = (req.raw.url ?? '').split('?')[0]
+  if (!u.startsWith('/dl/')) return
+  reply.header('Cache-Control', 'no-store')
+  if (
+    reply.statusCode === 200 &&
+    req.method === 'GET' &&
+    !req.headers.range &&
+    (u.endsWith('.exe') || u.endsWith('.apk'))
+  ) {
+    const hdr = (n: string): string =>
+      ((req.headers[n] as string | undefined) ?? '').split(',')[0]?.trim() ?? ''
+    const email = getSessionUser(req)?.email ?? ''
+    void recordDownload(
+      u.slice('/dl/'.length),
+      email,
+      hdr('cf-connecting-ip') || req.ip || '',
+      hdr('cf-ipcountry'),
+      (req.headers['user-agent'] as string | undefined) ?? '',
+    ).catch(() => {})
+  }
+})
+
 // Health — must return exactly 200 (200-only rule + Railway healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
 
@@ -124,28 +165,44 @@ await app.register(bridgeRoutes)
 await app.register(contactRoutes)
 await app.register(greetRoutes)
 
+// Where the built frontend + baked-in download defaults live.
+const distPath = path.resolve(__dirname, '..', config.frontendDist)
+
 // Create tables if a database is configured (non-fatal if it isn't / is down).
 try {
   await initDb()
+  await initAppFiles() // load installer masters (uploaded from Linux) into cache
 } catch (err) {
   app.log.error({ err }, 'initDb failed — chat persistence disabled')
 }
 
+// Download endpoint: the installer MASTER lives on the Linux server and is
+// pushed into app_files, so this serves the LATEST bytes with NO app redeploy.
+// DB first (fresh, from the server) → disk fallback (baked-in defaults). The
+// onSend hook adds no-store + logs the download; a single flat segment only.
+app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
+  const file = req.params.file
+  if (file.includes('/') || file.includes('..')) return reply.code(404).send({ error: 'not_found' })
+  const ext = file.split('.').pop()?.toLowerCase() ?? ''
+  const type = DL_TYPES[ext] ?? 'application/octet-stream'
+  const db = getAppFile(file)
+  if (db) {
+    reply.header('Content-Type', db.type || type)
+    return reply.send(db.buf)
+  }
+  const onDisk = path.resolve(distPath, 'downloads', file)
+  if (onDisk.startsWith(path.resolve(distPath, 'downloads')) && fs.existsSync(onDisk)) {
+    reply.header('Content-Type', type)
+    return reply.send(fs.createReadStream(onDisk))
+  }
+  return reply.code(404).send({ error: 'not_found' })
+})
+
 // In production, serve the built frontend (SPA) from FRONTEND_DIST.
-const distPath = path.resolve(__dirname, '..', config.frontendDist)
 if (config.isProd && fs.existsSync(distPath)) {
   await app.register(fastifyStatic, { root: distPath, prefix: '/' })
-  // App downloads live at /dl/* with NO-STORE: installers and the self-update
-  // manifest must always be the LATEST version — never a CDN-cached one (the
-  // /downloads path got frozen by Cloudflare's edge cache; /dl replaces it).
-  await app.register(fastifyStatic, {
-    root: path.join(distPath, 'downloads'),
-    prefix: '/dl/',
-    decorateReply: false,
-    setHeaders: (res) => {
-      res.setHeader('Cache-Control', 'no-store')
-    },
-  })
+  // NOTE: /dl/* is handled by the explicit route above (DB master → disk
+  // fallback, no-store), NOT by static — so the QR always serves latest.
   // SPA fallback — any non-API route returns index.html
   app.setNotFoundHandler((req, reply) => {
     const url = req.raw.url ?? ''

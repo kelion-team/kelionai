@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { recordCost } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
+import { normalizeLang } from '../services/tts.js'
 
 // Audio language identification + transcription via Google Cloud Speech-to-Text
 // v2 (chirp_2, automatic language detection). This is what lets Kelion detect
@@ -30,7 +31,7 @@ function getAuth(): GoogleAuth | null {
 const REGION = 'us-central1'
 
 export async function asrRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { audio?: string } }>('/api/asr', async (req, reply) => {
+  app.post<{ Body: { audio?: string; lang?: string } }>('/api/asr', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
@@ -39,6 +40,12 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
 
     const audio = req.body?.audio?.trim()
     if (!audio) return reply.code(400).send({ error: 'bad_request' })
+    // Optional language anchor from the client (the user's established chat
+    // language) — a bare 'll' or 'll-RR' tag; anything malformed is ignored.
+    const rawLang = (req.body?.lang ?? '').trim()
+    const langHint = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(rawLang)
+      ? normalizeLang(rawLang)
+      : ''
 
     try {
       const token = await a.getAccessToken()
@@ -48,7 +55,20 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          config: { model: 'chirp_2', languageCodes: ['auto'], autoDecodingConfig: {} },
+          config: {
+            model: 'chirp_2',
+            // ANCHORED language when the user has one established — 'auto' on
+            // short utterances kept mis-guessing (Romanian speech transcribed
+            // as Polish/Turkish). With a known language we pin it; visitors
+            // without one keep full auto-detection.
+            languageCodes: langHint ? [langHint] : ['auto'],
+            autoDecodingConfig: {},
+            // Adrian's rule: Google's voice improvements apply AUTOMATICALLY.
+            // chirp_2 is Google's flagship (they upgrade it server-side); the
+            // features below make it punctuate for real — question marks,
+            // commas, capitals — instead of a flat word stream.
+            features: { enableAutomaticPunctuation: true },
+          },
           content: audio,
         }),
       })

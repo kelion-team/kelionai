@@ -1,6 +1,8 @@
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  /** Când a fost trimis (epoch ms) — afișat ca oră lângă fiecare mesaj. */
+  ts?: number
 }
 
 export interface Coords {

@@ -67,6 +67,17 @@ export default function Stage({ user }: { user: User }) {
   const [claudeBridge, setClaudeBridge] = useState(false)
   const [serverUp, setServerUp] = useState(true)
   const [claudeActivity, setClaudeActivity] = useState<string[]>([])
+  // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
+  const [srvLoad, setSrvLoad] = useState('')
+  // Real numeric telemetry (0–100) → the LIVE bar graphs on the monitor. `live`
+  // is false when the paznic feed is stale, so a frozen bar never fakes motion.
+  const [metrics, setMetrics] = useState<{
+    cpu: number
+    mem: number
+    disk: number
+    bridge: number
+    live: boolean
+  } | null>(null)
   // The live-work console is NOT permanent on the owner's monitor — the AIs
   // see the journal server-side regardless. He opens it only when he wants:
   // one click on the "● Bridge" light shows/hides it.
@@ -188,13 +199,34 @@ export default function Stage({ user }: { user: User }) {
           if (!r.ok) throw new Error('server')
           return r.json()
         })
-        .then((j: { active?: boolean; bridge?: boolean; activity?: string[] } | null) => {
-          if (!j) return // 429 — state unchanged
-          setServerUp(true)
-          setClaudeActive(!!j.active)
-          setClaudeBridge(!!j.bridge)
-          setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
-        })
+        .then(
+          (j: {
+            active?: boolean
+            bridge?: boolean
+            activity?: string[]
+            srv?: string
+            metrics?: { cpu?: number; mem?: number; disk?: number; bridge?: number; live?: boolean }
+          } | null) => {
+            if (!j) return // 429 — state unchanged
+            setServerUp(true)
+            setClaudeActive(!!j.active)
+            setClaudeBridge(!!j.bridge)
+            setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
+            setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
+            const mm = j.metrics
+            setMetrics(
+              mm
+                ? {
+                    cpu: Number(mm.cpu ?? 0),
+                    mem: Number(mm.mem ?? 0),
+                    disk: Number(mm.disk ?? 0),
+                    bridge: Number(mm.bridge ?? 0),
+                    live: !!mm.live,
+                  }
+                : null,
+            )
+          },
+        )
         .catch(() => {
           // A real failure (network / 5xx) → the SERVER light goes off (and with
           // it the bridge). Transient 429s are handled above and never reach here.
@@ -204,7 +236,9 @@ export default function Stage({ user }: { user: User }) {
         })
     }
     check()
-    const id = window.setInterval(check, 4_000)
+    // 2s cadence: the paznic posts real numbers every ~2s, so the bars move
+    // smoothly and live (CSS eases each change over the gap).
+    const id = window.setInterval(check, 2_000)
     return () => window.clearInterval(id)
   }, [user.role])
 
@@ -230,27 +264,18 @@ export default function Stage({ user }: { user: User }) {
     return () => window.clearInterval(id)
   }, [])
 
-  // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it fires
-  // the activation command by itself — no manual switch. Two legal channels,
-  // both automatic: (1) a server flag the laptop wake-agent polls; (2) the
-  // kelionai:// protocol (like Zoom's "open in app") so a browser tab launches
-  // the local builder after a one-time "always allow". Re-armed every 90s while
-  // the admin stays, so the builder wakes even if it was closed meanwhile.
+  // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it sets
+  // the server wake flag the laptop wake-agent polls. The old second channel —
+  // a hidden iframe firing kelionai:// every 90s — was THE source of the
+  // visible cmd flashes (Chrome launched the .cmd launcher with a console
+  // window at exactly 90s intervals; trapped and proven 4 iul). The builder now
+  // pulls its own work orders, so the protocol launch is gone for good.
   useEffect(() => {
     if (user.role !== 'admin') return
     const wake = (): void => {
       void fetch('/api/bridge/request-wake', { method: 'POST', credentials: 'include' }).catch(
         () => {},
       )
-      try {
-        const f = document.createElement('iframe')
-        f.style.display = 'none'
-        f.src = 'kelionai://wake'
-        document.body.appendChild(f)
-        window.setTimeout(() => f.remove(), 1500)
-      } catch {
-        /* protocol not registered yet — the server flag still wakes it */
-      }
     }
     wake()
     const id = window.setInterval(wake, 90_000)
@@ -303,28 +328,71 @@ export default function Stage({ user }: { user: User }) {
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
         {!ws.open && live && (
           <div className="workspace-inner claude-console">
-            <div className="claude-console-head">● Claude — lucru în direct</div>
-            <div className="claude-rows">
-              {live.tasks.length === 0 && (
-                <div className="claude-status-line">Pornesc lucrul…</div>
-              )}
-              {live.tasks.map((it) => (
-                <div key={it.key} className={`claude-row ${it.pct >= 100 ? 'done' : ''}`}>
-                  <span className="claude-row-text">{it.text}</span>
-                  <span className="claude-row-bar">
-                    <span className="claude-row-fill" style={{ width: `${it.pct}%` }} />
-                  </span>
-                  <span className="claude-row-pct">{it.pct >= 100 ? '✓ 100%' : `${it.pct}%`}</span>
+            <div className="claude-console-head">
+              ● Creierul Linux — execuție în direct
+              <span className={`live-dot ${metrics?.live ? 'on' : ''}`}>
+                {metrics?.live ? 'LIVE' : 'fără semnal'}
+              </span>
+            </div>
+            {/* BARE LIVE 0–100% — CPU/RAM/disc/punte măsurate REAL pe VPS
+                (paznicul postează la 2s); fiecare bară se animează fluid la
+                fiecare valoare nouă. NU se inventează nimic pe client. */}
+            <div className="live-gauges">
+              {(
+                [
+                  ['CPU', metrics?.cpu ?? 0, 'g-cpu'],
+                  ['RAM', metrics?.mem ?? 0, 'g-mem'],
+                  ['Disc', metrics?.disk ?? 0, 'g-disk'],
+                  ['Punte', metrics?.bridge ?? 0, 'g-bridge'],
+                ] as const
+              ).map(([label, val, cls]) => (
+                <div className="gauge" key={label}>
+                  <div className="gauge-top">
+                    <span className="gauge-label">{label}</span>
+                    <span className="gauge-val">{Math.round(val)}%</span>
+                  </div>
+                  <div className="gauge-track">
+                    <div
+                      className={`gauge-fill ${cls} ${val >= 90 ? 'hot' : ''}`}
+                      style={{ width: `${Math.max(0, Math.min(100, val))}%` }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
-            {live.status.length > 0 && (
-              <div className="claude-status">
-                {live.status.map((s) => (
-                  <div key={s} className="claude-status-line">
-                    {s}
+            {/* JURNAL LIVE: fiecare pas al creierului, în ordine, nu o singură
+                linie. Progres cu bară pentru pașii cu procent; restul ca log. */}
+            <div className="claude-rows">
+              {claudeActivity.length === 0 && (
+                <div className="claude-status-line">În așteptare…</div>
+              )}
+              {claudeActivity.slice(-14).map((raw, i) => {
+                const m = /^(?:\[\d{1,2}:\d{2}\]\s*)?\[(\d{1,3})%\]\s*(.*)$/.exec(raw)
+                if (m) {
+                  const pct = Math.min(100, Number(m[1]))
+                  return (
+                    <div key={i} className={`claude-row ${pct >= 100 ? 'done' : ''}`}>
+                      <span className="claude-row-text">{m[2]}</span>
+                      <span className="claude-row-bar">
+                        <span className="claude-row-fill" style={{ width: `${pct}%` }} />
+                      </span>
+                      <span className="claude-row-pct">{pct >= 100 ? '✓' : `${pct}%`}</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={i} className="claude-log-line">
+                    {raw}
                   </div>
-                ))}
+                )
+              })}
+            </div>
+            {/* Bottom-left: the REAL Linux server load in percentages (posted
+                by the VPS paznic every minute) — replaces the old status line
+                that duplicated the top-bar work ticker. */}
+            {srvLoad && (
+              <div className="claude-status">
+                <div className="claude-status-line srv-load">Serv. Linux — {srvLoad}</div>
               </div>
             )}
           </div>
@@ -441,6 +509,20 @@ export default function Stage({ user }: { user: User }) {
           <img src="/kelion-logo.png" className="brand-logo" alt="" />
           Kelionai
         </span>
+        {/* Adrian's ALWAYS-ON status (admin, top-left): shows what's being worked
+            on when there's live work, else the real Linux server load — so the
+            server status + current task never vanish (they used to hide when the
+            work console closed). */}
+        {user.role === 'admin' && (
+          <span
+            className={`work-ticker ${claudeActivity.length > 0 ? 'busy' : ''}`}
+            title={claudeActivity.length > 0 ? claudeActivity.join('\n') : `Serverul Linux — ${srvLoad || 'se conectează…'}`}
+          >
+            {claudeActivity.length > 0
+              ? claudeActivity[claudeActivity.length - 1]
+              : `🟢 Linux ${srvLoad || '…'} · liniște`}
+          </span>
+        )}
         {user.role === 'customer' && <WalletButton />}
         {user.role === 'demo' && !demoOver && (
           <span className="trial-pill">
@@ -448,24 +530,8 @@ export default function Stage({ user }: { user: User }) {
           </span>
         )}
         <div className="who">
-          {/* Signed-in users can grab the native apps right from the interface;
-              both are thin shells around this same app, always up to date. */}
-          {user.role !== 'demo' && (
-            <span className="app-dl">
-              <a href="/dl/Kelionai-Setup.exe" download title={t.downloadWin}>
-                ⊞
-              </a>
-              <a href="/dl/Kelionai.apk" download title={t.downloadAndroid}>
-                🤖
-              </a>
-              <a
-                href="https://kelionai.app"
-                title="iOS — add to Home Screen (Safari: Share → Add to Home Screen)"
-              >
-
-              </a>
-            </span>
-          )}
+          {/* App downloads live ONLY on the landing page now — four QR codes,
+              click-to-enlarge. The topbar stays clean for signed-in users. */}
           {user.picture && <img src={user.picture} alt="" className="avatar-pic" />}
           <span>{user.name}</span>
           {user.role === 'admin' && <span className="badge">admin</span>}
@@ -499,6 +565,18 @@ export default function Stage({ user }: { user: User }) {
               }
             >
               ● Server
+            </span>
+          )}
+          {user.role === 'admin' && (
+            <span
+              className={`claude-ind ${srvLoad ? 'on' : ''}`}
+              title={
+                srvLoad
+                  ? `Serverul Linux e viu — ${srvLoad}`
+                  : 'SERVERUL LINUX nu raportează — verifică paznicul pe VPS'
+              }
+            >
+              ● Linux
             </span>
           )}
           {user.role === 'admin' && (

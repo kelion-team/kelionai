@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
@@ -34,6 +35,7 @@ import {
   closeAllTasks,
   switchToKind,
   getWorkspace,
+  subscribeWorkspace,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 
@@ -285,7 +287,7 @@ export default function ChatPanel({
 
   // Short spoken + on-screen acknowledgement for a local command (camera, etc.).
   function ack(text: string): void {
-    setMessages((cur) => [...cur, { role: 'assistant', content: text }])
+    setMessages((cur) => [...cur, { role: 'assistant', content: text, ts: Date.now() }])
     if (voiceOutRef.current) enqueueSpeech(text, speechLangRef.current)
   }
 
@@ -786,8 +788,8 @@ export default function ChatPanel({
           .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url }))
       : undefined
 
-    const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing }]
-    setMessages([...next, { role: 'assistant', content: '' }])
+    const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
+    setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
     setChatImage(null) // a new turn clears any previously shown image
     setBusy(true)
     try {
@@ -806,7 +808,7 @@ export default function ChatPanel({
         bridgeFiles,
       )) {
         acc += chunk
-        setMessages([...next, { role: 'assistant', content: acc }])
+        setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
         if (speak) {
           const end = lastSentenceEnd(acc)
           if (end > spoken) {
@@ -832,7 +834,7 @@ export default function ChatPanel({
           : code === 'offline'
             ? spoken.offline
             : t.brainError
-      setMessages([...next, { role: 'assistant', content: `⚠️ ${m}` }])
+      setMessages([...next, { role: 'assistant', content: `⚠️ ${m}`, ts: Date.now() }])
       // Lost signal (e.g. a tunnel while driving): SAY it so the driver hears it
       // without looking, and remember so we can announce when we're back online.
       if (code === 'offline') {
@@ -970,6 +972,9 @@ export default function ChatPanel({
         if (error === 'not-allowed') setMicError(t.micBlocked)
       },
       (status) => setVoiceStatus(status),
+      // Anchor recognition on the user's established language — no more
+      // auto-detect guessing Polish/Turkish on short Romanian utterances.
+      () => speechLangRef.current,
     )
     if (fd) {
       fdRef.current = fd
@@ -1237,6 +1242,9 @@ export default function ChatPanel({
     setCameraOn(false)
   }
 
+  // When the MONITOR shows content, the centre chat bubbles would cover it —
+  // so Kelion's words move to a slim black bar just above the composer instead.
+  const wsOpen = useSyncExternalStore(subscribeWorkspace, getWorkspace).open
   // Show the CURRENT exchange in writing: the user's request (so he sees it
   // arrived correctly the instant he speaks/types) AND Kelion's reply, which
   // updates live as Kelion speaks — not audio-only, not just one sentence.
@@ -1252,20 +1260,24 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      <div className="chat-log">
-        {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-        {lastUser && lastUser.content && (
-          <div className="bubble user">{lastUser.content.slice(0, 600)}</div>
-        )}
-        {(lastAssistant || busy) && (
-          <div className="bubble assistant">
-            {lastAssistant?.content ? lastAssistant.content : busy ? '…' : ''}
-          </div>
-        )}
-        {chatImage && (
-          <img className="chat-image" src={chatImage} alt="Kelion generated" />
-        )}
-      </div>
+      {/* Centre bubbles — HIDDEN while the monitor shows content, so they never
+          cover it (Kelion's words go to the black bar above the composer). */}
+      {!wsOpen && (
+        <div className="chat-log">
+          {messages.length === 0 && <p className="chat-hint">{hint}</p>}
+          {lastUser && lastUser.content && (
+            <div className="bubble user">{lastUser.content.slice(0, 600)}{lastUser.ts && <span className="bubble-time">{new Date(lastUser.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span>}</div>
+          )}
+          {(lastAssistant || busy) && (
+            <div className="bubble assistant">
+              {lastAssistant?.content ? lastAssistant.content : busy ? '…' : ''}{lastAssistant?.ts && lastAssistant.content ? <span className="bubble-time">{new Date(lastAssistant.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span> : null}
+            </div>
+          )}
+          {chatImage && (
+            <img className="chat-image" src={chatImage} alt="Kelion generated" />
+          )}
+        </div>
+      )}
       <MicMeter active={listening} label={t.hearingLabel} />
       {voiceStatus !== 'online' && (
         <p className="voice-recording">
@@ -1305,6 +1317,13 @@ export default function ChatPanel({
         <button type="button" className="scenario-stop" onClick={stopScenario}>
           ■ {t.scenarioStop}
         </button>
+      )}
+      {/* Monitor mode: Kelion's words in a slim black bar ABOVE the composer,
+          so nothing covers what's on the monitor. */}
+      {wsOpen && (lastAssistant?.content || busy) && (
+        <div className="monitor-speech">
+          {lastAssistant?.content ? lastAssistant.content : '…'}
+        </div>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>
         {attachments.length > 0 && (
