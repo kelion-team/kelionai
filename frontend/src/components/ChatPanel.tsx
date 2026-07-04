@@ -151,6 +151,16 @@ export default function ChatPanel({
       setDelivered(true)
       return
     }
+    // VOCEA CREIERULUI: MP3 gata sintetizat pe server (Chirp 3) — DOAR îl redăm.
+    // Cât vorbește, microfonul e mut (anti-ecou); revine singur la final.
+    if (c.audio) {
+      playVoice(
+        c.audio,
+        () => micRef.current?.setMuted(true),
+        () => micRef.current?.setMuted(false),
+      )
+      return
+    }
     // A SERVER-interpreted device command (the camera/monitor regexes moved off
     // the browser): just execute it. Any spoken ack arrives as normal text.
     if (c.device) {
@@ -642,6 +652,35 @@ export default function ChatPanel({
   }
   const sendRef = useRef(send)
   sendRef.current = send
+
+  // Microfonul: pornește captarea (full-duplex, filtru zgomot, VOX, buffer mare).
+  // Ce transcrie serverul (STT) e trimis ca mesaj către creier. NU produce voce.
+  async function toggleMic(): Promise<void> {
+    if (micRef.current) {
+      micRef.current.stop()
+      micRef.current = null
+      setListening(false)
+      return
+    }
+    const h = await startMic(
+      (text) => void sendRef.current(text),
+      () => setListening(false),
+      () => speechLangRef.current,
+    )
+    if (h) {
+      micRef.current = h
+      setListening(true)
+    }
+  }
+  // Curăță microfonul + orice redare la demontare.
+  useEffect(
+    () => () => {
+      micRef.current?.stop()
+      micRef.current = null
+      stopVoice()
+    },
+    [],
+  )
 
   // Apply a language the SERVER decided (it already persisted the pref) —
   // update the recognizer + the local mirror. No-op if already active.
