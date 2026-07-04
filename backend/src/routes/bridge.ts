@@ -221,7 +221,38 @@ export function stageRelease(title: string, detail: string): string {
   return id
 }
 
+// ── CANAL PERMANENT FULL-DUPLEX (ordinul lui Adrian, 4 iul) ────────────────
+// Workerul ține MINIM 5 canale WebSocket permanent deschise. Un job e ÎMPINS pe
+// un canal liber ÎN CLIPA în care apare (zero drum de long-poll); bucățile de
+// text, pulsul de viață și răspunsul final curg înapoi pe ACELAȘI canal.
+// Long-poll-ul HTTP rămâne DOAR plasă de siguranță când niciun canal nu e sus.
+interface WsLane {
+  socket: { send(data: string): void; close(code?: number, reason?: string): void }
+  busy: string | null // id-ul jobului aflat pe canal (null = liber)
+}
+const wsLanes = new Set<WsLane>()
+function freeLane(): WsLane | null {
+  for (const l of wsLanes) if (!l.busy) return l
+  return null
+}
+export function wsLaneCount(): number {
+  return wsLanes.size
+}
+
 function dispatch(job: PendingJob): void {
+  // 1) canal permanent liber → jobul pleacă INSTANT, full-duplex
+  const lane = freeLane()
+  if (lane) {
+    lane.busy = job.id
+    markServed(job)
+    try {
+      lane.socket.send(JSON.stringify({ type: 'job', job }))
+      return
+    } catch {
+      lane.busy = null // canal mort — cade pe căile clasice
+    }
+  }
+  // 2) plasa de siguranță: long-poll-ul HTTP / coada persistentă
   const w = pullWaiters.shift()
   if (w) w(job)
   else queue.push(job)
@@ -235,6 +266,8 @@ function dispatch(job: PendingJob): void {
 let lastJobDispatched = 0
 export function bridgeOnline(): boolean {
   if (config.bridgeSecret === '') return false
+  // Canale permanente deschise = puntea e sus, fără îndoială.
+  if (wsLanes.size > 0) return true
   if (Date.now() - lastWorkerSeen < 75_000) return true
   return waiters.size > 0 && Date.now() - lastJobDispatched < 300_000
 }
@@ -414,6 +447,74 @@ function authed(req: FastifyRequest): boolean {
 }
 
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
+  // ── CANALUL PERMANENT (minim 5 benzi WS, full-duplex) ────────────────────
+  // Workerul deschide wss://kelionai.app/api/bridge/ws de 5 ori și le ține
+  // deschise permanent. Secretul călătorește pe subprotocol (clientul standard
+  // WebSocket nu poate pune antete): new WebSocket(url, ['kelion-bridge', SECRET]).
+  app.get('/api/bridge/ws', { websocket: true }, (socket, req) => {
+    const proto = String(req.headers['sec-websocket-protocol'] ?? '')
+    const okAuth =
+      config.bridgeSecret !== '' &&
+      proto
+        .split(',')
+        .map((s) => s.trim())
+        .includes(config.bridgeSecret)
+    if (!okAuth) {
+      socket.close(4401, 'unauthorized')
+      return
+    }
+    const lane: WsLane = { socket, busy: null }
+    wsLanes.add(lane)
+    workerBeat()
+    socket.on('message', (raw: Buffer) => {
+      workerBeat()
+      let m: { type?: string; id?: string; text?: string }
+      try {
+        m = JSON.parse(String(raw))
+      } catch {
+        return
+      }
+      if (m.type === 'beat') return // doar ține canalul cald (Cloudflare taie idle)
+      if (m.type === 'ack' && m.id) {
+        ackSeen = true
+        const e = inFlight.get(m.id)
+        if (e) e.confirmed = true
+        return
+      }
+      if (m.type === 'chunk' && m.id) {
+        const e = inFlight.get(m.id)
+        if (e) e.confirmed = true
+        const sink = chunkSinks.get(m.id)
+        if (sink && typeof m.text === 'string' && m.text) sink(m.text)
+        return
+      }
+      if (m.type === 'keepalive' && m.id) {
+        const sink = chunkSinks.get(m.id)
+        if (sink) sink('') // pulsul de gândire — armează ceasurile anti-stall
+        return
+      }
+      if (m.type === 'reply' && m.id) {
+        if (lane.busy === m.id) lane.busy = null
+        inFlight.delete(m.id)
+        const resolve = waiters.get(m.id)
+        if (resolve) {
+          waiters.delete(m.id)
+          resolve(typeof m.text === 'string' ? m.text : '')
+        }
+        // banda s-a eliberat → următorul job din coadă pleacă imediat pe ea
+        const next = staleJob() ?? queue.shift()
+        if (next) dispatch(next)
+        return
+      }
+    })
+    const bye = (): void => {
+      wsLanes.delete(lane)
+      // un job rămas pe canalul căzut se relivrează prin staleJob (ack-tracking)
+    }
+    socket.on('close', bye)
+    socket.on('error', bye)
+  })
+
   // Laptop Claude Code → server: "I'm actively writing code right now", plus an
   // optional short activity line (which file / build / deploy). Sent every ~15s
   // while a dev work session is engaged (secret-protected).
@@ -716,7 +817,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // catching the "process alive but hung" case systemd can't see.
   app.get('/api/bridge/health', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    return { online: bridgeOnline(), lastSeenMs: Date.now() - lastWorkerSeen }
+    return { online: bridgeOnline(), lastSeenMs: Date.now() - lastWorkerSeen, wsLanes: wsLaneCount() }
   })
 
   // Worker → server: "give me the next admin prompt" (long-poll up to 25s).
