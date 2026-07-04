@@ -221,14 +221,21 @@ export function bridgeAsk(
 // speaking within ~2s instead of holding the whole answer for 10–30s.
 const chunkSinks = new Map<string, (text: string) => void>()
 
+// Sentinel: no first word arrived within firstTokenMs → the caller RE-ANALYZES
+// (Adrian's rule, 4 iul: a request never ends without a clear answer; at 30s
+// with total silence it is retried, not left to rot for 4 minutes).
+export const BRIDGE_STALL = '__BRIDGE_STALL__'
+
 export function bridgeAskStream(
   prompt: string,
   files: BridgeFile[] = [],
   onChunk: (text: string) => void,
   timeoutMs = 240_000,
+  firstTokenMs = 30_000,
 ): Promise<string | null> {
   const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files }
   return new Promise((resolve) => {
+    let gotChunk = false
     // Stall guard: chunks reset it — a stream that keeps flowing never dies.
     let timer: ReturnType<typeof setTimeout>
     const arm = (ms: number): void => {
@@ -240,12 +247,25 @@ export function bridgeAskStream(
       }, ms)
     }
     arm(timeoutMs)
+    // FIRST-WORD deadline: if total silence for firstTokenMs, bail early with the
+    // stall sentinel so the caller can re-analyze (fresh job / fresh worker poll).
+    // Fires ONLY when nothing has streamed — a slow-but-flowing answer is left be.
+    const firstTimer = setTimeout(() => {
+      if (gotChunk) return
+      waiters.delete(job.id)
+      chunkSinks.delete(job.id)
+      clearTimeout(timer)
+      resolve(BRIDGE_STALL)
+    }, firstTokenMs)
     chunkSinks.set(job.id, (text) => {
+      gotChunk = true
+      clearTimeout(firstTimer)
       arm(90_000) // flowing — allow generous continuation windows
       onChunk(text)
     })
     waiters.set(job.id, (text) => {
       clearTimeout(timer)
+      clearTimeout(firstTimer)
       chunkSinks.delete(job.id)
       resolve(text)
     })
@@ -308,6 +328,16 @@ export function resetBrainActivity(): void {
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
   logDevLines([stamped])
+}
+
+// Kelion speaks a line into the admin's chat by himself (delivered by the
+// /api/chat/incoming poll, spoken aloud, and saved to history). Used to deliver
+// a LATE answer to a request that stalled — so no request ends without a reply.
+export function sayToAdmin(text: string): void {
+  const t = text.trim().slice(0, 4000)
+  if (!t) return
+  sayQueue.push(t)
+  void saveMessage(config.adminEmail, 'assistant', t)
 }
 
 function authed(req: FastifyRequest): boolean {

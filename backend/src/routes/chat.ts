@@ -50,9 +50,11 @@ import {
   bridgeOnline,
   bridgeAsk,
   bridgeAskStream,
+  BRIDGE_STALL,
   bridgeRepair,
   noteBrainActivity,
   resetBrainActivity,
+  sayToAdmin,
   getReadyDeploy,
   triggerDeploy,
   recentDevLog,
@@ -871,6 +873,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // addressed Kelion by name — removed.)
     if (isAdmin) {
       let a = ''
+      // The exact bridge prompt for this turn, hoisted so the final fallback can
+      // RE-QUEUE the request (nothing is ever dropped without an answer).
+      let reanalyzePrompt = ''
       // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
       // feed so this command starts clean and shows ONLY its own flow. History
       // is kept (Jurnal Claude) and the telemetry bars keep running.
@@ -1200,18 +1205,34 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // Monitor shows the brain is on it the instant Adrian sends (his rule:
         // never the raw message text — just that the brain is answering).
         noteBrainActivity('Creierul de pe Linux răspunde la mesajul tău…')
-        const answer = await bridgeAskStream(
-          decision + ctxBlock + sharedBlock + langLock + journalBlock + convo,
-          files,
-          (chunk: string) => {
-            if (headDone) emit(chunk)
-            else {
-              head += chunk
-              releaseHead(false)
+        // NICIO CERERE FĂRĂ RĂSPUNS (Adrian, 4 iul): if 30s pass with TOTAL
+        // silence, re-analyze — a fresh job hits a fresh worker poll (or the
+        // watchdog-restarted worker), up to 4 times. A request is never left to
+        // rot for 4 minutes and never ends without a clear answer. Once a single
+        // word has streamed we stop retrying (a slow-but-flowing reply is fine).
+        let answer: string | null = null
+        const onChunk = (chunk: string): void => {
+          if (headDone) emit(chunk)
+          else {
+            head += chunk
+            releaseHead(false)
+          }
+        }
+        const bridgePrompt = decision + ctxBlock + sharedBlock + langLock + journalBlock + convo
+        reanalyzePrompt = bridgePrompt
+        const maxTries = 4
+        for (let attempt = 1; attempt <= maxTries; attempt++) {
+          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 30_000)
+          if (answer === BRIDGE_STALL && !headDone && !streamed.trim()) {
+            head = ''
+            if (attempt < maxTries) {
+              noteBrainActivity(`⏳ 30s fără răspuns — reanalizez cererea (încercarea ${attempt + 1})`)
+              continue
             }
-          },
-          240_000,
-        )
+          }
+          break
+        }
+        if (answer === BRIDGE_STALL) answer = null
         // Finalisation: a non-streaming worker (or a short reply that never hit
         // a newline) lands here with everything still buffered.
         if (!headDone) {
@@ -1229,16 +1250,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       if (!a) {
-        // HONEST failure wording: a slow answer is NOT a fallen bridge. If the
-        // worker is polling (light on) the reply simply timed out — say that.
+        // Reached ONLY after the request was re-analyzed 4× (≈2 min) with total
+        // silence. Never a vague "say it again" — a clear status, and the request
+        // is re-queued so the (watchdog-restarted) worker answers it, not drops it.
         const ro = !langName || /rom/i.test(langName)
         a = bridgeOnline()
           ? ro
-            ? 'Mi-a luat prea mult la mesajul ăsta și am pierdut rândul — puntea E în picioare (becul e aprins). Spune-mi încă o dată, scurt.'
-            : 'This one took me too long and the turn timed out — the bridge IS up (light on). Tell me once more, briefly.'
+            ? 'Am reanalizat cererea de câteva ori și puntea încă nu a scos un răspuns (e în picioare, dar înțepenită). Nu te ignor — am pus-o din nou la lucru; îți răspund în câteva secunde.'
+            : 'I re-analyzed this a few times and the bridge still produced nothing (it is up, but stuck). I am not ignoring you — I re-queued it and will answer in a few seconds.'
           : ro
-            ? 'Puntea către Claude e căzută — nu vorbesc în numele lui. Becul Bridge e stins; se repornește singură în câteva secunde.'
-            : 'The bridge to Claude is down — I will not speak on his behalf. The Bridge light is off; it restarts itself within seconds.'
+            ? 'Puntea către Claude e căzută chiar acum (se repornește singură în câteva secunde). Am pus cererea în coadă — îți răspund imediat ce revine, nu se pierde.'
+            : 'The bridge to Claude is down right now (it restarts itself within seconds). I queued your request — I will answer the moment it is back; nothing is lost.'
+        // Re-queue so the request is genuinely answered, not lost (his rule:
+        // no request ends without a clear answer). When the bridge comes back it
+        // answers, and Kelion speaks the late reply into the chat by himself.
+        if (reanalyzePrompt) {
+          void bridgeAsk(reanalyzePrompt, [], 150_000)
+            .then((late) => {
+              if (late && late.trim()) sayToAdmin(`Revin la ce m-ai întrebat: ${late.trim()}`)
+            })
+            .catch(() => {})
+        }
         reply.raw.write(a)
       }
       reply.raw.end()
