@@ -144,6 +144,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ escalated: true, online: true })
   })
 
+  // Trimite TOATE cererile deschise la creier dintr-un click (Adrian, 4 iul):
+  // fiecare devine ordin de lucru + e marcată „trimisă"; dispar singure la deploy.
+  app.post('/api/admin/gaps/escalate-all', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const open = (await getCapabilityGaps(false)).filter((g) => !g.escalated)
+    for (const g of open) {
+      bridgeRepair(
+        `Cerere de la utilizatori (culegerea de dorințe a lui Kelion), escaladată de admin — ` +
+          `construiește/adaugă această capacitate: "${g.request}"` +
+          (g.reason ? ` (motiv: ${g.reason})` : ''),
+      )
+      await markGapEscalated(g.id)
+    }
+    return reply.send({ escalated: open.length })
+  })
+
   // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
   // (admin only). This is what the admin sees instead of the users' credits.
   app.get('/api/admin/pool', async (req, reply) => {

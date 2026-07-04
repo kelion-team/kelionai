@@ -11,6 +11,7 @@ import {
   decideRelease,
   resolveGap,
   escalateGap,
+  escalateAllGaps,
   type StagedRelease,
   type UserSummary,
   type HistoryRow,
@@ -801,6 +802,22 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
+            {gaps.some((g) => !g.escalated) && (
+              <div className="gaps-bulk">
+                <span>Trimite dintr-un click toate cererile deschise la creier — se construiesc și dispar singure după publicare.</span>
+                <button
+                  type="button"
+                  className="composer-send"
+                  onClick={() => {
+                    void escalateAllGaps().then((n) => {
+                      if (n > 0) void fetchGaps().then(setGaps)
+                    })
+                  }}
+                >
+                  Trimite toate la creier ({gaps.filter((g) => !g.escalated).length})
+                </button>
+              </div>
+            )}
             {gaps.length === 0 && (
               <p className="chat-hint">
                 Nicio cerere neacoperită încă. Aici apar lucrurile pe care userii i le cer lui Kelion și pe

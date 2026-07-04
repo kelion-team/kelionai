@@ -2368,3 +2368,19 @@ a.card-item:hover {
   background: rgba(255, 93, 93, 0.14);
   animation: rec 1.2s ease-in-out infinite;
 }
+
+/* Bara „trimite toate cererile la creier" */
+.gaps-bulk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  background: rgba(110, 168, 254, 0.08);
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: #cfe0ff;
+}
+.gaps-bulk button { white-space: nowrap; }

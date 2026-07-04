@@ -322,3 +322,17 @@ export async function escalateGap(id: number): Promise<{ escalated: boolean; onl
   }
 }
 
+// Trimite TOATE cererile deschise la creier dintr-un click. Întoarce câte au plecat.
+export async function escalateAllGaps(): Promise<number> {
+  try {
+    const r = await fetch('/api/admin/gaps/escalate-all', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (!r.ok) return 0
+    return ((await r.json()) as { escalated?: number }).escalated ?? 0
+  } catch {
+    return 0
+  }
+}
+
