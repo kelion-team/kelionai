@@ -725,7 +725,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
             {(() => {
               const url = 'https://kelionai.app'
               const text =
-                'Kelionai — your brilliant AI assistant. It sees, hears and speaks. Try 3 minutes free:'
+                'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Îl încerci 3 minute gratuit, fără cont:'
               const enc = encodeURIComponent
               // Text/link networks accept a prefilled share URL; video platforms
               // require uploading IN their studio — the clips are in Downloads.

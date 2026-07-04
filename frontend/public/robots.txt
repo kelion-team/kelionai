@@ -1,0 +1,10 @@
+# Kelionai — deschis crawlerelor bune (Google, Bing, GPTBot, etc.) ca să ne
+# indexeze și să ne promoveze. Rutele private (API, admin, auth) sunt blocate.
+User-agent: *
+Allow: /$
+Allow: /index.html
+Disallow: /api/
+Disallow: /auth/
+Disallow: /dl/
+
+Sitemap: https://kelionai.app/sitemap.xml
