@@ -492,14 +492,26 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     '/api/bridge/deploy-done',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const failedBranch = deployWanted?.branch ?? ''
+      const failedSummary = deployWanted?.summary ?? ''
       deployWanted = null
       const ok = req.body?.ok !== false
-      const msg = ok
-        ? 'Gata — e PUBLICAT live pe kelionai.app. Reîmprospătează pagina și verifică.'
-        : `Deploy-ul a eșuat: ${String(req.body?.detail || '').slice(0, 200)}. Nu s-a publicat nimic.`
-      sayQueue.push(msg)
-      void saveMessage(config.adminEmail, 'assistant', msg)
-      noteBrainActivity(ok ? '🟢 PUBLICAT LIVE' : '🔴 Deploy eșuat')
+      if (ok) {
+        const msg = 'Gata — e PUBLICAT live pe kelionai.app. Reîmprospătează pagina și verifică.'
+        sayQueue.push(msg)
+        void saveMessage(config.adminEmail, 'assistant', msg)
+        noteBrainActivity('🟢 PUBLICAT LIVE')
+      } else {
+        // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
+        // — never a silent auto-redeploy. Re-stage the branch so his "ok"
+        // republishes it (the affirm path calls triggerDeploy → the deployer).
+        if (failedBranch) readyDeploy = { branch: failedBranch, summary: failedSummary, at: Date.now() }
+        const detail = String(req.body?.detail || '').slice(0, 200)
+        const msg = `Deploy-ul a picat: ${detail}. Nu s-a publicat nimic — versiunea veche e tot live. Vrei să reîncerc? Zi „ok".`
+        sayQueue.push(msg)
+        void saveMessage(config.adminEmail, 'assistant', msg)
+        noteBrainActivity('🔴 Deploy eșuat — aștept „ok" să reîncerc')
+      }
       return { ok: true }
     },
   )

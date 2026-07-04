@@ -18,6 +18,7 @@ import {
   switchToId,
   normalizeEmbedUrl,
   isEmbeddable,
+  setMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { keepScreenOn } from '../lib/wakelock'
@@ -309,6 +310,11 @@ export default function Stage({ user }: { user: User }) {
     ((claudeActive && claudeActivity.length > 0) || showWork)
   const live = claudeShow && !ws.open ? parseLive(claudeActivity) : null
   const monitorOn = ws.open || (claudeShow && claudeActivity.length > 0)
+  // Tell the chat when the monitor is busy so it collapses to the slim black
+  // speech bar (Adrian's rule) — during live work, not only for open surfaces.
+  useEffect(() => {
+    setMonitorWorking(monitorOn)
+  }, [monitorOn])
   return (
     // rec-clean: while a clip records, everything "admin" disappears (topbar,
     // chat bubbles) and the site address is watermarked into the frame.

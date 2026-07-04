@@ -66,6 +66,22 @@ export function subscribeWorkspace(fn: () => void): () => void {
   }
 }
 
+// MONITOR BUSY — separate from surfaces: true while the Linux brain is EXECUTING
+// live (the "execuție în direct" console is showing its steps). Adrian's rule:
+// while the monitor is working, the chat must collapse to the slim black bar
+// above the composer (only what's spoken), never bubbles that cover the monitor.
+// Stage drives it; ChatPanel reads it via subscribeWorkspace.
+let working = false
+export function setMonitorWorking(b: boolean): void {
+  if (working !== b) {
+    working = b
+    emit()
+  }
+}
+export function isMonitorWorking(): boolean {
+  return working
+}
+
 // Classify a URL into a task kind so same-kind surfaces share one tab (a new map
 // replaces the old map, a new video swaps the current one — "just swap the video").
 export function kindForUrl(raw: string): string {

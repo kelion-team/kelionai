@@ -36,6 +36,7 @@ import {
   switchToKind,
   getWorkspace,
   subscribeWorkspace,
+  isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 
@@ -1274,6 +1275,11 @@ export default function ChatPanel({
   // When the MONITOR shows content, the centre chat bubbles would cover it —
   // so Kelion's words move to a slim black bar just above the composer instead.
   const wsOpen = useSyncExternalStore(subscribeWorkspace, getWorkspace).open
+  // Monitor mode = a surface is open OR the brain is executing live. In EITHER
+  // case the chat collapses to the slim black bar above the composer so nothing
+  // covers the monitor (Adrian's rule). `working` follows the live-work console.
+  const monitorBusy = useSyncExternalStore(subscribeWorkspace, isMonitorWorking)
+  const monitorMode = wsOpen || monitorBusy
   // Show the CURRENT exchange in writing: the user's request (so he sees it
   // arrived correctly the instant he speaks/types) AND Kelion's reply, which
   // updates live as Kelion speaks — not audio-only, not just one sentence.
@@ -1289,9 +1295,10 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {/* Centre bubbles — HIDDEN while the monitor shows content, so they never
-          cover it (Kelion's words go to the black bar above the composer). */}
-      {!wsOpen && (
+      {/* Centre bubbles — HIDDEN while the monitor shows content OR the brain is
+          executing live, so they never cover it (Kelion's words go to the black
+          bar above the composer). */}
+      {!monitorMode && (
         <div className="chat-log">
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
           {lastUser && lastUser.content && (
@@ -1349,7 +1356,7 @@ export default function ChatPanel({
       )}
       {/* Monitor mode: Kelion's words in a slim black bar ABOVE the composer,
           so nothing covers what's on the monitor. */}
-      {wsOpen && (lastAssistant?.content || busy) && (
+      {monitorMode && (lastAssistant?.content || busy) && (
         <div className="monitor-speech">
           {lastAssistant?.content ? lastAssistant.content : '…'}
           {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
