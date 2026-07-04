@@ -359,16 +359,27 @@ export function noteBrainActivity(line: string): void {
 // live execution feed is wiped so he sees ONLY the current command's flow. The
 // full history is untouched (it lives in devLog / "Jurnal Claude") and the
 // server-load bars keep pulsing (they're ambient telemetry, not command output).
+// Set whenever a BUILDER/agent posts a live step (via /api/bridge/activity). If a
+// build is actively streaming its code-writing, a new chat command must NOT wipe
+// those steps off the monitor — otherwise the live demonstration ("uite cum scriu
+// codul") is erased mid-write and only ever looks like narration (Adrian, 4 iul).
+let lastBuildBeat = 0
+export function noteBuildBeat(): void {
+  lastBuildBeat = Date.now()
+}
+
 export function resetBrainActivity(): void {
-  // Seed a single intake marker (never the raw message) so the panel stays open
-  // — the live bars keep showing — while the feed is otherwise blank and fills
-  // with THIS command's real steps.
   const stamped = `[${new Date().toISOString().slice(11, 16)}] 📥 Comandă nouă — pornesc curat`
-  devActivity = [stamped]
+  // A build is writing code RIGHT NOW → keep its live steps on the monitor; just
+  // append the intake marker instead of wiping. Otherwise start clean as before.
+  if (Date.now() - lastBuildBeat < 45_000) {
+    devActivity = [...devActivity, stamped].slice(-40)
+  } else {
+    devActivity = [stamped]
+  }
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
   logDevLines([stamped])
-  // New command → the process bar restarts at the intake stage.
   setProgress(6, 'Preluare')
 }
 
@@ -459,7 +470,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { line?: string } }>('/api/bridge/activity', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     const line = typeof req.body?.line === 'string' ? req.body.line.trim() : ''
-    if (line) noteBrainActivity(line)
+    if (line) {
+      noteBuildBeat() // mark a build is streaming, so chat won't wipe these steps
+      noteBrainActivity(line)
+    }
     return { ok: true }
   })
 
