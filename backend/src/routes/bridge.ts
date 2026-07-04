@@ -43,6 +43,11 @@ interface PendingJob {
   kind: 'chat' | 'repair'
   prompt: string
   files?: BridgeFile[]
+  // THREAD MEMORY (urgența 2, Adrian 4 iul): the small per-turn packet (fresh
+  // context + the NEW message only). When present and the worker holds a live
+  // claude session, it resumes it (--resume) — real conversational memory
+  // instead of a fresh process fed 15 truncated messages.
+  turn?: string
 }
 
 const queue: PendingJob[] = []
@@ -272,8 +277,9 @@ export function bridgeAskStream(
   onChunk: (text: string) => void,
   timeoutMs = 240_000,
   firstTokenMs = 30_000,
+  turn = '',
 ): Promise<string | null> {
-  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files }
+  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files, turn: turn || undefined }
   return new Promise((resolve) => {
     let gotChunk = false
     // Stall guard: chunks reset it — a stream that keeps flowing never dies.
@@ -752,11 +758,18 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/bridge/reply-chunk', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()
-    const body = (req.body ?? {}) as { id?: string; text?: string }
+    const body = (req.body ?? {}) as { id?: string; text?: string; keepalive?: boolean }
     const flying = body.id ? inFlight.get(body.id) : undefined
     if (flying) flying.confirmed = true // a chunk is proof of delivery too
     const sink = body.id ? chunkSinks.get(body.id) : undefined
-    if (sink && typeof body.text === 'string' && body.text) sink(body.text)
+    if (sink && body.keepalive) {
+      // PULS DE VIAȚĂ (urgența 3): the brain is THINKING (no text yet). Arm the
+      // stall timers with an empty chunk so a hard question is never mistaken
+      // for a dead bridge (which re-queued the job and threw the answer away).
+      sink('')
+    } else if (sink && typeof body.text === 'string' && body.text) {
+      sink(body.text)
+    }
     return { accepted: !!sink }
   })
 
