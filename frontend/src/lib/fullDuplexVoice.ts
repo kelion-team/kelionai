@@ -280,6 +280,26 @@ export async function startFullDuplex(
   }
 
   void ctx.resume()
+  // MICUL „BLOCAT PE OFF" (Adrian, 4 iul): după o reîncărcare automată la release
+  // (fără vreun gest), browserul ține AudioContext-ul SUSPENDAT — analizatorul
+  // primește doar zero, deci vocea nu mai e auzită deloc. Reînviem contextul la
+  // primul gest (click/tastă) și reîncercăm singuri la 3s; bannerul 🔊 anunță.
+  if (ctx.state === 'suspended') {
+    globalThis.dispatchEvent?.(new Event('kelion:audio-blocked'))
+    const unlock = (): void => {
+      globalThis.removeEventListener('pointerdown', unlock)
+      globalThis.removeEventListener('keydown', unlock)
+      void ctx
+        .resume()
+        .then(() => globalThis.dispatchEvent?.(new Event('kelion:audio-unblocked')))
+        .catch(() => {})
+    }
+    globalThis.addEventListener('pointerdown', unlock)
+    globalThis.addEventListener('keydown', unlock)
+  }
+  const resumeTimer = window.setInterval(() => {
+    if (!stopped && ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  }, 3000)
   tick()
 
   return {
@@ -288,6 +308,7 @@ export async function startFullDuplex(
       cancelAnimationFrame(raf)
       window.removeEventListener('online', onOnline)
       window.clearInterval(retry)
+      window.clearInterval(resumeTimer)
       try {
         proc.disconnect()
         sink.disconnect()
