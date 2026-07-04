@@ -9,23 +9,10 @@ import {
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { strings, resolveLang, type Lang } from '../lib/i18n'
-import {
-  enqueueSpeech,
-  stopSpeaking,
-  isSpeaking,
-  startContinuous,
-  speechSupported,
-  setOnSpeakingChange,
-  type ContinuousHandle,
-} from '../lib/voice'
 import CameraView from './CameraView'
-import MicMeter from './MicMeter'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
-import { detectLanguageFromMic } from '../lib/langDetect'
-import { startFullDuplex, type FullDuplexHandle, type VoiceStatus } from '../lib/fullDuplexVoice'
 import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
-import { correctTranscript } from '../lib/correct'
 import {
   openWorkspace,
   openWorkspaceCard,
@@ -44,11 +31,6 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 // ~15s; a full landing demo can use the whole window).
 const SCENARIO_MAX_MS = 60_000
 
-// "Hey Kelion" wake word (interim — Web Speech transcript match; the spec's
-// low-power engine is Picovoice Porcupine). Accepts the documented variants.
-const WAKE = /\b(hey\s+|hei\s+)?(kelion|kelian|kelyon|hey\s*k(ey)?)\b/i
-// Spoken interrupt while Kelion is talking (barge-in).
-const STOP = /\b(stop|stai|opre[sș]te|opreste|gata|taci|destul)\b/i
 // "Close the monitor" — a map/route/video stays open across turns (multi-tasking),
 // so closing it must be instant and language-agnostic, never dependent on the
 // model calling a tool. The ✕ on the monitor is the universal fallback; this
@@ -65,17 +47,16 @@ const SCREEN_NOUN =
 const SWITCH_VERB =
   /(?<![\p{L}\p{N}])(comut[ăa]?|treci|revino|switch|schimb[ăa]\s+la|mergi\s+la|back\s+to|înapoi\s+la|inapoi\s+la)(?![\p{L}])/iu
 const CLOSE_ALL = /\b(tot|totul|toate|everything|all)\b/i
-// Admin voice control for the promo recorder. START arms the Rec button (the
-// browser REQUIRES one real click to pick the screen — no voice can skip that);
-// STOP is fully hands-free. Kelion confirms both out loud.
+// Admin typed control for the promo recorder. START arms the Rec button (the
+// browser REQUIRES one real click to pick the screen); STOP ends the take.
+// Kelion confirms both in chat.
 // NB: no \b before "î" — JS word boundaries are ASCII-only, so \bî never
 // matches and the spoken "înregistrează" would sail through to Claude.
 const REC_STOP =
   /\b(opre[șs]te|opreste|stop|termin[ăa]|gata)\b.{0,12}([îi]nregistr|record|rec\b)/i
 const REC_START =
   /([îi]nregistreaz[ăa]|porne[șs]te\s+[îi]nregistrarea|start\s+record\w*|record\s+(the\s+)?screen|filmeaz[ăa])/i
-// During a promo TAKE the mic stays open ONLY for these (narrow on purpose —
-// "gata"/"destul" could appear inside a promo script; these can't).
+// During a promo TAKE only these typed words cut it (narrow on purpose).
 const TAKE_STOP = /\b(stop|stai|opre[șs]te|opreste|t[ăa]iem|taie)\b/i
 // "Reluăm" — redo the SAME approved take without re-asking for the script.
 const RETAKE =
@@ -93,20 +74,6 @@ function taskKindFromText(msg: string): string | null {
     return 'doc'
   return null
 }
-const IDLE_MS = 60_000 // back to standby after this much silence (spec: ~1 min)
-// Below this recognizer confidence, clean the transcript with Gemini before it
-// reaches Claude (the spec's transcript-validation layer). Above it, pass
-// straight through to keep latency low.
-const CONF_MIN = 0.85
-
-function lastSentenceEnd(s: string): number {
-  const re = /[.!?…]["'”’)\]]?\s/g
-  let end = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(s)) !== null) end = m.index + m[0].length
-  return end
-}
-
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -127,8 +94,8 @@ export default function ChatPanel({
   readonly isDemo?: boolean
 }) {
   const t = strings(lang)
-  // Speech language (recognition + Kelion's voice). Defaults to the browser
-  // locale; the user can switch to any supported language in the ⊕ menu.
+  // The user's established conversation language. Defaults to the browser
+  // locale; refined from what they actually type and persisted per user.
   const [speechLang, setSpeechLang] = useState(() => defaultSpeechLang(lang))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatImage, setChatImage] = useState<string | null>(null)
@@ -137,19 +104,9 @@ export default function ChatPanel({
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
-  const [voiceOut, setVoiceOut] = useState(true)
-  // Autoplay-blocked banner: after a release auto-refresh the browser mutes
-  // audio until the first gesture — this tells Adrian ONE touch brings it back.
-  const [audioLocked, setAudioLocked] = useState(false)
-  const [awake, setAwake] = useState(false) // post wake-word active conversation
   const [cameraOn, setCameraOn] = useState(false)
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [listening, setListening] = useState(false)
-  const [micError, setMicError] = useState<string | null>(null)
-  // Voice capture status — drives the "Recording" indicator shown while the
-  // signal is down and we're holding the user's speech locally (GSM loss).
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('online')
   // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
   // Attachments are images (url = data URL, used for vision), documents
   // (text = the Markdown extracted by MarkItDown, prepended to the message),
@@ -168,35 +125,20 @@ export default function ChatPanel({
   scenarioRunningRef.current = scenarioRunning
   const scenarioRecRef = useRef<RecordingHandle | null>(null)
 
-  const contRef = useRef<ContinuousHandle | null>(null)
-  const fdRef = useRef<FullDuplexHandle | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
   const coordsRef = useRef<Coords | null>(null)
-  const idleRef = useRef<number | null>(null)
-  // Refs mirror state for the always-on voice callback (registered once).
-  const voiceOutRef = useRef(voiceOut)
-  voiceOutRef.current = voiceOut
-  const awakeRef = useRef(awake)
-  awakeRef.current = awake
   const busyRef = useRef(busy)
   busyRef.current = busy
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
   const inFlightRef = useRef(false)
-  // Messages typed/spoken WHILE a turn is still streaming. They are queued here
+  // Messages typed WHILE a turn is still streaming. They are queued here
   // instead of being dropped by the in-flight guard (that silent drop is how
   // written messages "never arrived"), and sent as one turn when it finishes.
   const pendingSendsRef = useRef<string[]>([])
-  // Invisible speech accumulation: rapid utterances (you speaking fast, or the mic
-  // splitting one sentence into pieces on a short pause) are buffered here and
-  // handed to Kelion as ONE coherent message after a brief gap — so he never
-  // answers fragments and nothing is lost. Entirely behind the scenes.
-  const heardBufRef = useRef<string[]>([])
-  const heardTimerRef = useRef<number>(0)
-  const HEARD_GAP_MS = 700
   // Approved promo script + shot list waiting for the recording to start, and
   // the scheduled scene timers (cleared when the recording stops).
   const promoRef = useRef<{
@@ -207,69 +149,28 @@ export default function ChatPanel({
     scenes?: { at: number; title: string; url?: string; close?: boolean }[]
   } | null>(null)
   const promoTimersRef = useRef<number[]>([])
-  // A promo TAKE in progress: the mic stays OPEN through the narration so the
-  // owner can cut it mid-take ("stop"/"tăiem") — only TAKE_STOP words are
-  // honoured, everything else heard during a take is discarded, so Kelion's own
-  // narration can never become a turn. lastPromoRef keeps the approved take so
-  // "reluăm" re-arms the SAME script + scenes without redoing the approval.
+  // A promo TAKE in progress: the owner can cut it mid-take by typing a
+  // TAKE_STOP word. lastPromoRef keeps the approved take so "reluăm" re-arms
+  // the SAME script + scenes without redoing the approval.
   const takeActiveRef = useRef(false)
   const lastPromoRef = useRef<typeof promoRef.current>(null)
-  // A turn is "active" from the moment Kelion starts producing a reply until the
-  // reply is fully spoken. The mic is muted for that whole window (see syncMic) —
-  // this is the single, structural anti-echo: the mic captures nothing while
-  // Kelion thinks or talks, so his own voice can never become a second turn.
-  const turnActiveRef = useRef(false)
   // True after a turn failed because the connection dropped — used to resume once
   // the browser regains connectivity. retryTextRef holds the message to re-send.
   const offlineRef = useRef(false)
   const retryTextRef = useRef<string | null>(null)
   const cameraOnRef = useRef(cameraOn)
   cameraOnRef.current = cameraOn
-  const listeningRef = useRef(listening)
-  listeningRef.current = listening
   const speechLangRef = useRef(speechLang)
   speechLangRef.current = speechLang
-  const messagesRef = useRef(messages)
-  messagesRef.current = messages
   // Once the user has an established language (stored pref, or one actively
-  // detected/chosen), the noisy startup mic auto-detect must NOT override it —
-  // the spec requires the detected language to persist, not flip every load.
+  // detected/chosen), auto-detection must NOT override it — the spec requires
+  // the detected language to persist, not flip every load.
   const langPinnedRef = useRef(false)
   // A language switch is committed/persisted only after the SAME new language is
   // seen on two messages in a row — franc mis-reads diacritic-less Romanian as
-  // Spanish/Italian, so a one-off detection must never flip the remembered voice.
+  // Spanish/Italian, so a one-off detection must never flip the remembered choice.
   const pendingLangRef = useRef<string | null>(null)
   const pendingCountRef = useRef(0)
-
-  // Single source of truth for the mic's mute state (both the full-duplex and the
-  // Web-Speech channels). The mic is muted whenever a reply is in progress OR
-  // Kelion is speaking — i.e. the whole turn — and open only while waiting for the
-  // user. Called whenever either of those two facts changes.
-  function syncMic(): void {
-    // During a promo take the mic STAYS OPEN even while Kelion narrates, so the
-    // owner can cut the take by voice; the heard handlers discard everything
-    // except the stop words, so the narration echo can't start a turn.
-    const mute = !takeActiveRef.current && (turnActiveRef.current || isSpeaking())
-    fdRef.current?.setMuted(mute)
-    contRef.current?.setMuted(mute)
-  }
-
-  // Audio ducking: while Kelion speaks, drop a playing YouTube clip's volume so
-  // his voice is in the foreground (car-radio style — music dips when the nav
-  // talks), then bring it back. Uses the YouTube IFrame API (enablejsapi=1).
-  function duckMedia(duck: boolean): void {
-    const win = (document.querySelector('.workspace-frame') as HTMLIFrameElement | null)
-      ?.contentWindow
-    if (!win) return
-    try {
-      win.postMessage(
-        JSON.stringify({ event: 'command', func: 'setVolume', args: [duck ? 12 : 100] }),
-        '*',
-      )
-    } catch {
-      /* cross-origin / player not ready — ignore */
-    }
-  }
 
   // Kelion drives the monitor himself (no manual button): a control frame from
   // the stream opens/clears the workspace surface behind the avatar.
@@ -301,10 +202,9 @@ export default function ChatPanel({
     else closeWorkspace()
   }
 
-  // Short spoken + on-screen acknowledgement for a local command (camera, etc.).
+  // Short on-screen acknowledgement for a local command (camera, etc.).
   function ack(text: string): void {
     setMessages((cur) => [...cur, { role: 'assistant', content: text, ts: Date.now() }])
-    if (voiceOutRef.current) enqueueSpeech(text, speechLangRef.current)
   }
 
   // The conversation SURVIVES a RELEASE refresh — and ONLY that. The release
@@ -333,23 +233,10 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Audio gesture-lock (autoplay policy after a release auto-refresh): voice.ts
-  // parks the blocked lines and fires these events; one touch replays them.
-  useEffect(() => {
-    const onBlocked = (): void => setAudioLocked(true)
-    const onUnblocked = (): void => setAudioLocked(false)
-    window.addEventListener('kelion:audio-blocked', onBlocked)
-    window.addEventListener('kelion:audio-unblocked', onUnblocked)
-    return () => {
-      window.removeEventListener('kelion:audio-blocked', onBlocked)
-      window.removeEventListener('kelion:audio-unblocked', onUnblocked)
-    }
-  }, [])
-
   // Claude can WALK IN first (admin only): messages Claude leaves through the
-  // bridge are picked up here and Kelion says them — written in chat, spoken
-  // aloud, already persisted to history by the server. The owner's rule:
-  // "când intri, mă strigi" — Claude calls him, not only answers.
+  // bridge are picked up here and shown in chat — already persisted to history
+  // by the server. The owner's rule: "când intri, mă strigi" — Claude calls
+  // him, not only answers.
   useEffect(() => {
     if (!isAdmin) return
     const id = window.setInterval(() => {
@@ -358,10 +245,6 @@ export default function ChatPanel({
         .then((j: { messages?: string[] }) => {
           const arr = j.messages ?? []
           if (arr.length === 0) return
-          // ONE mouth, never two voices: when Claude cuts in, whatever is
-          // being spoken right now is CUT OFF, and Claude's words come out
-          // through Kelion's own voice.
-          stopSpeaking()
           for (const m of arr) ack(m)
         })
         .catch(() => {})
@@ -391,8 +274,7 @@ export default function ChatPanel({
   }
 
   // The recording actually started (the owner clicked and picked the screen):
-  // PERFORM the clip. The script panel closes (the clip never shows the text),
-  // Kelion SPEAKS the approved script verbatim — voice only, no chat bubble —
+  // PERFORM the clip. The script panel closes (the clip never shows the text)
   // and the shot-list scenes appear on the monitor at their times.
   useEffect(() => {
     const onStarted = (): void => {
@@ -401,12 +283,7 @@ export default function ChatPanel({
       promoRef.current = null
       lastPromoRef.current = p // kept so "reluăm" can redo this exact take
       takeActiveRef.current = true
-      syncMic() // take mode: the ear stays open for "stop"/"tăiem"
       closeAllTasks() // the script panel is done — clean frame for the clip
-      // Narrate the clip in the SCRIPT's own language so the voice always matches
-      // the text (a mismatch is what silenced the voice on a recalled scenario).
-      const takeLang = p.lang || speechLangRef.current
-      window.setTimeout(() => enqueueSpeech(p.script, takeLang), 900)
       for (const s of p.scenes ?? []) {
         promoTimersRef.current.push(
           window.setTimeout(() => {
@@ -416,17 +293,15 @@ export default function ChatPanel({
         )
       }
     }
-    // Recording stopped (voice cut, Chrome's stop bar, or natural end): kill the
-    // narration + pending scenes, clear the stage, and offer the retake.
+    // Recording stopped (typed cut, Chrome's stop bar, or natural end): kill the
+    // pending scenes, clear the stage, and offer the retake.
     const onStopped = (): void => {
       const wasTake = takeActiveRef.current
       takeActiveRef.current = false
       for (const id of promoTimersRef.current) window.clearTimeout(id)
       promoTimersRef.current = []
       if (wasTake) {
-        stopSpeaking()
         closeAllTasks()
-        syncMic()
         const ro = speechLangRef.current.toLowerCase().startsWith('ro')
         window.setTimeout(
           () =>
@@ -648,8 +523,7 @@ export default function ChatPanel({
     const msg = text.trim()
     const atts = attachments
     if (!msg && atts.length === 0) return
-    // Admin recorder commands — BEFORE the speech interrupt, so "oprește
-    // înregistrarea" stops the RECORDING, not just Kelion's sentence.
+    // Admin recorder commands — handled locally, never sent to Claude.
     if (msg && isAdmin) {
       const ro = speechLangRef.current.toLowerCase().startsWith('ro')
       // Mid-take cut: something changed — stop everything; the rec-stopped
@@ -707,14 +581,7 @@ export default function ChatPanel({
         return
       }
     }
-    // Typed interrupt: while Kelion is speaking, "stop/stai/oprește" just halts
-    // him (it's a command, not a question — don't send it to Claude).
-    if (msg && isSpeaking() && STOP.test(msg) && msg.split(/\s+/).length <= 2) {
-      stopSpeaking()
-      setInput('')
-      return
-    }
-    // Local camera commands (verbal or typed) — handled without a round-trip.
+    // Local camera commands (typed) — handled without a round-trip.
     if (msg && tryCameraCommand(msg)) {
       setInput('')
       return
@@ -761,30 +628,18 @@ export default function ChatPanel({
       return
     }
     inFlightRef.current = true
-    turnActiveRef.current = true
-    syncMic() // mute the mic for the whole turn (structural anti-echo)
     setInput('')
     setDelivered(false) // new turn — the ✓ lights only once the server answers
     setAttachments([])
-    stopSpeaking()
     // Multi-tasking: whatever is on the monitor (a map, a route, a video) STAYS
     // open while you keep chatting — it's only replaced when Kelion shows
     // something new, or closed when you (or Kelion) close it. So the map keeps
     // running in parallel with the conversation until you say to close it.
-    const speak = voiceOutRef.current
-    // The voice follows the LANGUAGE OF THIS REPLY (Kelion mirrors the user's
-    // language), not a drifting global setting — so a Romanian reply is never
-    // read by an English voice (the "defective ro"). Seed from the user's
-    // message, then refine from the reply once enough text has streamed.
-    // The spoken voice ALWAYS uses the USER's language (their account, or how they
-    // speak/type) — NEVER a language detected from Kelion's REPLY text. That reply
-    // drift is exactly what made "the voice go French". Adopt the user's language
-    // only from THEIR message, never from Kelion's output.
-    // The spoken voice uses the user's ESTABLISHED language (stable) — never a
-    // single message's guess, because franc mis-reads diacritic-less Romanian as
-    // Spanish/Italian. A switch is committed + persisted only after the SAME new
-    // base language is seen on TWO messages in a row: that corrects a stale/wrong
-    // stored language without ever flipping on a one-off mis-detection.
+    // The user's ESTABLISHED language (stable) — never a single message's guess,
+    // because franc mis-reads diacritic-less Romanian as Spanish/Italian. A
+    // switch is committed + persisted only after the SAME new base language is
+    // seen on TWO messages in a row: that corrects a stale/wrong stored language
+    // without ever flipping on a one-off mis-detection.
     const seedLang = detectLangFromText(msg)
     if (seedLang) {
       langPinnedRef.current = true
@@ -833,7 +688,6 @@ export default function ChatPanel({
     setBusy(true)
     try {
       let acc = ''
-      let spoken = 0
       const wsNow = getWorkspace()
       const screen = wsNow.open
         ? wsNow.tasks.map((tk) => ({ kind: tk.kind, title: tk.title, active: tk.id === wsNow.activeId }))
@@ -848,16 +702,6 @@ export default function ChatPanel({
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
-        if (speak) {
-          const end = lastSentenceEnd(acc)
-          if (end > spoken) {
-            enqueueSpeech(acc.slice(spoken, end), replyLang)
-            spoken = end
-          }
-        }
-      }
-      if (speak) {
-        if (acc.length > spoken) enqueueSpeech(acc.slice(spoken), replyLang)
       }
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
@@ -874,21 +718,15 @@ export default function ChatPanel({
             ? spoken.offline
             : t.brainError
       setMessages([...next, { role: 'assistant', content: `⚠️ ${m}`, ts: Date.now() }])
-      // Lost signal (e.g. a tunnel while driving): SAY it so the driver hears it
-      // without looking, and remember so we can announce when we're back online.
+      // Lost signal (e.g. a tunnel while driving): remember so we can resume
+      // when we're back online.
       if (code === 'offline') {
         offlineRef.current = true
         retryTextRef.current = msg // resume THIS message when the signal returns
-        if (speak) enqueueSpeech(spoken.offline, replyLang)
       }
     } finally {
       inFlightRef.current = false
       setBusy(false)
-      // The reply is done streaming. The mic reopens only once Kelion also finishes
-      // speaking — syncMic re-checks isSpeaking(), and onSpeaking→syncMic reopens it
-      // at the very end. A turn with no speech reopens it right here.
-      turnActiveRef.current = false
-      syncMic()
       // Anything written during this turn was queued, not lost — combine it and
       // start the next turn with it (a beat later, so this one fully unwinds).
       if (pendingSendsRef.current.length > 0) {
@@ -901,241 +739,19 @@ export default function ChatPanel({
   const sendRef = useRef(send)
   sendRef.current = send
 
-  function armIdle(): void {
-    if (idleRef.current) globalThis.clearTimeout(idleRef.current)
-    idleRef.current = globalThis.setTimeout(() => {
-      // Don't drop to standby while the mic channel is explicitly ON.
-      if (!listeningRef.current) setAwake(false)
-    }, IDLE_MS)
-  }
-
-  // Invisible accumulation: buffer utterances that arrive close together and hand
-  // them to Kelion as ONE coherent message after a brief silence — so speaking
-  // fast (or the mic splitting a sentence) never fragments into separate turns and
-  // nothing is dropped. All behind the scenes; the user just talks naturally.
-  function accumulateHeard(text: string): void {
-    const t = text.trim()
-    if (!t) return
-    heardBufRef.current.push(t)
-    if (heardTimerRef.current) globalThis.clearTimeout(heardTimerRef.current)
-    heardTimerRef.current = globalThis.setTimeout(() => {
-      const combined = heardBufRef.current.join(' ').replace(/\s+/g, ' ').trim()
-      heardBufRef.current = []
-      if (combined) void sendRef.current(combined)
-    }, HEARD_GAP_MS)
-  }
-
-  // Send a heard utterance to Kelion, cleaning it first only when the recognizer
-  // wasn't confident (the spec's transcript-validation step — Google/Gemini).
-  async function dispatchHeard(text: string, confidence: number): Promise<void> {
-    let toSend = text
-    if (confidence > 0 && confidence < CONF_MIN) {
-      const context = messagesRef.current
-        .slice(-2)
-        .map((m) => m.content)
-        .join('\n')
-      toSend = await correctTranscript(text, context, speechLangRef.current)
-    }
-    accumulateHeard(toSend)
-  }
-
-  // Heard a final utterance from the permanent mic.
-  function onHeard(raw: string, confidence: number): void {
-    const text = raw.trim()
-    if (!text) return
-    // A take is rolling: ONLY the cut words act — everything else (including
-    // Kelion's own narration echo) is discarded.
-    if (takeActiveRef.current) {
-      if (TAKE_STOP.test(text)) window.dispatchEvent(new CustomEvent('kelion:rec', { detail: 'stop' }))
-      return
-    }
-    // Defensive stop-word guard; the mic is muted for the whole turn upstream.
-    if (isSpeaking()) {
-      if (STOP.test(text)) stopSpeaking()
-      return
-    }
-    // Asleep: wait for the wake word, then send anything said after it.
-    if (!awakeRef.current) {
-      if (!WAKE.test(text)) return
-      setAwake(true)
-      armIdle()
-      const rest = text.replace(WAKE, '').trim()
-      if (rest.length > 1) void dispatchHeard(rest, confidence)
-      return
-    }
-    // Awake: send the utterance (validated if low-confidence).
-    armIdle()
-    void dispatchHeard(text, confidence)
-  }
-
-  // Heard a full utterance from the full-duplex (AEC + Chirp) channel. Chirp
-  // gives an accurate transcript; we send it straight to Claude. The reply's
-  // voice language is detected from the reply text (see send), so we no longer
-  // flip a global language per utterance.
-  function onHeardFull(text: string): void {
-    const clean = text.trim()
-    if (!clean) return
-    // A take is rolling: ONLY the cut words act — everything else (including
-    // Kelion's own narration echo) is discarded.
-    if (takeActiveRef.current) {
-      if (TAKE_STOP.test(clean)) window.dispatchEvent(new CustomEvent('kelion:rec', { detail: 'stop' }))
-      return
-    }
-    // Defensive: the mic is already muted for the whole turn (syncMic), so echo
-    // shouldn't reach here — but if a stray result slips through, only honour a
-    // stop-word, never a new turn.
-    if (isSpeaking()) {
-      if (STOP.test(clean)) stopSpeaking()
-      return
-    }
-    // Don't flip the global language per utterance (it landed on a wrong/defective
-    // language). The reply's voice language is detected from the reply text in send().
-    // A song/video is playing and you're not clearly addressing Kelion: stay out
-    // of it. The mic is probably just hearing the media itself — so only the wake
-    // word or an explicit media command (stop / close / switch) gets through, and
-    // Kelion never interrupts the music unprompted.
-    if (getWorkspace().tasks.some((t) => t.kind === 'youtube')) {
-      if (!(WAKE.test(clean) || STOP.test(clean) || CLOSE_VERB.test(clean) || SWITCH_VERB.test(clean)))
-        return
-    }
-    armIdle()
-    accumulateHeard(WAKE.test(clean) ? clean.replace(WAKE, '').trim() || clean : clean)
-  }
-
-  // Start listening. Prefer the professional full-duplex path (browser AEC +
-  // Google Chirp STT) so the user can talk over Kelion with no echo; fall back
-  // to the Web Speech recognizer (half-duplex) where that's unavailable.
-  async function startVoice(): Promise<void> {
-    fdRef.current?.stop()
-    fdRef.current = null
-    contRef.current?.stop()
-    contRef.current = null
-    setMicError(null)
-
-    const fd = await startFullDuplex(
-      (text) => onHeardFull(text),
-      (error) => {
-        if (error === 'not-allowed') setMicError(t.micBlocked)
-      },
-      (status) => setVoiceStatus(status),
-      // Anchor recognition on the user's established language — no more
-      // auto-detect guessing Polish/Turkish on short Romanian utterances.
-      () => speechLangRef.current,
-    )
-    if (fd) {
-      fdRef.current = fd
-      syncMic() // if a turn is already active, the fresh mic starts muted
-      setListening(true)
-      setAwake(true)
-      armIdle()
-      return
-    }
-
-    // Fallback: Web Speech (half-duplex; mic muted while Kelion speaks).
-    const h = startContinuous(
-      speechLangRef.current,
-      (heard, conf) => onHeard(heard, conf),
-      (error) => {
-        if (error === 'not-allowed' || error === 'service-not-allowed') {
-          setMicError(t.micBlocked)
-          setListening(false)
-          setAwake(false)
-        } else if (error === 'audio-capture') {
-          setMicError(t.micNoDevice)
-          setListening(false)
-          setAwake(false)
-        }
-      },
-    )
-    contRef.current = h
-    if (h) {
-      syncMic() // start muted if a turn is already active
-      setListening(true)
-      setAwake(true)
-      armIdle()
-      // Only auto-detect the language from the mic when the user has no
-      // established/stored language yet — otherwise we'd clobber their choice.
-      if (!langPinnedRef.current) {
-        void detectLanguageFromMic().then((code) => {
-          if (code) changeSpeechLang(code)
-        })
-      }
-    } else {
-      setMicError(t.micUnsupported)
-    }
-  }
-  function stopVoice(): void {
-    fdRef.current?.stop()
-    fdRef.current = null
-    contRef.current?.stop()
-    contRef.current = null
-    setListening(false)
-    setAwake(false)
-    stopSpeaking()
-  }
-  function toggleVoice(): void {
-    if (listening) stopVoice()
-    else void startVoice()
-  }
-  // Switch the language Kelion hears + speaks; restart the recognizer live and
-  // persist the choice per user. No-op if it's already the active language.
+  // Adopt a newly confirmed language and persist the choice per user. No-op if
+  // it's already the active language.
   function changeSpeechLang(code: string): void {
     langPinnedRef.current = true // a language is now established — keep it
     if (code === speechLangRef.current) return
     speechLangRef.current = code
-    setSpeechLang(code) // updates Kelion's voice (TTS) language immediately
+    setSpeechLang(code)
     saveLang(code)
-    // Only the Web Speech fallback needs a restart to change recognition
-    // language; full-duplex (Chirp) auto-detects, so leave it running.
-    if (listeningRef.current && contRef.current && !fdRef.current) {
-      contRef.current.stop()
-      contRef.current = null
-      void startVoice()
-    }
   }
 
-  // Hands-free: auto-open the mic on load IF permission is already granted.
-  // The browser blocks mic access without a user gesture on the very first
-  // visit, so the 🎤 button stays for that one-time grant; after that, every
-  // visit starts listening automatically (no button needed) — per the spec.
-  useEffect(() => {
-    if (!speechSupported()) return
-    let cancelled = false
-    const perms = navigator.permissions
-    if (!perms?.query) return
-    void perms
-      .query({ name: 'microphone' as PermissionName })
-      .then((st) => {
-        if (cancelled) return
-        if (st.state === 'granted' && !listeningRef.current) void startVoice()
-        st.onchange = () => {
-          if (st.state === 'granted' && !listeningRef.current) void startVoice()
-        }
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-    // Mount-only auto-start; startVoice is stable for this purpose.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Clean up the mic + timers when the panel unmounts.
-  useEffect(() => {
-    return () => {
-      fdRef.current?.stop()
-      fdRef.current = null
-      contRef.current?.stop()
-      contRef.current = null
-      if (idleRef.current) globalThis.clearTimeout(idleRef.current)
-      stopSpeaking()
-    }
-  }, [])
-
-  // Connectivity recovery: after a turn failed offline, announce (spoken) that
-  // we're back the moment the browser regains a connection — so a driver knows
-  // they can talk again without looking. Each request is independent, so the
-  // next message just works.
+  // Connectivity recovery: after a turn failed offline, resume the moment the
+  // browser regains a connection. Each request is independent, so the next
+  // message just works.
   useEffect(() => {
     const onOnline = (): void => {
       if (!offlineRef.current) return
@@ -1147,26 +763,10 @@ export default function ChatPanel({
         // and re-send, so Kelion answers the message that got interrupted.
         setMessages((cur) => cur.slice(0, -2))
         window.setTimeout(() => void sendRef.current(retry), 400)
-      } else if (voiceOutRef.current) {
-        const lg = speechLangRef.current
-        enqueueSpeech(strings(resolveLang(lg)).backOnline, lg)
       }
     }
     window.addEventListener('online', onOnline)
     return () => window.removeEventListener('online', onOnline)
-  }, [])
-
-  // Half-duplex anti-echo: the mic is muted for the whole turn (thinking + talking)
-  // and reopens only when Kelion goes silent. Both channels obey one authority
-  // (syncMic); this callback fires when the speaking state flips.
-  useEffect(() => {
-    setOnSpeakingChange((speaking) => {
-      syncMic()
-      duckMedia(speaking) // dip background video volume while Kelion talks
-    })
-    return () => setOnSpeakingChange(null)
-    // syncMic reads refs only (stable) — safe to wire once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load the user's persisted speech language (localStorage instantly, then the
@@ -1278,12 +878,6 @@ export default function ChatPanel({
   function switchCamera(): void {
     setFacing((f) => (f === 'user' ? 'environment' : 'user'))
   }
-  function toggleVoiceOut(): void {
-    setVoiceOut((v) => {
-      if (v) stopSpeaking()
-      return !v
-    })
-  }
   function onCameraError(): void {
     setCameraOn(false)
   }
@@ -1297,11 +891,11 @@ export default function ChatPanel({
   const monitorBusy = useSyncExternalStore(subscribeWorkspace, isMonitorWorking)
   const monitorMode = wsOpen || monitorBusy
   // Show the CURRENT exchange in writing: the user's request (so he sees it
-  // arrived correctly the instant he speaks/types) AND Kelion's reply, which
-  // updates live as Kelion speaks — not audio-only, not just one sentence.
+  // arrived correctly the instant he types) AND Kelion's reply, which updates
+  // live as it streams — not just one sentence.
   const lastUser = messages.filter((m) => m.role === 'user').at(-1)
   const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1)
-  const hint = speechSupported() ? t.wakeHint : t.chatHint
+  const hint = t.chatHint
 
   return (
     <div className="chat">
@@ -1329,16 +923,6 @@ export default function ChatPanel({
             <img className="chat-image" src={chatImage} alt="Kelion generated" />
           )}
         </div>
-      )}
-      <MicMeter active={listening} label={t.hearingLabel} />
-      {voiceStatus !== 'online' && (
-        <p className="voice-recording">
-          ● {voiceStatus === 'buffering' ? 'Recording — no signal, saving your words' : 'Reconnected — sending what you said'}
-        </p>
-      )}
-      {micError && <p className="mic-error">{micError}</p>}
-      {audioLocked && (
-        <p className="audio-locked">🔊 Browserul a oprit sunetul după actualizare — atinge o dată oriunde și vocea revine singură.</p>
       )}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
       {isAdmin && scenarioOpen && (
@@ -1406,7 +990,7 @@ export default function ChatPanel({
           <div className="fn-wrap" ref={menuRef}>
             <button
               type="button"
-              className={`composer-icon ${menuOpen || awake ? 'live' : ''}`}
+              className={`composer-icon ${menuOpen ? 'live' : ''}`}
               onClick={() => setMenuOpen((o) => !o)}
               title={t.functionsTitle}
               aria-label={t.functionsTitle}
@@ -1420,11 +1004,6 @@ export default function ChatPanel({
                   <span className="ico">📎</span>
                   {t.attachTitle}
                 </button>
-                <button type="button" className="fn-item" onClick={toggleVoiceOut}>
-                  <span className="ico">{voiceOut ? '🔊' : '🔇'}</span>
-                  {t.voiceTitle}
-                  {voiceOut && <span className="dot" />}
-                </button>
                 {cameraSupported() && (
                   <button type="button" className="fn-item" onClick={toggleCamera}>
                     <span className="ico">{cameraOn ? '🔌' : '📷'}</span>
@@ -1433,10 +1012,8 @@ export default function ChatPanel({
                   </button>
                 )}
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
-                    his own (show_on_screen), and the camera is switched by voice or
-                    text command ("switch camera", "comută camera", "camera spate").
-                    Audio routing (incl. Bluetooth) follows the system default —
-                    automatic, no picker. */}
+                    his own (show_on_screen), and the camera is switched by text
+                    command ("switch camera", "comută camera", "camera spate"). */}
                 {isAdmin && (
                   <button
                     type="button"
@@ -1468,17 +1045,6 @@ export default function ChatPanel({
             }}
             placeholder={t.chatPlaceholder}
           />
-          {speechSupported() && (
-            <button
-              type="button"
-              className={`composer-icon ${listening ? 'live' : ''}`}
-              onClick={toggleVoice}
-              title={t.micTitle}
-              aria-label={t.micTitle}
-            >
-              {listening ? '●' : '🎤'}
-            </button>
-          )}
           <button
             type="button"
             className="composer-send"

@@ -1,10 +1,8 @@
 // Admin-only screen+audio recorder for promo clips (TikTok / Instagram /
 // Facebook). Captures the Kelion tab (avatar, monitor, chat) via getDisplayMedia
-// plus the tab/system audio (Kelion's voice) AND the mic (your narration), mixed
-// into one track, and saves an MP4 (the format those platforms accept) to the
-// Downloads folder. Falls back to WebM only if the browser can't record MP4.
-
-import { setVoiceTap } from './voice'
+// plus the tab/system audio AND the mic (your narration), mixed into one track,
+// and saves an MP4 (the format those platforms accept) to the Downloads folder.
+// Falls back to WebM only if the browser can't record MP4.
 
 export interface RecordingHandle {
   stop(): void
@@ -60,21 +58,12 @@ export async function startRecording(
   let mixedTrack: MediaStreamTrack | null = null
   const displayAudio = display.getAudioTracks()
   if (AC) {
-    // The mixer ALWAYS exists: tab/system audio (if shared) + the mic + a direct
-    // tap of Kelion's own voice (see setVoiceTap below) — so the clip has his
-    // voice even when "share tab audio" wasn't ticked in the picker.
+    // The mixer ALWAYS exists: tab/system audio (if shared) + the mic — one
+    // clean track regardless of what was ticked in the picker.
     ctx = new AC()
     const dest = ctx.createMediaStreamDestination()
     if (displayAudio.length > 0) ctx.createMediaStreamSource(new MediaStream(displayAudio)).connect(dest)
     if (mic) ctx.createMediaStreamSource(mic).connect(dest)
-    const mixCtx = ctx
-    setVoiceTap((s) => {
-      try {
-        mixCtx.createMediaStreamSource(s).connect(dest)
-      } catch {
-        /* a failed tap must never break the recording */
-      }
-    })
     mixedTrack = dest.stream.getAudioTracks()[0] ?? null
   }
 
@@ -102,7 +91,6 @@ export async function startRecording(
   }
 
   const cleanup = (): void => {
-    setVoiceTap(null) // stop feeding TTS clips into the (now gone) mixer
     display.getTracks().forEach((t) => t.stop())
     mic?.getTracks().forEach((t) => t.stop())
     void ctx?.close()

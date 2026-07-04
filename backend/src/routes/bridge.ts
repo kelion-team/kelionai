@@ -283,7 +283,7 @@ export function bridgeAsk(
   const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files }
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      waiters.delete(job.id)
+      forgetJob(job.id)
       resolve(null)
     }, timeoutMs)
     waiters.set(job.id, (text) => {
@@ -299,6 +299,18 @@ export function bridgeAsk(
 // forwards them straight into the open reply, so Kelion starts writing AND
 // speaking within ~2s instead of holding the whole answer for 10–30s.
 const chunkSinks = new Map<string, (text: string) => void>()
+
+// A turn that gave up (timeout / stall) must take its job WITH it. A dead job
+// left in `queue` was still served to the worker LATER — which then burned
+// minutes answering nobody while the admin's next real message waited behind
+// it (the "te-am scris de 10 ori" pile-up). Forgetting removes every trace.
+function forgetJob(id: string): void {
+  waiters.delete(id)
+  chunkSinks.delete(id)
+  inFlight.delete(id)
+  const i = queue.findIndex((j) => j.id === id)
+  if (i !== -1) queue.splice(i, 1)
+}
 
 // Sentinel: no first word arrived within firstTokenMs → the caller RE-ANALYZES
 // (Adrian's rule, 4 iul: a request never ends without a clear answer; at 30s
@@ -321,8 +333,7 @@ export function bridgeAskStream(
     const arm = (ms: number): void => {
       clearTimeout(timer)
       timer = setTimeout(() => {
-        waiters.delete(job.id)
-        chunkSinks.delete(job.id)
+        forgetJob(job.id)
         resolve(null)
       }, ms)
     }
@@ -332,8 +343,7 @@ export function bridgeAskStream(
     // Fires ONLY when nothing has streamed — a slow-but-flowing answer is left be.
     const firstTimer = setTimeout(() => {
       if (gotChunk) return
-      waiters.delete(job.id)
-      chunkSinks.delete(job.id)
+      forgetJob(job.id)
       clearTimeout(timer)
       resolve(BRIDGE_STALL)
     }, firstTokenMs)
