@@ -1242,9 +1242,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         const bridgePrompt = decision + ctxBlock + sharedBlock + langLock + journalBlock + convo
         // MEMORIA FIRULUI (urgența 2): pachetul turei — context proaspăt + DOAR
-        // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume):
-        // creierul ține minte firul real și răspunde mai repede (prompt mic).
-        const turnPacket = `${ctxBlock}${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
+        // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume).
+        // BUG REPARAT (Adrian, 4 iul seara): pachetul turei NU ducea Jurnalul
+        // live și caietul comun — creierul era ORB la ce face constructorul CHIAR
+        // ACUM și, împins de contextul „e legat", afirma lucruri pe care Adrian
+        // nu le vedea. Acum FIECARE tură primește starea vie: jurnal + caiet.
+        const turnPacket = `${ctxBlock}${sharedBlock}${journalBlock}${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
         reanalyzePrompt = bridgePrompt
         const maxTries = 4
         for (let attempt = 1; attempt <= maxTries; attempt++) {
