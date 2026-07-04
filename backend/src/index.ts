@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
 import cookie from '@fastify/cookie'
+import websocket from '@fastify/websocket'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
@@ -45,6 +46,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 await app.register(cookie)
+// CANALUL PERMANENT al punții (Adrian, 4 iul): minim 5 benzi WebSocket
+// full-duplex, mereu deschise, între server și creierul de pe Linux.
+await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
   credentials: true,
