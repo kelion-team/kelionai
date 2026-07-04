@@ -35,6 +35,15 @@ export interface ChatControl {
   // A readable text deliverable from an agent (email, translation, findings),
   // shown as a copyable panel on the monitor.
   doc?: { title: string; text: string }
+  // A device command the SERVER interpreted (camera / monitor tabs) — the
+  // regexes moved off the browser; the client just executes what this says.
+  device?: {
+    camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
+    screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
+  }
+  // The server committed a new speech language (detected + persisted there);
+  // the client applies it to the recognizer and mirrors it locally.
+  lang?: string
   // Out of credit — the client should open the top-up (buy credit) flow.
   paywall?: boolean
   // The server has received the message — the delivery check mark in the UI.

@@ -25,6 +25,7 @@ import {
   debitWallet,
   logCapabilityGap,
   getSpeechLang,
+  setSpeechLangPref,
   saveNote,
   listNotes,
   deleteNote,
@@ -34,7 +35,8 @@ import {
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
-import { checkLang, detectLang } from '../services/lang.js'
+import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
+import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
 import { geoLookupCached } from './demo.js'
 import {
   browserOpen,
@@ -655,7 +657,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // The user's ESTABLISHED language (what they actually use), not their Google
     // account locale — used for the language lock AND the out-of-credit message.
-    const speechPref = await getSpeechLang(user.email)
+    const storedPref = await getSpeechLang(user.email)
+
+    // DEVICE COMMANDS + SPEECH LANGUAGE — both interpreted on the SERVER now
+    // (moved out of the browser; owner's order: as much of the app as possible
+    // on the server). A device command is answered below with a {device} frame
+    // and no model call. A language switch is committed only after the SAME
+    // new language on two consecutive messages (a one-off mis-detection never
+    // flips the stored choice), persisted here, and announced to the client
+    // with a {lang} frame so the recognizer + voice follow.
+    const lastIncoming = messages.at(-1)
+    const lastIncomingText = lastIncoming?.role === 'user' ? lastIncoming.content : ''
+    const deviceCmd = interpretDeviceCommand(lastIncomingText, req.body?.screen)
+    const committedLang = deviceCmd
+      ? null // a device command is an order, not conversation — never shifts the language
+      : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
+    if (committedLang) await setSpeechLangPref(user.email, committedLang)
+    const speechPref = committedLang ?? storedPref
     const userLang = speechPref || user.locale || 'unknown'
     const ro = userLang.toLowerCase().startsWith('ro')
 
@@ -676,6 +694,33 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           : "You've run out of credit. Please top up to keep talking with me.",
       )
       reply.raw.write(`${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`)
+      reply.raw.end()
+      return
+    }
+
+    // A device command (camera / monitor tabs): answer instantly — {device}
+    // control frame the client executes verbatim, plus a short ack — with NO
+    // model call. Same stream shape as a normal turn ({turn} receipt first) so
+    // the delivery check mark and the resume path still work.
+    if (deviceCmd) {
+      reply.hijack()
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      })
+      const cmdTurnId = randomUUID()
+      startTurn(cmdTurnId)
+      const ack = deviceAck(deviceCmd, ro)
+      const payload =
+        `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
+        `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
+        ack
+      appendTurn(cmdTurnId, payload)
+      finishTurn(cmdTurnId)
+      reply.raw.write(payload)
+      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
+      if (ack) void saveMessage(user.email, 'assistant', ack)
       reply.raw.end()
       return
     }
@@ -859,6 +904,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }) as typeof reply.raw.end
     // Announce the turn id FIRST so the client can resume from the very start.
     reply.raw.write(`${CTRL}${JSON.stringify({ turn: turnId })}${CTRL}`)
+    // A language switch committed server-side this turn: tell the client so
+    // the recognizer + local mirror follow (the pref is already persisted).
+    if (committedLang) reply.raw.write(`${CTRL}${JSON.stringify({ lang: committedLang })}${CTRL}`)
 
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)

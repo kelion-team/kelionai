@@ -53,6 +53,18 @@ _Last updated: 2026-06-30_
   `gen-lang-client-0460348646`, and the user must **re-login** to grant the new
   scopes (consent screen for Calendar + Gmail).
 
+## 📦 In repo, nedeployat (4 iul 2026 — ordinul „cât mai mult pe server")
+
+- **Comenzile de dispozitiv s-au mutat pe server** — camera („camera spate",
+  „închide camera") și taburile monitorului („închide harta", „treci la video")
+  se interpretează acum în backend (`services/commands.ts`, rulat de `/api/chat`
+  înaintea creierului; răspuns instant cu un cadru `{device}`, fără apel de
+  model). Clientul doar execută cadrul.
+- **Limba vorbită s-a mutat pe server** — detecția (stopwords + alfabete
+  non-latine în `services/lang.ts`) + regula „de două ori la rând" + persistarea
+  rulează în `/api/chat`; clientul primește un cadru `{lang}` și doar comută
+  recognizer-ul + oglinda locală. `franc-min` nu se mai folosește în frontend.
+
 ## 🚧 Next
 
 - Skill result **cards** (MapCard, EmailList, CalendarView…) — replace raw text.

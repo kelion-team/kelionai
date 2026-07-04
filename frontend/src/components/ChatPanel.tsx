@@ -11,8 +11,8 @@ import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../
 import { strings, resolveLang, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { cameraSupported, type Facing } from '../lib/camera'
-import { defaultSpeechLang, detectLangFromText } from '../lib/languages'
-import { loadLocalLang, loadServerLang, saveLang } from '../lib/prefs'
+import { defaultSpeechLang } from '../lib/languages'
+import { loadLocalLang, loadServerLang, mirrorLang } from '../lib/prefs'
 import {
   openWorkspace,
   openWorkspaceCard,
@@ -31,22 +31,11 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 // ~15s; a full landing demo can use the whole window).
 const SCENARIO_MAX_MS = 60_000
 
-// "Close the monitor" — a map/route/video stays open across turns (multi-tasking),
-// so closing it must be instant and language-agnostic, never dependent on the
-// model calling a tool. The ✕ on the monitor is the universal fallback; this
-// catches the spoken/typed command in the languages the user actually uses.
-// NB: Unicode lookbehind, not \b — JS \b is ASCII-only and never matches before
-// "î", so the spoken "închide" (real diacritics from Chirp STT) was dead.
-const CLOSE_VERB =
-  /(?<![\p{L}\p{N}])(închide|inchide|închid|ascunde|opre[șs]t[eiî]|close|hide|dismiss|cierra|cerrar|ferme|fermer|schlie[sß]|закро)\w*/iu
-const SCREEN_NOUN =
-  /\b(harta|hart[ăa]|ecran\w*|monitor\w*|map|screen|video|imagin\w*|image|fereastr\w*|window|pagin\w*|page|asta|aceasta|acesta|it|that|tot)\b/i
-// "Switch to <task>" — jump between already-open monitor tabs (map ⇄ youtube ⇄
-// weather…) with one voice. Narrow verbs only, so "arată-mi harta Romei" (new
-// content) still reaches Kelion; a bare switch just changes the active surface.
-const SWITCH_VERB =
-  /(?<![\p{L}\p{N}])(comut[ăa]?|treci|revino|switch|schimb[ăa]\s+la|mergi\s+la|back\s+to|înapoi\s+la|inapoi\s+la)(?![\p{L}])/iu
-const CLOSE_ALL = /\b(tot|totul|toate|everything|all)\b/i
+// Camera + monitor-tab commands ("închide harta", "camera spate", "switch to
+// the video") are interpreted on the SERVER now (backend services/commands.ts,
+// owner's order: as much of the app as possible on the server). The server
+// answers them with a {device} control frame that handleControl executes; the
+// ✕ on the monitor stays as the universal manual fallback.
 // Admin typed control for the promo recorder. START arms the Rec button (the
 // browser REQUIRES one real click to pick the screen); STOP ends the take.
 // Kelion confirms both in chat.
@@ -61,19 +50,6 @@ const TAKE_STOP = /\b(stop|stai|opre[șs]te|opreste|t[ăa]iem|taie)\b/i
 // "Reluăm" — redo the SAME approved take without re-asking for the script.
 const RETAKE =
   /(relu[ăa]m\b|retake|reia (dubla|clipul|[îi]nregistrarea)|înc[ăa] o dubl[ăa]|inca o dubla|din nou (dubla|clipul))/i
-// Map words the user says to a monitor task kind (the tab to switch/close).
-function taskKindFromText(msg: string): string | null {
-  if (/\b(hart[ăa]|harta|map|rut[ăa]|ruta|traseu\w*|route|directions|navigat\w*)\b/i.test(msg))
-    return 'map'
-  if (/\b(youtube|video\w*|clip\w*|film\w*|melodi\w*|pies[ăa]|muzic\w*|song)\b/i.test(msg))
-    return 'youtube'
-  if (/\b(meteo|vreme\w*|vremea|weather|windy)\b/i.test(msg)) return 'weather'
-  if (/\b(imagin\w*|poz[ăa]\w*|poza|image|picture)\b/i.test(msg)) return 'image'
-  if (/\b(pagin\w*|pagina|site\w*|web|articol\w*|page)\b/i.test(msg)) return 'web'
-  if (/\b(document\w*|documentul|text\w*|textul|email\w*|emailul|scrisoare\w*|nota|notă)\b/i.test(msg))
-    return 'doc'
-  return null
-}
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -162,15 +138,6 @@ export default function ChatPanel({
   cameraOnRef.current = cameraOn
   const speechLangRef = useRef(speechLang)
   speechLangRef.current = speechLang
-  // Once the user has an established language (stored pref, or one actively
-  // detected/chosen), auto-detection must NOT override it — the spec requires
-  // the detected language to persist, not flip every load.
-  const langPinnedRef = useRef(false)
-  // A language switch is committed/persisted only after the SAME new language is
-  // seen on two messages in a row — franc mis-reads diacritic-less Romanian as
-  // Spanish/Italian, so a one-off detection must never flip the remembered choice.
-  const pendingLangRef = useRef<string | null>(null)
-  const pendingCountRef = useRef(0)
 
   // Kelion drives the monitor himself (no manual button): a control frame from
   // the stream opens/clears the workspace surface behind the avatar.
@@ -178,6 +145,32 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     if (c.receipt) {
       setDelivered(true)
+      return
+    }
+    // A SERVER-interpreted device command (the camera/monitor regexes moved off
+    // the browser): just execute it. Any spoken ack arrives as normal text.
+    if (c.device) {
+      const cam = c.device.camera
+      if (cam === 'off') setCameraOn(false)
+      else if (cam === 'back') {
+        setFacing('environment')
+        setCameraOn(true)
+      } else if (cam === 'front') {
+        setFacing('user')
+        setCameraOn(true)
+      } else if (cam === 'switch') switchCamera()
+      else if (cam === 'on') setCameraOn(true)
+      const scr = c.device.screen
+      if (scr?.op === 'closeAll') closeAllTasks()
+      else if (scr?.op === 'close') closeWorkspace()
+      else if (scr?.op === 'closeKind' && scr.kind) closeTasksByKind(scr.kind)
+      else if (scr?.op === 'switchKind' && scr.kind) switchToKind(scr.kind)
+      return
+    }
+    // The server committed a speech-language switch (detected + persisted
+    // there): apply it to the recognizer and mirror it locally.
+    if (c.lang) {
+      applyLang(c.lang)
       return
     }
     if (c.paywall) {
@@ -340,43 +333,6 @@ export default function ChatPanel({
     return () => window.clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDemo])
-
-  // Camera is controlled by voice/text command (no switch button). Returns true
-  // when the message was a camera command and was handled locally (not sent to
-  // Claude). Requires both the word "camera" and an action verb so normal
-  // questions like "ce vezi pe cameră?" still reach Claude.
-  function tryCameraCommand(msg: string): boolean {
-    const m = msg.toLowerCase()
-    if (!/\bcamer/.test(m) && !/\bwebcam/.test(m)) return false
-    if (/\b(închide|inchide|opre[sșț]te|opreste|stinge|dezactiv|close|turn off|disconnect)\b/.test(m)) {
-      setCameraOn(false)
-      ack(t.camOffMsg)
-      return true
-    }
-    if (/\b(spate|exterior|back|rear|environment)\b/.test(m)) {
-      setFacing('environment')
-      setCameraOn(true)
-      ack(t.camBackMsg)
-      return true
-    }
-    if (/\b(fa[țt][ăa]|frontal|front|selfie|user)\b/.test(m)) {
-      setFacing('user')
-      setCameraOn(true)
-      ack(t.camFrontMsg)
-      return true
-    }
-    if (/\b(comut|schimb|switch|flip|toggle|întoarce|intoarce)\b/.test(m)) {
-      switchCamera()
-      ack(t.camSwitchMsg)
-      return true
-    }
-    if (/\b(deschide|porne[sș]te|porneste|activ|open|turn on|connect|start)\b/.test(m)) {
-      setCameraOn(true)
-      ack(t.camOnMsg)
-      return true
-    }
-    return false
-  }
 
   // ── File attachment (ChatGPT-style) ──
   function openFilePicker(): void {
@@ -581,42 +537,9 @@ export default function ChatPanel({
         return
       }
     }
-    // Local camera commands (typed) — handled without a round-trip.
-    if (msg && tryCameraCommand(msg)) {
-      setInput('')
-      return
-    }
-    // Local monitor commands — instant, no round-trip, so switching/closing tasks
-    // always obeys the moment the user asks, in any language, with one voice.
-    if (msg && getWorkspace().open) {
-      // "switch to <task>" — jump to an already-open tab (map ⇄ youtube ⇄ …).
-      // If that task isn't open, fall through so Kelion can open it.
-      if (SWITCH_VERB.test(msg)) {
-        const kind = taskKindFromText(msg)
-        if (kind && switchToKind(kind)) {
-          setInput('')
-          return
-        }
-      }
-      // "close <task>" / "close everything" / bare "close" (the active task).
-      if (CLOSE_VERB.test(msg)) {
-        if (CLOSE_ALL.test(msg)) {
-          closeAllTasks()
-          setInput('')
-          return
-        }
-        const kind = taskKindFromText(msg)
-        if (kind && closeTasksByKind(kind)) {
-          setInput('')
-          return
-        }
-        if (SCREEN_NOUN.test(msg) || msg.split(/\s+/).length <= 4) {
-          closeWorkspace()
-          setInput('')
-          return
-        }
-      }
-    }
+    // Camera + monitor commands are interpreted by the SERVER (it sees the open
+    // tabs on every turn and answers instantly with a {device} frame, no model
+    // call) — nothing to intercept here anymore.
     if (busyRef.current || inFlightRef.current) {
       // A turn is already streaming (it can take minutes). NEVER drop the text
       // silently — queue it; the finally block sends everything queued as the
@@ -635,31 +558,8 @@ export default function ChatPanel({
     // open while you keep chatting — it's only replaced when Kelion shows
     // something new, or closed when you (or Kelion) close it. So the map keeps
     // running in parallel with the conversation until you say to close it.
-    // The user's ESTABLISHED language (stable) — never a single message's guess,
-    // because franc mis-reads diacritic-less Romanian as Spanish/Italian. A
-    // switch is committed + persisted only after the SAME new base language is
-    // seen on TWO messages in a row: that corrects a stale/wrong stored language
-    // without ever flipping on a one-off mis-detection.
-    const seedLang = detectLangFromText(msg)
-    if (seedLang) {
-      langPinnedRef.current = true
-      const base = (c: string): string => c.toLowerCase().split('-')[0]
-      if (base(seedLang) !== base(speechLangRef.current)) {
-        if (pendingLangRef.current && base(pendingLangRef.current) === base(seedLang)) {
-          if (++pendingCountRef.current >= 2) {
-            changeSpeechLang(seedLang) // confirmed twice → adopt + persist
-            pendingLangRef.current = null
-            pendingCountRef.current = 0
-          }
-        } else {
-          pendingLangRef.current = seedLang
-          pendingCountRef.current = 1
-        }
-      } else {
-        pendingLangRef.current = null // matches the current language — no switch
-        pendingCountRef.current = 0
-      }
-    }
+    // The user's ESTABLISHED language. Detection + the two-in-a-row commit rule
+    // run on the SERVER now; a committed switch comes back as a {lang} frame.
     const replyLang = speechLangRef.current
     // An attached image takes priority over the live camera frame for this turn.
     const attached = atts.find((a) => a.url.startsWith('data:image'))?.url
@@ -739,14 +639,13 @@ export default function ChatPanel({
   const sendRef = useRef(send)
   sendRef.current = send
 
-  // Adopt a newly confirmed language and persist the choice per user. No-op if
-  // it's already the active language.
-  function changeSpeechLang(code: string): void {
-    langPinnedRef.current = true // a language is now established — keep it
+  // Apply a language the SERVER decided (it already persisted the pref) —
+  // update the recognizer + the local mirror. No-op if already active.
+  function applyLang(code: string): void {
     if (code === speechLangRef.current) return
     speechLangRef.current = code
     setSpeechLang(code)
-    saveLang(code)
+    mirrorLang(code)
   }
 
   // Connectivity recovery: after a turn failed offline, resume the moment the
@@ -778,9 +677,7 @@ export default function ChatPanel({
   useEffect(() => {
     if (isDemo) return
     const apply = (code: string | null): void => {
-      if (!code) return
-      langPinnedRef.current = true // an established preference — don't auto-override
-      if (code === speechLangRef.current) return
+      if (!code || code === speechLangRef.current) return
       speechLangRef.current = code
       setSpeechLang(code)
     }
@@ -790,7 +687,7 @@ export default function ChatPanel({
       apply(serverCode)
       // Server is the cross-device source of truth: if the local mirror is stale
       // (e.g. left over from an earlier mis-detection), correct it.
-      if (serverCode && serverCode !== local) saveLang(serverCode)
+      if (serverCode && serverCode !== local) mirrorLang(serverCode)
     })
   }, [isDemo])
 
