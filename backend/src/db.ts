@@ -185,7 +185,218 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_shared_mem ON shared_memory (created_at DESC);
+    -- Installer downloads from OUR site (/dl/*.exe|.apk) — the verifiable
+    -- download log: WHO (email when signed in, else IP + country), WHAT, WHEN.
+    -- Store installs are aggregate-only via the stores' own APIs; no store ever
+    -- exposes downloader identities.
+    CREATE TABLE IF NOT EXISTS app_downloads (
+      id BIGSERIAL PRIMARY KEY,
+      file TEXT NOT NULL,
+      user_email TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      ua TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_downloads_file ON app_downloads (file, created_at DESC);
+    -- App installers stored for delivery (master lives on the Linux server; the
+    -- builder uploads the freshest bytes here so the QR always serves latest).
+    CREATE TABLE IF NOT EXISTS app_files (
+      name TEXT PRIMARY KEY,
+      content BYTEA NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
+    -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
+    -- silently vanished). Persisted = an order can never be lost again, and the
+    -- admin can SEE the whole queue + its history in the panel.
+    CREATE TABLE IF NOT EXISTS work_orders (
+      id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      delivered_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_workorders ON work_orders (status, created_at DESC);
+    -- STAGED RELEASES (the approval gate) — persisted for the same reason: a
+    -- pending release must survive a backend restart, or the owner approves
+    -- into thin air.
+    CREATE TABLE IF NOT EXISTS staged_releases (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_releases ON staged_releases (status, at DESC);
+    -- Tiny key-value state that must survive restarts (e.g. the bridge worker's
+    -- last-seen beat — a deploy must never blink the Bridge light).
+    CREATE TABLE IF NOT EXISTS kv_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `)
+}
+
+// ── Work orders (persistent builder queue) ──────────────────────────────────
+
+export interface WorkOrderRow {
+  id: string
+  text: string
+  status: string
+  created_at: string
+  delivered_at: string | null
+}
+
+export async function saveWorkOrder(id: string, text: string): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query('INSERT INTO work_orders (id, text) VALUES ($1,$2)', [id, text])
+}
+
+/** Atomic pull: pending → delivered, returned once — but never deleted. */
+export async function pullPendingWorkOrders(): Promise<WorkOrderRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<WorkOrderRow>(
+    `UPDATE work_orders SET status='delivered', delivered_at=now()
+     WHERE status='pending' RETURNING id, text, status, created_at, delivered_at`,
+  )
+  return r.rows
+}
+
+export async function listWorkOrders(n = 50): Promise<WorkOrderRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<WorkOrderRow>(
+    'SELECT id, text, status, created_at, delivered_at FROM work_orders ORDER BY created_at DESC LIMIT $1',
+    [n],
+  )
+  return r.rows
+}
+
+// ── Staged releases (persistent approval gate) ──────────────────────────────
+
+export interface StagedReleaseRow {
+  id: string
+  title: string
+  detail: string
+  status: string
+  at: string
+}
+
+export async function saveStagedRelease(id: string, title: string, detail: string): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query('INSERT INTO staged_releases (id, title, detail) VALUES ($1,$2,$3)', [
+    id,
+    title,
+    detail,
+  ])
+}
+
+export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool().query<StagedReleaseRow>(
+    'SELECT id, title, detail, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
+    [n],
+  )
+  return r.rows
+}
+
+export async function setReleaseStatus(id: string, status: string): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query('UPDATE staged_releases SET status=$2 WHERE id=$1', [id, status])
+}
+
+// ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
+// (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
+
+export async function saveKv(key: string, value: string): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query(
+    `INSERT INTO kv_state (key, value, updated_at) VALUES ($1,$2,now())
+     ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`,
+    [key, value],
+  )
+}
+
+export async function loadKv(key: string): Promise<string | null> {
+  if (!dbEnabled()) return null
+  const r = await getPool().query<{ value: string }>('SELECT value FROM kv_state WHERE key=$1', [
+    key,
+  ])
+  return r.rows[0]?.value ?? null
+}
+
+// ── App installers: MASTER on the Linux server, DELIVERED here ──────────────
+// The Linux builder pushes the freshest .exe/.apk into this table; /dl/<file>
+// serves it (no-store, over HTTPS+Cloudflare). Survives redeploys → the QR
+// codes ALWAYS hand out the latest version, and a new build needs NO app
+// redeploy — just an upload from the server.
+const appFileCache = new Map<string, { buf: Buffer; type: string }>()
+
+export async function initAppFiles(): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    const r = await getPool().query<{ name: string; content: Buffer; content_type: string }>(
+      'SELECT name, content, content_type FROM app_files',
+    )
+    for (const row of r.rows) appFileCache.set(row.name, { buf: row.content, type: row.content_type })
+  } catch {
+    /* table may not exist yet on first boot — created by initDb */
+  }
+}
+
+export function getAppFile(name: string): { buf: Buffer; type: string } | null {
+  return appFileCache.get(name) ?? null
+}
+
+export async function putAppFile(name: string, buf: Buffer, type: string): Promise<void> {
+  appFileCache.set(name, { buf, type }) // serve immediately, even before DB ack
+  if (!dbEnabled()) return
+  await getPool().query(
+    `INSERT INTO app_files (name, content, content_type, updated_at) VALUES ($1,$2,$3,now())
+     ON CONFLICT (name) DO UPDATE SET content=$2, content_type=$3, updated_at=now()`,
+    [name, buf, type],
+  )
+}
+
+// ── Installer download log (who downloaded what, from our own /dl) ─────────
+
+export async function recordDownload(
+  file: string,
+  email: string,
+  ip: string,
+  country: string,
+  ua: string,
+): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query(
+    'INSERT INTO app_downloads (file, user_email, ip, country, ua) VALUES ($1,$2,$3,$4,$5)',
+    [file, email, ip, country, ua.slice(0, 300)],
+  )
+}
+
+export interface DownloadRow {
+  file: string
+  user_email: string
+  ip: string
+  country: string
+  created_at: string
+}
+
+export async function getDownloadStats(): Promise<{
+  counts: { file: string; total: number }[]
+  recent: DownloadRow[]
+}> {
+  if (!dbEnabled()) return { counts: [], recent: [] }
+  const counts = await getPool().query<{ file: string; total: number }>(
+    'SELECT file, COUNT(*)::int AS total FROM app_downloads GROUP BY file',
+  )
+  const recent = await getPool().query<DownloadRow>(
+    `SELECT file, user_email, ip, country, created_at
+     FROM app_downloads ORDER BY created_at DESC LIMIT 100`,
+  )
+  return { counts: counts.rows, recent: recent.rows }
 }
 
 // ── Shared memory: the common notebook both Claudes read + write ──

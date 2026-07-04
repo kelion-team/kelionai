@@ -8,6 +8,15 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
 import { greetOnHover } from '../lib/voice'
 
+// The four install codes — one per platform. Click → enlarged for scanning.
+const QR_CODES = [
+  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png' },
+  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png' },
+  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png' },
+  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png' },
+] as const
+type QrCode = (typeof QR_CODES)[number]
+
 const ERR_KEY: Record<string, keyof ReturnType<typeof strings>> = {
   closed: 'errClosed',
   bad_state: 'errBadState',
@@ -27,6 +36,7 @@ export default function Landing({ error }: { error?: string | null }) {
   const t = strings('en')
   const [busy, setBusy] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
+  const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
   const [notice, setNotice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
@@ -148,35 +158,23 @@ export default function Landing({ error }: { error?: string | null }) {
             </ul>
           </div>
 
-          {/* One tidy download section, four DISTINCT platforms, no duplicates.
-              Desktop (Windows, Linux) as click-to-install; mobile (iOS, Android)
-              as scan codes. Every target is a stable URL that always serves the
-              latest build. */}
-          <div className="landing-download">
-            <div className="dl-desktop">
-              <a className="dl-tile" href="/dl/Kelionai-Setup.exe" download>
-                <span className="dl-ico">⊞</span>
-                <span className="dl-name">Windows</span>
-                <span className="dl-sub">Download .exe</span>
-              </a>
-              <a className="dl-tile" href="https://kelionai.app" target="_blank" rel="noreferrer">
-                <span className="dl-ico">🐧</span>
-                <span className="dl-name">Linux</span>
-                <span className="dl-sub">Open web app</span>
-              </a>
-            </div>
-            <div className="landing-qr">
-              <span className="landing-qr-hint">Or scan to install on your phone or tablet</span>
-              <div className="landing-qr-row">
-                <figure>
-                  <img src="/dl/qr-ios.png" alt="QR — iOS" width="96" height="96" />
-                  <figcaption> iOS</figcaption>
+          {/* Four platforms, four scan codes — the ONLY download UI. Clicking a
+              code opens it LARGE so any phone can scan it comfortably. Every
+              target always serves the LATEST version: the store apps are thin
+              live shells over kelionai.app, /dl/* is served no-store, and the
+              .exe self-updates. Store targets get swapped in the moment a
+              listing goes public (MS Store, Play, App Store). */}
+          <div className="landing-qr">
+            <span className="landing-qr-hint">Scan to install — click a code to enlarge it</span>
+            <div className="landing-qr-row">
+              {QR_CODES.map((q) => (
+                <figure key={q.key}>
+                  <button type="button" className="qr-btn" onClick={() => setQrZoom(q)}>
+                    <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
+                  </button>
+                  <figcaption>{q.label}</figcaption>
                 </figure>
-                <figure>
-                  <img src="/dl/qr-apk.png" alt="QR — Android" width="96" height="96" />
-                  <figcaption>🤖 Android</figcaption>
-                </figure>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -191,6 +189,25 @@ export default function Landing({ error }: { error?: string | null }) {
         </div>
       </div>
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
+      {qrZoom && (
+        <div
+          className="qr-zoom-overlay"
+          role="button"
+          tabIndex={0}
+          onClick={() => setQrZoom(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' || e.key === 'Enter') setQrZoom(null)
+          }}
+        >
+          <figure className="qr-zoom">
+            <img src={qrZoom.img} alt={`QR — ${qrZoom.label}`} />
+            <figcaption>
+              {qrZoom.label}
+              <span className="qr-zoom-hint">Scan with your phone — tap anywhere to close</span>
+            </figcaption>
+          </figure>
+        </div>
+      )}
     </div>
   )
 }

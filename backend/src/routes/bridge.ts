@@ -2,7 +2,21 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { saveMessage, getRecentHistory, getSharedMemory, appendSharedMemory } from '../db.js'
+import {
+  saveMessage,
+  getRecentHistory,
+  getSharedMemory,
+  appendSharedMemory,
+  saveWorkOrder,
+  pullPendingWorkOrders,
+  listWorkOrders,
+  saveStagedRelease,
+  listStagedReleases,
+  setReleaseStatus,
+  saveKv,
+  loadKv,
+  putAppFile,
+} from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
 // (subscription) instead of the paid API. Flow: the chat route enqueues the
@@ -35,6 +49,22 @@ const queue: PendingJob[] = []
 const waiters = new Map<string, (text: string | null) => void>()
 let pullWaiter: ((job: PendingJob | null) => void) | null = null
 let lastWorkerSeen = 0
+// The beat SURVIVES restarts: persisted (throttled) to Postgres and restored at
+// boot — so a deploy never blinks the Bridge light while the worker is alive.
+let lastBeatSaved = 0
+function workerBeat(): void {
+  lastWorkerSeen = Date.now()
+  if (Date.now() - lastBeatSaved > 15_000) {
+    lastBeatSaved = Date.now()
+    void saveKv('last_worker_seen', String(lastWorkerSeen)).catch(() => {})
+  }
+}
+void loadKv('last_worker_seen')
+  .then((v) => {
+    const t = Number(v)
+    if (Number.isFinite(t) && t > lastWorkerSeen) lastWorkerSeen = t
+  })
+  .catch(() => {})
 
 // AUTO-WAKE: the moment the app sees an ADMIN user it fires a wake request here.
 // A tiny always-running laptop agent polls wakePending() and, when true, launches
@@ -51,6 +81,33 @@ export function wakePending(): boolean {
 // carries a short "activity" line (which file, build, deploy…) so the owner can
 // watch the work steps live on the monitor.
 let lastDevBeat = 0
+// Real Linux server load, posted by the VPS paznic every ~2s.
+let srvLoad = ''
+let srvLoadAt = 0
+// Real numeric telemetry (0–100) for the LIVE bar graphs on Adrian's monitor.
+// These are measured on the VPS (paznic) — never invented on the client.
+let srvCpu = 0
+let srvMem = 0
+let srvDisk = 0
+
+// ── OK → DEPLOY (Adrian, 4 iul): NO approval tab. A finished fix is "ready";
+// Adrian just replies "ok" in chat and the server publishes it immediately.
+// The builder sets `readyDeploy` when a fix built clean; an "ok" in chat sets
+// `deployWanted`; the server deployer polls, runs railway up, marks done.
+let readyDeploy: { branch: string; summary: string; at: number } | null = null
+let deployWanted: { branch: string; summary: string } | null = null
+export function getReadyDeploy(): { branch: string; summary: string } | null {
+  return readyDeploy ? { branch: readyDeploy.branch, summary: readyDeploy.summary } : null
+}
+// Called from chat.ts when Adrian says "ok/da/publică…" and a fix is ready.
+export function triggerDeploy(): { summary: string } | null {
+  if (!readyDeploy) return null
+  deployWanted = { branch: readyDeploy.branch, summary: readyDeploy.summary }
+  const s = readyDeploy.summary
+  readyDeploy = null
+  noteBrainActivity('🚀 Public pe producție — pornesc deploy-ul')
+  return { summary: s }
+}
 let devActivity: string[] = []
 // When two senders beat at once (the rich live work feed from the laptop and a
 // bare generic presence beat), the LAST write used to win and the monitor
@@ -100,6 +157,7 @@ function logDevLines(lines: string[]): void {
 // release here — it never publishes on its own. The owner reviews it in the
 // admin "Releases" tab and approves; only then does the builder deploy it. This
 // is the human-in-the-loop gate that keeps autonomous building SAFE.
+// PERSISTED IN POSTGRES: a pending release must survive backend restarts.
 export interface StagedRelease {
   id: string
   title: string
@@ -107,19 +165,11 @@ export interface StagedRelease {
   status: 'pending' | 'approved' | 'rejected' | 'deployed'
   at: string
 }
-const releases: StagedRelease[] = []
 
 export function stageRelease(title: string, detail: string): string {
-  const r: StagedRelease = {
-    id: randomUUID(),
-    title: title.slice(0, 200),
-    detail: detail.slice(0, 12000),
-    status: 'pending',
-    at: new Date().toISOString(),
-  }
-  releases.unshift(r)
-  if (releases.length > 50) releases.length = 50
-  return r.id
+  const id = randomUUID()
+  void saveStagedRelease(id, title.slice(0, 200), detail.slice(0, 12000)).catch(() => {})
+  return id
 }
 
 function dispatch(job: PendingJob): void {
@@ -165,6 +215,44 @@ export function bridgeAsk(
   })
 }
 
+// ── STREAMING bridge (viteza sunetului, Adrian 4 iul) ───────────────────────
+// The worker posts text CHUNKS as the model writes them; the chat route
+// forwards them straight into the open reply, so Kelion starts writing AND
+// speaking within ~2s instead of holding the whole answer for 10–30s.
+const chunkSinks = new Map<string, (text: string) => void>()
+
+export function bridgeAskStream(
+  prompt: string,
+  files: BridgeFile[] = [],
+  onChunk: (text: string) => void,
+  timeoutMs = 240_000,
+): Promise<string | null> {
+  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files }
+  return new Promise((resolve) => {
+    // Stall guard: chunks reset it — a stream that keeps flowing never dies.
+    let timer: ReturnType<typeof setTimeout>
+    const arm = (ms: number): void => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        waiters.delete(job.id)
+        chunkSinks.delete(job.id)
+        resolve(null)
+      }, ms)
+    }
+    arm(timeoutMs)
+    chunkSinks.set(job.id, (text) => {
+      arm(90_000) // flowing — allow generous continuation windows
+      onChunk(text)
+    })
+    waiters.set(job.id, (text) => {
+      clearTimeout(timer)
+      chunkSinks.delete(job.id)
+      resolve(text)
+    })
+    dispatch(job)
+  })
+}
+
 // WORK ORDERS for laptop-Claude (the builder): build/fix/change tasks decided
 // by the chat brain (or escalated from the admin panel) land here; the laptop
 // session polls them (secret-protected), executes, and reports back in chat +
@@ -174,24 +262,37 @@ export interface WorkOrder {
   text: string
   at: string
 }
-const workOrders: WorkOrder[] = []
 
+// PERSISTED IN POSTGRES: the old in-memory queue was wiped by every deploy —
+// the admin's "am trimis la execuție" orders vanished into thin air. Never
+// again: an order survives any restart and stays visible (with its status) in
+// the admin panel even after the builder picked it up.
 export function bridgeRepair(description: string): string | null {
-  const order: WorkOrder = {
-    id: randomUUID(),
-    text: description.slice(0, 4000),
-    at: new Date().toISOString(),
-  }
-  workOrders.push(order)
-  if (workOrders.length > 100) workOrders.splice(0, workOrders.length - 100)
+  const id = randomUUID()
+  const text = description.slice(0, 4000)
+  void saveWorkOrder(id, text).catch(() => {})
   // OBLIGATORY monitor display: the moment a repair/dev task is created it shows
-  // on the monitor by itself — the owner SEES the work, no click, no waiting.
-  const line = `[${new Date().toISOString().slice(11, 16)}] În execuție: ${order.text.slice(0, 140)}`
+  // on the monitor by itself. Adrian's rule (4 iul): his RAW message never
+  // appears in the bar — the full text lives in the Admin order registry; the
+  // bar only announces that an order entered execution.
+  const line = `[${new Date().toISOString().slice(11, 16)}] Ordin nou primit — intrat în execuție (textul complet: Admin → Jurnal)`
   devActivity = [...devActivity, line].slice(-40)
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
   logDevLines([line])
-  return order.id
+  return id
+}
+
+// LIVE brain activity → the monitor console. Every real action the Linux brain
+// takes in chat (shows weather/a page, generates an image, answers) pushes a
+// human line here, so Adrian SEES on the monitor exactly what the brain is
+// doing right now — not a fake laptop ticker.
+export function noteBrainActivity(line: string): void {
+  const stamped = `[${new Date().toISOString().slice(11, 16)}] ${line.slice(0, 160)}`
+  devActivity = [...devActivity, stamped].slice(-40)
+  lastRichFeed = Date.now()
+  lastDevBeat = Date.now()
+  logDevLines([stamped])
 }
 
 function authed(req: FastifyRequest): boolean {
@@ -248,10 +349,97 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Laptop-Claude picks up its WORK ORDERS here (secret-protected, delivered
-  // once): the build/fix tasks the chat decided are for the builder.
+  // once): the build/fix tasks the chat decided are for the builder. Pulling
+  // marks them 'delivered' in Postgres — never deletes, so the admin can always
+  // SEE what was sent and when it was picked up.
   app.get('/api/bridge/workorders', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    return { orders: workOrders.splice(0, workOrders.length) }
+    const rows = await pullPendingWorkOrders()
+    return { orders: rows.map((r) => ({ id: r.id, text: r.text, at: r.created_at })) }
+  })
+
+  // Enqueue a work order directly (secret) — lets the builder or a tool requeue
+  // a task (e.g. one lost before the queue became persistent).
+  app.post<{ Body: { text?: string } }>('/api/bridge/workorders', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
+    if (!text) return reply.code(400).send({ error: 'bad_request' })
+    return { ok: true, id: bridgeRepair(text) }
+  })
+
+  // A parallel builder AGENT → its live step, shown on Adrian's monitor console
+  // (each agent announces itself so he SEES all of them working at once).
+  app.post<{ Body: { line?: string } }>('/api/bridge/activity', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const line = typeof req.body?.line === 'string' ? req.body.line.trim() : ''
+    if (line) noteBrainActivity(line)
+    return { ok: true }
+  })
+
+  // Builder → a fix is BUILT and READY (branch pushed). Kelion tells Adrian in
+  // chat "gata, zi ok"; Adrian's "ok" then deploys it. No approval tab.
+  app.post<{ Body: { branch?: string; summary?: string } }>(
+    '/api/bridge/ready-deploy',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : ''
+      const summary = typeof req.body?.summary === 'string' ? req.body.summary.trim() : ''
+      if (!branch) return reply.code(400).send({ error: 'bad_request' })
+      readyDeploy = { branch, summary, at: Date.now() }
+      const msg = `Am reparat: ${summary || branch}. Aprobi deploy? Scrie „da" și public pe loc.`
+      sayQueue.push(msg)
+      void saveMessage(config.adminEmail, 'assistant', msg)
+      noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}`)
+      return { ok: true }
+    },
+  )
+
+  // Server deployer polls this: is there something to publish RIGHT NOW?
+  app.get('/api/bridge/deploy-pending', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { deploy: deployWanted }
+  })
+
+  // Server deployer → done publishing (ok or failed). Tells Adrian in chat.
+  app.post<{ Body: { ok?: boolean; detail?: string } }>(
+    '/api/bridge/deploy-done',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      deployWanted = null
+      const ok = req.body?.ok !== false
+      const msg = ok
+        ? 'Gata — e PUBLICAT live pe kelionai.app. Reîmprospătează pagina și verifică.'
+        : `Deploy-ul a eșuat: ${String(req.body?.detail || '').slice(0, 200)}. Nu s-a publicat nimic.`
+      sayQueue.push(msg)
+      void saveMessage(config.adminEmail, 'assistant', msg)
+      noteBrainActivity(ok ? '🟢 PUBLICAT LIVE' : '🔴 Deploy eșuat')
+      return { ok: true }
+    },
+  )
+
+  // Linux server → upload the freshest installer MASTER (.exe/.apk) into the
+  // delivery store. From then on /dl/<name> serves THIS, over HTTPS+Cloudflare,
+  // with no app redeploy — so the QR codes always hand out the latest version.
+  app.post<{ Body: { name?: string; type?: string; data?: string } }>(
+    '/api/bridge/upload-app',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const b = req.body ?? {}
+      const name = typeof b.name === 'string' ? b.name.replace(/[^A-Za-z0-9._-]/g, '') : ''
+      if (!name || typeof b.data !== 'string') return reply.code(400).send({ error: 'bad_request' })
+      const buf = Buffer.from(b.data, 'base64')
+      if (buf.length === 0) return reply.code(400).send({ error: 'empty' })
+      await putAppFile(name, buf, b.type || 'application/octet-stream')
+      return { ok: true, name, bytes: buf.length }
+    },
+  )
+
+  // Admin → the FULL order book (pending + delivered, newest first): exactly
+  // what was sent to execution, when, and whether the builder picked it up.
+  app.get('/api/admin/workorders', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return { orders: await listWorkOrders(50) }
   })
 
   // ── APPROVAL GATE ──
@@ -267,20 +455,20 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // Builder → poll which releases the owner APPROVED (so it can deploy them).
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    return { releases: releases.filter((r) => r.status === 'approved') }
+    const all = await listStagedReleases(50)
+    return { releases: all.filter((r) => r.status === 'approved') }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    const r = releases.find((x) => x.id === req.body?.id)
-    if (r) r.status = 'deployed'
+    if (req.body?.id) await setReleaseStatus(req.body.id, 'deployed')
     return { ok: true }
   })
   // Admin → see all releases (pending first) in the "Releases" tab.
   app.get('/api/admin/releases', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return { releases }
+    return { releases: await listStagedReleases(50) }
   })
   // Admin → approve or reject a staged release (the human gate).
   app.post<{ Body: { id?: string; decision?: 'approve' | 'reject' } }>(
@@ -288,9 +476,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const r = releases.find((x) => x.id === req.body?.id)
+      const all = await listStagedReleases(50)
+      const r = all.find((x) => x.id === req.body?.id)
       if (!r) return reply.code(404).send({ error: 'not_found' })
-      if (r.status === 'pending') r.status = req.body?.decision === 'approve' ? 'approved' : 'rejected'
+      if (r.status === 'pending') {
+        r.status = req.body?.decision === 'approve' ? 'approved' : 'rejected'
+        await setReleaseStatus(r.id, r.status)
+      }
       return { ok: true, status: r.status }
     },
   )
@@ -345,9 +537,46 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // Frontend polls this. The "Claude" LIGHT means THE BRIDGE: lit = Claude is
   // reachable on the bridge, OFF = bridge down (the owner sees it instantly),
   // pulsing = code is being written right now (dev heartbeat active).
+  // REAL Linux server load (the paznic on the VPS posts it every minute) —
+  // shown bottom-left on the admin's work monitor, in real percentages.
+  app.post<{ Body: { line?: string; cpu?: number; mem?: number; disk?: number } }>(
+    '/api/bridge/server-load',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const b = req.body ?? {}
+      const line = typeof b.line === 'string' ? b.line.slice(0, 200) : ''
+      const clamp = (n: unknown): number | null =>
+        typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null
+      const cpu = clamp(b.cpu)
+      const mem = clamp(b.mem)
+      const disk = clamp(b.disk)
+      if (line || cpu !== null || mem !== null || disk !== null) {
+        if (line) srvLoad = line
+        if (cpu !== null) srvCpu = cpu
+        if (mem !== null) srvMem = mem
+        if (disk !== null) srvDisk = disk
+        srvLoadAt = Date.now()
+      }
+      return { ok: true }
+    },
+  )
+
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
-    return { active, bridge: bridgeOnline(), activity: active ? devActivity : [] }
+    // Telemetry is "live" only if the paznic posted within the last 12s (it
+    // posts every ~2s). Stale → send nulls so the monitor shows "no signal"
+    // instead of a frozen bar pretending to be live.
+    const fresh = Date.now() - srvLoadAt < 12_000
+    return {
+      active,
+      bridge: bridgeOnline(),
+      activity: active ? devActivity : [],
+      srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
+      // Real 0–100 metrics for the live bar graphs (null when no fresh signal).
+      metrics: fresh
+        ? { cpu: srvCpu, mem: srvMem, disk: srvDisk, bridge: bridgeOnline() ? 100 : 0, live: true }
+        : { cpu: 0, mem: 0, disk: 0, bridge: bridgeOnline() ? 100 : 0, live: false },
+    }
   })
 
   // Watchdog probe (secret-protected): is the worker ACTUALLY polling? The
@@ -361,7 +590,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // Worker → server: "give me the next admin prompt" (long-poll up to 25s).
   app.post('/api/bridge/pull', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    lastWorkerSeen = Date.now()
+    workerBeat()
     const ready = queue.shift()
     if (ready) {
       lastJobDispatched = Date.now()
@@ -376,16 +605,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         }
       }, 25_000)
     })
-    lastWorkerSeen = Date.now()
+    workerBeat()
     if (job) lastJobDispatched = Date.now()
     return { job }
+  })
+
+  // Worker → server: a text CHUNK while the model is still writing (streaming).
+  // Forwarded live into the admin's open reply — first words in ~2 seconds.
+  app.post('/api/bridge/reply-chunk', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    workerBeat()
+    const body = (req.body ?? {}) as { id?: string; text?: string }
+    const sink = body.id ? chunkSinks.get(body.id) : undefined
+    if (sink && typeof body.text === 'string' && body.text) sink(body.text)
+    return { accepted: !!sink }
   })
 
   // Worker → server: the finished answer for a job. Posting a reply is proof
   // of life — refresh the presence clock here too.
   app.post('/api/bridge/reply', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    lastWorkerSeen = Date.now()
+    workerBeat()
     const body = (req.body ?? {}) as { id?: string; text?: string }
     const resolve = body.id ? waiters.get(body.id) : undefined
     if (!resolve || !body.id) return { accepted: false }

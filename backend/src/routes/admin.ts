@@ -10,12 +10,65 @@ import {
   loadAdminPool,
   getDemoStats,
   getUserActivity,
+  getDownloadStats,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
 import { bridgeRepair } from './bridge.js'
 
+// ── Store presence (the admin's REAL market control) ───────────────────────
+// Live checks against the four public install locations. Cached 5 minutes so
+// the admin tab never hammers the stores. `listed` is the truth of the moment:
+// a store page that 404s is NOT listed, no matter what the dashboard promises.
+interface StoreCheck {
+  key: string
+  name: string
+  store: string
+  url: string
+  listed: boolean
+}
+let storeCache: { at: number; checks: StoreCheck[] } | null = null
+
+const STORE_TARGETS: { key: string; name: string; store: string; url: string }[] = [
+  { key: 'windows', name: 'Windows', store: 'Microsoft Store', url: 'https://apps.microsoft.com/detail/9NBW313FHN44' },
+  { key: 'android', name: 'Android', store: 'Google Play', url: 'https://play.google.com/store/apps/details?id=app.kelionai.twa' },
+  { key: 'ios', name: 'iOS', store: 'App Store', url: 'https://apps.apple.com/app/id6786766714' },
+  { key: 'linux', name: 'Linux', store: 'Web app (kelionai.app)', url: 'https://kelionai.app/health' },
+]
+
+async function checkStores(): Promise<StoreCheck[]> {
+  if (storeCache && Date.now() - storeCache.at < 5 * 60_000) return storeCache.checks
+  const checks = await Promise.all(
+    STORE_TARGETS.map(async (t) => {
+      let listed = false
+      try {
+        const res = await fetch(t.url, {
+          redirect: 'follow',
+          signal: AbortSignal.timeout(8000),
+          headers: { 'User-Agent': 'Mozilla/5.0 (KelionaiStatus)' },
+        })
+        listed = res.ok
+      } catch {
+        /* unreachable → not listed right now */
+      }
+      return { ...t, listed }
+    }),
+  )
+  storeCache = { at: Date.now(), checks }
+  return checks
+}
+
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
+  // Market control: live store presence + direct-download counts + WHO
+  // downloaded (email when signed in, else IP + country). Store installs are
+  // aggregate-only by design — no store exposes user identities.
+  app.get('/api/admin/stores', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const [checks, downloads] = await Promise.all([checkStores(), getDownloadStats()])
+    return reply.send({ stores: checks, downloads })
+  })
+
   // List users with message counts (admin only).
   app.get('/api/admin/users', async (req, reply) => {
     const user = getSessionUser(req)
@@ -67,13 +120,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
     const gap = (await getCapabilityGaps(true)).find((g) => g.id === id)
     if (!gap) return reply.code(404).send({ error: 'not_found' })
-    const jobId = bridgeRepair(
+    // Adrian's flow (4 iul): escalation lands in the PERSISTENT order registry
+    // (visible as pending in Admin → Jurnal), and the gap STAYS in this list —
+    // he cleans it himself with "Rezolvat" only after the fix is deployed and
+    // HE has tested it. Nothing disappears before his eyes confirm it.
+    bridgeRepair(
       `Cerere de la utilizatori (din culegerea de dorințe a lui Kelion), escaladată de admin — ` +
         `construiește/adaugă această capacitate în aplicația Kelionai: "${gap.request}"` +
         (gap.reason ? ` (motiv notat: ${gap.reason})` : ''),
     )
-    if (!jobId) return reply.send({ escalated: false, online: false })
-    await setGapResolved(id, true)
     return reply.send({ escalated: true, online: true })
   })
 
