@@ -138,6 +138,9 @@ export default function ChatPanel({
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
   const [voiceOut, setVoiceOut] = useState(true)
+  // Autoplay-blocked banner: after a release auto-refresh the browser mutes
+  // audio until the first gesture — this tells Adrian ONE touch brings it back.
+  const [audioLocked, setAudioLocked] = useState(false)
   const [awake, setAwake] = useState(false) // post wake-word active conversation
   const [cameraOn, setCameraOn] = useState(false)
   const [facing, setFacing] = useState<Facing>('user')
@@ -328,6 +331,19 @@ export default function ChatPanel({
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Audio gesture-lock (autoplay policy after a release auto-refresh): voice.ts
+  // parks the blocked lines and fires these events; one touch replays them.
+  useEffect(() => {
+    const onBlocked = (): void => setAudioLocked(true)
+    const onUnblocked = (): void => setAudioLocked(false)
+    window.addEventListener('kelion:audio-blocked', onBlocked)
+    window.addEventListener('kelion:audio-unblocked', onUnblocked)
+    return () => {
+      window.removeEventListener('kelion:audio-blocked', onBlocked)
+      window.removeEventListener('kelion:audio-unblocked', onUnblocked)
+    }
   }, [])
 
   // Claude can WALK IN first (admin only): messages Claude leaves through the
@@ -1321,6 +1337,9 @@ export default function ChatPanel({
         </p>
       )}
       {micError && <p className="mic-error">{micError}</p>}
+      {audioLocked && (
+        <p className="audio-locked">🔊 Browserul a oprit sunetul după actualizare — atinge o dată oriunde și vocea revine singură.</p>
+      )}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
       {isAdmin && scenarioOpen && (
         <div className="scenario-panel">
