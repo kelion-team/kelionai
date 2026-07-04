@@ -330,15 +330,6 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                     </div>
                   ))}
                 </div>
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Contul tău Google (Gmail / Calendar / Drive)</div>
-                  <div className="fin-row">
-                    <span>Conectează-l ca Kelion să-ți citească/trimită emailuri și evenimente.</span>
-                    <a className="admin-connect-google" href="/auth/google/login">
-                      Conectează Google
-                    </a>
-                  </div>
-                </div>
               </>
             )}
           </section>
