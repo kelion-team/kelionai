@@ -12,6 +12,7 @@ import {
   googleTools,
   runGoogleTool,
   refreshGoogleAccessToken,
+  reverseGeocode,
   reverseGeocodeCached,
   promoSceneUrl,
   youtubeFirstEmbed,
