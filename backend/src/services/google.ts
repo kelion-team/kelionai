@@ -254,13 +254,15 @@ export async function refreshGoogleAccessToken(
 
 // Best-effort reverse geocode (device GPS → human place name) so Claude knows
 // where "here" is. Keyless OpenStreetMap Nominatim; short timeout, never throws.
-// Cached by ~100 m (3 decimals) so only the first chat turn at a location pays
-// the network cost — keeps the chat hot path low-latency.
+// Cached by ~100 m (3 decimals); failures are negative-cached briefly so an
+// outage can't cause a lookup storm.
 const geoCache = new Map<string, string>()
+const geoRetryAt = new Map<string, number>()
 export async function reverseGeocode(lat: number, lon: number): Promise<string> {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
   const hit = geoCache.get(key)
   if (hit !== undefined) return hit
+  if ((geoRetryAt.get(key) ?? 0) > Date.now()) return ''
   try {
     const u = new URL('https://nominatim.openstreetmap.org/reverse')
     u.searchParams.set('lat', String(lat))
@@ -271,14 +273,34 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string> 
       headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
       signal: AbortSignal.timeout(4000),
     })
-    if (!res.ok) return ''
+    if (!res.ok) {
+      geoRetryAt.set(key, Date.now() + 60_000)
+      return ''
+    }
     const j = (await res.json()) as { display_name?: string }
     const name = j.display_name ?? ''
     geoCache.set(key, name)
     return name
   } catch {
+    geoRetryAt.set(key, Date.now() + 60_000)
     return ''
   }
+}
+
+// Non-blocking variant for the chat hot path: returns the cached place name
+// instantly ('' when not resolved yet) and warms the cache in the background.
+// The GPS place name must NEVER delay a reply — the raw lat/lon (which the
+// skills use directly) is always injected regardless.
+const geoInFlight = new Set<string>()
+export function reverseGeocodeCached(lat: number, lon: number): string {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
+  const hit = geoCache.get(key)
+  if (hit !== undefined) return hit
+  if (!geoInFlight.has(key)) {
+    geoInFlight.add(key)
+    void reverseGeocode(lat, lon).finally(() => geoInFlight.delete(key))
+  }
+  return ''
 }
 
 function num(v: unknown, fallback: number): number {

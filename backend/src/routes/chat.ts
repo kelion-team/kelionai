@@ -12,7 +12,7 @@ import {
   googleTools,
   runGoogleTool,
   refreshGoogleAccessToken,
-  reverseGeocode,
+  reverseGeocodeCached,
   promoSceneUrl,
 } from '../services/google.js'
 import {
@@ -33,7 +33,7 @@ import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang } from '../services/lang.js'
-import { geoLookup } from './demo.js'
+import { geoLookupCached } from './demo.js'
 import {
   browserOpen,
   browserClick,
@@ -712,9 +712,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     systemPrompt += absoluteLock
       ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
       : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
+    // GPS must NEVER delay the reply: only synchronous cache reads happen here.
+    // The place-name/IP lookups run in the background and are ready for the
+    // next turn; the raw lat/lon (all the skills need) is injected immediately.
     const coords = req.body?.coords
     if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
-      const place = await reverseGeocode(coords.lat, coords.lon)
+      const place = reverseGeocodeCached(coords.lat, coords.lon)
       systemPrompt +=
         `\n\nThe user's current device location (live GPS) is latitude ${coords.lat.toFixed(5)}, longitude ${coords.lon.toFixed(5)}` +
         (place ? ` — approximately ${place}.` : '.') +
@@ -727,8 +730,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const hdr = (name: string): string =>
         ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
       const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
-      const geo = await geoLookup(ip)
-      if (geo.city || geo.country) {
+      const geo = geoLookupCached(ip)
+      if (geo && (geo.city || geo.country)) {
         const where = [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
         systemPrompt +=
           `\n\nThe user's approximate location (from their network, precise GPS not yet available) is ${where}. Use this ONLY as a rough fallback for "near me"/weather/local questions — mention it's approximate if precision matters, and prefer exact GPS the moment it's available.`

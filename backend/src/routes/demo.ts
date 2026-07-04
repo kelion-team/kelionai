@@ -6,14 +6,15 @@ import { tryStartDemo, logVisit, touchVisit, type DemoVisit } from '../db.js'
 // Look up the visitor's location from their IP for the owner's analytics:
 // country/city/region, ISP and timezone. Free, no key (ipwho.is). Short
 // timeout; fails to empty fields, never blocks the trial.
-export async function geoLookup(ip: string): Promise<{
+export interface GeoInfo {
   country: string
   code: string
   city: string
   region: string
   isp: string
   tz: string
-}> {
+}
+export async function geoLookup(ip: string): Promise<GeoInfo> {
   const empty = { country: '', code: '', city: '', region: '', isp: '', tz: '' }
   if (!ip || ip.startsWith('127.') || ip.startsWith('::') || ip.startsWith('10.') || ip.startsWith('192.168.'))
     return empty
@@ -36,7 +37,7 @@ export async function geoLookup(ip: string): Promise<{
       connection?: { isp?: string; org?: string }
     }
     if (!j.success) return empty
-    return {
+    const info = {
       country: j.country ?? '',
       code: j.country_code ?? '',
       city: j.city ?? '',
@@ -44,9 +45,27 @@ export async function geoLookup(ip: string): Promise<{
       isp: j.connection?.isp || j.connection?.org || '',
       tz: j.timezone?.id ?? '',
     }
+    if (info.country || info.city) geoIpCache.set(ip, info)
+    return info
   } catch {
     return empty
   }
+}
+
+// Non-blocking variant for the chat hot path: returns the cached lookup
+// instantly (null when not resolved yet) and warms the cache in the background.
+// The IP fallback for location must NEVER delay a reply.
+const geoIpCache = new Map<string, GeoInfo>()
+const geoIpInFlight = new Set<string>()
+export function geoLookupCached(ip: string): GeoInfo | null {
+  if (!ip) return null
+  const hit = geoIpCache.get(ip)
+  if (hit) return hit
+  if (!geoIpInFlight.has(ip)) {
+    geoIpInFlight.add(ip)
+    void geoLookup(ip).finally(() => geoIpInFlight.delete(ip))
+  }
+  return null
 }
 
 // Classify the visitor's user-agent: browser, OS, device class — and whether it
