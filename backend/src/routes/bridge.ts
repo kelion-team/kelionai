@@ -151,22 +151,29 @@ export function setAnalysisDetail(text: string): void {
 
 // ── OK → DEPLOY (Adrian, 4 iul): NO approval tab. A finished fix is "ready";
 // Adrian just replies "ok" in chat and the server publishes it immediately.
-// The builder sets `readyDeploy` when a fix built clean; an "ok" in chat sets
+// The builder stages a fix when it built clean; an "ok" in chat sets
 // `deployWanted`; the server deployer polls, runs railway up, marks done.
-let readyDeploy: { branch: string; summary: string; at: number } | null = null
+// COADĂ, nu sertar unic (5 iul): două fixuri gata în același timp se călcau pe
+// picior — al doilea îl SUPRASCRIA pe primul și un „da" publica altceva decât
+// credea Adrian. Acum fiecare fix stă la rând; fiecare „da" publică PRIMUL.
+const readyDeploys: { branch: string; summary: string; at: number }[] = []
 let deployWanted: { branch: string; summary: string } | null = null
 export function getReadyDeploy(): { branch: string; summary: string } | null {
-  return readyDeploy ? { branch: readyDeploy.branch, summary: readyDeploy.summary } : null
+  const r = readyDeploys[0]
+  return r ? { branch: r.branch, summary: r.summary } : null
 }
 // Called from chat.ts when Adrian says "ok/da/publică…" and a fix is ready.
 export function triggerDeploy(): { summary: string } | null {
-  if (!readyDeploy) return null
-  deployWanted = { branch: readyDeploy.branch, summary: readyDeploy.summary }
-  const s = readyDeploy.summary
-  readyDeploy = null
+  const r = readyDeploys.shift()
+  if (!r) return null
+  deployWanted = { branch: r.branch, summary: r.summary }
   noteBrainActivity('🚀 Public pe producție — pornesc deploy-ul')
   updateRequirement('deploy pornit')
-  return { summary: s }
+  if (readyDeploys.length > 0) {
+    // Mai e ceva la rând — spune-i clar că un nou „da" publică următorul.
+    sayQueue.push(`Mai am ${readyDeploys.length} la rând de publicat — următorul: ${readyDeploys[0].summary.slice(0, 120)}. Zi „da" din nou când vrei.`)
+  }
+  return { summary: r.summary }
 }
 
 // ── VERIFICARE LIVE (Adrian, 5 iul: „trimis ≠ gata") ───────────────────────
@@ -736,8 +743,18 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : ''
       const summary = typeof req.body?.summary === 'string' ? req.body.summary.trim() : ''
       if (!branch) return reply.code(400).send({ error: 'bad_request' })
-      readyDeploy = { branch, summary, at: Date.now() }
-      const msg = `Am reparat: ${summary || branch}. Aprobi deploy? Scrie „da" și public pe loc.`
+      // COADĂ: un fix nou NU-l mai suprascrie pe cel care așteaptă — se așază
+      // la rând (aceeași ramură nu se dublează, doar i se împrospătează sumarul).
+      const dup = readyDeploys.find((r) => r.branch === branch)
+      if (dup) {
+        dup.summary = summary
+        dup.at = Date.now()
+      } else {
+        readyDeploys.push({ branch, summary, at: Date.now() })
+        if (readyDeploys.length > 10) readyDeploys.shift()
+      }
+      const pos = readyDeploys.length > 1 ? ` (la rând: ${readyDeploys.length})` : ''
+      const msg = `Am reparat: ${summary || branch}. Aprobi deploy?${pos} Scrie „da" și public pe loc.`
       sayQueue.push(msg)
       void saveMessage(config.adminEmail, 'assistant', msg)
       noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}`)
@@ -811,7 +828,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
         // — never a silent auto-redeploy. Re-stage the branch so his "ok"
         // republishes it (the affirm path calls triggerDeploy → the deployer).
-        if (failedBranch) readyDeploy = { branch: failedBranch, summary: failedSummary, at: Date.now() }
+        if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch))
+          readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now() })
         const detail = String(req.body?.detail || '').slice(0, 200)
         const msg = `Deploy-ul a picat: ${detail}. Nu s-a publicat nimic — versiunea veche e tot live. Vrei să reîncerc? Zi „ok".`
         sayQueue.push(msg)
