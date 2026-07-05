@@ -1172,8 +1172,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // trimite CONTEXTUL (ultimele replici = propunerea creierului + „da"-ul),
         // ca să înțeleagă ce s-a cerut de fapt.
         const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?)[\s.!]*$/i
-        const dispatchTask = bareAffirm.test(lastUserText.trim())
-          ? `SARCINA (Adrian a aprobat cu „${lastUserText.trim()}"; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde cu „da"):\n${past.slice(-8).join('\n')}`
+        // „Reia"/„termină"-style (5 iul, ordinul „reia terminat cu această
+        // comandă."): un mesaj scurt făcut DOAR din verbe de reluare + umplutură
+        // referă sarcina anterioară, nu descrie una nouă. Trimis verbatim,
+        // constructorul primește un fragment gol și nu are ce executa — deci și
+        // el primește CONTEXTUL, ca la „da". „Termină implementarea X" NU intră
+        // aici (are conținut propriu) — doar fragmentele fără substanță.
+        const resumeVerb = /^(reia|relu[aă]m|termin[aă]|terminat[aă]?|finalizeaz[aă]|încheie|incheie|(re)?încearc[aă]|(re)?incearc[aă])$/i
+        const resumeFiller =
+          /^(din|nou|cu|aceast[aă]|asta|acest|comanda|comand[aă]|sarcina|sarcin[aă]|ordinul|treaba|lucrarea|te|rog|acum|iar|tot|o|ce|ai|unde|r[aă]mas|de|la|cap[aă]t|ultima|imediat|[șs]i)$/i
+        const resumeRef = (t: string): boolean => {
+          const words = t.split(/[\s.,!?"„”–-]+/).filter(Boolean)
+          if (words.length === 0 || !resumeVerb.test(words[0])) return false
+          return words.every((w) => resumeVerb.test(w) || resumeFiller.test(w))
+        }
+        const refersToContext = bareAffirm.test(lastUserText.trim()) || resumeRef(lastUserText.trim())
+        const dispatchTask = refersToContext
+          ? `SARCINA (mesajul lui Adrian „${lastUserText.trim()}" doar aprobă sau cere reluarea; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde la fragment):\n${past.slice(-8).join('\n')}`
           : lastUserText
         const runTags = (line: string): string => {
           if (/\[EXECUT\]/i.test(line)) bridgeRepair(dispatchTask)
@@ -1482,10 +1497,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // verificare live, nu se închide la „trimis" (Adrian, 5 iul). Numele
           // cerinței = mesajul real, dar dacă a fost doar „da", ia prima linie
           // cu sens din context (nu afișa „da" ca titlu de cerință).
-          const ownedTitle = bareAffirm.test(lastUserText.trim())
+          const ownedTitle = refersToContext
             ? (past.slice(-2, -1)[0]?.replace(/^Kelion:\s*/, '').slice(0, 100) || lastUserText)
             : lastUserText
-          openRequirement(ownedTitle)
+          // Sarcina COMPLETĂ (cu contextul, dacă mesajul doar referă contextul)
+          // se ține pe cerință: la re-asignare, supervizorul trimite agentului
+          // proaspăt sarcina reală, nu fragmentul-titlu („reia terminat cu…").
+          openRequirement(ownedTitle, dispatchTask)
           updateRequirement('trimisă la constructor')
           if (!a) {
             a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
