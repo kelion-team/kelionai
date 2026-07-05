@@ -47,6 +47,7 @@ import {
   browserBack,
   browserScroll,
   browserClose,
+  crawlSite,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/replayStore.js'
 import {
@@ -1048,6 +1049,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '- Îi arăți notițele salvate: [NOTES] (le citește serverul, cu numărul lor). Ștergi una: [DELNOTE număr] (ex: [DELNOTE 12]).\n' +
           '- Îi spui cheltuielile reale: [COST] (serverul citește suma exactă din bază).\n' +
           '- Arăți o HARTĂ pe monitor: [MAP numele locului/adresei] (ex: [MAP Londra] sau [MAP Piața Unirii Cluj]).\n' +
+          '- Parcurgi un site pagină cu pagină și-l treci în revistă pe monitor: [CRAWL https://adresa] (ex: [CRAWL https://exemplu.ro]).\n' +
           '- Afișezi TEXT pe monitor (un răspuns, o listă, un plan, un rezumat — orice nu e o pagină web): [DOC titlu scurt] pe prima linie; TOT ce scrii după aceea apare automat și pe monitorul lui ca document. Când Adrian zice „afișează pe monitor" / „pune pe ecran" / „arată-mi pe monitor" și nu cere o pagină web, folosește [DOC] — nu spune că nu poți.\n' +
           '- Cureți ecranul/monitorul: [CLEAR].\n' +
           'ECHIPA TA de 7 agenți specialiști (rulează pe server, pe abonament). Deleagă un task greu/de domeniu cu [AGENT nume: sarcina completă], apoi spune scurt „întreb <agentul>":\n' +
@@ -1106,9 +1108,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
           const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
           const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
+          const crawlTag = /\[CRAWL\s+(\S+)\]/i.exec(line)
           if (noteTag) {
             void saveNote(user.email, noteTag[1].trim())
             noteBrainActivity(`Am salvat o notiță: ${noteTag[1].trim().slice(0, 80)}`)
+          }
+          // [CRAWL url] (cererea #24): parcurge un site pagină cu pagină și pune
+          // rezumatul fiecărei pagini pe monitor, ca document citibil.
+          if (crawlTag) {
+            const site = crawlTag[1].trim()
+            noteBrainActivity(`Parcurg site-ul: ${site}`)
+            pendingTags.push(
+              (async () => {
+                const r = await crawlSite(user.email, bridgeBase, site, 8)
+                if (r.error || r.pages.length === 0) {
+                  emit(`\nN-am putut parcurge ${site} (${r.error || 'fără pagini'}).`)
+                  return
+                }
+                const doc = r.pages
+                  .map((p, i) => `${i + 1}. ${p.title || p.url}\n   ${p.url}\n   ${p.text.slice(0, 400)}`)
+                  .join('\n\n')
+                reply.raw.write(
+                  `${CTRL}${JSON.stringify({ doc: { title: `Site parcurs: ${site} (${r.pages.length} pagini)`, text: doc } })}${CTRL}`,
+                )
+                noteBrainActivity(`✅ Am parcurs ${r.pages.length} pagini din ${site}`)
+              })().catch(() => {}),
+            )
           }
           if (mapTag) {
             const place = mapTag[1].trim()
@@ -1254,6 +1279,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             .replace(/\[IMG[^\]]*\]/gi, '')
             .replace(/\[NOTE[^\]]*\]/gi, '')
             .replace(/\[MAP[^\]]*\]/gi, '')
+            .replace(/\[CRAWL[^\]]*\]/gi, '')
             .replace(/\[DOC[^\]]*\]/gi, '')
             .replace(/\[YT[^\]]*\]/gi, '')
             .replace(/\[COST\]/gi, '')

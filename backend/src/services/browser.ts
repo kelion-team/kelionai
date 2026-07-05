@@ -218,6 +218,49 @@ export async function browserOpen(
   }
 }
 
+// CRAWL (cererea #24): deschide un site și îl parcurge PAGINĂ CU PAGINĂ — adună
+// linkurile interne din prima pagină și vizitează până la maxPages, întorcând
+// titlul + textul fiecăreia, ca să poată fi trecute în revistă. Refolosește
+// browserOpen (aceeași sesiune, navighează în ea), fără dublare de infrastructură.
+export async function crawlSite(
+  email: string,
+  baseUrl: string,
+  startUrl: string,
+  maxPages = 8,
+): Promise<{ pages: { url: string; title: string; text: string }[]; error?: string }> {
+  const first = await browserOpen(email, baseUrl, startUrl)
+  if ('error' in first) return { pages: [], error: first.error }
+  let host = ''
+  try {
+    host = new URL(first.url).host
+  } catch {
+    return { pages: [], error: 'bad_url' }
+  }
+  const pages = [{ url: first.url, title: first.title, text: first.text }]
+  const seen = new Set([first.url.replace(/#.*$/, '')])
+  const queue: string[] = []
+  for (const el of first.elements) {
+    if (!el.href) continue
+    try {
+      const abs = new URL(el.href, first.url)
+      abs.hash = ''
+      if (abs.host === host && !seen.has(abs.toString()) && !queue.includes(abs.toString())) {
+        queue.push(abs.toString())
+      }
+    } catch {
+      /* link malformat — sărit */
+    }
+  }
+  for (const link of queue) {
+    if (pages.length >= maxPages) break
+    seen.add(link)
+    const snap = await browserOpen(email, baseUrl, link)
+    if (!('error' in snap)) pages.push({ url: snap.url, title: snap.title, text: snap.text })
+  }
+  await browserClose(email).catch(() => {})
+  return { pages }
+}
+
 export async function browserClick(
   email: string,
   baseUrl: string,
