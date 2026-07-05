@@ -73,4 +73,33 @@ citește ieșirea brută, exact ca un operator uman.
 - [ ] Raport complet de ordine cu stadii, la cerere, în chat.
 - [ ] Mesajele „gata" vin cu DOVADA build/tester atașată.
 
+---
+
+## 7. SPECIFICAȚIA TEHNICĂ EXACTĂ (dovada „înainte / după")
+
+### ÎNAINTE (starea de azi — orbirea, dovedită în cod)
+`bridge/kelion-bridge-linux.mjs`, linia 52:
+```js
+// Text answer only: no tools, no file access, no edit permissions.
+const args = ['-p', '--output-format', 'text']
+```
+Creierul lui Kelion = Claude pe VPS pornit FĂRĂ nicio unealtă. Nu poate rula git,
+nu poate citi fișiere, nu poate vedea jurnale. De-aia „nu vede și nu decide".
+
+### DUPĂ (ce primește — exact)
+```js
+const args = ['-p', '--output-format', 'text',
+  '--allowedTools', 'Bash,Read,Grep,Glob',
+  '--add-dir', '/root/kelion']
+```
+plus preambulul lui completat cu secțiunea UNELTELE TALE PROPRII:
+- git pe clona serverului: status/log/branch/diff, `merge --abort`, `reset --merge`
+- curl la punte cu secretul din `/root/kelion/bridge-secret.txt`:
+  deploy-pending, workorders (registru cu stadii), activity
+- `journalctl -u kelion-deployer / kelion-builder / kelion-paznic` — cauza reală
+- Read/Grep/Glob pe `/root/kelion` (repo, jurnale, configurări)
+- regulile de decizie: conflict → inspectează + decide (rebuild/drop); index blocat
+  → deblochează singur; duplicat → aruncă cu motiv; NICIODATĂ buclă pe „ok"
+- gardurile de la pct. 3 scrise în preambul, cuvânt cu cuvânt
+
 *Scris ca dovadă la cererea lui Adrian: „scrie exact sa ramina dovada ce primeste".*
