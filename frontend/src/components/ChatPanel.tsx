@@ -153,7 +153,8 @@ export default function ChatPanel({
       return
     }
     // VOCEA CREIERULUI: MP3 gata sintetizat pe server (Chirp 3) — DOAR îl redăm.
-    // Cât vorbește, microfonul e mut (anti-ecou); revine singur la final.
+    // Cât vorbește, microfonul nu trimite (anti-ecou), dar rămâne de veghe:
+    // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
       playVoice(
         c.audio,
@@ -686,6 +687,12 @@ export default function ChatPanel({
         micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
       },
       () => speechLangRef.current,
+      // BARGE-IN (ordinul lui Adrian): când i se aude vocea peste Kelion,
+      // vocea lui Kelion se taie PE LOC și microfonul revine să-l asculte.
+      () => {
+        stopVoice()
+        micRef.current?.setMuted(false)
+      },
     )
     micStartingRef.current = false
     if (h) {
