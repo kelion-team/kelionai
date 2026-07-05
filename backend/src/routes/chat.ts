@@ -39,6 +39,7 @@ import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
 import { geoLookupCached } from './demo.js'
 import { synthesize } from '../services/tts.js'
+import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
   browserClick,
@@ -438,13 +439,21 @@ async function streamVoice(
     .trim()
     .slice(0, 1800)
   if (!spoken) return
-  try {
-    const r = await synthesize(spoken, lang)
-    if (r.ok) {
-      reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+  // STREAMING pe fraze: sintetizez și trimit fiecare bucată pe rând → Kelion
+  // începe să vorbească din PRIMA frază (time-to-first-audio mic); restul se
+  // sintetizează cât se redă prima. Prima bucată emisă poartă first:true, ca
+  // aplicația să golească coada unei replici anterioare înainte s-o redea.
+  let first = true
+  for (const chunk of splitForSpeech(spoken)) {
+    try {
+      const r = await synthesize(chunk, lang)
+      if (r.ok) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64'), first })}${CTRL}`)
+        first = false
+      }
+    } catch {
+      /* o bucată pierdută nu oprește restul — vocea e best-effort */
     }
-  } catch {
-    /* vocea e best-effort — dacă pică sinteza, textul rămâne */
   }
 }
 

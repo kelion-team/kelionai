@@ -14,6 +14,7 @@ import { ttsRoutes } from './routes/tts.js'
 import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
+import { asrStreamRoutes } from './routes/asr-stream.js'
 import { correctRoutes } from './routes/correct.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
@@ -158,6 +159,7 @@ await app.register(ttsRoutes)
 await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
+await app.register(asrStreamRoutes)
 await app.register(correctRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)

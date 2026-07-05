@@ -1,145 +1,208 @@
-// AUDIO I/O — poarta către creier (Adrian, 4 iul). Aplicația NU sintetizează și
-// NU recunoaște nimic local: microfonul captează → trimite la server (STT), iar
-// vocea creierului vine gata sintetizată de pe server (Chirp 3) ca un cadru
-// {audio} pe punte și aici DOAR se decodează + se redă. Zero „voce în front".
+import { createTurnManager, type TurnManager } from './turnManager'
+
+// AUDIO I/O — full-duplex, decalaj 0 (Adrian, 5 iul). Aplicația NU sintetizează
+// și NU recunoaște nimic local: microfonul captează → PCM16 → SERVER (STT v2
+// streaming, endpointing pe server), iar vocea creierului vine gata sintetizată
+// de pe server și aici DOAR se redă. Zero „voce în front".
 //
-//  • Microfon: full-duplex (poți vorbi peste voce), filtru profesional de zgomot
-//    (echoCancellation + noiseSuppression + autoGainControl), VOX (pornește la
-//    voce, se oprește la tăcere) și buffer mare (nimic pierdut la fraze lungi).
-//  • Redare: playVoice(base64) — decodează MP3-ul primit de la creier și-l redă;
-//    cât redă, microfonul e mut (anti-ecou), ca să nu se audă pe el însuși.
+//  • Microfon: DESCHIS PERMANENT cu AEC (echoCancellation scoate din microfon
+//    exact vocea lui Kelion → poți vorbi PESTE ea fără să se declanșeze pe el
+//    însuși). Audio în STREAMING către /api/asr-stream (nu record→stop→trimite).
+//  • Manager de tur ([[turnManager]]): barge-in instant (server: speech_begin /
+//    partial → tai vocea), fără tăiat la început (microfonul curge continuu).
+//  • Redare: playVoice(base64) — redă + anunță managerul (voiceStarted/voiceEnded).
 
 export interface MicHandle {
   stop(): void
   setMuted(m: boolean): void
 }
 
-// ── VOX (voice activity) reglaje ────────────────────────────────────────────
-const START_RMS = 0.012 // pragul de la care „e voce"
-const DOMINANCE = 2.2 // vocea apropiată domină zgomotul de fond de-atâtea ori
-const SILENCE_MS = 750 // tăcere care închide o frază
-const MIN_UTTER_MS = 350 // sub atât = zgomot, nu frază — se ignoră
-const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
+// Managerul de tur trăiește la nivel de modul: microfonul îl HRĂNEȘTE cu
+// evenimente ASR, iar playVoice îl anunță când Kelion vorbește/tace — așa
+// barge-in-ul și starea sunt coordonate într-un singur loc.
+let turn: TurnManager | null = null
+
+// TELEMETRIE latență (#11): ultima latență de răspuns (frază finală → prima voce),
+// în ms. „Decalaj 0" dovedit cu cifre. UI-ul se abonează prin onVoiceLatency.
+let lastVoiceLatencyMs: number | null = null
+let latencyListener: ((ms: number) => void) | null = null
+export function getLastVoiceLatency(): number | null {
+  return lastVoiceLatencyMs
+}
+export function onVoiceLatency(cb: ((ms: number) => void) | null): void {
+  latencyListener = cb
+}
 
 export async function startMic(
   onTranscript: (text: string) => void,
   onError: (reason: string) => void,
   getLang: () => string,
 ): Promise<MicHandle | null> {
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+  const AC =
+    globalThis.AudioContext ??
+    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (
+    !navigator.mediaDevices?.getUserMedia ||
+    !AC ||
+    typeof AudioWorkletNode === 'undefined' ||
+    typeof WebSocket === 'undefined'
+  ) {
     onError('unsupported')
     return null
   }
+
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: {
+        echoCancellation: true, // AEC — scoate vocea lui Kelion din microfon (barge-in real)
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
     })
   } catch (e) {
-    // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
-    // eșecul trecător (dispozitiv ocupat, căști scoase) da.
     const name = (e as { name?: string })?.name
     onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
     return null
   }
 
-  const AC =
-    globalThis.AudioContext ??
-    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AC) {
-    stream.getTracks().forEach((t) => t.stop())
-    onError('unsupported')
-    return null
-  }
+  let stopped = false
+  let muted = false
   const ctx = new AC()
   void ctx.resume().catch(() => {})
+
+  // efectele managerului: barge-in taie vocea; fraza finală merge la creier.
+  turn = createTurnManager({
+    onStopVoice: () => stopVoice(),
+    onUtterance: (text) => onTranscript(text),
+    onLatency: (ms) => {
+      lastVoiceLatencyMs = ms
+      latencyListener?.(ms)
+      // dovadă în consolă (observabilă la testul live)
+      try {
+        console.info(`[voce] latență răspuns: ${ms} ms`)
+      } catch {
+        /* fără consolă */
+      }
+    },
+  })
+
+  // ── WebSocket către ASR-ul în streaming (cookie-ul de sesiune merge automat) ─
+  const wsUrl = location.origin.replace(/^http/, 'ws') + '/api/asr-stream'
+  let ws: WebSocket | null = null
+  let wsReady = false
+  const pending: ArrayBuffer[] = [] // cadre audio până se deschide WS
+
+  const openWs = (): void => {
+    try {
+      ws = new WebSocket(wsUrl)
+    } catch {
+      if (!stopped) setTimeout(openWs, 1500)
+      return
+    }
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => {
+      wsReady = true
+      try {
+        ws?.send(JSON.stringify({ type: 'start', lang: getLang() }))
+      } catch {
+        /* start pierdut — reconectarea reface */
+      }
+      for (const buf of pending.splice(0)) {
+        try {
+          ws?.send(buf)
+        } catch {
+          /* cadru pierdut */
+        }
+      }
+    }
+    ws.onmessage = (ev) => {
+      let m: { type?: string; transcript?: string }
+      try {
+        m = JSON.parse(String(ev.data)) as { type?: string; transcript?: string }
+      } catch {
+        return
+      }
+      if (!turn) return
+      if (m.type === 'speech_begin') turn.speechBegin()
+      else if (m.type === 'speech_end') turn.speechEnd()
+      else if (m.type === 'partial') turn.partial(m.transcript ?? '')
+      else if (m.type === 'final') turn.final(m.transcript ?? '')
+    }
+    ws.onclose = () => {
+      wsReady = false
+      if (!stopped) setTimeout(openWs, 1500) // reconectare cât microfonul e viu
+    }
+    ws.onerror = () => {
+      try {
+        ws?.close()
+      } catch {
+        /* deja închis */
+      }
+    }
+  }
+  openWs()
+
+  // ── Microfon → worklet PCM16 (fir de audio) → WS ────────────────────────────
   const source = ctx.createMediaStreamSource(stream)
-  const analyser = ctx.createAnalyser()
-  analyser.fftSize = 512
-  source.connect(analyser)
-  const buf = new Float32Array(analyser.fftSize)
-
-  const mime =
-    ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported(m)) ??
-    ''
-
-  let muted = false
-  let stopped = false
-  let recording = false
-  let rec: MediaRecorder | null = null
-  let chunks: Blob[] = []
-  let voicedMs = 0
-  let silenceMs = 0
-  let noiseFloor = 0.006
-  let uttMs = 0
-  let raf = 0
-
-  const send = async (blob: Blob): Promise<void> => {
+  let node: AudioWorkletNode
+  try {
+    await ctx.audioWorklet.addModule('/pcm16-worklet.js')
+    node = new AudioWorkletNode(ctx, 'pcm16-downsampler')
+  } catch {
+    stream.getTracks().forEach((t) => t.stop())
+    void ctx.close().catch(() => {})
     try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader()
-        fr.onload = () => resolve(String(fr.result).split(',')[1] ?? '')
-        fr.onerror = () => reject(new Error('read'))
-        fr.readAsDataURL(blob)
-      })
-      if (!b64) return
-      const r = await fetch('/api/asr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ audio: b64, lang: getLang() }),
-      })
-      if (!r.ok) return
-      const j = (await r.json()) as { transcript?: string }
-      const text = (j.transcript ?? '').trim()
-      if (text) onTranscript(text)
+      ;(ws as WebSocket | null)?.close()
     } catch {
-      /* o frază pierdută nu oprește microfonul */
+      /* deja închis */
+    }
+    onError('failed')
+    return null
+  }
+  node.port.onmessage = (ev: MessageEvent) => {
+    if (stopped || muted) return
+    const buf = ev.data as ArrayBuffer
+    if (wsReady && ws) {
+      try {
+        ws.send(buf)
+      } catch {
+        /* cadru pierdut */
+      }
+    } else if (pending.length < 200) {
+      pending.push(buf) // tampon de pornire până se deschide WS
     }
   }
-
-  const startRec = (): void => {
-    if (recording || !mime) return
-    chunks = []
-    try {
-      rec = new MediaRecorder(stream, { mimeType: mime })
-    } catch {
-      rec = new MediaRecorder(stream)
-    }
-    rec.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data)
-    }
-    rec.onstop = () => {
-      const took = uttMs
-      const blob = new Blob(chunks, { type: mime || 'audio/webm' })
-      recording = false
-      uttMs = 0
-      // sub minim = zgomot scurt, nu-l trimitem
-      if (took >= MIN_UTTER_MS && blob.size > 0) void send(blob)
-    }
-    rec.start()
-    recording = true
-    uttMs = 0
-  }
-  const stopRec = (): void => {
-    if (recording && rec && rec.state !== 'inactive') rec.stop()
-  }
+  source.connect(node)
+  // NU conectăm node → destination: worklet-ul doar postează date, nu vrem ecou.
 
   const cleanup = (): void => {
     if (stopped) return
     stopped = true
-    cancelAnimationFrame(raf)
     try {
-      stopRec()
+      node.port.onmessage = null
+      source.disconnect()
+      node.disconnect()
     } catch {
-      /* deja oprit */
+      /* deja deconectat */
     }
+    try {
+      ws?.close()
+    } catch {
+      /* deja închis */
+    }
+    ws = null
     stream.getTracks().forEach((t) => t.stop())
     void ctx.close().catch(() => {})
+    if (turn) {
+      turn.reset()
+      turn = null
+    }
   }
 
-  // PERMANENT ON: dacă pista moare din exterior (apel telefonic, căști Bluetooth
-  // scoase, alt app ia microfonul), anunțăm — panoul redeschide microfonul singur.
+  // PERMANENT ON: dacă pista moare din exterior (apel, căști scoase, alt app ia
+  // microfonul), anunțăm — panoul redeschide microfonul singur.
   stream.getAudioTracks().forEach((t) => {
     t.addEventListener('ended', () => {
       if (stopped) return
@@ -148,79 +211,153 @@ export async function startMic(
     })
   })
 
-  const tick = (): void => {
-    if (stopped) return
-    analyser.getFloatTimeDomainData(buf)
-    let sum = 0
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
-    const rms = Math.sqrt(sum / buf.length)
-    // podeaua de zgomot se adaptează lent când e liniște
-    if (!recording) noiseFloor = noiseFloor * 0.95 + rms * 0.05
-    const dt = 16
-    const isVoice = !muted && rms > START_RMS && rms > noiseFloor * DOMINANCE
-
-    if (recording) {
-      uttMs += dt
-      if (isVoice) {
-        voicedMs += dt
-        silenceMs = 0
-      } else {
-        silenceMs += dt
-      }
-      if (silenceMs >= SILENCE_MS || uttMs >= MAX_UTTER_MS) stopRec()
-    } else if (isVoice) {
-      voicedMs = 0
-      silenceMs = 0
-      startRec()
-    }
-    raf = requestAnimationFrame(tick)
-  }
-  raf = requestAnimationFrame(tick)
-
   return {
     stop() {
       cleanup()
     },
+    // gate MANUAL (buton mut). În full-duplex NU se mai mută la redare — AEC +
+    // managerul de tur se ocupă de ecou și barge-in.
     setMuted(m: boolean) {
       muted = m
-      // dacă începe vocea creierului cât înregistram, închidem fraza curentă
-      if (m && recording) stopRec()
     },
   }
 }
 
 // ── REDARE: vocea creierului, sosită gata sintetizată de pe server ──────────
 let curVoice: HTMLAudioElement | null = null
+// Coadă de bucăți (streaming pe fraze, TTS): redate LEGAT, în ordine. Barge-in /
+// stopVoice golește coada. voiceStarted/voiceEnded se anunță O DATĂ pe replică.
+const voiceQueue: string[] = []
+let speaking = false
+let endCb: (() => void) | null = null
 
-export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
+// LIP-SYNC (Adrian): gura avatarului urmează AMPLITUDINEA REALĂ a sunetului, nu
+// o animație falsă. Tapez redarea cu un AnalyserNode și expun nivelul (0..1),
+// pe care AvatarModel îl citește în fiecare cadru. `getVoiceLevel()` = 0 în tăcere.
+let playCtx: AudioContext | null = null
+let voiceLevel = 0
+let levelRAF = 0
+
+export function getVoiceLevel(): number {
+  return voiceLevel
+}
+
+// Rutează redarea prin WebAudio ca să-i pot măsura amplitudinea — DAR numai dacă
+// contextul e deja pornit (gest de utilizator). Altfel NU ating redarea (rămâne
+// audibilă simplă), doar fără mișcarea gurii de data asta. Zero risc de voce mută.
+function attachLevelAnalysis(audio: HTMLAudioElement): void {
   try {
-    stopVoice()
-    const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
-    curVoice = audio
-    const done = (): void => {
-      if (curVoice === audio) curVoice = null
-      onEnd?.()
+    const AC =
+      globalThis.AudioContext ??
+      (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return
+    if (!playCtx) playCtx = new AC()
+    void playCtx.resume().catch(() => {})
+    if (playCtx.state !== 'running') return // context suspendat → redare simplă
+    const src = playCtx.createMediaElementSource(audio)
+    const analyser = playCtx.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.5
+    src.connect(playCtx.destination) // audibil
+    src.connect(analyser) // priză de nivel (analyser-ul nu merge mai departe)
+    const data = new Float32Array(analyser.fftSize)
+    cancelAnimationFrame(levelRAF)
+    const loop = (): void => {
+      if (curVoice !== audio) {
+        voiceLevel = 0
+        return
+      }
+      analyser.getFloatTimeDomainData(data)
+      let sum = 0
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i]
+      const rms = Math.sqrt(sum / data.length)
+      voiceLevel = Math.min(1, rms * 6) // scalare la 0..1 pentru gură
+      levelRAF = requestAnimationFrame(loop)
     }
-    audio.onended = done
-    audio.onerror = done
-    onStart?.()
-    void audio.play().catch(done)
+    levelRAF = requestAnimationFrame(loop)
   } catch {
-    onEnd?.()
+    /* fără lip-sync dacă routing-ul audio eșuează — vocea rămâne audibilă */
   }
 }
 
+function startNext(): void {
+  const next = voiceQueue.shift()
+  if (next === undefined) {
+    curVoice = null
+    voiceLevel = 0
+    if (speaking) {
+      speaking = false
+      turn?.voiceEnded()
+      const cb = endCb
+      endCb = null
+      cb?.()
+    }
+    return
+  }
+  const audio = new Audio(`data:audio/mp3;base64,${next}`)
+  curVoice = audio
+  const finish = (): void => {
+    if (curVoice !== audio) return // înlocuit/oprit
+    curVoice = null
+    startNext() // legăm bucata următoare (fără voiceEnded între bucăți)
+  }
+  audio.onended = finish
+  audio.onerror = finish
+  attachLevelAnalysis(audio) // lip-sync (fără să rupă audibilitatea)
+  void audio.play().catch(finish)
+}
+
+// Adaugă o bucată de voce în coadă. first=true → replică NOUĂ: golește coada
+// (și oprește redarea) unei replici anterioare înainte s-o pornească.
+export function enqueueVoice(base64Mp3: string, first = false, onEnd?: () => void): void {
+  if (first) {
+    voiceQueue.length = 0
+    if (curVoice) {
+      try {
+        curVoice.pause()
+      } catch {
+        /* deja oprit */
+      }
+      curVoice = null
+    }
+  }
+  if (onEnd) endCb = onEnd
+  voiceQueue.push(base64Mp3)
+  if (!speaking) {
+    speaking = true
+    turn?.voiceStarted() // → „speaking"; barge-in-ul poate tăia toată coada
+    startNext()
+  } else if (!curVoice) {
+    startNext() // relansare dacă s-a golit între timp
+  }
+}
+
+// Redare de sine stătătoare (salut/landing): o singură bucată, cu onStart/onEnd.
+export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
+  stopVoice() // închide curat orice redare anterioară (îi cheamă onEnd o dată)
+  onStart?.()
+  enqueueVoice(base64Mp3, true, onEnd)
+}
+
 export function stopVoice(): void {
+  const wasSpeaking = speaking
+  voiceQueue.length = 0
   if (curVoice) {
     try {
       curVoice.pause()
     } catch {
       /* deja oprit */
     }
-    curVoice = null
   }
+  curVoice = null
+  voiceLevel = 0
+  speaking = false
+  turn?.voiceEnded() // no-op dacă managerul e deja în „listening" (barge-in)
+  const cb = endCb
+  endCb = null
+  if (wasSpeaking) cb?.() // pause() NU declanșează onended → chemăm noi onEnd
 }
 
 export function isVoicePlaying(): boolean {
-  return curVoice !== null
+  return curVoice !== null || voiceQueue.length > 0
 }
