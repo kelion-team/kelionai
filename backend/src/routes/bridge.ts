@@ -138,6 +138,16 @@ export function setProgress(pct: number, label: string, file = ''): void {
   procFile = file.slice(0, 80)
   procAt = Date.now()
 }
+// CE ANALIZEAZĂ CREIERUL (ordinul din 5 iul): la click pe bara „Creierul
+// analizează" Adrian deschide detaliul — cererea aflată în analiză. Ținută
+// separat de eticheta barei ca să rămână aceeași cerere pe toate etapele
+// procesului (analiză → compunere → gata), nu doar pe prima.
+let procDetail = ''
+let procDetailAt = 0
+export function setAnalysisDetail(text: string): void {
+  procDetail = text.slice(0, 600)
+  procDetailAt = Date.now()
+}
 
 // ── OK → DEPLOY (Adrian, 4 iul): NO approval tab. A finished fix is "ready";
 // Adrian just replies "ok" in chat and the server publishes it immediately.
@@ -801,6 +811,25 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         procAt && Date.now() - procAt < 120_000
           ? { pct: procPct, label: procLabel, file: procFile }
           : null,
+    }
+  })
+
+  // Detaliul analizei — DOAR pentru admin (textul cererii NU se dă publicului;
+  // /api/dev/status rămâne fără el). Frontend-ul îl cere la click pe bara
+  // „Creierul analizează" și arată: cererea în lucru, etapa curentă și ultimii
+  // pași din jurnal — exact ce analizează creierul acum.
+  app.get('/api/dev/analysis', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const fresh = procDetailAt && Date.now() - procDetailAt < 30 * 60_000
+    return {
+      request: fresh ? procDetail : '',
+      at: fresh ? new Date(procDetailAt).toISOString() : null,
+      stage:
+        procAt && Date.now() - procAt < 120_000
+          ? { pct: procPct, label: procLabel, file: procFile }
+          : null,
+      steps: devLog.slice(-20),
     }
   })
 

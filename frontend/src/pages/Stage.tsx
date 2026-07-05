@@ -80,6 +80,14 @@ export default function Stage({ user }: { user: User }) {
   const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
     null,
   )
+  // Ordinul din 5 iul: CLICK pe bara „Creierul analizează" → se deschide
+  // detaliul cu CE analizează (cererea în lucru + ultimii pași din jurnal).
+  const [showAnalysis, setShowAnalysis] = useState(false)
+  const [analysis, setAnalysis] = useState<{
+    request: string
+    stage: { pct: number; label: string; file: string } | null
+    steps: string[]
+  } | null>(null)
   // The live-work console is NOT permanent on the owner's monitor — the AIs
   // see the journal server-side regardless. He opens it only when he wants:
   // one click on the "● Bridge" light shows/hides it.
@@ -238,6 +246,41 @@ export default function Stage({ user }: { user: User }) {
     return () => window.clearInterval(id)
   }, [user.role])
 
+  // Cât timp detaliul analizei e deschis, îl reîmprospătăm la 3s — Adrian vede
+  // LIVE ce cerere analizează creierul și pașii care se adaugă în jurnal.
+  useEffect(() => {
+    if (!showAnalysis || user.role !== 'admin') return
+    const load = (): void => {
+      void fetch('/api/dev/analysis', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (j: {
+            request?: string
+            stage?: { pct?: number; label?: string; file?: string } | null
+            steps?: string[]
+          } | null) => {
+            if (!j) return
+            setAnalysis({
+              request: typeof j.request === 'string' ? j.request : '',
+              stage:
+                j.stage && typeof j.stage.pct === 'number'
+                  ? {
+                      pct: Number(j.stage.pct),
+                      label: String(j.stage.label ?? ''),
+                      file: String(j.stage.file ?? ''),
+                    }
+                  : null,
+              steps: Array.isArray(j.steps) ? j.steps : [],
+            })
+          },
+        )
+        .catch(() => {})
+    }
+    load()
+    const id = window.setInterval(load, 3_000)
+    return () => window.clearInterval(id)
+  }, [showAnalysis, user.role])
+
   // AUTO-REFRESH on release: when the served bundle name changes (a deploy
   // landed), the page reloads ITSELF — nobody has to press F5 ever again.
   useEffect(() => {
@@ -342,9 +385,16 @@ export default function Stage({ user }: { user: User }) {
                 procesul trece prin etape; arată și fișierul la care se lucrează.
                 Asta a cerut Adrian: procesul de la început la sfârșit, nu resurse. */}
             {progress && progress.pct > 0 && (
-              <div className="proc-progress">
+              /* CLICK pe bară (ordinul 5 iul): se deschide detaliul analizei —
+                 cererea aflată în lucru + ultimii pași din jurnal, live. */
+              <div
+                className="proc-progress clickable"
+                title="Click: vezi ce analizează creierul"
+                onClick={() => setShowAnalysis((v) => !v)}
+              >
                 <div className="proc-top">
                   <span className="proc-label">
+                    <span className="proc-caret">{showAnalysis ? '▾' : '▸'}</span>
                     {progress.label || 'În lucru'}
                     {progress.file ? <span className="proc-file"> · {progress.file}</span> : null}
                   </span>
@@ -356,6 +406,30 @@ export default function Stage({ user }: { user: User }) {
                     style={{ width: `${Math.max(0, Math.min(100, progress.pct))}%` }}
                   />
                 </div>
+                {showAnalysis && (
+                  <div className="proc-detail" onClick={(e) => e.stopPropagation()}>
+                    {analysis === null ? (
+                      <div className="proc-detail-line">Se încarcă…</div>
+                    ) : (
+                      <>
+                        <div className="proc-detail-title">Cererea în analiză</div>
+                        <div className="proc-detail-req">
+                          {analysis.request || '— nicio cerere activă acum —'}
+                        </div>
+                        {analysis.steps.length > 0 && (
+                          <>
+                            <div className="proc-detail-title">Ultimii pași</div>
+                            {analysis.steps.slice(-8).map((s, i) => (
+                              <div key={i} className="proc-detail-line">
+                                {s}
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {/* JURNAL LIVE: fiecare pas al creierului, în ordine, nu o singură
