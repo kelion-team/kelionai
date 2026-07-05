@@ -26,7 +26,7 @@ import {
   isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { startMic, stopVoice, enqueueVoice, onVoiceLatency, type MicHandle } from '../lib/audioIO'
+import { startMic, playVoice, stopVoice, isVoicePlaying, type MicHandle } from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
@@ -81,8 +81,6 @@ export default function ChatPanel({
   const [busy, setBusy] = useState(false)
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
   const [listening, setListening] = useState(false)
-  // TELEMETRIE voce (#11): latența răspunsului (final → prima voce), arătată adminului
-  const [voiceLatency, setVoiceLatency] = useState<number | null>(null)
   const micRef = useRef<MicHandle | null>(null)
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
@@ -155,11 +153,13 @@ export default function ChatPanel({
       return
     }
     // VOCEA CREIERULUI: MP3 gata sintetizat pe server (Chirp 3) — DOAR îl redăm.
-    // Full-duplex: microfonul RĂMÂNE deschis (AEC scoate ecoul), iar managerul de
-    // tur face barge-in dacă Adrian vorbește peste voce.
+    // Cât vorbește, microfonul e mut (anti-ecou); revine singur la final.
     if (c.audio) {
-      // streaming pe fraze: prima bucată golește coada, restul se leagă în ordine
-      enqueueVoice(c.audio, c.first === true)
+      playVoice(
+        c.audio,
+        () => micRef.current?.setMuted(true),
+        () => micRef.current?.setMuted(false),
+      )
       return
     }
     // A SERVER-interpreted device command (the camera/monitor regexes moved off
@@ -692,8 +692,9 @@ export default function ChatPanel({
       micRef.current = h
       micBackoffRef.current = 1000
       setListening(true)
-      // Full-duplex: microfonul rămâne deschis chiar dacă redă creierul (AEC +
-      // manager de tur) — nu-l mai mutăm la repornire.
+      // Repornit cât încă vorbește creierul: pornește mut (anti-ecou); revine
+      // singur la finalul redării, ca la orice replică.
+      if (isVoicePlaying()) h.setMuted(true)
     }
   }
   const ensureMicRef = useRef(ensureMic)
@@ -734,12 +735,6 @@ export default function ChatPanel({
     keepScreenOn(listening)
     return () => keepScreenOn(false)
   }, [listening])
-
-  // Primesc latența răspunsului voce de la managerul de tur și o arăt (admin).
-  useEffect(() => {
-    onVoiceLatency((ms) => setVoiceLatency(ms))
-    return () => onVoiceLatency(null)
-  }, [])
 
   // Apply a language the SERVER decided (it already persisted the pref) —
   // update the recognizer + the local mirror. No-op if already active.
@@ -1053,14 +1048,6 @@ export default function ChatPanel({
           >
             {listening ? '●' : '🎤'}
           </button>
-          {isAdmin && voiceLatency != null && (
-            <span
-              style={{ fontSize: '0.7rem', opacity: 0.6, marginLeft: '0.4rem', alignSelf: 'center' }}
-              title="Latență răspuns voce: de când termini de vorbit → prima voce a lui Kelion"
-            >
-              ⚡ {voiceLatency} ms
-            </span>
-          )}
           <button
             type="button"
             className="composer-send"

@@ -51,9 +51,6 @@ export interface ChatControl {
   // VOCEA CREIERULUI: MP3 (base64) sintetizat pe server (Chirp 3) și trimis prin
   // punte. Aplicația doar îl decodează + redă — nu sintetizează nimic local.
   audio?: string
-  // STREAMING pe fraze: prima bucată de voce a unei replici → aplicația golește
-  // coada replicii anterioare înainte s-o pornească. Bucățile următoare: fără first.
-  first?: boolean
   // Owner promo pipeline: an APPROVED clip script + shot list — arm the recorder;
   // when recording starts the script is spoken (voice only, no text on screen)
   // while the scenes appear on the monitor at their times.
