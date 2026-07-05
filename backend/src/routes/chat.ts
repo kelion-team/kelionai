@@ -1161,8 +1161,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             })(),
           )
         }
+        // SARCINA REALĂ, nu „da" (Adrian, 5 iul — bug de dispecerizare): când
+        // Adrian aprobă cu „da"/„ok", `lastUserText` e doar aprobarea, nu munca.
+        // Trimițând „da" la constructor, ăsta nu știe ce să facă (a plecat pe
+        // timezone aiurea). Regula: dacă mesajul e o simplă afirmație, dispecerul
+        // trimite CONTEXTUL (ultimele replici = propunerea creierului + „da"-ul),
+        // ca să înțeleagă ce s-a cerut de fapt.
+        const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?)[\s.!]*$/i
+        const dispatchTask = bareAffirm.test(lastUserText.trim())
+          ? `SARCINA (Adrian a aprobat cu „${lastUserText.trim()}"; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde cu „da"):\n${past.slice(-8).join('\n')}`
+          : lastUserText
         const runTags = (line: string): string => {
-          if (/\[EXECUT\]/i.test(line)) bridgeRepair(lastUserText)
+          if (/\[EXECUT\]/i.test(line)) bridgeRepair(dispatchTask)
           const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
           const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
           const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
@@ -1465,8 +1475,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // (agent → files → build → deploy → live), so don't jump to 100 here.
           setProgress(15, 'Trimis la constructor')
           // SUPERVIZOR: cerința devine DEȚINUTĂ — rămâne deschisă până la
-          // verificare live, nu se închide la „trimis" (Adrian, 5 iul).
-          openRequirement(lastUserText)
+          // verificare live, nu se închide la „trimis" (Adrian, 5 iul). Numele
+          // cerinței = mesajul real, dar dacă a fost doar „da", ia prima linie
+          // cu sens din context (nu afișa „da" ca titlu de cerință).
+          const ownedTitle = bareAffirm.test(lastUserText.trim())
+            ? (past.slice(-2, -1)[0]?.replace(/^Kelion:\s*/, '').slice(0, 100) || lastUserText)
+            : lastUserText
+          openRequirement(ownedTitle)
           updateRequirement('trimisă la constructor')
           if (!a) {
             a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
