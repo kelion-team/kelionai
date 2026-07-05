@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../services/supervisor.js'
 import { buildBrainReport, fallbackLine, type AgentOutcome } from '../services/feedback.js'
+import { decideDeployFailure, isDuplicateOrder, composeOrdersReport } from '../services/orders.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -640,9 +641,19 @@ export interface WorkOrder {
 // the admin's "am trimis la execuție" orders vanished into thin air. Never
 // again: an order survives any restart and stays visible (with its status) in
 // the admin panel even after the builder picked it up.
+// METODA DE UNICAT (Adrian, 5 iul: „scoate 1 Influencer… creiază metoda de
+// unicat"): același ordin nu se mai construiește de două ori. Ținem textele
+// recente în memorie și sărim duplicatele înainte să ajungă la constructor.
+const recentOrderTexts: string[] = []
 export function bridgeRepair(description: string): string | null {
-  const id = randomUUID()
   const text = description.slice(0, 4000)
+  if (isDuplicateOrder(text, recentOrderTexts)) {
+    noteBrainActivity('↩️ Ordin duplicat — deja în lucru/făcut, nu-l repet')
+    return null
+  }
+  recentOrderTexts.push(text)
+  if (recentOrderTexts.length > 30) recentOrderTexts.shift()
+  const id = randomUUID()
   void saveWorkOrder(id, text).catch(() => {})
   // OBLIGATORY monitor display: the moment a repair/dev task is created it shows
   // on the monitor by itself. Adrian's rule (4 iul): his RAW message never
@@ -981,23 +992,40 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // imediat. Ștergerea cererilor rămâne DUPĂ triajul creierului (4 iul).
         void confirmLiveThenAnnounce(failedSummary)
       } else {
-        // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
-        // — never a silent auto-redeploy. Re-stage the branch so his "ok"
-        // republishes it (the affirm path calls triggerDeploy → the deployer).
-        if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch)) {
-          readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now() })
-          persistReady()
-        }
+        // DECIZIE LA EȘEC (Adrian, 5 iul: „la conflict decide singur, nu buclă"):
+        // conflict de merge = ramură veche/duplicat → a reîncerca ACELAȘI pică la
+        // infinit. NU re-cozăm — retrimitem la reconstruit pe master proaspăt.
+        // Alt eșec (build/rețea) poate fi trecător → cerem „ok" ca înainte.
         const detail = String(req.body?.detail || '').slice(0, 200)
-        const msg = `Deploy-ul a picat: ${detail}. Nu s-a publicat nimic — versiunea veche e tot live. Vrei să reîncerc? Zi „ok".`
-        sayQueue.push(msg)
+        const decision = decideDeployFailure(detail, failedSummary)
+        if (decision.action === 'rebuild') {
+          bridgeRepair(
+            `RECONSTRUIRE (deploy picat pe conflict): „${failedSummary}" s-a ciocnit cu masterul curent (ramură veche/duplicat). Reconstruiește de la zero pe origin/master proaspăt și re-publică prin flux; dacă e deja făcut, las-o.`,
+          )
+          noteBrainActivity('🔁 Deploy picat pe conflict → retrimis la reconstruit (fără buclă pe „ok")')
+        } else {
+          if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch)) {
+            readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now() })
+            persistReady()
+          }
+          noteBrainActivity('🔴 Deploy eșuat — aștept „ok" să reîncerc')
+        }
+        sayQueue.push(decision.message)
         persistSay()
-        void saveMessage(config.adminEmail, 'assistant', msg)
-        noteBrainActivity('🔴 Deploy eșuat — aștept „ok" să reîncerc')
+        void saveMessage(config.adminEmail, 'assistant', decision.message)
       }
       return { ok: true }
     },
   )
+
+  // REGISTRU DE ORDINE (Adrian, 5 iul): Kelion cere raportul cu toate cererile
+  // și stadiile lor — ca să știe și el, și Adrian, ce s-a făcut cu fiecare ordin.
+  app.get('/api/bridge/orders-report', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const orders = await listWorkOrders(50)
+    const owned = ownedRequirement()
+    return { report: composeOrdersReport(orders, owned?.summary ?? null) }
+  })
 
   // Linux server → upload the freshest installer MASTER (.exe/.apk) into the
   // delivery store. From then on /dl/<name> serves THIS, over HTTPS+Cloudflare,
