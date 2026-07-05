@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../services/supervisor.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -267,6 +268,8 @@ interface OwnedReq {
   at: number
   opened: number
   nudged: number
+  attempts: number // câți agenți proaspeți a re-asignat supervizorul
+  task: string // sarcina completă (pt re-asignare cu escaladare)
 }
 let ownedReq: OwnedReq | null = null
 // Cerința deținută supraviețuiește restartului (Postgres) — o cerință deschisă
@@ -281,8 +284,16 @@ void loadKv('owned_req')
     if (r && typeof r.summary === 'string') ownedReq = r
   })
   .catch(() => {})
-export function openRequirement(summary: string): void {
-  ownedReq = { summary: summary.slice(0, 120), status: 'primită', at: Date.now(), opened: Date.now(), nudged: 0 }
+export function openRequirement(summary: string, task?: string): void {
+  ownedReq = {
+    summary: summary.slice(0, 120),
+    status: 'primită',
+    at: Date.now(),
+    opened: Date.now(),
+    nudged: 0,
+    attempts: 0,
+    task: (task ?? summary).slice(0, 4000),
+  }
   persistOwned()
 }
 export function updateRequirement(status: string): void {
@@ -306,18 +317,17 @@ export function ownedRequirement(): { summary: string; status: string; ageMs: nu
 setInterval(() => {
   const r = ownedReq
   if (!r) return
-  const stalledMs = Date.now() - r.at
-  if (stalledMs < 4 * 60_000) return
-  if (Date.now() - r.nudged < 4 * 60_000) return
+  const action = superviseDecision(
+    { status: r.status, at: r.at, nudged: r.nudged, attempts: r.attempts ?? 0 },
+    Date.now(),
+    lastBuildBeat,
+  )
+  if (action === 'wait') return
   r.nudged = Date.now()
+  const max = DEFAULT_SUPERVISE.maxAttempts
   void (async () => {
-    // BUG REPARAT (Adrian, 5 iul): site-ul care răspunde 200 NU dovedește că
-    // CERINȚA s-a făcut — vechiul cod închidea fals cerințe aflate încă în
-    // lucru la constructor. Închiderea se face DOAR pe drumul real: deploy →
-    // confirmLiveThenAnnounce → resolveRequirement. Aici doar RAPORTĂM cinstit.
-    if (r.status.startsWith('deploy pornit')) {
-      // După un deploy pornit, un 200 chiar înseamnă că publicarea a supraviețuit
-      // — dar confirmarea o dă tot confirmLiveThenAnnounce; aici doar notăm.
+    if (action === 'deploy-check') {
+      // Publică — un 200 NU închide cerința (o face confirmLiveThenAnnounce); doar raportăm.
       const live = await verifyLive()
       noteBrainActivity(
         live
@@ -326,8 +336,35 @@ setInterval(() => {
       )
       return
     }
-    updateRequirement(`în lucru de ${Math.round((Date.now() - r.opened) / 60000)} min — rămân pe ea`)
-    noteBrainActivity(`⏳ Cerința „${r.summary}" e încă în lucru la constructor — NU o închid, rămân pe ea`)
+    if (action === 'active') {
+      // Constructorul CHIAR lucrează (build beat recent) — NU-l înlocuim.
+      noteBrainActivity(`⏳ „${r.summary}" — constructorul lucrează activ, aștept`)
+      return
+    }
+    if (action === 'reassign') {
+      // NU performează (stagnat + fără activitate) → ÎNLOCUIESC agentul cu unul
+      // PROASPĂT, cu instrucțiune escaladată. Un work-order nou = agent nou.
+      r.attempts = (r.attempts ?? 0) + 1
+      bridgeRepair(
+        `SUPERVIZOR — încercarea ${r.attempts}/${max}: agentul anterior N-A dus la capăt „${r.summary}". ` +
+          `${escalationText(r.attempts, max)}\n\nSARCINA: ${r.task || r.summary}`,
+      )
+      updateRequirement(`re-asignat unui agent proaspăt (încercarea ${r.attempts}/${max})`)
+      noteBrainActivity(
+        `🔁 Supervizor: „${r.summary}" re-asignată — agent proaspăt, escaladat (${r.attempts}/${max})`,
+      )
+      return
+    }
+    // giveup: gata cu re-asignările automate → NU buclează la infinit, decizia lui Adrian.
+    updateRequirement(`BLOCAT după ${max} încercări — decizia lui Adrian`)
+    const msg =
+      `🛑 „${r.summary}": ${max} agenți la rând n-au dus-o la capăt. Nu mai re-asignez automat. ` +
+      `Vrei s-o simplific, s-o las, sau îmi dai alt unghi?`
+    sayQueue.push(msg)
+    void saveMessage(config.adminEmail, 'assistant', msg)
+    noteBrainActivity(`🛑 Supervizor: „${r.summary}" blocată după ${max} încercări — la decizia lui Adrian`)
+    r.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată până se schimbă ceva
+    persistOwned()
   })()
 }, 60_000).unref()
 let devActivity: string[] = []
