@@ -64,6 +64,12 @@ _Last updated: 2026-06-30_
   non-latine în `services/lang.ts`) + regula „de două ori la rând" + persistarea
   rulează în `/api/chat`; clientul primește un cadru `{lang}` și doar comută
   recognizer-ul + oglinda locală. `franc-min` nu se mai folosește în frontend.
+- **Microfonul e permanent on (5 iul 2026)** — pornește singur la intrare (fără
+  click), se redeschide singur când pista moare (apel, căști Bluetooth scoase,
+  alt app ia microfonul — `track ended` în `audioIO.ts`) sau când tabul redevine
+  vizibil, cu reîncercare cu pas dublat (1s→15s); refuzul de permisiune NU se
+  reîncearcă automat (butonul reîncearcă la atingere). Cât ascultă, ecranul e
+  ținut treaz (`wakelock.ts`). Butonul de mic rămâne doar ca pauză manuală.
 
 ## 🚧 Next
 

@@ -26,7 +26,8 @@ import {
   isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { startMic, playVoice, stopVoice, type MicHandle } from '../lib/audioIO'
+import { startMic, playVoice, stopVoice, isVoicePlaying, type MicHandle } from '../lib/audioIO'
+import { keepScreenOn } from '../lib/wakelock'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
 // ~15s; a full landing demo can use the whole window).
@@ -653,34 +654,87 @@ export default function ChatPanel({
   const sendRef = useRef(send)
   sendRef.current = send
 
-  // Microfonul: pornește captarea (full-duplex, filtru zgomot, VOX, buffer mare).
-  // Ce transcrie serverul (STT) e trimis ca mesaj către creier. NU produce voce.
-  async function toggleMic(): Promise<void> {
+  // Microfonul e PERMANENT ON: pornește singur la intrare și se redeschide
+  // singur când pista moare (apel telefonic, căști Bluetooth scoase, alt app ia
+  // microfonul) sau când tabul redevine vizibil. Butonul rămâne doar ca pauză
+  // manuală — singurul caz în care microfonul stă oprit intenționat.
+  const micManualOffRef = useRef(false)
+  const micStartingRef = useRef(false)
+  const micRetryRef = useRef<number | null>(null)
+  const micBackoffRef = useRef(1000)
+
+  async function ensureMic(): Promise<void> {
+    if (micRef.current || micStartingRef.current || micManualOffRef.current) return
+    if (micRetryRef.current) {
+      window.clearTimeout(micRetryRef.current)
+      micRetryRef.current = null
+    }
+    micStartingRef.current = true
+    const h = await startMic(
+      (text) => void sendRef.current(text),
+      (reason) => {
+        micRef.current = null
+        setListening(false)
+        // Refuz de permisiune / browser fără suport: nu insistăm (am reprompta
+        // la nesfârșit) — butonul de microfon reîncearcă la atingere. Orice
+        // altceva e trecător și se reîncearcă singur, cu pas dublat până la 15s.
+        if (reason === 'not-allowed' || reason === 'unsupported') return
+        micRetryRef.current = window.setTimeout(
+          () => void ensureMicRef.current(),
+          micBackoffRef.current,
+        )
+        micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+      },
+      () => speechLangRef.current,
+    )
+    micStartingRef.current = false
+    if (h) {
+      micRef.current = h
+      micBackoffRef.current = 1000
+      setListening(true)
+      // Repornit cât încă vorbește creierul: pornește mut (anti-ecou); revine
+      // singur la finalul redării, ca la orice replică.
+      if (isVoicePlaying()) h.setMuted(true)
+    }
+  }
+  const ensureMicRef = useRef(ensureMic)
+  ensureMicRef.current = ensureMic
+
+  function toggleMic(): void {
     if (micRef.current) {
+      micManualOffRef.current = true
       micRef.current.stop()
       micRef.current = null
       setListening(false)
       return
     }
-    const h = await startMic(
-      (text) => void sendRef.current(text),
-      () => setListening(false),
-      () => speechLangRef.current,
-    )
-    if (h) {
-      micRef.current = h
-      setListening(true)
-    }
+    micManualOffRef.current = false
+    void ensureMicRef.current()
   }
-  // Curăță microfonul + orice redare la demontare.
-  useEffect(
-    () => () => {
+
+  // Permanent hearing: pornește la montare, revine când tabul redevine vizibil
+  // (browserele opresc captarea în fundal), curăță tot la demontare.
+  useEffect(() => {
+    void ensureMicRef.current()
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void ensureMicRef.current()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       micRef.current?.stop()
       micRef.current = null
       stopVoice()
-    },
-    [],
-  )
+    }
+  }, [])
+
+  // Cât ascultă, ecranul nu adoarme — un telefon cu ecranul stins își taie
+  // microfonul, iar „permanent on" ar muri la primul screen-off.
+  useEffect(() => {
+    keepScreenOn(listening)
+    return () => keepScreenOn(false)
+  }, [listening])
 
   // Apply a language the SERVER decided (it already persisted the pref) —
   // update the recognizer + the local mirror. No-op if already active.
@@ -988,7 +1042,7 @@ export default function ChatPanel({
           <button
             type="button"
             className={`composer-mic ${listening ? 'live' : ''}`}
-            onClick={() => void toggleMic()}
+            onClick={toggleMic}
             aria-label="Microfon"
             title={listening ? 'Oprește microfonul' : 'Vorbește (microfon)'}
           >

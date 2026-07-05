@@ -35,8 +35,11 @@ export async function startMic(
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
-  } catch {
-    onError('not-allowed')
+  } catch (e) {
+    // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
+    // eșecul trecător (dispozitiv ocupat, căști scoase) da.
+    const name = (e as { name?: string })?.name
+    onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
     return null
   }
 
@@ -122,6 +125,29 @@ export async function startMic(
     if (recording && rec && rec.state !== 'inactive') rec.stop()
   }
 
+  const cleanup = (): void => {
+    if (stopped) return
+    stopped = true
+    cancelAnimationFrame(raf)
+    try {
+      stopRec()
+    } catch {
+      /* deja oprit */
+    }
+    stream.getTracks().forEach((t) => t.stop())
+    void ctx.close().catch(() => {})
+  }
+
+  // PERMANENT ON: dacă pista moare din exterior (apel telefonic, căști Bluetooth
+  // scoase, alt app ia microfonul), anunțăm — panoul redeschide microfonul singur.
+  stream.getAudioTracks().forEach((t) => {
+    t.addEventListener('ended', () => {
+      if (stopped) return
+      cleanup()
+      onError('track-ended')
+    })
+  })
+
   const tick = (): void => {
     if (stopped) return
     analyser.getFloatTimeDomainData(buf)
@@ -153,15 +179,7 @@ export async function startMic(
 
   return {
     stop() {
-      stopped = true
-      cancelAnimationFrame(raf)
-      try {
-        stopRec()
-      } catch {
-        /* deja oprit */
-      }
-      stream.getTracks().forEach((t) => t.stop())
-      void ctx.close().catch(() => {})
+      cleanup()
     },
     setMuted(m: boolean) {
       muted = m
