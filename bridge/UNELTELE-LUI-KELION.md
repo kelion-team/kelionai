@@ -1,5 +1,11 @@
 # UNELTELE LUI KELION — contract confirmat 100% (Adrian, 5 iulie 2026, ~21:50)
 
+## REGULA 0 — DECIZIA E LA ADRIAN (declarată de el, 5 iul ~21:55)
+Nimic din acest contract nu se aplică pe serverele lui fără ordinul lui explicit.
+Claude pregătește, testează și dovedește; **Adrian decide când și ce intră live.**
+Orice autonomie primită de Kelion e sub aceeași lege: decizia finală, întotdeauna,
+e a lui Adrian — uneltele îl servesc, nu-l înlocuiesc.
+
 Cerința lui Adrian, cuvânt cu cuvânt: **„DA tot ce are nevoie. Confirma cerinta ca o faci 100%."**
 și **„ochii și mâinile LUI, nu ale tale."**
 
