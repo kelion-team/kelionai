@@ -79,7 +79,17 @@ export function setDemoSession(reply: FastifyReply, seconds: number, email = mak
 }
 
 export function getSessionUser(req: FastifyRequest): SessionUser | null {
-  const token = req.cookies[SESSION_COOKIE]
+  // req.cookies e populat de @fastify/cookie pe rutele HTTP normale. Pe un
+  // UPGRADE WebSocket poate fi neparsat (undefined) → `?.` evită crash-ul și
+  // cădem pe header-ul brut, ca autentificarea prin sesiune să meargă și pe WS.
+  let token = req.cookies?.[SESSION_COOKIE]
+  if (!token) {
+    const raw = req.headers.cookie
+    if (raw) {
+      const m = raw.match(/(?:^|;\s*)kelionai_session=([^;]+)/)
+      if (m) token = decodeURIComponent(m[1])
+    }
+  }
   if (!token) return null
   try {
     return jwt.verify(token, config.sessionSecret) as SessionUser

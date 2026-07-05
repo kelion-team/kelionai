@@ -17,8 +17,8 @@ import { normalizeLang } from '../services/tts.js'
 
 const REGION = 'us-central1'
 // Cel mai avansat model cerut de Adrian. chirp_2 e dovedit în batch; chirp_3 e
-// mai nou — dacă proiectul Google nu-l are pe streaming în regiune, e o singură
-// vorbă de schimbat aici (se verifică la testul live, Faza 3).
+// Adrian confirmă: chirp_3 SUPORTĂ streaming → păstrăm chirp_3. Mic-ul mut la
+// primul deploy NU e de la model — bug-ul e pe drum (WS/auth/format), de găsit.
 const ASR_MODEL = 'chirp_3'
 
 let client: v2.SpeechClient | null = null
@@ -50,6 +50,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/asr-stream', { websocket: true }, (socket, req) => {
     const user = getSessionUser(req)
     if (!user) {
+      app.log.warn('asr-stream: WS refuzat — fără sesiune (cookie neparsat pe upgrade?)')
       try {
         socket.close(1008, 'unauthorized')
       } catch {
@@ -59,6 +60,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     }
     const c = getClient()
     if (!c || !projectId) {
+      app.log.warn('asr-stream: WS refuzat — Google STT neconfigurat (fără service account)')
       try {
         socket.close(1011, 'asr_not_configured')
       } catch {
@@ -66,6 +68,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
+    app.log.info('asr-stream: WS conectat (sesiune OK) — aștept audio')
 
     let gStream: GStream | null = null
     let started = false
@@ -120,7 +123,9 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
           }
         }
       })
-      stream.on('error', () => {
+      stream.on('error', (e: unknown) => {
+        // dovada EXACTĂ a cauzei în Railway: model refuzat? config invalid? auth?
+        app.log.error({ err: e }, 'asr-stream: eroare Google streamingRecognize')
         send({ type: 'error', error: 'asr_failed' })
         gStream = null
       })
