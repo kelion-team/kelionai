@@ -57,6 +57,11 @@ export default function Stage({ user }: { user: User }) {
   const [adminOpen, setAdminOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [recording, setRecording] = useState(false)
+  // Zoom/potrivire pentru textul de pe monitor (cererea #27): A− / A+ scalează
+  // conținutul citibil (doc + consola live) ca să fie încadrat și lizibil.
+  const [monZoom, setMonZoom] = useState(1)
+  const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
+  const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
   // Lit ORANGE when the laptop Claude Code session is actively writing code, so
   // the owner sees when Claude is working on his behalf (admin only). The live
   // work steps are shown on the monitor while active.
@@ -417,6 +422,15 @@ export default function Stage({ user }: { user: User }) {
                   </button>
                 ))}
               </div>
+              <div className="ws-zoom" title="Potrivește textul (zoom)">
+                <button type="button" className="ghost" onClick={zoomOut} aria-label="Micșorează">
+                  A−
+                </button>
+                <span className="ws-zoom-val">{Math.round(monZoom * 100)}%</span>
+                <button type="button" className="ghost" onClick={zoomIn} aria-label="Mărește">
+                  A+
+                </button>
+              </div>
               {ws.tasks.length > 1 && (
                 <button
                   type="button"
@@ -438,7 +452,7 @@ export default function Stage({ user }: { user: User }) {
                 >
                   Copiază
                 </button>
-                <pre className="doc-text">{ws.text}</pre>
+                <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{ws.text}</pre>
               </div>
             ) : ws.card ? (
               <CardView card={ws.card} />
