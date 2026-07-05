@@ -155,8 +155,117 @@ export function triggerDeploy(): { summary: string } | null {
   const s = readyDeploy.summary
   readyDeploy = null
   noteBrainActivity('🚀 Public pe producție — pornesc deploy-ul')
+  updateRequirement('deploy pornit')
   return { summary: s }
 }
+
+// ── VERIFICARE LIVE (Adrian, 5 iul: „trimis ≠ gata") ───────────────────────
+// Creierul NU declară „publicat" pe cuvântul deployerului. După ce deployerul
+// zice că a terminat, creierul verifică EL însuși că producția răspunde 200 și
+// abia atunci confirmă. Dacă nu răspunde, rămâne angajat (nu declară gata).
+async function verifyLive(): Promise<boolean> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 8000)
+    const r = await fetch('https://kelionai.app/api/dev/status', {
+      signal: ctrl.signal,
+      headers: { 'cache-control': 'no-store' },
+    })
+    clearTimeout(t)
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+// Rulează asincron DUPĂ deploy-done (nu blochează răspunsul către deployer):
+// probează live-ul până la ~30s, apoi anunță în chat DOAR ce a verificat.
+async function confirmLiveThenAnnounce(summary: string): Promise<void> {
+  noteBrainActivity('🔎 Verific live pe kelionai.app (nu cred pe cuvânt)…')
+  setProgress(92, 'Verific live (fetch → 200)')
+  let live = false
+  for (let i = 0; i < 10 && !live; i++) {
+    await new Promise((r) => setTimeout(r, 3000))
+    live = await verifyLive()
+  }
+  if (live) {
+    const msg = `Gata — VERIFICAT live pe kelionai.app (răspunde 200): ${summary || 'modificarea'}. Reîmprospătează pagina.`
+    sayQueue.push(msg)
+    void saveMessage(config.adminEmail, 'assistant', msg)
+    noteBrainActivity('🟢 PUBLICAT + VERIFICAT LIVE (200)')
+    // 100% ADEVĂRAT: bara ajunge la capăt DOAR când producția e verificată live,
+    // nu la „trimis" (Adrian, 5 iul). Ăsta e „done"-ul cinstit al creierului.
+    setProgress(100, 'Verificat live')
+    resolveRequirement() // cerința e ÎNCHISĂ abia acum — verificată, nu trimisă.
+  } else {
+    const msg =
+      'Deployerul raportează publicat, dar verificarea mea live a picat — kelionai.app nu răspunde 200 după 30s. NU confirm ca publicat; rămân pe cerință și investighez.'
+    sayQueue.push(msg)
+    void saveMessage(config.adminEmail, 'assistant', msg)
+    noteBrainActivity('🟠 Deploy raportat OK, dar verificarea live a picat — rămân angajat')
+    // NU 100%: cerința rămâne deschisă, bara NU minte că e gata.
+    setProgress(95, 'Verificarea live a picat — investighez')
+    updateRequirement('verificarea live a picat — investighez')
+  }
+}
+
+// ── SUPERVIZOR PER-CERINȚĂ (Adrian, 5 iul: „stă implicat până la verificat") ──
+// O cerință de execuție rămâne DEȚINUTĂ (deschisă) până e verificată live — nu
+// se închide la „Răspuns trimis". Dacă stagnează prea mult, creierul se
+// REANGAJEAZĂ singur: re-verifică live (poate deploy-ul a reușit tăcut) și
+// anunță — în loc să intre în idle. NU redeployează singur (poarta umană
+// rămâne); watchdog-ul e read-only (fetch de stare + anunț), nu autonom-periculos.
+interface OwnedReq {
+  summary: string
+  status: string
+  at: number
+  opened: number
+  nudged: number
+}
+let ownedReq: OwnedReq | null = null
+export function openRequirement(summary: string): void {
+  ownedReq = { summary: summary.slice(0, 120), status: 'primită', at: Date.now(), opened: Date.now(), nudged: 0 }
+}
+export function updateRequirement(status: string): void {
+  if (ownedReq) {
+    ownedReq.status = status.slice(0, 80)
+    ownedReq.at = Date.now()
+  }
+}
+export function resolveRequirement(): void {
+  ownedReq = null
+}
+export function ownedRequirement(): { summary: string; status: string; ageMs: number } | null {
+  return ownedReq ? { summary: ownedReq.summary, status: ownedReq.status, ageMs: Date.now() - ownedReq.opened } : null
+}
+
+// Watchdog: o cerință deschisă care stagnează >4 min primește o reangajare —
+// re-verific live (poate a devenit live între timp) și, dacă da, o închid; altfel
+// notez că e blocată și rămân pe ea. Max o reangajare la 4 min, ca să nu spameze.
+setInterval(() => {
+  const r = ownedReq
+  if (!r) return
+  const stalledMs = Date.now() - r.at
+  if (stalledMs < 4 * 60_000) return
+  if (Date.now() - r.nudged < 4 * 60_000) return
+  r.nudged = Date.now()
+  void (async () => {
+    noteBrainActivity(`⏳ Cerința „${r.summary}" stagnează de ${Math.round(stalledMs / 60000)} min — reverific live`)
+    const live = await verifyLive()
+    if (!ownedReq) return
+    if (live) {
+      const msg = `Am reverificat singur: „${r.summary}" e live pe kelionai.app (200). Închid cerința ca rezolvată.`
+      sayQueue.push(msg)
+      void saveMessage(config.adminEmail, 'assistant', msg)
+      noteBrainActivity('🟢 Reangajare: verificat live — cerință închisă')
+      setProgress(100, 'Verificat live (reangajare)')
+      resolveRequirement()
+    } else {
+      updateRequirement('blocată — rămân pe ea')
+      noteBrainActivity('🟠 Reangajare: încă nu e live — rămân pe cerință')
+    }
+  })()
+}, 60_000).unref()
 let devActivity: string[] = []
 // When two senders beat at once (the rich live work feed from the laptop and a
 // bare generic presence beat), the LAST write used to win and the monitor
@@ -628,13 +737,11 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       deployWanted = null
       const ok = req.body?.ok !== false
       if (ok) {
-        const msg = 'Gata — e PUBLICAT live pe kelionai.app. Reîmprospătează pagina și verifică.'
-        sayQueue.push(msg)
-        void saveMessage(config.adminEmail, 'assistant', msg)
-        noteBrainActivity('🟢 PUBLICAT LIVE')
-        // Nu mai ștergem orbește cererile la deploy — ștergerea se face DUPĂ
-        // VERIFICAREA creierului (triaj: „s-a făcut?"), ca să nu iasă din listă
-        // ceva ce n-a fost cu adevărat construit (Adrian, 4 iul).
+        // NU mai anunțăm „publicat" pe cuvântul deployerului. Creierul verifică
+        // el însuși live-ul (fetch → 200) și abia apoi confirmă (Adrian, 5 iul:
+        // „trimis ≠ gata"). Rulează asincron ca deployerul să primească răspuns
+        // imediat. Ștergerea cererilor rămâne DUPĂ triajul creierului (4 iul).
+        void confirmLiveThenAnnounce(failedSummary)
       } else {
         // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
         // — never a silent auto-redeploy. Re-stage the branch so his "ok"
@@ -801,6 +908,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         procAt && Date.now() - procAt < 120_000
           ? { pct: procPct, label: procLabel, file: procFile }
           : null,
+      // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată
+      // live). Rămâne aici până creierul o verifică — dovada că nu „trimite și
+      // uită". null = nicio cerință deschisă (Adrian, 5 iul).
+      owned: ownedRequirement(),
     }
   })
 

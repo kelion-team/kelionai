@@ -80,6 +80,11 @@ export default function Stage({ user }: { user: User }) {
   const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
     null,
   )
+  // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată live).
+  // Rămâne pe monitor până creierul o verifică — dovada că nu „trimite și uită".
+  const [owned, setOwned] = useState<{ summary: string; status: string; ageMs: number } | null>(
+    null,
+  )
   // The live-work console is NOT permanent on the owner's monitor — the AIs
   // see the journal server-side regardless. He opens it only when he wants:
   // one click on the "● Bridge" light shows/hides it.
@@ -208,6 +213,7 @@ export default function Stage({ user }: { user: User }) {
             activity?: string[]
             srv?: string
             progress?: { pct?: number; label?: string; file?: string }
+            owned?: { summary?: string; status?: string; ageMs?: number } | null
           } | null) => {
             if (!j) return // 429 — state unchanged
             setServerUp(true)
@@ -219,6 +225,12 @@ export default function Stage({ user }: { user: User }) {
             setProgress(
               p && typeof p.pct === 'number'
                 ? { pct: Number(p.pct), label: String(p.label ?? ''), file: String(p.file ?? '') }
+                : null,
+            )
+            const o = j.owned
+            setOwned(
+              o && typeof o.summary === 'string'
+                ? { summary: o.summary, status: String(o.status ?? ''), ageMs: Number(o.ageMs ?? 0) }
                 : null,
             )
           },
@@ -341,6 +353,17 @@ export default function Stage({ user }: { user: User }) {
                 (preluare) până la final (live/gata). Se umple fluid pe măsură ce
                 procesul trece prin etape; arată și fișierul la care se lucrează.
                 Asta a cerut Adrian: procesul de la început la sfârșit, nu resurse. */}
+            {/* CERINȚA DEȚINUTĂ: rămâne pe monitor până creierul o VERIFICĂ live
+                — dovada vizibilă că nu „trimite și uită" (Adrian, 5 iul). */}
+            {owned && (
+              <div className="owned-req">
+                <span className="owned-dot" />
+                <span className="owned-text">
+                  Cerință deschisă: <b>{owned.summary}</b>
+                  {owned.status ? <span className="owned-status"> — {owned.status}</span> : null}
+                </span>
+              </div>
+            )}
             {progress && progress.pct > 0 && (
               <div className="proc-progress">
                 <div className="proc-top">

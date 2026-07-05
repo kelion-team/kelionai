@@ -64,6 +64,8 @@ import {
   triggerDeploy,
   recentDevLog,
   stashAdminFiles,
+  openRequirement,
+  updateRequirement,
   type BridgeFile,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
@@ -1393,6 +1395,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // Handed to the builder — the process bar continues from the builder
           // (agent → files → build → deploy → live), so don't jump to 100 here.
           setProgress(15, 'Trimis la constructor')
+          // SUPERVIZOR: cerința devine DEȚINUTĂ — rămâne deschisă până la
+          // verificare live, nu se închide la „trimis" (Adrian, 5 iul).
+          openRequirement(lastUserText)
+          updateRequirement('trimisă la constructor')
           if (!a) {
             a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
             emit(a)
