@@ -1,9 +1,9 @@
 // ── Meserii (roluri/persona pentru Kelion) ────────────────────────────────
 // O "meserie" este un rol opțional pe care Kelion îl poate adopta pe lângă
-// comportamentul lui implicit. Acest fișier este DOAR fundația: definește
-// structura de date și lista de meserii disponibile. NU este (încă)
-// integrat în chat.ts sau în system prompt-ul principal — activarea unei
-// meserii va fi cablată separat, ulterior.
+// comportamentul lui implicit. Structura de date + lista de meserii e aici;
+// activarea per-user (persistată în user_prefs.meserie_activa) e în db.ts
+// (getMeserieActiva/setMeserieActivaPref), expusă prin GET/PUT /api/prefs
+// (routes/prefs.ts) și aplicată la system prompt în routes/chat.ts.
 
 export interface Meserie {
   id: number

@@ -26,12 +26,14 @@ import {
   logCapabilityGap,
   getSpeechLang,
   setSpeechLangPref,
+  getMeserieActiva,
   saveNote,
   listNotes,
   deleteNote,
   getRecentHistory,
   getSharedMemory,
 } from '../db.js'
+import { getMeserie } from '../services/meserii.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
@@ -783,6 +785,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // the live coordinates; we resolve a human place name (cached) so Claude can
     // pass it to the name-based skills.
     let systemPrompt = SYSTEM_PROMPT
+    // Active "meserie" (role/persona), if the user has one enabled via
+    // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
+    // default behavior; absent/unknown id means Kelion stays default.
+    const meserieId = await getMeserieActiva(user.email)
+    const meserie = meserieId != null ? getMeserie(meserieId) : undefined
+    if (meserie) {
+      systemPrompt += `\n\nACTIVE ROLE (${meserie.nume}): ${meserie.systemPromptAddon}`
+    }
     // Language lock — the #1 rule. Kelion must never drift to another language.
     // userLang (the user's ESTABLISHED language, not the Google-account locale)
     // was resolved above. Using the account locale is why short/ambiguous

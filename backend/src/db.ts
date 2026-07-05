@@ -34,6 +34,7 @@ export async function initDb(): Promise<void> {
       speech_lang TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
     CREATE TABLE IF NOT EXISTS cost_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -1095,6 +1096,35 @@ export async function setSpeechLangPref(email: string, lang: string): Promise<vo
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET speech_lang = $2, updated_at = now()`,
       [email, lang],
+    )
+  } catch {
+    // Never break the chat because persistence failed.
+  }
+}
+
+// Per-user active "meserie" (role/persona) — id into MESERII, or null when
+// the user has no role active. Same persistence pattern as speech_lang.
+export async function getMeserieActiva(email: string): Promise<number | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ meserie_activa: number | null }>(
+      'SELECT meserie_activa FROM user_prefs WHERE user_email = $1',
+      [email],
+    )
+    return r.rows[0]?.meserie_activa ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function setMeserieActivaPref(email: string, id: number | null): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO user_prefs (user_email, meserie_activa, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_email) DO UPDATE SET meserie_activa = $2, updated_at = now()`,
+      [email, id],
     )
   } catch {
     // Never break the chat because persistence failed.
