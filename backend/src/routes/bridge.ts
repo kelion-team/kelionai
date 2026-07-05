@@ -203,10 +203,21 @@ async function confirmLiveThenAnnounce(summary: string): Promise<void> {
     sayQueue.push(msg)
     void saveMessage(config.adminEmail, 'assistant', msg)
     noteBrainActivity('🟢 PUBLICAT + VERIFICAT LIVE (200)')
-    // 100% ADEVĂRAT: bara ajunge la capăt DOAR când producția e verificată live,
-    // nu la „trimis" (Adrian, 5 iul). Ăsta e „done"-ul cinstit al creierului.
-    setProgress(100, 'Verificat live')
-    resolveRequirement() // cerința e ÎNCHISĂ abia acum — verificată, nu trimisă.
+    const r = ownedRequirement()
+    if (r) {
+      // LEGEA 200 PE CERINȚĂ (Adrian, 5 iul): site-ul sus NU închide cerința.
+      // Comportamentul ei e verificat pe live de tester; închiderea vine DOAR
+      // pe verdict PASS (endpointul requirement-verdict). FAIL → auto-reparat.
+      updateRequirement('verific comportamentul pe live (tester)')
+      setProgress(97, 'Verific comportamentul cerinței')
+      bridgeRepair(
+        `VERIFICARE PE CERINȚĂ (auto, după deploy verificat live): testează pe kelionai.app că cerința „${r.summary}" chiar se comportă conform — dovezi reale (curl, codul livrat, încercare concretă), nu presupuneri. Apoi raportează verdictul cu: curl -s -X POST https://kelionai.app/api/bridge/requirement-verdict -H "x-bridge-secret: $(cat /root/kelion/bridge-secret.txt)" -H "content-type: application/json" -d '{"pass":true,"detail":"dovada scurtă"}' — sau pass:false cu motivul exact. INTERZIS verdict fără dovadă.`,
+      )
+    } else {
+      // 100% ADEVĂRAT: bara ajunge la capăt DOAR când producția e verificată
+      // live, nu la „trimis" (Adrian, 5 iul).
+      setProgress(100, 'Verificat live')
+    }
   } else {
     const msg =
       'Deployerul raportează publicat, dar verificarea mea live a picat — kelionai.app nu răspunde 200 după 30s. NU confirm ca publicat; rămân pe cerință și investighez.'
@@ -749,6 +760,37 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const t = triggerDeploy()
     return { ok: !!t, summary: t ? t.summary : null }
   })
+
+  // LEGEA 200 PE CERINȚĂ — verdictul testerului de pe server: PASS (cu dovadă)
+  // → cerința se închide CERTIFICATĂ; FAIL → pleacă AUTOMAT la reparat și
+  // rămâne deschisă. Singurul drum prin care o cerință deployată se închide.
+  app.post<{ Body: { pass?: boolean; detail?: string } }>(
+    '/api/bridge/requirement-verdict',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const r = ownedRequirement()
+      if (!r) return { ok: false, reason: 'no_open_requirement' }
+      const detail = String(req.body?.detail ?? '').slice(0, 300)
+      if (req.body?.pass === true) {
+        resolveRequirement()
+        setProgress(100, 'Certificat pe cerință (PASS)')
+        const msg = `✅ CERTIFICAT: „${r.summary}" verificată pe comportament (tester PASS)${detail ? ` — ${detail}` : ''}.`
+        sayQueue.push(msg)
+        void saveMessage(config.adminEmail, 'assistant', msg)
+        noteBrainActivity('🟢 200 — cerință certificată (tester PASS)')
+      } else {
+        updateRequirement('FAIL la tester — trimisă automat la reparat')
+        noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
+        bridgeRepair(
+          `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
+        )
+        const msg = `❌ „${r.summary}" a picat verificarea pe comportament (${detail || 'fără detaliu'}) — am trimis-o automat la reparat. Rămâne deschisă.`
+        sayQueue.push(msg)
+        void saveMessage(config.adminEmail, 'assistant', msg)
+      }
+      return { ok: true }
+    },
+  )
 
   // Server deployer → done publishing (ok or failed). Tells Adrian in chat.
   app.post<{ Body: { ok?: boolean; detail?: string } }>(

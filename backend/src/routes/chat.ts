@@ -1131,6 +1131,29 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           reply.raw.write(t)
           streamed += t
         }
+        // ── LEGEA 200 (Adrian, 5 iul): ORICE operațiune se certifică — succes
+        // real („200") sau pleacă AUTOMAT la reparat. Fără eșec tăcut, fără
+        // .catch gol care înghite defectul.
+        const certify = (op: string, fn: () => Promise<true | string>): void => {
+          pendingTags.push(
+            (async () => {
+              let verdict: true | string
+              try {
+                verdict = await fn()
+              } catch (e) {
+                verdict = e instanceof Error ? e.message.slice(0, 140) : 'excepție'
+              }
+              if (verdict === true) {
+                noteBrainActivity(`🟢 200 — ${op}`)
+              } else {
+                noteBrainActivity(`🔴 fără 200 — ${op} → trimis automat la reparat`)
+                bridgeRepair(
+                  `LEGEA 200 (auto): operațiunea „${op}" a eșuat: ${verdict}. Găsește cauza reală și repar-o.`,
+                )
+              }
+            })(),
+          )
+        }
         const runTags = (line: string): string => {
           if (/\[EXECUT\]/i.test(line)) bridgeRepair(lastUserText)
           const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
@@ -1139,60 +1162,60 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
           const crawlTag = /\[CRAWL\s+(\S+)\]/i.exec(line)
           if (noteTag) {
-            void saveNote(user.email, noteTag[1].trim())
-            noteBrainActivity(`Am salvat o notiță: ${noteTag[1].trim().slice(0, 80)}`)
+            noteBrainActivity(`Salvez notița: ${noteTag[1].trim().slice(0, 80)}`)
+            certify('salvez notița', async () => {
+              await saveNote(user.email, noteTag[1].trim())
+              return true
+            })
           }
           // [CRAWL url] (cererea #24): parcurge un site pagină cu pagină și pune
           // rezumatul fiecărei pagini pe monitor, ca document citibil.
           if (crawlTag) {
             const site = crawlTag[1].trim()
             noteBrainActivity(`Parcurg site-ul: ${site}`)
-            pendingTags.push(
-              (async () => {
-                const r = await crawlSite(user.email, bridgeBase, site, 8)
-                if (r.error || r.pages.length === 0) {
-                  emit(`\nN-am putut parcurge ${site} (${r.error || 'fără pagini'}).`)
-                  return
-                }
-                const doc = r.pages
-                  .map((p, i) => `${i + 1}. ${p.title || p.url}\n   ${p.url}\n   ${p.text.slice(0, 400)}`)
-                  .join('\n\n')
-                reply.raw.write(
-                  `${CTRL}${JSON.stringify({ doc: { title: `Site parcurs: ${site} (${r.pages.length} pagini)`, text: doc } })}${CTRL}`,
-                )
-                noteBrainActivity(`✅ Am parcurs ${r.pages.length} pagini din ${site}`)
-              })().catch(() => {}),
-            )
+            certify(`parcurg ${site}`, async () => {
+              const r = await crawlSite(user.email, bridgeBase, site, 8)
+              if (r.error || r.pages.length === 0) {
+                emit(`\nN-am putut parcurge ${site} (${r.error || 'fără pagini'}).`)
+                return r.error || 'fără pagini'
+              }
+              const doc = r.pages
+                .map((p, i) => `${i + 1}. ${p.title || p.url}\n   ${p.url}\n   ${p.text.slice(0, 400)}`)
+                .join('\n\n')
+              reply.raw.write(
+                `${CTRL}${JSON.stringify({ doc: { title: `Site parcurs: ${site} (${r.pages.length} pagini)`, text: doc } })}${CTRL}`,
+              )
+              return true
+            })
           }
           if (mapTag) {
             const place = mapTag[1].trim()
             noteBrainActivity(`Afișez harta: ${place}`)
-            pendingTags.push(
-              (async () => {
-                let url = config.googleMapsKey
-                  ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
-                  : ''
-                if (!url) {
-                  // No Maps key: geocode the place name → coords (free Nominatim),
-                  // then show a Waze live map (embeddable, no key needed).
-                  try {
-                    const g = await fetch(
-                      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
-                      { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
-                    )
-                    const arr = (await g.json()) as { lat?: string; lon?: string }[]
-                    const lat = arr[0]?.lat
-                    const lon = arr[0]?.lon
-                    url = lat && lon
-                      ? `https://embed.waze.com/iframe?zoom=12&lat=${lat}&lon=${lon}`
-                      : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-                  } catch {
-                    url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-                  }
+            certify(`afișez harta ${place}`, async () => {
+              let url = config.googleMapsKey
+                ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
+                : ''
+              if (!url) {
+                // No Maps key: geocode the place name → coords (free Nominatim),
+                // then show a Waze live map (embeddable, no key needed).
+                try {
+                  const g = await fetch(
+                    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
+                    { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
+                  )
+                  const arr = (await g.json()) as { lat?: string; lon?: string }[]
+                  const lat = arr[0]?.lat
+                  const lon = arr[0]?.lon
+                  url = lat && lon
+                    ? `https://embed.waze.com/iframe?zoom=12&lat=${lat}&lon=${lon}`
+                    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+                } catch {
+                  url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
                 }
-                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
-              })().catch(() => {}),
-            )
+              }
+              reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
+              return true
+            })
           }
           // [YT query] — the brain never guesses a video ID (it hallucinates and
           // the embed fails). It names what to play; the server resolves a REAL,
@@ -1201,61 +1224,57 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (ytTag) {
             const q = ytTag[1].trim()
             noteBrainActivity(`Caut pe YouTube: ${q}`)
-            pendingTags.push(
-              (async () => {
-                const v = await youtubeFirstEmbed(q)
-                if (v) {
-                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`)
-                } else {
-                  emit(`\nN-am găsit un clip care să pornească pentru „${q}".`)
-                }
-              })().catch(() => {}),
-            )
+            certify(`pornesc clip YouTube: ${q.slice(0, 50)}`, async () => {
+              const v = await youtubeFirstEmbed(q)
+              if (v) {
+                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`)
+                return true
+              }
+              emit(`\nN-am găsit un clip care să pornească pentru „${q}".`)
+              return 'niciun clip găsit/pornit'
+            })
           }
           // [COST] — real spend, read from the cost_events table (not invented).
           if (/\[COST\]/i.test(line)) {
             noteBrainActivity('Adun cheltuielile')
-            pendingTags.push(
-              (async () => {
-                const c = await getCostSummary()
-                const kinds = Object.entries(c.byKind)
-                  .map(([k, v]) => `${k} $${v.toFixed(2)}`)
-                  .join(', ')
-                emit(
-                  `\nCheltuieli: total $${c.total.toFixed(2)}, azi $${c.today.toFixed(2)}${kinds ? ` (${kinds})` : ''}.`,
-                )
-              })().catch(() => {}),
-            )
+            certify('citesc cheltuielile reale', async () => {
+              const c = await getCostSummary()
+              const kinds = Object.entries(c.byKind)
+                .map(([k, v]) => `${k} $${v.toFixed(2)}`)
+                .join(', ')
+              emit(
+                `\nCheltuieli: total $${c.total.toFixed(2)}, azi $${c.today.toFixed(2)}${kinds ? ` (${kinds})` : ''}.`,
+              )
+              return true
+            })
           }
           // [NOTES] — read back the saved notes (real rows, with their ids so he
           // can delete by number).
           if (/\[NOTES\]/i.test(line)) {
             noteBrainActivity('Îți citesc notițele')
-            pendingTags.push(
-              (async () => {
-                const notes = await listNotes(user.email, 20)
-                if (notes.length === 0) {
-                  emit('\nNu ai nicio notiță salvată.')
-                  return
-                }
-                const list = notes
-                  .map((n) => `#${n.id} ${n.title ? n.title + ': ' : ''}${n.content.slice(0, 90)}`)
-                  .join('\n')
-                emit(`\nNotițele tale:\n${list}`)
-              })().catch(() => {}),
-            )
+            certify('citesc notițele', async () => {
+              const notes = await listNotes(user.email, 20)
+              if (notes.length === 0) {
+                emit('\nNu ai nicio notiță salvată.')
+                return true
+              }
+              const list = notes
+                .map((n) => `#${n.id} ${n.title ? n.title + ': ' : ''}${n.content.slice(0, 90)}`)
+                .join('\n')
+              emit(`\nNotițele tale:\n${list}`)
+              return true
+            })
           }
           // [DELNOTE id] — delete one of his own notes by id.
           const delTag = /\[DELNOTE\s+(\d+)\]/i.exec(line)
           if (delTag) {
             const id = Number(delTag[1])
             noteBrainActivity(`Șterg notița #${id}`)
-            pendingTags.push(
-              (async () => {
-                const ok = await deleteNote(user.email, id)
-                emit(ok ? `\nAm șters notița #${id}.` : `\nN-am găsit notița #${id} la tine.`)
-              })().catch(() => {}),
-            )
+            certify(`șterg notița #${id}`, async () => {
+              const ok = await deleteNote(user.email, id)
+              emit(ok ? `\nAm șters notița #${id}.` : `\nN-am găsit notița #${id} la tine.`)
+              return true // notiță inexistentă = răspuns corect, nu defect de reparat
+            })
           }
           if (/\[CLEAR\]/i.test(line)) {
             reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
@@ -1272,34 +1291,33 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             const url = showTag[1]
             const title = (showTag[2] ?? '').trim()
             noteBrainActivity(`Afișez pe monitor: ${title || url}`)
-            pendingTags.push(
-              (async () => {
-                if (iframeSafe(url)) {
-                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-                  return
-                }
-                const live = await browserOpen(user.email, bridgeBase, url)
-                if ('error' in live) {
-                  reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-                } else {
-                  browserToolResult(reply, live)
-                }
-              })().catch(() => {}),
-            )
+            certify(`afișez pe monitor: ${(title || url).slice(0, 50)}`, async () => {
+              if (iframeSafe(url)) {
+                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
+                return true
+              }
+              const live = await browserOpen(user.email, bridgeBase, url)
+              if ('error' in live) {
+                // Cădere pe iframe direct — poate randa totuși; e drum proiectat,
+                // dar fără browser live NU e 200 → pleacă și la reparat.
+                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
+                return `browserul live a eșuat (${live.error}); am căzut pe iframe direct`
+              }
+              browserToolResult(reply, live)
+              return true
+            })
           }
           if (imgTag) {
             noteBrainActivity(`Generez o imagine: ${imgTag[1].trim().slice(0, 70)}`)
-            pendingTags.push(
-              (async () => {
-                const result = await generateImage(imgTag[1].trim())
-                if (!('error' in result)) {
-                  const url = `${bridgeBase}/api/image/${result.id}`
-                  reply.raw.write(
-                    `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
-                  )
-                }
-              })().catch(() => {}),
-            )
+            certify('generez imaginea', async () => {
+              const result = await generateImage(imgTag[1].trim())
+              if ('error' in result) return `generatorul a răspuns: ${JSON.stringify(result)}`.slice(0, 140)
+              const url = `${bridgeBase}/api/image/${result.id}`
+              reply.raw.write(
+                `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
+              )
+              return true
+            })
           }
           return line
             .replace(/\[EXECUT\]/gi, '')
