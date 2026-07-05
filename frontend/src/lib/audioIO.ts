@@ -7,7 +7,9 @@
 //    (echoCancellation + noiseSuppression + autoGainControl), VOX (pornește la
 //    voce, se oprește la tăcere) și buffer mare (nimic pierdut la fraze lungi).
 //  • Redare: playVoice(base64) — decodează MP3-ul primit de la creier și-l redă;
-//    cât redă, microfonul e mut (anti-ecou), ca să nu se audă pe el însuși.
+//    cât redă, microfonul nu TRIMITE nimic (anti-ecou), dar rămâne DE VEGHE:
+//    dacă aude vocea lui Adrian peste redare, anunță prin onBargeIn ca panoul
+//    să taie vocea lui Kelion pe loc (ordinul: „când aude vocea mea, mă-ntrerupe").
 
 export interface MicHandle {
   stop(): void
@@ -21,10 +23,21 @@ const SILENCE_MS = 750 // tăcere care închide o frază
 const MIN_UTTER_MS = 350 // sub atât = zgomot, nu frază — se ignoră
 const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
 
+// ── BARGE-IN (cât vorbește Kelion) ──────────────────────────────────────────
+// Praguri mai stricte decât VOX-ul normal: echoCancellation scoate vocea lui
+// Kelion din microfon, dar poate rămâne un rest — cerem semnal clar și susținut
+// ca să nu se taie singur.
+const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
+const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe redarea (onset)
+
 export async function startMic(
   onTranscript: (text: string) => void,
   onError: (reason: string) => void,
   getLang: () => string,
+  // chemat când se aude vocea lui Adrian CÂT microfonul e mut (Kelion vorbește):
+  // panoul taie vocea lui Kelion și dezmutează microfonul.
+  onBargeIn?: () => void,
 ): Promise<MicHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     onError('unsupported')
@@ -73,6 +86,8 @@ export async function startMic(
   let noiseFloor = 0.006
   let uttMs = 0
   let raf = 0
+  let mutedAt = 0 // când a început muțenia (redarea vocii) — pentru garda de onset
+  let bargeMs = 0 // cât timp s-a auzit voce clară peste redare
 
   const send = async (blob: Blob): Promise<void> => {
     try {
@@ -154,10 +169,26 @@ export async function startMic(
     let sum = 0
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
     const rms = Math.sqrt(sum / buf.length)
-    // podeaua de zgomot se adaptează lent când e liniște
-    if (!recording) noiseFloor = noiseFloor * 0.95 + rms * 0.05
+    // podeaua de zgomot se adaptează lent când e liniște — dar NU cât redă
+    // Kelion (restul de ecou ar urca podeaua și-ar surzi barge-in-ul)
+    if (!recording && !muted) noiseFloor = noiseFloor * 0.95 + rms * 0.05
     const dt = 16
     const isVoice = !muted && rms > START_RMS && rms > noiseFloor * DOMINANCE
+
+    // BARGE-IN: microfonul e mut (Kelion vorbește), dar tot ascultă. Voce clară
+    // și susținută peste redare = Adrian vorbește → tăiem vocea lui Kelion.
+    if (muted) {
+      const pastGuard = performance.now() - mutedAt >= BARGE_GUARD_MS
+      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE) {
+        bargeMs += dt
+        if (bargeMs >= BARGE_HOLD_MS) {
+          bargeMs = 0
+          onBargeIn?.()
+        }
+      } else {
+        bargeMs = 0
+      }
+    }
 
     if (recording) {
       uttMs += dt
@@ -183,6 +214,10 @@ export async function startMic(
     },
     setMuted(m: boolean) {
       muted = m
+      if (m) {
+        mutedAt = performance.now() // pornește garda anti-onset a barge-in-ului
+        bargeMs = 0
+      }
       // dacă începe vocea creierului cât înregistram, închidem fraza curentă
       if (m && recording) stopRec()
     },

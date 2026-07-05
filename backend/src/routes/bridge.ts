@@ -826,12 +826,17 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // Builder → a fix is BUILT and READY (branch pushed). Kelion tells Adrian in
   // chat "gata, zi ok"; Adrian's "ok" then deploys it. No approval tab.
-  app.post<{ Body: { branch?: string; summary?: string } }>(
+  // DOVADA (Adrian, 5 iul: „la nimic din ce zici că faci nu aduci dovada"):
+  // constructorul trimite și `proof` — ce s-a schimbat concret + verdictele de
+  // build — iar mesajul din chat o poartă; fără ea, anunțul spune cinstit că
+  // fixul vine fără dovadă verificată.
+  app.post<{ Body: { branch?: string; summary?: string; proof?: string } }>(
     '/api/bridge/ready-deploy',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const branch = typeof req.body?.branch === 'string' ? req.body.branch.trim() : ''
       const summary = typeof req.body?.summary === 'string' ? req.body.summary.trim() : ''
+      const proof = typeof req.body?.proof === 'string' ? req.body.proof.trim().slice(0, 300) : ''
       if (!branch) return reply.code(400).send({ error: 'bad_request' })
       // COADĂ: un fix nou NU-l mai suprascrie pe cel care așteaptă — se așază
       // la rând (aceeași ramură nu se dublează, doar i se împrospătează sumarul).
@@ -845,10 +850,11 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       }
       persistReady()
       const pos = readyDeploys.length > 1 ? ` (la rând: ${readyDeploys.length})` : ''
-      const msg = `Am reparat: ${summary || branch}. Aprobi deploy?${pos} Scrie „da" și public pe loc.`
+      const proofLine = proof ? ` Dovada: ${proof}.` : ' (fără dovadă de build atașată — cere-o dacă vrei să vezi ce s-a schimbat).'
+      const msg = `Am reparat: ${summary || branch}.${proofLine} Aprobi deploy?${pos} Scrie „da" și public pe loc.`
       sayQueue.push(msg)
       void saveMessage(config.adminEmail, 'assistant', msg)
-      noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}`)
+      noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}${proof ? ` — dovada: ${proof.slice(0, 80)}` : ''}`)
       return { ok: true }
     },
   )

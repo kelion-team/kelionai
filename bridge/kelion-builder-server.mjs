@@ -136,6 +136,36 @@ function toolFile(t) {
     : ''
 }
 
+// ── DOVADA (ordinul lui Adrian, 5 iul: „la nimic din ce zici că faci nu aduci
+// dovada") ─────────────────────────────────────────────────────────────────
+// Constructorul NU mai crede pe cuvânt raportul modelului. După execuție
+// verifică EL însuși: git diff (ce fișiere s-au schimbat efectiv) + npm run
+// build în backend ȘI frontend, rulate de constructor. Rezultatul real
+// (fișiere, exit code-uri, coada erorii) intră în release și pleacă lui Adrian
+// în chat — iar „Gata" se spune DOAR când dovada există; altfel se spune
+// cinstit ce a picat.
+async function verifyWork() {
+  const diff = (await run('git', ['diff', '--stat'])).out.trim()
+  const summary = diff.split('\n').pop()?.trim() || '' // „3 files changed, 41 insertions(+)…"
+  const be = await run('npm', ['run', 'build'], { cwd: REPO + '/backend' })
+  const fe = await run('npm', ['run', 'build'], { cwd: REPO + '/frontend' })
+  const verdict = (r) => (r.code === 0 ? 'OK' : `PICĂ (exit ${r.code})`)
+  const proof = `${summary || 'NICIUN fișier modificat'}; build backend: ${verdict(be)}; build frontend: ${verdict(fe)}`
+  const detail =
+    '--- DOVADA (verificată de constructor, nu pe cuvântul modelului) ---\n' +
+    `git diff --stat:\n${diff || '(gol — niciun fișier modificat)'}\n\n` +
+    `npm run build (backend) → exit ${be.code}${be.code !== 0 ? `\n${be.out.slice(-1500)}` : ''}\n` +
+    `npm run build (frontend) → exit ${fe.code}${fe.code !== 0 ? `\n${fe.out.slice(-1500)}` : ''}`
+  const builtOk = be.code === 0 && fe.code === 0
+  return { ok: builtOk && diff !== '', changed: diff !== '', proof, detail }
+}
+
+// O veste către chatul lui Adrian (rostită + salvată în istoric). Fire-and-
+// forget: chatul căzut nu oprește niciodată constructorul.
+function tellAdmin(text) {
+  return api('/api/bridge/say', 'POST', { text }).catch(() => {})
+}
+
 async function build(order) {
   // Claude editeaza + compileaza in repo. NU publica (interzis explicit).
   const prompt =
@@ -166,29 +196,59 @@ async function build(order) {
     }
   }, 900000)
   clearInterval(hb)
-  if (res.code !== 0) say('⚠️ Execuția s-a terminat cu erori — detaliile în Admin → Release-uri')
-  else say('🧪 Execuția s-a încheiat — verific ce s-a schimbat')
-  pushProgress(90, 'Verificare')
-  const diff = (await run('git', ['diff', '--stat'])).out
+  if (res.code !== 0) say('⚠️ Execuția s-a terminat cu erori — verific oricum ce s-a schimbat efectiv')
+  else say('🧪 Execuția s-a încheiat — verific EU dovada (diff + build-uri), nu cred pe cuvânt')
+  pushProgress(88, 'Verificare cu dovadă')
+  const v = await verifyWork()
   const sumMatch = res.out.match(/SUMAR:\s*(.+)/)
   const title = (sumMatch ? sumMatch[1] : order.text).slice(0, 180)
-  const detail = `Ordin: ${order.text}\n\n--- ce s-a schimbat (git diff --stat) ---\n${diff}\n\n--- notele constructorului ---\n${res.out.slice(-2000)}`
+  const detail = `Ordin: ${order.text}\n\n${v.detail}\n\n--- notele constructorului ---\n${res.out.slice(-2000)}`
   await api('/api/bridge/stage-release', 'POST', { title, detail })
-  say(`✅ Gata: ${title.slice(0, 100)} — aștept aprobarea (Admin → Release-uri)`)
-  pushProgress(100, 'Gata — aștept aprobarea')
+  // Verdictul pleacă lui Adrian CU dovada atașată — niciodată „gata" gol.
+  if (v.ok) {
+    say(`✅ Gata, cu dovadă: ${v.proof} — aștept aprobarea (Admin → Release-uri)`)
+    await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. E pregătit — aprobă în Admin → Release-uri.`)
+    pushProgress(100, 'Gata — dovadă atașată, aștept aprobarea')
+  } else if (!v.changed) {
+    say('⚠️ NU declar gata: niciun fișier modificat — nu am dovadă că s-a lucrat ceva (detaliile în Release-uri)')
+    await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" s-a terminat FĂRĂ fișiere modificate — nu am dovadă de lucru, nu declar gata. Detaliile sunt în Admin → Release-uri.`)
+    pushProgress(100, 'Fără dovadă — niciun fișier modificat')
+  } else {
+    say(`🔴 NU e gata — dovada arată build picat: ${v.proof} (eroarea completă în Release-uri)`)
+    await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: ${v.proof}. Eroarea completă e în Admin → Release-uri; nu public nimic stricat.`)
+    pushProgress(100, 'Build picat — dovada în Release-uri')
+  }
 }
 
 async function deployApproved(r) {
   say(`🚀 Aprobat — public pe producție: ${String(r.title || r.id).slice(0, 80)}`)
   pushProgress(94, 'Deploy')
   const res = await run('railway', ['up', '--detach'], { timeoutMs: 600000 })
-  if (res.code === 0) {
-    await api('/api/bridge/release-deployed', 'POST', { id: r.id })
-    say('🟢 PUBLICAT LIVE pe kelionai.app')
-    pushProgress(100, 'Publicat live')
-  } else {
+  if (res.code !== 0) {
     console.error('deploy esuat:', res.out.slice(-500))
     say('🔴 Deploy eșuat — nimic nu s-a publicat (detalii în jurnalul serverului)')
+    return
+  }
+  // Release-ul se marchează publicat pe acceptul Railway (altfel bucla l-ar
+  // redeploya la infinit), dar DOVADA publicării e separată: „PUBLICAT LIVE"
+  // se spune DOAR după ce producția chiar răspunde 200 — nu pe cuvântul
+  // deployerului (Adrian, 5 iul: fără afirmații fără dovadă).
+  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
+  say('🔎 Railway a acceptat — verific EU live-ul (fetch → 200), nu cred pe cuvânt')
+  pushProgress(97, 'Verific live (fetch → 200)')
+  let live = false
+  for (let i = 0; i < 10 && !live; i++) {
+    await new Promise((w) => setTimeout(w, 3000))
+    live = await fetch(BASE + '/api/dev/status', { signal: AbortSignal.timeout(8000) })
+      .then((x) => x.ok)
+      .catch(() => false)
+  }
+  if (live) {
+    say('🟢 PUBLICAT + VERIFICAT LIVE: kelionai.app răspunde 200')
+    pushProgress(100, 'Publicat + verificat live')
+  } else {
+    say('🟠 Deploy trimis, dar live-ul NU răspunde 200 după 30s — NU declar publicat; verifică jurnalul Railway')
+    pushProgress(98, 'Deploy trimis — verificarea live a picat')
   }
 }
 
