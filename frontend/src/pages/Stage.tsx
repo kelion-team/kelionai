@@ -439,6 +439,16 @@ export default function Stage({ user }: { user: User }) {
                         <div className="proc-detail-req">
                           {analysis.request || '— nicio cerere activă acum —'}
                         </div>
+                        {/* CE și CUM editează ACUM (Adrian, 5 iul: „să văd clar
+                            când deschid ce și cum editează"): operația curentă
+                            + fișierul exact în care lucrează. */}
+                        {analysis.stage && (
+                          <div className="proc-detail-line">
+                            Acum: {analysis.stage.label}
+                            {analysis.stage.file ? ` · ${analysis.stage.file}` : ''}
+                            {` — ${analysis.stage.pct}%`}
+                          </div>
+                        )}
                         {/* FĂRĂ „Ultimii pași" aici — pașii curg deja LIVE în
                             consola de dedesubt; repetarea lor dubla monitorul
                             (Adrian, 5 iul: „vezi dublat?"). Detaliul arată DOAR

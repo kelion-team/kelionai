@@ -260,20 +260,23 @@ setInterval(() => {
   if (Date.now() - r.nudged < 4 * 60_000) return
   r.nudged = Date.now()
   void (async () => {
-    noteBrainActivity(`⏳ Cerința „${r.summary}" stagnează de ${Math.round(stalledMs / 60000)} min — reverific live`)
-    const live = await verifyLive()
-    if (!ownedReq) return
-    if (live) {
-      const msg = `Am reverificat singur: „${r.summary}" e live pe kelionai.app (200). Închid cerința ca rezolvată.`
-      sayQueue.push(msg)
-      void saveMessage(config.adminEmail, 'assistant', msg)
-      noteBrainActivity('🟢 Reangajare: verificat live — cerință închisă')
-      setProgress(100, 'Verificat live (reangajare)')
-      resolveRequirement()
-    } else {
-      updateRequirement('blocată — rămân pe ea')
-      noteBrainActivity('🟠 Reangajare: încă nu e live — rămân pe cerință')
+    // BUG REPARAT (Adrian, 5 iul): site-ul care răspunde 200 NU dovedește că
+    // CERINȚA s-a făcut — vechiul cod închidea fals cerințe aflate încă în
+    // lucru la constructor. Închiderea se face DOAR pe drumul real: deploy →
+    // confirmLiveThenAnnounce → resolveRequirement. Aici doar RAPORTĂM cinstit.
+    if (r.status.startsWith('deploy pornit')) {
+      // După un deploy pornit, un 200 chiar înseamnă că publicarea a supraviețuit
+      // — dar confirmarea o dă tot confirmLiveThenAnnounce; aici doar notăm.
+      const live = await verifyLive()
+      noteBrainActivity(
+        live
+          ? `⏳ „${r.summary}" — deploy pornit, serverul răspunde; aștept confirmarea verificată`
+          : `🟠 „${r.summary}" — deploy pornit dar serverul nu răspunde; rămân pe ea`,
+      )
+      return
     }
+    updateRequirement(`în lucru de ${Math.round((Date.now() - r.opened) / 60000)} min — rămân pe ea`)
+    noteBrainActivity(`⏳ Cerința „${r.summary}" e încă în lucru la constructor — NU o închid, rămân pe ea`)
   })()
 }, 60_000).unref()
 let devActivity: string[] = []

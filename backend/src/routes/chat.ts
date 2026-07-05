@@ -80,6 +80,9 @@ const MODEL = 'claude-fable-5'
 const MODEL_RESERVE = 'claude-opus-4-8'
 const FABLE_REST_MS = 10 * 60_000 // after a hard failure, use Opus for 10 min
 let fableDownUntil = 0
+// Ultimul mesaj (normalizat) al adminului — pentru filtrul anti-ecou ASR:
+// un duplicat sosit în <45s nu mai pornește o tură (zgomot de microfon).
+let lastAdminEcho: { key: string; at: number } = { key: '', at: 0 }
 function brainModel(): string {
   return Date.now() < fableDownUntil ? MODEL_RESERVE : MODEL
 }
@@ -952,6 +955,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // and stops. (The old prefix shortcut leaked to the API brain when he
     // addressed Kelion by name — removed.)
     if (isAdmin) {
+      // ── FILTRU ANTI-ZGOMOT ASR (Adrian, 5 iul) ────────────────────────────
+      // Microfonul permanent trimite uneori ACEEAȘI frază de mai multe ori
+      // („Nu." ×7) sau fragmente dublate în același mesaj. Fiecare duplicat
+      // pornea o tură plină → creierul umplea chatul („Sunt aici") și zgomotul
+      // suprascria „Cererea în analiză". Regula: propozițiile identice
+      // consecutive se strâng într-una; un mesaj identic cu precedentul, sosit
+      // în <45s, NU mai pornește o tură — e ecou de microfon, nu cerere nouă.
+      const normNoise = (s: string): string =>
+        s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+      const cleanUserText = lastUserText
+        .split(/(?<=[.!?])\s+/)
+        .filter((s, i, arr) => i === 0 || normNoise(s) !== normNoise(arr[i - 1]))
+        .join(' ')
+        .trim()
+      const noiseKey = normNoise(cleanUserText)
+      if (noiseKey && noiseKey === lastAdminEcho.key && Date.now() - lastAdminEcho.at < 45_000) {
+        // Ecou — nu răspunde nimic (nici umplutură, nici tură): profesional = tăcere.
+        lastAdminEcho.at = Date.now()
+        reply.raw.end()
+        return
+      }
+      lastAdminEcho = { key: noiseKey, at: Date.now() }
       let a = ''
       // The exact bridge prompt for this turn, hoisted so the final fallback can
       // RE-QUEUE the request (nothing is ever dropped without an answer).
@@ -1043,7 +1068,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           'EȘTI SINGURUL creier al chatului lui Adrian — nu există niciun alt AI pe traseu și nicio predare. Răspunzi TU la orice.\n' +
           'DECIZIE (alege UNA, la fiecare mesaj):\n' +
           '1. Dacă cererea e o SARCINĂ DE LUCRU pe aplicație/servere (repară, construiește, adaugă, schimbă, publică, un bug, „nu merge X") → răspunde cu [EXECUT] urmat de o confirmare scurtă în limba lui Adrian (ex: „Mă ocup — am trimis la execuție.").\n' +
-          '2. Altfel → răspunde direct, cinstit, din ce vezi în cod/istoric.\n\n' +
+          '2. Altfel → răspunde direct, cinstit, din ce vezi în cod/istoric.\n' +
+          'TON OBLIGATORIU (Adrian, 5 iul): profesional, precis, inteligență superioară — ca un inginer-șef. INTERZISE: umplutura emoțională („sunt aici", „respiră", „nu plec nicăieri", „stau lângă tine"), consolările, repetițiile. Scurt și la obiect, fiecare propoziție cu conținut. Fragmentele scurte repetate („Nu.", „Nu știu.") sunt aproape sigur zgomot de microfon: NU le răspunde cu umplutură — o singură replică minimă, tehnică, sau întreabă o dată ce a vrut să spună.\n\n' +
           'UNELTELE TALE (le comanzi direct, serverul le execută și taie eticheta din text):\n' +
           '- Afișezi ceva pe monitorul lui: [SHOW https://adresa | titlu scurt]. Pentru hartă https://embed.waze.com/iframe?zoom=12&lat=LAT&lon=LON, pentru alte site-uri adresa normală (se deschide în browserul live).\n' +
           '- Pui un clip pe YouTube: [YT ce vrei să pornească] (ex: [YT Coldplay Yellow live]). NU inventa NICIODATĂ un link/ID de YouTube — scrie doar ce vrei, serverul găsește clipul real și îl pornește pe monitor.\n' +
@@ -1325,7 +1351,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         setProgress(30, 'Creierul analizează')
         // Detaliul din spatele barei: pe monitor rămâne doar statusul, dar la
         // CLICK pe „Creierul analizează" Adrian vede exact CE cerere e în lucru.
-        setAnalysisDetail(lastUserText)
+        // GARDĂ (Adrian, 5 iul): fragmentele scurte („Nu.", „da", „ok") NU
+        // suprascriu cererea reală aflată în analiză — zgomotul de microfon
+        // făcea detaliul să arate „Nu." în loc de cererea adevărată.
+        if (normNoise(cleanUserText).split(' ').filter(Boolean).length >= 3)
+          setAnalysisDetail(cleanUserText)
         let firstWord = false
         // NICIO CERERE FĂRĂ RĂSPUNS (Adrian, 4 iul): if 30s pass with TOTAL
         // silence, re-analyze — a fresh job hits a fresh worker poll (or the
@@ -1361,7 +1391,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const turnPacket =
           ctxBlock +
           (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
-          `${langLock}\nMESAJ NOU de la Adrian: ${lastUserText}`
+          `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
         reanalyzePrompt = bridgePrompt
         const maxTries = 4
         for (let attempt = 1; attempt <= maxTries; attempt++) {
