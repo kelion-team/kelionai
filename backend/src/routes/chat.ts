@@ -999,7 +999,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .trim()
       const noiseKey = normNoise(cleanUserText)
       if (noiseKey && noiseKey === lastAdminEcho.key && Date.now() - lastAdminEcho.at < 45_000) {
-        lastAdminEcho.at = Date.now()
+        // AICI SE RUPEA ȘI FILTRUL (mesaje scrise „nu ajung", 4 iul): ceasul se
+        // reîmprospăta la FIECARE duplicat, deci Adrian care retrimitea același
+        // text (fiindcă nu primea răspuns) era înghițit la nesfârșit ca „ecou".
+        // Fereastra curge acum de la PRIMA apariție: a doua retrimitere după
+        // 45s pornește o tură reală. (Ecoul de microfon vine oricum în <45s.)
         const echoMsg = 'Am auzit (același mesaj, probabil ecou) — lucrez în continuare; dacă e comandă nouă, mai adaugă un cuvânt.'
         reply.raw.write(echoMsg)
         reply.raw.end()
@@ -1516,13 +1520,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // Re-queue so the request is genuinely answered, not lost (his rule:
         // no request ends without a clear answer). When the bridge comes back it
         // answers, and Kelion speaks the late reply into the chat by himself.
-        if (reanalyzePrompt) {
-          void bridgeAsk(reanalyzePrompt, [], 150_000)
-            .then((late) => {
-              if (late && late.trim()) sayToAdmin(`Revin la ce m-ai întrebat: ${late.trim()}`)
-            })
-            .catch(() => {})
-        }
+        // AICI SE RUPEA (mesajele scrise pierdute, 4 iul): cu puntea CĂZUTĂ
+        // blocul de mai sus nu rulează deloc, deci reanalyzePrompt rămânea gol
+        // și NIMIC nu intra în coadă — deși exact „am pus cererea în coadă, nu
+        // se pierde" i se spunea lui Adrian. Acum mesajul se așază REAL în
+        // coadă și cu puntea jos, cu un context minim; fereastra e de 10 min
+        // (cât are watchdog-ul să reînvie workerul), nu 150s.
+        const queuedPrompt =
+          reanalyzePrompt ||
+          `Ești Kelion, creierul lui Adrian (adminul tău). Mesajul de mai jos a sosit cât puntea era căzută — răspunde-i ACUM, în limba lui, scurt și direct, fără markdown.\nAdrian: ${lastUserText}`
+        void bridgeAsk(queuedPrompt, [], 600_000)
+          .then((late) => {
+            if (late && late.trim()) sayToAdmin(`Revin la ce m-ai întrebat: ${late.trim()}`)
+          })
+          .catch(() => {})
         reply.raw.write(a)
       }
       // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).

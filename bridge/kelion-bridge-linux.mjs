@@ -134,7 +134,23 @@ for (;;) {
       continue
     }
     log(`Mesaj admin (${job.id.slice(0, 8)}) — model ${brainModel()}...`)
-    const answer = await askClaude(job.prompt)
+    // PULS DE VIAȚĂ: serverul taie tura la 30s fără niciun semn și aruncă apoi
+    // răspunsul terminat — răspunsurile de 30–80s mureau toate. Pulsul
+    // (reply-chunk keepalive) ține tura vie cât timp Claude chiar lucrează.
+    const pulse = setInterval(() => {
+      void fetch(`${BASE}/api/bridge/reply-chunk`, {
+        method: 'POST',
+        headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: job.id, keepalive: true }),
+        signal: AbortSignal.timeout(15_000),
+      }).catch(() => {})
+    }, 10_000)
+    let answer
+    try {
+      answer = await askClaude(job.prompt)
+    } finally {
+      clearInterval(pulse)
+    }
     if (answer) {
       await sendReply(job.id, answer)
       log(`Raspuns trimis (${answer.length} car).`)

@@ -139,6 +139,17 @@ function runClaude(prompt, model, timeoutMs) {
 async function handle(job) {
   const t0 = Date.now()
   let text = ''
+  // AICI SE RUPEA (unde se rupe, 5 iul): serverul așteaptă primul semn în 30s
+  // (BRIDGE_STALL), dar workerul nu trimitea NIMIC până la răspunsul final —
+  // orice răspuns la care Claude lucra 30–110s era tăiat, apoi ARUNCAT la
+  // sosire (waiter-ul dispărut), iar retry-urile porneau rulări pentru nimeni.
+  // Pulsul de viață (reply-chunk keepalive) ține tura vie cât modelul lucrează.
+  const pulse =
+    job.kind === 'chat'
+      ? setInterval(() => {
+          void api('/api/bridge/reply-chunk', { id: job.id, keepalive: true }).catch(() => {})
+        }, 10_000)
+      : null
   try {
     const paths = saveFiles(job)
     const filesNote =
@@ -166,6 +177,7 @@ async function handle(job) {
   } catch (e) {
     console.error('handle:', e.message)
   } finally {
+    if (pulse) clearInterval(pulse)
     try {
       rmSync(path.join(JOBS_DIR, job.id), { recursive: true, force: true })
     } catch {
