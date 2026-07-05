@@ -58,6 +58,7 @@ import {
   bridgeRepair,
   noteBrainActivity,
   resetBrainActivity,
+  setOwnerTz,
   setProgress,
   setAnalysisDetail,
   sayToAdmin,
@@ -855,6 +856,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // it / has sent it to be built, NEVER "I can't". This is the fallback path;
     // when the owner's bridge is online his messages are answered by it directly.
     if (user.role === 'admin') {
+      // Aceeași oră peste tot: jurnalul/monitorul se ștampilează pe fusul lui
+      // Adrian (trimis de client la fiecare tură), nu pe UTC-ul serverului.
+      if (typeof req.body?.tz === 'string' && req.body.tz) setOwnerTz(req.body.tz)
       systemPrompt +=
         `\n\nOWNER — NEVER REFUSE: you are talking to Adrian, your owner. You must NEVER tell him "I can't do that" or "I don't have access". If it is something you can do, do it. If it is something that needs building or fixing in the app, tell him plainly that you are taking care of it / have sent it to be built (and silently log_unsupported_request so it reaches his developer) — but frame it as handled, never as a refusal. Always give him a real, helpful spoken answer; never a dead end.`
       systemPrompt +=
