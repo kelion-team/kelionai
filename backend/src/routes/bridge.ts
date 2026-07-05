@@ -740,6 +740,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { deploy: deployWanted }
   })
 
+  // UN SINGUR CUVÂNT, ORIUNDE (Adrian, 5 iul: „dacă scriu aici sau acolo
+  // trebuie să fie același lucru"): aprobarea dată constructorului de pe laptop
+  // apasă ACELAȘI buton ca „da"-ul din chatul Kelion. Publică DOAR ce e deja
+  // pregătit și anunțat (readyDeploy) — nu poate lansa nimic nepregătit.
+  app.post('/api/bridge/trigger-deploy', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const t = triggerDeploy()
+    return { ok: !!t, summary: t ? t.summary : null }
+  })
+
   // Server deployer → done publishing (ok or failed). Tells Adrian in chat.
   app.post<{ Body: { ok?: boolean; detail?: string } }>(
     '/api/bridge/deploy-done',
