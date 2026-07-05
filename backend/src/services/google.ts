@@ -136,6 +136,19 @@ export const googleTools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'add_contact',
+    description: "Add a new contact to the user's Google Contacts.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: "The contact's full name." },
+        email: { type: 'string', description: "Optional email address." },
+        phone: { type: 'string', description: "Optional phone number." },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'maps_search',
     description:
       'Find places, addresses or points of interest on the map and their coordinates. Use for "where is X", addresses, or locating a place.',
@@ -652,7 +665,7 @@ async function addTask(title: string, due: string, token: string): Promise<strin
   return JSON.stringify({ added: true, title })
 }
 
-interface PersonName { displayName?: string }
+interface PersonName { displayName?: string; givenName?: string }
 interface PersonEmail { value?: string }
 interface PersonPhone { value?: string }
 interface Person {
@@ -676,6 +689,20 @@ async function searchContacts(query: string, max: number, token: string): Promis
     phone: r.person?.phoneNumbers?.[0]?.value ?? '',
   }))
   return JSON.stringify({ contacts })
+}
+
+async function addContact(name: string, email: string, phone: string, token: string): Promise<string> {
+  if (!name) return JSON.stringify({ error: 'missing_name' })
+  const body: Person = { names: [{ givenName: name }] }
+  if (email) body.emailAddresses = [{ value: email }]
+  if (phone) body.phoneNumbers = [{ value: phone }]
+  const res = await fetch('https://people.googleapis.com/v1/people:createContact', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return JSON.stringify({ error: `contacts_create_http_${res.status}` })
+  return JSON.stringify({ added: true, name })
 }
 
 // ── Keyless / shared-key skills (no user OAuth token needed) ──
@@ -1059,6 +1086,8 @@ export async function runGoogleTool(
     if (name === 'add_task') return await addTask(str(args.title), str(args.due), token)
     if (name === 'search_contacts')
       return await searchContacts(str(args.query), num(args.max_results, 5), token)
+    if (name === 'add_contact')
+      return await addContact(str(args.name), str(args.email), str(args.phone), token)
     return JSON.stringify({ error: 'unknown_tool' })
   } catch (e) {
     return JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })
