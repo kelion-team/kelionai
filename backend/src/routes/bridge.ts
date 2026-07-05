@@ -378,19 +378,29 @@ let lastRichFeed = 0
 // panel ("Jurnal Claude"). In-memory, capped; survives until the next deploy.
 const devLog: string[] = []
 const devLogSeen = new Set<string>()
-// Ora din jurnal/monitor trebuie să fie ACEEAȘI oră pe care Adrian o vede în
-// chat (ora lui locală), nu UTC-ul serverului. Fusul lui e reținut din fiecare
-// tură de chat; Europe/Bucharest până sosește prima.
+// Ora din jurnal/monitor/admin trebuie să fie ACEEAȘI oră pe care Adrian o
+// vede în chat (ora lui locală), nu UTC-ul serverului. Fusul lui e reținut din
+// fiecare tură de chat și PERSISTAT în kv_state („da"-ul lui, 5 iul: aceeași
+// oră și în admin) — un restart/redeploy Railway nu-l mai uită; Europe/Bucharest
+// doar până se află prima dată. (Fixul original, 226d248, rămăsese pe un branch
+// nemergeuit — de-aia „s-a schimbat ora iar" la fiecare deploy.)
 let ownerTz = 'Europe/Bucharest'
 export function setOwnerTz(tz: string): void {
   if (!tz || tz === ownerTz) return
   try {
     new Intl.DateTimeFormat('ro-RO', { timeZone: tz })
     ownerTz = tz
+    void saveKv('owner_tz', tz).catch(() => {})
   } catch {
     /* fus invalid de la client — păstrăm ultimul bun */
   }
 }
+void loadKv('owner_tz')
+  .then((tz) => {
+    // Doar dacă între timp nu a sosit deja unul viu dintr-o tură de chat.
+    if (tz && ownerTz === 'Europe/Bucharest') setOwnerTz(tz)
+  })
+  .catch(() => {})
 function stampHM(): string {
   return new Date().toLocaleTimeString('ro-RO', {
     timeZone: ownerTz,
