@@ -1545,6 +1545,53 @@ body {
   background: linear-gradient(90deg, #35e07f, #7dffb0);
   box-shadow: 0 0 12px rgba(53, 224, 127, 0.6);
 }
+/* Click pe bară → detaliul analizei (ordinul 5 iul): CE analizează creierul —
+   cererea în lucru și ultimii pași din jurnal, sub bară, în același panou. */
+.proc-progress.clickable {
+  cursor: pointer;
+}
+.proc-progress.clickable:hover .proc-label {
+  color: #fff;
+}
+.proc-caret {
+  color: #ff9d2e;
+  margin-right: 6px;
+  font-size: 11px;
+}
+.proc-detail {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 157, 46, 0.3);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: default;
+  max-height: 32vh;
+  overflow-y: auto;
+}
+.proc-detail-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #ff9d2e;
+  margin: 8px 0 4px;
+}
+.proc-detail-title:first-child {
+  margin-top: 0;
+}
+.proc-detail-req {
+  font-size: 13px;
+  color: #ffe3c2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.proc-detail-line {
+  font-size: 12px;
+  color: #cfeaff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .claude-rows {
   flex: 1;
   display: flex;

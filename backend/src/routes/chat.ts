@@ -59,6 +59,7 @@ import {
   noteBrainActivity,
   resetBrainActivity,
   setProgress,
+  setAnalysisDetail,
   sayToAdmin,
   getReadyDeploy,
   triggerDeploy,
@@ -1322,6 +1323,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // never the raw message text — just that the brain is answering).
         noteBrainActivity('Creierul de pe Linux răspunde la mesajul tău…')
         setProgress(30, 'Creierul analizează')
+        // Detaliul din spatele barei: pe monitor rămâne doar statusul, dar la
+        // CLICK pe „Creierul analizează" Adrian vede exact CE cerere e în lucru.
+        setAnalysisDetail(lastUserText)
         let firstWord = false
         // NICIO CERERE FĂRĂ RĂSPUNS (Adrian, 4 iul): if 30s pass with TOTAL
         // silence, re-analyze — a fresh job hits a fresh worker poll (or the
