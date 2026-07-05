@@ -190,7 +190,10 @@ export function triggerDeploy(): { summary: string } | null {
   updateRequirement('deploy pornit')
   if (readyDeploys.length > 0) {
     // Mai e ceva la rând — spune-i clar că un nou „da" publică următorul.
-    sayQueue.push(`Mai am ${readyDeploys.length} la rând de publicat — următorul: ${readyDeploys[0].summary.slice(0, 120)}. Zi „da" din nou când vrei.`)
+    const msg = `Mai am ${readyDeploys.length} la rând de publicat — următorul: ${readyDeploys[0].summary.slice(0, 120)}. Zi „da" din nou când vrei.`
+    sayQueue.push(msg)
+    persistSay()
+    void saveMessage(config.adminEmail, 'assistant', msg)
   }
   return { summary: r.summary }
 }
@@ -227,6 +230,7 @@ async function confirmLiveThenAnnounce(summary: string): Promise<void> {
   if (live) {
     const msg = `Gata — VERIFICAT live pe kelionai.app (răspunde 200): ${summary || 'modificarea'}. Reîmprospătează pagina.`
     sayQueue.push(msg)
+    persistSay()
     void saveMessage(config.adminEmail, 'assistant', msg)
     noteBrainActivity('🟢 PUBLICAT + VERIFICAT LIVE (200)')
     const r = ownedRequirement()
@@ -248,6 +252,7 @@ async function confirmLiveThenAnnounce(summary: string): Promise<void> {
     const msg =
       'Deployerul raportează publicat, dar verificarea mea live a picat — kelionai.app nu răspunde 200 după 30s. NU confirm ca publicat; rămân pe cerință și investighez.'
     sayQueue.push(msg)
+    persistSay()
     void saveMessage(config.adminEmail, 'assistant', msg)
     noteBrainActivity('🟠 Deploy raportat OK, dar verificarea live a picat — rămân angajat')
     // NU 100%: cerința rămâne deschisă, bara NU minte că e gata.
@@ -361,6 +366,7 @@ setInterval(() => {
       `🛑 „${r.summary}": ${max} agenți la rând n-au dus-o la capăt. Nu mai re-asignez automat. ` +
       `Vrei s-o simplific, s-o las, sau îmi dai alt unghi?`
     sayQueue.push(msg)
+    persistSay()
     void saveMessage(config.adminEmail, 'assistant', msg)
     noteBrainActivity(`🛑 Supervizor: „${r.summary}" blocată după ${max} încercări — la decizia lui Adrian`)
     r.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată până se schimbă ceva
@@ -410,6 +416,23 @@ function stampHM(): string {
 }
 // Words Claude wants to say FIRST in the admin's chat (delivered by poll).
 const sayQueue: string[] = []
+// FĂRĂ AMNEZIE LA RESTART (Adrian, 5 iul): un mesaj gata de livrat („gata!"/
+// verdict) care nu apucă să fie pollat înainte de restart-ul provocat chiar de
+// deploy-ul lui era ȘTERS definitiv din memorie — Adrian nu-l mai vedea
+// niciodată. Coada se persistă în Postgres la fiecare schimbare, la fel ca
+// readyDeploys/ownedReq, și se reîncarcă la pornire.
+function persistSay(): void {
+  void saveKv('say_queue', JSON.stringify(sayQueue)).catch(() => {})
+}
+void loadKv('say_queue')
+  .then((v) => {
+    if (!v) return
+    const arr = JSON.parse(v) as unknown[]
+    if (Array.isArray(arr)) {
+      for (const m of arr) if (typeof m === 'string' && m) sayQueue.push(m)
+    }
+  })
+  .catch(() => {})
 // TOTAL chat access for laptop-Claude: the admin's latest attachments (photos,
 // pasted screenshots, archives, video…) are stashed here so the builder can
 // fetch them while executing a work order. Newest first, memory-capped.
@@ -679,6 +702,7 @@ export function sayToAdmin(text: string): void {
   const t = text.trim().slice(0, 4000)
   if (!t) return
   sayQueue.push(t)
+  persistSay()
   void saveMessage(config.adminEmail, 'assistant', t)
 }
 
@@ -792,6 +816,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
     if (!text) return reply.code(400).send({ error: 'bad_request' })
     sayQueue.push(text.slice(0, 4000))
+    persistSay()
     void saveMessage(config.adminEmail, 'assistant', text.slice(0, 4000))
     return { ok: true }
   })
@@ -800,7 +825,9 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/chat/incoming', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return { messages: sayQueue.splice(0, sayQueue.length) }
+    const messages = sayQueue.splice(0, sayQueue.length)
+    persistSay()
+    return { messages }
   })
 
   // Laptop-Claude picks up its WORK ORDERS here (secret-protected, delivered
@@ -863,6 +890,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       const proofLine = proof ? ` Dovada: ${proof}.` : ' (fără dovadă de build atașată — cere-o dacă vrei să vezi ce s-a schimbat).'
       const msg = `Am reparat: ${summary || branch}.${proofLine} Aprobi deploy?${pos} Scrie „da" și public pe loc.`
       sayQueue.push(msg)
+      persistSay()
       void saveMessage(config.adminEmail, 'assistant', msg)
       noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}${proof ? ` — dovada: ${proof.slice(0, 80)}` : ''}`)
       return { ok: true }
@@ -900,6 +928,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         setProgress(100, 'Certificat pe cerință (PASS)')
         const msg = `✅ CERTIFICAT: „${r.summary}" verificată pe comportament (tester PASS)${detail ? ` — ${detail}` : ''}.`
         sayQueue.push(msg)
+        persistSay()
         void saveMessage(config.adminEmail, 'assistant', msg)
         noteBrainActivity('🟢 200 — cerință certificată (tester PASS)')
       } else {
@@ -910,6 +939,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         )
         const msg = `❌ „${r.summary}" a picat verificarea pe comportament (${detail || 'fără detaliu'}) — am trimis-o automat la reparat. Rămâne deschisă.`
         sayQueue.push(msg)
+        persistSay()
         void saveMessage(config.adminEmail, 'assistant', msg)
       }
       return { ok: true }
@@ -942,6 +972,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         const detail = String(req.body?.detail || '').slice(0, 200)
         const msg = `Deploy-ul a picat: ${detail}. Nu s-a publicat nimic — versiunea veche e tot live. Vrei să reîncerc? Zi „ok".`
         sayQueue.push(msg)
+        persistSay()
         void saveMessage(config.adminEmail, 'assistant', msg)
         noteBrainActivity('🔴 Deploy eșuat — aștept „ok" să reîncerc')
       }
