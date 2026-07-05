@@ -153,6 +153,9 @@ app.addHook('onSend', async (req, reply) => {
 // Health — must return exactly 200 (200-only rule + Railway healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
 
+// Test/verification endpoint for the SDK constructor
+app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
+
 await app.register(authRoutes)
 await app.register(chatRoutes)
 await app.register(ttsRoutes)
