@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../services/supervisor.js'
+import { buildBrainReport, fallbackLine, type AgentOutcome } from '../services/feedback.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -682,6 +683,32 @@ export function sayToAdmin(text: string): void {
   void saveMessage(config.adminEmail, 'assistant', t)
 }
 
+// ÎNCHIDE BUCLA ÎN CREIER (Adrian, 5 iul: „kelion nu primește niciodată în chat").
+// În loc să împingem un text gata-făcut în chat (creier orb), RE-CHEMĂM creierul
+// cu rezultatul agentului ca să-l raporteze cu VOCEA lui, verificat, cu dovada —
+// astfel Kelion PRIMEȘTE rezultatul (îl are în sesiune, îl poate discuta). E
+// fire-and-forget: handlerul HTTP al constructorului NU așteaptă. Dacă puntea e
+// offline SAU creierul nu răspunde la timp → mesajul de rezervă (comportamentul de
+// azi), ca notificarea să nu se piardă NICIODATĂ. Vezi services/feedback.ts.
+async function reportToAdmin(o: AgentOutcome): Promise<void> {
+  const deliver = (text: string): void => {
+    const t = text.trim().slice(0, 4000)
+    if (!t) return
+    sayQueue.push(t)
+    void saveMessage(config.adminEmail, 'assistant', t)
+  }
+  if (!bridgeOnline()) {
+    deliver(fallbackLine(o))
+    return
+  }
+  try {
+    const reply = await bridgeAsk(buildBrainReport(o), [], 60_000)
+    deliver(reply && reply.trim() ? reply : fallbackLine(o))
+  } catch {
+    deliver(fallbackLine(o))
+  }
+}
+
 function authed(req: FastifyRequest): boolean {
   return config.bridgeSecret !== '' && req.headers['x-bridge-secret'] === config.bridgeSecret
 }
@@ -859,12 +886,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         if (readyDeploys.length > 10) readyDeploys.shift()
       }
       persistReady()
-      const pos = readyDeploys.length > 1 ? ` (la rând: ${readyDeploys.length})` : ''
-      const proofLine = proof ? ` Dovada: ${proof}.` : ' (fără dovadă de build atașată — cere-o dacă vrei să vezi ce s-a schimbat).'
-      const msg = `Am reparat: ${summary || branch}.${proofLine} Aprobi deploy?${pos} Scrie „da" și public pe loc.`
-      sayQueue.push(msg)
-      void saveMessage(config.adminEmail, 'assistant', msg)
       noteBrainActivity(`✅ Reparat, gata de publicare: ${summary || branch}${proof ? ` — dovada: ${proof.slice(0, 80)}` : ''}`)
+      // Rezultatul se întoarce prin CREIER (cu dovada + cererea de „da"), nu ca
+      // text gata-făcut — ca Kelion să-l primească, nu doar să-l afișeze.
+      void reportToAdmin({ kind: 'ready', summary: summary || branch, proof, queued: readyDeploys.length })
       return { ok: true }
     },
   )
@@ -898,9 +923,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (req.body?.pass === true) {
         resolveRequirement()
         setProgress(100, 'Certificat pe cerință (PASS)')
-        const msg = `✅ CERTIFICAT: „${r.summary}" verificată pe comportament (tester PASS)${detail ? ` — ${detail}` : ''}.`
-        sayQueue.push(msg)
-        void saveMessage(config.adminEmail, 'assistant', msg)
+        void reportToAdmin({ kind: 'pass', summary: r.summary, detail })
         noteBrainActivity('🟢 200 — cerință certificată (tester PASS)')
       } else {
         updateRequirement('FAIL la tester — trimisă automat la reparat')
@@ -908,9 +931,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         bridgeRepair(
           `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
         )
-        const msg = `❌ „${r.summary}" a picat verificarea pe comportament (${detail || 'fără detaliu'}) — am trimis-o automat la reparat. Rămâne deschisă.`
-        sayQueue.push(msg)
-        void saveMessage(config.adminEmail, 'assistant', msg)
+        void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
       }
       return { ok: true }
     },
