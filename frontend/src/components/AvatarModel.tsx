@@ -103,7 +103,9 @@ export default function AvatarModel() {
     // țintă pentru mișcare naturală). getVoiceLevel() = 0 în tăcere → gura închisă.
     const level = getVoiceLevel()
     mouth.current += (level - mouth.current) * 0.4
-    const jawOpen = Math.min(0.85, mouth.current * 1.3)
+    // deschidere MODERATĂ (Adrian: „deschide prea mult gura") — vorbire naturală,
+    // nu căscat; plafon jos ca să nu se holbeze gura pe silabele tari.
+    const jawOpen = Math.min(0.5, mouth.current * 0.55)
 
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
