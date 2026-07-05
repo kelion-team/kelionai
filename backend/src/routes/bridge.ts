@@ -287,6 +287,26 @@ let lastRichFeed = 0
 // panel ("Jurnal Claude"). In-memory, capped; survives until the next deploy.
 const devLog: string[] = []
 const devLogSeen = new Set<string>()
+// Ora din jurnal/monitor trebuie să fie ACEEAȘI oră pe care Adrian o vede în
+// chat (ora lui locală), nu UTC-ul serverului. Fusul lui e reținut din fiecare
+// tură de chat; Europe/Bucharest până sosește prima.
+let ownerTz = 'Europe/Bucharest'
+export function setOwnerTz(tz: string): void {
+  if (!tz || tz === ownerTz) return
+  try {
+    new Intl.DateTimeFormat('ro-RO', { timeZone: tz })
+    ownerTz = tz
+  } catch {
+    /* fus invalid de la client — păstrăm ultimul bun */
+  }
+}
+function stampHM(): string {
+  return new Date().toLocaleTimeString('ro-RO', {
+    timeZone: ownerTz,
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 // Words Claude wants to say FIRST in the admin's chat (delivered by poll).
 const sayQueue: string[] = []
 // TOTAL chat access for laptop-Claude: the admin's latest attachments (photos,
@@ -314,7 +334,7 @@ function logDevLines(lines: string[]): void {
   for (const l of lines) {
     if (devLogSeen.has(l)) continue
     devLogSeen.add(l)
-    devLog.push(`${new Date().toISOString().slice(11, 16)} ${l}`)
+    devLog.push(`${stampHM()} ${l}`)
   }
   if (devLog.length > 600) devLog.splice(0, devLog.length - 600)
   if (devLogSeen.size > 2000) devLogSeen.clear()
@@ -503,7 +523,7 @@ export function bridgeRepair(description: string): string | null {
   // on the monitor by itself. Adrian's rule (4 iul): his RAW message never
   // appears in the bar — the full text lives in the Admin order registry; the
   // bar only announces that an order entered execution.
-  const line = `[${new Date().toISOString().slice(11, 16)}] Ordin nou primit — intrat în execuție (textul complet: Admin → Jurnal)`
+  const line = `[${stampHM()}] Ordin nou primit — intrat în execuție (textul complet: Admin → Jurnal)`
   devActivity = [...devActivity, line].slice(-40)
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
@@ -516,7 +536,7 @@ export function bridgeRepair(description: string): string | null {
 // human line here, so Adrian SEES on the monitor exactly what the brain is
 // doing right now — not a fake laptop ticker.
 export function noteBrainActivity(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(11, 16)}] ${line.slice(0, 160)}`
+  const stamped = `[${stampHM()}] ${line.slice(0, 160)}`
   devActivity = [...devActivity, stamped].slice(-40)
   lastRichFeed = Date.now()
   lastDevBeat = Date.now()
@@ -537,7 +557,7 @@ export function noteBuildBeat(): void {
 }
 
 export function resetBrainActivity(): void {
-  const stamped = `[${new Date().toISOString().slice(11, 16)}] 📥 Comandă nouă — pornesc curat`
+  const stamped = `[${stampHM()}] 📥 Comandă nouă — pornesc curat`
   // A build is writing code RIGHT NOW → keep its live steps on the monitor; just
   // append the intake marker instead of wiping. Otherwise start clean as before.
   if (Date.now() - lastBuildBeat < 45_000) {
