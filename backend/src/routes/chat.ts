@@ -959,39 +959,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // and stops. (The old prefix shortcut leaked to the API brain when he
     // addressed Kelion by name — removed.)
     if (isAdmin) {
-      // ── FILTRU ANTI-ZGOMOT ASR (Adrian, 5 iul) ────────────────────────────
-      // Microfonul permanent trimite uneori ACEEAȘI frază de mai multe ori
-      // („Nu." ×7) sau fragmente dublate în același mesaj. Fiecare duplicat
-      // pornea o tură plină → creierul umplea chatul („Sunt aici") și zgomotul
-      // suprascria „Cererea în analiză". Regula: propozițiile identice
-      // consecutive se strâng într-una; un mesaj identic cu precedentul, sosit
-      // în <45s, NU mai pornește o tură — e ecou de microfon, nu cerere nouă.
-      const normNoise = (s: string): string =>
-        s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-      const cleanUserText = lastUserText
-        .split(/(?<=[.!?])\s+/)
-        .filter((s, i, arr) => i === 0 || normNoise(s) !== normNoise(arr[i - 1]))
-        .join(' ')
-        .trim()
-      const noiseKey = normNoise(cleanUserText)
-      if (noiseKey && noiseKey === lastAdminEcho.key && Date.now() - lastAdminEcho.at < 45_000) {
-        // Ecou — nu răspunde nimic (nici umplutură, nici tură): profesional = tăcere.
-        lastAdminEcho.at = Date.now()
-        reply.raw.end()
-        return
-      }
-      lastAdminEcho = { key: noiseKey, at: Date.now() }
-      let a = ''
-      // The exact bridge prompt for this turn, hoisted so the final fallback can
-      // RE-QUEUE the request (nothing is ever dropped without an answer).
-      let reanalyzePrompt = ''
-      // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
-      // feed so this command starts clean and shows ONLY its own flow. History
-      // is kept (Jurnal Claude) and the telemetry bars keep running.
-      resetBrainActivity()
-      // OK → DEPLOY: if a fix is BUILT and READY, a short affirmative from
-      // Adrian ("ok", "da", "publică", "deploy", "dă-i drumul") publishes it on
-      // the spot — no brain round-trip, no approval tab.
+      // OK → DEPLOY: PRIMUL, înaintea oricărui filtru (bug 5 iul: filtrul de
+      // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
+      // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
       const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
       if (getReadyDeploy() && affirm.test(lastUserText)) {
         const t = triggerDeploy()
@@ -1003,6 +973,39 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         void saveMessage(user.email, 'assistant', msg)
         return
       }
+      // ── FILTRU ANTI-ZGOMOT ASR (Adrian, 5 iul) ────────────────────────────
+      // Microfonul permanent trimite uneori ACEEAȘI frază de mai multe ori
+      // („Nu." ×7) sau fragmente dublate în același mesaj. Fiecare duplicat
+      // pornea o tură plină → creierul umplea chatul („Sunt aici") și zgomotul
+      // suprascria „Cererea în analiză". Regula: propozițiile identice
+      // consecutive se strâng într-una; un mesaj identic cu precedentul, sosit
+      // în <45s, nu pornește o tură — dar primește un rând scurt, NICIODATĂ
+      // tăcere totală (tăcerea arăta ca o aplicație moartă — bug 5 iul).
+      const normNoise = (s: string): string =>
+        s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+      const cleanUserText = lastUserText
+        .split(/(?<=[.!?])\s+/)
+        .filter((s, i, arr) => i === 0 || normNoise(s) !== normNoise(arr[i - 1]))
+        .join(' ')
+        .trim()
+      const noiseKey = normNoise(cleanUserText)
+      if (noiseKey && noiseKey === lastAdminEcho.key && Date.now() - lastAdminEcho.at < 45_000) {
+        lastAdminEcho.at = Date.now()
+        const echoMsg = 'Am auzit (același mesaj, probabil ecou) — lucrez în continuare; dacă e comandă nouă, mai adaugă un cuvânt.'
+        reply.raw.write(echoMsg)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', echoMsg)
+        return
+      }
+      lastAdminEcho = { key: noiseKey, at: Date.now() }
+      let a = ''
+      // The exact bridge prompt for this turn, hoisted so the final fallback can
+      // RE-QUEUE the request (nothing is ever dropped without an answer).
+      let reanalyzePrompt = ''
+      // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
+      // feed so this command starts clean and shows ONLY its own flow. History
+      // is kept (Jurnal Claude) and the telemetry bars keep running.
+      resetBrainActivity()
       if (bridgeOnline()) {
         // The conversation comes from the DATABASE, not from the page: the
         // visible chat can be empty (clean login, refresh, another device) but
@@ -1410,8 +1413,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const turnJournal = recentDevLog(8)
           .map((l) => l.slice(0, 140))
           .join('\n')
+        // O SINGURĂ MINTE (Adrian, 5 iul: „dacă scriu aici sau acolo trebuie să
+        // fie același lucru"): ultimele note din caietul comun vin în FIECARE
+        // tură, nu doar la începutul sesiunii — ce notează constructorul acum,
+        // creierul știe la următorul mesaj. Tuns dur (3×150) ca pachetul să
+        // rămână subțire (regula de viteză, 4 iul).
+        const turnShared = shared
+          .slice(-3)
+          .map((m) => `- [${m.source || '?'}] ${m.content.slice(0, 150)}`)
+          .join('\n')
         const turnPacket =
           ctxBlock +
+          (turnShared ? `CAIET COMUN (ultimele note — starea știută de amândoi):\n${turnShared}\n\n` : '') +
           (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
         reanalyzePrompt = bridgePrompt

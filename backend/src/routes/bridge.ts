@@ -158,6 +158,23 @@ export function setAnalysisDetail(text: string): void {
 // credea Adrian. Acum fiecare fix stă la rând; fiecare „da" publică PRIMUL.
 const readyDeploys: { branch: string; summary: string; at: number }[] = []
 let deployWanted: { branch: string; summary: string } | null = null
+// FĂRĂ AMNEZIE LA RESTART (Adrian, 5 iul: „da"-ul lui a căzut în gol după un
+// restart Railway care a uitat sertarul din RAM): coada de release se persistă
+// în Postgres la fiecare schimbare și se reîncarcă la pornire.
+function persistReady(): void {
+  void saveKv('ready_deploys', JSON.stringify(readyDeploys)).catch(() => {})
+}
+void loadKv('ready_deploys')
+  .then((v) => {
+    if (!v) return
+    const arr = JSON.parse(v) as { branch?: string; summary?: string; at?: number }[]
+    for (const r of arr) {
+      if (r && typeof r.branch === 'string' && !readyDeploys.some((x) => x.branch === r.branch)) {
+        readyDeploys.push({ branch: r.branch, summary: String(r.summary ?? ''), at: Number(r.at ?? Date.now()) })
+      }
+    }
+  })
+  .catch(() => {})
 export function getReadyDeploy(): { branch: string; summary: string } | null {
   const r = readyDeploys[0]
   return r ? { branch: r.branch, summary: r.summary } : null
@@ -166,6 +183,7 @@ export function getReadyDeploy(): { branch: string; summary: string } | null {
 export function triggerDeploy(): { summary: string } | null {
   const r = readyDeploys.shift()
   if (!r) return null
+  persistReady()
   deployWanted = { branch: r.branch, summary: r.summary }
   noteBrainActivity('🚀 Public pe producție — pornesc deploy-ul')
   updateRequirement('deploy pornit')
@@ -251,17 +269,32 @@ interface OwnedReq {
   nudged: number
 }
 let ownedReq: OwnedReq | null = null
+// Cerința deținută supraviețuiește restartului (Postgres) — o cerință deschisă
+// nu se pierde când Railway repornește backendul (Adrian, 5 iul).
+function persistOwned(): void {
+  void saveKv('owned_req', ownedReq ? JSON.stringify(ownedReq) : '').catch(() => {})
+}
+void loadKv('owned_req')
+  .then((v) => {
+    if (!v || ownedReq) return
+    const r = JSON.parse(v) as OwnedReq
+    if (r && typeof r.summary === 'string') ownedReq = r
+  })
+  .catch(() => {})
 export function openRequirement(summary: string): void {
   ownedReq = { summary: summary.slice(0, 120), status: 'primită', at: Date.now(), opened: Date.now(), nudged: 0 }
+  persistOwned()
 }
 export function updateRequirement(status: string): void {
   if (ownedReq) {
     ownedReq.status = status.slice(0, 80)
     ownedReq.at = Date.now()
+    persistOwned()
   }
 }
 export function resolveRequirement(): void {
   ownedReq = null
+  persistOwned()
 }
 export function ownedRequirement(): { summary: string; status: string; ageMs: number } | null {
   return ownedReq ? { summary: ownedReq.summary, status: ownedReq.status, ageMs: Date.now() - ownedReq.opened } : null
@@ -773,6 +806,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         readyDeploys.push({ branch, summary, at: Date.now() })
         if (readyDeploys.length > 10) readyDeploys.shift()
       }
+      persistReady()
       const pos = readyDeploys.length > 1 ? ` (la rând: ${readyDeploys.length})` : ''
       const msg = `Am reparat: ${summary || branch}. Aprobi deploy?${pos} Scrie „da" și public pe loc.`
       sayQueue.push(msg)
@@ -848,8 +882,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // Adrian's rule: if it doesn't work, ASK him BY VOICE to approve a retry
         // — never a silent auto-redeploy. Re-stage the branch so his "ok"
         // republishes it (the affirm path calls triggerDeploy → the deployer).
-        if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch))
+        if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch)) {
           readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now() })
+          persistReady()
+        }
         const detail = String(req.body?.detail || '').slice(0, 200)
         const msg = `Deploy-ul a picat: ${detail}. Nu s-a publicat nimic — versiunea veche e tot live. Vrei să reîncerc? Zi „ok".`
         sayQueue.push(msg)
