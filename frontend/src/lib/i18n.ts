@@ -77,6 +77,11 @@ export interface Strings {
   errNoIdToken: string
   errNoEmail: string
   errGeneric: string
+  calibrateVoiceTitle: string
+  calibrateVoiceListening: string
+  calibrateVoiceDone: string
+  calibrateVoiceFailed: string
+  calibrateVoiceReset: string
 }
 
 const dict: Record<Lang, Strings> = {
@@ -167,6 +172,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google did not return an identity. Please try again.',
     errNoEmail: 'Could not read a verified email from Google.',
     errGeneric: 'Sign-in error. Please try again.',
+    calibrateVoiceTitle: 'Recognize my voice',
+    calibrateVoiceListening: 'Listening… speak normally',
+    calibrateVoiceDone: 'Voice recognized',
+    calibrateVoiceFailed: "Couldn't calibrate — try again",
+    calibrateVoiceReset: 'Reset voice',
   },
   ro: {
     tagline: 'Asistentul tău. Conectează-te pentru a continua.',
@@ -255,6 +265,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google nu a returnat o identitate. Încearcă din nou.',
     errNoEmail: 'Nu am putut citi un email verificat de la Google.',
     errGeneric: 'Eroare la conectare. Încearcă din nou.',
+    calibrateVoiceTitle: 'Recunoaște-mi vocea',
+    calibrateVoiceListening: 'Ascult… vorbește normal',
+    calibrateVoiceDone: 'Vocea a fost recunoscută',
+    calibrateVoiceFailed: 'Nu am reușit — încearcă din nou',
+    calibrateVoiceReset: 'Resetează vocea',
   },
   es: {
     tagline: 'Tu asistente. Inicia sesión para continuar.',
@@ -343,6 +358,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google no devolvió una identidad. Inténtalo de nuevo.',
     errNoEmail: 'No se pudo leer un email verificado de Google.',
     errGeneric: 'Error al iniciar sesión. Inténtalo de nuevo.',
+    calibrateVoiceTitle: 'Reconoce mi voz',
+    calibrateVoiceListening: 'Escuchando… habla con normalidad',
+    calibrateVoiceDone: 'Voz reconocida',
+    calibrateVoiceFailed: 'No se pudo calibrar — inténtalo de nuevo',
+    calibrateVoiceReset: 'Restablecer voz',
   },
   fr: {
     tagline: 'Votre assistant. Connectez-vous pour continuer.',
@@ -431,6 +451,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google n’a pas renvoyé d’identité. Veuillez réessayer.',
     errNoEmail: 'Impossible de lire un email vérifié depuis Google.',
     errGeneric: 'Erreur de connexion. Veuillez réessayer.',
+    calibrateVoiceTitle: 'Reconnaître ma voix',
+    calibrateVoiceListening: 'Écoute… parlez normalement',
+    calibrateVoiceDone: 'Voix reconnue',
+    calibrateVoiceFailed: 'Échec de la calibration — réessayez',
+    calibrateVoiceReset: 'Réinitialiser la voix',
   },
   de: {
     tagline: 'Dein Assistent. Melde dich an, um fortzufahren.',
@@ -519,6 +544,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google hat keine Identität zurückgegeben. Bitte erneut versuchen.',
     errNoEmail: 'Es konnte keine verifizierte E-Mail von Google gelesen werden.',
     errGeneric: 'Anmeldefehler. Bitte erneut versuchen.',
+    calibrateVoiceTitle: 'Meine Stimme erkennen',
+    calibrateVoiceListening: 'Höre zu… sprich normal',
+    calibrateVoiceDone: 'Stimme erkannt',
+    calibrateVoiceFailed: 'Kalibrierung fehlgeschlagen — erneut versuchen',
+    calibrateVoiceReset: 'Stimme zurücksetzen',
   },
   it: {
     tagline: 'Il tuo assistente. Accedi per continuare.',
@@ -607,6 +637,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'Google non ha restituito un’identità. Riprova.',
     errNoEmail: 'Impossibile leggere un’email verificata da Google.',
     errGeneric: 'Errore di accesso. Riprova.',
+    calibrateVoiceTitle: 'Riconosci la mia voce',
+    calibrateVoiceListening: 'Ascolto… parla normalmente',
+    calibrateVoiceDone: 'Voce riconosciuta',
+    calibrateVoiceFailed: 'Calibrazione non riuscita — riprova',
+    calibrateVoiceReset: 'Reimposta voce',
   },
   pt: {
     tagline: 'O seu assistente. Inicie sessão para continuar.',
@@ -695,6 +730,11 @@ const dict: Record<Lang, Strings> = {
     errNoIdToken: 'O Google não retornou uma identidade. Tente novamente.',
     errNoEmail: 'Não foi possível ler um email verificado do Google.',
     errGeneric: 'Erro ao entrar. Tente novamente.',
+    calibrateVoiceTitle: 'Reconhecer minha voz',
+    calibrateVoiceListening: 'Ouvindo… fale normalmente',
+    calibrateVoiceDone: 'Voz reconhecida',
+    calibrateVoiceFailed: 'Não foi possível calibrar — tente novamente',
+    calibrateVoiceReset: 'Redefinir voz',
   },
 }
 

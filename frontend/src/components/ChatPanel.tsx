@@ -26,7 +26,16 @@ import {
   isMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { startMic, playVoice, stopVoice, isVoicePlaying, type MicHandle } from '../lib/audioIO'
+import {
+  startMic,
+  playVoice,
+  stopVoice,
+  isVoicePlaying,
+  calibrateVoiceprint,
+  hasVoiceprint,
+  clearVoiceprint,
+  type MicHandle,
+} from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
@@ -82,6 +91,11 @@ export default function ChatPanel({
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
   const [listening, setListening] = useState(false)
   const micRef = useRef<MicHandle | null>(null)
+  // Amprenta vocală (voiceprint) — restrânge microfonul permanent la vocea lui
+  // Adrian. Fără punct de UI, hasVoiceprint() rămâne mereu false: butonul de
+  // mai jos e singurul loc din care se poate înrola/reseta profilul.
+  const [voiceCalState, setVoiceCalState] = useState<'idle' | 'listening' | 'ok' | 'fail'>('idle')
+  const [hasVoicePrint, setHasVoicePrint] = useState(() => hasVoiceprint())
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
@@ -883,6 +897,21 @@ export default function ChatPanel({
     setCameraOn(false)
   }
 
+  // Calibrare voiceprint: 3s de captat vocea lui Adrian, apoi profilul se
+  // salvează local (audioIO.ts) și microfonul permanent începe să-l filtreze.
+  async function calibrateVoice(): Promise<void> {
+    if (voiceCalState === 'listening') return
+    setVoiceCalState('listening')
+    const ok = await calibrateVoiceprint(3000)
+    setHasVoicePrint(hasVoiceprint())
+    setVoiceCalState(ok ? 'ok' : 'fail')
+    window.setTimeout(() => setVoiceCalState('idle'), 2000)
+  }
+  function resetVoicePrint(): void {
+    clearVoiceprint()
+    setHasVoicePrint(false)
+  }
+
   // When the MONITOR shows content, the centre chat bubbles would cover it —
   // so Kelion's words move to a slim black bar just above the composer instead.
   const wsOpen = useSyncExternalStore(subscribeWorkspace, getWorkspace).open
@@ -1026,6 +1055,29 @@ export default function ChatPanel({
                   >
                     <span className="ico">🎬</span>
                     {t.scenarioTitle}
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="fn-item"
+                    onClick={() => void calibrateVoice()}
+                    disabled={voiceCalState === 'listening'}
+                  >
+                    <span className="ico">🎙️</span>
+                    {voiceCalState === 'listening'
+                      ? t.calibrateVoiceListening
+                      : voiceCalState === 'ok'
+                        ? t.calibrateVoiceDone
+                        : voiceCalState === 'fail'
+                          ? t.calibrateVoiceFailed
+                          : t.calibrateVoiceTitle}
+                  </button>
+                )}
+                {isAdmin && hasVoicePrint && voiceCalState === 'idle' && (
+                  <button type="button" className="fn-item" onClick={resetVoicePrint}>
+                    <span className="ico">♻️</span>
+                    {t.calibrateVoiceReset}
                   </button>
                 )}
               </div>

@@ -31,6 +31,203 @@ const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
 const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe redarea (onset)
 
+// ── VOICEPRINT (amprentă vocală) ────────────────────────────────────────────
+// Filtru 100% client-side: restrânge PORNIREA înregistrării (nu barge-in-ul,
+// vezi mai sus) la vocea calibrată a lui Adrian, ca să nu reacționeze la orice
+// voce/zgomot care trece pragul de volum (TV, alt om etc.). Dacă nu există
+// profil salvat (neînrolat), comportamentul rămâne exact cel de azi.
+export interface VoicePrint {
+  f0Min: number // frecvența fundamentală minimă observată la calibrare (Hz)
+  f0Max: number // frecvența fundamentală maximă observată la calibrare (Hz)
+  centroid: number // centroid spectral mediu (Hz) — „culoarea" timbrului
+  tolerance: number // marjă în jurul [f0Min, f0Max] la potrivire (Hz)
+}
+
+const VOICEPRINT_KEY = 'kelion.voiceprint'
+const CALIBRATION_MIN_FRAMES = 30 // cadre vocale minime ca să considerăm calibrarea reușită
+const F0_TOLERANCE_HZ = 25 // marjă în jurul intervalului F0 calibrat
+const CENTROID_TOLERANCE_RATIO = 0.35 // marjă relativă (35%) pentru centroidul spectral
+const F0_MIN_HZ = 70 // sub-limita vocii umane utile — restul e zgomot/eroare
+const F0_MAX_HZ = 400 // supra-limita vocii umane utile (bărbați + femei)
+
+export function hasVoiceprint(): boolean {
+  try {
+    return localStorage.getItem(VOICEPRINT_KEY) !== null
+  } catch {
+    return false
+  }
+}
+
+export function clearVoiceprint(): void {
+  try {
+    localStorage.removeItem(VOICEPRINT_KEY)
+  } catch {
+    /* localStorage indisponibil — ignorăm */
+  }
+}
+
+function loadVoiceprint(): VoicePrint | null {
+  try {
+    const raw = localStorage.getItem(VOICEPRINT_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Partial<VoicePrint>
+    if (
+      typeof p.f0Min === 'number' &&
+      typeof p.f0Max === 'number' &&
+      typeof p.centroid === 'number' &&
+      typeof p.tolerance === 'number'
+    )
+      return p as VoicePrint
+    return null
+  } catch {
+    return null
+  }
+}
+
+// autocorelație pe semnalul din domeniul timp — estimează frecvența fundamentală
+// (algoritm ACF2+ clasic: trim la zero-crossing, autocorelație, interpolare parabolică)
+function estimateF0(buf: Float32Array, sampleRate: number): number {
+  const SIZE = buf.length
+  let rmsSum = 0
+  for (let i = 0; i < SIZE; i++) rmsSum += buf[i] * buf[i]
+  if (Math.sqrt(rmsSum / SIZE) < START_RMS) return -1
+
+  let r1 = 0
+  let r2 = SIZE - 1
+  const thres = 0.2
+  for (let i = 0; i < SIZE / 2; i++) {
+    if (Math.abs(buf[i]) < thres) {
+      r1 = i
+      break
+    }
+  }
+  for (let i = 1; i < SIZE / 2; i++) {
+    if (Math.abs(buf[SIZE - i]) < thres) {
+      r2 = SIZE - i
+      break
+    }
+  }
+  const trimmed = buf.slice(r1, r2)
+  const n = trimmed.length
+  if (n < 8) return -1
+
+  const c = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    let sum = 0
+    for (let j = 0; j < n - i; j++) sum += trimmed[j] * trimmed[j + i]
+    c[i] = sum
+  }
+  let d = 0
+  while (d + 1 < n && c[d] > c[d + 1]) d++
+  let maxVal = -1
+  let maxPos = -1
+  for (let i = d; i < n; i++) {
+    if (c[i] > maxVal) {
+      maxVal = c[i]
+      maxPos = i
+    }
+  }
+  if (maxPos <= 0 || maxPos >= n - 1) return -1
+
+  // interpolare parabolică în jurul vârfului pentru o estimare mai fină a lag-ului
+  const x1 = c[maxPos - 1]
+  const x2 = c[maxPos]
+  const x3 = c[maxPos + 1]
+  const a = (x1 + x3 - 2 * x2) / 2
+  const b = (x3 - x1) / 2
+  const t0 = a ? maxPos - b / (2 * a) : maxPos
+  if (t0 <= 0) return -1
+
+  const f0 = sampleRate / t0
+  if (f0 < F0_MIN_HZ || f0 > F0_MAX_HZ) return -1
+  return f0
+}
+
+// centroid spectral — media frecvențelor ponderată cu energia din fiecare bin
+function estimateCentroid(freqData: Float32Array, sampleRate: number, fftSize: number): number {
+  let num = 0
+  let den = 0
+  const binHz = sampleRate / fftSize
+  for (let i = 0; i < freqData.length; i++) {
+    const db = freqData[i]
+    if (!Number.isFinite(db) || db < -100) continue
+    const mag = Math.pow(10, db / 20)
+    num += i * binHz * mag
+    den += mag
+  }
+  return den > 0 ? num / den : 0
+}
+
+// Calibrare: captează scurt vocea lui Adrian și salvează profilul în localStorage.
+// Returnează true doar dacă a strâns destule cadre vocale (RMS peste prag) — sub
+// atât, profilul nu e de încredere și nu se salvează (rămâne comportamentul azi).
+export async function calibrateVoiceprint(ms = 3000): Promise<boolean> {
+  if (!navigator.mediaDevices?.getUserMedia) return false
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    })
+  } catch {
+    return false
+  }
+  const AC =
+    globalThis.AudioContext ??
+    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AC) {
+    stream.getTracks().forEach((t) => t.stop())
+    return false
+  }
+  const ctx = new AC()
+  void ctx.resume().catch(() => {})
+  const source = ctx.createMediaStreamSource(stream)
+  const analyser = ctx.createAnalyser()
+  analyser.fftSize = 2048 // rezoluție mai bună la calibrare — F0 corect și la voci grave
+  source.connect(analyser)
+  const timeBuf = new Float32Array(analyser.fftSize)
+  const freqBuf = new Float32Array(analyser.frequencyBinCount)
+
+  const f0Samples: number[] = []
+  const centroidSamples: number[] = []
+  const start = performance.now()
+
+  await new Promise<void>((resolve) => {
+    const step = (): void => {
+      if (performance.now() - start >= ms) {
+        resolve()
+        return
+      }
+      analyser.getFloatTimeDomainData(timeBuf)
+      const f0 = estimateF0(timeBuf, ctx.sampleRate)
+      if (f0 > 0) {
+        f0Samples.push(f0)
+        analyser.getFloatFrequencyData(freqBuf)
+        centroidSamples.push(estimateCentroid(freqBuf, ctx.sampleRate, analyser.fftSize))
+      }
+      requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+  })
+
+  stream.getTracks().forEach((t) => t.stop())
+  void ctx.close().catch(() => {})
+
+  if (f0Samples.length < CALIBRATION_MIN_FRAMES) return false
+
+  const profile: VoicePrint = {
+    f0Min: Math.min(...f0Samples),
+    f0Max: Math.max(...f0Samples),
+    centroid: centroidSamples.reduce((a, b) => a + b, 0) / centroidSamples.length,
+    tolerance: F0_TOLERANCE_HZ,
+  }
+  try {
+    localStorage.setItem(VOICEPRINT_KEY, JSON.stringify(profile))
+  } catch {
+    return false
+  }
+  return true
+}
+
 export async function startMic(
   onTranscript: (text: string) => void,
   onError: (reason: string) => void,
@@ -71,6 +268,15 @@ export async function startMic(
   analyser.fftSize = 512
   source.connect(analyser)
   const buf = new Float32Array(analyser.fftSize)
+
+  // analizor separat, cu rezoluție mai mare, doar pentru F0/centroid — nu atinge
+  // RMS-ul de mai sus (analyser rămâne exact ca azi pentru VOX și barge-in)
+  const voiceprint = loadVoiceprint()
+  const pitchAnalyser = ctx.createAnalyser()
+  pitchAnalyser.fftSize = 2048
+  source.connect(pitchAnalyser)
+  const pitchBuf = new Float32Array(pitchAnalyser.fftSize)
+  const freqBuf = new Float32Array(pitchAnalyser.frequencyBinCount)
 
   const mime =
     ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported(m)) ??
@@ -140,6 +346,19 @@ export async function startMic(
     if (recording && rec && rec.state !== 'inactive') rec.stop()
   }
 
+  // gate suplimentar pentru PORNIREA înregistrării — verifică F0 + centroid contra
+  // profilului calibrat. Neînrolat (fără profil) → true mereu, comportament neschimbat.
+  const matchesVoiceprint = (): boolean => {
+    if (!voiceprint) return true
+    pitchAnalyser.getFloatTimeDomainData(pitchBuf)
+    const f0 = estimateF0(pitchBuf, ctx.sampleRate)
+    if (f0 < 0) return false
+    if (f0 < voiceprint.f0Min - voiceprint.tolerance || f0 > voiceprint.f0Max + voiceprint.tolerance) return false
+    pitchAnalyser.getFloatFrequencyData(freqBuf)
+    const centroid = estimateCentroid(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize)
+    return Math.abs(centroid - voiceprint.centroid) <= voiceprint.centroid * CENTROID_TOLERANCE_RATIO
+  }
+
   const cleanup = (): void => {
     if (stopped) return
     stopped = true
@@ -199,7 +418,7 @@ export async function startMic(
         silenceMs += dt
       }
       if (silenceMs >= SILENCE_MS || uttMs >= MAX_UTTER_MS) stopRec()
-    } else if (isVoice) {
+    } else if (isVoice && matchesVoiceprint()) {
       voicedMs = 0
       silenceMs = 0
       startRec()
