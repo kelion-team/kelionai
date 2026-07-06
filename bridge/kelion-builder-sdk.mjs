@@ -49,10 +49,13 @@ function run(cmd, args, opts = {}) {
 }
 
 async function api(p, body) {
+  // Timeout obligatoriu (ca la ceilalți lucrători ai punții): un fetch fără
+  // limită poate rămâne agățat pe un sughiț de rețea și bloca bucla constructorului.
   const r = await fetch(BASE + p, {
     method: body ? 'POST' : 'GET',
     headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30_000),
   })
   if (!r.ok) throw new Error(`${p} HTTP ${r.status}`)
   return r.json()
