@@ -47,10 +47,20 @@ export interface VoicePrint {
 
 const VOICEPRINT_KEY = 'kelion.voiceprint'
 const CALIBRATION_MIN_FRAMES = 30 // cadre vocale minime ca să considerăm calibrarea reușită
-const F0_TOLERANCE_HZ = 25 // marjă în jurul intervalului F0 calibrat
-const CENTROID_TOLERANCE_RATIO = 0.35 // marjă relativă (35%) pentru centroidul spectral
+// 6 iul: prima variantă (25Hz / 35%) surprindea DOAR intonația celor 3s de calibrare —
+// vorbirea reală (întrebări, entuziasm, voce ridicată) variază mult mai mult și cădea
+// în afara intervalului, blocând microfonul complet. Lărgite ca să acopere variația
+// reală de intonație a aceleiași persoane, păstrând totuși un filtru util.
+const F0_TOLERANCE_HZ = 55 // marjă în jurul intervalului F0 calibrat
+const CENTROID_TOLERANCE_RATIO = 0.48 // marjă relativă pentru centroidul spectral
 const F0_MIN_HZ = 70 // sub-limita vocii umane utile — restul e zgomot/eroare
 const F0_MAX_HZ = 400 // supra-limita vocii umane utile (bărbați + femei)
+// Histerezis pentru decizia de potrivire: autocorelația F0 pe UN SINGUR cadru de
+// 2048 sample-uri poate greși de octavă sau poate fi păcălită de zgomot tranzitoriu —
+// o singură eroare izolată nu mai trebuie să blocheze pornirea întregii fraze. Ținem
+// ultimele MATCH_WINDOW_FRAMES evaluări și e suficientă o majoritate simplă potrivită.
+const MATCH_WINDOW_FRAMES = 12 // ~190ms de evaluări la ~16ms/tick
+const MATCH_WINDOW_RATIO = 0.5 // majoritate simplă — o eroare izolată nu mai decide singură
 
 export function hasVoiceprint(): boolean {
   try {
@@ -353,11 +363,12 @@ export async function startMic(
     if (recording && rec && rec.state !== 'inactive') rec.stop()
   }
 
-  // gate pentru PORNIREA înregistrării ȘI pentru barge-in — verifică F0 + centroid
-  // contra profilului calibrat. Neînrolat (fără profil): demo → true mereu (comportament
-  // neschimbat); admin (restrictToOwnerVoice) → false mereu, ca să nu reacționeze la
-  // orice voce cât nu s-a calibrat încă (ordinul: „doar vocea mea, nu se acceptă alta").
-  const matchesVoiceprint = (): boolean => {
+  // evaluare BRUTĂ pe cadrul curent — verifică F0 + centroid contra profilului
+  // calibrat. Neînrolat (fără profil): demo → true mereu (comportament neschimbat);
+  // admin (restrictToOwnerVoice) → false mereu, cât nu s-a calibrat încă (ordinul:
+  // „doar vocea mea, nu se acceptă alta"). Poate greși izolat (octavă/zgomot) — de
+  //-aia nu se folosește direct, ci prin fereastra de histerezis de mai jos.
+  const matchesVoiceprintRaw = (): boolean => {
     if (!voiceprint) return !restrictToOwnerVoice
     pitchAnalyser.getFloatTimeDomainData(pitchBuf)
     const f0 = estimateF0(pitchBuf, ctx.sampleRate)
@@ -367,6 +378,23 @@ export async function startMic(
     const centroid = estimateCentroid(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize)
     return Math.abs(centroid - voiceprint.centroid) <= voiceprint.centroid * CENTROID_TOLERANCE_RATIO
   }
+
+  // fereastră de histerezis: ține ultimele MATCH_WINDOW_FRAMES evaluări brute și
+  // decide după majoritate, nu după cadrul curent — un singur cadru greșit nu mai
+  // blochează pornirea/oprirea. Start-recording și barge-in au ferestre separate
+  // (context diferit: una decide dacă începe fraza, alta dacă se taie vocea lui
+  // Kelion), ca istoricul uneia să nu contamineze decizia celeilalte.
+  const makeMatcher = (): (() => boolean) => {
+    const history: boolean[] = []
+    return () => {
+      history.push(matchesVoiceprintRaw())
+      if (history.length > MATCH_WINDOW_FRAMES) history.shift()
+      const matched = history.reduce((n, v) => n + (v ? 1 : 0), 0)
+      return matched / history.length >= MATCH_WINDOW_RATIO
+    }
+  }
+  const matchesForStart = makeMatcher()
+  const matchesForBargeIn = makeMatcher()
 
   const cleanup = (): void => {
     if (stopped) return
@@ -409,7 +437,7 @@ export async function startMic(
     // preajmă (TV, alt om) ar putea întrerupe vocea lui Kelion, nu doar a lui Adrian.
     if (muted) {
       const pastGuard = performance.now() - mutedAt >= BARGE_GUARD_MS
-      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE && matchesVoiceprint()) {
+      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE && matchesForBargeIn()) {
         bargeMs += dt
         if (bargeMs >= BARGE_HOLD_MS) {
           bargeMs = 0
@@ -429,7 +457,7 @@ export async function startMic(
         silenceMs += dt
       }
       if (silenceMs >= SILENCE_MS || uttMs >= MAX_UTTER_MS) stopRec()
-    } else if (isVoice && matchesVoiceprint()) {
+    } else if (isVoice && matchesForStart()) {
       voicedMs = 0
       silenceMs = 0
       startRec()
