@@ -41,6 +41,7 @@ import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
 import { geoLookupCached } from './demo.js'
 import { synthesize } from '../services/tts.js'
+import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
   browserClick,
@@ -440,13 +441,20 @@ async function streamVoice(
     .trim()
     .slice(0, 1800)
   if (!spoken) return
-  try {
-    const r = await synthesize(spoken, lang)
-    if (r.ok) {
-      reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+  // Ordinul lui Adrian (6 iul): „nu vreau să mai aștept atâta până răspunzi".
+  // Sinteza pe TOT textul deodată ținea vocea în așteptare cât dura tot
+  // răspunsul; acum vorbește pe bucăți la graniță de frază — prima bucată
+  // pleacă spre client imediat ce e gata, restul se sintetizează cât redă
+  // clientul bucata anterioară (frontend le pune la coadă, vezi audioIO.ts).
+  for (const chunk of splitForSpeech(spoken)) {
+    try {
+      const r = await synthesize(chunk, lang)
+      if (r.ok) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+      }
+    } catch {
+      /* o bucată pierdută nu oprește restul vocii */
     }
-  } catch {
-    /* vocea e best-effort — dacă pică sinteza, textul rămâne */
   }
 }
 

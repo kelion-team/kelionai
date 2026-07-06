@@ -565,27 +565,58 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
   }
 }
 
-export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
+// Coadă de redare: creierul acum trimite vocea PE BUCĂȚI (frază cu frază, vezi
+// streamVoice/backend chat.ts) ca sinteza să nu mai aștepte tot răspunsul.
+// Bucata 2 poate sosi cât încă redă bucata 1 — aici NU se taie una pe alta, se
+// pun la coadă și redau în ordine, ca o singură replică neîntreruptă. onStart
+// se cheamă o singură dată (la prima bucată a replicii, mutează microfonul);
+// onEnd la fel, o singură dată, după ce s-a redat ULTIMA bucată din coadă.
+const voiceQueue: string[] = []
+let pendingVoiceEnd: (() => void) | null = null
+
+function playNow(base64Mp3: string): void {
   try {
-    stopVoice()
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
     curVoice = audio
     const done = (): void => {
       if (curVoice === audio) curVoice = null
       stopLevelLoop()
-      onEnd?.()
+      playNextQueued()
     }
     audio.onended = done
     audio.onerror = done
-    onStart?.()
     void audio.play().catch(done)
     attachLevelAnalysis(audio)
   } catch {
-    onEnd?.()
+    playNextQueued()
   }
 }
 
+function playNextQueued(): void {
+  const next = voiceQueue.shift()
+  if (next) {
+    playNow(next)
+    return
+  }
+  const end = pendingVoiceEnd
+  pendingVoiceEnd = null
+  end?.()
+}
+
+export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
+  pendingVoiceEnd = onEnd ?? null
+  if (curVoice) {
+    // deja redă o bucată din ACEEAȘI replică — se adaugă la coadă, nu se taie.
+    voiceQueue.push(base64Mp3)
+    return
+  }
+  onStart?.()
+  playNow(base64Mp3)
+}
+
 export function stopVoice(): void {
+  voiceQueue.length = 0
+  pendingVoiceEnd = null
   if (curVoice) {
     try {
       curVoice.pause()
