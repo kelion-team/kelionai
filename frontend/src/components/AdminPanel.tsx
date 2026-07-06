@@ -20,6 +20,7 @@ import {
   type DemoStats,
   type DemoRecent,
   type UserActivity,
+  type UserActivityRow,
   fetchStores,
   type StoresData,
   fetchWorkOrders,
@@ -131,6 +132,20 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     const rows = await fetchHistory(v.session_email)
     setConvo({ v, rows })
     setConvoLoading(false)
+  }
+
+  // The conversation + testing profile of a clicked user (tab "Utilizatori") —
+  // ce a scris (chatul) și cum a testat (browser/device/IP/sesiuni/timp), într-un
+  // singur click, fără să mai treacă prin tabul separat "Istoric chat".
+  const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] } | null>(null)
+  const [userConvoLoading, setUserConvoLoading] = useState(false)
+
+  async function openUserConvo(u: UserActivityRow): Promise<void> {
+    setUserConvoLoading(true)
+    setUserConvo({ u, rows: [] })
+    const rows = await fetchHistory(u.email)
+    setUserConvo({ u, rows })
+    setUserConvoLoading(false)
   }
 
   useEffect(() => {
@@ -554,12 +569,23 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                     Pe utilizator — ultima intrare, IP, loc, cât a stat în total
                   </div>
                   {activity.users.map((u) => (
-                    <div className="vis-row" key={u.email}>
+                    <div
+                      className="vis-row vis-clickable"
+                      key={u.email}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void openUserConvo(u)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') void openUserConvo(u)
+                      }}
+                      title="Vezi ce a scris și cum a testat"
+                    >
                       <div className="vis-main">
                         <span className="vis-flagline">
                           <Flag code={u.code} />
                           <strong>{u.email}</strong>
                         </span>
+                        <span className="vis-open">deschide ›</span>
                         <span className="vis-time">
                           {new Date(u.last_seen).toLocaleString('ro-RO', {
                             day: 'numeric',
@@ -946,6 +972,50 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   {h.content}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {userConvo && (
+        <div className="convo-overlay" onClick={() => setUserConvo(null)}>
+          <div className="convo-panel" onClick={(e) => e.stopPropagation()}>
+            <header className="admin-head">
+              <div className="convo-title">
+                <strong>{userConvo.u.email}</strong>
+                <span className="convo-sub">
+                  {[userConvo.u.city, userConvo.u.country].filter(Boolean).join(', ') || 'loc necunoscut'} ·{' '}
+                  {userConvo.u.browser || '—'}
+                  {userConvo.u.device ? ` · ${userConvo.u.device === 'mobile' ? 'mobil' : 'desktop'}` : ''} ·{' '}
+                  {userConvo.u.last_ip || 'IP necunoscut'} · {userConvo.u.sessions} sesiuni · timp total{' '}
+                  {fmtDur(userConvo.u.seconds)} · {userConvo.u.messages} mesaje
+                </span>
+              </div>
+              <button type="button" className="ghost" onClick={() => setUserConvo(null)}>
+                Close
+              </button>
+            </header>
+            <div className="admin-history convo-body">
+              {userConvoLoading && <p className="chat-hint">Se încarcă…</p>}
+              {!userConvoLoading && userConvo.rows.length === 0 && (
+                <p className="chat-hint">Nu a scris niciun mesaj încă.</p>
+              )}
+              {!userConvoLoading &&
+                groupByDay(userConvo.rows).map((g) => (
+                  <div key={g.header} className="admin-day">
+                    <div className="admin-day-header">{g.header}</div>
+                    {g.rows.map((h, i) => (
+                      <div key={i} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
+                        <span className="admin-msg-time">
+                          {new Date(h.created_at).toLocaleTimeString('ro-RO', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        {h.content}
+                      </div>
+                    ))}
+                  </div>
+                ))}
             </div>
           </div>
         </div>
