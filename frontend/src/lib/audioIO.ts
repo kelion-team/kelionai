@@ -19,7 +19,7 @@ export interface MicHandle {
 // ── VOX (voice activity) reglaje ────────────────────────────────────────────
 const START_RMS = 0.012 // pragul de la care „e voce"
 const DOMINANCE = 2.2 // vocea apropiată domină zgomotul de fond de-atâtea ori
-const SILENCE_MS = 750 // tăcere care închide o frază
+const SILENCE_MS = 450 // tăcere care închide o frază — redus 6 iul (ordinul lui Adrian: răspunde mai repede)
 const MIN_UTTER_MS = 350 // sub atât = zgomot, nu frază — se ignoră
 const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
 
