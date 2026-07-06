@@ -37,6 +37,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
+import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
 // ~15s; a full landing demo can use the whole window).
@@ -91,6 +92,10 @@ export default function ChatPanel({
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
   const [listening, setListening] = useState(false)
   const micRef = useRef<MicHandle | null>(null)
+  // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
+  // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
+  // (re)pornire a microfonului — vezi ensureMic mai jos.
+  const coalescerRef = useRef<UtteranceCoalescer | null>(null)
   // Amprenta vocală (voiceprint) — restrânge microfonul permanent la vocea lui
   // Adrian. Fără punct de UI, hasVoiceprint() rămâne mereu false: butonul de
   // mai jos e singurul loc din care se poate înrola/reseta profilul.
@@ -685,10 +690,14 @@ export default function ChatPanel({
       micRetryRef.current = null
     }
     micStartingRef.current = true
+    // frază nouă la fiecare pornire de microfon — nu moștenim bucăți stale
+    // dintr-o sesiune anterioară (ar produce un flush fantomă la teardown)
+    coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
     const h = await startMic(
-      (text) => void sendRef.current(text),
+      (text) => coalescerRef.current?.push(text),
       (reason) => {
         micRef.current = null
+        coalescerRef.current?.cancel()
         setListening(false)
         // Refuz de permisiune / browser fără suport: nu insistăm (am reprompta
         // la nesfârșit) — butonul de microfon reîncearcă la atingere. Orice
@@ -729,6 +738,8 @@ export default function ChatPanel({
       micManualOffRef.current = true
       micRef.current.stop()
       micRef.current = null
+      // oprire intenționată: un fragment agățat NU trebuie trimis după teardown
+      coalescerRef.current?.cancel()
       setListening(false)
       return
     }
@@ -749,6 +760,7 @@ export default function ChatPanel({
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       micRef.current?.stop()
       micRef.current = null
+      coalescerRef.current?.cancel()
       stopVoice()
     }
   }, [])
