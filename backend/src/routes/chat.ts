@@ -1152,6 +1152,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // [DOC titlu] pe prima linie = „afișează pe monitor": la finalul
         // stream-ului, întregul text rostit e trimis și ca document pe monitor.
         let docTitle: string | null = null
+        let execOrderId: string | undefined
         const pendingTags: Promise<void>[] = []
         const emit = (t: string): void => {
           if (!t) return
@@ -1207,7 +1208,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? `SARCINA (mesajul lui Adrian „${lastUserText.trim()}" doar aprobă sau cere reluarea; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde la fragment):\n${past.slice(-8).join('\n')}`
           : lastUserText
         const runTags = (line: string): string => {
-          if (/\[EXECUT\]/i.test(line)) bridgeRepair(dispatchTask)
+          if (/\[EXECUT\]/i.test(line)) execOrderId = bridgeRepair(dispatchTask) ?? undefined
           const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
           const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
           const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
@@ -1519,7 +1520,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // Sarcina COMPLETĂ (cu contextul, dacă mesajul doar referă contextul)
           // se ține pe cerință: la re-asignare, supervizorul trimite agentului
           // proaspăt sarcina reală, nu fragmentul-titlu („reia terminat cu…").
-          openRequirement(ownedTitle, dispatchTask)
+          openRequirement(ownedTitle, dispatchTask, execOrderId)
           updateRequirement('trimisă la constructor')
           if (!a) {
             a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'

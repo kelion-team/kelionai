@@ -294,7 +294,7 @@ void loadKv('owned_req')
     if (r && typeof r.summary === 'string') ownedReq = r
   })
   .catch(() => {})
-export function openRequirement(summary: string, task?: string): void {
+export function openRequirement(summary: string, task?: string, orderId?: string): void {
   ownedReq = {
     summary: summary.slice(0, 120),
     status: 'primită',
@@ -303,7 +303,7 @@ export function openRequirement(summary: string, task?: string): void {
     nudged: 0,
     attempts: 0,
     task: (task ?? summary).slice(0, 4000),
-    orderId: lastRepairId ?? undefined,
+    orderId,
   }
   persistOwned()
 }
@@ -649,9 +649,6 @@ export interface WorkOrder {
 // unicat"): același ordin nu se mai construiește de două ori. Ținem textele
 // recente în memorie și sărim duplicatele înainte să ajungă la constructor.
 const recentOrderTexts: string[] = []
-// Ultimul ordin creat — openRequirement îl leagă de cerință, ca stadiul să se
-// închidă pe ordinul corect (delivered → published → certified).
-let lastRepairId: string | null = null
 export function bridgeRepair(description: string): string | null {
   const text = description.slice(0, 4000)
   if (isDuplicateOrder(text, recentOrderTexts)) {
@@ -661,7 +658,6 @@ export function bridgeRepair(description: string): string | null {
   recentOrderTexts.push(text)
   if (recentOrderTexts.length > 30) recentOrderTexts.shift()
   const id = randomUUID()
-  lastRepairId = id
   void saveWorkOrder(id, text).catch(() => {})
   // OBLIGATORY monitor display: the moment a repair/dev task is created it shows
   // on the monitor by itself. Adrian's rule (4 iul): his RAW message never
