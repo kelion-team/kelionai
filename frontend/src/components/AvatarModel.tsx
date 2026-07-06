@@ -2,6 +2,7 @@ import { useRef, useLayoutEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
+import { getVoiceLevel } from '../lib/audioIO'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -27,6 +28,7 @@ export default function AvatarModel() {
   const bones = useRef<Record<string, Bone>>({})
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
+  const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
 
   const applyArms = (b: Record<string, Bone>) => {
     for (const key of Object.keys(ARM_REST)) {
@@ -97,6 +99,13 @@ export default function AvatarModel() {
       }
     }
 
+    // Lip-sync — gura urmărește amplitudinea reală a vocii redate acum (Chirp
+    // 3), netezit ca blink-ul; deschidere MODERATĂ (Adrian s-a plâns cândva că
+    // gura se deschide prea mult).
+    const level = getVoiceLevel()
+    mouth.current += (level - mouth.current) * 0.4
+    const jawOpen = Math.min(0.5, mouth.current * 0.55)
+
     for (const mesh of morphs.current) {
       const d = mesh.morphTargetDictionary
       const inf = mesh.morphTargetInfluences
@@ -105,6 +114,8 @@ export default function AvatarModel() {
       const r = d['eyeBlinkRight'] ?? d['eyeBlink_R']
       if (l !== undefined) inf[l] = eye
       if (r !== undefined) inf[r] = eye
+      const jaw = d['jawOpen'] ?? d['mouthOpen'] ?? d['viseme_aa']
+      if (jaw !== undefined) inf[jaw] = jawOpen
     }
   })
 

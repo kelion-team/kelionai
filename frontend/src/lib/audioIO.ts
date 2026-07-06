@@ -446,6 +446,86 @@ export async function startMic(
 // ── REDARE: vocea creierului, sosită gata sintetizată de pe server ──────────
 let curVoice: HTMLAudioElement | null = null
 
+// ── LIP-SYNC: nivelul (0..1) al amplitudinii vocii redate acum ──────────────
+// Regulă de aur: e un bonus vizual — dacă analiza eșuează din orice motiv,
+// vocea trebuie să rămână audibilă neschimbată. Un singur AudioContext,
+// reutilizat, creat lazy la prima redare (nevoie de gest de utilizator).
+let levelCtx: AudioContext | null = null
+let levelAnalyser: AnalyserNode | null = null
+let levelSource: MediaElementAudioSourceNode | null = null
+let levelBuf: Uint8Array<ArrayBuffer> | null = null
+let levelRaf = 0
+let voiceLevel = 0
+
+export function getVoiceLevel(): number {
+  return voiceLevel
+}
+
+function stopLevelLoop(): void {
+  if (levelRaf) cancelAnimationFrame(levelRaf)
+  levelRaf = 0
+  voiceLevel = 0
+}
+
+// Rutează redarea prin Web Audio API DOAR ca să măsoare amplitudinea (RMS),
+// fără să schimbe redarea audibilă. Dacă orice pas eșuează, ieșim liniștiți —
+// audio.play() de mai sus rămâne singurul responsabil de sunet.
+function attachLevelAnalysis(audio: HTMLAudioElement): void {
+  try {
+    const AC =
+      globalThis.AudioContext ??
+      (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return
+    if (!levelCtx) {
+      levelCtx = new AC()
+      levelAnalyser = levelCtx.createAnalyser()
+      levelAnalyser.fftSize = 256
+      levelAnalyser.smoothingTimeConstant = 0.5
+      levelBuf = new Uint8Array(levelAnalyser.frequencyBinCount)
+    }
+    if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
+    if (!levelAnalyser || !levelBuf) return
+
+    // createMediaElementSource poate fi apelat o singură dată per element —
+    // dacă acest element audio a mai fost analizat (nu ar trebui, e mereu nou),
+    // sau contextul refuză, renunțăm silențios la analiză, nu la sunet.
+    if (!levelSource) {
+      levelSource = levelCtx.createMediaElementSource(audio)
+    } else {
+      try {
+        levelSource.disconnect()
+      } catch {
+        /* deja deconectat */
+      }
+      levelSource = levelCtx.createMediaElementSource(audio)
+    }
+    levelSource.connect(levelAnalyser)
+    levelSource.connect(levelCtx.destination)
+
+    const analyser = levelAnalyser
+    const buf = levelBuf
+    const step = (): void => {
+      if (curVoice !== audio) {
+        stopLevelLoop()
+        return
+      }
+      analyser.getByteTimeDomainData(buf)
+      let sum = 0
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128
+        sum += v * v
+      }
+      const rms = Math.sqrt(sum / buf.length)
+      voiceLevel = Math.min(1, rms * 6)
+      levelRaf = requestAnimationFrame(step)
+    }
+    levelRaf = requestAnimationFrame(step)
+  } catch {
+    // analiza a eșuat — vocea rămâne audibilă normal, doar gura nu se mișcă
+    stopLevelLoop()
+  }
+}
+
 export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
   try {
     stopVoice()
@@ -453,12 +533,14 @@ export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () =>
     curVoice = audio
     const done = (): void => {
       if (curVoice === audio) curVoice = null
+      stopLevelLoop()
       onEnd?.()
     }
     audio.onended = done
     audio.onerror = done
     onStart?.()
     void audio.play().catch(done)
+    attachLevelAnalysis(audio)
   } catch {
     onEnd?.()
   }
@@ -473,6 +555,7 @@ export function stopVoice(): void {
     }
     curVoice = null
   }
+  stopLevelLoop()
 }
 
 export function isVoicePlaying(): boolean {
