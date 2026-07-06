@@ -27,23 +27,58 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      scope: [
-        'openid',
-        'email',
-        'profile',
-        // Calendar read + event create; Gmail read + send; Drive read; Tasks;
-        // Contacts read + create — the skills Kelion can run on the user's behalf.
-        'https://www.googleapis.com/auth/calendar.events',
-        'https://www.googleapis.com/auth/calendar.readonly',
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/gmail.send',
-        'https://www.googleapis.com/auth/drive.readonly',
-        'https://www.googleapis.com/auth/tasks',
-        'https://www.googleapis.com/auth/contacts',
-      ].join(' '),
+      // LOGIN needs only identity. These three scopes are NON-sensitive, so the
+      // app can be published to production for EVERYONE with no Google security
+      // assessment. The heavy Google skills (Gmail, Calendar, Drive, Tasks,
+      // Contacts) are granted separately and on demand via /auth/google/connect
+      // (incremental consent) — only for the users who actually want them.
+      scope: 'openid email profile',
+      state,
+    })
+    return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
+  })
+
+  // Step 1b — "Connect Google services": incremental consent for the heavy
+  // scopes (Gmail read+send, Calendar, Drive, Tasks, Contacts). Only reachable
+  // when already signed in. access_type=offline + prompt=consent guarantee a
+  // refresh token so the skills keep working long-term. The state is prefixed
+  // "c." so the shared callback knows to KEEP the current identity and merely
+  // attach the freshly granted tokens.
+  const CONNECT_SCOPES = [
+    'openid',
+    'email',
+    'profile',
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/tasks',
+    'https://www.googleapis.com/auth/contacts',
+  ].join(' ')
+  app.get('/auth/google/connect', async (req, reply) => {
+    const user = getSessionUser(req)
+    // Must be a real (non-demo) signed-in user to grant Google access.
+    if (!user || user.role === 'demo') {
+      return reply.redirect(`${config.frontendOrigin}/?error=closed`)
+    }
+    const state = 'c.' + crypto.randomBytes(16).toString('hex')
+    reply.setCookie(STATE_COOKIE, state, {
+      path: '/',
+      httpOnly: true,
+      secure: config.isProd,
+      sameSite: 'lax',
+      maxAge: 600,
+    })
+    const params = new URLSearchParams({
+      client_id: config.google.clientId,
+      redirect_uri: config.google.redirectUri,
+      response_type: 'code',
+      scope: CONNECT_SCOPES,
       access_type: 'offline',
       include_granted_scopes: 'true',
       prompt: 'consent',
+      login_hint: user.email, // pre-select the account they're signed in as
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
@@ -92,6 +127,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.redirect(`${config.frontendOrigin}/?error=no_email`)
       }
 
+      // Incremental "Connect Google" flow (state prefixed "c."): the user is
+      // already signed in and is granting the heavy Google scopes. Keep their
+      // existing identity and just attach the freshly granted tokens (including
+      // the refresh token) so the Google skills start working.
+      if (state.startsWith('c.')) {
+        const existing = getSessionUser(req)
+        if (existing) {
+          setSession(reply, {
+            ...existing,
+            googleAccessToken: tokens.access_token ?? existing.googleAccessToken ?? '',
+            googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+            googleRefreshToken: tokens.refresh_token || existing.googleRefreshToken || '',
+          })
+          return reply.redirect(`${config.frontendOrigin}/?connected=google`)
+        }
+        // Session expired mid-flow — fall through to a normal login below.
+      }
+
       // The gate: v1 admits only the allowlist.
       if (!isAllowed(email)) {
         return reply.redirect(`${config.frontendOrigin}/?error=closed`)
@@ -120,11 +173,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ open: config.openSignup }),
   )
 
-  // Who am I? (frontend calls this on load)
+  // Who am I? (frontend calls this on load). NEVER expose the OAuth tokens to
+  // the browser — send only the identity plus a boolean that says whether the
+  // heavy Google scopes are connected (drives the "Connect Google" button).
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ authenticated: false })
-    return reply.send({ authenticated: true, user })
+    return reply.send({
+      authenticated: true,
+      user: {
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+        role: user.role,
+        locale: user.locale,
+        demoUntil: user.demoUntil,
+        googleConnected: Boolean(user.googleRefreshToken),
+      },
+    })
   })
 
   app.post('/auth/logout', async (_req, reply) => {
