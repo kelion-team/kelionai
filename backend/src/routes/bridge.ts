@@ -994,20 +994,46 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         void reportToAdmin({ kind: 'pass', summary: r.summary, detail })
         noteBrainActivity('🟢 200 — cerință certificată (tester PASS)')
       } else {
-        updateRequirement('FAIL la tester — trimisă automat la reparat')
-        noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
-        const newOrderId = bridgeRepair(
-          `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
-        )
-        // ACELAȘI BUG (Adrian, 6 iul): FAIL-ul trimite reparația la un ordin NOU,
-        // dar `ownedReq.orderId` rămânea legat de ordinul VECHI (cel picat) — un
-        // PASS ulterior ar fi certificat ordinul greșit, iar cel care CHIAR a
-        // reparat problema rămânea „delivered" (în lucru) pe veci în registru.
-        // NOTĂ: `r` de mai sus vine din `ownedRequirement()`, care întoarce o
-        // COPIE (fără orderId) — realinierea trebuie făcută pe `ownedReq` direct.
-        if (ownedReq && newOrderId) {
-          ownedReq.orderId = newOrderId
+        // BUG REAL (Adrian, 6 iul): FAIL apela bridgeRepair() necondiționat, de
+        // fiecare dată — o cerință fără sens (ex. scurgere ASR) primea FAIL la
+        // infinit și genera ordine noi identice la nesfârșit, ocolind complet
+        // plafonul de re-încercări pe care watchdog-ul de stagnare îl respectă
+        // deja (DEFAULT_SUPERVISE.maxAttempts). Unificăm contorul: FAIL crește
+        // ACELAȘI `ownedReq.attempts`, iar peste prag nu mai reasignăm automat.
+        const max = DEFAULT_SUPERVISE.maxAttempts
+        if (ownedReq) {
+          ownedReq.attempts = (ownedReq.attempts ?? 0) + 1
           persistOwned()
+        }
+        const attempts = ownedReq?.attempts ?? 0
+        if (ownedReq && attempts > max) {
+          updateRequirement(`BLOCAT după ${attempts} eșecuri de verificare — decizia lui Adrian`)
+          const msg =
+            `🛑 „${r.summary}": a picat verificarea de ${attempts} ori la rând (ultimul motiv: ${detail || 'fără detaliu'}). ` +
+            `Nu mai re-încerc automat — pare o cerință neclară sau imposibil de implementat ca specificație, nu un bug de cod. ` +
+            `Vrei s-o reformulez, s-o las, sau îmi dai alt unghi?`
+          sayQueue.push(msg)
+          persistSay()
+          void saveMessage(config.adminEmail, 'assistant', msg)
+          noteBrainActivity(`🛑 „${r.summary}" blocată după ${attempts} eșecuri de verificare — la decizia lui Adrian`)
+          ownedReq.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată (watchdog) până se schimbă ceva
+          persistOwned()
+        } else {
+          updateRequirement('FAIL la tester — trimisă automat la reparat')
+          noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
+          const newOrderId = bridgeRepair(
+            `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
+          )
+          // ACELAȘI BUG (Adrian, 6 iul): FAIL-ul trimite reparația la un ordin NOU,
+          // dar `ownedReq.orderId` rămânea legat de ordinul VECHI (cel picat) — un
+          // PASS ulterior ar fi certificat ordinul greșit, iar cel care CHIAR a
+          // reparat problema rămânea „delivered" (în lucru) pe veci în registru.
+          // NOTĂ: `r` de mai sus vine din `ownedRequirement()`, care întoarce o
+          // COPIE (fără orderId) — realinierea trebuie făcută pe `ownedReq` direct.
+          if (ownedReq && newOrderId) {
+            ownedReq.orderId = newOrderId
+            persistOwned()
+          }
         }
         void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
       }
