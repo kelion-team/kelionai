@@ -398,6 +398,19 @@ let lastRichFeed = 0
 // panel ("Jurnal Claude"). In-memory, capped; survives until the next deploy.
 const devLog: string[] = []
 const devLogSeen = new Set<string>()
+// FĂRĂ AMNEZIE LA RESTART (Adrian, 6 iul): jurnalul era doar în RAM și dispărea
+// la fiecare deploy/restart Railway — de-aia părea mereu gol. Persistat în
+// Postgres ca sayQueue/readyDeploys/ownedReq: se salvează la fiecare linie
+// nouă și se reîncarcă la pornire.
+void loadKv('dev_log')
+  .then((v) => {
+    if (!v) return
+    const arr = JSON.parse(v) as unknown[]
+    if (Array.isArray(arr)) {
+      for (const l of arr) if (typeof l === 'string' && l) devLog.push(l)
+    }
+  })
+  .catch(() => {})
 // Ora din jurnal/monitor/admin trebuie să fie ACEEAȘI oră pe care Adrian o
 // vede în chat (ora lui locală), nu UTC-ul serverului. Fusul lui e reținut din
 // fiecare tură de chat și PERSISTAT în kv_state („da"-ul lui, 5 iul: aceeași
@@ -469,13 +482,16 @@ export function recentDevLog(n = 15): string[] {
 }
 
 function logDevLines(lines: string[]): void {
+  let added = false
   for (const l of lines) {
     if (devLogSeen.has(l)) continue
     devLogSeen.add(l)
     devLog.push(`${stampHM()} ${l}`)
+    added = true
   }
   if (devLog.length > 600) devLog.splice(0, devLog.length - 600)
   if (devLogSeen.size > 2000) devLogSeen.clear()
+  if (added) void saveKv('dev_log', JSON.stringify(devLog)).catch(() => {})
 }
 
 // ── APPROVAL GATE (professional CD) ───────────────────────────────────────
