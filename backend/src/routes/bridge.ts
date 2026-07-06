@@ -356,10 +356,18 @@ setInterval(() => {
       // NU performează (stagnat + fără activitate) → ÎNLOCUIESC agentul cu unul
       // PROASPĂT, cu instrucțiune escaladată. Un work-order nou = agent nou.
       r.attempts = (r.attempts ?? 0) + 1
-      bridgeRepair(
+      const newOrderId = bridgeRepair(
         `SUPERVIZOR — încercarea ${r.attempts}/${max}: agentul anterior N-A dus la capăt „${r.summary}". ` +
           `${escalationText(r.attempts, max)}\n\nSARCINA: ${r.task || r.summary}`,
       )
+      // BUG REAL (Adrian, 6 iul: „stadiu real, nu în lucru pe veci"): fiecare
+      // reasignare crea un ORDIN NOU în registru dar `ownedReq.orderId` rămânea
+      // legat de PRIMUL ordin — la publicare `confirmLiveThenAnnounce` marca
+      // "published" ordinul vechi, iar ordinul reasignat (cel care CHIAR se
+      // execută și ajunge să fie construit/publicat) rămânea "delivered" (în
+      // lucru) în registru pentru totdeauna, orice s-ar fi întâmplat cu el.
+      // Legăm cerința deținută de ordinul NOU, ca stadiul să urmeze agentul activ.
+      if (newOrderId) r.orderId = newOrderId
       updateRequirement(`re-asignat unui agent proaspăt (încercarea ${r.attempts}/${max})`)
       noteBrainActivity(
         `🔁 Supervizor: „${r.summary}" re-asignată — agent proaspăt, escaladat (${r.attempts}/${max})`,
@@ -972,9 +980,19 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       } else {
         updateRequirement('FAIL la tester — trimisă automat la reparat')
         noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
-        bridgeRepair(
+        const newOrderId = bridgeRepair(
           `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
         )
+        // ACELAȘI BUG (Adrian, 6 iul): FAIL-ul trimite reparația la un ordin NOU,
+        // dar `ownedReq.orderId` rămânea legat de ordinul VECHI (cel picat) — un
+        // PASS ulterior ar fi certificat ordinul greșit, iar cel care CHIAR a
+        // reparat problema rămânea „delivered" (în lucru) pe veci în registru.
+        // NOTĂ: `r` de mai sus vine din `ownedRequirement()`, care întoarce o
+        // COPIE (fără orderId) — realinierea trebuie făcută pe `ownedReq` direct.
+        if (ownedReq && newOrderId) {
+          ownedReq.orderId = newOrderId
+          persistOwned()
+        }
         void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
       }
       return { ok: true }
@@ -1004,9 +1022,17 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         const detail = String(req.body?.detail || '').slice(0, 200)
         const decision = decideDeployFailure(detail, failedSummary)
         if (decision.action === 'rebuild') {
-          bridgeRepair(
+          const newOrderId = bridgeRepair(
             `RECONSTRUIRE (deploy picat pe conflict): „${failedSummary}" s-a ciocnit cu masterul curent (ramură veche/duplicat). Reconstruiește de la zero pe origin/master proaspăt și re-publică prin flux; dacă e deja făcut, las-o.`,
           )
+          // ACELAȘI BUG (Adrian, 6 iul): reconstrucția pleacă pe un ordin NOU, dar
+          // cerința deținută rămânea legată de ordinul vechi (cel picat pe
+          // conflict) — realiniem, ca „published"/„certified" să cadă pe ordinul
+          // care CHIAR a reconstruit și publicat.
+          if (ownedReq && newOrderId) {
+            ownedReq.orderId = newOrderId
+            persistOwned()
+          }
           noteBrainActivity('🔁 Deploy picat pe conflict → retrimis la reconstruit (fără buclă pe „ok")')
         } else {
           if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch)) {
