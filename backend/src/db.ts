@@ -488,51 +488,6 @@ export async function getBalance(email: string): Promise<number> {
   }
 }
 
-/**
- * Credit a top-up, atomically and idempotently. `stripeRef` (the Checkout
- * Session / PaymentIntent id) guards against a webhook retry double-crediting.
- * Returns true only when it actually credited.
- */
-export async function creditWallet(
-  email: string,
-  amount: number,
-  currency: string,
-  stripeRef: string,
-  meta = '',
-): Promise<boolean> {
-  if (!dbEnabled() || !(amount > 0) || !stripeRef) return false
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
-    if ((seen.rowCount ?? 0) > 0) {
-      await client.query('ROLLBACK')
-      return false
-    }
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'topup', $2, $3, $4)`,
-      [email, amount, stripeRef, meta],
-    )
-    await client.query(
-      `INSERT INTO wallets (user_email, balance, currency) VALUES ($1, $2, $3)
-       ON CONFLICT (user_email) DO UPDATE SET balance = wallets.balance + $2, updated_at = now()`,
-      [email, amount, currency],
-    )
-    await client.query('COMMIT')
-    return true
-  } catch {
-    try {
-      await client.query('ROLLBACK')
-    } catch {
-      /* ignore */
-    }
-    return false
-  } finally {
-    client.release()
-  }
-}
-
 /** Deduct usage from the wallet (in display currency). Never throws. */
 export async function debitWallet(email: string, amount: number, meta = ''): Promise<void> {
   if (!dbEnabled() || !(amount > 0)) return
@@ -1328,21 +1283,6 @@ export async function markGapEscalated(id: number): Promise<void> {
     )
   } catch {
     /* non-fatal */
-  }
-}
-
-/** Auto-clear: after a deploy passes (healthcheck 200), every request that was
- * SENT to the brain is considered handled and removed from the open list.
- * Returns how many were cleared. (Adrian's rule: „dacă a trecut cu 200, scoas-o".) */
-export async function resolveEscalatedGaps(): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const r = await getPool().query(
-      'UPDATE capability_gaps SET resolved = true WHERE escalated = true AND resolved = false',
-    )
-    return r.rowCount ?? 0
-  } catch {
-    return 0
   }
 }
 

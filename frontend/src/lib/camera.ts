@@ -21,13 +21,3 @@ export async function startCamera(facing: Facing): Promise<MediaStream> {
 export function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop())
 }
-
-/** True when the device exposes more than one camera (front/back switch worth showing). */
-export async function hasMultipleCameras(): Promise<boolean> {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    return devices.filter((d) => d.kind === 'videoinput').length > 1
-  } catch {
-    return false
-  }
-}

@@ -38,11 +38,6 @@ function getClient(): v2.SpeechClient | null {
   return client
 }
 
-/** True când ASR-ul în streaming e configurat (are cont de serviciu Google). */
-export function asrStreamConfigured(): boolean {
-  return getClient() !== null && projectId !== ''
-}
-
 type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>
 type Resp = protos.google.cloud.speech.v2.IStreamingRecognizeResponse
 
