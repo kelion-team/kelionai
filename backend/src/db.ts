@@ -295,6 +295,16 @@ export async function listWorkOrders(n = 50): Promise<WorkOrderRow[]> {
   return r.rows
 }
 
+// STADIU REAL PER ORDIN (Adrian, 6 iul: registrul arăta „în lucru" la infinit —
+// nu avansa după publicare). Acum stadiul se închide: delivered → published (200
+// live) → certified (tester PASS). Așa lista spune adevărul, nu „în lucru" pe veci.
+export async function setWorkOrderStatus(id: string, status: string): Promise<void> {
+  if (!dbEnabled() || !id) return
+  await getPool()
+    .query('UPDATE work_orders SET status=$2 WHERE id=$1', [id, status])
+    .catch(() => {})
+}
+
 // ── Staged releases (persistent approval gate) ──────────────────────────────
 
 export interface StagedReleaseRow {
