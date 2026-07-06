@@ -46,6 +46,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // video to Claude) raises its own limit to 100MB per-route (see chat.ts).
 const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
+// PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
+// fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
+// → restart-loop pe Railway. Le prindem și le logăm, ca aplicația live să NU cadă
+// dintr-o eroare izolată. (Fixul de fond rămâne `.catch` pe fiecare `.then`.)
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ reason }, 'unhandledRejection — prins global, procesul rămâne viu')
+})
+process.on('uncaughtException', (err) => {
+  app.log.error({ err }, 'uncaughtException — prins global, procesul rămâne viu')
+})
+
 await app.register(cookie)
 // CANALUL PERMANENT al punții (Adrian, 4 iul): minim 5 benzi WebSocket
 // full-duplex, mereu deschise, între server și creierul de pe Linux.

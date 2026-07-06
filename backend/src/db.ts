@@ -566,7 +566,7 @@ export async function topUpUser(
     await client.query(
       `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, $2)
        ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
+         SET balance = wallets.balance + $2, topup_ref = $2, updated_at = now()`,
       [email, userCredit, currency],
     )
     await client.query(

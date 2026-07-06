@@ -123,6 +123,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         app.log.error({ err: e }, 'asr-stream: eroare Google streamingRecognize')
         send({ type: 'error', error: 'asr_failed' })
         gStream = null
+        started = false // permite repornirea la următorul cadru — altfel ASR rămâne mut
       })
       stream.on('end', () => {
         gStream = null

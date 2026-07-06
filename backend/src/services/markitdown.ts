@@ -20,13 +20,17 @@ export async function documentToMarkdown(bytes: Buffer, filename: string): Promi
         'import sys;from markitdown import MarkItDown;sys.stdout.write(MarkItDown().convert(sys.argv[1]).text_content or "")',
         path,
       ])
+      // setEncoding tamponează byte-ii UTF-8 parțiali peste granițele de chunk —
+      // altfel diacriticele (ă ș ț) care cad pe graniță se corup în „�".
+      py.stdout.setEncoding('utf8')
+      py.stderr.setEncoding('utf8')
       let out = ''
       let err = ''
       py.stdout.on('data', (d) => {
-        out += d.toString()
+        out += d
       })
       py.stderr.on('data', (d) => {
-        err += d.toString()
+        err += d
       })
       py.on('error', (e) => reject(e))
       py.on('close', (code) =>
