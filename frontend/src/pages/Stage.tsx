@@ -8,7 +8,7 @@ import ContactModal from '../components/ContactModal'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
-import { logout, startGoogleLogin } from '../lib/api'
+import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
 import {
   getWorkspace,
@@ -703,6 +703,16 @@ export default function Stage({ user }: { user: User }) {
           {user.role === 'admin' && (
             <button type="button" className="ghost" onClick={() => setAdminOpen(true)}>
               Admin
+            </button>
+          )}
+          {user.role !== 'demo' && !user.googleConnected && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={startGoogleConnect}
+              title="Grant Gmail, Calendar & Drive access so Kelion can act on them"
+            >
+              Connect Google
             </button>
           )}
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>

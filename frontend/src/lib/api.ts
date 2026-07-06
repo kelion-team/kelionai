@@ -7,6 +7,9 @@ export interface User {
   // Free-trial sessions only: epoch-ms when the 3 minutes end (drives the
   // countdown and the conversion overlay).
   demoUntil?: number
+  // True once the user has granted the heavy Google scopes via "Connect Google"
+  // (Gmail, Calendar, Drive, Tasks, Contacts). Login alone no longer grants them.
+  googleConnected?: boolean
 }
 
 export interface MeResponse {
@@ -26,6 +29,13 @@ export async function fetchMe(): Promise<MeResponse> {
 
 export function startGoogleLogin(): void {
   window.location.href = '/auth/google/login'
+}
+
+// "Connect Google services": incremental consent for the heavy scopes (Gmail,
+// Calendar, Drive, Tasks, Contacts). Only meaningful for a signed-in user; the
+// backend redirects to the login page otherwise.
+export function startGoogleConnect(): void {
+  window.location.href = '/auth/google/connect'
 }
 
 // Start a free trial. Returns 'ok', or a reason the trial was refused.

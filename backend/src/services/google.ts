@@ -1069,26 +1069,36 @@ export async function runGoogleTool(
       return await convertCurrency(num(args.amount, 1), str(args.from), str(args.to))
     if (name === 'get_time') return getTime(str(args.timezone))
 
-    if (!token) {
-      return JSON.stringify({
-        error: 'no_google_access — ask the user to sign in again to grant access.',
-      })
-    }
-    if (name === 'get_calendar_events') return await calendarEvents(num(args.max_results, 10), token)
-    if (name === 'get_recent_emails')
-      return await recentEmails(str(args.query), num(args.max_results, 5), token)
-    if (name === 'send_email')
-      return await sendEmail(str(args.to), str(args.subject), str(args.body), token)
-    if (name === 'create_calendar_event')
-      return await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
-    if (name === 'get_drive_files') return await driveFiles(str(args.query), num(args.max_results, 10), token)
-    if (name === 'get_tasks') return await getTasks(num(args.max_results, 20), token)
-    if (name === 'add_task') return await addTask(str(args.title), str(args.due), token)
-    if (name === 'search_contacts')
-      return await searchContacts(str(args.query), num(args.max_results, 5), token)
-    if (name === 'add_contact')
-      return await addContact(str(args.name), str(args.email), str(args.phone), token)
-    return JSON.stringify({ error: 'unknown_tool' })
+    // These need the user's Google access. Since login now grants only identity,
+    // the heavy scopes come from the separate "Connect Google" button. If it was
+    // never done (no token) OR Google rejects on auth (token lacks the scope /
+    // was revoked → 401/403), return ONE clear signal telling the brain to ask
+    // the user to connect — never a raw HTTP code.
+    const NEEDS_CONNECT = JSON.stringify({
+      error: 'google_not_connected',
+      hint: 'The user has not connected their Google account (or access expired). Ask them to click "Connect Google" at the top of the app to grant Gmail, Calendar, Drive, Tasks and Contacts — then retry.',
+    })
+    if (!token) return NEEDS_CONNECT
+
+    let result: string
+    if (name === 'get_calendar_events') result = await calendarEvents(num(args.max_results, 10), token)
+    else if (name === 'get_recent_emails')
+      result = await recentEmails(str(args.query), num(args.max_results, 5), token)
+    else if (name === 'send_email')
+      result = await sendEmail(str(args.to), str(args.subject), str(args.body), token)
+    else if (name === 'create_calendar_event')
+      result = await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
+    else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)
+    else if (name === 'get_tasks') result = await getTasks(num(args.max_results, 20), token)
+    else if (name === 'add_task') result = await addTask(str(args.title), str(args.due), token)
+    else if (name === 'search_contacts')
+      result = await searchContacts(str(args.query), num(args.max_results, 5), token)
+    else if (name === 'add_contact')
+      result = await addContact(str(args.name), str(args.email), str(args.phone), token)
+    else return JSON.stringify({ error: 'unknown_tool' })
+
+    if (/_http_(401|403)\b/.test(result)) return NEEDS_CONNECT
+    return result
   } catch (e) {
     return JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })
   }
