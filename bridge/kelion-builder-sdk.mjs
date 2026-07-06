@@ -85,6 +85,9 @@ const TESTER = {
   tools: ['Read', 'Bash', 'Glob', 'Grep'],
 }
 
+const JOB_TIMEOUT_MS = 20 * 60_000 // plasă de siguranță: un job nu rulează la infinit
+const HEARTBEAT_MS = 20_000 // cât timp nu vine niciun eveniment nou, anunț că încă lucrez
+
 // Rulează un job prin Agent SDK: coordonatorul deleagă la developer + tester,
 // streamând fiecare pas pe monitorul lui Adrian. Întoarce textul-rezumat final.
 async function sdkBuild(dir, orderText, id) {
@@ -92,6 +95,20 @@ async function sdkBuild(dir, orderText, id) {
   const seen = new Set()
   let result = ''
   let touched = 0
+  const abortController = new AbortController()
+  let heartbeatTimer = null
+  let timedOut = false
+  const armHeartbeat = () => {
+    clearTimeout(heartbeatTimer)
+    heartbeatTimer = setTimeout(() => {
+      mon(`⏳ Coordonator ${id} încă lucrează…`).catch(() => {})
+      armHeartbeat()
+    }, HEARTBEAT_MS)
+  }
+  const jobTimeout = setTimeout(() => {
+    timedOut = true
+    abortController.abort()
+  }, JOB_TIMEOUT_MS)
   const prompt =
     'Ești COORDONATORUL constructor al aplicației Kelionai (copia de cod curentă; live pe kelionai.app). ' +
     'Execută REAL DOAR acest ordin al lui Adrian, în directorul de lucru curent:\n\n' +
@@ -109,9 +126,13 @@ async function sdkBuild(dir, orderText, id) {
         permissionMode: 'acceptEdits',
         allowedTools: ['Read', 'Write', 'Edit', 'MultiEdit', 'Bash', 'Glob', 'Grep', 'Agent'],
         agents: { developer: DEVELOPER, tester: TESTER },
+        abortController,
+        maxTurns: 60,
       },
     })
+    armHeartbeat()
     for await (const m of q) {
+      armHeartbeat() // eveniment real primit → amân heartbeat-ul, nu spamez în paralel
       if (m.type === 'result' && typeof m.result === 'string') result = m.result
       if (m.type !== 'assistant') continue
       const inSub = !!m.parent_tool_use_id
@@ -143,9 +164,22 @@ async function sdkBuild(dir, orderText, id) {
         }
       }
     }
+    // Abort-ul poate încheia iteratorul fără să arunce excepție — verificăm oricum.
+    if (timedOut) {
+      log(`AGENT ${id} SDK oprit după timeout (${JOB_TIMEOUT_MS / 60_000} min)`)
+      await mon(`🔴 Coordonator ${id}: job oprit după depășirea timpului (${JOB_TIMEOUT_MS / 60_000} min) — verifică manual`)
+    }
   } catch (e) {
-    log(`AGENT ${id} SDK eroare: ${e.message}`)
-    await mon(`⚠️ Coordonator ${id}: ${String(e.message).slice(0, 80)}`)
+    if (timedOut) {
+      log(`AGENT ${id} SDK oprit după timeout (${JOB_TIMEOUT_MS / 60_000} min)`)
+      await mon(`🔴 Coordonator ${id}: job oprit după depășirea timpului (${JOB_TIMEOUT_MS / 60_000} min) — verifică manual`)
+    } else {
+      log(`AGENT ${id} SDK eroare: ${e.message}`)
+      await mon(`⚠️ Coordonator ${id}: ${String(e.message).slice(0, 80)}`)
+    }
+  } finally {
+    clearTimeout(jobTimeout)
+    clearTimeout(heartbeatTimer)
   }
   return result
 }
