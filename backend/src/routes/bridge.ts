@@ -13,6 +13,7 @@ import {
   saveWorkOrder,
   pullPendingWorkOrders,
   listWorkOrders,
+  setWorkOrderStatus,
   saveStagedRelease,
   listStagedReleases,
   setReleaseStatus,
@@ -235,6 +236,7 @@ async function confirmLiveThenAnnounce(summary: string): Promise<void> {
     persistSay()
     void saveMessage(config.adminEmail, 'assistant', msg)
     noteBrainActivity('🟢 PUBLICAT + VERIFICAT LIVE (200)')
+    if (ownedReq?.orderId) void setWorkOrderStatus(ownedReq.orderId, 'published')
     const r = ownedRequirement()
     if (r) {
       // LEGEA 200 PE CERINȚĂ (Adrian, 5 iul): site-ul sus NU închide cerința.
@@ -277,6 +279,7 @@ interface OwnedReq {
   nudged: number
   attempts: number // câți agenți proaspeți a re-asignat supervizorul
   task: string // sarcina completă (pt re-asignare cu escaladare)
+  orderId?: string // ordinul din work_orders legat de cerință (pt stadiu real)
 }
 let ownedReq: OwnedReq | null = null
 // Cerința deținută supraviețuiește restartului (Postgres) — o cerință deschisă
@@ -300,6 +303,7 @@ export function openRequirement(summary: string, task?: string): void {
     nudged: 0,
     attempts: 0,
     task: (task ?? summary).slice(0, 4000),
+    orderId: lastRepairId ?? undefined,
   }
   persistOwned()
 }
@@ -645,6 +649,9 @@ export interface WorkOrder {
 // unicat"): același ordin nu se mai construiește de două ori. Ținem textele
 // recente în memorie și sărim duplicatele înainte să ajungă la constructor.
 const recentOrderTexts: string[] = []
+// Ultimul ordin creat — openRequirement îl leagă de cerință, ca stadiul să se
+// închidă pe ordinul corect (delivered → published → certified).
+let lastRepairId: string | null = null
 export function bridgeRepair(description: string): string | null {
   const text = description.slice(0, 4000)
   if (isDuplicateOrder(text, recentOrderTexts)) {
@@ -654,6 +661,7 @@ export function bridgeRepair(description: string): string | null {
   recentOrderTexts.push(text)
   if (recentOrderTexts.length > 30) recentOrderTexts.shift()
   const id = randomUUID()
+  lastRepairId = id
   void saveWorkOrder(id, text).catch(() => {})
   // OBLIGATORY monitor display: the moment a repair/dev task is created it shows
   // on the monitor by itself. Adrian's rule (4 iul): his RAW message never
@@ -960,6 +968,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (!r) return { ok: false, reason: 'no_open_requirement' }
       const detail = String(req.body?.detail ?? '').slice(0, 300)
       if (req.body?.pass === true) {
+        if (ownedReq?.orderId) void setWorkOrderStatus(ownedReq.orderId, 'certified')
         resolveRequirement()
         setProgress(100, 'Certificat pe cerință (PASS)')
         void reportToAdmin({ kind: 'pass', summary: r.summary, detail })
