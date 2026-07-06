@@ -82,6 +82,7 @@ export interface Strings {
   calibrateVoiceDone: string
   calibrateVoiceFailed: string
   calibrateVoiceReset: string
+  voiceNotEnrolledHint: string
 }
 
 const dict: Record<Lang, Strings> = {
@@ -177,6 +178,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Voice recognized',
     calibrateVoiceFailed: "Couldn't calibrate — try again",
     calibrateVoiceReset: 'Reset voice',
+    voiceNotEnrolledHint: 'Mic is muted until you set up your voice (+ → Recognize my voice).',
   },
   ro: {
     tagline: 'Asistentul tău. Conectează-te pentru a continua.',
@@ -270,6 +272,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Vocea a fost recunoscută',
     calibrateVoiceFailed: 'Nu am reușit — încearcă din nou',
     calibrateVoiceReset: 'Resetează vocea',
+    voiceNotEnrolledHint: 'Microfonul e mut până îți configurezi vocea (+ → Recunoaște-mi vocea).',
   },
   es: {
     tagline: 'Tu asistente. Inicia sesión para continuar.',
@@ -363,6 +366,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Voz reconocida',
     calibrateVoiceFailed: 'No se pudo calibrar — inténtalo de nuevo',
     calibrateVoiceReset: 'Restablecer voz',
+    voiceNotEnrolledHint: 'El micrófono está silenciado hasta que configures tu voz (+ → Reconoce mi voz).',
   },
   fr: {
     tagline: 'Votre assistant. Connectez-vous pour continuer.',
@@ -456,6 +460,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Voix reconnue',
     calibrateVoiceFailed: 'Échec de la calibration — réessayez',
     calibrateVoiceReset: 'Réinitialiser la voix',
+    voiceNotEnrolledHint: 'Micro coupé jusqu’à ce que vous configuriez votre voix (+ → Reconnaître ma voix).',
   },
   de: {
     tagline: 'Dein Assistent. Melde dich an, um fortzufahren.',
@@ -549,6 +554,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Stimme erkannt',
     calibrateVoiceFailed: 'Kalibrierung fehlgeschlagen — erneut versuchen',
     calibrateVoiceReset: 'Stimme zurücksetzen',
+    voiceNotEnrolledHint: 'Mikrofon stumm, bis du deine Stimme einrichtest (+ → Meine Stimme erkennen).',
   },
   it: {
     tagline: 'Il tuo assistente. Accedi per continuare.',
@@ -642,6 +648,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Voce riconosciuta',
     calibrateVoiceFailed: 'Calibrazione non riuscita — riprova',
     calibrateVoiceReset: 'Reimposta voce',
+    voiceNotEnrolledHint: 'Microfono muto finché non configuri la tua voce (+ → Riconosci la mia voce).',
   },
   pt: {
     tagline: 'O seu assistente. Inicie sessão para continuar.',
@@ -735,6 +742,7 @@ const dict: Record<Lang, Strings> = {
     calibrateVoiceDone: 'Voz reconhecida',
     calibrateVoiceFailed: 'Não foi possível calibrar — tente novamente',
     calibrateVoiceReset: 'Redefinir voz',
+    voiceNotEnrolledHint: 'Microfone mudo até configurar sua voz (+ → Reconhecer minha voz).',
   },
 }
 

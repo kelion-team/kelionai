@@ -707,6 +707,9 @@ export default function ChatPanel({
         stopVoice()
         micRef.current?.setMuted(false)
       },
+      // „doar vocea mea sau scrisul meu, nu se acceptă alta" — adminul e singurul
+      // rol restrâns la vocea proprie calibrată; demo (vizitatori) rămâne neschimbat.
+      isAdmin,
     )
     micStartingRef.current = false
     if (h) {
@@ -999,6 +1002,12 @@ export default function ChatPanel({
         </div>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>
+        {/* Ordinul lui Adrian: „doar vocea mea, nu se acceptă alta" — cât nu e
+            calibrat profilul, microfonul e mut la orice voce (audioIO.ts). Indiciu
+            discret, non-blocant, ca să înțeleagă de ce nu-i reacționează microfonul. */}
+        {isAdmin && !hasVoicePrint && (
+          <p className="chat-hint">{t.voiceNotEnrolledHint}</p>
+        )}
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (

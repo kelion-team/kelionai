@@ -32,10 +32,12 @@ const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un p
 const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe redarea (onset)
 
 // ── VOICEPRINT (amprentă vocală) ────────────────────────────────────────────
-// Filtru 100% client-side: restrânge PORNIREA înregistrării (nu barge-in-ul,
-// vezi mai sus) la vocea calibrată a lui Adrian, ca să nu reacționeze la orice
-// voce/zgomot care trece pragul de volum (TV, alt om etc.). Dacă nu există
-// profil salvat (neînrolat), comportamentul rămâne exact cel de azi.
+// Filtru 100% client-side: restrânge PORNIREA înregistrării ȘI barge-in-ul la
+// vocea calibrată a lui Adrian, ca să nu reacționeze la orice voce/zgomot care
+// trece pragul de volum (TV, alt om etc.). Pentru rolul demo (vizitatori
+// publici), fără profil salvat, comportamentul rămâne exact cel de azi (accept
+// orice voce). Pentru admin, fără profil salvat = neînrolat încă → nu se
+// acceptă nimic până nu calibrează (vezi `restrictToOwnerVoice` în startMic).
 export interface VoicePrint {
   f0Min: number // frecvența fundamentală minimă observată la calibrare (Hz)
   f0Max: number // frecvența fundamentală maximă observată la calibrare (Hz)
@@ -235,6 +237,11 @@ export async function startMic(
   // chemat când se aude vocea lui Adrian CÂT microfonul e mut (Kelion vorbește):
   // panoul taie vocea lui Kelion și dezmutează microfonul.
   onBargeIn?: () => void,
+  // ordinul lui Adrian: „doar vocea mea sau scrisul meu". true = adminul — dacă
+  // nu există încă profil calibrat, microfonul NU acceptă nicio voce (neînrolat,
+  // nu „orice voce"). false = rolul demo (vizitatori publici) — comportamentul
+  // rămâne exact cel de azi: fără profil, acceptă orice voce peste prag.
+  restrictToOwnerVoice = false,
 ): Promise<MicHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     onError('unsupported')
@@ -346,10 +353,12 @@ export async function startMic(
     if (recording && rec && rec.state !== 'inactive') rec.stop()
   }
 
-  // gate suplimentar pentru PORNIREA înregistrării — verifică F0 + centroid contra
-  // profilului calibrat. Neînrolat (fără profil) → true mereu, comportament neschimbat.
+  // gate pentru PORNIREA înregistrării ȘI pentru barge-in — verifică F0 + centroid
+  // contra profilului calibrat. Neînrolat (fără profil): demo → true mereu (comportament
+  // neschimbat); admin (restrictToOwnerVoice) → false mereu, ca să nu reacționeze la
+  // orice voce cât nu s-a calibrat încă (ordinul: „doar vocea mea, nu se acceptă alta").
   const matchesVoiceprint = (): boolean => {
-    if (!voiceprint) return true
+    if (!voiceprint) return !restrictToOwnerVoice
     pitchAnalyser.getFloatTimeDomainData(pitchBuf)
     const f0 = estimateF0(pitchBuf, ctx.sampleRate)
     if (f0 < 0) return false
@@ -395,10 +404,12 @@ export async function startMic(
     const isVoice = !muted && rms > START_RMS && rms > noiseFloor * DOMINANCE
 
     // BARGE-IN: microfonul e mut (Kelion vorbește), dar tot ascultă. Voce clară
-    // și susținută peste redare = Adrian vorbește → tăiem vocea lui Kelion.
+    // și susținută peste redare = Adrian vorbește → tăiem vocea lui Kelion. Aceeași
+    // regulă a amprentei vocale se aplică și aici — altfel orice voce puternică din
+    // preajmă (TV, alt om) ar putea întrerupe vocea lui Kelion, nu doar a lui Adrian.
     if (muted) {
       const pastGuard = performance.now() - mutedAt >= BARGE_GUARD_MS
-      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE) {
+      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE && matchesVoiceprint()) {
         bargeMs += dt
         if (bargeMs >= BARGE_HOLD_MS) {
           bargeMs = 0
