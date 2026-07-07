@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../services/supervisor.js'
@@ -774,7 +774,12 @@ async function reportToAdmin(o: AgentOutcome): Promise<void> {
 }
 
 function authed(req: FastifyRequest): boolean {
-  return config.bridgeSecret !== '' && req.headers['x-bridge-secret'] === config.bridgeSecret
+  // Comparație în timp constant (W10 #6): `===` iese la primul octet diferit →
+  // scurgere de timing pe secretul cu putere totală (upload installer, cozi, deploy).
+  const got = String(req.headers['x-bridge-secret'] ?? '')
+  const want = config.bridgeSecret
+  if (!want || got.length !== want.length) return false
+  return timingSafeEqual(Buffer.from(got), Buffer.from(want))
 }
 
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {

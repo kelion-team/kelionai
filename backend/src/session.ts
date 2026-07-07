@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import jwt from 'jsonwebtoken'
-import { config } from './config.js'
+import { config, roleFor } from './config.js'
 
 export const SESSION_COOKIE = 'kelionai_session'
 
@@ -92,7 +92,12 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
   }
   if (!token) return null
   try {
-    return jwt.verify(token, config.sessionSecret) as SessionUser
+    const u = jwt.verify(token, config.sessionSecret) as SessionUser
+    // Re-derivă rolul din email (W10 #5): rolul „înghețat" în JWT rămânea admin
+    // 30 de zile dacă ADMIN_EMAIL se schimba — revocarea de admin nu avea efect.
+    // Demo rămâne demo (identitate throwaway); restul, rol după emailul curent.
+    u.role = u.role === 'demo' ? 'demo' : roleFor(u.email)
+    return u
   } catch {
     return null
   }
