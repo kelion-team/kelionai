@@ -5,6 +5,10 @@ import Stage from './pages/Stage'
 import { watchForUpdate } from './lib/updateCheck'
 import { strings, resolveLang, browserLang } from './lib/i18n'
 
+// Injectate la build (vezi vite.config.ts): versiunea + data compilării.
+declare const __APP_VERSION__: string
+declare const __BUILD_DATE__: string
+
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
@@ -59,6 +63,11 @@ export default function App() {
         </div>
       )}
       {user ? <Stage user={user} /> : <Landing error={error} />}
+      {/* Filigran versiune + dată update — dovada vizibilă că ultima versiune e
+          instalată (Adrian, 7 iul). Apare pe toate shell-urile (aceeași web app). */}
+      <div className="app-watermark" aria-hidden="true">
+        v{__APP_VERSION__} · {__BUILD_DATE__}
+      </div>
     </>
   )
 }
