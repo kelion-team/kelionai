@@ -6,6 +6,15 @@ import { config } from '../config.js'
 // and returns the result. Add a new skill = add a tool def + a case in
 // runGoogleTool (generic framework — cheap to extend to Drive, Maps, etc.).
 
+// Every external fetch gets a hard timeout so a slow or hung upstream (Google,
+// Serper, OpenStreetMap, FX…) can NEVER block a tool call — and therefore a
+// whole chat turn — forever. Respects a caller's own AbortSignal if one is
+// already set (route computation, geocoding already pass their own).
+async function tfetch(url: string | URL, init: RequestInit = {}, ms = 30_000): Promise<Response> {
+  if (init.signal) return fetch(url, init)
+  return fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
+}
+
 export const googleTools: Anthropic.Tool[] = [
   {
     name: 'get_calendar_events',
@@ -246,7 +255,7 @@ export async function refreshGoogleAccessToken(
 ): Promise<{ accessToken: string; expiresIn: number } | null> {
   if (!refreshToken) return null
   try {
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    const res = await tfetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -282,7 +291,7 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string> 
     u.searchParams.set('lon', String(lon))
     u.searchParams.set('format', 'json')
     u.searchParams.set('zoom', '14')
-    const res = await fetch(u, {
+    const res = await tfetch(u, {
       headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
       signal: AbortSignal.timeout(4000),
     })
@@ -328,7 +337,7 @@ function str(v: unknown): string {
 async function fetchRetry(url: string | URL, tries = 3): Promise<Response | null> {
   for (let i = 0; i < tries; i++) {
     try {
-      const r = await fetch(url)
+      const r = await tfetch(url)
       if (r.ok) return r
     } catch {
       /* network blip — retry */
@@ -355,7 +364,7 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   url.searchParams.set('maxResults', String(Math.min(Math.max(max, 1), 25)))
   url.searchParams.set('singleEvents', 'true')
   url.searchParams.set('orderBy', 'startTime')
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `calendar_http_${res.status}` })
   const j = (await res.json()) as { items?: CalendarItem[] }
   const events = (j.items ?? []).map((e) => ({
@@ -372,14 +381,14 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
   listUrl.searchParams.set('maxResults', String(n))
   if (query) listUrl.searchParams.set('q', query)
-  const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
+  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
   if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
   const list = (await listRes.json()) as { messages?: { id: string }[] }
   const ids = (list.messages ?? []).slice(0, n)
   const emails: { from: string; subject: string; date: string; snippet: string }[] = []
   for (const { id } of ids) {
     const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`
-    const mRes = await fetch(mUrl, { headers: { Authorization: `Bearer ${token}` } })
+    const mRes = await tfetch(mUrl, { headers: { Authorization: `Bearer ${token}` } })
     if (!mRes.ok) continue
     const m = (await mRes.json()) as { snippet?: string; payload?: { headers?: GmailHeader[] } }
     const h = (name: string): string =>
@@ -409,7 +418,7 @@ async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
   let res: Response
   try {
-    res = await fetch(url, {
+    res = await tfetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
       body: JSON.stringify({
@@ -449,7 +458,7 @@ async function webSearch(query: string, max: number): Promise<string> {
   // Primary: Serper.dev (the paid plan) when a key is set and accepted.
   if (config.serperKey) {
     try {
-      const res = await fetch('https://google.serper.dev/search', {
+      const res = await tfetch('https://google.serper.dev/search', {
         method: 'POST',
         headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({ q: query }),
@@ -585,7 +594,7 @@ async function sendEmail(to: string, subject: string, body: string, token: strin
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replace(/=+$/, '')
-  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+  const res = await tfetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ raw }),
@@ -607,7 +616,7 @@ async function createCalendarEvent(
   const endIso = end && !Number.isNaN(Date.parse(end))
     ? new Date(end).toISOString()
     : new Date(startMs + 3_600_000).toISOString()
-  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+  const res = await tfetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -633,7 +642,7 @@ async function driveFiles(query: string, max: number, token: string): Promise<st
   } else {
     url.searchParams.set('q', 'trashed = false')
   }
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `drive_http_${res.status}` })
   const j = (await res.json()) as {
     files?: { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
@@ -645,7 +654,7 @@ async function getTasks(max: number, token: string): Promise<string> {
   const url = new URL('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks')
   url.searchParams.set('maxResults', String(Math.min(Math.max(max, 1), 100)))
   url.searchParams.set('showCompleted', 'false')
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
   const j = (await res.json()) as { items?: { title?: string; due?: string; status?: string }[] }
   const tasks = (j.items ?? []).map((t) => ({ title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
@@ -656,7 +665,7 @@ async function addTask(title: string, due: string, token: string): Promise<strin
   if (!title) return JSON.stringify({ error: 'missing_title' })
   const body: { title: string; due?: string } = { title }
   if (due && !Number.isNaN(Date.parse(due))) body.due = new Date(due).toISOString()
-  const res = await fetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
+  const res = await tfetch('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -680,7 +689,7 @@ async function searchContacts(query: string, max: number, token: string): Promis
   url.searchParams.set('query', query)
   url.searchParams.set('pageSize', String(Math.min(Math.max(max, 1), 25)))
   url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers')
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `contacts_http_${res.status}` })
   const j = (await res.json()) as { results?: { person?: Person }[] }
   const contacts = (j.results ?? []).map((r) => ({
@@ -696,7 +705,7 @@ async function addContact(name: string, email: string, phone: string, token: str
   const body: Person = { names: [{ givenName: name }] }
   if (email) body.emailAddresses = [{ value: email }]
   if (phone) body.phoneNumbers = [{ value: phone }]
-  const res = await fetch('https://people.googleapis.com/v1/people:createContact', {
+  const res = await tfetch('https://people.googleapis.com/v1/people:createContact', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -721,7 +730,7 @@ async function geocodeOne(query: string): Promise<NominatimPlace | null> {
   u.searchParams.set('q', query)
   u.searchParams.set('format', 'json')
   u.searchParams.set('limit', '1')
-  const res = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+  const res = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
   if (!res.ok) return null
   const arr = (await res.json()) as NominatimPlace[]
   return arr[0] ?? null
@@ -733,7 +742,7 @@ async function mapsSearch(query: string, max: number): Promise<string> {
   u.searchParams.set('q', query)
   u.searchParams.set('format', 'json')
   u.searchParams.set('limit', String(Math.min(Math.max(max, 1), 10)))
-  const res = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+  const res = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
   if (!res.ok) return JSON.stringify({ error: `maps_http_${res.status}` })
   const arr = (await res.json()) as NominatimPlace[]
   const places = arr.map((p) => ({
@@ -789,7 +798,7 @@ export async function osrmRoute(
     try {
       const ctrl = new AbortController()
       const to = setTimeout(() => ctrl.abort(), 8000)
-      const res = await fetch(`${base}/${fromLon},${fromLat};${toLon},${toLat}?${params}`, {
+      const res = await tfetch(`${base}/${fromLon},${fromLat};${toLon},${toLat}?${params}`, {
         signal: ctrl.signal,
       })
       clearTimeout(to)
@@ -854,7 +863,7 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
   // Primary: Serper.dev (the paid plan) when a key is set and accepted.
   if (config.serperKey) {
     try {
-      const res = await fetch('https://google.serper.dev/search', {
+      const res = await tfetch('https://google.serper.dev/search', {
         method: 'POST',
         headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({ q: `${query} site:youtube.com` }),
@@ -937,7 +946,7 @@ async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
   if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  const res = await fetch(url, {
+  const res = await tfetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
     body: JSON.stringify({
@@ -975,7 +984,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       const s = new URL(`https://${ed}.wikipedia.org/w/rest.php/v1/search/page`)
       s.searchParams.set('q', query)
       s.searchParams.set('limit', '3')
-      const sr = await fetch(s, { headers: { 'User-Agent': OSM_UA } })
+      const sr = await tfetch(s, { headers: { 'User-Agent': OSM_UA } })
       if (!sr.ok) continue
       const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
       for (const p of sj.pages ?? []) if (p.key) candidates.push({ ed, key: p.key, title: p.title ?? '' })
@@ -993,7 +1002,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       }
     }
     const u = `https://${best.ed}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(best.key)}`
-    const r = await fetch(u, { headers: { 'User-Agent': OSM_UA } })
+    const r = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
     if (!r.ok) return JSON.stringify({ error: `wiki_http_${r.status}` })
     const j = (await r.json()) as {
       title?: string
@@ -1017,7 +1026,7 @@ async function convertCurrency(amount: number, from: string, to: string): Promis
   if (!/^[A-Z]{3}$/.test(f) || !/^[A-Z]{3}$/.test(t)) return JSON.stringify({ error: 'bad_currency_code' })
   const amt = Number.isFinite(amount) && amount > 0 ? amount : 1
   try {
-    const r = await fetch(`https://open.er-api.com/v6/latest/${f}`)
+    const r = await tfetch(`https://open.er-api.com/v6/latest/${f}`)
     if (!r.ok) return JSON.stringify({ error: `fx_http_${r.status}` })
     const j = (await r.json()) as { result?: string; rates?: Record<string, number> }
     const rate = j.rates?.[t]

@@ -35,7 +35,7 @@ function page(title: string, body: string): string {
 <p class="muted">Last updated: ${UPDATED}</p>
 ${body}
 <hr>
-<p class="nav"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="/">Home</a></p>
+<p class="nav"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="/delete-account">Delete Account</a><a href="/">Home</a></p>
 <p class="muted">Contact: <a href="mailto:${CONTACT}">${CONTACT}</a></p>
 </main></body></html>`
 }
@@ -136,9 +136,48 @@ const TERMS = page(
   <p>Questions: <a href="mailto:${CONTACT}">${CONTACT}</a>.</p>`,
 )
 
+// Account + data deletion page (Google Play Data safety requires a public URL
+// that shows the steps to delete an account and what data is removed/kept).
+const DELETE_ACCOUNT = page(
+  'Delete your account',
+  `<p>This page explains how to delete your <span class="brand">Kelionai</span>
+  account and the data associated with it. Kelionai is a personal AI assistant
+  available at <a href="https://kelionai.app">kelionai.app</a>.</p>
+
+  <h2>How to request deletion</h2>
+  <p>Email <a href="mailto:${CONTACT}">${CONTACT}</a> <strong>from the Google
+  email address you sign in with</strong>, using the subject line
+  <strong>"Delete my account"</strong>. That is all we need — sending from your
+  own account lets us verify the request is really yours.</p>
+  <p>We erase your data and reply to confirm once it is done. You do not need to
+  be signed in, pay anything, or install anything to make the request.</p>
+
+  <h2>What is deleted</h2>
+  <ul>
+    <li>Your profile — name, email, profile picture and locale.</li>
+    <li>Your conversation history and the memory Kelion learned about you.</li>
+    <li>Any stored Google OAuth tokens (your Calendar/Gmail/Drive access is revoked).</li>
+    <li>Usage and cost-metering records tied to your account.</li>
+  </ul>
+
+  <h2>What is kept, and for how long</h2>
+  <p>We delete your personal data without undue delay and, in any case, within
+  <strong>30 days</strong> of your request. Residual copies inside encrypted
+  backups are purged on our normal rotation, within <strong>90 days</strong>. We
+  keep only the minimum records the law requires (for example billing/tax); all
+  other personal data is removed.</p>
+
+  <p>You can also revoke Kelionai's access to your Google account at any time in
+  your <a href="https://myaccount.google.com/permissions">Google Account
+  permissions</a>.</p>`,
+)
+
 export async function legalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/privacy', async (_req, reply) =>
     reply.type('text/html; charset=utf-8').send(PRIVACY),
   )
   app.get('/terms', async (_req, reply) => reply.type('text/html; charset=utf-8').send(TERMS))
+  app.get('/delete-account', async (_req, reply) =>
+    reply.type('text/html; charset=utf-8').send(DELETE_ACCOUNT),
+  )
 }
