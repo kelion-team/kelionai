@@ -1248,6 +1248,9 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return {
       active,
       bridge: bridgeOnline(),
+      // CALITATEA LEGĂTURII (Adrian, 7 iul): câte din cele 10 benzi WS sunt sus —
+      // frontend-ul colorează becul verde→roșu→stins după asta, nu hardcodat.
+      lanes: wsLaneCount(),
       activity: active ? devActivity : [],
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
       // THE process bar 0→100% (what's executing, start→finish). Kept for 2 min

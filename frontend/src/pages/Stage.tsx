@@ -71,6 +71,9 @@ export default function Stage({ user }: { user: User }) {
   // restarts it and the light re-lights by itself). "Server" = kelionai.app
   // itself (poll failing = OFF; Railway auto-restarts it, light comes back).
   const [claudeBridge, setClaudeBridge] = useState(false)
+  // Calitatea legăturii punții: câte din cele 10 benzi WS sunt sus (0–10).
+  // Colorează becul verde (toate) → roșu (puține) → stins (jos), NU hardcodat.
+  const [bridgeLanes, setBridgeLanes] = useState(0)
   const [serverUp, setServerUp] = useState(true)
   const [claudeActivity, setClaudeActivity] = useState<string[]>([])
   // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
@@ -218,6 +221,7 @@ export default function Stage({ user }: { user: User }) {
           (j: {
             active?: boolean
             bridge?: boolean
+            lanes?: number
             activity?: string[]
             srv?: string
             progress?: { pct?: number; label?: string; file?: string }
@@ -227,6 +231,7 @@ export default function Stage({ user }: { user: User }) {
             setServerUp(true)
             setClaudeActive(!!j.active)
             setClaudeBridge(!!j.bridge)
+            setBridgeLanes(Number(j.lanes ?? 0))
             setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
             setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
             const p = j.progress
@@ -646,6 +651,20 @@ export default function Stage({ user }: { user: User }) {
           {user.role === 'admin' && (
             <span
               className={`claude-ind clickable ${claudeBridge ? 'on' : ''} ${claudeActive ? 'work' : ''}`}
+              style={
+                claudeBridge
+                  ? (() => {
+                      // hue: 120°=verde (10 benzi) → 0°=roșu (1 bandă). Jos = fără
+                      // stil → becul cade pe gri (stins). Calitate REALĂ, nu hardcodat.
+                      const h = (Math.min(Math.max(bridgeLanes, 0), 10) / 10) * 120
+                      return {
+                        color: `hsl(${h} 85% 55%)`,
+                        borderColor: `hsl(${h} 85% 55% / 0.6)`,
+                        background: `hsl(${h} 85% 55% / 0.14)`,
+                      }
+                    })()
+                  : undefined
+              }
               onClick={() => setShowWork((v) => !v)}
               role="button"
               tabIndex={0}
