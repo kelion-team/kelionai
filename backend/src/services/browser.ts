@@ -172,7 +172,23 @@ const COLLECT_SCRIPT = `(() => {
 })()`
 const TEXT_SCRIPT = `(() => document.body ? document.body.innerText : '')()`
 
-async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+// Heavy Google SPAs (Play Console etc.) keep redirecting via JS well after
+// "domcontentloaded" — if evaluate()/screenshot() lands mid-navigation, the
+// old execution context is torn down and Playwright throws a navigation
+// error, not a real page-content error. Recognize that class of error so we
+// can wait it out and retry once, instead of surfacing a misleading
+// snapshot_failed for a page that would have worked a moment later.
+function isNavigationRace(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return (
+    msg.includes('context was destroyed') ||
+    msg.includes('Execution context') ||
+    msg.includes('Target closed') ||
+    msg.includes('Cannot find context')
+  )
+}
+
+async function takeSnapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
   const title = await page.title()
   const url = page.url()
   const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
@@ -180,6 +196,20 @@ async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
   return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }
+}
+
+async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+  try {
+    return await takeSnapshot(page, baseUrl)
+  } catch (e) {
+    if (!isNavigationRace(e)) throw e
+    // Give the SPA's redirect cascade a moment to settle, then retry once —
+    // a single retry is enough since a real content/navigation failure will
+    // fail the same way again and should propagate as before.
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+    await page.waitForTimeout(500)
+    return await takeSnapshot(page, baseUrl)
+  }
 }
 
 // ── public actions ───────────────────────────────────────────────────────
@@ -205,6 +235,10 @@ export async function browserOpen(
   }
   try {
     await session.page.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 15000 })
+    // Heavy SPAs (e.g. Google Play Console) keep firing JS redirects after
+    // domcontentloaded; give them a chance to reach 'load' before the fixed
+    // settle wait, so the first snapshot isn't taken mid-redirect-cascade.
+    await session.page.waitForLoadState('load', { timeout: 5000 }).catch(() => {})
     await session.page.waitForTimeout(500)
   } catch (e) {
     console.error('[browser] navigation failed:', e instanceof Error ? e.message.slice(0, 300) : e)
