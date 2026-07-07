@@ -19,23 +19,34 @@ export async function documentToMarkdown(bytes: Buffer, filename: string): Promi
         '-c',
         'import sys;from markitdown import MarkItDown;sys.stdout.write(MarkItDown().convert(sys.argv[1]).text_content or "")',
         path,
-      ])
+      ], { detached: true })
       // setEncoding tamponează byte-ii UTF-8 parțiali peste granițele de chunk —
       // altfel diacriticele (ă ș ț) care cad pe graniță se corup în „�".
       py.stdout.setEncoding('utf8')
       py.stderr.setEncoding('utf8')
       let out = ''
       let err = ''
+      // TIMEOUT (W10 #3): un PDF malformat putea bloca MarkItDown la infinit —
+      // procesul rămânea agățat, promisiunea nerezolvată, fișierul temp nescurs.
+      // La 30s omorâm tot grupul de procese și respingem curat.
+      const killer = setTimeout(() => {
+        try {
+          if (py.pid) process.kill(-py.pid, 'SIGKILL')
+          else py.kill('SIGKILL')
+        } catch { py.kill('SIGKILL') }
+        reject(new Error('markitdown timeout 30s'))
+      }, 30_000)
       py.stdout.on('data', (d) => {
         out += d
       })
       py.stderr.on('data', (d) => {
         err += d
       })
-      py.on('error', (e) => reject(e))
-      py.on('close', (code) =>
-        code === 0 ? resolve(out) : reject(new Error(err.trim().slice(0, 200) || `exit ${code}`)),
-      )
+      py.on('error', (e) => { clearTimeout(killer); reject(e) })
+      py.on('close', (code) => {
+        clearTimeout(killer)
+        code === 0 ? resolve(out) : reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
+      })
     })
     return md.trim()
   } finally {

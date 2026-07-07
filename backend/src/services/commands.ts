@@ -87,7 +87,13 @@ export function interpretDeviceCommand(
   if (CLOSE_VERB.test(msg)) {
     if (CLOSE_ALL.test(msg)) return { screen: { op: 'closeAll' } }
     const kind = taskKindFromText(msg)
-    if (kind && open.some((t) => t.kind === kind)) return { screen: { op: 'closeKind', kind } }
+    // W4 #2: dacă Adrian numește o suprafață anume (ex. „închide harta"), o închidem
+    // DOAR dacă e chiar deschisă; altfel lăsăm creierul să răspundă — NU închidem
+    // tab-ul activ (alt lucru) doar fiindcă cel numit nu e deschis.
+    if (kind) {
+      if (open.some((t) => t.kind === kind)) return { screen: { op: 'closeKind', kind } }
+      return null
+    }
     if (SCREEN_NOUN.test(msg) || msg.split(/\s+/).length <= 4) return { screen: { op: 'close' } }
   }
   return null
