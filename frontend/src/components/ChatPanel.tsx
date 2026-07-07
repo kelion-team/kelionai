@@ -1114,6 +1114,10 @@ export default function ChatPanel({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
+                // Un gând spus poate încă aștepta în coalescer (fereastra de
+                // 900ms n-a expirat) — îl trimitem PE LOC, în ordine, înainte
+                // de textul scris manual, ca să nu rămână agățat/pierdut.
+                coalescerRef.current?.flushNow()
                 void send(input)
               }
             }}
@@ -1131,7 +1135,12 @@ export default function ChatPanel({
           <button
             type="button"
             className="composer-send"
-            onClick={() => void send(input)}
+            onClick={() => {
+              // vezi comentariul din onKeyDown Enter: golim orice frază de
+              // voce rămasă în așteptare înainte de trimiterea manuală.
+              coalescerRef.current?.flushNow()
+              void send(input)
+            }}
             disabled={busy || (!input.trim() && attachments.length === 0)}
             aria-label={t.send}
             title={t.send}
