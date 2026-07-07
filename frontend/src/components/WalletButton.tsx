@@ -21,7 +21,9 @@ export function WalletButton(): React.JSX.Element {
     if (b) {
       setCredits(b.credits)
       setPercent(b.percent)
-      if (b.credits > 0) setPaywalled(false)
+      // reflectă realitatea: la sold 0 rămâne paywalled, altfel iese — altfel
+      // un refresh cu credits=0 lăsa meniul de top-up blocat deschis pe veci.
+      setPaywalled(b.credits <= 0)
     }
   }
 

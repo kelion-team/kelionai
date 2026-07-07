@@ -20,12 +20,13 @@ export async function correctRoutes(app: FastifyInstance): Promise<void> {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-      const text = req.body?.text?.trim()
+      // Plafon la 8000 caractere (transcript de voce) — ruta lovește Gemini (plătit).
+      const text = req.body?.text?.trim()?.slice(0, 8000)
       if (!text) return reply.code(400).send({ error: 'bad_request' })
       // No key → behave as a pass-through so the chat never breaks.
       if (!config.geminiKey) return reply.send({ text })
 
-      const context = req.body?.context?.trim() ?? ''
+      const context = req.body?.context?.trim().slice(0, 4000) ?? ''
       const prompt =
         'You correct speech-to-text transcripts. The text below was produced by ' +
         'automatic speech recognition and may contain mishearings (wrong/garbled ' +

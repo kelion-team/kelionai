@@ -32,10 +32,17 @@ export async function greetRoutes(app: FastifyInstance): Promise<void> {
 
     let audio = cache.get(slot)
     if (!audio) {
-      const r = await synthesize(line, 'en-US')
-      if (!r.ok) return reply.code(r.status).send({ error: r.error })
-      audio = r.audio
-      cache.set(slot, audio)
+      try {
+        const r = await synthesize(line, 'en-US')
+        if (!r.ok) return reply.code(r.status).send({ error: r.error })
+        audio = r.audio
+        cache.set(slot, audio)
+      } catch (err) {
+        // synthesize poate arunca (token/fetch/json) — pe ruta publică nu lăsăm
+        // să devină 500 necaptat; răspundem curat 502.
+        app.log.error(err)
+        return reply.code(502).send({ error: 'greet_failed' })
+      }
     }
 
     // The client needs the EXACT spoken text to drive the mouth — return it in a

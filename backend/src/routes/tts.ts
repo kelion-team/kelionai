@@ -13,7 +13,9 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    const text = req.body?.text?.trim()
+    // Plafon la 5000 caractere: /api/tts lovește Google TTS (plătit) și n-avea
+    // limită — un client putea trimite ~24MB text la 120 req/min = factură uriașă.
+    const text = req.body?.text?.trim()?.slice(0, 5000)
     if (!text) return reply.code(400).send({ error: 'bad_request' })
 
     try {
