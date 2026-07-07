@@ -96,7 +96,7 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'jurnal' | 'releases' | 'stores' | 'inbox'
+    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'
   >('finance')
   const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [copied, setCopied] = useState(false)
@@ -163,6 +163,14 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   useEffect(() => {
     if (tab !== 'gaps') return
     const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
+  // Tab „Joburi" deschis → auto-refresh la 8s (Adrian: „actualizare automată fără
+  // alte butoane"), ca stadiul fiecărui ordin să se miște singur în timp real.
+  useEffect(() => {
+    if (tab !== 'joburi') return
+    const id = window.setInterval(() => void fetchWorkOrders().then(setOrders), 8_000)
     return () => window.clearInterval(id)
   }, [tab])
 
@@ -248,6 +256,16 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => setTab('gaps')}
             >
               Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('joburi')
+                void fetchWorkOrders().then(setOrders)
+              }}
+            >
+              Joburi{orders.length > 0 ? ` (${orders.length})` : ''}
             </button>
             <button
               type="button"
@@ -507,6 +525,43 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   )}
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+        {tab === 'joburi' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Joburi — toate cererile trimise la execuție, cu stadiul lor real (se
+                actualizează singur; supraviețuiește oricărui restart).
+              </div>
+              {orders.length === 0 && (
+                <div className="chat-hint">Niciun job încă (registrul e persistent în bază).</div>
+              )}
+              {orders.map((o) => {
+                const stage =
+                  o.status === 'certified'
+                    ? '✅ certificat (test PASS)'
+                    : o.status === 'published'
+                      ? '🟢 publicat pe live'
+                      : o.status === 'delivered'
+                        ? '🔧 preluat de constructor'
+                        : '⏳ în așteptare'
+                return (
+                  <div className="fin-row" key={o.id}>
+                    <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
+                    <span>
+                      {stage} ·{' '}
+                      {new Date(o.created_at).toLocaleString('ro-RO', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </section>
         )}
