@@ -38,11 +38,6 @@ function getClient(): v2.SpeechClient | null {
   return client
 }
 
-/** True când ASR-ul în streaming e configurat (are cont de serviciu Google). */
-export function asrStreamConfigured(): boolean {
-  return getClient() !== null && projectId !== ''
-}
-
 type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>
 type Resp = protos.google.cloud.speech.v2.IStreamingRecognizeResponse
 
@@ -128,6 +123,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         app.log.error({ err: e }, 'asr-stream: eroare Google streamingRecognize')
         send({ type: 'error', error: 'asr_failed' })
         gStream = null
+        started = false // permite repornirea la următorul cadru — altfel ASR rămâne mut
       })
       stream.on('end', () => {
         gStream = null

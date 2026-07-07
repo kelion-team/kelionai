@@ -67,14 +67,17 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ ok: true, delivered: false })
     }
 
-    // 1) Forward the full enquiry to the owner.
+    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated field —
+    // name/subject/department vin de la un vizitator anonim (XSS stocat în inbox).
+    const esc = (s: string): string =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const adminHtml = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <h2 style="margin:0 0 12px;">New contact — ${department}</h2>
-      <p><strong>From:</strong> ${name || '(no name)'} &lt;${email}&gt;</p>
-      <p><strong>Language:</strong> ${lang}</p>
-      <p><strong>Subject:</strong> ${subject || '(none)'}</p>
+      <h2 style="margin:0 0 12px;">New contact — ${esc(department)}</h2>
+      <p><strong>From:</strong> ${esc(name) || '(no name)'} &lt;${esc(email)}&gt;</p>
+      <p><strong>Language:</strong> ${esc(lang)}</p>
+      <p><strong>Subject:</strong> ${esc(subject) || '(none)'}</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;">
-      <p style="white-space:pre-wrap;">${message.replace(/</g, '&lt;')}</p>
+      <p style="white-space:pre-wrap;">${esc(message)}</p>
     </div>`
     void sendMail({
       to: config.mail.forwardTo,

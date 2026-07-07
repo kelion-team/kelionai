@@ -10,22 +10,6 @@ export interface HistoryRow {
   created_at: string
 }
 
-export interface CostSummary {
-  total: number
-  today: number
-  byKind: Record<string, number>
-}
-
-export async function fetchCosts(): Promise<CostSummary | null> {
-  try {
-    const r = await fetch('/api/admin/costs', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as CostSummary
-  } catch {
-    return null
-  }
-}
-
 // The owner's REAL money picture (admin only): live Stripe balance, real cost
 // consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
 export interface Finance {

@@ -22,6 +22,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     if (!config.stripe.secretKey) return reply.code(503).send({ error: 'stripe_not_configured' })
     const amount = Number(req.body?.amount ?? 10)
+    if (!Number.isFinite(amount) || amount <= 0) return reply.code(400).send({ error: 'bad_amount' })
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     const result = await createCheckout(user.email, user.name ?? '', amount, baseUrl)
     if ('error' in result) return reply.code(502).send(result)

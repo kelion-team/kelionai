@@ -57,7 +57,7 @@ if ($What -eq 'desktop' -or $What -eq 'all') {
     pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     platforms = @{ 'windows-x86_64' = @{
       signature = $sig
-      url = 'https://kelionai.app/downloads/Kelionai-Setup.exe'
+      url = 'https://kelionai.app/dl/Kelionai-Setup.exe'
     } }
   } | ConvertTo-Json -Depth 4 | Out-File "$root\frontend\public\downloads\desktop-update.json" -Encoding utf8
   Write-Host "installer v$ver + manifest update → frontend/public/downloads/"
