@@ -1,7 +1,8 @@
 import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { Environment, OrbitControls } from '@react-three/drei'
+import { OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
+import AvatarLoading from '../components/AvatarLoading'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import ContactModal from '../components/ContactModal'
@@ -598,11 +599,18 @@ export default function Stage({ user }: { user: User }) {
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
         {!monitorOn && <color attach="background" args={['#0b0d12']} />}
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[2, 3, 2]} intensity={1.4} castShadow />
+        {/* Self-contained lighting (key + cool fill + rim) — NO remote HDR.
+            `<Environment preset="city">` fetched a ~1MB HDR from an external CDN
+            (githack/pmndrs) INSIDE the avatar's Suspense: on a fresh phone with a
+            slow or blocked network that fetch could hang, so the Suspense never
+            resolved and the avatar stayed BLACK forever (Adrian, 8 iul: „aplicația
+            publicată și defectă"). The landing already dropped HDR for this exact
+            reason; the in-app stage now matches — same look, zero external deps. */}
+        <ambientLight intensity={0.75} />
+        <directionalLight position={[2, 3, 2]} intensity={1.6} castShadow />
+        <directionalLight position={[-2.5, 1.2, -2]} intensity={0.7} color="#8fb6ff" />
         <Suspense fallback={null}>
           <AvatarModel />
-          <Environment preset="city" />
         </Suspense>
         <OrbitControls
           enablePan={false}
@@ -615,6 +623,7 @@ export default function Stage({ user }: { user: User }) {
           target={[0, 0.7, 0]}
         />
       </Canvas>
+      <AvatarLoading />
       </div>
 
       <header className="topbar">

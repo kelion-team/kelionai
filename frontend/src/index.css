@@ -140,6 +140,41 @@ body {
   pointer-events: none;
   background: linear-gradient(90deg, transparent 55%, rgba(11, 13, 18, 0.85) 100%);
 }
+/* VISIBLE loading state over the 3D avatar (landing hero + in-app stage) so the
+   area is NEVER a dead black screen while the ~9MB GLB downloads — otherwise a
+   fresh tester on a phone opens the app to black and thinks it's broken
+   (Adrian, 8 iul). Fills its positioned parent (.landing-hero / .stage-canvas). */
+.avatar-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 40%, #141a28, #0b0d12 72%);
+}
+.avatar-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(110, 168, 254, 0.22);
+  border-top-color: #6ea8fe;
+  animation: avatar-spin 0.9s linear infinite;
+}
+.avatar-loading-label {
+  color: #cfe0ff;
+  font-size: 14px;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+@keyframes avatar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .landing-panel {
   display: flex;
   flex-direction: column;

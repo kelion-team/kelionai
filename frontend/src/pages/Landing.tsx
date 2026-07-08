@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
+import AvatarLoading from '../components/AvatarLoading'
 import ContactModal from '../components/ContactModal'
 import { startGoogleLogin, startDemo } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
@@ -95,6 +96,7 @@ export default function Landing({ error }: { error?: string | null }) {
             target={[0, 0.7, 0]}
           />
         </Canvas>
+        <AvatarLoading />
         <div className="landing-hero-fade" />
       </div>
 
