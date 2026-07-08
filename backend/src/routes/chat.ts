@@ -899,11 +899,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // this user so the conversation is continuous across sessions. The user's
     // current message is the relevance hint — old facts they ask about resurface.
     const lastMsg = messages.at(-1)
-    systemPrompt += await recallMemories(
+    // MEMORIE (Adrian, 8 iul): recall = DB pur (fără model, fără credite) — ia
+    // faptele recente + SCANEAZĂ după cuvintele întrebării în tot ce știe. O
+    // capturăm ca s-o dăm ȘI creierului de pe punte (nu doar systemPrompt-ul API,
+    // pe care calea punții îl ignoră — de-aia Kelion „nu ținea minte" din 4 iul).
+    const memRecall = await recallMemories(
       user.email,
       'kelion',
       lastMsg?.role === 'user' ? lastMsg.content : '',
     )
+    systemPrompt += memRecall
 
     const params: Anthropic.MessageParam[] = messages.map((m) => ({
       role: m.role,
@@ -1448,7 +1453,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             releaseHead(false)
           }
         }
-        const bridgePrompt = decision + ctxBlock + sharedBlock + langLock + journalBlock + convo
+        // MEMORIE PE PUNTE (Adrian, 8 iul — regula lui): dacă răspunsul nu e în
+        // memoria scurtă, Kelion caută în tot ce știe; găsit → răspunde direct;
+        // negăsit → întreabă-l și ține minte. `memRecall` (DB pur) poartă exact
+        // asta; îl dăm și la începutul sesiunii, și în fiecare tură (mai jos).
+        const memBlock = memRecall.trim()
+          ? `\nMEMORIE DESPRE ADRIAN (ce știi deja despre el — când te întreabă ceva de aici, RĂSPUNDE DIRECT cu faptul; dacă NU găsești nicăieri, întreabă-l și ține minte răspunsul):\n${memRecall.trim().slice(0, 2500)}\n`
+          : ''
+        const bridgePrompt = decision + ctxBlock + sharedBlock + memBlock + langLock + journalBlock + convo
         // MEMORIA FIRULUI (urgența 2): pachetul turei — context proaspăt + DOAR
         // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume).
         // Creierul primește starea VIE la fiecare tură (altfel vorbește din
@@ -1470,6 +1482,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           .join('\n')
         const turnPacket =
           ctxBlock +
+          (memBlock ? `${memBlock}\n` : '') +
           (turnShared ? `CAIET COMUN (ultimele note — starea știută de amândoi):\n${turnShared}\n\n` : '') +
           (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
@@ -1566,6 +1579,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       await streamVoice(reply, a, speechPref || user.locale)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', a)
+      // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): chatul adminului iese pe punte și
+      // se termina aici cu `return`, ÎNAINTE de pasul de învățare din calea
+      // creierului normal (mai jos) — de-aia nu s-a mai salvat NIMIC în `memories`
+      // din 4 iul (ultima memorie: 4 iul 17:21). Rulăm ACELAȘI distil+save și pe
+      // punte, fire-and-forget (nu adaugă latență răspunsului).
+      if (lastUserText.trim() || a.trim()) void learnFromTurn(user.email, lastUserText, a)
       return
     }
 
