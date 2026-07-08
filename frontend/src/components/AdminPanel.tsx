@@ -542,11 +542,15 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 const stage =
                   o.status === 'certified'
                     ? '✅ certificat (test PASS)'
-                    : o.status === 'published'
-                      ? '🟢 publicat pe live'
-                      : o.status === 'delivered'
-                        ? '🔧 preluat de constructor'
-                        : '⏳ în așteptare'
+                    : o.status === 'finalized'
+                      ? '✅ finalizat (închis)'
+                      : o.status === 'published'
+                        ? '🟢 publicat pe live'
+                        : o.status === 'failed'
+                          ? '🔴 a picat'
+                          : o.status === 'delivered'
+                            ? '🔧 preluat de constructor'
+                            : '⏳ în așteptare'
                 return (
                   <div className="fin-row" key={o.id}>
                     <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>

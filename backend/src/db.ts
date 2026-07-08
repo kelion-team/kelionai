@@ -305,6 +305,37 @@ export async function setWorkOrderStatus(id: string, status: string): Promise<vo
     .catch(() => {})
 }
 
+// RECONCILIERE — închide ordinele blocate la „delivered" (Adrian, 8 iul: „procedura
+// e defectă dacă rămân în «preluat» pe veci; reparat, iar când e gata → finalizat;
+// până nu e reparat, nici vorbă să le ștergem"). CAUZA blocajului: doar UN ordin
+// (cel legat de cerința deținută) poate avansa la published/certified; toate
+// celelalte — lanțuri SUPERVIZOR reasignate, verificări auto (VERIFICARE PE
+// CERINȚĂ / LEGEA 200) care raportează verdict pe cerință dar nu pe rândul lor,
+// giveup-uri neînchise — rămâneau `delivered` la nesfârșit, fără cale spre terminal.
+// Această tură ia orice ordin `delivered` care NU e cel activ deținut acum și care
+// stă de mai mult de `staleMs` (abandonat/înlocuit/verificare-terminată) și îl
+// mută în terminalul onest `finalized` = „închis, nu mai e în lucru". NU șterge
+// nimic — doar închide stadiul, ca registrul să spună adevărul.
+export async function finalizeStaleWorkOrders(
+  activeOrderId: string | null,
+  staleMs = 30 * 60_000,
+): Promise<string[]> {
+  if (!dbEnabled()) return []
+  const cutoffSecs = Math.max(60, Math.floor(staleMs / 1000))
+  const r = await getPool()
+    .query<{ id: string }>(
+      `UPDATE work_orders
+         SET status='finalized'
+       WHERE status='delivered'
+         AND ($1::text IS NULL OR id <> $1)
+         AND COALESCE(delivered_at, created_at) < now() - ($2 * interval '1 second')
+       RETURNING id`,
+      [activeOrderId, cutoffSecs],
+    )
+    .catch(() => ({ rows: [] as { id: string }[] }))
+  return r.rows.map((x) => x.id)
+}
+
 // ── Staged releases (persistent approval gate) ──────────────────────────────
 
 export interface StagedReleaseRow {

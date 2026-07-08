@@ -14,6 +14,7 @@ import {
   pullPendingWorkOrders,
   listWorkOrders,
   setWorkOrderStatus,
+  finalizeStaleWorkOrders,
   saveStagedRelease,
   listStagedReleases,
   setReleaseStatus,
@@ -367,7 +368,14 @@ setInterval(() => {
       // execută și ajunge să fie construit/publicat) rămânea "delivered" (în
       // lucru) în registru pentru totdeauna, orice s-ar fi întâmplat cu el.
       // Legăm cerința deținută de ordinul NOU, ca stadiul să urmeze agentul activ.
-      if (newOrderId) r.orderId = newOrderId
+      // ÎNCHIDEM ordinul înlocuit (Adrian, 8 iul): lanțul de reasignări lăsa
+      // ordinul vechi „delivered" (în lucru) pe veci. Acum, când agentul e
+      // înlocuit, ordinul lui precedent trece pe `finalized` (închis, înlocuit) —
+      // stadiul urmează realitatea, nu rămâne blocat.
+      if (newOrderId) {
+        if (r.orderId && r.orderId !== newOrderId) void setWorkOrderStatus(r.orderId, 'finalized')
+        r.orderId = newOrderId
+      }
       updateRequirement(`re-asignat unui agent proaspăt (încercarea ${r.attempts}/${max})`)
       noteBrainActivity(
         `🔁 Supervizor: „${r.summary}" re-asignată — agent proaspăt, escaladat (${r.attempts}/${max})`,
@@ -375,6 +383,9 @@ setInterval(() => {
       return
     }
     // giveup: gata cu re-asignările automate → NU buclează la infinit, decizia lui Adrian.
+    // Ordinul trece pe `failed` (Adrian, 8 iul): onest — după max încercări chiar
+    // NU s-a dus la capăt; nu-l mai lăsăm „în lucru" pe veci în registru.
+    if (ownedReq?.orderId) void setWorkOrderStatus(ownedReq.orderId, 'failed')
     updateRequirement(`BLOCAT după ${max} încercări — decizia lui Adrian`)
     const msg =
       `🛑 „${r.summary}": ${max} agenți la rând n-au dus-o la capăt. Nu mai re-asignez automat. ` +
@@ -387,6 +398,20 @@ setInterval(() => {
     persistOwned()
   })()
 }, 60_000).unref()
+
+// RECONCILIERE PERIODICĂ A REGISTRULUI (Adrian, 8 iul: „procedura e defectă dacă
+// rămân în «preluat» pe veci — reparat, iar când e gata → finalizat"). Plasa de
+// siguranță generică: orice ordin `delivered` care NU e cel activ deținut acum și
+// stă abandonat de peste 30 min (lanț SUPERVIZOR vechi, verificare auto terminată,
+// agent picat fără raport) e trecut pe `finalized` = închis. NU șterge nimic — doar
+// scoate din „în lucru" pe veci, ca registrul să spună adevărul. Rulează la 5 min.
+setInterval(() => {
+  void finalizeStaleWorkOrders(ownedReq?.orderId ?? null, 30 * 60_000)
+    .then((ids) => {
+      if (ids.length) noteBrainActivity(`🧹 Registru: ${ids.length} ordine blocate închise (finalizat) — reconciliere`)
+    })
+    .catch(() => {})
+}, 5 * 60_000).unref()
 let devActivity: string[] = []
 // When two senders beat at once (the rich live work feed from the laptop and a
 // bare generic presence beat), the LAST write used to win and the monitor

@@ -79,6 +79,7 @@ const STAGE: Record<string, string> = {
   ready: '📦 gata, așteaptă „da" pentru publicare',
   published: '🟢 publicat pe live',
   certified: '✅ certificat (tester PASS)',
+  finalized: '✅ finalizat (închis)',
   failed: '🔴 a picat',
 }
 const hm = (v?: string | Date | null): string => {
