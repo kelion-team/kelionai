@@ -704,18 +704,6 @@ export default function Stage({ user }: { user: User }) {
             </span>
           )}
           {user.role === 'admin' && (
-            <span
-              className={`claude-ind ${srvLoad ? 'on' : ''}`}
-              title={
-                srvLoad
-                  ? `Serverul Linux e viu — ${srvLoad}`
-                  : 'SERVERUL LINUX nu raportează — verifică paznicul pe VPS'
-              }
-            >
-              ● Linux
-            </span>
-          )}
-          {user.role === 'admin' && (
             <button
               type="button"
               className={`ghost ${recording ? 'rec-on' : ''} ${recArmed && !recording ? 'rec-armed' : ''}`}
