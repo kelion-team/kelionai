@@ -1186,6 +1186,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
                 noteBrainActivity(`🔴 fără 200 — ${op} → trimis automat la reparat`)
                 bridgeRepair(
                   `LEGEA 200 (auto): operațiunea „${op}" a eșuat: ${verdict}. Găsește cauza reală și repar-o.`,
+                  { autonomous: true },
                 )
               }
             })(),
