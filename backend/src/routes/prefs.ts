@@ -21,7 +21,10 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       speechLang: await getSpeechLang(user.email),
       meserieActiva: await getMeserieActiva(user.email),
-      anthropicKey: await getAnthropicKey(user.email),
+      // NICIODATĂ cheia în clar către browser (audit 9 iul): un secret cu putere
+      // de bani nu se trimite înapoi la client — doar DACĂ e setată. UI-ul
+      // afișează „Modifică/Adaugă" din boolean; câmpul pornește gol, nu preumplut.
+      anthropicKeySet: !!(await getAnthropicKey(user.email)),
     })
   })
 

@@ -5,6 +5,7 @@ import { getSessionUser } from '../session.js'
 import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../services/supervisor.js'
 import { buildBrainReport, fallbackLine, type AgentOutcome } from '../services/feedback.js'
 import { decideDeployFailure, isDuplicateOrder, composeOrdersReport } from '../services/orders.js'
+import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -247,6 +248,7 @@ async function confirmLiveThenAnnounce(summary: string): Promise<void> {
       setProgress(97, 'Verific comportamentul cerinței')
       bridgeRepair(
         `VERIFICARE PE CERINȚĂ (auto, după deploy verificat live): testează pe kelionai.app că cerința „${r.summary}" chiar se comportă conform — dovezi reale (curl, codul livrat, încercare concretă), nu presupuneri. Apoi raportează verdictul cu: curl -s -X POST https://kelionai.app/api/bridge/requirement-verdict -H "x-bridge-secret: $(cat /root/kelion/bridge-secret.txt)" -H "content-type: application/json" -d '{"pass":true,"detail":"dovada scurtă"}' — sau pass:false cu motivul exact. INTERZIS verdict fără dovadă.`,
+        { autonomous: true },
       )
     } else {
       // 100% ADEVĂRAT: bara ajunge la capăt DOAR când producția e verificată
@@ -281,6 +283,7 @@ interface OwnedReq {
   attempts: number // câți agenți proaspeți a re-asignat supervizorul
   task: string // sarcina completă (pt re-asignare cu escaladare)
   orderId?: string // ordinul din work_orders legat de cerință (pt stadiu real)
+  lastFailDetail?: string // ultimul motiv de eșec (pt oprirea pe aceeași eroare)
 }
 let ownedReq: OwnedReq | null = null
 // Cerința deținută supraviețuiește restartului (Postgres) — o cerință deschisă
@@ -307,6 +310,9 @@ export function openRequirement(summary: string, task?: string, orderId?: string
     orderId,
   }
   persistOwned()
+  // Adrian pornește o sarcină nouă → e prezent și conduce: dă autonomiei loc
+  // proaspăt de lucru (reset la plafonul rulant).
+  resetAutonomyBudget()
 }
 export function updateRequirement(status: string): void {
   if (ownedReq) {
@@ -360,6 +366,7 @@ setInterval(() => {
       const newOrderId = bridgeRepair(
         `SUPERVIZOR — încercarea ${r.attempts}/${max}: agentul anterior N-A dus la capăt „${r.summary}". ` +
           `${escalationText(r.attempts, max)}\n\nSARCINA: ${r.task || r.summary}`,
+        { autonomous: true },
       )
       // BUG REAL (Adrian, 6 iul: „stadiu real, nu în lucru pe veci"): fiecare
       // reasignare crea un ORDIN NOU în registru dar `ownedReq.orderId` rămânea
@@ -698,11 +705,64 @@ export interface WorkOrder {
 // unicat"): același ordin nu se mai construiește de două ori. Ținem textele
 // recente în memorie și sărim duplicatele înainte să ajungă la constructor.
 const recentOrderTexts: string[] = []
-export function bridgeRepair(description: string): string | null {
+
+// ── AUTONOMIE ÎN LESĂ (Adrian, 9 iul: „să nu mă aducă în sapă de lemn") ───────
+// Întrerupătorul PRINCIPAL peste TOATE reparațiile autonome: un plafon rulant pe
+// 24h. Sub plafon, autonomia lucrează liber; la plafon ÎNGHEAȚĂ și Kelion cere
+// OK (chatul lui Adrian nu se blochează niciodată). Contorul se persistă
+// (supraviețuiește restartului) și se resetează când Adrian pornește EL o sarcină
+// nouă — semn că e prezent și conduce, deci nu-l mai ținem în frâu.
+const autonomyCfg = { windowMs: DEFAULT_AUTONOMY.windowMs, maxRuns: config.autonomyDailyMax }
+let autonomyRuns: number[] = []
+let autonomyFrozenAt = 0
+function persistAutonomy(): void {
+  void saveKv('autonomy_runs', JSON.stringify(autonomyRuns)).catch(() => {})
+}
+void loadKv('autonomy_runs')
+  .then((v) => {
+    if (!v) return
+    const a = JSON.parse(v) as unknown[]
+    if (Array.isArray(a)) autonomyRuns = a.filter((n): n is number => typeof n === 'number')
+  })
+  .catch(() => {})
+// Adrian pornește o sarcină nouă (calea lui [EXECUT]) → e prezent și conduce:
+// resetează plafonul autonom, ca autonomia să aibă din nou loc de lucru.
+export function resetAutonomyBudget(): void {
+  if (autonomyRuns.length === 0 && autonomyFrozenAt === 0) return
+  autonomyRuns = []
+  autonomyFrozenAt = 0
+  persistAutonomy()
+}
+
+export function bridgeRepair(description: string, opts: { autonomous?: boolean } = {}): string | null {
   const text = description.slice(0, 4000)
   if (isDuplicateOrder(text, recentOrderTexts)) {
     noteBrainActivity('↩️ Ordin duplicat — deja în lucru/făcut, nu-l repet')
     return null
+  }
+  // ÎNTRERUPĂTORUL AUTONOM: doar acțiunile autonome (supervizor / verificare) trec
+  // pe la plafon; cererile lui Adrian (chat, panou, request_repair) nu sunt
+  // îngrădite NICIODATĂ — el decide, el cheltuie cât vrea.
+  if (opts.autonomous) {
+    const chk = budgetCheck(autonomyRuns, Date.now(), autonomyCfg)
+    autonomyRuns = chk.recent
+    if (!chk.allowed) {
+      persistAutonomy()
+      // Anunță o dată pe oră cât e înghețat, ca să nu spameze chatul.
+      if (Date.now() - autonomyFrozenAt > 3600_000) {
+        autonomyFrozenAt = Date.now()
+        const msg =
+          `🧯 Am atins plafonul autonom (${chk.count}/${autonomyCfg.maxRuns} reparații automate în 24h). ` +
+          `Îngheț reparațiile automate ca să nu consum aiurea. Zi „continuă" sau pornește o sarcină nouă și reiau.`
+        sayQueue.push(msg)
+        persistSay()
+        void saveMessage(config.adminEmail, 'assistant', msg)
+        noteBrainActivity('🧯 Plafon autonom atins — autonomie înghețată, aștept OK')
+      }
+      return null
+    }
+    autonomyRuns = [...chk.recent, Date.now()]
+    persistAutonomy()
   }
   recentOrderTexts.push(text)
   if (recentOrderTexts.length > 30) recentOrderTexts.shift()
@@ -1045,8 +1105,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // deja (DEFAULT_SUPERVISE.maxAttempts). Unificăm contorul: FAIL crește
         // ACELAȘI `ownedReq.attempts`, iar peste prag nu mai reasignăm automat.
         const max = DEFAULT_SUPERVISE.maxAttempts
+        // OPRIRE PE LIPSĂ DE PROGRES (Adrian, 9 iul): aceeași eroare de două ori
+        // la rând = împotmolit, nu progres. NU mai cheltui pe același fix —
+        // oprește-te ÎNAINTE de plafon și cere alt unghi. (Prinde bucla care
+        // pică identic mai devreme decât contorul de 3 încercări.)
+        if (ownedReq && sameFailure(ownedReq.lastFailDetail ?? '', detail)) {
+          updateRequirement('BLOCAT — aceeași eroare de două ori, nu mai reîncerc')
+          const msg =
+            `🛑 „${r.summary}": a picat de două ori cu ACEEAȘI eroare (${detail || 'fără detaliu'}). ` +
+            `Nu mai cheltui pe același fix — pare o problemă care cere alt unghi sau decizia ta. Ce facem?`
+          sayQueue.push(msg)
+          persistSay()
+          void saveMessage(config.adminEmail, 'assistant', msg)
+          noteBrainActivity(`🛑 „${r.summary}" — aceeași eroare de două ori, opresc reparația automată`)
+          ownedReq.nudged = Date.now() + 24 * 3600_000
+          persistOwned()
+          void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
+          return { ok: true }
+        }
         if (ownedReq) {
           ownedReq.attempts = (ownedReq.attempts ?? 0) + 1
+          ownedReq.lastFailDetail = detail
           persistOwned()
         }
         const attempts = ownedReq?.attempts ?? 0
@@ -1067,6 +1146,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
           const newOrderId = bridgeRepair(
             `LEGEA 200 (auto): cerința „${r.summary}" a picat verificarea pe live: ${detail || 'fără detaliu'}. Găsește cauza, repar-o și re-publică prin fluxul normal.`,
+            { autonomous: true },
           )
           // ACELAȘI BUG (Adrian, 6 iul): FAIL-ul trimite reparația la un ordin NOU,
           // dar `ownedReq.orderId` rămânea legat de ordinul VECHI (cel picat) — un
@@ -1110,6 +1190,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         if (decision.action === 'rebuild') {
           const newOrderId = bridgeRepair(
             `RECONSTRUIRE (deploy picat pe conflict): „${failedSummary}" s-a ciocnit cu masterul curent (ramură veche/duplicat). Reconstruiește de la zero pe origin/master proaspăt și re-publică prin flux; dacă e deja făcut, las-o.`,
+            { autonomous: true },
           )
           // ACELAȘI BUG (Adrian, 6 iul): reconstrucția pleacă pe un ordin NOU, dar
           // cerința deținută rămânea legată de ordinul vechi (cel picat pe

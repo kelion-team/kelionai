@@ -31,6 +31,11 @@ export const config = {
   // error) it fails over to this one automatically, so the brain never dies from
   // one account running dry. Optional — when unset there is simply no fallback.
   anthropicKeyReserve: (process.env.ANTHROPIC_API_KEY_RESERVE ?? '').trim(),
+  // Autonomie în lesă (Adrian, 9 iul): plafonul de acțiuni autonome (reparații
+  // auto declanșate de supervizor / verificare live) pe o fereastră rulantă de
+  // 24h. Peste el, autonomia ÎNGHEAȚĂ și Kelion cere OK — ca să nu macine la
+  // infinit pe cota lui Adrian. Reglabil din env; implicit 20.
+  autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   // Optional so the app boots without a DB (chat just isn't persisted then).
   databaseUrl: process.env.DATABASE_URL ?? '',
   // Google Cloud Text-to-Speech (Chirp 3 HD). Two auth paths (prefer the
