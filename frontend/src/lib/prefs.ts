@@ -15,14 +15,35 @@ export function loadLocalLang(): string | null {
   }
 }
 
-export async function loadServerLang(): Promise<string | null> {
+export async function loadServerPrefs(): Promise<{
+  speechLang: string | null
+  meserieActiva: number | null
+  anthropicKey: string | null
+} | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
     if (!res.ok) return null
-    const j = (await res.json()) as { speechLang?: string | null }
-    return j.speechLang ?? null
+    return (await res.json()) as {
+      speechLang: string | null
+      meserieActiva: number | null
+      anthropicKey: string | null
+    }
   } catch {
     return null
+  }
+}
+
+export async function saveAnthropicKey(key: string | null): Promise<boolean> {
+  try {
+    const res = await fetch('/api/prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ anthropicKey: key }),
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
 

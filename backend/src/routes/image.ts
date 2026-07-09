@@ -5,11 +5,11 @@ import { getImage } from '../services/image.js'
 // chat bubble) can render it by URL.
 export async function imageRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>('/api/image/:id', async (req, reply) => {
-    const img = getImage(req.params.id)
+    const img = await getImage(req.params.id)
     if (!img) return reply.code(404).send({ error: 'not_found' })
     return reply
       .header('Content-Type', img.mime)
-      .header('Cache-Control', 'public, max-age=3600')
+      .header('Cache-Control', 'public, max-age=31536000, immutable')
       .send(img.buf)
   })
 }

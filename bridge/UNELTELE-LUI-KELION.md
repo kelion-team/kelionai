@@ -22,7 +22,7 @@ de citire**, pe care le rulează EL, când vrea EL:
 | Unealta | Ce vede cu ea |
 |---|---|
 | `Bash` (git) | starea reală a repo-ului: `git status`, `git log`, ramuri, conflicte, index blocat |
-| `Bash` (curl + secretul punții) | coada de deploy (`/api/bridge/deploy-pending`), ordinele cu stadiile lor, erorile reale |
+| `Bash` (curl + secretul punții) | coada de deploy (`/api/bridge/deploy-pending`), ordinele cu stadiile lor, erorile reale, regenerează codurile QR (`/api/bridge/upload-app`) |
 | `Read` / `Grep` / `Glob` | orice fișier din `/root/kelion` și din clona repo: cod, jurnale, configurări |
 | Jurnalele systemd | de ce a picat un serviciu: `journalctl -u kelion-deployer`, `-u kelion-builder` |
 
@@ -36,6 +36,7 @@ citește ieșirea brută, exact ca un operator uman.
 | Deploy picat pe CONFLICT de merge | NU buclează pe „ok". Inspectează cu git, apoi DECIDE: reconstruiește pe master proaspăt SAU aruncă ramura dacă e duplicat |
 | Index git înțepenit (`resolve your current index first`) | `git merge --abort` / `git reset --merge` — deblochează singur |
 | Ordin duplicat (același lucru de 2 ori) | îl aruncă și spune cinstit „era deja făcut" |
+| Regenerare coduri QR (la cerere sau automat la deploy) | folosește unealta internă de regenerare QR pentru toate platformele |
 | Serviciu picat (builder/deployer) | citește jurnalul, raportează cauza REALĂ, propune/execută repornirea |
 | Orice reparație de cod | `[EXECUT]` la constructor (există deja) — rămâne |
 

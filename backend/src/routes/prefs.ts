@@ -1,6 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, setMeserieActivaPref } from '../db.js'
+import {
+  getSpeechLang,
+  setSpeechLangPref,
+  getMeserieActiva,
+  setMeserieActivaPref,
+  getAnthropicKey,
+  setAnthropicKey,
+} from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 
 // Per-user preferences: the speech language (what Kelion hears + speaks) and
@@ -14,12 +21,15 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       speechLang: await getSpeechLang(user.email),
       meserieActiva: await getMeserieActiva(user.email),
+      anthropicKey: await getAnthropicKey(user.email),
     })
   })
 
-  app.put<{ Body: { speechLang?: string; meserieActiva?: number | null } }>('/api/prefs', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+  app.put<{ Body: { speechLang?: string; meserieActiva?: number | null; anthropicKey?: string | null } }>(
+    '/api/prefs',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
     if (req.body?.speechLang !== undefined) {
       const lang = req.body.speechLang?.trim()
@@ -35,6 +45,14 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'bad_request' })
       }
       await setMeserieActivaPref(user.email, id)
+    }
+
+    if (req.body?.anthropicKey !== undefined) {
+      const key = req.body.anthropicKey
+      if (key !== null && typeof key !== 'string') {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      await setAnthropicKey(user.email, key)
     }
 
     return reply.send({ ok: true })

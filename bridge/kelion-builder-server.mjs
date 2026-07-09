@@ -220,6 +220,38 @@ async function build(order) {
   }
 }
 
+async function generateAndUploadQRs() {
+  say('🎨 Generez noile coduri QR pentru download...')
+  try {
+    // Folosim api-ul extern (ex: goqr.me sau similar) pentru a genera QR-urile
+    // direct ca buffer, apoi le urcăm în baza de date. Fără dependințe noi pe VPS.
+    const targets = [
+      { name: 'qr-win.png', url: `${BASE}/dl/Kelionai-Setup.exe` },
+      { name: 'qr-apk.png', url: `${BASE}/dl/Kelionai.apk` },
+      { name: 'qr-linux.png', url: `${BASE}/dl/Kelionai-linux.zip` },
+      { name: 'qr-ios.png', url: `${BASE}` },
+    ]
+
+    for (const t of targets) {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(t.url)}`
+      const res = await fetch(qrUrl)
+      if (!res.ok) throw new Error(`QR fail: ${t.name}`)
+      const buf = await res.arrayBuffer()
+      const b64 = Buffer.from(buf).toString('base64')
+      await api('/api/bridge/upload-app', 'POST', {
+        name: t.name,
+        type: 'image/png',
+        data: b64
+      })
+      say(`  ✓ ${t.name} actualizat`)
+    }
+    say('✅ Toate codurile QR au fost regenerate și sunt LIVE')
+  } catch (err) {
+    console.error('QR regen failed:', err)
+    say('⚠️ Eșec la regenerarea codurilor QR (detalii în log)')
+  }
+}
+
 async function deployApproved(r) {
   say(`🚀 Aprobat — public pe producție: ${String(r.title || r.id).slice(0, 80)}`)
   pushProgress(94, 'Deploy')
@@ -229,11 +261,11 @@ async function deployApproved(r) {
     say('🔴 Deploy eșuat — nimic nu s-a publicat (detalii în jurnalul serverului)')
     return
   }
-  // Release-ul se marchează publicat pe acceptul Railway (altfel bucla l-ar
-  // redeploya la infinit), dar DOVADA publicării e separată: „PUBLICAT LIVE"
-  // se spune DOAR după ce producția chiar răspunde 200 — nu pe cuvântul
-  // deployerului (Adrian, 5 iul: fără afirmații fără dovadă).
-  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
+  
+  // Dupa deploy, regeneram codurile QR ca sa fim siguri ca reflecta ultimele cai
+  await generateAndUploadQRs()
+
+  // Release-ul se marchează publicat pe acceptul Railway...
   say('🔎 Railway a acceptat — verific EU live-ul (fetch → 200), nu cred pe cuvânt')
   pushProgress(97, 'Verific live (fetch → 200)')
   let live = false

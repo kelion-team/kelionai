@@ -722,6 +722,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const userLang = speechPref || user.locale || 'unknown'
     const ro = userLang.toLowerCase().startsWith('ro')
 
+    const userAnthropicKey = await getAnthropicKey(user.email)
+
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop
     // in the user's language + a paywall frame so the UI shows the top-up link.
@@ -729,6 +731,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       config.stripe.secretKey &&
       user.role !== 'admin' &&
       user.role !== 'demo' &&
+      !userAnthropicKey &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -1617,7 +1620,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // (or is refused) before any text streams, the SAME round is re-served by
     // Opus 4.8. KEY: if the account itself is unusable, switch to the reserve
     // key. One model or account having problems never breaks the answer.
-    let active: Anthropic = anthropic
+    let active: Anthropic = userAnthropicKey ? new Anthropic({ apiKey: userAnthropicKey }) : anthropic
     let model = brainModel()
     // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
     // back until we confirm it's in that language; on a confident mismatch we
@@ -1699,12 +1702,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             try {
               final = await runRound(active, model)
             } catch (e2) {
-              if (anthropicReserve && active === anthropic && shouldFailover(e2)) {
+              if (active !== anthropicReserve && shouldFailover(e2)) {
                 active = anthropicReserve
                 final = await runRound(active, model)
               } else throw e2
             }
-          } else if (anthropicReserve && active === anthropic && roundText === '' && shouldFailover(e)) {
+          } else if (active !== anthropicReserve && roundText === '' && shouldFailover(e)) {
             // Nothing streamed yet → safe to retry this round on the reserve key.
             active = anthropicReserve
             final = await runRound(active, model)
@@ -1799,6 +1802,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         config.stripe.secretKey &&
         user.role !== 'admin' &&
         user.role !== 'demo' &&
+        !userAnthropicKey &&
         usageUsd > 0
       ) {
         const charge = usageUsd * config.stripe.usdToCurrency

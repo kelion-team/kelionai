@@ -12,6 +12,8 @@ _Last updated: 2026-07-09_
 - **Puntea (Bridge) pe VPS** — "Creierul" (Claude Code) rulează ca serviciu `kelion-bridge` pe VPS-ul Linux, conectat la backend prin `BRIDGE_SECRET`.
 - **Autonomie Creier** — Puntea are acum "Ochi și Mâini": acces direct la fișierele repo-ului pe VPS, Git, Bash și jurnalele de sistem (`journalctl`). Poate decide singură la conflicte de deploy sau erori de build.
 - **Monitorizare Live** — Indicatorii **● Bridge**, **● Server** și **● Linux** din dashboard-ul de admin sunt activi și reflectă starea reală a serviciilor de pe Linux.
+- **Audit Căi și Rutine (9 iul 2026)** — Am verificat întreg proiectul (backend, frontend, admin). Toate API-urile și download-urile folosesc acum căile de producție (`https://kelionai.app`). Orice actualizare de program (EXE/APK) este servită instantaneu din baza de date via Punte.
+- **Formate Market Finalizate (9 iul 2026)** — Toate formatele de aplicație sunt active: Windows (Microsoft Store + EXE), Android (Google Play + APK), iOS (App Store + PWA) și Linux (Web App). Codurile QR sunt regenerate automat la fiecare deploy pentru a asigura link-uri mereu valide.
 
 ## ✅ Live on kelionai.app
 

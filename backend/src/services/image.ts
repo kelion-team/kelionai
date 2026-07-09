@@ -1,31 +1,45 @@
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
+import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
 
-// In-memory store of generated images. The web service is single-instance, so a
-// Map is enough; entries are ephemeral (cleared on redeploy), which is fine for
-// on-screen display. Bounded so memory can't grow without limit.
+// Generated images are now persistent (stored in DB). The ephemeral Map
+// is kept only as a 1st-level cache for performance on high-load,
+// but survival through redeployments is guaranteed by Postgres.
 interface StoredImage {
   mime: string
   buf: Buffer
   ts: number
 }
 
-const store = new Map<string, StoredImage>()
-const MAX_IMAGES = 60
+const cache = new Map<string, StoredImage>()
+const MAX_CACHE = 60
 
-function put(mime: string, buf: Buffer): string {
+async function put(mime: string, buf: Buffer): Promise<string> {
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-  store.set(id, { mime, buf, ts: Date.now() })
-  while (store.size > MAX_IMAGES) {
-    const oldest = store.keys().next().value
+  // 1. Save to DB (Permanent)
+  await saveGeneratedImage(id, mime, buf)
+  // 2. Cache locally
+  cache.set(id, { mime, buf, ts: Date.now() })
+  while (cache.size > MAX_CACHE) {
+    const oldest = cache.keys().next().value
     if (oldest === undefined) break
-    store.delete(oldest)
+    cache.delete(oldest)
   }
   return id
 }
 
-export function getImage(id: string): StoredImage | null {
-  return store.get(id) ?? null
+export async function getImage(id: string): Promise<StoredImage | null> {
+  // Check cache
+  const hit = cache.get(id)
+  if (hit) return hit
+  // Check DB
+  const row = await loadGeneratedImage(id)
+  if (row) {
+    const img = { mime: row.mime, buf: row.data, ts: Date.now() }
+    cache.set(id, img) // Populate cache
+    return img
+  }
+  return null
 }
 
 // Gemini's native image model. Returns inline image bytes via generateContent.
@@ -97,7 +111,7 @@ export async function generateImage(prompt: string): Promise<ImageResult> {
     const data = part.inlineData?.data
     if (data) {
       const mime = part.inlineData?.mimeType ?? 'image/png'
-      return { id: put(mime, Buffer.from(data, 'base64')), mime }
+      return { id: await put(mime, Buffer.from(data, 'base64')), mime }
     }
   }
   return { error: 'no_image' }
