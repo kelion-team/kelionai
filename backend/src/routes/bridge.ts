@@ -1404,6 +1404,21 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { ok: !!entry }
   })
 
+  // GARDĂ LA POARTĂ (dovedit 9 iul, 21:52–22:17): scuza „mi s-a rupt legătura
+  // cu creierul… mai trimite-l o dată" NU e produsă de niciun cod din repo —
+  // o trimite un worker VECHI de pe VPS care renunță în ~6s (niciun apel real
+  // la model nu se termină atât de repede). Garda din chat.ts o prindea doar
+  // pe calea nebufferizată; aici se taie LA INTRARE, pe ambele căi (reply și
+  // reply-chunk), orice ar mai rula pe VPS. Semnătura cere AMBELE bucăți ale
+  // frazei + text scurt, ca un răspuns legitim care conține „trimite" să nu
+  // fie atins niciodată.
+  const isWorkerExcuse = (text: string): boolean => {
+    const t = text.trim()
+    if (!t || t.length > 220) return false
+    const norm = t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    return /rupt.{0,15}legatura/.test(norm) && /trimite/.test(norm)
+  }
+
   // Worker → server: a text CHUNK while the model is still writing (streaming).
   // Forwarded live into the admin's open reply — first words in ~2 seconds.
   app.post('/api/bridge/reply-chunk', async (req, reply) => {
@@ -1419,7 +1434,9 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       // for a dead bridge (which re-queued the job and threw the answer away).
       sink('')
     } else if (sink && typeof body.text === 'string' && body.text) {
-      sink(body.text)
+      // Scuza falsă devine puls gol: ceasul de stall rămâne armat, iar chatul
+      // re-cozează cinstit în loc să-i ceară lui Adrian „mai trimite-l o dată".
+      sink(isWorkerExcuse(body.text) ? '' : body.text)
     }
     return { accepted: !!sink }
   })
@@ -1434,7 +1451,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const resolve = body.id ? waiters.get(body.id) : undefined
     if (!resolve || !body.id) return { accepted: false }
     waiters.delete(body.id)
-    resolve(typeof body.text === 'string' ? body.text : '')
+    const text = typeof body.text === 'string' ? body.text : ''
+    // Răspuns = scuza falsă → tratat ca „fără răspuns": chatul re-cozează și
+    // răspunde EL, nu-i mai arată lui Adrian minciuna „mi s-a rupt legătura".
+    resolve(isWorkerExcuse(text) ? '' : text)
     return { accepted: true }
   })
 }
