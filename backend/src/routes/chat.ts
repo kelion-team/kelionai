@@ -1516,7 +1516,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // a newline) lands here with everything still buffered.
         if (!headDone) {
           const whole = (answer && answer.trim()) || head
-          if (whole.trim()) deliver(whole)
+          if (whole.trim()) {
+            // GARDĂ (Adrian, 9 iul): un worker care a renunțat trimite fals „mi s-a
+            // rupt legătura cu creierul… mai trimite-l o dată". NU i-l mai arătăm —
+            // îl tratăm ca stall: `answer` devine gol, deci calea de mai jos
+            // re-cozează cererea și răspunde EL, fără să-i ceară retrimiterea.
+            const norm = whole.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            if (/rupt.{0,15}legatura|mai trimite|trimite-l.{0,20}o data/.test(norm)) {
+              answer = null
+              head = ''
+            } else {
+              deliver(whole)
+            }
+          }
         }
         // Drain side-effect tags FIRST — [COST]/[NOTES]/[DELNOTE]/[YT] emit their
         // real (spoken) result here, so capture `a` AFTER they've run or the

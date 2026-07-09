@@ -97,11 +97,14 @@ function runClaude(prompt, { timeoutMs, model } = {}) {
 async function askClaude(prompt) {
   const model = brainModel()
   const full = loadContext() + '\n\n' + PREAMBLE + prompt
-  let answer = await runClaude(full, { timeoutMs: 80_000, model })
+  // Timeout generos (120s): întrebările grele (raționament avansat) durează
+  // legitim 60–90s. Pulsul de viață (mai jos, la 10s) ține serverul în așteptare
+  // cât timp Claude chiar lucrează, deci nu mai apare fals „mi s-a rupt legătura".
+  let answer = await runClaude(full, { timeoutMs: 120_000, model })
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
     log('Fable a esuat — trec pe Opus, revin la Fable in 10 min.')
-    answer = await runClaude(full, { timeoutMs: 80_000, model: RESERVE })
+    answer = await runClaude(full, { timeoutMs: 120_000, model: RESERVE })
   }
   return answer
 }
