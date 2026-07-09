@@ -26,6 +26,23 @@ RUN cd backend && npx playwright install --with-deps chromium
 COPY backend ./backend
 RUN cd backend && npm run build
 
+# --- production image ---
+FROM node:22-bookworm-slim
+WORKDIR /app
+
+# Re-install system deps in the final stage (since it's a new stage)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip curl \
+    && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=0 /app/frontend/dist ./frontend/dist
+COPY --from=0 /app/backend/dist ./backend/dist
+COPY --from=0 /app/backend/node_modules ./backend/node_modules
+COPY --from=0 /app/backend/package.json ./backend/package.json
+# Also need playwright browsers in the final image if we want to use them
+COPY --from=0 /root/.cache/ms-playwright /root/.cache/ms-playwright
+
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
 EXPOSE 8080

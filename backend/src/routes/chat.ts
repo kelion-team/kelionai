@@ -32,6 +32,7 @@ import {
   deleteNote,
   getRecentHistory,
   getSharedMemory,
+  getAnthropicKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -1702,15 +1703,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             try {
               final = await runRound(active, model)
             } catch (e2) {
-              if (active !== anthropicReserve && shouldFailover(e2)) {
+              if (anthropicReserve && active !== anthropicReserve && shouldFailover(e2)) {
                 active = anthropicReserve
-                final = await runRound(active, model)
+                final = await runRound(active as Anthropic, model)
               } else throw e2
             }
-          } else if (active !== anthropicReserve && roundText === '' && shouldFailover(e)) {
+          } else if (anthropicReserve && active !== anthropicReserve && roundText === '' && shouldFailover(e)) {
             // Nothing streamed yet → safe to retry this round on the reserve key.
             active = anthropicReserve
-            final = await runRound(active, model)
+            final = await runRound(active as Anthropic, model)
           } else throw e
         }
         // A Fable safety refusal (HTTP 200, stop_reason "refusal", no content):
