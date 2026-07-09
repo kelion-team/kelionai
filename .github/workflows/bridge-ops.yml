@@ -64,8 +64,10 @@ jobs:
               curl -sS --max-time 20 -H "$H" "$B/api/bridge/orders-report" | jq -r '.report' ;;
             chat-tail)
               # Doar coada conversației, tunsă — destul pentru diagnostic.
+              # Cu ORA fiecărui mesaj: fără ea nu se poate spune dacă o eroare
+              # din istoric e dinainte sau de după un deploy.
               curl -sS --max-time 20 -H "$H" "$B/api/bridge/chat-history" \
-                | jq -r '.history[-14:][] | "\(.role): \(.content[0:220])"' ;;
+                | jq -r '.history[-14:][] | "\(.created_at) \(.role): \(.content[0:220])"' ;;
             workorder)
               [ -n "$TEXT" ] || { echo "::error::text gol"; exit 1; }
               curl -sS --max-time 20 -X POST -H "$H" -H "content-type: application/json" \
