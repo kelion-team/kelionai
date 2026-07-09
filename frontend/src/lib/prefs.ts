@@ -18,15 +18,16 @@ export function loadLocalLang(): string | null {
 export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
-  anthropicKey: string | null
+  anthropicKeySet: boolean
 } | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
     if (!res.ok) return null
+    // Serverul NU mai trimite cheia în clar — doar dacă e setată (anthropicKeySet).
     return (await res.json()) as {
       speechLang: string | null
       meserieActiva: number | null
-      anthropicKey: string | null
+      anthropicKeySet: boolean
     }
   } catch {
     return null

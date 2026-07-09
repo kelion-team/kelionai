@@ -101,7 +101,10 @@ export default function ChatPanel({
   // mai jos e singurul loc din care se poate înrola/reseta profilul.
   const [voiceCalState, setVoiceCalState] = useState<'idle' | 'listening' | 'ok' | 'fail'>('idle')
   const [hasVoicePrint, setHasVoicePrint] = useState(() => hasVoiceprint())
-  const [anthropicKey, setAnthropicKey] = useState<string | null>(null)
+  // Doar DACĂ e setată o cheie (serverul nu mai trimite valoarea în clar); textul
+  // introdus stă separat și pornește gol — nu preumplem niciodată un secret.
+  const [hasKey, setHasKey] = useState(false)
+  const [keyInput, setKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
@@ -821,7 +824,7 @@ export default function ChatPanel({
     void loadServerPrefs().then((serverPrefs) => {
       if (!serverPrefs) return
       apply(serverPrefs.speechLang)
-      setAnthropicKey(serverPrefs.anthropicKey)
+      setHasKey(serverPrefs.anthropicKeySet)
       // Server is the cross-device source of truth: if the local mirror is stale
       // (e.g. left over from an earlier mis-detection), correct it.
       if (serverPrefs.speechLang && serverPrefs.speechLang !== local) mirrorLang(serverPrefs.speechLang)
@@ -1115,7 +1118,7 @@ export default function ChatPanel({
                     }}
                   >
                     <span className="ico">🔑</span>
-                    {anthropicKey ? 'Modifică cheia Anthropic' : 'Adaugă cheie Anthropic'}
+                    {hasKey ? 'Modifică cheia Anthropic' : 'Adaugă cheie Anthropic'}
                   </button>
                 )}
               </div>
@@ -1185,9 +1188,9 @@ export default function ChatPanel({
                 type="password"
                 className="composer-input"
                 style={{ background: 'rgba(255,255,255,0.1)', marginBottom: '1rem' }}
-                placeholder="sk-ant-api03-..."
-                value={anthropicKey || ''}
-                onChange={(e) => setAnthropicKey(e.target.value)}
+                placeholder={hasKey ? 'Cheie setată — scrie una nouă sau lasă gol ca s-o ștergi' : 'sk-ant-api03-...'}
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
               />
               <div className="scenario-btns">
                 <button
@@ -1199,7 +1202,10 @@ export default function ChatPanel({
                 <button
                   className="scenario-btn ok"
                   onClick={async () => {
-                    await saveAnthropicKey(anthropicKey)
+                    const val = keyInput.trim()
+                    await saveAnthropicKey(val || null)
+                    setHasKey(!!val)
+                    setKeyInput('')
                     setShowKeyInput(false)
                   }}
                 >
