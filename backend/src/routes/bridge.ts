@@ -798,9 +798,27 @@ async function reportToAdmin(o: AgentOutcome): Promise<void> {
   }
 }
 
+// Diagnoza eșecurilor de autentificare, throttled (max 1/min): istoricul punții
+// a arătat că o nepotrivire de secret tăcută lasă componentele de pe VPS
+// (paznic, deployer, constructor) fără acces și pe nimeni fără indiciu — de-aia
+// s-a ajuns la dezactivarea de urgență. Se loghează DOAR lungimile, niciodată
+// conținutul secretului.
+let lastAuthFailLog = 0
+
 function authed(req: FastifyRequest): boolean {
-  // TEST DE URGENȚĂ: Acceptăm orice cerere pentru a vedea dacă restul sistemului funcționează
-  return true;
+  // Header-ul se normalizează (trim) fiindcă scripturile de pe VPS citesc
+  // secretul din fișier și pot aduce spații/CRLF — exact nepotrivirea care a
+  // dus la „testul de urgență" ce lăsase toate endpoint-urile fără apărare.
+  const got = String(req.headers['x-bridge-secret'] ?? '').trim()
+  const want = config.bridgeSecret
+  // Comparație în timp constant: `===` iese la primul octet diferit → scurgere
+  // de timing pe secretul cu putere totală (upload installer, cozi, deploy).
+  const ok = want !== '' && got.length === want.length && timingSafeEqual(Buffer.from(got), Buffer.from(want))
+  if (!ok && got !== '' && Date.now() - lastAuthFailLog > 60_000) {
+    lastAuthFailLog = Date.now()
+    console.log(`[bridge] auth fail: header ${got.length} chars vs secret ${want.length}`)
+  }
+  return ok
 }
 
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
