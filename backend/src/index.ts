@@ -30,6 +30,7 @@ import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { initDb, recordDownload, initAppFiles, getAppFile } from './db.js'
 import { getSessionUser } from './session.js'
+import { buildLinuxZip } from './services/linuxPackage.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -37,7 +38,12 @@ const DL_TYPES: Record<string, string> = {
   apk: 'application/vnd.android.package-archive',
   png: 'image/png',
   json: 'application/json',
+  zip: 'application/zip',
 }
+
+// Pachetul Linux nu e un binar depozitat, ci un lansator generat pe loc — mereu
+// versiunea live, deci /dl/Kelionai-linux.zip nu poate 404 (Adrian, 9 iul).
+const LINUX_ZIP = 'Kelionai-linux.zip'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -217,6 +223,14 @@ app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
   if (onDisk.startsWith(path.resolve(distPath, 'downloads')) && fs.existsSync(onDisk)) {
     reply.header('Content-Type', type)
     return reply.send(fs.createReadStream(onDisk))
+  }
+  // Linux: dacă nu s-a urcat un binar real în DB/pe disc, servește lansatorul
+  // generat pe loc — mereu 200, mereu versiunea live (un binar urcat ulterior în
+  // DB are prioritate, fiindcă e verificat mai sus).
+  if (file === LINUX_ZIP) {
+    reply.header('Content-Type', 'application/zip')
+    reply.header('Content-Disposition', `attachment; filename="${LINUX_ZIP}"`)
+    return reply.send(buildLinuxZip(distPath))
   }
   return reply.code(404).send({ error: 'not_found' })
 })
