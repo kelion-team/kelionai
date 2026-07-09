@@ -1629,6 +1629,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Opus 4.8. KEY: if the account itself is unusable, switch to the reserve
     // key. One model or account having problems never breaks the answer.
     let active: Anthropic = userAnthropicKey ? new Anthropic({ apiKey: userAnthropicKey }) : anthropic
+    // GAURA DE BANI (Adrian, audit 9 iul): un client care-și pune CHEIA LUI sărea
+    // paywall-ul, iar dacă cheia era invalidă/fără credit, failover-ul de mai jos
+    // muta conversația pe cheia NOASTRĂ de rezervă — vorbea gratis pe contul
+    // nostru. Regula: o cerere pe cheia clientului NU atinge NICIODATĂ cheile
+    // platformei. Pică pe cheia lui → primește o eroare clară, nu o cursă gratis.
+    const usingUserKey = !!userAnthropicKey
     let model = brainModel()
     // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
     // back until we confirm it's in that language; on a confident mismatch we
@@ -1703,6 +1709,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         try {
           final = await runRound(active, model)
         } catch (e) {
+          // Cheia clientului: NICIUN failover pe platformă, NICIO odihnă de Fable
+          // provocată de cheia lui. Pică → aruncă (jos, catch-ul exterior îi dă
+          // un mesaj clar despre cheie). Așa se închide cursa gratis pe contul nostru.
+          if (usingUserKey) throw e
           if (roundText === '' && model === MODEL) {
             // Fable itself has a problem — rest it and re-serve on Opus 4.8.
             restFable()
@@ -1823,9 +1833,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // credit. Tell the user calmly in THEIR language instead of a raw
         // "[connection error]"; the frontend shows AND speaks whatever we stream.
         const ro = userLang.toLowerCase().startsWith('ro')
-        const note = ro
-          ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
-          : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
+        // Cheia proprie a picat (invalidă/expirată/fără credit): spune-i EXACT
+        // asta, ca să știe că e cheia lui, nu serviciul — și că nu trecem tacit
+        // pe cheia noastră (gaura de bani închisă mai sus).
+        const note = usingUserKey
+          ? ro
+            ? 'Cheia ta Anthropic nu a funcționat (invalidă, expirată sau fără credit). Verific-o în meniul ⊕ → cheie Anthropic.'
+            : 'Your Anthropic key did not work (invalid, expired, or out of credit). Check it in the ⊕ menu → Anthropic key.'
+          : ro
+            ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
+            : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
         reply.raw.write(assistantText.trim() ? `\n\n${note}` : note)
         reply.raw.end()
       }
