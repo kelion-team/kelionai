@@ -25,12 +25,10 @@ export const config = {
   // route returns a clear error if it's missing.
   // Trimmed: a stray space or newline pasted into the env var would otherwise be
   // sent verbatim and rejected by Anthropic as a 401 (invalid key).
+  // SINGURA cheie a creierului — contul plătit de Adrian. Regula absolută
+  // (9 iul): fără cheie de rezervă, fără al doilea cont de facturare. Dacă
+  // această cheie pică, eroarea se arată cinstit — nu se comută pe nimic.
   anthropicKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
-  // Reserve Anthropic key (a second billing account). The brain calls the
-  // primary key; if that account is unusable (out of credit, auth/billing/rate
-  // error) it fails over to this one automatically, so the brain never dies from
-  // one account running dry. Optional — when unset there is simply no fallback.
-  anthropicKeyReserve: (process.env.ANTHROPIC_API_KEY_RESERVE ?? '').trim(),
   // Autonomie în lesă (Adrian, 9 iul): plafonul de acțiuni autonome (reparații
   // auto declanșate de supervizor / verificare live) pe o fereastră rulantă de
   // 24h. Peste el, autonomia ÎNGHEAȚĂ și Kelion cere OK — ca să nu macine la
