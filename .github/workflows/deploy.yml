@@ -87,6 +87,7 @@ jobs:
           ENVNAME="production"
           if [ -z "$ENVID" ]; then
             ENVNAME=$(echo "$P" | jq -r '.environments.edges[0].node.name')
+            ENVID=$(echo "$P" | jq -r '.environments.edges[0].node.id')
           fi
           SVC=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].name // empty')
           NSVC=$(echo "$P" | jq -r '.services.edges | length')
@@ -105,6 +106,7 @@ jobs:
           {
             echo "mode=account-token"
             echo "project_id=$PID"
+            echo "env_id=$ENVID"
             echo "env_name=$ENVNAME"
             echo "service=$SVC"
           } >> "$GITHUB_OUTPUT"
@@ -114,7 +116,7 @@ jobs:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           MODE: ${{ steps.target.outputs.mode }}
           PROJECT_ID: ${{ steps.target.outputs.project_id }}
-          ENV_NAME: ${{ steps.target.outputs.env_name }}
+          ENV_ID: ${{ steps.target.outputs.env_id }}
           SERVICE: ${{ steps.target.outputs.service }}
         run: |
           set -euo pipefail
@@ -122,13 +124,42 @@ jobs:
             # Token de proiect: CLI-ul îl ia din RAILWAY_TOKEN și e deja legat.
             export RAILWAY_TOKEN="$TOKEN"
             railway up --service "${RAILWAY_SERVICE:-web}" --ci
-          else
-            # Token de cont: CLI-ul îl ia din RAILWAY_API_TOKEN; legăm întâi
-            # EXPLICIT proiectul+mediul găsite (nimic ghicit la publicare).
-            export RAILWAY_API_TOKEN="$TOKEN"
-            railway link --project "$PROJECT_ID" --environment "$ENV_NAME" --service "$SERVICE"
-            railway up --service "$SERVICE" --ci
+            exit 0
           fi
+          # Token de cont/workspace: CLI-ul refuza 'railway link' cu el (run #3:
+          # Unauthorized). Solutia stabila: cu cheia de cont FABRICAM prin API un
+          # token de PROIECT efemer, legat strict de Kelionai/production — tipul
+          # care merge garantat cu 'railway up' — si il stergem la final.
+          GQL=https://backboard.railway.com/graphql/v2
+          TNAME="gh-deploy-${GITHUB_RUN_ID}"
+          MUT=$(jq -nc --arg n "$TNAME" --arg p "$PROJECT_ID" --arg e "$ENV_ID" \
+            '{query:"mutation($n:String!,$p:String!,$e:String!){projectTokenCreate(input:{name:$n,projectId:$p,environmentId:$e})}",variables:{n:$n,p:$p,e:$e}}')
+          PT=$(curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" -d "$MUT" | jq -r '.data.projectTokenCreate // empty')
+          if [ -z "$PT" ]; then
+            echo "::error::Nu am putut fabrica tokenul de proiect prin API (projectTokenCreate a refuzat). Verifica permisiunile cheii din RAILWAY_TOKEN."
+            exit 1
+          fi
+          echo "::add-mask::$PT"
+          # Curatenie garantata: tokenul efemer se sterge si la succes, si la esec.
+          cleanup() {
+            DELQ=$(jq -nc --arg p "$PROJECT_ID" \
+              '{query:"query($p:String!){projectTokens(projectId:$p){edges{node{id name}}}}",variables:{p:$p}}')
+            TID=$(curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" -d "$DELQ" \
+              | jq -r --arg n "$TNAME" '.data.projectTokens.edges[]?.node | select(.name==$n) | .id' | head -1)
+            if [ -n "$TID" ]; then
+              DELM=$(jq -nc --arg i "$TID" \
+                '{query:"mutation($i:String!){projectTokenDelete(id:$i)}",variables:{i:$i}}')
+              curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" -d "$DELM" >/dev/null || true
+              echo "Token efemer sters."
+            fi
+          }
+          trap cleanup EXIT
+          export RAILWAY_TOKEN="$PT"
+          unset RAILWAY_API_TOKEN || true
+          railway up --service "$SERVICE" --ci
 
       - name: Verifică live (kelionai.app răspunde 200)
         run: |
