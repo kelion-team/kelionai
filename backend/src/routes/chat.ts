@@ -1493,11 +1493,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         reanalyzePrompt = bridgePrompt
         const maxTries = 4
         for (let attempt = 1; attempt <= maxTries; attempt++) {
-          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 30_000, turnPacket)
+          // Fereastra primului cuvânt = 75s, nu 30s (Adrian, 9 iul: „legătura
+          // ruptă" pe mesajul curent). Calea de RAȚIONAMENT AVANSAT durează
+          // legitim 60–80s fără să scoată vreun cuvânt; la 30s serverul declara
+          // fals „punte înțepenită", spunea „mi s-a rupt legătura" și reanaliza —
+          // deși creierul CHIAR răspundea (revenea la ~48s). Pulsul de viață tot
+          // resetează ceasul cât timp workerul îl trimite; 75s e doar plasa când
+          // nu-l trimite (ex. worker care nu pulsează în timpul gândirii).
+          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 75_000, turnPacket)
           if (answer === BRIDGE_STALL && !headDone && !streamed.trim()) {
             head = ''
             if (attempt < maxTries) {
-              noteBrainActivity(`⏳ 30s fără răspuns — reanalizez cererea (încercarea ${attempt + 1})`)
+              noteBrainActivity(`⏳ Fără răspuns încă — reanalizez cererea (încercarea ${attempt + 1})`)
               continue
             }
           }
