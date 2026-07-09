@@ -1,45 +1,23 @@
 import Fastify from 'fastify'
 import websocket from '@fastify/websocket'
-import { config } from './config.js'
 import { bridgeRoutes } from './routes/bridge.js'
-import { initDb, initAppFiles } from './db.js'
 
-const app = Fastify({ 
-  logger: true,
-  disableRequestLogging: false 
-})
+const PORT = Number(process.env.PORT) || 8080
+const app = Fastify({ logger: true })
 
-async function bootstrap() {
-  const port = Number(process.env.PORT) || 8080
-  
-  // Healthcheck pentru Railway
-  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+async function start() {
+  app.get('/health', async () => ({ status: 'ok', auth: 'disabled-for-test' }))
 
   try {
     await app.register(websocket)
     await app.register(bridgeRoutes, { prefix: '/api/bridge' })
     
-    // Pornim ascultarea înainte de DB pentru a trece healthcheck-ul Railway rapid
-    await app.listen({ host: '0.0.0.0', port })
-    console.log(`[BOOTSTRAP] Server listening on port ${port}`)
-
-    // Inițializare asincronă DB (nu blochează pornirea)
-    setImmediate(async () => {
-      try {
-        if (config.databaseUrl) {
-          await initDb()
-          await initAppFiles()
-          console.log('[DB] Initialized successfully')
-        }
-      } catch (err) {
-        console.error('[DB] Deferred initialization failed:', err)
-      }
-    })
-
+    await app.listen({ host: '0.0.0.0', port: PORT })
+    console.log(`[TEST] Server listening on ${PORT} with AUTH DISABLED`)
   } catch (err) {
-    console.error('[BOOTSTRAP] Fatal error:', err)
+    console.error('[TEST] Startup crash:', err)
     process.exit(1)
   }
 }
 
-bootstrap()
+start()
