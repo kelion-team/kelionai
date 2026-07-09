@@ -51,7 +51,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
           export SSHPASS="$VPS_PASS"
-          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25"
+          # Forțează autentificarea pe PAROLĂ: fără asta, ssh epuizează întâi
+          # metodele pubkey/none (MaxAuthTries) și parola nici nu mai e trimisă,
+          # dând fals „Permission denied".
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          # 2.0) Sondă (FĂRĂ parolă): ce metode de auth oferă serverul runner-ului?
+          echo "=== metode de auth oferite runner-ului ==="
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            -o PreferredAuthentications=none -o BatchMode=yes root@"$VPS_HOST" true 2>&1 | grep -i 'authentication\|denied\|continue' || true
 
           # 2a) Scrie secretul REAL în fișierul pe care worker-ul îl citește
           #     (prin stdin → cat, ca să nu apară niciodată în argv/loguri).
