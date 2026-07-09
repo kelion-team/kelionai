@@ -240,9 +240,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain's Anthropic keys live (admin only). Pings the primary and
-  // reserve keys with a 1-token call; reports ok/fail per key without ever
-  // exposing the key values.
+  // Verify the brain's Anthropic key live (admin only). Pings the single paid
+  // key with a 1-token call; reports ok/fail without ever exposing the key value.
+  // Prin regula lui Adrian nu există cheie de rezervă — doar cea plătită.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

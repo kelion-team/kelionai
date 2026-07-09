@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
 import { getMemories, searchMemories, addMemory, recordCost } from '../db.js'
 import { claudeCost } from './cost.js'
-import { withAnthropicFallback } from './anthropic.js'
+import { anthropic } from './anthropic.js'
 
 // Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
 // route's streaming loop (low-latency Opus); this module hosts the Memory agent
@@ -56,8 +56,7 @@ export async function learnFromTurn(
   try {
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
-    const res = await withAnthropicFallback((c) =>
-      c.messages.create({
+    const res = await anthropic.messages.create({
       model: HAIKU,
       max_tokens: 400,
       system:
@@ -81,8 +80,7 @@ export async function learnFromTurn(
             `Latest exchange:\nUser: ${userMsg}\nAssistant: ${assistantMsg}`,
         },
       ],
-      }),
-    )
+    })
     // Meter the Memory agent's real cost too (admin accounting completeness).
     void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content

@@ -1,12 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import {
-  anthropic,
-  anthropicReserve,
-  shouldFailover,
-  withAnthropicFallback,
-} from '../services/anthropic.js'
+import { anthropic } from '../services/anthropic.js'
 import { getSessionUser, setSession, type SessionUser } from '../session.js'
 import {
   googleTools,
@@ -1626,11 +1621,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Provider cost incurred by delegated specialist agents (their own Claude
     // calls + tool costs), accumulated so it's billed to the same wallet.
     const usage = { usd: 0 }
-    // Two safety nets, layered. MODEL: Fable 5 is the brain; if a round fails
+    // One safety net: MODEL-level only. Fable 5 is the brain; if a round fails
     // (or is refused) before any text streams, the SAME round is re-served by
-    // Opus 4.8. KEY: if the account itself is unusable, switch to the reserve
-    // key. One model or account having problems never breaks the answer.
-    let active: Anthropic = userAnthropicKey ? new Anthropic({ apiKey: userAnthropicKey }) : anthropic
+    // Opus 4.8 — on the SAME paid key. REGULA LUI ADRIAN (9 iul): nu există
+    // cheie de rezervă / al doilea cont; dacă acest cont pică, eroarea se vede.
+    const active: Anthropic = userAnthropicKey ? new Anthropic({ apiKey: userAnthropicKey }) : anthropic
     // GAURA DE BANI (Adrian, audit 9 iul): un client care-și pune CHEIA LUI sărea
     // paywall-ul, iar dacă cheia era invalidă/fără credit, failover-ul de mai jos
     // muta conversația pe cheia NOASTRĂ de rezervă — vorbea gratis pe contul
@@ -1716,21 +1711,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // un mesaj clar despre cheie). Așa se închide cursa gratis pe contul nostru.
           if (usingUserKey) throw e
           if (roundText === '' && model === MODEL) {
-            // Fable itself has a problem — rest it and re-serve on Opus 4.8.
+            // Fable itself has a problem — rest it and re-serve on Opus 4.8
+            // (same paid account; there is deliberately NO reserve key).
             restFable()
             model = MODEL_RESERVE
-            try {
-              final = await runRound(active, model)
-            } catch (e2) {
-              if (anthropicReserve && active !== anthropicReserve && shouldFailover(e2)) {
-                active = anthropicReserve
-                final = await runRound(active as Anthropic, model)
-              } else throw e2
-            }
-          } else if (anthropicReserve && active !== anthropicReserve && roundText === '' && shouldFailover(e)) {
-            // Nothing streamed yet → safe to retry this round on the reserve key.
-            active = anthropicReserve
-            final = await runRound(active as Anthropic, model)
+            final = await runRound(active, model)
           } else throw e
         }
         // A Fable safety refusal (HTTP 200, stop_reason "refusal", no content):
@@ -1969,33 +1954,30 @@ async function runAgent(
     let outTok = 0
     let agentModel = brainModel()
     for (let round = 0; round < 4; round++) {
-      // Same layered nets as the brain: Fable → Opus 4.8 on any model problem
-      // (incl. a safety refusal), and primary → reserve key underneath.
-      const res = await withAnthropicFallback(async (c) => {
-        const make = (m: string): Promise<Anthropic.Message> =>
-          c.messages.create({
-            model: m,
-            // Code agents get room to write real programs; text agents stay tight.
-            max_tokens: spec.code ? 4000 : m === MODEL ? 2200 : 1500,
-            system,
-            tools: agentTools,
-            messages: params,
-          })
-        let r: Anthropic.Message
-        try {
-          r = await make(agentModel)
-        } catch (e) {
-          if (agentModel !== MODEL) throw e
-          restFable()
-          agentModel = MODEL_RESERVE
-          r = await make(agentModel)
-        }
-        if ((r as { stop_reason?: string }).stop_reason === 'refusal' && agentModel === MODEL) {
-          agentModel = MODEL_RESERVE
-          r = await make(agentModel)
-        }
-        return r
-      })
+      // Same model net as the brain: Fable → Opus 4.8 on any model problem
+      // (incl. a safety refusal) — always on the single paid key, never another.
+      const make = (m: string): Promise<Anthropic.Message> =>
+        anthropic.messages.create({
+          model: m,
+          // Code agents get room to write real programs; text agents stay tight.
+          max_tokens: spec.code ? 4000 : m === MODEL ? 2200 : 1500,
+          system,
+          tools: agentTools,
+          messages: params,
+        })
+      let res: Anthropic.Message
+      try {
+        res = await make(agentModel)
+      } catch (e) {
+        if (agentModel !== MODEL) throw e
+        restFable()
+        agentModel = MODEL_RESERVE
+        res = await make(agentModel)
+      }
+      if ((res as { stop_reason?: string }).stop_reason === 'refusal' && agentModel === MODEL) {
+        agentModel = MODEL_RESERVE
+        res = await make(agentModel)
+      }
       inTok += res.usage.input_tokens
       outTok += res.usage.output_tokens
       const t = res.content
