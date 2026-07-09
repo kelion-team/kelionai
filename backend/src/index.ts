@@ -143,7 +143,7 @@ async function bootstrap() {
           await initAppFiles()
           console.log('DB and files initialized successfully')
         }
-        startMailbox(app)
+        startMailbox()
       } catch (err) {
         console.error('Deferred initDb failed:', err)
       }
