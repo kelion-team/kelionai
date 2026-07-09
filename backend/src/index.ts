@@ -192,11 +192,13 @@ await app.register(meseriiRoutes)
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
 
 // Create tables if a database is configured (non-fatal if it isn't / is down).
+app.log.info('Starting DB initialization...')
 try {
   await initDb()
   await initAppFiles() // load installer masters (uploaded from Linux) into cache
+  app.log.info('DB and files initialized successfully')
 } catch (err) {
-  app.log.error({ err }, 'initDb failed — chat persistence disabled')
+  app.log.error({ err }, 'CRITICAL: initDb failed — but continuing to allow bridge recovery')
 }
 
 // Download endpoint: the installer MASTER lives on the Linux server and is
