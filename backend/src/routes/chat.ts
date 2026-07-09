@@ -1569,30 +1569,36 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       if (!a) {
-        // CREIERUL DE REZERVĂ PREIA (Adrian, 9 iul: „la fel — legătura ruptă").
-        // Vechiul comportament era o buclă a morții: puntea primea jobul dar
-        // Claude de pe VPS nu producea NIMIC, iar serverul îi trimitea lui
-        // Adrian doar scuza („punte înțepenită, revin în câteva secunde") și
-        // RE-COZA cererea în ACEEAȘI punte moartă — deci fiecare mesaj primea
-        // aceeași scuză, la nesfârșit. Regula nouă: puntea rămâne PRIMA, dar
-        // dacă n-a scos niciun cuvânt, NU ne scuzăm și NU re-cozăm — cade mai
-        // jos în calea creierului normal (API), care îi răspunde ACUM, complet,
-        // cu toate uneltele lui. Adrian primește un răspuns real, nu un status.
-        noteBrainActivity('🟠 Puntea nu a produs răspuns — preia creierul de rezervă (API)')
-        setProgress(40, 'Creierul de rezervă preia')
-      } else {
-        // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).
-        await streamVoice(reply, a, speechPref || user.locale)
-        reply.raw.end()
-        void saveMessage(user.email, 'assistant', a)
-        // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): chatul adminului iese pe punte și
-        // se termina aici cu `return`, ÎNAINTE de pasul de învățare din calea
-        // creierului normal (mai jos) — de-aia nu s-a mai salvat NIMIC în `memories`
-        // din 4 iul (ultima memorie: 4 iul 17:21). Rulăm ACELAȘI distil+save și pe
-        // punte, fire-and-forget (nu adaugă latență răspunsului).
-        if (lastUserText.trim() || a.trim()) void learnFromTurn(user.email, lastUserText, a)
-        return
+        // REGULA ABSOLUTĂ A LUI ADRIAN (4 iul, reconfirmată 9 iul: „ce creier de
+        // rezervă, cine a cerut așa ceva?"): mesajele adminului sunt răspunse
+        // EXCLUSIV de creierul Linux (abonament), NICIODATĂ de creierul API cu
+        // plată. Puntea mută → statut cinstit + recozare, fără fallback.
+        const ro = !langName || /rom/i.test(langName)
+        a = bridgeOnline()
+          ? ro
+            ? 'Am reanalizat cererea de câteva ori și puntea încă nu a scos un răspuns (e în picioare, dar înțepenită). Nu te ignor — am pus-o din nou la lucru; îți răspund în câteva secunde.'
+            : 'I re-analyzed this a few times and the bridge still produced nothing (it is up, but stuck). I am not ignoring you — I re-queued it and will answer in a few seconds.'
+          : ro
+            ? 'Puntea către Claude e căzută chiar acum (se repornește singură în câteva secunde). Am pus cererea în coadă — îți răspund imediat ce revine, nu se pierde.'
+            : 'The bridge to Claude is down right now (it restarts itself within seconds). I queued your request — I will answer the moment it is back; nothing is lost.'
+        const queuedPrompt =
+          reanalyzePrompt ||
+          `Ești Kelion, creierul lui Adrian (adminul tău). Mesajul de mai jos a sosit cât puntea era căzută — răspunde-i ACUM, în limba lui, scurt și direct, fără markdown.\nAdrian: ${lastUserText}`
+        void bridgeAsk(queuedPrompt, [], 600_000)
+          .then((late) => {
+            if (late && late.trim()) sayToAdmin(`Revin la ce m-ai întrebat: ${late.trim()}`)
+          })
+          .catch(() => {})
+        reply.raw.write(a)
       }
+      // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).
+      await streamVoice(reply, a, speechPref || user.locale)
+      reply.raw.end()
+      void saveMessage(user.email, 'assistant', a)
+      // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): distil+save și pe punte,
+      // fire-and-forget (nu adaugă latență răspunsului).
+      if (lastUserText.trim() || a.trim()) void learnFromTurn(user.email, lastUserText, a)
+      return
     }
 
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL]
