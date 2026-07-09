@@ -19,14 +19,14 @@ On a fresh session, also read **HANDOFF.md** and **STATUS.md** in this folder.
   3D stage in `src/pages/Stage.tsx`, voice in `src/lib/voice.ts`.
 - `Dockerfile`, `railway.json` — deploy.
 
-## Build & deploy
+## Build & deploy (Linux-first)
+Proiectul se bazează acum pe un VPS Linux pentru dezvoltare și Railway pentru producție.
 ```bash
-cd backend  && npx tsc            # → backend/dist  (must be clean)
-cd ../frontend && npx vite build  # → frontend/dist (must be clean)
-cd ..       && railway up --detach # Railway project Kelionai, service "web"
+# Pe VPS (/root/kelion)
+git pull origin master
+railway up --detach
 ```
-Verify: `railway status`, `railway logs`, then load https://kelionai.app and
-confirm the deployed bundle hash matches the local `frontend/dist` build.
+Adminul folosește interfața din `https://kelionai.app` pentru a trimite comenzi către Puntea de pe VPS.
 
 ## Local dev
 `cd backend && npm run dev` (:8080) + `cd frontend && npm run dev` (:5173).

@@ -3,7 +3,15 @@
 > Where the build is right now. Updated as milestones land. The full locked
 > product spec lives in Claude's project memory (`kelion-rewrite-spec.md`).
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-09_
+
+## 🚀 Migrare completă pe Linux (9 iul 2026)
+
+- **Laptop Eliminat** — Întreg fluxul de lucru rulează acum pe infrastructură permanentă (Railway + VPS). Laptopul este doar un terminal de vizualizare.
+- **Acces Admin Securizat** — Autentificarea admin (`adrianenc11@gmail.com`) este configurată pentru producție pe `https://kelionai.app`.
+- **Puntea (Bridge) pe VPS** — "Creierul" (Claude Code) rulează ca serviciu `kelion-bridge` pe VPS-ul Linux, conectat la backend prin `BRIDGE_SECRET`.
+- **Autonomie Creier** — Puntea are acum "Ochi și Mâini": acces direct la fișierele repo-ului pe VPS, Git, Bash și jurnalele de sistem (`journalctl`). Poate decide singură la conflicte de deploy sau erori de build.
+- **Monitorizare Live** — Indicatorii **● Bridge**, **● Server** și **● Linux** din dashboard-ul de admin sunt activi și reflectă starea reală a serviciilor de pe Linux.
 
 ## ✅ Live on kelionai.app
 
