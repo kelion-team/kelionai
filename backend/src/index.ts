@@ -27,6 +27,7 @@ import { bridgeRoutes } from './routes/bridge.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { greetRoutes } from './routes/greet.js'
+import { meseriiRoutes } from './routes/meserii.js'
 import { initDb, recordDownload, initAppFiles, getAppFile } from './db.js'
 import { getSessionUser } from './session.js'
 
@@ -185,6 +186,7 @@ await app.register(browserRoutes)
 await app.register(bridgeRoutes)
 await app.register(contactRoutes)
 await app.register(greetRoutes)
+await app.register(meseriiRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
