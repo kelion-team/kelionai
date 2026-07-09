@@ -1,0 +1,78 @@
+# Deploy pe producție (Railway) — LA COMANDĂ, fără VPS și fără terminal.
+#
+# De ce există: publicarea depindea de cineva care rula manual `railway up` pe
+# VPS. Acum deploy-ul se face din GitHub: fie automat când reparația ajunge în
+# `master`, fie manual, pornit din comandă (workflow_dispatch). Așa creierul de
+# cod poate duce o reparație până pe live singur — nu mai stă nimeni cu mâna pe
+# terminal.
+#
+# SETUP O SINGURĂ DATĂ (Adrian — e o cheie, nu se pune în cod):
+#   GitHub → repo Settings → Secrets and variables → Actions → New secret:
+#     RAILWAY_TOKEN = un PROJECT TOKEN din Railway
+#       (Railway → proiectul Kelionai → Settings → Tokens → Create,
+#        pe environment „production"). Un project token e legat de proiect+mediu,
+#        deci CLI-ul știe singur unde publică.
+#   (opțional) Variabilă `RAILWAY_SERVICE` dacă serviciul NU se numește „web".
+# După ce secretul e pus o dată, orice deploy de aici e automat.
+
+name: deploy
+
+on:
+  # Pornit din comandă (butonul „Run workflow" din tab-ul Actions, sau declanșat
+  # programatic prin API) — ăsta e „deploy la comandă".
+  workflow_dispatch:
+  # Automat când reparația intră în master (merge de PR / push direct).
+  push:
+    branches: [master]
+
+# O singură publicare odată — un deploy nou îl anulează pe cel în curs, ca să nu
+# se calce două „railway up" pe picior (exact avalanșa de deploy-uri de evitat).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalează Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Publică pe Railway (build din Dockerfile, ca `railway up` de pe VPS)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN lipsește. Adaugă-l în Settings → Secrets → Actions (project token din Railway)."
+            exit 1
+          fi
+          SERVICE="${{ vars.RAILWAY_SERVICE }}"
+          SERVICE="${SERVICE:-web}"
+          echo "Public pe serviciul '$SERVICE'…"
+          # `railway up` urcă repo-ul și îl construiește pe Railway după railway.json
+          # (builder DOCKERFILE) — exact ce face `railway up --detach` de pe VPS,
+          # doar că headless. Fără --detach: așteptăm build-ul și ieșim pe rezultat.
+          railway up --service "$SERVICE" --ci
+
+      - name: Verifică live (kelionai.app răspunde 200)
+        run: |
+          # „Trimis ≠ gata": nu declarăm publicat pe cuvântul CLI-ului. Probăm
+          # producția până la ~90s; abia un 200 real e succes.
+          ok=""
+          for i in $(seq 1 18); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/health || echo 000)
+            echo "încercarea $i → HTTP $code"
+            if [ "$code" = "200" ]; then ok="1"; break; fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Deploy trimis, dar kelionai.app nu răspunde 200 după ~90s."
+            exit 1
+          fi
+          echo "🟢 PUBLICAT + VERIFICAT LIVE — kelionai.app răspunde 200"
