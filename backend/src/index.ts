@@ -3,7 +3,7 @@ import websocket from '@fastify/websocket'
 
 // CONFIG MINIMALĂ (folosim BRIDGE_TOKEN pentru a forța reprovizionarea Railway)
 const BRIDGE_SECRET = process.env.BRIDGE_TOKEN || process.env.BRIDGE_SECRET || 'k3l1on_br1dg3_5tr0ng_2026_99'
-const PORT = Number(process.env.PORT) || 8080
+const PORT = Number(process.env.PORT) || 8081
 
 const app = Fastify({ logger: true })
 
