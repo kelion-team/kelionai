@@ -261,11 +261,15 @@ async function deployApproved(r) {
     say('🔴 Deploy eșuat — nimic nu s-a publicat (detalii în jurnalul serverului)')
     return
   }
-  
+  // Release-ul se marchează publicat pe acceptul Railway (altfel bucla de 20s
+  // îl redeployează la INFINIT — exact avalanșa de „railway up" din 9 iul, când
+  // apelul ăsta a dispărut odată cu adăugarea QR-urilor). Lacătul se pune
+  // ÎNAINTE de orice pas opțional; DOVADA publicării rămâne separată:
+  // „PUBLICAT LIVE" se spune DOAR după ce producția chiar răspunde 200.
+  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
+
   // Dupa deploy, regeneram codurile QR ca sa fim siguri ca reflecta ultimele cai
   await generateAndUploadQRs()
-
-  // Release-ul se marchează publicat pe acceptul Railway...
   say('🔎 Railway a acceptat — verific EU live-ul (fetch → 200), nu cred pe cuvânt')
   pushProgress(97, 'Verific live (fetch → 200)')
   let live = false
