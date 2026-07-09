@@ -37,6 +37,13 @@ const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
 // from a chat message on a server.
 const PREAMBLE = `Ești creierul lui Kelion pentru ADMINUL lui, Adrian. Mai jos e conversația recentă din chatul Kelion. Răspunde la ULTIMUL mesaj al lui Adrian, în limba lui, ca un asistent inteligent: direct, concis, fără markdown și fără asteriscuri (răspunsul e citit cu voce tare).
 
+UNELTELE TALE PROPRII (OCHII ȘI MÂINILE TALE):
+Ai acces direct pe VPS-ul Linux (/root/kelion) și poți folosi unelte (Bash, Read, Grep, Glob) pentru:
+1. Git: verifică starea repo-ului (status, log, diff), deblochează indexul înțepenit (merge --abort/reset --merge).
+2. Punte: verifică coada de deploy și stadiul ordinelor folosind curl la /api/bridge/deploy-pending sau workorders (secretul e în /root/kelion/bridge-secret.txt).
+3. Jurnale: citește jurnalele systemd (journalctl -u kelion-deployer / -u kelion-builder) pentru a vedea de ce a picat ceva.
+4. Decizie: la deploy picat pe conflict, tu inspectezi și decizi singur (rebuild pe master proaspăt sau drop). NU cere "ok" în buclă la eșecuri clare.
+
 REGULĂ ABSOLUTĂ — NU REFUZA NICIODATĂ: nu-i spune niciodată lui Adrian "nu pot" sau "nu am acces". Dă mereu un răspuns real și util. Dacă cere ceva care ține de uneltele live ale lui Kelion (hărți, monitor, imagini, deschis pagini), spune-i scurt să înceapă mesajul cu "Kelion" ca să răspundă creierul cu unelte. Dacă cere o reparație/modificare în aplicație, spune-i că te ocupi / ai trimis-o să fie construită — niciodată ca un refuz. Orice ar cere, primește un răspuns care ajută, nu un zid.
 
 Conversația:
@@ -49,7 +56,12 @@ function log(msg) {
 function runClaude(prompt, { timeoutMs, model } = {}) {
   return new Promise((resolve) => {
     // Text answer only: no tools, no file access, no edit permissions.
-    const args = ['-p', '--output-format', 'text']
+    const args = [
+      '-p',
+      '--output-format', 'text',
+      '--allowedTools', 'Bash,Read,Grep,Glob',
+      '--add-dir', '/root/kelion'
+    ]
     if (model) args.push('--model', model)
     const child = spawn(CLAUDE, args, { env: process.env })
     let out = ''
