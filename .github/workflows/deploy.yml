@@ -1,32 +1,31 @@
-# Deploy pe producție (Railway) — LA COMANDĂ, fără VPS și fără terminal.
+# Deploy pe producție (Railway) — COMPLET AUTOMAT, fără VPS, fără terminal,
+# fără ca Adrian să copieze vreun ID.
 #
-# De ce există: publicarea depindea de cineva care rula manual `railway up` pe
-# VPS. Acum deploy-ul se face din GitHub: fie automat când reparația ajunge în
-# `master`, fie manual, pornit din comandă (workflow_dispatch). Așa creierul de
-# cod poate duce o reparație până pe live singur — nu mai stă nimeni cu mâna pe
-# terminal.
+# Cum funcționează (auto-configurare totală):
+#   1. Cu RAILWAY_TOKEN (secretul din GitHub) întreabă API-ul Railway ce
+#      proiecte există. Găsește SINGUR proiectul de producție (numele conține
+#      „kelion") + mediul „production" + serviciul (preferă „web").
+#   2. SIGURANȚĂ „un singur proiect": dacă găsește mai multe proiecte kelion și
+#      nu poate alege fără dubiu, SE OPREȘTE și listează ce a găsit — nu publică
+#      niciodată într-o țintă ghicită. Nu creează și nu șterge NIMIC, niciodată.
+#   3. Publică (railway up = build din Dockerfile, identic cu VPS-ul) și apoi
+#      verifică EL că kelionai.app răspunde 200 — abia atunci declară succes.
 #
-# SETUP O SINGURĂ DATĂ (Adrian — e o cheie, nu se pune în cod):
-#   GitHub → repo Settings → Secrets and variables → Actions → New secret:
-#     RAILWAY_TOKEN = un PROJECT TOKEN din Railway
-#       (Railway → proiectul Kelionai → Settings → Tokens → Create,
-#        pe environment „production"). Un project token e legat de proiect+mediu,
-#        deci CLI-ul știe singur unde publică.
-#   (opțional) Variabilă `RAILWAY_SERVICE` dacă serviciul NU se numește „web".
-# După ce secretul e pus o dată, orice deploy de aici e automat.
+# Merge și cu un token de PROIECT (dacă secretul e înlocuit vreodată): atunci
+# sare peste căutare și publică direct, tokenul fiind deja legat de proiect.
+#
+# Secret necesar (o singură dată): RAILWAY_TOKEN — deja pus.
 
 name: deploy
 
 on:
-  # Pornit din comandă (butonul „Run workflow" din tab-ul Actions, sau declanșat
-  # programatic prin API) — ăsta e „deploy la comandă".
+  # Pornit din comandă (Run workflow / API) — „deploy la comanda creierului".
   workflow_dispatch:
-  # Automat când reparația intră în master (merge de PR / push direct).
+  # Automat când o reparație intră în master.
   push:
     branches: [master]
 
-# O singură publicare odată — un deploy nou îl anulează pe cel în curs, ca să nu
-# se calce două „railway up" pe picior (exact avalanșa de deploy-uri de evitat).
+# O singură publicare odată — un deploy nou îl anulează pe cel în curs.
 concurrency:
   group: deploy-production
   cancel-in-progress: true
@@ -44,35 +43,102 @@ jobs:
       - name: Instalează Railway CLI
         run: npm i -g @railway/cli
 
-      - name: Publică pe Railway (build din Dockerfile, ca `railway up` de pe VPS)
+      - name: Găsește singur ținta de producție (proiect + mediu + serviciu)
+        id: target
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN lipsește. Adaugă-l în Settings → Secrets → Actions (project token din Railway)."
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN lipsește din Settings → Secrets → Actions."
             exit 1
           fi
-          SERVICE="${{ vars.RAILWAY_SERVICE }}"
-          SERVICE="${SERVICE:-web}"
-          echo "Public pe serviciul '$SERVICE'…"
-          # `railway up` urcă repo-ul și îl construiește pe Railway după railway.json
-          # (builder DOCKERFILE) — exact ce face `railway up --detach` de pe VPS,
-          # doar că headless. Fără --detach: așteptăm build-ul și ieșim pe rezultat.
-          railway up --service "$SERVICE" --ci
+          # Întreabă API-ul Railway (GraphQL) ce proiecte vede cheia asta.
+          Q='{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}'
+          RESP=$(curl -sS --max-time 30 https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d "$Q" || echo '{}')
+          if ! echo "$RESP" | jq -e '.data.projects.edges' >/dev/null 2>&1; then
+            # Cheie de PROIECT (nu are voie să listeze proiecte) → e deja legată
+            # de proiectul ei; publicăm direct, fără căutare.
+            echo "mode=project-token" >> "$GITHUB_OUTPUT"
+            echo "Cheia e token de proiect — deja țintită, public direct."
+            exit 0
+          fi
+          echo "Proiecte văzute de cheie:"
+          echo "$RESP" | jq -r '.data.projects.edges[].node.name'
+          # Alege proiectul de producție: numele conține „kelion" (insensibil).
+          MATCHES=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))]')
+          COUNT=$(echo "$MATCHES" | jq 'length')
+          TOTAL=$(echo "$RESP" | jq '.data.projects.edges | length')
+          if [ "$COUNT" -eq 0 ] && [ "$TOTAL" -eq 1 ]; then
+            # Un singur proiect în tot contul → el e, oricum s-ar numi.
+            MATCHES=$(echo "$RESP" | jq '[.data.projects.edges[].node]')
+            COUNT=1
+          fi
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::Nu pot alege FĂRĂ DUBIU proiectul (găsite: $COUNT potriviri din $TOTAL proiecte). NU public într-o țintă ghicită. Proiectele văzute sunt listate mai sus — spune-i creierului care e cel bun."
+            exit 1
+          fi
+          P=$(echo "$MATCHES" | jq '.[0]')
+          PID=$(echo "$P" | jq -r '.id')
+          PNAME=$(echo "$P" | jq -r '.name')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id // empty')
+          ENVNAME="production"
+          if [ -z "$ENVID" ]; then
+            ENVNAME=$(echo "$P" | jq -r '.environments.edges[0].node.name')
+          fi
+          SVC=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].name // empty')
+          NSVC=$(echo "$P" | jq -r '.services.edges | length')
+          if [ -z "$SVC" ]; then
+            if [ "$NSVC" -eq 1 ]; then
+              SVC=$(echo "$P" | jq -r '.services.edges[0].node.name')
+            else
+              echo "::error::Serviciul „web" nu există și sunt $NSVC servicii în „$PNAME" — nu ghicesc. Servicii: $(echo "$P" | jq -r '[.services.edges[].node.name] | join(", ")')"
+              exit 1
+            fi
+          fi
+          echo "ȚINTA ALEASĂ: proiect „$PNAME" ($PID), mediu „$ENVNAME", serviciu „$SVC"."
+          {
+            echo "mode=account-token"
+            echo "project_id=$PID"
+            echo "env_name=$ENVNAME"
+            echo "service=$SVC"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publică pe Railway
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          MODE: ${{ steps.target.outputs.mode }}
+          PROJECT_ID: ${{ steps.target.outputs.project_id }}
+          ENV_NAME: ${{ steps.target.outputs.env_name }}
+          SERVICE: ${{ steps.target.outputs.service }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "project-token" ]; then
+            # Token de proiect: CLI-ul îl ia din RAILWAY_TOKEN și e deja legat.
+            export RAILWAY_TOKEN="$TOKEN"
+            railway up --service "${RAILWAY_SERVICE:-web}" --ci
+          else
+            # Token de cont: CLI-ul îl ia din RAILWAY_API_TOKEN; legăm întâi
+            # EXPLICIT proiectul+mediul găsite (nimic ghicit la publicare).
+            export RAILWAY_API_TOKEN="$TOKEN"
+            railway link --project "$PROJECT_ID" --environment "$ENV_NAME" --service "$SERVICE"
+            railway up --service "$SERVICE" --ci
+          fi
 
       - name: Verifică live (kelionai.app răspunde 200)
         run: |
-          # „Trimis ≠ gata": nu declarăm publicat pe cuvântul CLI-ului. Probăm
-          # producția până la ~90s; abia un 200 real e succes.
+          # „Trimis ≠ gata": probăm producția până la ~2 min; doar 200 = succes.
           ok=""
-          for i in $(seq 1 18); do
+          for i in $(seq 1 24); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/health || echo 000)
             echo "încercarea $i → HTTP $code"
             if [ "$code" = "200" ]; then ok="1"; break; fi
             sleep 5
           done
           if [ -z "$ok" ]; then
-            echo "::error::Deploy trimis, dar kelionai.app nu răspunde 200 după ~90s."
+            echo "::error::Deploy trimis, dar kelionai.app nu răspunde 200 după ~2 min."
             exit 1
           fi
           echo "🟢 PUBLICAT + VERIFICAT LIVE — kelionai.app răspunde 200"
