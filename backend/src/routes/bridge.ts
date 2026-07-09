@@ -799,8 +799,12 @@ async function reportToAdmin(o: AgentOutcome): Promise<void> {
 }
 
 function authed(req: FastifyRequest): boolean {
-  // TEST DE URGENȚĂ: Acceptăm orice cerere pentru a vedea dacă restul sistemului funcționează
-  return true;
+  // Comparație în timp constant (W10 #6): `===` iese la primul octet diferit →
+  // scurgere de timing pe secretul cu putere totală (upload installer, cozi, deploy).
+  const got = String(req.headers['x-bridge-secret'] ?? '')
+  const want = config.bridgeSecret
+  if (!want || got.length !== want.length) return false
+  return timingSafeEqual(Buffer.from(got), Buffer.from(want))
 }
 
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
