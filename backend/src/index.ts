@@ -1,33 +1,45 @@
 import Fastify from 'fastify'
 import websocket from '@fastify/websocket'
+import { config } from './config.js'
+import { bridgeRoutes } from './routes/bridge.js'
+import { initDb, initAppFiles } from './db.js'
 
-// CONFIG MINIMALĂ (folosim BRIDGE_TOKEN pentru a forța reprovizionarea Railway)
-const BRIDGE_SECRET = process.env.BRIDGE_TOKEN || process.env.BRIDGE_SECRET || 'k3l1on_br1dg3_5tr0ng_2026_99'
-const PORT = Number(process.env.PORT) || 8081
+const app = Fastify({ 
+  logger: true,
+  disableRequestLogging: false 
+})
 
-const app = Fastify({ logger: true })
-
-async function start() {
-  app.get('/health', async () => ({ status: 'ok', mode: 'emergency-flat' }))
-
-  // RUTA DE BRIDGE ÎNCORPORATĂ (pentru a evita erori de import ESM/NodeNext)
-  app.all('/api/bridge/*', async (req, res) => {
-    const got = String(req.headers['x-bridge-secret'] ?? '')
-    if (!got || got !== BRIDGE_SECRET) {
-      console.log(`[AUTH_FAIL] Minimal check failed`)
-      return res.status(401).send({ error: 'Unauthorized' })
-    }
-    return res.status(200).send({ status: 'connected', msg: 'Bridge restored via flat index' })
-  })
+async function bootstrap() {
+  const port = Number(process.env.PORT) || 8080
+  
+  // Healthcheck pentru Railway
+  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
   try {
     await app.register(websocket)
-    await app.listen({ host: '0.0.0.0', port: PORT })
-    console.log(`[EMERGENCY] Server listening on ${PORT}`)
+    await app.register(bridgeRoutes, { prefix: '/api/bridge' })
+    
+    // Pornim ascultarea înainte de DB pentru a trece healthcheck-ul Railway rapid
+    await app.listen({ host: '0.0.0.0', port })
+    console.log(`[BOOTSTRAP] Server listening on port ${port}`)
+
+    // Inițializare asincronă DB (nu blochează pornirea)
+    setImmediate(async () => {
+      try {
+        if (config.databaseUrl) {
+          await initDb()
+          await initAppFiles()
+          console.log('[DB] Initialized successfully')
+        }
+      } catch (err) {
+        console.error('[DB] Deferred initialization failed:', err)
+      }
+    })
+
   } catch (err) {
-    console.error('[EMERGENCY] Startup crash:', err)
+    console.error('[BOOTSTRAP] Fatal error:', err)
     process.exit(1)
   }
 }
 
-start()
+bootstrap()

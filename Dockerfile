@@ -25,5 +25,5 @@ RUN cd backend && npm run build
 
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
-EXPOSE 8081
+EXPOSE 8080
 CMD ["node", "backend/dist/index.js"]
