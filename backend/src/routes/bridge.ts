@@ -554,33 +554,94 @@ export function stageRelease(title: string, detail: string): string {
 interface WsLane {
   socket: { send(data: string): void; close(code?: number, reason?: string): void }
   busy: string | null // id-ul jobului aflat pe canal (null = liber)
+  // Ultimul semn de viață (ORICE mesaj de la worker: beat/ack/chunk/reply). O
+  // bandă WS trece prin Cloudflare, care taie conexiunile idle la ~100s, dar o
+  // conexiune „half-open" (workerul a murit fără FIN/RST) rămâne agățată la
+  // nesfârșit — serverul n-o vede închizându-se. `seen` o demască.
+  seen: number
+  // Banda a fost servită dar N-A confirmat (ack/chunk) → e moartă sau workerul
+  // de la capăt n-o servește. NU o mai preferăm la dispatch (altfel fiecare
+  // mesaj s-ar pierde pe ea, exact „legătura ruptă" deși serverul o crede sus).
+  suspect: boolean
 }
 const wsLanes = new Set<WsLane>()
+// O bandă e „vie" doar dacă a dat semn în ultimele 45s. Sub asta e zombie
+// (worker mort / TCP half-open peste Cloudflare) și nu mai primește joburi.
+const LANE_ALIVE_MS = 45_000
+function laneAlive(l: WsLane): boolean {
+  return !l.suspect && Date.now() - l.seen < LANE_ALIVE_MS
+}
 function freeLane(): WsLane | null {
-  for (const l of wsLanes) if (!l.busy) return l
+  for (const l of wsLanes) if (!l.busy && laneAlive(l)) return l
   return null
 }
+// Doar benzile VII se numără — becul „Bridge" nu mai raportează 10 benzi zombie
+// ca legătură sănătoasă.
 export function wsLaneCount(): number {
-  return wsLanes.size
+  let n = 0
+  for (const l of wsLanes) if (laneAlive(l)) n++
+  return n
 }
+// REAPER: închide și scoate benzile zombie (fără niciun semn de viață). Fără el,
+// benzile rămase de la un worker vechi/mort stăteau „deschise" pe server pentru
+// totdeauna, iar dispatch le prefera la infinit — fiecare mesaj al lui Adrian se
+// pierdea pe ele. Rulează des ca legătura să se auto-vindece în secunde.
+setInterval(() => {
+  for (const l of wsLanes) {
+    if (Date.now() - l.seen > LANE_ALIVE_MS) {
+      wsLanes.delete(l)
+      try {
+        l.socket.close(4000, 'stale')
+      } catch {
+        /* deja moartă */
+      }
+    }
+  }
+}, 15_000).unref()
 
 function dispatch(job: PendingJob): void {
-  // 1) canal permanent liber → jobul pleacă INSTANT, full-duplex
+  // 1) canal permanent VIU și liber → jobul pleacă INSTANT, full-duplex
   const lane = freeLane()
   if (lane) {
     lane.busy = job.id
     markServed(job)
     try {
       lane.socket.send(JSON.stringify({ type: 'job', job }))
+      // GARDĂ ANTI-ZOMBIE: `send()` pe un socket half-open REUȘEȘTE tăcut (intră
+      // în bufferul kernelului) fără să arunce — deci nu putem afla din try/catch
+      // că banda e moartă. Armăm în schimb un ceas scurt: dacă workerul nu
+      // confirmă (ack/chunk/reply) în câteva secunde, marcăm banda suspectă și
+      // RE-DISPECERIZĂM jobul pe calea HTTP (unde stau workerii reali). Un worker
+      // WS viu confirmă în ~1s (trimite ack imediat), deci calea rapidă rămâne
+      // rapidă; doar benzile moarte trec pe planul B.
+      armLaneFallback(job, lane)
       return
     } catch {
       lane.busy = null // canal mort — cade pe căile clasice
+      lane.suspect = true
     }
   }
   // 2) plasa de siguranță: long-poll-ul HTTP / coada persistentă
+  redispatchHttp(job)
+}
+
+// Re-dispecerizare DOAR pe calea HTTP (niciodată înapoi pe o bandă WS), ca să nu
+// buclăm între benzi zombie.
+function redispatchHttp(job: PendingJob): void {
   const w = pullWaiters.shift()
   if (w) w(job)
-  else queue.push(job)
+  else if (!queue.some((j) => j.id === job.id)) queue.push(job)
+}
+
+function armLaneFallback(job: PendingJob, lane: WsLane): void {
+  setTimeout(() => {
+    const e = inFlight.get(job.id)
+    if (!e || e.confirmed) return // banda a răspuns — totul bine
+    if (!waiters.has(job.id)) return // turul a renunțat deja — nimic de re-livrat
+    if (lane.busy === job.id) lane.busy = null
+    lane.suspect = true // banda nu mai e de încredere pentru joburile următoare
+    redispatchHttp(job) // dă mesajul unui worker HTTP real, ACUM
+  }, 6_000).unref()
 }
 
 // The worker polls every ≤30s; seen within 75s = online. CRUCIAL nuance: while
@@ -591,8 +652,9 @@ function dispatch(job: PendingJob): void {
 let lastJobDispatched = 0
 export function bridgeOnline(): boolean {
   if (config.bridgeSecret === '') return false
-  // Canale permanente deschise = puntea e sus, fără îndoială.
-  if (wsLanes.size > 0) return true
+  // Canale permanente VII deschise = puntea e sus, fără îndoială. (Benzile
+  // zombie NU se numără — altfel serverul raporta „sus" o legătură moartă.)
+  if (wsLaneCount() > 0) return true
   if (Date.now() - lastWorkerSeen < 75_000) return true
   return waiters.size > 0 && Date.now() - lastJobDispatched < 300_000
 }
@@ -898,11 +960,15 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       socket.close(4401, 'unauthorized')
       return
     }
-    const lane: WsLane = { socket, busy: null }
+    const lane: WsLane = { socket, busy: null, seen: Date.now(), suspect: false }
     wsLanes.add(lane)
     workerBeat()
     socket.on('message', (raw: Buffer) => {
       workerBeat()
+      // Orice mesaj = dovadă de viață: reînvie banda și îi scoate eticheta de
+      // suspect (dacă workerul a rămas tăcut o clipă, dar iată-l lucrând).
+      lane.seen = Date.now()
+      lane.suspect = false
       let m: { type?: string; id?: string; text?: string }
       try {
         m = JSON.parse(String(raw))
