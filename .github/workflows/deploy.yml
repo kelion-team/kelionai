@@ -94,11 +94,14 @@ jobs:
             if [ "$NSVC" -eq 1 ]; then
               SVC=$(echo "$P" | jq -r '.services.edges[0].node.name')
             else
-              echo "::error::Serviciul „web" nu există și sunt $NSVC servicii în „$PNAME" — nu ghicesc. Servicii: $(echo "$P" | jq -r '[.services.edges[].node.name] | join(", ")')"
+              LIST=$(echo "$P" | jq -r '[.services.edges[].node.name] | join(", ")')
+              # Fara ghilimele romanesti in stringuri bash: un " ASCII ratacit
+              # dupa „ inchidea stringul devreme -> syntax error near '(' (run #2).
+              echo "::error::Serviciul 'web' nu exista si sunt $NSVC servicii in '$PNAME' - nu ghicesc. Servicii: $LIST"
               exit 1
             fi
           fi
-          echo "ȚINTA ALEASĂ: proiect „$PNAME" ($PID), mediu „$ENVNAME", serviciu „$SVC"."
+          echo "TINTA ALEASA: proiect '$PNAME' ($PID), mediu '$ENVNAME', serviciu '$SVC'"
           {
             echo "mode=account-token"
             echo "project_id=$PID"
