@@ -3,7 +3,9 @@ import 'dotenv/config'
 function required(name: string): string {
   const v = process.env[name]
   if (!v || v.trim() === '') {
-    throw new Error(`Missing required env var: ${name}`)
+    // Audit 9 iul: nu mai aruncăm eroare la import pentru a preveni crash-ul silențios al serverului
+    // Validarea se va face la runtime când serviciul respectiv este accesat.
+    return ''
   }
   return v
 }
