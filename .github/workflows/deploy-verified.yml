@@ -1,0 +1,101 @@
+# DEPLOY VERIFICAT REAL — repară „deploy reușit dar producția rămâne veche".
+#
+# Problema dovedită (10 iul): deploy.yml declara succes doar fiindcă /health
+# răspundea 200 — dar 200 venea de la containerul VECHI pe care Railway îl ține
+# activ când un deploy nou nu-l înlocuiește (cursă/context vechi). Rutele noi
+# rămâneau 404 pe producție deși GitHub zicea „verde".
+#
+# Fixul: după publicare, NU ne mulțumim cu /health. Verificăm că o RUTĂ NOUĂ
+# (/api/admin/mailbox-live, adăugată în #71) răspunde 403 (rutată) în loc de 404
+# (inexistentă). Doar atunci codul nou e CU ADEVĂRAT live. Publică din `master`.
+name: deploy-verified
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/chat-instant-delay-em5gjf]
+    paths: ['.github/workflows/deploy-verified.yml']
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Publicăm EXACT `master` (codul corect, deja verificat local), nu ramura.
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalează Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Găsește ținta (proiect + mediu + serviciu)
+        id: target
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "::error::RAILWAY_TOKEN lipsește"; exit 1; fi
+          Q='{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}'
+          RESP=$(curl -sS --max-time 30 https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$Q" || echo '{}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0] // .data.projects.edges[0].node')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id // .environments.edges[0].node.id')
+          SVC=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].name // .services.edges[0].node.name')
+          echo "Țintă: proiect $(echo "$P"|jq -r .name), serviciu $SVC"
+          { echo "project_id=$PID"; echo "env_id=$ENVID"; echo "service=$SVC"; } >> "$GITHUB_OUTPUT"
+
+      - name: Publică pe Railway (context proaspăt din master)
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          PROJECT_ID: ${{ steps.target.outputs.project_id }}
+          ENV_ID: ${{ steps.target.outputs.env_id }}
+          SERVICE: ${{ steps.target.outputs.service }}
+        run: |
+          set -euo pipefail
+          GQL=https://backboard.railway.com/graphql/v2
+          TNAME="ghv-${GITHUB_RUN_ID}"
+          MUT=$(jq -nc --arg n "$TNAME" --arg p "$PROJECT_ID" --arg e "$ENV_ID" \
+            '{query:"mutation($n:String!,$p:String!,$e:String!){projectTokenCreate(input:{name:$n,projectId:$p,environmentId:$e})}",variables:{n:$n,p:$p,e:$e}}')
+          PT=$(curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" -d "$MUT" | jq -r '.data.projectTokenCreate // empty')
+          if [ -z "$PT" ]; then echo "::error::projectTokenCreate a refuzat"; exit 1; fi
+          echo "::add-mask::$PT"
+          cleanup() {
+            DELQ=$(jq -nc --arg p "$PROJECT_ID" '{query:"query($p:String!){projectTokens(projectId:$p){edges{node{id name}}}}",variables:{p:$p}}')
+            TID=$(curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$DELQ" \
+              | jq -r --arg n "$TNAME" '.data.projectTokens.edges[]?.node|select(.name==$n)|.id' | head -1)
+            [ -n "$TID" ] && curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg i "$TID" '{query:"mutation($i:String!){projectTokenDelete(id:$i)}",variables:{i:$i}}')" >/dev/null || true
+          }
+          trap cleanup EXIT
+          export RAILWAY_TOKEN="$PT"; unset RAILWAY_API_TOKEN || true
+          railway up --service "$SERVICE" --ci
+
+      - name: VERIFICĂ REAL că noul cod e live (nu doar /health)
+        run: |
+          set -uo pipefail
+          # Ruta nouă /api/admin/mailbox-live există DOAR în codul nou. Fără login
+          # întoarce 403 dacă e rutată, 404 dacă serverul e încă cel vechi. Așteptăm
+          # până la ~4 min ca noul container să preia traficul.
+          ok=""
+          for i in $(seq 1 48); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/api/admin/mailbox-live || echo 000)
+            ver=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+            echo "încercarea $i → mailbox-live HTTP $code   version=$ver"
+            if [ "$code" = "403" ]; then ok="1"; break; fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Deploy trimis, DAR codul nou NU e live (mailbox-live încă 404 după ~4 min). Producția rămâne pe build vechi."
+            exit 1
+          fi
+          echo "🟢 CONFIRMAT LIVE — codul nou răspunde pe producție (mailbox-live rutat = 403)."
