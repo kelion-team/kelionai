@@ -95,6 +95,10 @@ export async function* streamChat(
   files?: { name: string; type: string; data: string }[],
   // STOP: semnal de abandon — „stop" scris/vorbit taie tura PE LOC (nu în coadă).
   signal?: AbortSignal,
+  // Poza a fost ATAȘATĂ EXPLICIT (lipită cu Ctrl+V sau încărcată) — cerere de
+  // analiză fără echivoc, spre deosebire de cadrul camerei mereu-pornite (care
+  // se analizează doar la cerere explicită în text). Vezi ChatPanel.tsx.
+  imageIsAttachment?: boolean,
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -106,6 +110,7 @@ export async function* streamChat(
       body: JSON.stringify({
         messages,
         image,
+        imageIsAttachment,
         coords,
         screen,
         files,

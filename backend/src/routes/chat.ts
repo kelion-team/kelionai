@@ -652,6 +652,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     Body: {
       messages?: ChatMessage[]
       image?: string
+      // Poza a fost ATAȘATĂ EXPLICIT (Ctrl+V / încărcată), nu e cadrul ambient
+      // al camerei — cerere de analiză fără condiție (vezi VISION_INTENT mai jos).
+      imageIsAttachment?: boolean
       coords?: Coords
       screen?: { kind: string; title: string; active: boolean }[]
       now?: string
@@ -680,6 +683,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // De aceea vechiul gard 503 „brain_not_configured" a dispărut de aici.
     const rawMessages = req.body?.messages
     const image = req.body?.image
+    const imageIsAttachment = req.body?.imageIsAttachment === true
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
@@ -930,7 +934,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (image && params.length > 0) {
       const lastIdx = params.length - 1
       const lm = params[lastIdx]
-      if (lm.role === 'user' && typeof lm.content === 'string' && VISION_INTENT.test(lm.content)) {
+      if (
+        lm.role === 'user' &&
+        typeof lm.content === 'string' &&
+        (imageIsAttachment || VISION_INTENT.test(lm.content))
+      ) {
         const data = image.includes(',') ? image.slice(image.indexOf(',') + 1) : image
         params[lastIdx] = {
           role: 'user',
@@ -1740,8 +1748,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // avem cadrul camerei, îl trimitem ca fișier de job — workerul îl privește
       // cu Read în cutia publică (izolată de a adminului).
       const pubFiles: BridgeFile[] =
-        image && VISION_INTENT.test(lastUserText)
-          ? [{ name: 'camera.jpg', type: 'image/jpeg', data: image }]
+        image && (imageIsAttachment || VISION_INTENT.test(lastUserText))
+          ? [{ name: imageIsAttachment ? 'atasament.jpg' : 'camera.jpg', type: 'image/jpeg', data: image }]
           : []
       let acc = '' // TOT ce a produs creierul (cu etichete cu tot)
       let shownAny = false
