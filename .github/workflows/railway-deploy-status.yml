@@ -6,6 +6,11 @@ name: railway-deploy-status
 
 on:
   workflow_dispatch:
+  # Rulează și la push pe ramura de diagnostic (workflow_dispatch merge doar de pe
+  # ramura implicită; pe push rulează de pe ORICE ramură, deci îl pot porni acum).
+  push:
+    branches: [claude/chat-instant-delay-em5gjf]
+    paths: ['.github/workflows/railway-deploy-status.yml']
 
 jobs:
   status:
