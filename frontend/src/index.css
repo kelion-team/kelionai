@@ -2938,13 +2938,21 @@ a.card-item:hover {
 
 /* DICTARE LIVE — efect cinematografic „AI din filme": bandă terminal, text
    monospace cu glow, cursor care clipește, punct roșu care pulsează. */
-.voice-live {
+/* REGULĂ FIXĂ (Adrian, 10 iul): orice bandă live e o SINGURĂ LINIE, înălțime
+   fixă — nu crește NICIODATĂ pe verticală, nu acoperă niciodată pagina. Text
+   lung derulează ca teletextul (.ticker), nu se rupe pe mai multe linii. */
+.voice-live,
+.heard-band {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 38px;
   margin: 0 6px 8px;
-  padding: 10px 14px;
+  padding: 0 14px;
   border-radius: 12px;
+  overflow: hidden;
+}
+.voice-live {
   background: linear-gradient(90deg, rgba(0, 20, 12, 0.85), rgba(0, 12, 20, 0.85));
   border: 1px solid rgba(80, 240, 170, 0.28);
   box-shadow: 0 0 22px rgba(60, 240, 160, 0.12), inset 0 0 18px rgba(0, 0, 0, 0.35);
@@ -2957,17 +2965,6 @@ a.card-item:hover {
   background: #ff4d4d;
   box-shadow: 0 0 8px #ff4d4d;
   animation: voice-pulse 1s ease-in-out infinite;
-}
-.voice-live-text {
-  flex: 1;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 15px;
-  line-height: 1.4;
-  letter-spacing: 0.4px;
-  color: #7dffc0;
-  text-shadow: 0 0 6px rgba(90, 255, 180, 0.5);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 .voice-live-caret {
   flex: 0 0 auto;
@@ -2984,33 +2981,48 @@ a.card-item:hover {
 /* BARGRAF LA INTRAREA ÎN CREIER: confirmarea serverului cu textul EXACT predat
    creierului la tura curentă — chihlimbar, distinct de banda verde de dictare. */
 .heard-band {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin: 0 6px 8px;
-  padding: 8px 14px;
-  border-radius: 12px;
   background: linear-gradient(90deg, rgba(24, 16, 0, 0.88), rgba(20, 10, 0, 0.88));
   border: 1px solid rgba(255, 190, 80, 0.35);
   box-shadow: 0 0 18px rgba(255, 180, 60, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
 }
 .heard-band-label {
   flex: 0 0 auto;
-  font-size: 11px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  color: #ffca7a;
-  opacity: 0.85;
+  font-size: 15px;
 }
-.heard-band-text {
+/* TICKER / TELETEXT: o singură linie, care derulează în loc să se rupă sau să
+   crească pagina. Text scurt (încape) → static; text lung → derulează stânga. */
+.ticker {
   flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.ticker-text {
+  display: inline-block;
+  white-space: nowrap;
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
-  line-height: 1.4;
+  letter-spacing: 0.3px;
+  padding-left: 100%;
+  animation: ticker-scroll linear 1;
+  animation-duration: var(--ticker-dur, 6s);
+}
+.voice-live .ticker-text {
+  color: #7dffc0;
+  text-shadow: 0 0 6px rgba(90, 255, 180, 0.5);
+}
+.heard-band .ticker-text {
   color: #ffd9a0;
   text-shadow: 0 0 6px rgba(255, 200, 120, 0.35);
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
 }
 @keyframes voice-caret {
   0%, 50% { opacity: 1; }

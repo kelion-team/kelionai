@@ -5,6 +5,7 @@ import {
   useSyncExternalStore,
   type ChangeEvent,
   type ClipboardEvent as ReactClipboardEvent,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
@@ -98,6 +99,9 @@ export default function ChatPanel({
   // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT predat
   // creierului la tura curentă — vine de pe SERVER ({heard}), nu e ecou local.
   const [heard, setHeard] = useState('')
+  // TICKER (regulă fixă, 10 iul): durata derulării scalează cu lungimea
+  // textului, ca să rămână lizibil — nici prea repede, nici o veșnicie.
+  const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
   // Modul microfon: true = dictare live (streaming WS); cade pe batch dovedit
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
@@ -1134,10 +1138,23 @@ export default function ChatPanel({
         {/* DICTARE LIVE cu efect cinematografic (ca în filmele cu AI): pe măsură
             ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
             clipește; la pauză > 3s pleacă la creier și banda se golește. */}
+        {/* REGULĂ FIXĂ (Adrian, 10 iul: „nu vreau să văd pe interfață ceva ce
+            acoperă pagina — textul curge ca teletextul, pe o singură linie"):
+            ORICE bandă live e o linie fixă, text pe o singură linie, care
+            derulează (teletext) dacă nu încape — NICIODATĂ nu crește pe
+            verticală, niciodată nu acoperă pagina. */}
         {liveVoice && (
           <div className="voice-live" aria-live="polite">
             <span className="voice-live-dot" />
-            <span className="voice-live-text">{liveVoice}</span>
+            <span className="ticker">
+              <span
+                className="ticker-text"
+                key={liveVoice}
+                style={{ '--ticker-dur': tickerDur(liveVoice) } as CSSProperties}
+              >
+                {liveVoice}
+              </span>
+            </span>
             <span className="voice-live-caret" />
           </div>
         )}
@@ -1147,8 +1164,16 @@ export default function ChatPanel({
             creier (microfon/ureche); dacă textul e greșit, urechea aude prost. */}
         {heard && (
           <div className="heard-band" aria-live="polite">
-            <span className="heard-band-label">🧠 la intrare în creier</span>
-            <span className="heard-band-text">„{heard}"</span>
+            <span className="heard-band-label">🧠</span>
+            <span className="ticker">
+              <span
+                className="ticker-text"
+                key={heard}
+                style={{ '--ticker-dur': tickerDur(heard) } as CSSProperties}
+              >
+                „{heard}"
+              </span>
+            </span>
           </div>
         )}
         {/* Ordinul lui Adrian: „doar vocea mea, nu se acceptă alta" — cât nu e
