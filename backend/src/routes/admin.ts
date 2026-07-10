@@ -15,6 +15,7 @@ import {
   grantCredit,
   deleteUserData,
   listLeads,
+  listContactMessages,
   markLeadContacted,
   listVisitorConvos,
   getVisitorMessages,
@@ -318,6 +319,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ leads: await listLeads() })
+  })
+
+  // Mesajele din formularul „Contact" — salvate MEREU în DB, deci owner-ul le
+  // vede aici chiar dacă emailul nu e configurat (bug „contactul nu se trimite").
+  app.get('/api/admin/contact-messages', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ messages: await listContactMessages() })
   })
 
   // Email a captured lead through the site's mail service (admin only).

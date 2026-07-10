@@ -334,6 +334,30 @@ export async function fetchInbound(): Promise<InboundEmail[]> {
   }
 }
 
+// Mesajele din formularul „Contact" — salvate mereu în DB, vizibile chiar dacă
+// emailul nu e configurat.
+export interface ContactMessage {
+  id: number
+  name: string
+  email: string
+  subject: string
+  message: string
+  department: string
+  lang: string
+  emailed: boolean
+  created_at: string
+}
+
+export async function fetchContactMessages(): Promise<ContactMessage[]> {
+  try {
+    const r = await fetch('/api/admin/contact-messages', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
+  } catch {
+    return []
+  }
+}
+
 export async function decideRelease(id: string, decision: 'approve' | 'reject'): Promise<void> {
   try {
     await fetch('/api/admin/releases/decide', {
