@@ -5,6 +5,7 @@ import {
   fetchGaps,
   fetchFinance,
   updatePool,
+  manageUser,
   fetchDemos,
   fetchActivity,
   fetchDevLog,
@@ -718,6 +719,55 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                         <span>{u.sessions} sesiuni</span>
                         <span>timp total {fmtDur(u.seconds)}</span>
                         <span>{u.messages} mesaje</span>
+                        <span>
+                          sold {sym}
+                          {u.balance.toFixed(2)}
+                        </span>
+                        {u.blocked && <span className="user-badge blocked">BLOCAT</span>}
+                      </div>
+                      <div className="vis-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="user-act"
+                          onClick={async () => {
+                            const r = await manageUser(u.email, u.blocked ? 'unblock' : 'block')
+                            if (r) setActivity(r)
+                          }}
+                        >
+                          {u.blocked ? 'Deblochează' : 'Blochează'}
+                        </button>
+                        <button
+                          type="button"
+                          className="user-act"
+                          onClick={async () => {
+                            const s = window.prompt(
+                              `Credit pentru ${u.email} în ${sym}. Pune negativ ca să scazi:`,
+                            )
+                            if (s == null) return
+                            const amt = Number(s)
+                            if (!Number.isFinite(amt) || amt === 0) return
+                            const r = await manageUser(u.email, 'credit', amt)
+                            if (r) setActivity(r)
+                          }}
+                        >
+                          Credit
+                        </button>
+                        <button
+                          type="button"
+                          className="user-act danger"
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                `Ștergi definitiv datele lui ${u.email}? (mesaje, sold, sesiuni, memorie)`,
+                              )
+                            )
+                              return
+                            const r = await manageUser(u.email, 'delete')
+                            if (r) setActivity(r)
+                          }}
+                        >
+                          Șterge
+                        </button>
                       </div>
                     </div>
                   ))}

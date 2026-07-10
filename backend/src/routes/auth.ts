@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
 import { config, isAllowed, roleFor } from '../config.js'
 import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
+import { isBlocked } from '../db.js'
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 
@@ -148,6 +149,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // The gate: v1 admits only the allowlist.
       if (!isAllowed(email)) {
         return reply.redirect(`${config.frontendOrigin}/?error=closed`)
+      }
+      // Blocked users are refused (the admin can never be blocked — the block
+      // route protects it, but guard here too so the owner is never locked out).
+      if (email !== config.adminEmail && (await isBlocked(email))) {
+        return reply.redirect(`${config.frontendOrigin}/?error=blocked`)
       }
 
       setSession(reply, {
