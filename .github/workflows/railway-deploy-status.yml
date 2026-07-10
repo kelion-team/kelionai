@@ -1,0 +1,60 @@
+# DIAGNOSTIC (doar-citire): DE CE nu ajunge deploy-ul live. Întreabă API-ul
+# Railway starea ULTIMELOR deploy-uri (SUCCESS / FAILED / CRASHED / REMOVED) +
+# commitul fiecăruia, apoi descarcă jurnalul de BUILD și de DEPLOY al celui mai
+# recent. Nu publică, nu creează, nu șterge nimic. Parola/secretele nu se ating.
+name: railway-deploy-status
+
+on:
+  workflow_dispatch:
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Starea deploy-urilor Railway
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "$TOKEN" ]; then echo "::error::RAILWAY_TOKEN lipsește"; exit 1; fi
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0] // .data.projects.edges[0].node')
+          PID=$(echo "$P" | jq -r '.id')
+          PNAME=$(echo "$P" | jq -r '.name')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id // .environments.edges[0].node.id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
+          SVCNAME=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].name // .services.edges[0].node.name')
+          echo "Proiect: $PNAME   Serviciu: $SVCNAME"
+          echo "Toate serviciile din proiect:"
+          echo "$P" | jq -r '.services.edges[].node | "  - \(.name)  (\(.id))"'
+          echo ""
+
+          # Ultimele 8 deploy-uri: stare + data + commit + dacă e cel activ.
+          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:8,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt staticUrl meta canRedeploy}}}}",variables:{p:$p,e:$e,s:$s}}')
+          DEP=$(gql "$DQ")
+          echo "=== ULTIMELE DEPLOY-URI (cel mai nou primul) ==="
+          echo "$DEP" | jq -r '.data.deployments.edges[]?.node | "\(.createdAt)  \(.status)  \(.id)"' || echo "$DEP"
+          echo ""
+          echo "=== commit/meta per deploy ==="
+          echo "$DEP" | jq -r '.data.deployments.edges[]?.node | "\(.status)\t\(.meta // {} | tostring)"' | head -8
+          echo ""
+
+          # Cel mai recent deploy: descarcă jurnalul de BUILD și de DEPLOY ca să
+          # vedem EXACT unde pică (build error / crash la pornire / health timeout).
+          DID=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.id // empty')
+          DST=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.status // empty')
+          echo "Cel mai recent deploy: $DID  ($DST)"
+          if [ -n "$DID" ]; then
+            echo ""
+            echo "=== BUILD LOGS (ultimul deploy) ==="
+            BQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){buildLogs(deploymentId:$d,limit:200){message severity}}",variables:{d:$d}}')
+            gql "$BQ" | jq -r '.data.buildLogs[]?.message // empty' | tail -80 || echo "(fără build logs)"
+            echo ""
+            echo "=== DEPLOY LOGS (ultimul deploy — pornirea containerului) ==="
+            LQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){deploymentLogs(deploymentId:$d,limit:200){message severity}}",variables:{d:$d}}')
+            gql "$LQ" | jq -r '.data.deploymentLogs[]?.message // empty' | tail -80 || echo "(fără deploy logs)"
+          fi
