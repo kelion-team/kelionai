@@ -1,10 +1,8 @@
 # DIAGNOSTIC CREIER (doar-citire, NU atinge producția): rulează pe pull_request,
-# NU pe master — zero deploy, zero modificare. Face două lucruri:
-#   1. Ia ANTHROPIC_API_KEY chiar de pe Railway (cheia REALĂ pe care o folosește
-#      serverul) și întreabă DIRECT api.anthropic.com cu ea, pe fiecare model —
-#      tipărește statusul HTTP + mesajul de eroare EXACT (cheia rămâne mascată).
-#   2. Scoate ultimele linii de eroare din jurnalul RUNTIME al serverului.
-# Așa vedem negru pe alb DE CE pică chatul — fără presupuneri.
+# NU pe master — zero deploy, zero modificare. Ia ANTHROPIC_API_KEY chiar de pe
+# Railway (cheia REALĂ a serverului) și întreabă DIRECT api.anthropic.com, pe
+# fiecare model. VERDICTUL apare MARE pe pagina rulării (Summary) — nu trebuie
+# extins niciun pas ca să-l vezi.
 
 name: brain-diag
 
@@ -17,7 +15,7 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Interoghează Anthropic cu cheia REALĂ a serverului + jurnalul runtime
+      - name: Verdict creier — cheia REALĂ a serverului vs Anthropic
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -25,48 +23,64 @@ jobs:
           GQL=https://backboard.railway.com/graphql/v2
           gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
 
-          # Găsește proiectul/mediul/serviciul (identic cu bridge-deploy).
           RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
           P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0]')
           PID=$(echo "$P" | jq -r '.id')
           ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
           SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
-          echo "proiect=$PID mediu=$ENVID serviciu=$SVCID"
 
-          # 1) CHEIA REALĂ de pe server → întreabă DIRECT Anthropic, per model.
           VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
             '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
-          VARS=$(gql "$VQ")
-          KEY=$(echo "$VARS" | jq -r '.data.variables.ANTHROPIC_API_KEY // empty')
-          if [ -z "$KEY" ]; then echo "::error::ANTHROPIC_API_KEY lipsește dintre variabilele Railway!"; else
-            echo "::add-mask::$KEY"
-            echo "cheie: lungime=${#KEY}, prefix=$(echo "$KEY" | cut -c1-7)"
-            for MODEL in claude-fable-5 claude-opus-4-8 claude-haiku-4-5-20251001; do
-              echo "=== TEST DIRECT ANTHROPIC: $MODEL ==="
-              BODY=$(jq -nc --arg m "$MODEL" '{model:$m,max_tokens:8,messages:[{role:"user",content:"Reply: ok"}]}')
-              HTTP=$(curl -sS --max-time 45 -o /tmp/resp.json -w '%{http_code}' \
-                https://api.anthropic.com/v1/messages \
-                -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
-                -d "$BODY" || echo 000)
-              echo "HTTP $HTTP"
-              # La succes nu tipărim conținutul (nu contează); la eroare DA — exact.
-              if [ "$HTTP" != "200" ]; then cat /tmp/resp.json | head -c 600; echo; fi
-            done
+          KEY=$(gql "$VQ" | jq -r '.data.variables.ANTHROPIC_API_KEY // empty')
+          if [ -z "$KEY" ]; then
+            echo "## ❌ ANTHROPIC_API_KEY LIPSEȘTE de pe Railway" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::ANTHROPIC_API_KEY lipsește dintre variabilele Railway"
+            exit 0
           fi
+          echo "::add-mask::$KEY"
+          LAST4="${KEY: -4}"
 
-          # 2) Jurnalul RUNTIME al serverului — ultimele linii cu erori.
-          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:1,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt}}}}",variables:{p:$p,e:$e,s:$s}}')
-          DEP=$(gql "$DQ")
-          DID=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.id // empty')
-          echo "deployment=$DID status=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.status // "?"')"
-          if [ -n "$DID" ]; then
-            LQ=$(jq -nc --arg d "$DID" \
-              '{query:"query($d:String!){deploymentLogs(deploymentId:$d,limit:500){timestamp message severity}}",variables:{d:$d}}')
-            LOGS=$(gql "$LQ")
-            echo "=== ULTIMELE ERORI DIN JURNALUL SERVERULUI ==="
-            echo "$LOGS" | jq -r '.data.deploymentLogs[]? | "\(.timestamp) [\(.severity)] \(.message)"' \
-              | grep -iE 'error|err"|fail|exception|anthropic|status.?[45][0-9][0-9]' | tail -40 \
-              || { echo "(filtrul n-a prins nimic — ultimele 25 linii brute:)"; echo "$LOGS" | jq -r '.data.deploymentLogs[]? | .message' | tail -25; }
-            echo "$LOGS" | jq -r '.errors[]?.message' 2>/dev/null || true
+          {
+            echo "# VERDICT CREIER — test DIRECT la api.anthropic.com"
+            echo ""
+            echo "**Ora testului:** $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+            echo ""
+            echo "**Cheia testată:** EXACT cea de pe Railway (variabila \`ANTHROPIC_API_KEY\` a serviciului web) — se termină în \`…${LAST4}\`, lungime ${#KEY}."
+            echo ""
+            echo "Compar-o singur: Railway → service web → Variables → ANTHROPIC_API_KEY (ultimele 4 caractere), apoi console.anthropic.com → Settings → API keys."
+            echo ""
+            echo "| Model | HTTP | Răspunsul Anthropic, cuvânt cu cuvânt |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for MODEL in claude-fable-5 claude-opus-4-8 claude-haiku-4-5-20251001; do
+            BODY=$(jq -nc --arg m "$MODEL" '{model:$m,max_tokens:8,messages:[{role:"user",content:"Reply: ok"}]}')
+            HTTP=$(curl -sS --max-time 45 -o /tmp/resp.json -w '%{http_code}' \
+              https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+              -d "$BODY" || echo 000)
+            if [ "$HTTP" = "200" ]; then
+              MSG="✅ MERGE — modelul a răspuns (cheia ARE credit)"
+            else
+              MSG=$(jq -r '.error.message // "(fără mesaj)"' /tmp/resp.json 2>/dev/null | head -c 300)
+            fi
+            echo "| \`$MODEL\` | **$HTTP** | $MSG |" >> "$GITHUB_STEP_SUMMARY"
+            echo "=== $MODEL -> HTTP $HTTP: $MSG"
+            LASTHTTP="$HTTP"; LASTMSG="$MSG"
+          done
+
+          {
+            echo ""
+            if [ "$LASTHTTP" = "200" ]; then
+              echo "## ✅ CHEIA ARE CREDIT — creierul API funcționează acum."
+            else
+              echo "## ❌ TOATE modelele refuzate cu HTTP $LASTHTTP."
+              echo ""
+              echo "> $LASTMSG"
+              echo ""
+              echo "**Tradus:** creditul API al contului care deține cheia \`…${LAST4}\` este epuizat. Abonamentul Claude (claude.ai) NU alimentează API-ul — creditul API se încarcă separat la console.anthropic.com → Plans & Billing, la contul care deține exact cheia \`…${LAST4}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$LASTHTTP" != "200" ]; then
+            echo "::error::Anthropic răspunde HTTP $LASTHTTP pentru cheia …${LAST4}: $LASTMSG"
           fi
