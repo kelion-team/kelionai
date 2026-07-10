@@ -147,6 +147,8 @@ export default function ChatPanel({
   const coordsRef = useRef<Coords | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
+  // Controlerul de abandon al turei în curs — „stop" îl abortează pe loc.
+  const abortRef = useRef<AbortController | null>(null)
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
@@ -588,6 +590,35 @@ export default function ChatPanel({
         return
       }
     }
+    // OPRIRE IMEDIATĂ (Adrian, 10 iul: „îi spun stop și mă ignoră, nu primește
+    // imediat comanda"). „stop" scris sau vorbit NU se pune în coadă — taie vocea
+    // și tura curentă PE LOC, golește coada și închide cererea pe server. Softul
+    // NU se rupe: backendul își termină singur tura în fundal; eu doar nu mai
+    // aștept și nu mai vorbesc. Se verifică ÎNAINTE de garda „ocupat".
+    const STOP_CMD =
+      /^\s*(stop|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
+    if (msg && STOP_CMD.test(msg)) {
+      stopVoice()
+      abortRef.current?.abort()
+      pendingSendsRef.current = [] // stop înseamnă stop — golește coada
+      inFlightRef.current = false
+      setBusy(false)
+      setLiveVoice('')
+      setInput('')
+      // Închide cererea/bucla pe server (handlerul de stop din backend).
+      void fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: msg }],
+          now: new Date().toISOString(),
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      }).catch(() => {})
+      ack(speechLangRef.current.toLowerCase().startsWith('ro') ? 'Am oprit.' : 'Stopped.')
+      return
+    }
     // Camera + monitor commands are interpreted by the SERVER (it sees the open
     // tabs on every turn and answers instantly with a {device} frame, no model
     // call) — nothing to intercept here anymore.
@@ -636,9 +667,12 @@ export default function ChatPanel({
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
     setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
     setChatImage(null) // a new turn clears any previously shown image
+    // Controlerul de abandon al ACESTEI ture — „stop" îl abortează pe loc.
+    const ac = new AbortController()
+    abortRef.current = ac
     setBusy(true)
+    let acc = ''
     try {
-      let acc = ''
       const wsNow = getWorkspace()
       const screen = wsNow.open
         ? wsNow.tasks.map((tk) => ({ kind: tk.kind, title: tk.title, active: tk.id === wsNow.activeId }))
@@ -650,6 +684,7 @@ export default function ChatPanel({
         handleControl,
         screen,
         bridgeFiles,
+        ac.signal,
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
@@ -658,24 +693,33 @@ export default function ChatPanel({
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
     } catch (err) {
-      const code = err instanceof Error ? err.message : 'error'
-      // Offline text follows the language the user actually speaks (so a driver
-      // hears it in their language), not the account-UI locale.
-      const spoken = strings(resolveLang(replyLang))
-      const m =
-        code === 'brain_not_configured'
-          ? t.brainNotActive
-          : code === 'offline'
-            ? spoken.offline
-            : t.brainError
-      setMessages([...next, { role: 'assistant', content: `⚠️ ${m}`, ts: Date.now() }])
-      // Lost signal (e.g. a tunnel while driving): remember so we can resume
-      // when we're back online.
-      if (code === 'offline') {
-        offlineRef.current = true
-        retryTextRef.current = msg // resume THIS message when the signal returns
+      if (ac.signal.aborted) {
+        // OPRIT de Adrian — fără mesaj de eroare; textul deja afișat rămâne așa.
+      } else {
+        // Nu lăsa vocea să spună mai mult decât s-a scris (bug 10 iul: scrisul
+        // dispărea la eroare, dar audio-ul continua).
+        stopVoice()
+        const code = err instanceof Error ? err.message : 'error'
+        const spoken = strings(resolveLang(replyLang))
+        const m =
+          code === 'brain_not_configured'
+            ? t.brainNotActive
+            : code === 'offline'
+              ? spoken.offline
+              : t.brainError
+        // PĂSTREAZĂ textul deja primit (nu-l arunca) — doar adaugă o notă discretă,
+        // ca scrisul să rămână complet față de ce s-a auzit.
+        setMessages([
+          ...next,
+          { role: 'assistant', content: acc.trim() ? `${acc}\n⚠️ ${m}` : `⚠️ ${m}`, ts: Date.now() },
+        ])
+        if (code === 'offline') {
+          offlineRef.current = true
+          retryTextRef.current = msg // resume THIS message when the signal returns
+        }
       }
     } finally {
+      if (abortRef.current === ac) abortRef.current = null
       inFlightRef.current = false
       setBusy(false)
       // Anything written during this turn was queued, not lost — combine it and

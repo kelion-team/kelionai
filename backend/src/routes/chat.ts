@@ -439,7 +439,10 @@ async function streamVoice(
     .replace(/[*_#`~>|]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 1800)
+    // Plafon de rostire ridicat 1800 → 4000 (Adrian, 10 iul: „ieșirea audio minim
+    // 1 minut"). 4000 caractere ≈ 3-4 minute, sintetizate pe bucăți de frază, deci
+    // un răspuns lung se aude întreg, nu tăiat.
+    .slice(0, 4000)
   if (!spoken) return
   // Ordinul lui Adrian (6 iul): „nu vreau să mai aștept atâta până răspunzi".
   // Sinteza pe TOT textul deodată ținea vocea în așteptare cât dura tot

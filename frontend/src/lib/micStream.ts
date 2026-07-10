@@ -87,6 +87,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let wsReady = false
   let lastVoiceAt = 0
   let phraseFinal = '' // finalurile validate din fraza curentă
+  let lastPartial = '' // ultimul parțial (dacă Google nu dă „final" în 3s)
   let phraseTimer: ReturnType<typeof setTimeout> | null = null
   // PLASĂ contra „mic-ului mut": dacă am trimis voce dar Google NU întoarce NIMIC
   // în 15s, streamingul e stricat (WS/auth/format) → cădem pe calea batch dovedită.
@@ -99,16 +100,31 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     ws = new WebSocket(`${proto}://${location.host}/api/asr-stream`)
     ws.binaryType = 'arraybuffer'
   } catch {
+    // WS n-a pornit → curăță graful audio și cade pe batch (nu lăsa AudioContext
+    // + microfon agățate — scurgere/rasă din audit 10 iul).
+    try {
+      proc.disconnect()
+      source.disconnect()
+    } catch {
+      /* deja deconectat */
+    }
+    stream.getTracks().forEach((t) => t.stop())
+    void ctx.close().catch(() => {})
     opts.onError('failed')
+    return null
   }
 
   const closePhrase = (): void => {
-    const text = phraseFinal.trim()
-    phraseFinal = ''
     if (phraseTimer) {
       clearTimeout(phraseTimer)
       phraseTimer = null
     }
+    // Dacă Google n-a dat „final" în 3s, folosește ultimul parțial — altfel o
+    // frază scurtă/de coadă se pierdea complet (bug audit 10 iul).
+    const text = (phraseFinal || lastPartial).trim()
+    phraseFinal = ''
+    lastPartial = ''
+    opts.onLive('') // golește MEREU banda la sfârșit de frază (nu rămâne agățat)
     if (text) opts.onPhrase(text)
   }
 
@@ -141,6 +157,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       }
       if (m.type === 'partial' && typeof m.transcript === 'string') {
         // LIVE: finaluri validate + parțialul care crește acum
+        lastPartial = m.transcript
         const live = `${phraseFinal} ${m.transcript}`.trim()
         opts.onLive(live)
         armPhraseTimer()
