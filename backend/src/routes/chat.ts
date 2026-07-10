@@ -27,6 +27,8 @@ import {
   getRecentHistory,
   getSharedMemory,
   getAnthropicKey,
+  getMemories,
+  deleteMemory,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -74,15 +76,15 @@ import {
   type BridgeFile,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
+import { MODEL_FAST, MODEL_TOP, chooseModel } from '../services/modelRouter.js'
 
-// The brain: Claude Fable 5 — Anthropic's most capable model. If Fable has ANY
-// problem (suspended access, overload, a safety refusal, any error before text
-// streams), the turn is transparently re-served by the RESERVE brain, Opus 4.8,
-// and Fable is rested for a while before we probe it again. The user never
-// notices — one brain, always answering.
-const MODEL = 'claude-fable-5'
-const MODEL_RESERVE = 'claude-opus-4-8'
-const FABLE_REST_MS = 10 * 60_000 // after a hard failure, use Opus for 10 min
+// STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
+// modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
+// cost (services/modelRouter.ts), determinist și gratuit. Tier-urile stau acolo,
+// configurabile din mediu (future-proof). Numele vechi rămân pentru restul codului.
+const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
+const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
+const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
 let fableDownUntil = 0
 // Ultimul mesaj (normalizat) al adminului — pentru filtrul anti-ecou ASR:
 // un duplicat sosit în <45s nu mai pornește o tură (zgomot de microfon).
@@ -180,6 +182,28 @@ const DELETE_NOTE_TOOL: Anthropic.Tool = {
     type: 'object',
     properties: { id: { type: 'number', description: 'The note id to delete.' } },
     required: ['id'],
+  },
+}
+
+// MEMORIA E A USERULUI (#20, Adrian 10 iul): pe lângă notițele explicite, userul
+// vede și controlează și memoria învățată automat — transparență + „uită asta".
+// Disponibile TUTUROR userilor (aceleași capabilități pentru toți).
+const LIST_MEMORIES_TOOL: Anthropic.Tool = {
+  name: 'list_memories',
+  description:
+    'Show everything you (Kelion) remember about this user from earlier conversations — the auto-learned durable facts (distinct from their explicitly saved notes). Use when they ask "ce știi despre mine?", "ce ții minte despre mine?", "what do you remember about me?". Present it naturally in their language.',
+  input_schema: { type: 'object', properties: {} },
+}
+const FORGET_MEMORY_TOOL: Anthropic.Tool = {
+  name: 'forget_memory',
+  description:
+    'Permanently forget remembered facts about this user that match a text fragment, when they ask you to forget something (e.g. "uită că...", "șterge din memorie...", "forget that I..."). Pass the most specific fragment of the fact. Returns how many facts were deleted — confirm honestly (0 = nothing matched).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      fragment: { type: 'string', description: 'Text fragment identifying the fact(s) to forget.' },
+    },
+    required: ['fragment'],
   },
 }
 
@@ -749,13 +773,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // live instant"): citirile independente pleacă ÎMPREUNĂ — fiecare await
     // separat mai punea o tură de DB înaintea primului cuvânt.
     const lastForRecall = messages.at(-1)
-    const [storedPref, userAnthropicKey, meserieId, memRecall] = await Promise.all([
+    const [storedPref, userAnthropicKey, meserieId, memRecall, lastSavedRow] = await Promise.all([
       getSpeechLang(user.email),
       getAnthropicKey(user.email),
       getMeserieActiva(user.email),
       // Memory agent (recall): DB pur (fără model, fără credite) — faptele
       // durabile despre user; mesajul curent e indiciul de relevanță.
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+      // Continuitate între sesiuni (#20): momentul ultimului mesaj salvat — DB
+      // pur, în paralel cu restul (zero latență adăugată).
+      getRecentHistory(user.email, 1).catch(() => []),
     ])
 
     // DEVICE COMMANDS + SPEECH LANGUAGE — both interpreted on the SERVER now
@@ -966,6 +993,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // this user so the conversation is continuous across sessions. Citit mai
     // sus (drumul unic spre bază); folosit și de punte (memBlock) și de API.
     systemPrompt += memRecall
+
+    // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
+    // Kelion ȘTIE că e o reîntâlnire (nu un fir continuu) și salută natural cu
+    // continuitate. DB pur — timestamp-ul citit în paralel mai sus, zero cost.
+    const lastSavedAt = lastSavedRow?.[0]?.created_at ? new Date(lastSavedRow[0].created_at).getTime() : 0
+    const gapMin = lastSavedAt > 0 ? Math.floor((Date.now() - lastSavedAt) / 60_000) : -1
+    if (gapMin > 45) {
+      const gapText =
+        gapMin >= 2880
+          ? `${Math.floor(gapMin / 1440)} zile`
+          : gapMin >= 120
+            ? `${Math.floor(gapMin / 60)} ore`
+            : `${gapMin} minute`
+      systemPrompt += `\n\nSESSION CONTINUITY: your previous conversation with this user ended about ${gapText} ago (this is a REUNION, not a continuous thread). Greet/respond with natural continuity — you remember them and what you discussed — without reciting your memory unprompted.`
+    }
 
     const params: Anthropic.MessageParam[] = messages.map((m) => ({
       role: m.role,
@@ -1891,7 +1933,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (chunk) feedPub(chunk) // '' = puls de viață, nu text
         },
         120_000,
-        45_000,
+        // Stall 12s (era 45s): workerul sănătos pulsează la ~3s, deci 12s fără
+        // NIMIC = banda chiar e moartă — userul primește mesajul cinstit în 12s,
+        // nu după 45s de așteptare (#7 latență, Adrian 10 iul).
+        12_000,
         '',
         'public',
       )
@@ -1932,7 +1977,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
-    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL]
+    const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL]
     const BROWSER_TOOLS = [
       BROWSER_OPEN_TOOL,
       BROWSER_CLICK_TOOL,
@@ -1971,7 +2016,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // nostru. Regula: o cerere pe cheia clientului NU atinge NICIODATĂ cheile
     // platformei. Pică pe cheia lui → primește o eroare clară, nu o cursă gratis.
     const usingUserKey = !!userAnthropicKey
-    let model = brainModel()
+    // Router automat capabilitate↔cost: cel mai ieftin model care poate duce
+    // sarcina (șanse mari la cost mic). Dacă modelul rapid „se odihnește" după un
+    // eșec, brainModel() ridică baza automat la modelul TOP.
+    const chosen = chooseModel(lastUserText)
+    let model = chosen === MODEL_FAST ? brainModel() : chosen
     // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
     // back until we confirm it's in that language; on a confident mismatch we
     // discard (nothing was sent) and re-serve the round ONCE, corrected. It is
@@ -2470,6 +2519,18 @@ async function runTool(
     if (!Number.isFinite(id)) return JSON.stringify({ error: 'bad_id' })
     const ok = await deleteNote(email, id)
     return JSON.stringify({ deleted: ok })
+  }
+  if (block.name === 'list_memories') {
+    // Tot ce ține minte Kelion despre user (memoria auto-învățată) — transparent.
+    const mems = await getMemories(email, 100)
+    return JSON.stringify({ memories: mems.map((m) => m.content) })
+  }
+  if (block.name === 'forget_memory') {
+    const inp = (block.input ?? {}) as { fragment?: string }
+    const fragment = typeof inp.fragment === 'string' ? inp.fragment : ''
+    if (fragment.trim().length < 3) return JSON.stringify({ error: 'fragment_too_short' })
+    const deleted = await deleteMemory(email, fragment)
+    return JSON.stringify({ deleted })
   }
   if (block.name === 'prepare_promo_clip') {
     if (!isAdmin) return JSON.stringify({ error: 'forbidden' })

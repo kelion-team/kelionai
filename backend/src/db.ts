@@ -1631,6 +1631,27 @@ export async function searchMemories(
   }
 }
 
+// Uitare la cerere (#20, Adrian 10 iul): userul e stăpân pe memoria lui —
+// „uită că..." șterge faptele care se potrivesc fragmentului. Întoarce câte au
+// fost șterse, ca Kelion să confirme sincer (0 = n-a găsit nimic de uitat).
+export async function deleteMemory(
+  email: string,
+  fragment: string,
+  agent = 'kelion',
+): Promise<number> {
+  const f = fragment.trim().replaceAll('%', '').replaceAll('_', '')
+  if (!dbEnabled() || f.length < 3) return 0
+  try {
+    const r = await getPool().query(
+      `DELETE FROM memories WHERE user_email = $1 AND agent = $2 AND content ILIKE $3`,
+      [email, agent, `%${f}%`],
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
+  }
+}
+
 // ── Capability gaps (admin-only "what Kelion can't do yet" monitor) ──
 export interface CapabilityGap {
   id: number
