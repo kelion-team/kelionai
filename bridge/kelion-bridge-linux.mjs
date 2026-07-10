@@ -190,214 +190,16 @@ function runClaudeText(prompt, { timeoutMs, model, hasFiles } = {}) {
   })
 }
 
-// ── CREIER CALD: sesiune `claude` PERMANENTĂ (sub 1s la lucruri simple) ──────
-// Adrian, 10 iul: „chat live gândit; răspuns ultra rapid, sub 1s la lucruri
-// simple; dacă e nevoie de ceva, DOAR atunci se caută în istoric." Zidul de
-// ~2-3s era procesul `claude` pornit DE LA ZERO la fiecare mesaj (spawn + auth +
-// reconectare model + reîncărcarea întregului context ca prefill). Aici ținem UN
-// SINGUR proces `claude` VIU, în mod stream-json intrare+ieșire: îl amorsăm O
-// DATĂ cu tot contextul, apoi fiecare tură trimite DOAR mesajul nou → primul
-// cuvânt ține doar de model (sub 1s). Istoricul se caută „la nevoie": backendul
-// bagă în pachetul turei doar memoria relevantă (scanare DB), nu tot contextul.
-//
-// PLASĂ (Adrian: „să nu se mai poată strica"): dacă versiunea de CLI de pe VPS NU
-// suportă modul ăsta (procesul iese pe loc / nu scoate stream-json), sau sesiunea
-// moare — cădem AUTOMAT pe calea veche dovedită (proces nou + cascadă). După 2
-// eșecuri la rând oprim complet încercările calde. În cel mai rău caz = ca azi.
-const WARM_ENABLED = process.env.KELION_WARM !== '0' // urgență: KELION_WARM=0 dezactivează tot
-
-class WarmBrain {
-  constructor() {
-    this.child = null
-    this.model = null
-    this.ready = false
-    this.primed = false // amorsat cu tot contextul? (prima tură a sesiunii)
-    this.turns = 0 // câte ture a dus sesiunea (pentru reamorsare periodică)
-    this.busy = false
-    this.buf = ''
-    this.onLine = null
-    this.abortTurn = null
-  }
-  start(model) {
-    const args = [
-      '-p',
-      '--input-format', 'stream-json',
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-    ]
-    if (model) args.push('--model', model)
-    let child
-    try {
-      child = spawn(CLAUDE, args, { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] })
-    } catch {
-      return false
-    }
-    this.child = child
-    this.model = model
-    this.ready = true // procesul e sus; „primed" se face la prima cerere
-    this.primed = false
-    this.buf = ''
-    child.stdout.on('data', (d) => {
-      this.buf += d.toString()
-      let nl
-      while ((nl = this.buf.indexOf('\n')) !== -1) {
-        const line = this.buf.slice(0, nl).trim()
-        this.buf = this.buf.slice(nl + 1)
-        if (!line) continue
-        let ev
-        try {
-          ev = JSON.parse(line)
-        } catch {
-          continue
-        }
-        this.onLine?.(ev)
-      }
-    })
-    child.stderr.on('data', () => {})
-    const die = () => {
-      this.ready = false
-      this.child = null
-      const a = this.abortTurn
-      this.abortTurn = null
-      a?.() // dacă o tură aștepta, o închidem pe loc → fallback rapid
-    }
-    child.on('close', die)
-    child.on('error', die)
-    return true
-  }
-  // Trimite un mesaj pe sesiunea vie; streamează tokenii prin onChunk.
-  // Rezolvă { text, clean }: clean=true doar dacă tura s-a terminat curat
-  // (eveniment `result` sau liniște după stream); necurat → apelantul repornește.
-  ask(text, onChunk, timeoutMs) {
-    return new Promise((resolve) => {
-      if (!this.ready || !this.child || this.busy) {
-        resolve({ text: null, clean: false })
-        return
-      }
-      this.busy = true
-      let streamed = ''
-      let finalText = ''
-      let done = false
-      let idleTimer = null
-      const finish = (val, clean) => {
-        if (done) return
-        done = true
-        clearTimeout(killer)
-        if (idleTimer) clearTimeout(idleTimer)
-        this.onLine = null
-        this.abortTurn = null
-        this.busy = false
-        resolve({ text: val, clean })
-      }
-      // Buget total (până la primul semn de viață). Dacă modul nu e suportat,
-      // procesul iese și `die` închide tura instant — nu așteptăm degeaba.
-      const killer = setTimeout(() => finish((finalText || streamed).trim() || null, false), timeoutMs)
-      this.abortTurn = () => finish((finalText || streamed).trim() || null, false)
-      // Dacă versiunea de CLI nu emite `result` per tură, închidem tura după o
-      // liniște de 2s de la ultimul token (răspunsul curge oricum live la Adrian).
-      const armIdle = () => {
-        if (idleTimer) clearTimeout(idleTimer)
-        idleTimer = setTimeout(() => finish((finalText || streamed).trim() || null, true), 2000)
-      }
-      this.onLine = (ev) => {
-        if (
-          ev.type === 'stream_event' &&
-          ev.event?.type === 'content_block_delta' &&
-          ev.event.delta?.type === 'text_delta'
-        ) {
-          const t = ev.event.delta.text || ''
-          if (t) {
-            streamed += t
-            onChunk?.(t)
-            armIdle()
-          }
-        } else if (ev.type === 'result' && typeof ev.result === 'string') {
-          if (ev.result.trim().length > finalText.trim().length) finalText = ev.result
-          const full = (finalText.trim().length >= streamed.trim().length ? finalText : streamed).trim()
-          if (full && full.length > streamed.length && full.startsWith(streamed)) {
-            const tail = full.slice(streamed.length)
-            if (tail) onChunk?.(tail)
-          }
-          finish(full || null, true)
-        }
-      }
-      try {
-        this.child.stdin.write(
-          JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\n',
-        )
-      } catch {
-        finish(null, false)
-      }
-    })
-  }
-  kill() {
-    try {
-      this.child?.kill()
-    } catch {}
-    this.child = null
-    this.ready = false
-    this.primed = false
-  }
-}
-
-let warm = null
-let warmFails = 0
-let warmDisabled = false
-function ensureWarm(model) {
-  if (!WARM_ENABLED || warmDisabled) return null
-  if (warm && warm.ready && warm.model === model) return warm
-  if (warm) warm.kill()
-  warm = new WarmBrain()
-  if (!warm.start(model)) {
-    warm = null
-    return null
-  }
-  return warm
-}
-
-// Chat: mai întâi CREIERUL CALD (sub 1s); dacă nu-l avem/eșuează → cascada veche
-// dovedită (Fable stream → text → Opus → `claude -p` gol). Jobs cu fișiere (poze)
-// rămân DIRECT pe calea veche cu Read — nu riscăm sesiunea caldă acolo.
-async function askClaude(prompt, onChunk, hasFiles, turnText) {
+// Chat cu streaming + failover de model. Încearcă Fable (dacă nu se odihnește),
+// stream; dacă streamul nu scoate text, cade pe modul text (aceeași cerere);
+// dacă tot nimic și eram pe Fable, trece pe Opus și odihnește Fable 10 min.
+async function askClaude(prompt, onChunk, hasFiles) {
   const model = brainModel()
-
-  if (WARM_ENABLED && !warmDisabled && !hasFiles) {
-    let w = ensureWarm(model)
-    // Reamorsare periodică: după WARM_MAX_TURNS ture, reîncepem sesiunea ca să nu
-    // crească istoricul la nesfârșit (ar încetini). Conversația recentă revine din
-    // contextul de amorsare (bridgePrompt), deci nu se pierde nimic important.
-    const WARM_MAX_TURNS = 40
-    if (w && w.ready && w.primed && w.turns >= WARM_MAX_TURNS) {
-      w.kill()
-      w = ensureWarm(model)
-    }
-    if (w && w.ready) {
-      const primed = w.primed
-      // Amorsare O DATĂ cu tot contextul; apoi DOAR mesajul nou (pachet subțire).
-      const payload = primed && turnText ? turnText : loadContext() + '\n\n' + PREAMBLE + prompt
-      const { text: ans, clean } = await w.ask(payload, onChunk, primed ? 45_000 : 75_000)
-      if (ans && clean) {
-        w.primed = true
-        w.turns += 1
-        warmFails = 0
-        return ans
-      }
-      // Necurat / gol → sesiunea e într-o stare incertă: o oprim (repornește la
-      // următoarea tură). Dacă a difuzat PARȚIAL înainte să pice, `ans` e acel
-      // parțial (îl păstrăm, fără dublare). Dacă e null = ZERO difuzat → sigur
-      // de reluat pe calea veche. După 2 eșecuri goale la rând, oprim caldul.
-      w.kill()
-      if (ans) return ans
-      if (++warmFails >= 2) {
-        warmDisabled = true
-        log('Creier cald indisponibil (2 esecuri) — trec pe calea dovedita in acest worker.')
-      }
-    }
-  }
-
-  // ── CALEA VECHE DOVEDITĂ (fallback garantat) ──
   const full = loadContext() + '\n\n' + PREAMBLE + prompt
+  // Buget de timp MĂRGINIT (Adrian, 10 iul + audit): serverul renunță la 75s și
+  // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
+  // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
+  // se ating decât la rațiune grea; cascada e scurtă, nu 4×120s ca înainte.
   let answer = await runClaudeStream(full, { timeoutMs: 90_000, model, onChunk, hasFiles })
   if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles })
   if (!answer && model === MODEL) {
@@ -542,9 +344,7 @@ for (;;) {
       // există fișiere permitem Read (ca să le privească); altfel chat pur, fără
       // unelte → instant.
       const fileNote = saveJobFiles(job)
-      // job.prompt = context COMPLET (amorsare sesiune / fallback); job.turn =
-      // pachetul SUBȚIRE (doar mesajul nou) pentru turele pe sesiunea caldă.
-      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '', job.turn)
+      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '')
     } finally {
       clearInterval(pulse)
       flush() // orice bucată rămasă în tampon pleacă acum
