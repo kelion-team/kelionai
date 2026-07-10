@@ -768,11 +768,23 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const lastIncoming = messages.at(-1)
     const lastIncomingText = lastIncoming?.role === 'user' ? lastIncoming.content : ''
     const deviceCmd = interpretDeviceCommand(lastIncomingText, req.body?.screen)
-    const committedLang = deviceCmd
-      ? null // a device command is an order, not conversation — never shifts the language
-      : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
+    // LIMBA (Adrian, 10 iul: „blochează limba admin pe română, restul pe detecție
+    // automată"). ADMINUL e blocat PERMANENT pe română — NU detectăm, NU comutăm
+    // niciodată pe locale-ul contului sau pe ce citește (asta rezolvă „nu respectă
+    // limba admin" + cercul vicios al recognizer-ului). RESTUL userilor rămân pe
+    // detecția automată (trackSpeechLang), exact ca până acum.
+    const adminLocked = user.role === 'admin'
+    const committedLang = adminLocked
+      ? null // adminul nu comută niciodată — e mereu ro
+      : deviceCmd
+        ? null // a device command is an order, not conversation — never shifts the language
+        : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
     if (committedLang) await setSpeechLangPref(user.email, committedLang)
-    const speechPref = committedLang ?? storedPref
+    // Ce anunțăm clientului ca limbă: adminul primește MEREU ro-RO (idempotent pe
+    // client — applyLang schimbă recognizer-ul doar dacă diferă), ca microfonul
+    // să asculte română; restul primesc comutarea detectată.
+    const announceLang = adminLocked ? 'ro-RO' : committedLang
+    const speechPref = adminLocked ? 'ro-RO' : (committedLang ?? storedPref)
     const userLang = speechPref || user.locale || 'unknown'
     const ro = userLang.toLowerCase().startsWith('ro')
 
@@ -1030,9 +1042,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.on('close', () => clearInterval(pingTimer))
     // Announce the turn id FIRST so the client can resume from the very start.
     reply.raw.write(`${CTRL}${JSON.stringify({ turn: turnId })}${CTRL}`)
-    // A language switch committed server-side this turn: tell the client so
-    // the recognizer + local mirror follow (the pref is already persisted).
-    if (committedLang) reply.raw.write(`${CTRL}${JSON.stringify({ lang: committedLang })}${CTRL}`)
+    // Limba pe care o urmează clientul (recognizer + oglindă locală): adminul e
+    // MEREU ro-RO (blocat), restul primesc comutarea detectată. Idempotent pe
+    // client (applyLang schimbă doar dacă diferă), deci nu deranjează microfonul.
+    if (announceLang) reply.raw.write(`${CTRL}${JSON.stringify({ lang: announceLang })}${CTRL}`)
 
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
