@@ -67,6 +67,8 @@ import {
   stashAdminFiles,
   openRequirement,
   updateRequirement,
+  resolveRequirement,
+  ownedRequirement,
   type BridgeFile,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
@@ -981,6 +983,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // and stops. (The old prefix shortcut leaked to the API brain when he
     // addressed Kelion by name — removed.)
     if (isAdmin) {
+      // STOP pe cerință: dacă Adrian spune „stop / oprește / lasă / anulează" cât
+      // o cerință e în lucru, o ÎNCHIDEM — supervizorul vede că nu mai e nimic de
+      // dus la capăt (ownedReq = null) și nu mai re-asignează. Fără asta, bucla de
+      // re-asignare (până la 3 încercări) ignora comanda. Revenim la modul chat.
+      const stopCmd = /^\s*(stop|opre[șs]te(?:\-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
+      if (stopCmd.test(lastUserText) && ownedRequirement()) {
+        resolveRequirement()
+        const msg = 'Am oprit — cerința e închisă, nu mai reîncerc. Sunt pe modul chat, spune-mi ce vrei.'
+        reply.raw.write(msg)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', msg)
+        return
+      }
       // OK → DEPLOY: PRIMUL, înaintea oricărui filtru (bug 5 iul: filtrul de
       // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
       // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
@@ -1099,6 +1114,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // (his explicit order, 4 iul) — there is no hand-off to any other AI.
         const decision =
           'EȘTI CREIERUL INTELIGENT al lui Adrian — gândești, analizezi, decizi și ACȚIONEZI singur. NU ești dispecer și NU clasifici mesaje ca să le predai altcuiva. Ai acces total la server și la cod (unelte reale): inspectezi starea adevărată (rulezi comanda, nu ghici), repari, construiești, verifici — TU.\n' +
+          'MODURI DE LUCRU (comută SINGUR, automat, după ce cere Adrian): (1) CHAT — doar conversație/întrebare: răspunde scurt și direct, NU deschide nicio cerință de execuție. (2) LUCRU — o cerință de execuție (repară/construiește/modifică): apucă-te, du-o la capăt, ține-o pe o singură cerință; NU redeschide și NU relua la infinit aceeași sarcină. (3) RAPORT — după ce ai terminat: raportează rezultatul cu dovada reală, apoi ÎNCHIDE (revii la CHAT). Dacă Adrian spune „stop/oprește/lasă/anulează", OPREȘTE lucrul pe loc și treci în CHAT — nu insista.\n' +
           'La fiecare mesaj: înțelege ce vrea Adrian, GÂNDEȘTE și FĂ. Dacă e o întrebare → răspunde din ce VEZI real în cod/sistem, nu din presupuneri. Dacă e ceva de analizat/reparat/construit → apucă-te cu uneltele tale, dus până la capăt, și raportează ce ai făcut cu dovada reală (ieșirea comenzii). Un job mare, de durată, îl POȚI da constructorului tău cu [EXECUT] dacă tu, ca inginer-șef, decizi așa — dar e alegerea ta, nu o regulă; nu preda ce poți face singur.\n' +
           'TON OBLIGATORIU (Adrian, 5 iul): profesional, precis, inteligență superioară — ca un inginer-șef. INTERZISE: umplutura emoțională („sunt aici", „respiră", „nu plec nicăieri", „stau lângă tine"), consolările, repetițiile. Scurt și la obiect, fiecare propoziție cu conținut. Fragmentele scurte repetate („Nu.", „Nu știu.") sunt aproape sigur zgomot de microfon: NU le răspunde cu umplutură — o singură replică minimă, tehnică, sau întreabă o dată ce a vrut să spună.\n\n' +
           'UNELTELE TALE (le comanzi direct, serverul le execută și taie eticheta din text):\n' +
