@@ -774,6 +774,86 @@ body {
   margin: 0 0 20px;
 }
 
+/* ---------- customer settings (⚙) ---------- */
+.settings-panel {
+  width: min(520px, 96vw);
+}
+.settings-sec {
+  padding: 16px 0;
+  border-top: 1px solid #ece6d8;
+}
+.settings-sec:first-of-type {
+  border-top: none;
+}
+.settings-sec h4 {
+  margin: 0 0 10px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  color: #1c2740;
+}
+.settings-note {
+  font-size: 12.5px;
+  color: #6b6a64;
+  line-height: 1.55;
+  margin: 8px 0 0;
+}
+.settings-credits {
+  font-size: 15px;
+  color: #1a1a24;
+}
+.settings-credits strong {
+  font-size: 22px;
+  color: #1c2740;
+}
+.settings-topup {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.settings-keystate {
+  font-size: 13px;
+  color: #8a887e;
+  margin-bottom: 10px;
+}
+.settings-keystate.on {
+  color: #2c7a4b;
+}
+.settings-keyrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.settings-keyrow input {
+  flex: 1;
+  min-width: 180px;
+}
+.settings-account {
+  font-size: 14px;
+}
+.settings-account-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.settings-danger {
+  color: #a32d2d;
+  border-color: rgba(163, 45, 45, 0.4);
+}
+.settings-confirm {
+  width: 100%;
+}
+.settings-confirm-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.settings-danger-solid {
+  background: #a32d2d;
+}
+
 /* ---------- free-trial (demo) ---------- */
 .trial-pill {
   padding: 6px 12px;

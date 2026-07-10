@@ -56,3 +56,34 @@ export function mirrorLang(code: string): void {
     /* ignore */
   }
 }
+
+// Set the speech language explicitly from Settings (a paying customer choosing
+// their own language). PUT /api/prefs persists it; we mirror it locally too.
+export async function saveSpeechLang(code: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ speechLang: code }),
+    })
+    if (res.ok) mirrorLang(code)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+// Self-service account deletion (GDPR: dreptul la ștergere). Wipes the user's
+// data server-side and clears the session cookie. Returns true on success.
+export async function deleteMyAccount(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/me/delete', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}

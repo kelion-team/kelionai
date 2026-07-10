@@ -19,6 +19,7 @@ import { correctRoutes } from './routes/correct.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
 import { billingRoutes } from './routes/billing.js'
+import { meRoutes } from './routes/me.js'
 import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
@@ -209,6 +210,7 @@ await app.register(correctRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
 await app.register(billingRoutes)
+await app.register(meRoutes)
 await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
