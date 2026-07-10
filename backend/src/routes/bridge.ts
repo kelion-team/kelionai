@@ -19,6 +19,7 @@ import {
   saveStagedRelease,
   listStagedReleases,
   setReleaseStatus,
+  addMemory,
   saveKv,
   loadKv,
   putAppFile,
@@ -590,6 +591,10 @@ export interface StagedRelease {
 export function stageRelease(title: string, detail: string): string {
   const id = randomUUID()
   void saveStagedRelease(id, title.slice(0, 200), detail.slice(0, 12000)).catch(() => {})
+  // KELION ANUNȚĂ (Adrian, 10 iul: „cu mențiune că Kelion anunță că e ceva de
+  // aprobat"): spune-i lui Adrian în chat + cu voce că are ceva de aprobat, ca
+  // să nu-i scape release-ul agățat în tabul Release-uri.
+  sayToAdmin(`Am ceva de aprobat: „${title.slice(0, 120)}". Deschide Release-uri și aprobă sau respinge.`)
   return id
 }
 
@@ -1082,6 +1087,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         setProgress(100, 'Certificat pe cerință (PASS)')
         void reportToAdmin({ kind: 'pass', summary: r.summary, detail })
         noteBrainActivity('🟢 200 — cerință certificată (tester PASS)')
+        // ARHIVĂ APELABILĂ (Adrian, 10 iul: „joburile finalizate se arhivează
+        // într-o memorie apelabilă"): lucrarea terminată intră în memoria pe care
+        // creierul o RECHEAMĂ — când Adrian întreabă „ce ai făcut / ce s-a
+        // rezolvat", Kelion răspunde direct din ea. Datată, indexată prin conținut.
+        void addMemory(
+          config.adminEmail,
+          `Lucrare terminată și certificată (test PASS): ${r.summary.slice(0, 200)}${detail ? ` — ${detail.slice(0, 150)}` : ''}`,
+        )
       } else {
         // BUG REAL (Adrian, 6 iul): FAIL apela bridgeRepair() necondiționat, de
         // fiecare dată — o cerință fără sens (ex. scurgere ASR) primea FAIL la
@@ -1275,6 +1288,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (r.status === 'pending') {
         r.status = req.body?.decision === 'approve' ? 'approved' : 'rejected'
         await setReleaseStatus(r.id, r.status)
+        // ARHIVĂ APELABILĂ INDEXATĂ (Adrian, 10 iul): decizia iese din câmpul de
+        // aprobat și intră în memoria pe care creierul o recheamă — ce s-a aprobat
+        // și ce s-a respins, datat. Câmpul „Release-uri" arată apoi doar pending-ul.
+        void addMemory(
+          config.adminEmail,
+          `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
+        )
       }
       return { ok: true, status: r.status }
     },

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
+import { saveContactMessage } from '../db.js'
 import {
   mailEnabled,
   sendMail,
@@ -61,10 +62,25 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !message) {
       return reply.code(400).send({ error: 'bad_request', message: 'email and message required' })
     }
+
+    // 0) SALVEAZĂ MEREU în DB, ÎNAINTE de orice email (bug 10 iul: „mesajele din
+    // contact nu se trimit"). Cauza: dacă emailul nu era configurat (MAIL_PASS
+    // gol) sau sendMail eșua tăcut (fire-and-forget), mesajul se pierdea complet —
+    // UI-ul zicea „trimis", dar nu ajungea nicăieri. Acum e persistat garantat și
+    // vizibil în Inbox-ul adminului; emailul e doar redirectare best-effort.
+    const stored = await saveContactMessage({
+      name,
+      email,
+      subject,
+      message,
+      department,
+      lang,
+      emailed: mailEnabled(),
+    })
+
     if (!mailEnabled()) {
-      // The form is live but the mailbox isn't wired yet — accept gracefully so
-      // the UI can say "received" without falsely promising delivery.
-      return reply.send({ ok: true, delivered: false })
+      // Emailul nu e cablat, dar mesajul E salvat — owner-ul îl vede în Inbox.
+      return reply.send({ ok: true, stored, delivered: false })
     }
 
     // 1) Forward the full enquiry to the owner. Escape EVERY interpolated field —
@@ -100,6 +116,6 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       }),
     })
 
-    return reply.send({ ok: true, delivered: true })
+    return reply.send({ ok: true, stored, delivered: true })
   })
 }

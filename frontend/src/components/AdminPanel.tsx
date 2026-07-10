@@ -37,6 +37,8 @@ import {
   type WorkOrder,
   fetchInbound,
   type InboundEmail,
+  fetchContactMessages,
+  type ContactMessage,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -47,6 +49,25 @@ function fmtDur(seconds: number): string {
   if (m < 60) return `${m}m`
   return `${Math.floor(m / 60)}h ${m % 60}m`
 }
+
+// Stadiul unui job + dacă e TERMINAT (certificat/finalizat) → merge în arhivă.
+function jobStageLabel(status: string): string {
+  switch (status) {
+    case 'certified':
+      return '✅ certificat (test PASS)'
+    case 'finalized':
+      return '✅ finalizat (închis)'
+    case 'published':
+      return '🟢 publicat pe live'
+    case 'failed':
+      return '🔴 a picat'
+    case 'delivered':
+      return '🔧 preluat de constructor'
+    default:
+      return '⏳ în așteptare'
+  }
+}
+const JOB_DONE = new Set(['certified', 'finalized'])
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
 // text). flagcdn serves every ISO country; on any failure we fall back to a dot.
@@ -115,6 +136,11 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [vreply, setVreply] = useState('')
   const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
+  const [contactMsgs, setContactMsgs] = useState<ContactMessage[]>([])
+  // Arhivă apelabilă: joburile terminate și release-urile decise se strâng într-o
+  // secțiune pliabilă, ca lista activă să arate DOAR ce e în lucru / de aprobat.
+  const [showJobArchive, setShowJobArchive] = useState(false)
+  const [showRelArchive, setShowRelArchive] = useState(false)
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -383,6 +409,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => {
                 setTab('inbox')
                 void fetchInbound().then(setInbound)
+                void fetchContactMessages().then(setContactMsgs)
               }}
             >
               Inbox
@@ -517,13 +544,15 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 Release-uri — modificări construite de Claude, în așteptarea aprobării tale. Nimic nu
                 intră live până nu apeși „Aprobă și publică".
               </div>
-              {releases.length === 0 && (
+              {releases.filter((r) => r.status === 'pending').length === 0 && (
                 <div className="chat-hint">
-                  Niciun release în așteptare. Aici apar modificările pe care Claude le-a construit
-                  headless pe server; le vezi, le aprobi (→ se publică) sau le respingi.
+                  Nimic de aprobat acum. Aici apar DOAR modificările în așteptare; cele aprobate
+                  sau respinse se mută în arhiva apelabilă de mai jos.
                 </div>
               )}
-              {releases.map((r) => (
+              {releases
+                .filter((r) => r.status === 'pending')
+                .map((r) => (
                 <div key={r.id} className={`release-row status-${r.status}`}>
                   <div className="release-main">
                     <span className="release-title">{r.title}</span>
@@ -567,6 +596,40 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 </div>
               ))}
             </div>
+            {releases.filter((r) => r.status !== 'pending').length > 0 && (
+              <div className="fin-breakdown">
+                <button
+                  type="button"
+                  className="admin-tab"
+                  onClick={() => setShowRelArchive((v) => !v)}
+                >
+                  {showRelArchive ? '▾' : '▸'} Arhivă release-uri (apelabilă de Kelion) ·{' '}
+                  {releases.filter((r) => r.status !== 'pending').length}
+                </button>
+                {showRelArchive &&
+                  releases
+                    .filter((r) => r.status !== 'pending')
+                    .map((r) => (
+                      <div className="fin-row" key={r.id}>
+                        <span>{r.title.length > 160 ? `${r.title.slice(0, 160)}…` : r.title}</span>
+                        <span>
+                          {r.status === 'approved'
+                            ? '✅ aprobat'
+                            : r.status === 'deployed'
+                              ? '🟢 publicat'
+                              : '⛔ respins'}{' '}
+                          ·{' '}
+                          {new Date(r.at).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+            )}
           </section>
         )}
         {tab === 'stores' && (
@@ -643,6 +706,40 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
           <section className="admin-finance">
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
+                Mesaje din formularul „Contact" — salvate MEREU aici, chiar dacă
+                emailul (MAIL_PASS) nu e configurat. Niciun mesaj nu se mai pierde.
+              </div>
+              {contactMsgs.length === 0 && (
+                <p className="chat-hint">Niciun mesaj de contact încă.</p>
+              )}
+              {contactMsgs.map((m) => (
+                <div className="inbox-item" key={m.id}>
+                  <div className="inbox-top">
+                    <span className="inbox-from">
+                      {m.name || '(fără nume)'} &lt;{m.email}&gt;
+                    </span>
+                    <span className={`inbox-flag ${m.emailed ? 'ok' : 'wait'}`}>
+                      {m.emailed ? '✉️ redirecționat pe email' : '📥 doar salvat (email off)'}
+                    </span>
+                  </div>
+                  <div className="inbox-subj">
+                    {m.department ? `[${m.department}] ` : ''}
+                    {m.subject || '(fără subiect)'}
+                  </div>
+                  <div className="inbox-body">{m.message.slice(0, 500)}</div>
+                  <div className="chat-hint">
+                    {new Date(m.created_at).toLocaleString('ro-RO', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
                 Inbox contact@kelionai.app — emailurile PRIMITE și răspunsul redactat
                 automat de Secretar (row 19). Se citesc la fiecare 3 minute.
               </div>
@@ -673,30 +770,19 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
           <section className="admin-finance">
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
-                Joburi — toate cererile trimise la execuție, cu stadiul lor real (se
-                actualizează singur; supraviețuiește oricărui restart).
+                Joburi ÎN LUCRU — cererile trimise la execuție, cu stadiul lor real (se
+                actualizează singur). Cele terminate se mută în arhiva de mai jos.
               </div>
-              {orders.length === 0 && (
-                <div className="chat-hint">Niciun job încă (registrul e persistent în bază).</div>
+              {orders.filter((o) => !JOB_DONE.has(o.status)).length === 0 && (
+                <div className="chat-hint">Niciun job în lucru acum.</div>
               )}
-              {orders.map((o) => {
-                const stage =
-                  o.status === 'certified'
-                    ? '✅ certificat (test PASS)'
-                    : o.status === 'finalized'
-                      ? '✅ finalizat (închis)'
-                      : o.status === 'published'
-                        ? '🟢 publicat pe live'
-                        : o.status === 'failed'
-                          ? '🔴 a picat'
-                          : o.status === 'delivered'
-                            ? '🔧 preluat de constructor'
-                            : '⏳ în așteptare'
-                return (
+              {orders
+                .filter((o) => !JOB_DONE.has(o.status))
+                .map((o) => (
                   <div className="fin-row" key={o.id}>
                     <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
                     <span>
-                      {stage} ·{' '}
+                      {jobStageLabel(o.status)} ·{' '}
                       {new Date(o.created_at).toLocaleString('ro-RO', {
                         day: 'numeric',
                         month: 'short',
@@ -705,9 +791,37 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                       })}
                     </span>
                   </div>
-                )
-              })}
+                ))}
             </div>
+            {orders.filter((o) => JOB_DONE.has(o.status)).length > 0 && (
+              <div className="fin-breakdown">
+                <button
+                  type="button"
+                  className="admin-tab"
+                  onClick={() => setShowJobArchive((v) => !v)}
+                >
+                  {showJobArchive ? '▾' : '▸'} Arhivă joburi terminate (apelabilă de Kelion) ·{' '}
+                  {orders.filter((o) => JOB_DONE.has(o.status)).length}
+                </button>
+                {showJobArchive &&
+                  orders
+                    .filter((o) => JOB_DONE.has(o.status))
+                    .map((o) => (
+                      <div className="fin-row" key={o.id}>
+                        <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
+                        <span>
+                          {jobStageLabel(o.status)} ·{' '}
+                          {new Date(o.created_at).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+            )}
           </section>
         )}
         {tab === 'jurnal' && (

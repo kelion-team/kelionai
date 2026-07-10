@@ -288,6 +288,22 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_vchat_conv ON visitor_chats (conv_id, id);
+    -- MESAJE DE CONTACT: se salvează MEREU aici, indiferent dacă emailul e
+    -- configurat — ca un mesaj de contact să nu se piardă NICIODATĂ (bug 10 iul:
+    -- „mesajele din contact nu se trimit"). Emailul e doar redirectare best-effort
+    -- pe deasupra; adevărul e în DB, vizibil în Inbox-ul adminului.
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL,
+      department TEXT NOT NULL DEFAULT '',
+      lang TEXT NOT NULL DEFAULT 'en',
+      emailed BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_messages (created_at DESC);
   `)
 }
 
@@ -400,6 +416,65 @@ export async function markLeadContacted(id: number): Promise<void> {
     await getPool().query('UPDATE leads SET contacted = true WHERE id = $1', [id])
   } catch {
     /* non-fatal */
+  }
+}
+
+// ── Mesaje de contact (formularul „Contact") ────────────────────────────────
+// Se salvează MEREU (indiferent de email) ca să nu se piardă niciun mesaj.
+
+export interface ContactMessage {
+  id: number
+  name: string
+  email: string
+  subject: string
+  message: string
+  department: string
+  lang: string
+  emailed: boolean
+  created_at: string
+}
+
+export async function saveContactMessage(m: {
+  name: string
+  email: string
+  subject: string
+  message: string
+  department: string
+  lang: string
+  emailed: boolean
+}): Promise<boolean> {
+  if (!dbEnabled() || !m.email || !m.message) return false
+  try {
+    await getPool().query(
+      `INSERT INTO contact_messages (name, email, subject, message, department, lang, emailed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        m.name.slice(0, 120),
+        m.email.slice(0, 200),
+        m.subject.slice(0, 200),
+        m.message.slice(0, 8000),
+        m.department.slice(0, 80),
+        m.lang.slice(0, 5),
+        m.emailed,
+      ],
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function listContactMessages(n = 100): Promise<ContactMessage[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<ContactMessage>(
+      `SELECT id, name, email, subject, message, department, lang, emailed, created_at::text
+       FROM contact_messages ORDER BY created_at DESC LIMIT $1`,
+      [n],
+    )
+    return r.rows
+  } catch {
+    return []
   }
 }
 
