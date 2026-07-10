@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
 import Landing from './pages/Landing'
 import Stage from './pages/Stage'
-import { watchForUpdate } from './lib/updateCheck'
+import { watchForUpdate, hardResetToLatest } from './lib/updateCheck'
 import { strings, resolveLang, browserLang } from './lib/i18n'
 
 // Injectate la build (vezi vite.config.ts): versiunea + data compilării.
@@ -49,15 +49,7 @@ export default function App() {
       {updateReady && (
         <div className="update-bar" role="status">
           <span>{t.updateReady}</span>
-          <button
-            type="button"
-            onClick={() => {
-              // Update refresh — restore the running conversation after reload
-              // (fresh logins still start with a clean page).
-              sessionStorage.setItem('kelion_restore_chat', '1')
-              window.location.reload()
-            }}
-          >
+          <button type="button" onClick={() => void hardResetToLatest()}>
             {t.updateNow}
           </button>
         </div>
