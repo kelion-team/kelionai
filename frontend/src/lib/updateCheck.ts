@@ -58,8 +58,15 @@ export async function hardResetToLatest(): Promise<void> {
   }
   // „Tot default": starea locală se golește COMPLET (fără restaurare de chat pe
   // pagină — istoricul revine de pe server la încărcare, ca la prima logare).
+  // EXCEPȚIE: amprenta vocală (kelion.voiceprint). BUG găsit 10 iul (Adrian:
+  // „microfonul nu se deschide automat să zic da" — de fapt calibrarea îi era
+  // ștearsă la FIECARE publicare de resetul ăsta, deci mereu cerea reînrolare).
+  // Nu e „stare de sesiune" — e o calibrare hardware/voce care trebuie să
+  // supraviețuiască oricărei publicări, la fel ca memoriile de pe server.
   try {
+    const voiceprint = localStorage.getItem('kelion.voiceprint')
     localStorage.clear()
+    if (voiceprint) localStorage.setItem('kelion.voiceprint', voiceprint)
   } catch {
     /* indisponibil */
   }

@@ -1484,6 +1484,23 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Worker → server: "give me the next admin prompt" (long-poll up to 25s).
+  // ALERTĂ INSTANT DE PUBLICARE (Adrian, 10 iul: „kelion trebuie să primească
+  // instant err de la railway" — nu tu să-mi arăți poze din dashboard). Chemat
+  // de pipeline-ul deploy.yml (GitHub Actions) la orice eșec — țintă negăsită,
+  // build picat, sau kelionai.app nu răspunde 200 după publicare. Kelion îi
+  // spune lui Adrian pe loc, în chat, fără să mai caute el singur.
+  app.post('/api/bridge/deploy-alert', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const body = (req.body ?? {}) as { stage?: string; detail?: string; runUrl?: string }
+    const stage = String(body.stage ?? 'necunoscută').slice(0, 200)
+    const detail = String(body.detail ?? '').slice(0, 1200)
+    const runUrl = String(body.runUrl ?? '').slice(0, 300)
+    sayToAdmin(
+      `🔴 Publicarea pe Railway a eșuat — etapa „${stage}".${detail ? `\n${detail}` : ''}${runUrl ? `\nJurnal: ${runUrl}` : ''}`,
+    )
+    return { ok: true }
+  })
+
   app.post('/api/bridge/pull', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()

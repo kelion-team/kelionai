@@ -112,6 +112,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publică pe Railway
+        id: publish
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           MODE: ${{ steps.target.outputs.mode }}
@@ -162,6 +163,7 @@ jobs:
           railway up --service "$SERVICE" --ci
 
       - name: Verifică live (kelionai.app răspunde 200)
+        id: verify
         run: |
           # „Trimis ≠ gata": probăm producția până la ~2 min; doar 200 = succes.
           ok=""
@@ -176,3 +178,41 @@ jobs:
             exit 1
           fi
           echo "🟢 PUBLICAT + VERIFICAT LIVE — kelionai.app răspunde 200"
+
+      # ALERTĂ INSTANT (Adrian, 10 iul: „kelion trebuie să primească instant err
+      # de la railway" — nu tu să-mi arăți poze din dashboard). Rulează la ORICE
+      # eșec al pipeline-ului de mai sus (țintă negăsită, build picat, sau
+      # kelionai.app nu răspunde) — auto-conținut, nu depinde de pașii de dinainte
+      # (ei pot fi cei care au picat). Kelion îi spune lui Adrian pe loc, în chat.
+      - name: Alertă Kelion la eșec (instant, în chatul lui Adrian)
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -uo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          FAILED_STEP="${{ steps.target.outcome == 'failure' && 'găsire țintă' || steps.publish.outcome == 'failure' && 'publicare pe Railway' || steps.verify.outcome == 'failure' && 'verificare live (kelionai.app nu răspunde 200)' || 'necunoscută' }}"
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 20 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1" 2>/dev/null || echo '{}'; }
+          # Rezoluție auto-conținută (nu depinde de pașii de mai sus — ei pot fi
+          # exact cei picați): găsește proiectul/mediul/serviciul din nou.
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0] // .data.projects.edges[0].node // empty')
+          PID=$(echo "$P" | jq -r '.id // empty')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id // .environments.edges[0].node.id // empty')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id // empty')
+          BSECRET=""
+          if [ -n "$PID" ] && [ -n "$ENVID" ] && [ -n "$SVCID" ]; then
+            VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+              '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+            BSECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
+          fi
+          if [ -z "$BSECRET" ]; then
+            echo "::warning::Nu am putut obține BRIDGE_SECRET — nu pot alerta chatul lui Adrian. Vezi jurnalul: $RUN_URL"
+            exit 0
+          fi
+          curl -sS --max-time 15 -X POST "https://kelionai.app/api/bridge/deploy-alert" \
+            -H "x-bridge-secret: $BSECRET" -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg stage "$FAILED_STEP" --arg url "$RUN_URL" '{stage:$stage,runUrl:$url}')" \
+            >/dev/null || echo "::warning::Alerta n-a ajuns la server."
+          echo "Alertă trimisă spre chatul lui Adrian (etapă: $FAILED_STEP)."

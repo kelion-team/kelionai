@@ -102,6 +102,14 @@ export default function ChatPanel({
   // TICKER (regulă fixă, 10 iul): durata derulării scalează cu lungimea
   // textului, ca să rămână lizibil — nici prea repede, nici o veșnicie.
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
+  // SINTEZĂ RAPIDĂ (Adrian, 10 iul: „dacă pauza e mai mare de gândire, să nu
+  // rămână gol în dreptul creierului — sinteză de câteva cuvinte, ține-o până
+  // la următorul"). Extrasă INSTANT din {heard} (cererea deja confirmată de
+  // server ca predată creierului) — zero latență, nu așteaptă modelul.
+  const synthesize = (s: string, maxWords = 8): string => {
+    const words = s.trim().split(/\s+/).filter(Boolean)
+    return words.length <= maxWords ? s.trim() : `${words.slice(0, maxWords).join(' ')}…`
+  }
   // Modul microfon: true = dictare live (streaming WS); cade pe batch dovedit
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
@@ -1130,7 +1138,9 @@ export default function ChatPanel({
           doar când monitorul arată consola de lucru (fără surface). */}
       {monitorBusy && !wsOpen && (lastAssistant?.content || busy) && (
         <div className="monitor-speech">
-          {lastAssistant?.content ? lastAssistant.content : '…'}
+          {/* NICIODATĂ gol în pauza de gândire (ordin, 10 iul): cât nu a sosit
+              niciun cuvânt real, arată o sinteză scurtă a cererii — nu „…". */}
+          {lastAssistant?.content ? lastAssistant.content : heard ? synthesize(heard) : '…'}
           {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
         </div>
       )}
@@ -1176,12 +1186,10 @@ export default function ChatPanel({
             </span>
           </div>
         )}
-        {/* Ordinul lui Adrian: „doar vocea mea, nu se acceptă alta" — cât nu e
-            calibrat profilul, microfonul e mut la orice voce (audioIO.ts). Indiciu
-            discret, non-blocant, ca să înțeleagă de ce nu-i reacționează microfonul. */}
-        {isAdmin && !hasVoicePrint && (
-          <p className="chat-hint">{t.voiceNotEnrolledHint}</p>
-        )}
+        {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
+            că e greșită" + „microfon cu autovox, instant"): microfonul nu mai
+            stă mut până la calibrare — amprenta se învață AUTOMAT din primele
+            fraze (audioIO.ts, auto-înrolare), deci indiciul era fals. */}
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (
