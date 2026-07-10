@@ -14,6 +14,8 @@ import {
   unblockUser,
   grantCredit,
   deleteUserData,
+  listLeads,
+  markLeadContacted,
   getDemoStats,
   getUserActivity,
   getDownloadStats,
@@ -22,6 +24,7 @@ import {
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
+import { sendMail } from '../services/mail.js'
 import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
@@ -304,6 +307,36 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           return reply.code(400).send({ error: 'bad_action' })
       }
       return reply.send(await getUserActivity())
+    },
+  )
+
+  // Leads captured from visitors who left an email (admin only).
+  app.get('/api/admin/leads', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ leads: await listLeads() })
+  })
+
+  // Email a captured lead through the site's mail service (admin only).
+  app.post<{ Body: { id?: number; to?: string; subject?: string; body?: string } }>(
+    '/api/admin/lead/email',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const to = String(req.body?.to ?? '').trim()
+      const subject = String(req.body?.subject ?? '').trim()
+      const body = String(req.body?.body ?? '')
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to) || !subject || !body.trim()) {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      const html = `<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;font-size:15px;line-height:1.5;color:#222">${body
+        .split('\n')
+        .map((l) => l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        .join('<br>')}</div>`
+      const sent = await sendMail({ to, subject, html, text: body, replyTo: config.mail.forwardTo })
+      if (!sent) return reply.code(502).send({ error: 'send_failed' })
+      if (req.body?.id) await markLeadContacted(Number(req.body.id))
+      return reply.send({ ok: true })
     },
   )
 }

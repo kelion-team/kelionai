@@ -40,6 +40,32 @@ export default function Landing({ error }: { error?: string | null }) {
   const [notice, setNotice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
+  // Lead capture: a visitor leaves an email so the owner can reach them.
+  const [leadEmail, setLeadEmail] = useState('')
+  const [leadNote, setLeadNote] = useState('')
+  const [leadBusy, setLeadBusy] = useState(false)
+  const [leadSent, setLeadSent] = useState(false)
+
+  async function submitLead(): Promise<void> {
+    if (leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)) return
+    setLeadBusy(true)
+    const fp = await deviceFingerprint()
+    try {
+      const r = await fetch('/api/lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: leadEmail, note: leadNote, fp }),
+      })
+      if (r.ok) {
+        setLeadSent(true)
+        setLeadEmail('')
+        setLeadNote('')
+      }
+    } catch {
+      /* ignore */
+    }
+    setLeadBusy(false)
+  }
 
   // Visit beacon: every arrival lands in the owner's analytics (server dedupes
   // 6h; the sessionStorage guard just avoids re-firing on SPA re-renders).
@@ -146,6 +172,40 @@ export default function Landing({ error }: { error?: string | null }) {
               </svg>
               {t.signIn}
             </button>
+          </div>
+
+          <div className="landing-lead">
+            {leadSent ? (
+              <p className="landing-lead-done">Mulțumim — te contactăm în curând.</p>
+            ) : (
+              <>
+                <h3 className="landing-lead-title">Lasă-ți emailul și te contactăm</h3>
+                <div className="landing-lead-row">
+                  <input
+                    className="landing-lead-input"
+                    type="email"
+                    placeholder="email@exemplu.com"
+                    value={leadEmail}
+                    onChange={(e) => setLeadEmail(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="landing-lead-btn"
+                    onClick={() => void submitLead()}
+                    disabled={leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)}
+                  >
+                    {leadBusy ? 'Se trimite…' : 'Trimite'}
+                  </button>
+                </div>
+                <input
+                  className="landing-lead-input landing-lead-note"
+                  type="text"
+                  placeholder="Mesaj scurt (opțional)"
+                  value={leadNote}
+                  onChange={(e) => setLeadNote(e.target.value)}
+                />
+              </>
+            )}
           </div>
 
           <div className="landing-manual">

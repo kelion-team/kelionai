@@ -182,6 +182,44 @@ export interface UserActivity {
   sessions: UserSessionRow[]
 }
 
+// Leads: visitors who left their email so the owner can reach them.
+export interface Lead {
+  id: number
+  email: string
+  note: string
+  contacted: boolean
+  created_at: string
+}
+
+export async function fetchLeads(): Promise<Lead[]> {
+  try {
+    const r = await fetch('/api/admin/leads', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { leads: Lead[] }).leads
+  } catch {
+    return []
+  }
+}
+
+export async function emailLead(
+  id: number,
+  to: string,
+  subject: string,
+  body: string,
+): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/lead/email', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, to, subject, body }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 // Admin action on a user: block / unblock / credit (amount) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
 export async function manageUser(
