@@ -37,6 +37,8 @@ import {
   fetchWorkOrders,
   type WorkOrder,
   fetchInbound,
+  fetchMailboxLive,
+  type MailboxLiveItem,
   type InboundEmail,
   fetchContactMessages,
   type ContactMessage,
@@ -137,6 +139,8 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [vreply, setVreply] = useState('')
   const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
+  const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
+  const [mailboxLoading, setMailboxLoading] = useState(false)
   const [contactMsgs, setContactMsgs] = useState<ContactMessage[]>([])
   // Arhivă apelabilă: joburile terminate și release-urile decise se strâng într-o
   // secțiune pliabilă, ca lista activă să arate DOAR ce e în lucru / de aprobat.
@@ -438,6 +442,11 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 setTab('inbox')
                 void fetchInbound().then(setInbound)
                 void fetchContactMessages().then(setContactMsgs)
+                setMailboxLoading(true)
+                void fetchMailboxLive().then((m) => {
+                  setMailboxLive(m)
+                  setMailboxLoading(false)
+                })
               }}
             >
               Inbox
@@ -732,6 +741,39 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
         )}
         {tab === 'inbox' && (
           <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                📬 Cutia REALĂ contact@kelionai.app — citită direct din server (toate
+                mesajele, citite sau nu). Aici vezi tot ce e în inbox, nu doar mailul
+                nou. Ultimele 40.
+              </div>
+              {mailboxLoading && <p className="chat-hint">Se citește cutia…</p>}
+              {!mailboxLoading && mailboxLive.length === 0 && (
+                <p className="chat-hint">Cutia e goală sau nu s-a putut citi (verifică MAIL_PASS).</p>
+              )}
+              {mailboxLive.map((m) => (
+                <div className="inbox-item" key={m.uid}>
+                  <div className="inbox-top">
+                    <span className="inbox-from">
+                      {m.fromName ? `${m.fromName} <${m.from}>` : m.from || '(expeditor necunoscut)'}
+                    </span>
+                    <span className={`inbox-flag ${m.seen ? 'ok' : 'wait'}`}>
+                      {m.seen ? 'citit' : '● necitit'}
+                    </span>
+                  </div>
+                  <div className="inbox-subj">{m.subject || '(fără subiect)'}</div>
+                  <div className="chat-hint">
+                    {new Date(m.date).toLocaleString('ro-RO', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
                 Mesaje din formularul „Contact" — salvate MEREU aici, chiar dacă
