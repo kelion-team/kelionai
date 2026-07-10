@@ -446,6 +446,21 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                       placeholder={`Sumă (${sym})`}
                       value={poolAmount}
                       onChange={(e) => setPoolAmount(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter în câmp = „Adaugă bani" (fluxul principal), ca să nu
+                        // pară că „nu face nimic" când apeși Enter în loc de buton.
+                        if (e.key !== 'Enter' || poolBusy || !(Number(poolAmount) > 0)) return
+                        e.preventDefault()
+                        void (async () => {
+                          setPoolBusy(true)
+                          const ok = await updatePool(Number(poolAmount), 'add')
+                          if (ok) {
+                            setPoolAmount('')
+                            await fetchFinance().then(setFinance)
+                          }
+                          setPoolBusy(false)
+                        })()
+                      }}
                     />
                     <button
                       type="button"
