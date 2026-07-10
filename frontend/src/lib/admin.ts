@@ -159,6 +159,8 @@ export interface UserActivityRow {
   code: string
   device: string
   browser: string
+  blocked: boolean
+  balance: number
 }
 
 export interface UserSessionRow {
@@ -176,6 +178,27 @@ export interface UserSessionRow {
 export interface UserActivity {
   users: UserActivityRow[]
   sessions: UserSessionRow[]
+}
+
+// Admin action on a user: block / unblock / credit (amount) / delete.
+// Returns the refreshed activity so the caller can update the list in place.
+export async function manageUser(
+  email: string,
+  action: 'block' | 'unblock' | 'credit' | 'delete',
+  amount?: number,
+): Promise<UserActivity | null> {
+  try {
+    const r = await fetch('/api/admin/user', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, action, amount }),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as UserActivity
+  } catch {
+    return null
+  }
 }
 
 // Approval gate: releases the server builder staged, awaiting the owner's OK.

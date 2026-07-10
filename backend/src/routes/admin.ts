@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import {
   listUsers,
@@ -9,6 +10,10 @@ import {
   getAdminAccount,
   loadAdminPool,
   withdrawAdminPool,
+  blockUser,
+  unblockUser,
+  grantCredit,
+  deleteUserData,
   getDemoStats,
   getUserActivity,
   getDownloadStats,
@@ -263,4 +268,42 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     else await loadAdminPool(amount)
     return reply.send(await getAdminAccount())
   })
+
+  // ── User management (admin only) ──────────────────────────────────────────
+  // Block/unblock, grant credit, or delete a user. The ADMIN is hard-protected:
+  // he can never block or delete himself, so the owner can't be locked out.
+  app.post<{ Body: { email?: string; action?: string; amount?: number } }>(
+    '/api/admin/user',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const email = String(req.body?.email ?? '').trim().toLowerCase()
+      const action = String(req.body?.action ?? '')
+      if (!email) return reply.code(400).send({ error: 'bad_request' })
+      const isOwner = email === config.adminEmail
+      switch (action) {
+        case 'block':
+          if (isOwner) return reply.code(400).send({ error: 'cannot_block_admin' })
+          await blockUser(email)
+          break
+        case 'unblock':
+          await unblockUser(email)
+          break
+        case 'credit': {
+          const amount = Number(req.body?.amount)
+          if (!Number.isFinite(amount) || amount === 0)
+            return reply.code(400).send({ error: 'bad_amount' })
+          await grantCredit(email, amount, config.stripe.currency)
+          break
+        }
+        case 'delete':
+          if (isOwner) return reply.code(400).send({ error: 'cannot_delete_admin' })
+          await deleteUserData(email)
+          break
+        default:
+          return reply.code(400).send({ error: 'bad_action' })
+      }
+      return reply.send(await getUserActivity())
+    },
+  )
 }

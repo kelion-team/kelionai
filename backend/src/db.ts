@@ -267,7 +267,80 @@ export async function initDb(): Promise<void> {
       value TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS blocked_users (
+      email TEXT PRIMARY KEY,
+      blocked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `)
+}
+
+// ── User management (admin) ─────────────────────────────────────────────────
+// The owner blocks/unblocks a user, grants credit, or wipes a user's data.
+// The ADMIN is protected at the route layer (can never be blocked/deleted).
+
+export async function isBlocked(email: string): Promise<boolean> {
+  if (!dbEnabled() || !email) return false
+  try {
+    const r = await getPool().query('SELECT 1 FROM blocked_users WHERE email = $1', [email.toLowerCase()])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+export async function blockUser(email: string): Promise<void> {
+  if (!dbEnabled() || !email) return
+  try {
+    await getPool().query(
+      'INSERT INTO blocked_users (email) VALUES ($1) ON CONFLICT (email) DO NOTHING',
+      [email.toLowerCase()],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+export async function unblockUser(email: string): Promise<void> {
+  if (!dbEnabled() || !email) return
+  try {
+    await getPool().query('DELETE FROM blocked_users WHERE email = $1', [email.toLowerCase()])
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Admin grants credit straight to a user's wallet (no Stripe, no split). */
+export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
+  if (!dbEnabled() || !email || !(amount !== 0)) return
+  try {
+    await getPool().query(
+      `INSERT INTO wallets (user_email, balance, currency) VALUES ($1, $2, $3)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, updated_at = now()`,
+      [email.toLowerCase(), amount, currency],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Wipe a user's data (messages, prefs, memories, wallet, visits, blocked flag). */
+export async function deleteUserData(email: string): Promise<void> {
+  if (!dbEnabled() || !email) return
+  const e = email.toLowerCase()
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    for (const t of ['messages', 'user_prefs', 'memories', 'wallets', 'visits', 'blocked_users']) {
+      const col = t === 'blocked_users' ? 'email' : 'user_email'
+      await client.query(`DELETE FROM ${t} WHERE ${col} = $1`, [e])
+    }
+    await client.query('COMMIT')
+  } catch {
+    await client.query('ROLLBACK').catch(() => {})
+  } finally {
+    client.release()
+  }
 }
 
 // ── Work orders (persistent builder queue) ──────────────────────────────────
@@ -827,6 +900,8 @@ export interface UserActivityRow {
   code: string
   device: string
   browser: string
+  blocked: boolean
+  balance: number
 }
 
 export interface UserSessionRow {
@@ -864,7 +939,9 @@ export async function getUserActivity(): Promise<{
                 (ARRAY_AGG(v.country ORDER BY v.last_seen_at DESC))[1] AS country,
                 (ARRAY_AGG(v.country_code ORDER BY v.last_seen_at DESC))[1] AS code,
                 (ARRAY_AGG(v.device ORDER BY v.last_seen_at DESC))[1] AS device,
-                (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser
+                (ARRAY_AGG(v.browser ORDER BY v.last_seen_at DESC))[1] AS browser,
+                EXISTS(SELECT 1 FROM blocked_users b WHERE b.email = v.user_email) AS blocked,
+                COALESCE((SELECT w.balance FROM wallets w WHERE w.user_email = v.user_email), 0)::float AS balance
          FROM visits v
          LEFT JOIN (SELECT user_email, COUNT(*)::int AS n
                     FROM messages GROUP BY user_email) m
