@@ -1,7 +1,6 @@
-# DIAGNOSTIC RUNTIME (doar-citire, NU atinge producția): rulează pe pull_request.
-# Scoate jurnalul RUNTIME al serverului de pe Railway — erori, calea punții,
-# joburile publice, vocea (TTS/ASR) — ca să vedem EXACT ce s-a întâmplat la
-# testele lui Adrian (demo fără audio), nu să ghicim.
+# DIAGNOSTIC ASR STREAMING (doar-citire): ia GOOGLE_SERVICE_ACCOUNT_JSON de pe
+# Railway și încearcă DE PE RUNNER matricea de configurații streamingRecognize —
+# Google răspunde cu eroarea EXACTĂ pentru fiecare. Zero atingere de producție.
 
 name: brain-diag
 
@@ -14,42 +13,53 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Jurnal runtime Railway — erori + punte + voce
+      - name: Matrice streamingRecognize — ce refuză Google exact
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -uo pipefail
           GQL=https://backboard.railway.com/graphql/v2
           gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
-
           RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
           P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0]')
-          PID=$(echo "$P" | jq -r '.id')
-          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
+          PID=$(echo "$P" | jq -r '.id'); ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
           SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
-
-          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:1,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt}}}}",variables:{p:$p,e:$e,s:$s}}')
-          DEP=$(gql "$DQ")
-          DID=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.id // empty')
-          echo "deployment=$DID status=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.status // "?"') created=$(echo "$DEP" | jq -r '.data.deployments.edges[0].node.createdAt // "?"')"
-          [ -z "$DID" ] && { echo "::error::nu găsesc deployment-ul"; exit 0; }
-
-          LQ=$(jq -nc --arg d "$DID" \
-            '{query:"query($d:String!){deploymentLogs(deploymentId:$d,limit:2000){timestamp message severity}}",variables:{d:$d}}')
-          LOGS=$(gql "$LQ")
-          echo "$LOGS" | jq -r '.errors[]?.message' 2>/dev/null || true
-          ALL=$(echo "$LOGS" | jq -r '.data.deploymentLogs[]? | "\(.timestamp) [\(.severity)] \(.message)"')
-          echo "linii total: $(echo "$ALL" | wc -l)"
-
-          echo "=== ERORI — ultimele 60 ==="
-          echo "$ALL" | grep -iE '\[err|error|fail|exception|unhandled|reject' | tail -60 || echo "(nimic)"
-
-          echo "=== PUNTE + JOBURI PUBLICE — ultimele 60 ==="
-          echo "$ALL" | grep -iE 'bridge|public|persona|stall' | tail -60 || echo "(nimic)"
-
-          echo "=== VOCE (tts/asr/chirp) — ultimele 40 ==="
-          echo "$ALL" | grep -iE 'tts|synth|asr|voice|chirp|speech' | tail -40 || echo "(nimic)"
-
-          echo "=== ULTIMELE 40 LINII BRUTE ==="
-          echo "$ALL" | tail -40
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          gql "$VQ" | jq -r '.data.variables.GOOGLE_SERVICE_ACCOUNT_JSON // empty' > /tmp/sa.json
+          [ -s /tmp/sa.json ] || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON lipsă"; exit 0; }
+          echo "service account: $(jq -r '.client_email' /tmp/sa.json | sed 's/@.*/@…/') proiect: $(jq -r '.project_id' /tmp/sa.json)"
+          npm i --no-save --silent @google-cloud/speech >/dev/null 2>&1
+          node - <<'EOF'
+          const { v2 } = require('@google-cloud/speech')
+          const creds = require('/tmp/sa.json')
+          const REGION = 'us-central1'
+          const pid = creds.project_id
+          const rec = `projects/${pid}/locations/${REGION}/recognizers/_`
+          const base = { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 }
+          const variants = [
+            ['A: chirp_3 + auto + punct + VAD + interim (PRODUCTIA)', { model: 'chirp_3', languageCodes: ['auto'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
+            ['B: chirp_3 + ro-RO (fara auto)', { model: 'chirp_3', languageCodes: ['ro-RO'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
+            ['C: chirp_3 minimal (fara punct/VAD/interim)', { model: 'chirp_3', languageCodes: ['ro-RO'], explicitDecodingConfig: base }, {}],
+            ['D: chirp_2 + auto (config identic cu A)', { model: 'chirp_2', languageCodes: ['auto'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
+            ['E: chirp_3 + auto, fara VAD', { model: 'chirp_3', languageCodes: ['auto'], explicitDecodingConfig: base }, { interimResults: true }],
+          ]
+          const silence = Buffer.alloc(16000) // 0.5s PCM16 tacere
+          async function probe([name, config, streamingFeatures]) {
+            const client = new v2.SpeechClient({ credentials: creds, projectId: pid, apiEndpoint: `${REGION}-speech.googleapis.com` })
+            return new Promise((resolve) => {
+              let done = false
+              let s
+              const fin = (msg) => { if (!done) { done = true; console.log(`${name} -> ${msg}`); try { s && s.end() } catch {} resolve() } }
+              try { s = client._streamingRecognize() } catch (e) { return fin(`SPAWN FAIL: ${e.message}`) }
+              s.on('error', (e) => fin(`EROARE: [${e.code ?? '?'}] ${String(e.message).slice(0, 220)}`))
+              s.on('data', () => fin('OK - Google accepta configuratia (a raspuns)'))
+              setTimeout(() => fin('OK - nicio eroare in 5s (config acceptat)'), 5000)
+              try {
+                s.write({ recognizer: rec, streamingConfig: { config, streamingFeatures } })
+                s.write({ audio: silence })
+              } catch (e) { fin(`WRITE FAIL: ${e.message}`) }
+            })
+          }
+          ;(async () => { for (const v of variants) await probe(v) })()
+          EOF
