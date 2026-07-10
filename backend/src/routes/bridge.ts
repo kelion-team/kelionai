@@ -55,6 +55,11 @@ interface PendingJob {
   // claude session, it resumes it (--resume) — real conversational memory
   // instead of a fresh process fed 15 truncated messages.
   turn?: string
+  // PUBLIC (ordin direct Adrian, 10 iul: „peste tot abonamentul mare"): jobul
+  // vine de la un VIZITATOR, nu de la proprietar. Workerul NU atașează
+  // contextul privat (context.md) și folosește personajul neutru Kelion —
+  // proiectul proprietarului nu se scurge niciodată către străini.
+  persona?: 'public'
 }
 
 const queue: PendingJob[] = []
@@ -614,7 +619,12 @@ export function stageRelease(title: string, detail: string): string {
 function dispatch(job: PendingJob): void {
   const w = pullWaiters.shift()
   if (w) w(job)
-  else if (!queue.some((j) => j.id === job.id)) queue.push(job)
+  else if (!queue.some((j) => j.id === job.id)) {
+    // PRIORITATE: mesajele PROPRIETARULUI sar în fața cozii — un val de
+    // vizitatori (joburi publice) nu-l poate face pe Adrian să aștepte după ei.
+    if (job.persona === 'public') queue.push(job)
+    else queue.unshift(job)
+  }
 }
 
 // Calitatea legăturii pentru becul din UI (fostul număr de benzi WS, 0–10):
@@ -695,8 +705,16 @@ export function bridgeAskStream(
   timeoutMs = 240_000,
   firstTokenMs = 30_000,
   turn = '',
+  persona: 'public' | '' = '',
 ): Promise<string | null> {
-  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files, turn: turn || undefined }
+  const job: PendingJob = {
+    id: randomUUID(),
+    kind: 'chat',
+    prompt,
+    files,
+    turn: turn || undefined,
+    persona: persona || undefined,
+  }
   return new Promise((resolve) => {
     let gotChunk = false
     // Stall guard: chunks reset it — a stream that keeps flowing never dies.

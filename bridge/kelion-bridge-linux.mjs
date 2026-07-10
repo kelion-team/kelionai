@@ -45,6 +45,14 @@ Ești conversațional: răspunde pe loc din ce ți se dă în context. NU folosi
 Conversația:
 `
 
+// PUBLIC (ordin direct Adrian, 10 iul: „peste tot abonamentul mare"): joburile
+// marcate persona:'public' vin de la VIZITATORI/CLIENȚI, nu de la proprietar.
+// NU primesc context.md (proiectul privat NU se scurge către străini) și au
+// personajul neutru Kelion — politicos, direct, în limba utilizatorului.
+const PUBLIC_PREAMBLE = `You are Kelion — a refined, courteous personal AI assistant: a well-mannered gentleman with a first-class mind. The conversation below is with a VISITOR or CUSTOMER (not your owner). Answer their LAST message DIRECTLY and IMMEDIATELY, briefly and to the point, in the language the instructions below specify. Plain spoken sentences only — NO markdown, NO asterisks, NO bullet lists, NO emoji (your words are read ALOUD). Do not use tools, do not explore files, do not run commands — just answer from what you are given. NEVER mention your owner, his name, his project, this server, or any internal detail. If asked for something that needs live tools (maps, email, camera, images), say briefly and kindly that this feature is coming to their account soon.
+
+`
+
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`)
 }
@@ -102,10 +110,15 @@ function claudeArgs({ streaming, model, hasFiles }) {
   return args
 }
 
-function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles } = {}) {
+// cwd NEUTRU pentru joburile PUBLICE: `claude -p` își încarcă automat CLAUDE.md
+// și contextul din directorul curent — un job de vizitator pornit din
+// /root/kelion ar primi pe furiș contextul privat. Public → rulează din /tmp.
+const spawnOpts = (pub) => (pub ? { env: process.env, cwd: '/tmp' } : { env: process.env })
+
+function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub } = {}) {
   return new Promise((resolve) => {
     const args = claudeArgs({ streaming: true, model, hasFiles })
-    const child = spawn(CLAUDE, args, { env: process.env })
+    const child = spawn(CLAUDE, args, spawnOpts(pub))
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
     let buf = ''
@@ -165,10 +178,10 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles } = {}) {
 // PLASĂ DE SIGURANȚĂ: modul text vechi (dovedit), fără streaming. Folosit doar
 // dacă streamingul nu scoate nimic (versiune de CLI fără `stream-json`) — așa
 // nu coborâm NICIODATĂ sub comportamentul de azi.
-function runClaudeText(prompt, { timeoutMs, model, hasFiles } = {}) {
+function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub } = {}) {
   return new Promise((resolve) => {
     const args = claudeArgs({ streaming: false, model, hasFiles })
-    const child = spawn(CLAUDE, args, { env: process.env })
+    const child = spawn(CLAUDE, args, spawnOpts(pub))
     let out = ''
     let err = ''
     const killer = setTimeout(() => {
@@ -193,37 +206,39 @@ function runClaudeText(prompt, { timeoutMs, model, hasFiles } = {}) {
 // Chat cu streaming + failover de model. Încearcă Fable (dacă nu se odihnește),
 // stream; dacă streamul nu scoate text, cade pe modul text (aceeași cerere);
 // dacă tot nimic și eram pe Fable, trece pe Opus și odihnește Fable 10 min.
-async function askClaude(prompt, onChunk, hasFiles) {
+async function askClaude(prompt, onChunk, hasFiles, isPublic) {
   const model = brainModel()
-  const full = loadContext() + '\n\n' + PREAMBLE + prompt
+  // Jobul PUBLIC nu primește NICIODATĂ context.md (privat) — doar personajul
+  // neutru. Jobul adminului primește tot contextul, ca până acum.
+  const full = isPublic ? PUBLIC_PREAMBLE + prompt : loadContext() + '\n\n' + PREAMBLE + prompt
   // Buget de timp MĂRGINIT (Adrian, 10 iul + audit): serverul renunță la 75s și
   // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
   // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
   // se ating decât la rațiune grea; cascada e scurtă, nu 4×120s ca înainte.
-  let answer = await runClaudeStream(full, { timeoutMs: 90_000, model, onChunk, hasFiles })
-  if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles })
+  let answer = await runClaudeStream(full, { timeoutMs: 90_000, model, onChunk, hasFiles, pub: isPublic })
+  if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles, pub: isPublic })
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
     log('Fable a esuat — trec pe Opus, revin la Fable in 10 min.')
-    answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles })
+    answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles, pub: isPublic })
   }
   // PLASĂ FINALĂ GARANTATĂ (Adrian, 10 iul: „să nu se mai poată strica"): dacă TOT
   // n-a ieșit nimic (ex. un flag pe care versiunea de CLI de aici nu-l cunoaște,
   // exact ce a rupt chatul), încearcă o comandă MINIMALĂ absolută — doar `claude
   // -p`, fără NICIUN flag opțional. Orice versiune de CLI o suportă, deci un flag
   // prost nu mai poate lăsa NICIODATĂ chatul complet mut.
-  if (!answer) answer = await runClaudeBare(full, 60_000)
+  if (!answer) answer = await runClaudeBare(full, 60_000, isPublic)
   return answer
 }
 
 // Comanda cea mai simplă cu putință — plasa de siguranță. Fără output-format,
 // fără unelte, fără model: doar text din stdin. Dacă și asta tace, chiar nu se
 // poate (CLI/abonament căzut), și abia atunci serverul dă mesajul cinstit.
-function runClaudeBare(prompt, timeoutMs = 60_000) {
+function runClaudeBare(prompt, timeoutMs = 60_000, pub = false) {
   return new Promise((resolve) => {
     let child
     try {
-      child = spawn(CLAUDE, ['-p'], { env: process.env })
+      child = spawn(CLAUDE, ['-p'], spawnOpts(pub))
     } catch {
       resolve(null)
       return
@@ -343,8 +358,10 @@ for (;;) {
       // Atașează pozele/fișierele jobului (dacă există) la prompt. Doar când
       // există fișiere permitem Read (ca să le privească); altfel chat pur, fără
       // unelte → instant.
-      const fileNote = saveJobFiles(job)
-      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '')
+      // GARD: joburile publice nu primesc NICIODATĂ fișiere/Read pe inbox —
+      // uneltele și fișierele sunt doar pentru admin.
+      const fileNote = job.persona === 'public' ? '' : saveJobFiles(job)
+      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '', job.persona === 'public')
     } finally {
       clearInterval(pulse)
       flush() // orice bucată rămasă în tampon pleacă acum
