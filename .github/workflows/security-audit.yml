@@ -53,14 +53,7 @@ jobs:
               ufw status verbose | head -20
               echo "== 2) FAIL2BAN — ban automat la brute-force pe SSH =="
               apt-get install -y -qq fail2ban >/dev/null 2>&1
-              cat > /etc/fail2ban/jail.d/kelion.conf <<'CONF'
-[sshd]
-enabled = true
-port = ssh
-maxretry = 4
-findtime = 600
-bantime = 86400
-CONF
+              printf '%s\n' '[sshd]' 'enabled = true' 'port = ssh' 'maxretry = 4' 'findtime = 600' 'bantime = 86400' > /etc/fail2ban/jail.d/kelion.conf
               systemctl enable fail2ban >/dev/null 2>&1
               systemctl restart fail2ban
               sleep 3
@@ -72,7 +65,7 @@ CONF
                 echo "  (nicio parolă nouă dată — nu am schimbat-o)"
               fi
               echo "== GATA hardening =="
-EOS
+          EOS
             exit 0
           fi
 
@@ -109,4 +102,4 @@ EOS
             grep -rhiE '^\s*(PermitRootLogin|PasswordAuthentication)' /etc/ssh/sshd_config.d/ 2>/dev/null | sed 's/^/  (drop-in) /'
             echo; echo "===== ULTIMELE 25 comenzi din istoricul root ====="; tail -25 /root/.bash_history 2>/dev/null | sed 's/^/  /'
             echo "===== GATA AUDIT ====="
-EOS
+          EOS
