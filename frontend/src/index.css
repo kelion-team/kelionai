@@ -1914,8 +1914,9 @@ body {
 }
 .admin-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
@@ -1923,9 +1924,16 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  /* Toate tab-urile trebuie să încapă în panou — pe mai multe rânduri dacă e
-     nevoie — ca butonul Inbox/Close să nu mai iasă din pagină. */
-  max-width: 100%;
+  /* CHEIA: fără flex:1 + min-width:0, containerul creștea la lățimea tuturor
+     tab-urilor pe UN rând (max-content) și flex-wrap nu se declanșa niciodată —
+     de-aia Close ieșea din pagină. Acum ia DOAR lățimea disponibilă (minus
+     Close) și tab-urile chiar curg pe mai multe rânduri. */
+  flex: 1;
+  min-width: 0;
+}
+/* Butonul Close rămâne MEREU vizibil, sus-dreapta, nu se micșorează sub tab-uri. */
+.admin-head > .ghost {
+  flex-shrink: 0;
 }
 .admin-tab {
   padding: 6px 12px;
