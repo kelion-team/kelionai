@@ -43,6 +43,16 @@ jobs:
       - name: Instalează Railway CLI
         run: npm i -g @railway/cli
 
+      # AMPRENTA DE DINAINTE (10 iul): salvăm ce versiune rulează ACUM, ca după
+      # publicare să dovedim că s-a SCHIMBAT. „/health = 200" nu dovedea nimic —
+      # venea de la containerul vechi când deploy-ul nou nu-l înlocuia.
+      - name: Amprenta versiunii de dinainte
+        id: before
+        run: |
+          V=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+          echo "Versiune înainte: $V"
+          echo "ver=$V" >> "$GITHUB_OUTPUT"
+
       - name: Găsește singur ținta de producție (proiect + mediu + serviciu)
         id: target
         env:
@@ -162,22 +172,31 @@ jobs:
           unset RAILWAY_API_TOKEN || true
           railway up --service "$SERVICE" --ci
 
-      - name: Verifică live (kelionai.app răspunde 200)
+      - name: Verifică REAL că noul build a preluat (versiunea s-a schimbat)
         id: verify
+        env:
+          BEFORE: ${{ steps.before.outputs.ver }}
         run: |
-          # „Trimis ≠ gata": probăm producția până la ~2 min; doar 200 = succes.
+          # „Trimis ≠ gata" ȘI „200 ≠ nou". /api/version raportează momentul
+          # pornirii containerului (se schimbă la ORICE publicare reală). Așteptăm
+          # până când versiunea DIFERĂ de cea de dinainte — dovada că build-ul nou
+          # a preluat traficul, nu containerul vechi care oricum dădea /health 200.
+          echo "Versiune înainte: $BEFORE"
           ok=""
-          for i in $(seq 1 24); do
+          for i in $(seq 1 48); do
+            NOW=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/health || echo 000)
-            echo "încercarea $i → HTTP $code"
-            if [ "$code" = "200" ]; then ok="1"; break; fi
+            echo "încercarea $i → HTTP $code   version=$NOW"
+            if [ "$code" = "200" ] && [ -n "$NOW" ] && [ "$NOW" != "$BEFORE" ] && [ "$NOW" != "{}" ]; then
+              ok="1"; break
+            fi
             sleep 5
           done
           if [ -z "$ok" ]; then
-            echo "::error::Deploy trimis, dar kelionai.app nu răspunde 200 după ~2 min."
+            echo "::error::Deploy trimis, DAR versiunea live nu s-a schimbat după ~4 min — producția a rămas pe build vechi (containerul nou nu a preluat)."
             exit 1
           fi
-          echo "🟢 PUBLICAT + VERIFICAT LIVE — kelionai.app răspunde 200"
+          echo "🟢 PUBLICAT + VERIFICAT LIVE — versiunea s-a schimbat, noul build a preluat."
 
       # ALERTĂ INSTANT (Adrian, 10 iul: „kelion trebuie să primească instant err
       # de la railway" — nu tu să-mi arăți poze din dashboard). Rulează la ORICE
