@@ -1,5 +1,6 @@
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
+import { academicPronounce } from './pronounce.js'
 
 // Shared Google Cloud Text-to-Speech synthesis — Chirp 3 HD (male, academic).
 // ONE implementation used by BOTH the authenticated /api/tts route and the
@@ -59,6 +60,10 @@ export async function synthesize(text: string, langRaw: string | undefined): Pro
   if (!clean) return { ok: false, status: 400, error: 'bad_request' }
 
   const lang = normalizeLang(langRaw)
+  // MOD ACADEMIC: respellăm acronimele tehnice literă-cu-literă în limba țintă
+  // ca să fie rostite corect (API → „a pe i"), nu stâlcite. Strat pur pe text,
+  // nu atinge microfonul. Vezi services/pronounce.ts.
+  const spoken = academicPronounce(clean, lang.split('-')[0])
   // A valid Chirp 3 HD style is a single capitalised name (e.g. Charon). Guard
   // against legacy/invalid values that would make Google reject the voice.
   const style = /^[A-Z][a-z]+$/.test(config.ttsVoiceStyle) ? config.ttsVoiceStyle : 'Charon'
@@ -79,7 +84,7 @@ export async function synthesize(text: string, langRaw: string | undefined): Pro
     method: 'POST',
     headers,
     body: JSON.stringify({
-      input: { text: clean },
+      input: { text: spoken },
       voice: { languageCode: lang, name: voiceName },
       audioConfig: { audioEncoding: 'MP3' },
     }),
