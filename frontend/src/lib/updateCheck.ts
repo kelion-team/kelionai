@@ -19,6 +19,17 @@ let resetting = false
 export async function hardResetToLatest(): Promise<void> {
   if (resetting) return
   resetting = true
+  // ANTI-BUCLĂ de reload (supraviețuiește reîncărcării): dacă am resetat în
+  // ultimele 30s, NU mai reîncărcăm încă o dată. Fără plasa asta, orice cauză care
+  // ar chema resetul din nou după reload ar putea intra într-o buclă de reload care
+  // face aplicația inutilizabilă („distrus"). 30s > timpul unei reîncărcări complete.
+  try {
+    const last = Number(sessionStorage.getItem('kelion_last_reset') || 0)
+    if (Date.now() - last < 30_000) return
+    sessionStorage.setItem('kelion_last_reset', String(Date.now()))
+  } catch {
+    /* storage indisponibil — continuăm cu resetul */
+  }
   try {
     if ('caches' in window) {
       const keys = await caches.keys()

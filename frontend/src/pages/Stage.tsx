@@ -10,7 +10,6 @@ import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
 import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
-import { hardResetToLatest } from '../lib/updateCheck'
 import { resolveLang, strings } from '../lib/i18n'
 import {
   getWorkspace,
@@ -322,36 +321,13 @@ export default function Stage({ user }: { user: User }) {
     return () => window.clearInterval(id)
   }, [showAnalysis, user.role])
 
-  // AUTO-REFRESH on release: when the served bundle name changes (a deploy
-  // landed), the page reloads ITSELF — nobody has to press F5 ever again.
-  useEffect(() => {
-    const current = document.querySelector('script[src*="index-"]')?.getAttribute('src') ?? ''
-    if (!current) return
-    const check = (): void => {
-      void fetch('/index.html', { cache: 'no-store' })
-        .then((r) => r.text())
-        .then((html) => {
-          const m = html.match(/index-[A-Za-z0-9_-]+\.js/)
-          if (m && !current.includes(m[0])) {
-            // Versiune nouă → RESET DUR (golește cache + SW) și ia ultima versiune.
-            // Nu doar reload: un reload simplu putea servi tot build vechi din cache.
-            void hardResetToLatest()
-          }
-        })
-        .catch(() => {})
-    }
-    check() // verifică și la deschidere, nu doar din 45 în 45s
-    const id = window.setInterval(check, 45_000)
-    // Verifică și când revii pe tab — prinzi ultima versiune imediat ce te întorci.
-    const onVis = (): void => {
-      if (document.visibilityState === 'visible') check()
-    }
-    document.addEventListener('visibilitychange', onVis)
-    return () => {
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVis)
-    }
-  }, [])
+  // VERSIUNE NOUĂ — NEintruziv (Adrian, 10 iul: „chat distrus, audio și scris").
+  // ÎNAINTE: pagina se reseta DUR singură (golea tot cache-ul + reload) la fiecare
+  // build nou — la deschidere, din 45 în 45s și la revenirea pe tab. Cât publicam
+  // des, îți smulgea pagina PESTE chat, în mijlocul vorbirii/scrisului → distrugea
+  // ȘI audio ȘI scris deodată. ACUM nu mai atingem pagina din timpul unei
+  // conversații: App.tsx afișează bara „Update now" (watchForUpdate), iar TU
+  // apeși când ești gata — resetul dur rămâne, dar la comanda ta, nu peste chat.
 
   // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it sets
   // the server wake flag the laptop wake-agent polls. The old second channel —
