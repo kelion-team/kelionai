@@ -2909,3 +2909,21 @@ a.card-item:hover {
   border-color: rgba(127, 224, 168, 0.4);
   background: rgba(127, 224, 168, 0.12);
 }
+/* VITEZA CREIERULUI: cronometrul turei / timpii ultimei ture (10 iul). */
+.speed-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+  color: #b8c2cc;
+  border: 1px solid var(--border);
+  background: rgba(180, 194, 204, 0.08);
+  font-variant-numeric: tabular-nums;
+}
+.speed-badge.live {
+  color: #ffd27a;
+  border-color: rgba(255, 210, 122, 0.45);
+  background: rgba(255, 210, 122, 0.14);
+}

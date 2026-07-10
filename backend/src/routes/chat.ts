@@ -57,6 +57,8 @@ import {
   bridgeRepair,
   noteBrainActivity,
   resetBrainActivity,
+  markFirstWord,
+  finishBrainTurn,
   setOwnerTz,
   setProgress,
   setAnalysisDetail,
@@ -1461,6 +1463,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (!chunk) return
           if (!firstWord) {
             firstWord = true
+            markFirstWord() // primul cuvânt real → măsurăm viteza creierului
             setProgress(65, 'Compun răspunsul')
           }
           if (headDone) emit(chunk)
@@ -1503,7 +1506,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
         reanalyzePrompt = bridgePrompt
-        const maxTries = 4
+        // O SINGURĂ reîncercare, nu 4 (Adrian, 10 iul: „intră în buclă pe cerință
+        // și nu mai ascultă stop"). Fereastra primului cuvânt e deja generoasă
+        // (75s pentru raționament avansat); dacă tot tace, reîncercăm o dată în
+        // liniște și-atât — fără buclă de „încercarea 2/3/4" care sperie și
+        // întârzie. Restul e tratat cinstit mai jos (re-cozare + răspuns).
+        const maxTries = 2
         for (let attempt = 1; attempt <= maxTries; attempt++) {
           // Fereastra primului cuvânt = 75s, nu 30s (Adrian, 9 iul: „legătura
           // ruptă" pe mesajul curent). Calea de RAȚIONAMENT AVANSAT durează
@@ -1516,7 +1524,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (answer === BRIDGE_STALL && !headDone && !streamed.trim()) {
             head = ''
             if (attempt < maxTries) {
-              noteBrainActivity(`⏳ Fără răspuns încă — reanalizez cererea (încercarea ${attempt + 1})`)
+              noteBrainActivity('⏳ Creierul încă gândește — mai aștept o dată, în liniște')
               continue
             }
           }
@@ -1558,6 +1566,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // Handed to the builder — the process bar continues from the builder
           // (agent → files → build → deploy → live), so don't jump to 100 here.
           setProgress(15, 'Trimis la constructor')
+          // CHAT CU CERINȚĂ DE LUCRU: stampilăm timpii dispatch-ului (tip „lucru")
+          // — Adrian vede cât a durat până s-a predat la execuție.
+          finishBrainTurn('lucru')
           // SUPERVIZOR: cerința devine DEȚINUTĂ — rămâne deschisă până la
           // verificare live, nu se închide la „trimis" (Adrian, 5 iul). Numele
           // cerinței = mesajul real, dar dacă a fost doar „da", ia prima linie
@@ -1575,11 +1586,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             emit(a)
           }
         } else {
-          // A plain chat answer is a complete process — the bar reaches the end.
-          setProgress(100, 'Gata')
+          // CHAT SIMPLU: proces COMPLET — bara ajunge la 100, stampilăm timpii
+          // (tip „chat") și apoi se stinge singură (nu rămâne agățată = fals lucru).
+          finishBrainTurn('chat')
         }
       }
       if (!a) {
+        // Închide cronometrul turei și pe calea asta (punte căzută → blocul de
+        // streaming a fost sărit): fără asta, bara ar rămâne agățată la „Preluare"
+        // (turnActive niciodată închis). Idempotent — no-op dacă deja s-a închis.
+        finishBrainTurn('chat')
         // REGULA ABSOLUTĂ A LUI ADRIAN (4 iul, reconfirmată 9 iul: „ce creier de
         // rezervă, cine a cerut așa ceva?"): mesajele adminului sunt răspunse
         // EXCLUSIV de creierul Linux (abonament), NICIODATĂ de creierul API cu
