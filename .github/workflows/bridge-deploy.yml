@@ -57,13 +57,15 @@ jobs:
             done
             [ -z "$REPO" ] && { echo "NU găsesc clona repo-ului cu bridge/"; exit 1; }
             cd "$REPO" || exit 1
-            echo "repo: $REPO (înainte: $(git rev-parse --short HEAD))"
+            echo "repo: $REPO (HEAD local: $(git rev-parse --short HEAD))"
             git fetch origin master || { echo "git fetch a eșuat"; exit 1; }
-            if ! git pull --ff-only origin master; then
-              echo "⚠️ NU pot avansa curat (commituri locale pe VPS). Rezolvă manual (git status / git stash)."
-              exit 2
-            fi
-            echo "cod la zi: $(git rev-parse --short HEAD)"
+            # SURGICAL: aducem DOAR fișierul workerului la origin/master. Repo-ul de
+            # pe VPS a divergat din commituri locale de auto-reparație, deci un pull
+            # --ff-only e imposibil; dar workerul e un singur .mjs cu doar builtins,
+            # așa că-l actualizăm țintit fără să atingem istoricul/munca locală.
+            git checkout origin/master -- bridge/kelion-bridge-linux.mjs || { echo "checkout worker a eșuat"; exit 2; }
+            echo "worker adus la origin/master ($(git rev-parse --short origin/master)):"
+            git --no-pager diff --stat HEAD -- bridge/kelion-bridge-linux.mjs || true
             systemctl restart kelion-bridge
             sleep 4
             echo "kelion-bridge → $(systemctl is-active kelion-bridge)"
