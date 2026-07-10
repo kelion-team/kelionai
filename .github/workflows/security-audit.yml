@@ -42,27 +42,32 @@ jobs:
           SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
 
           if [ "$MODE" = "harden" ]; then
-            echo "MOD: HARDEN — aplic apărarea (fail2ban + firewall + parolă)"
-            NEW_PASS="$NEW_PASS" sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
+            echo "MOD: HARDEN — aplic apararea (fail2ban + firewall + banner + parola)"
+            sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<EOS
               set -uo pipefail
               export DEBIAN_FRONTEND=noninteractive
-              echo "== 1) FIREWALL (ufw) — deschid SSH ÎNAINTE de enable, ca să nu ne blocăm =="
+              echo "== 1) FIREWALL (ufw) — deschid SSH INAINTE de enable, ca sa nu ne blocam =="
               apt-get install -y -qq ufw >/dev/null 2>&1
               ufw allow 22/tcp >/dev/null 2>&1
               ufw --force enable >/dev/null 2>&1
               ufw status verbose | head -20
-              echo "== 2) FAIL2BAN — ban automat la brute-force pe SSH =="
+              echo "== 2) FAIL2BAN — ban automat la brute-force (4 greseli -> 24h ban) =="
               apt-get install -y -qq fail2ban >/dev/null 2>&1
               printf '%s\n' '[sshd]' 'enabled = true' 'port = ssh' 'maxretry = 4' 'findtime = 600' 'bantime = 86400' > /etc/fail2ban/jail.d/kelion.conf
               systemctl enable fail2ban >/dev/null 2>&1
               systemctl restart fail2ban
-              sleep 3
-              fail2ban-client status sshd 2>/dev/null | sed 's/^/  /' || echo "  (fail2ban pornește...)"
-              echo "== 3) PAROLĂ ROOT nouă =="
+              sleep 4
+              echo "  --- IP-uri deja banate ACUM ---"
+              fail2ban-client status sshd 2>/dev/null | sed 's/^/  /' || echo "  (fail2ban porneste...)"
+              echo "== 3) BANNER LEGAL de avertizare la conectare =="
+              printf '%s\n' '****************************************************************' 'ACCES INTERZIS. Sistem privat, monitorizat 24/7. Orice tentativa' 'de acces neautorizat este inregistrata, banata automat si poate fi' 'raportata autoritatilor conform legii. Deconectati-va imediat.' '****************************************************************' > /etc/issue.net
+              grep -q '^Banner ' /etc/ssh/sshd_config || echo 'Banner /etc/issue.net' >> /etc/ssh/sshd_config
+              (systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null) && echo "  Banner activat."
+              echo "== 4) PAROLA ROOT noua =="
               if [ -n "${NEW_PASS:-}" ]; then
-                echo "root:${NEW_PASS}" | chpasswd && echo "  Parola root a fost SCHIMBATĂ." || echo "  EȘEC la schimbarea parolei."
+                echo "root:${NEW_PASS}" | chpasswd && echo "  Parola root a fost SCHIMBATA." || echo "  ESEC la schimbarea parolei."
               else
-                echo "  (nicio parolă nouă dată — nu am schimbat-o)"
+                echo "  (nicio parola noua data — nu am schimbat-o)"
               fi
               echo "== GATA hardening =="
           EOS
