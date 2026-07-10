@@ -8,6 +8,7 @@ import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin, startDemo } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
+import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
@@ -38,6 +39,24 @@ export default function Landing({ error }: { error?: string | null }) {
   const [busy, setBusy] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
+  // Versiunea live (aceeași sursă ca filigranul din browser) — o arătăm sub
+  // fiecare cod QR ca dovadă că aplicația instalată e EXACT versiunea din
+  // browser; se împrospătează singură la orice deploy (fetchServerVersion).
+  const [srv, setSrv] = useState<ServerVersion | null>(null)
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => {
+      void fetchServerVersion().then((j) => {
+        if (alive && j) setSrv(j)
+      })
+    }
+    refresh()
+    const id = window.setInterval(refresh, 60_000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
   const [notice, setNotice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
@@ -233,6 +252,9 @@ export default function Landing({ error }: { error?: string | null }) {
                     <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
                   </button>
                   <figcaption>{q.label}</figcaption>
+                  {/* Numărul din filigram, sub FIECARE cod — același ca în browser;
+                      dovedește că aplicația instalată e exact versiunea live. */}
+                  <span className="qr-version">{versionLabel(srv)}</span>
                 </figure>
               ))}
             </div>
