@@ -1168,18 +1168,21 @@ export default function ChatPanel({
           </button>
           <button
             type="button"
-            className="composer-send"
+            className={`composer-send ${busy ? 'queueing' : ''}`}
             onClick={() => {
               // vezi comentariul din onKeyDown Enter: golim orice frază de
               // voce rămasă în așteptare înainte de trimiterea manuală.
               coalescerRef.current?.flushNow()
               void send(input)
             }}
-            disabled={busy || (!input.trim() && attachments.length === 0)}
-            aria-label={t.send}
-            title={t.send}
+            // MEREU activ cât ai ceva de trimis — și cât Kelion răspunde. Un mesaj
+            // trimis acum NU întrerupe tura curentă: se pune în coadă (send() îl
+            // stivuiește) și pleacă imediat ce tura se termină. Softul nu se rupe.
+            disabled={!input.trim() && attachments.length === 0}
+            aria-label={busy ? 'Pune în coadă' : t.send}
+            title={busy ? 'Se procesează — mesajul tău se pune în coadă, nu întrerupe' : t.send}
           >
-            ↑
+            {busy ? '■' : '↑'}
           </button>
         </div>
         <input
