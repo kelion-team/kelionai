@@ -75,14 +75,18 @@ import {
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
 
-// The brain: Claude Fable 5 — Anthropic's most capable model. If Fable has ANY
-// problem (suspended access, overload, a safety refusal, any error before text
-// streams), the turn is transparently re-served by the RESERVE brain, Opus 4.8,
-// and Fable is rested for a while before we probe it again. The user never
-// notices — one brain, always answering.
-const MODEL = 'claude-fable-5'
-const MODEL_RESERVE = 'claude-opus-4-8'
-const FABLE_REST_MS = 10 * 60_000 // after a hard failure, use Opus for 10 min
+// ── STRATEGIA DE MODEL (Adrian, 10 iul) ──────────────────────────────────────
+// „Kelion pornește ÎNTOTDEAUNA de la viteză maximă de răspuns și urcă la cel mai
+//  avansat model din momentul respectiv DOAR când cerința o cere."
+// Cele două tier-uri sunt CONFIGURABILE DIN MEDIU (Railway). Când apare un model
+// mai nou/mai puternic — acum sau în viitor — setezi variabila și intră INSTANT,
+// FĂRĂ deploy și fără cod dublat. Fără variabilă, folosim cele mai bune de acum.
+const MODEL_FAST = process.env.KELION_FAST_MODEL || 'claude-fable-5' // viteză maximă, primul cuvânt <1s
+const MODEL_TOP = process.env.KELION_TOP_MODEL || 'claude-opus-4-8' // cel mai nou+puternic din prezent; cereri grele + orice eșec
+// Nume vechi păstrate pentru restul codului (compat), derivate din tier-uri.
+const MODEL = MODEL_FAST
+const MODEL_RESERVE = MODEL_TOP
+const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
 let fableDownUntil = 0
 // Ultimul mesaj (normalizat) al adminului — pentru filtrul anti-ecou ASR:
 // un duplicat sosit în <45s nu mai pornește o tură (zgomot de microfon).
@@ -92,6 +96,15 @@ function brainModel(): string {
 }
 function restFable(): void {
   fableDownUntil = Date.now() + FABLE_REST_MS
+}
+// Cerere „grea" (analiză, cod, raționament multi-pas, comparație, text lung) →
+// pornim DIRECT pe modelul cel mai avansat, nu așteptăm un eșec. Chatul scurt și
+// simplu rămâne pe modelul rapid → viteză maximă implicită + cost neschimbat pe
+// demo pentru cererile obișnuite; costul urcă DOAR când cerința chiar o cere.
+function demandsTopModel(text: string): boolean {
+  const t = (text || '').toLowerCase()
+  if (t.length > 700) return true // cerere lungă/complexă
+  return /(analiz[ăae]|demonstr|rezolv[ăa]|algoritm|debug|strategi[ea]|pas cu pas|[îi]n detaliu|g[âa]nde[șs]te|ra[țt]ion|argument[ea]|compar[ăa]|scrie[^.]{0,24}(cod|program|func))/.test(t)
 }
 
 // Admin-only tool so Kelion can report its own real running cost when asked.
@@ -1971,7 +1984,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // nostru. Regula: o cerere pe cheia clientului NU atinge NICIODATĂ cheile
     // platformei. Pică pe cheia lui → primește o eroare clară, nu o cursă gratis.
     const usingUserKey = !!userAnthropicKey
-    let model = brainModel()
+    // Fast-first, dar dacă cererea e grea pornim DIRECT pe modelul cel mai avansat
+    // (nu așteptăm un eșec) — principiul lui Adrian: viteză maximă implicit, putere
+    // maximă la nevoie. Chatul obișnuit rămâne pe modelul rapid (cost neschimbat).
+    let model = demandsTopModel(lastUserText) ? MODEL_TOP : brainModel()
     // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
     // back until we confirm it's in that language; on a confident mismatch we
     // discard (nothing was sent) and re-serve the round ONCE, corrected. It is
