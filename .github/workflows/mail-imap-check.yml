@@ -1,0 +1,61 @@
+# VERIFICARE REALĂ A EMAILULUI (doar-citire). Nu doar că MAIL_PASS există, ci că
+# contul contact@kelionai.app CHIAR se autentifică: ia credențialele din Railway
+# (parola MASCATĂ în jurnal, niciodată afișată), încearcă un LOGIN IMAP real și
+# raportează „reușit" / „respins". Nu modifică nimic, nu șterge niciun email.
+name: mail-imap-check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test login IMAP la contact@kelionai.app
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "$TOKEN" ]; then echo "::error::RAILWAY_TOKEN lipsește"; exit 1; fi
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0]')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          VARS=$(gql "$VQ")
+          USER=$(echo "$VARS" | jq -r '.data.variables.MAIL_USER // "contact@kelionai.app"')
+          PASS=$(echo "$VARS" | jq -r '.data.variables.MAIL_PASS // ""')
+          HOST=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_HOST // "mail.privateemail.com"')
+          PORT=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_PORT // "993"')
+          # Parola nu se afișează NICIODATĂ.
+          [ -n "$PASS" ] && echo "::add-mask::$PASS" || true
+
+          echo "Cont: $USER   Server: $HOST:$PORT"
+          if [ -z "$PASS" ]; then
+            echo "❌ MAIL_PASS există ca nume, dar VALOAREA E GOALĂ — de-aia emailul nu merge."
+            exit 0
+          fi
+
+          # Escape pentru string-ul IMAP (\\ și ") — ca o parolă cu simboluri să nu strice comanda.
+          ESC=$(printf '%s' "$PASS" | sed 's/\\/\\\\/g; s/"/\\"/g')
+          echo "::add-mask::$ESC"
+
+          # LOGIN IMAP real peste TLS. 'a OK' = autentificare reușită.
+          OUT=$(printf 'a login "%s" "%s"\r\na logout\r\n' "$USER" "$ESC" \
+            | timeout 25 openssl s_client -quiet -crlf -connect "$HOST:$PORT" 2>/dev/null | tr -d '\r')
+
+          echo "--- răspuns server (doar liniile de protocol, fără parolă) ---"
+          echo "$OUT" | grep -E '^(a |\* )' | head -12 || true
+          echo "-------------------------------------------------------------"
+          if echo "$OUT" | grep -qiE '^a OK'; then
+            echo "✅ CONEXIUNE IMAP REUȘITĂ — parola e corectă, contact@kelionai.app se autentifică. Emailul funcționează; Inbox e gol doar fiindcă n-au venit scrisori."
+          elif echo "$OUT" | grep -qiE '^a (NO|BAD)'; then
+            echo "❌ AUTENTIFICARE RESPINSĂ de server — parola MAIL_PASS e greșită/expirată sau contul e blocat. ASTA trebuie reparat."
+          else
+            echo "⚠️ Fără verdict clar (rețea/port/host). Verific manual dacă e nevoie."
+          fi
