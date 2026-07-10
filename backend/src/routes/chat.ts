@@ -1045,6 +1045,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       lastAdminEcho = { key: noiseKey, at: Date.now() }
+      // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): serverul confirmă EXACT
+      // textul pe care îl predă creierului la această tură — banda din UI îl
+      // afișează. Nu e ecou local: dacă banda nu se schimbă când vorbești,
+      // vocea a murit ÎNAINTE de creier.
+      reply.raw.write(`${CTRL}${JSON.stringify({ heard: (cleanUserText || lastUserText).slice(0, 500) })}${CTRL}`)
       let a = ''
       // The exact bridge prompt for this turn, hoisted so the final fallback can
       // RE-QUEUE the request (nothing is ever dropped without an answer).
@@ -1627,6 +1632,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // memorie injectată, fără învățare, fără salvare în istoric. Camera DA:
       // cadrul camerei pleacă la creier ca fișier de job (persoana publică).
       const isDemo = user.role === 'demo'
+      // Bargraf la intrarea în creier — și pe calea publică (vezi calea admin).
+      reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
       if (!bridgeOnline()) {
         // Puntea e jos → mesaj cinstit, scurt. NU cădem pe cheia API (ordinul).
         const msg = roPub

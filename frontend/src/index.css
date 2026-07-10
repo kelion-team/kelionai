@@ -2981,6 +2981,37 @@ a.card-item:hover {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.35; transform: scale(0.7); }
 }
+/* BARGRAF LA INTRAREA ÎN CREIER: confirmarea serverului cu textul EXACT predat
+   creierului la tura curentă — chihlimbar, distinct de banda verde de dictare. */
+.heard-band {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 6px 8px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(24, 16, 0, 0.88), rgba(20, 10, 0, 0.88));
+  border: 1px solid rgba(255, 190, 80, 0.35);
+  box-shadow: 0 0 18px rgba(255, 180, 60, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.heard-band-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #ffca7a;
+  opacity: 0.85;
+}
+.heard-band-text {
+  flex: 1;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #ffd9a0;
+  text-shadow: 0 0 6px rgba(255, 200, 120, 0.35);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 @keyframes voice-caret {
   0%, 50% { opacity: 1; }
   50.01%, 100% { opacity: 0; }

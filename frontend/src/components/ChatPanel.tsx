@@ -95,6 +95,9 @@ export default function ChatPanel({
   // DICTARE LIVE: fraza curentă, cuvânt cu cuvânt, cu efect cinematografic pe
   // bandă cât vorbește Adrian; se golește când fraza pleacă la creier.
   const [liveVoice, setLiveVoice] = useState('')
+  // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT predat
+  // creierului la tura curentă — vine de pe SERVER ({heard}), nu e ecou local.
+  const [heard, setHeard] = useState('')
   // Modul microfon: true = dictare live (streaming WS); cade pe batch dovedit
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
@@ -187,6 +190,12 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     if (c.receipt) {
       setDelivered(true)
+      return
+    }
+    // Bargraf-ul intrării în creier: serverul spune EXACT ce text predă
+    // creierului — se afișează pe banda dedicată până la tura următoare.
+    if (c.heard !== undefined) {
+      setHeard(c.heard)
       return
     }
     // VOCEA CREIERULUI: MP3 gata sintetizat pe server (Chirp 3) — DOAR îl redăm.
@@ -1129,6 +1138,16 @@ export default function ChatPanel({
             <span className="voice-live-dot" />
             <span className="voice-live-text">{liveVoice}</span>
             <span className="voice-live-caret" />
+          </div>
+        )}
+        {/* BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): ce a primit EFECTIV
+            creierul la ultima tură — confirmat de server, nu ecou local. Dacă
+            vorbești și banda asta NU se schimbă, vocea a murit ÎNAINTE de
+            creier (microfon/ureche); dacă textul e greșit, urechea aude prost. */}
+        {heard && (
+          <div className="heard-band" aria-live="polite">
+            <span className="heard-band-label">🧠 la intrare în creier</span>
+            <span className="heard-band-text">„{heard}"</span>
           </div>
         )}
         {/* Ordinul lui Adrian: „doar vocea mea, nu se acceptă alta" — cât nu e
