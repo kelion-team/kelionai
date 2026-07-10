@@ -6,6 +6,29 @@ import { isBlocked, saveGoogleRefreshToken, getGoogleRefreshToken } from '../db.
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 
+// DIAGNOSTIC conectare Google (Adrian, 10 iul: „nu face ce ai zis"). Reține exact
+// ce s-a întâmplat la ultima conectare, ca să știm UNDE pică, nu să ghicim:
+// a venit refresh token de la Google? exista sesiune? s-a salvat în DB?
+let lastConnectDiag: {
+  at: string
+  reachedCallback: boolean
+  stateOk: boolean
+  tokenExchangeOk: boolean
+  gotRefreshFromGoogle: boolean
+  sessionExisted: boolean
+  savedToDb: boolean
+  error: string
+} = {
+  at: '',
+  reachedCallback: false,
+  stateOk: false,
+  tokenExchangeOk: false,
+  gotRefreshFromGoogle: false,
+  sessionExisted: false,
+  savedToDb: false,
+  error: 'nicio conectare încă',
+}
+
 function decodeIdToken(idToken: string): { email?: string; email_verified?: boolean; name?: string; picture?: string; locale?: string } {
   const payload = idToken.split('.')[1]
   if (!payload) return {}
@@ -134,11 +157,27 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // the refresh token) so the Google skills start working.
       if (state.startsWith('c.')) {
         const existing = getSessionUser(req)
+        lastConnectDiag = {
+          at: new Date().toISOString(),
+          reachedCallback: true,
+          stateOk: true, // am trecut de verificarea de state de mai sus
+          tokenExchangeOk: true, // am trecut de schimbul de token de mai sus
+          gotRefreshFromGoogle: Boolean(tokens.refresh_token),
+          sessionExisted: Boolean(existing),
+          savedToDb: false,
+          error: '',
+        }
         if (existing) {
           const refresh = tokens.refresh_token || existing.googleRefreshToken || ''
           // PERSISTĂ token-ul în DB (fix definitiv „iar loghez Google"): de-acum
           // supraviețuiește oricărei re-logări/deploy, nu doar în cookie.
-          if (tokens.refresh_token) void saveGoogleRefreshToken(existing.email, tokens.refresh_token)
+          if (tokens.refresh_token) {
+            void saveGoogleRefreshToken(existing.email, tokens.refresh_token)
+              .then(() => {
+                lastConnectDiag.savedToDb = true
+              })
+              .catch(() => {})
+          }
           setSession(reply, {
             ...existing,
             googleAccessToken: tokens.access_token ?? existing.googleAccessToken ?? '',
@@ -148,6 +187,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           return reply.redirect(`${config.frontendOrigin}/?connected=google`)
         }
         // Session expired mid-flow — fall through to a normal login below.
+        lastConnectDiag.error = 'sesiunea a expirat în timpul conectării (getSessionUser=null la callback)'
       }
 
       // The gate: v1 admits only the allowlist.
@@ -217,5 +257,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/logout', async (_req, reply) => {
     reply.clearCookie(SESSION_COOKIE, { path: '/' })
     return reply.send({ ok: true })
+  })
+
+  // DIAGNOSTIC conectare Google (admin) — deschide kelionai.app/auth/google/status
+  // DUPĂ ce apeși „Connect Google". Arată EXACT unde pică: a venit refresh de la
+  // Google? exista sesiune la callback? s-a salvat în DB? are sesiunea/DB token acum?
+  app.get('/auth/google/status', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const dbToken = await getGoogleRefreshToken(user.email)
+    return reply.send({
+      email: user.email,
+      sessionHasRefresh: Boolean(user.googleRefreshToken),
+      dbHasRefresh: Boolean(dbToken),
+      lastConnectAttempt: lastConnectDiag,
+    })
   })
 }

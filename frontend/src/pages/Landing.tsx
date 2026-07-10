@@ -177,15 +177,15 @@ export default function Landing({ error }: { error?: string | null }) {
 
           <div className="landing-lead">
             {leadSent ? (
-              <p className="landing-lead-done">Mulțumim — te contactăm în curând.</p>
+              <p className="landing-lead-done">Thanks — we'll get back to you soon.</p>
             ) : (
               <>
-                <h3 className="landing-lead-title">Lasă-ți emailul și te contactăm</h3>
+                <h3 className="landing-lead-title">Leave your email and we'll reach out</h3>
                 <div className="landing-lead-row">
                   <input
                     className="landing-lead-input"
                     type="email"
-                    placeholder="email@exemplu.com"
+                    placeholder="email@example.com"
                     value={leadEmail}
                     onChange={(e) => setLeadEmail(e.target.value)}
                   />
@@ -195,13 +195,13 @@ export default function Landing({ error }: { error?: string | null }) {
                     onClick={() => void submitLead()}
                     disabled={leadBusy || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(leadEmail)}
                   >
-                    {leadBusy ? 'Se trimite…' : 'Trimite'}
+                    {leadBusy ? 'Sending…' : 'Send'}
                   </button>
                 </div>
                 <input
                   className="landing-lead-input landing-lead-note"
                   type="text"
-                  placeholder="Mesaj scurt (opțional)"
+                  placeholder="Short message (optional)"
                   value={leadNote}
                   onChange={(e) => setLeadNote(e.target.value)}
                 />
