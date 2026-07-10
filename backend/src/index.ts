@@ -148,6 +148,14 @@ app.addHook('onRequest', async (_req, reply) => {
 // resumes and HEAD probes don't double-count.
 app.addHook('onSend', async (req, reply) => {
   const u = (req.raw.url ?? '').split('?')[0]
+  // Service worker-ul + manifestul PWA: MEREU proaspete. Cloudflare le ținea
+  // 4 ore la edge (max-age=14400 din static) — deci instalările (PWA/TWA/iOS/
+  // desktop, toate încarcă site-ul live) rămâneau lipite de shell-ul vechi până
+  // la 4 ore după deploy. no-store = update-ul ajunge la TOȚI la prima deschidere.
+  if (u === '/sw.js' || u === '/manifest.webmanifest') {
+    reply.header('Cache-Control', 'no-store')
+    return
+  }
   if (!u.startsWith('/dl/')) return
   reply.header('Cache-Control', 'no-store')
   if (
