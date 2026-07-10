@@ -2879,3 +2879,29 @@ a.card-item:hover {
   gap: 8px;
   max-height: 52vh;
 }
+
+/* Badge de mod de lucru (Chat / Lucru / Raport). */
+.mode-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+  border: 1px solid var(--border);
+}
+.mode-badge.mode-chat {
+  color: #8fb6ff;
+  border-color: rgba(143, 182, 255, 0.4);
+  background: rgba(143, 182, 255, 0.12);
+}
+.mode-badge.mode-lucru {
+  color: #f0b07a;
+  border-color: rgba(240, 176, 122, 0.4);
+  background: rgba(240, 176, 122, 0.12);
+}
+.mode-badge.mode-raport {
+  color: #7fe0a8;
+  border-color: rgba(127, 224, 168, 0.4);
+  background: rgba(127, 224, 168, 0.12);
+}

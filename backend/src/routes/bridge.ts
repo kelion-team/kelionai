@@ -1319,6 +1319,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       // live). Rămâne aici până creierul o verifică — dovada că nu „trimite și
       // uită". null = nicio cerință deschisă (Adrian, 5 iul).
       owned: ownedRequirement(),
+      // MODUL DE LUCRU (Adrian): derivat din starea reală, comutabil automat.
+      // 'chat' = doar conversație; 'lucru' = o cerință de execuție e în lucru;
+      // 'raport' = cerința e în faza de verificare/publicare (raportare rezultat).
+      mode: (() => {
+        const o = ownedRequirement()
+        if (!o) return 'chat'
+        return /verific|deploy|live|publicat|gata/i.test(o.status) ? 'raport' : 'lucru'
+      })(),
     }
   })
 

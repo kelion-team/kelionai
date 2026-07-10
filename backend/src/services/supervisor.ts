@@ -27,7 +27,9 @@ export const DEFAULT_SUPERVISE: SuperviseCfg = {
   stallMs: 4 * 60_000,
   nudgeMs: 4 * 60_000,
   activeMs: 90_000,
-  maxAttempts: 3,
+  // Adrian: O SINGURĂ re-asignare automată, nu 3 — după ea, raportează și
+  // lasă decizia lui Adrian. Fără buclă lungă de agenți pe aceeași cerință.
+  maxAttempts: 1,
 }
 
 export function superviseDecision(

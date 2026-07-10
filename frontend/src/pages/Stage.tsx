@@ -86,6 +86,7 @@ export default function Stage({ user }: { user: User }) {
   )
   // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată live).
   // Rămâne pe monitor până creierul o verifică — dovada că nu „trimite și uită".
+  const [mode, setMode] = useState<'chat' | 'lucru' | 'raport'>('chat')
   const [owned, setOwned] = useState<{ summary: string; status: string; ageMs: number } | null>(
     null,
   )
@@ -227,6 +228,7 @@ export default function Stage({ user }: { user: User }) {
             srv?: string
             progress?: { pct?: number; label?: string; file?: string }
             owned?: { summary?: string; status?: string; ageMs?: number } | null
+            mode?: string
           } | null) => {
             if (!j) return // 429 — state unchanged
             setServerUp(true)
@@ -247,6 +249,7 @@ export default function Stage({ user }: { user: User }) {
                 ? { summary: o.summary, status: String(o.status ?? ''), ageMs: Number(o.ageMs ?? 0) }
                 : null,
             )
+            setMode(j.mode === 'lucru' || j.mode === 'raport' ? j.mode : 'chat')
           },
         )
         .catch(() => {
@@ -394,6 +397,9 @@ export default function Stage({ user }: { user: User }) {
           <div className="workspace-inner claude-console">
             <div className="claude-console-head">
               ● Creierul Linux — execuție în direct
+              <span className={`mode-badge mode-${mode}`}>
+                {mode === 'lucru' ? '🛠 Lucru' : mode === 'raport' ? '📊 Raport' : '💬 Chat'}
+              </span>
               <span className={`live-dot ${claudeActive ? 'on' : ''}`}>
                 {claudeActive ? 'LIVE' : 'în așteptare'}
               </span>
