@@ -11,7 +11,9 @@
 
 const TARGET_RATE = 16000
 const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza (ordinul lui Adrian)
-const VOICE_RMS = 0.012 // sub atât = tăcere (nu trimitem cadre)
+const VOICE_RMS = 0.02 // prag ABSOLUT de voce (ridicat de la 0.012 — scoate zgomotul de fond)
+const DOMINANCE = 2.2 // vocea apropiată trebuie să domine podeaua de zgomot de-atâtea ori
+const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim (un poc = 1 cadru, se ignoră)
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
 
 export interface MicStreamHandle {
@@ -86,6 +88,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let ws: WebSocket | null = null
   let wsReady = false
   let lastVoiceAt = 0
+  let noiseFloor = 0.006 // podeaua de zgomot adaptivă (pentru dominanță)
+  let voicedRun = 0 // câte cadre de voce consecutive (anti-poc)
   let phraseFinal = '' // finalurile validate din fraza curentă
   let lastPartial = '' // ultimul parțial (dacă Google nu dă „final" în 3s)
   let phraseTimer: ReturnType<typeof setTimeout> | null = null
@@ -184,9 +188,16 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
     const rms = Math.sqrt(sum / input.length)
     const now = performance.now()
-    if (rms > VOICE_RMS) lastVoiceAt = now
+    // PODEA DE ZGOMOT adaptivă (ca la batch): urcă lent când e liniște. Vocea
+    // reală = peste pragul absolut ȘI dominând podeaua de-atâtea ori. Fără asta
+    // orice zgomot de fond > 0.012 curgea la Google (transcrieri fantomă).
+    const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
+    if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
+    // Un poc scurt (1 cadru) nu deschide fluxul — cerem câteva cadre consecutive.
+    voicedRun = voiced ? voicedRun + 1 : 0
+    if (voicedRun >= VOICED_FRAMES_TO_OPEN) lastVoiceAt = now
     // trimite DOAR cât e voce sau în coada de 3.2s de după — fără tăcere la Google
-    if (now - lastVoiceAt > TAIL_MS) return
+    if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
     const ds = downsample(input, ctx.sampleRate)
     try {
       ws.send(floatToPcm16(ds))
