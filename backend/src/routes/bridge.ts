@@ -182,6 +182,13 @@ export function startTurnClock(): void {
 export function markFirstWord(): void {
   if (turnActive && turnStartAt && !firstWordAt) firstWordAt = Date.now()
 }
+// E o tură ÎN LUCRU chiar acum? Filtrul anti-ecou din chat înghite un mesaj
+// identic DOAR cât timp Kelion chiar răspunde/vorbește (ecoul de microfon apare
+// atunci). Când e liniște, un mesaj retrimis identic e Adrian care insistă
+// fiindcă n-a primit răspuns — pornește o tură reală, nu-l mai arunca.
+export function brainTurnActive(): boolean {
+  return turnActive
+}
 // Tura s-a terminat. `chat` = proces COMPLET (bara ajunge la 100 și apoi se
 // stinge). `lucru` = predat constructorului (bara continuă de la el). În ambele
 // cazuri stampilăm timpii și îi afișăm pe monitor — Adrian VEDE viteza reală.
@@ -1586,7 +1593,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       // re-cozează cinstit în loc să-i ceară lui Adrian „mai trimite-l o dată".
       sink(isWorkerExcuse(body.text) ? '' : body.text)
     }
-    return { accepted: !!sink }
+    // ANULARE LA ABANDON (Adrian, 10 iul: „se blochează"): `gone` îi spune
+    // workerului că NIMENI nu mai ascultă tura asta (nici sink de stream, nici
+    // waiter de răspuns final — serverul a renunțat la 75s/240s). Workerul taie
+    // pe loc procesul claude și eliberează banda, în loc să macine minute în șir
+    // pe un job mort care ținea mesajul următor al lui Adrian la coadă.
+    return { accepted: !!sink, gone: !!body.id && !sink && !waiters.has(body.id) }
   })
 
   // Worker → server: the finished answer for a job. Posting a reply is proof
