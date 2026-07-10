@@ -225,7 +225,16 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic) {
   const model = brainModel()
   // Jobul PUBLIC nu primește NICIODATĂ context.md (privat) — doar personajul
   // neutru. Jobul adminului primește tot contextul, ca până acum.
-  const full = isPublic ? PUBLIC_PREAMBLE + prompt : loadContext() + '\n\n' + PREAMBLE + prompt
+  // CONTRADICȚIA POZELOR (Adrian, 10 iul: „kelion nu primește poze cu scris"):
+  // PREAMBLE interzice uneltele (viteza), dar nota de fișiere cere Read — modelul
+  // asculta interdicția și IGNORA poza. Cu fișiere atașate, excepția devine
+  // explicită și mai puternică decât interdicția.
+  const FILES_EXCEPTION = hasFiles
+    ? '\n\nEXCEPȚIE OBLIGATORIE LA REGULA FĂRĂ UNELTE: acest mesaj ARE FIȘIERE ATAȘATE (căile sunt mai jos). FOLOSEȘTE unealta Read ca să le vezi/citești ÎNAINTE să răspunzi — asta anulează, doar pentru fișierele atașate, orice interdicție de unelte de mai sus.\n'
+    : ''
+  const full = isPublic
+    ? PUBLIC_PREAMBLE + prompt
+    : loadContext() + '\n\n' + PREAMBLE + FILES_EXCEPTION + prompt
   // Buget de timp MĂRGINIT (Adrian, 10 iul + audit): serverul renunță la 75s și
   // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
   // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
