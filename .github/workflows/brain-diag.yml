@@ -1,7 +1,8 @@
-# DIAGNOSTIC: ULTIMELE DEPLOYMENT-URI RAILWAY (doar-citire, NU atinge producția).
-# Rulează pe pull_request. Listează ultimele 6 deployment-uri cu status/oră
-# exactă/commit, apoi scoate jurnalul de BUILD pentru orice deployment care NU
-# a reușit — ca să vedem EXACT ce a picat și când, nu să presupunem.
+# DIAGNOSTIC ASR CAP-COADĂ (doar-citire, NU atinge producția). Rulează pe
+# pull_request. Ia contul de serviciu REAL de pe Railway, sintetizează o
+# propoziție în română (TTS), o trece prin urechea de streaming chirp_3 în
+# regiunea `eu` — și tipărește DACĂ iese transcrierea. Așa dovedim negru pe alb
+# dacă urechea live merge, nu presupunem.
 
 name: brain-diag
 
@@ -14,7 +15,10 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Ultimele 6 deployment-uri Railway — status, ora, commit, jurnal de build la eșec
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: TTS ro → chirp_3@eu streaming → transcriere (test complet al urechii)
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -26,18 +30,78 @@ jobs:
           PID=$(echo "$P" | jq -r '.id')
           ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
           SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
-          echo "proiect=$PID mediu=$ENVID serviciu=$SVCID"
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          gql "$VQ" | jq -r '.data.variables.GOOGLE_SERVICE_ACCOUNT_JSON // empty' > /tmp/sa.json
+          [ -s /tmp/sa.json ] || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON lipsă"; exit 0; }
+          echo "Cont de serviciu obținut ($(wc -c < /tmp/sa.json) bytes)."
+          npm i --no-save --silent @google-cloud/speech @google-cloud/text-to-speech >/dev/null 2>&1
+          node - <<'EOF'
+          const speech = require('@google-cloud/speech')
+          const tts = require('@google-cloud/text-to-speech')
+          const creds = require('/tmp/sa.json')
+          const pid = creds.project_id
+          const PHRASE = 'Salut Kelion, cât face șapte ori șase?'
+          const REGION = 'eu'
+          ;(async () => {
+            // 1) Sinteză: aceeași frază pe care ar rosti-o Adrian → PCM LINEAR16 16kHz.
+            const ttsClient = new tts.TextToSpeechClient({ credentials: creds, projectId: pid })
+            let pcm
+            try {
+              const [r] = await ttsClient.synthesizeSpeech({
+                input: { text: PHRASE },
+                voice: { languageCode: 'ro-RO', name: 'ro-RO-Chirp3-HD-Aoede' },
+                audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 16000 },
+              })
+              pcm = Buffer.from(r.audioContent)
+              // scoate headerul WAV (44 bytes) dacă e prezent — vrem PCM brut
+              if (pcm.slice(0, 4).toString() === 'RIFF') pcm = pcm.slice(44)
+              console.log(`TTS OK: ${pcm.length} bytes PCM (~${(pcm.length/32000).toFixed(1)}s audio)`)
+            } catch (e) {
+              console.log(`TTS a esuat (${e.message}) — incerc o voce standard`)
+              const [r] = await ttsClient.synthesizeSpeech({
+                input: { text: PHRASE },
+                voice: { languageCode: 'ro-RO', ssmlGender: 'FEMALE' },
+                audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 16000 },
+              })
+              pcm = Buffer.from(r.audioContent); if (pcm.slice(0,4).toString()==='RIFF') pcm = pcm.slice(44)
+              console.log(`TTS fallback OK: ${pcm.length} bytes`)
+            }
 
-          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:6,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt updatedAt meta}}}}",variables:{p:$p,e:$e,s:$s}}')
-          DEPS=$(gql "$DQ")
-          echo "=== ULTIMELE 6 DEPLOYMENT-URI (cele mai noi primele) ==="
-          echo "$DEPS" | jq -r '.data.deployments.edges[].node | "\(.createdAt)  status=\(.status)  id=\(.id)  meta=\(.meta)"'
+            // 2) Urechea streaming: chirp_3 @ eu — exact ca pe producție.
+            const ep = `${REGION}-speech.googleapis.com`
+            const rec = `projects/${pid}/locations/${REGION}/recognizers/_`
+            const client = new speech.v2.SpeechClient({ credentials: creds, projectId: pid, apiEndpoint: ep })
+            const results = []
+            await new Promise((resolve) => {
+              let done = false
+              const fin = (why) => { if (done) return; done = true; console.log(`--- stream inchis: ${why}`); resolve() }
+              const s = client._streamingRecognize()
+              s.on('error', (e) => { console.log(`EROARE STREAM: [${e.code ?? '?'}] ${String(e.message).slice(0,200)}`); fin('error') })
+              s.on('data', (d) => {
+                for (const r of (d.results || [])) {
+                  const alt = r.alternatives && r.alternatives[0]
+                  if (alt && alt.transcript) results.push(`${r.isFinal ? 'FINAL' : 'partial'}: "${alt.transcript}"`)
+                }
+              })
+              s.on('end', () => fin('end'))
+              // config
+              s.write({ recognizer: rec, streamingConfig: { config: { model: 'chirp_3', languageCodes: ['ro-RO'], explicitDecodingConfig: { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 } }, streamingFeatures: { interimResults: true } } })
+              // audio in bucati de ~100ms (3200 bytes), ca browserul
+              let off = 0
+              const CH = 3200
+              const pump = () => {
+                if (off >= pcm.length) { try { s.end() } catch {}; setTimeout(() => fin('audio terminat'), 3000); return }
+                s.write({ audio: pcm.slice(off, off + CH) }); off += CH
+                setTimeout(pump, 100)
+              }
+              pump()
+              setTimeout(() => fin('timeout 30s'), 30000)
+            })
 
-          echo "$DEPS" | jq -r '.data.deployments.edges[].node | select(.status!="SUCCESS") | .id' | while read -r DID; do
-            [ -z "$DID" ] && continue
-            echo ""
-            echo "=== JURNAL BUILD pentru deployment $DID (status non-SUCCESS) ==="
-            LQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){buildLogs(deploymentId:$d,limit:200){message severity timestamp}}",variables:{d:$d}}')
-            gql "$LQ" | jq -r '.data.buildLogs[]? | "\(.timestamp) [\(.severity)] \(.message)"' | tail -60
-          done
+            console.log('')
+            console.log('=== REZULTAT TRANSCRIERE ===')
+            if (results.length) { results.forEach((r) => console.log('  ' + r)); console.log('VERDICT: ✅ URECHEA MERGE — audio real a fost transcris.') }
+            else console.log('VERDICT: ❌ Zero transcriere — urechea NU produce text din audio real.')
+          })().catch((e) => console.log('EROARE FATALA:', e.message))
+          EOF
