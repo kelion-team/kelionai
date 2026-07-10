@@ -1,11 +1,13 @@
-# Aduce codul workerului punții (kelion-bridge-linux.mjs) la zi pe VPS și
-# repornește puntea — ca modificările din master (ex. STREAMING pentru viteză)
-# să intre în producție. Backend-ul se publică singur pe Railway la merge, DAR
-# workerul de pe VPS rulează dintr-o clonă locală care trebuie adusă cu git pull.
+# SINCRONIZEAZĂ VPS-ul la origin/master și repornește serviciile Kelion.
 #
-# NON-DISTRUCTIV: `git pull --ff-only`. Dacă VPS-ul are commituri locale
-# (ex. auto-repair) care nu se pot avansa curat, se OPREȘTE și raportează —
-# nu calcă peste munca locală. Parola root a VPS-ului se dă ca input (mascată).
+# REGULA 100% SINCRON (Adrian, 10 iul): producția = master, mereu. Cauza
+# reverterilor „build fantomă": clona de pe VPS DIVERGASE (commituri locale de
+# auto-reparație nepublicate), deci publica cod VECHI peste deploy-ul corect.
+# Acest workflow face `git reset --hard origin/master` pe VPS → curăță divergența
+# și adoptă scripturile reparate (repair.sh/pornire care acum ÎMPING fixurile în
+# master). E SIGUR: master conține tot codul verificat; reparațiile reușite ajung
+# în master, deci nu se pierde nimic. După asta, VPS-ul NU mai poate publica stale.
+# Parola root a VPS-ului se dă ca input (mascată, nu se salvează).
 
 name: bridge-deploy
 
@@ -57,7 +59,10 @@ jobs:
           export SSHPASS="$VPS_PASS"
           SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
 
-          # Găsește clona repo-ului, adu master NON-DISTRUCTIV, repornește puntea.
+          # SINCRONIZARE FORȚATĂ la origin/master — curăță divergența locală (cauza
+          # reverterilor) și adoptă scripturile reparate. NU folosim `git clean` ca
+          # să nu ștergem fișiere de config netrack-uite (ex. claude.env). Repornim
+          # TOATE serviciile Kelion ca să ruleze codul nou.
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
             set -uo pipefail
             REPO=""
@@ -66,18 +71,18 @@ jobs:
             done
             [ -z "$REPO" ] && { echo "NU găsesc clona repo-ului cu bridge/"; exit 1; }
             cd "$REPO" || exit 1
-            echo "repo: $REPO (HEAD local: $(git rev-parse --short HEAD))"
+            echo "repo: $REPO (HEAD local VECHI: $(git rev-parse --short HEAD))"
             git fetch origin master || { echo "git fetch a eșuat"; exit 1; }
-            # SURGICAL: aducem DOAR fișierul workerului la origin/master. Repo-ul de
-            # pe VPS a divergat din commituri locale de auto-reparație, deci un pull
-            # --ff-only e imposibil; dar workerul e un singur .mjs cu doar builtins,
-            # așa că-l actualizăm țintit fără să atingem istoricul/munca locală.
-            git checkout origin/master -- bridge/kelion-bridge-linux.mjs || { echo "checkout worker a eșuat"; exit 2; }
-            echo "worker adus la origin/master ($(git rev-parse --short origin/master)):"
-            git --no-pager diff --stat HEAD -- bridge/kelion-bridge-linux.mjs || true
-            systemctl restart kelion-bridge
+            git reset --hard origin/master || { echo "reset la origin/master a eșuat"; exit 2; }
+            echo "VPS SINCRONIZAT la master: $(git rev-parse --short HEAD)"
+            for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
+              if systemctl list-unit-files "$svc.service" 2>/dev/null | grep -q "^$svc.service"; then
+                systemctl restart "$svc" && echo "restart $svc → $(systemctl is-active "$svc")"
+              else
+                echo "($svc nu există aici — sar peste)"
+              fi
+            done
             sleep 4
-            echo "kelion-bridge → $(systemctl is-active kelion-bridge)"
             echo "=== jurnal punte ==="
             journalctl -u kelion-bridge -n 8 --no-pager -o cat | tail -8
           EOS

@@ -6,6 +6,7 @@ import AvatarLoading from '../components/AvatarLoading'
 import ChatPanel from '../components/ChatPanel'
 import AdminPanel from '../components/AdminPanel'
 import ContactModal from '../components/ContactModal'
+import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
@@ -57,6 +58,7 @@ export default function Stage({ user }: { user: User }) {
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
   // Zoom/potrivire pentru textul de pe monitor (cererea #27): A− / A+ scalează
   // conținutul citibil (doc + consola live) ca să fie încadrat și lizibil.
@@ -679,6 +681,17 @@ export default function Stage({ user }: { user: User }) {
           </span>
         )}
         {user.role === 'customer' && <WalletButton />}
+        {user.role === 'customer' && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setSettingsOpen(true)}
+            title="Setări"
+            aria-label="Setări"
+          >
+            ⚙
+          </button>
+        )}
         {user.role === 'demo' && !demoOver && (
           <span className="trial-pill">
             {t.trialLabel} · {mmss}
@@ -782,6 +795,8 @@ export default function Stage({ user }: { user: User }) {
       {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
+
+      {settingsOpen && <CustomerSettings user={user} onClose={() => setSettingsOpen(false)} />}
 
       {demoOver && (
         <div className="demo-over">

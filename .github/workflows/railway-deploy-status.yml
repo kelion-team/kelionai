@@ -1,0 +1,62 @@
+# DIAGNOSTIC (doar-citire): DE CE revine producția la un build vechi. Arată
+# SURSA serviciului (e conectată integrarea GitHub care se bate cu `railway up`?),
+# deploy-ul ACTIV acum, și ultimele deploy-uri cu cine le-a pornit (cliCaller vs
+# GitHub) + de ce (reason: deploy / rollback / redeploy). Nu publică, nu șterge.
+name: railway-deploy-status
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/chat-instant-delay-em5gjf]
+    paths: ['.github/workflows/railway-deploy-status.yml']
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sursa + istoricul deploy-urilor
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "$TOKEN" ]; then echo "::error::RAILWAY_TOKEN lipsește"; exit 1; fi
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0] // .data.projects.edges[0].node')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id // .environments.edges[0].node.id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
+          echo "Proiect $(echo "$P"|jq -r .name)  Serviciu web=$SVCID  Env=$ENVID"
+          echo ""
+
+          # 1) SURSA serviciului: repo GitHub conectat? branch? imagine? Dacă apare
+          #    un repo + branch aici, integrarea GitHub auto-deploy e ACTIVĂ și se
+          #    bate cu `railway up` → cauza probabilă a reverterii.
+          echo "=== SURSA SERVICIULUI (serviceInstance.source) ==="
+          SIQ=$(jq -nc --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($e:String!,$s:String!){serviceInstance(environmentId:$e,serviceId:$s){source{repo image} builder region numReplicas latestDeployment{id status createdAt}}}",variables:{e:$e,s:$s}}')
+          gql "$SIQ" | jq '.data.serviceInstance // .errors'
+          echo ""
+
+          # 2) Declanșatoare de repo (repoTriggers): dacă există, Railway redeployează
+          #    singur la push pe acel branch — a doua sursă.
+          echo "=== REPO TRIGGERS (auto-deploy la push) ==="
+          RTQ=$(jq -nc --arg s "$SVCID" \
+            '{query:"query($s:String!){service(id:$s){name repoTriggers{edges{node{id branch repository}}}}}",variables:{s:$s}}')
+          gql "$RTQ" | jq '.data.service // .errors'
+          echo ""
+
+          # 3) Ultimele 12 deploy-uri: cine + de ce + stare, ca să vedem tiparul
+          #    reverterii (cine pune build-ul vechi înapoi).
+          echo "=== ULTIMELE 12 DEPLOY-URI ==="
+          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:12,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt meta}}}}",variables:{p:$p,e:$e,s:$s}}')
+          DEP=$(gql "$DQ")
+          echo "$DEP" | jq -r '.data.deployments.edges[]?.node | "\(.createdAt)  \(.status | . + "        " | .[0:11])  by=\((.meta.cliCaller // "github/other"))  reason=\((.meta.reason // "?"))  \(.id[0:8])"' || echo "$DEP"
+          echo ""
+
+          # 4) Care e deployment-ul ACTIV acum (serveste traficul).
+          echo "=== DEPLOYMENT ACTIV (latestDeployment de mai sus = cel activ) ==="
+          echo "$DEP" | jq -r '.data.deployments.edges[0].node | "activ candidat: \(.id[0:8]) \(.status) \(.createdAt)"'

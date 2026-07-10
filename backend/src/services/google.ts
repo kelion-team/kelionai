@@ -42,12 +42,12 @@ export const googleTools: Anthropic.Tool[] = [
   {
     name: 'web_search',
     description:
-      'Search the live web for current, real information (news, facts, prices, anything recent). Use whenever the answer depends on up-to-date or external information you do not already know.',
+      'Search the live web for current, real information (news, facts, prices, anything recent). Returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches — use it whenever the answer depends on up-to-date or external information you do not already know.',
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query.' },
-        max_results: { type: 'number', description: 'How many results (default 5, max 10).' },
+        max_results: { type: 'number', description: 'How many organic results (default 8, max 12).' },
       },
       required: ['query'],
     },
@@ -402,6 +402,7 @@ interface SerperResult {
   title?: string
   link?: string
   snippet?: string
+  date?: string
 }
 
 // Live web search via Gemini's built-in Google Search grounding. Uses the
@@ -453,27 +454,72 @@ async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult 
 
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
-  const n = Math.min(Math.max(max, 1), 10)
+  const n = Math.min(Math.max(max, 1), 12)
 
-  // Primary: Serper.dev (the paid plan) when a key is set and accepted.
+  // Primary: Serper.dev (the paid plan) when a key is set and accepted. We ask
+  // for EVERYTHING Google returns — not only the organic links but the direct
+  // answer box, the knowledge-graph fact panel, "people also ask", fresh news
+  // and related searches — so the brain answers from the richest, most current
+  // picture possible (căutare web „la maxim", 10 iul).
   if (config.serperKey) {
     try {
       const res = await tfetch('https://google.serper.dev/search', {
         method: 'POST',
         headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query }),
+        body: JSON.stringify({ q: query, num: Math.max(n, 10) }),
       })
       if (res.ok) {
         const j = (await res.json()) as {
           organic?: SerperResult[]
-          answerBox?: { answer?: string; snippet?: string }
+          answerBox?: { answer?: string; snippet?: string; title?: string; link?: string }
+          knowledgeGraph?: {
+            title?: string
+            type?: string
+            description?: string
+            attributes?: Record<string, string>
+            website?: string
+          }
+          peopleAlsoAsk?: { question?: string; snippet?: string; link?: string }[]
+          topStories?: { title?: string; link?: string; source?: string; date?: string }[]
+          news?: { title?: string; link?: string; source?: string; date?: string }[]
+          relatedSearches?: { query?: string }[]
         }
         const results = (j.organic ?? []).slice(0, n).map((r) => ({
           title: r.title ?? '',
           link: r.link ?? '',
           snippet: r.snippet ?? '',
+          ...(r.date ? { date: r.date } : {}),
         }))
-        return JSON.stringify({ answer: j.answerBox?.answer ?? j.answerBox?.snippet ?? '', results, source: 'serper' })
+        const kg = j.knowledgeGraph
+        const stories = (j.topStories ?? j.news ?? [])
+          .slice(0, 4)
+          .map((s) => ({ title: s.title ?? '', link: s.link ?? '', source: s.source ?? '', date: s.date ?? '' }))
+        const paa = (j.peopleAlsoAsk ?? [])
+          .slice(0, 4)
+          .map((p) => ({ question: p.question ?? '', snippet: p.snippet ?? '', link: p.link ?? '' }))
+        const related = (j.relatedSearches ?? []).slice(0, 6).map((r) => r.query ?? '').filter(Boolean)
+        const out = {
+          answer: j.answerBox?.answer ?? j.answerBox?.snippet ?? '',
+          ...(kg
+            ? {
+                knowledgeGraph: {
+                  title: kg.title ?? '',
+                  type: kg.type ?? '',
+                  description: kg.description ?? '',
+                  attributes: kg.attributes ?? {},
+                  website: kg.website ?? '',
+                },
+              }
+            : {}),
+          results,
+          ...(paa.length ? { peopleAlsoAsk: paa } : {}),
+          ...(stories.length ? { news: stories } : {}),
+          ...(related.length ? { related } : {}),
+          source: 'serper',
+        }
+        // Only accept a Serper answer that actually carries signal; otherwise
+        // fall through to Gemini so search never returns an empty shell.
+        if (out.answer || results.length || 'knowledgeGraph' in out) return JSON.stringify(out)
       }
       // Non-OK (e.g. 403 bad key) → fall through to Gemini so search still works.
     } catch {
