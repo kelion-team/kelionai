@@ -966,6 +966,26 @@ async function translateText(text: string, target: string): Promise<string> {
   return JSON.stringify({ translation: out ?? '', target })
 }
 
+// TRADUCERE ÎN BLOC (Adrian, 10 iul: „buton care traduce în română instant din
+// orice limbă" — în vizualizarea conversațiilor din admin). Traduce un ȘIR de
+// mesaje în `target`, în paralel; dacă o traducere eșuează (Gemini neconfigurat
+// sau eroare), întoarce textul ORIGINAL pentru acel mesaj, nu se pierde nimic.
+export async function translateMany(texts: string[], target: string): Promise<string[]> {
+  return Promise.all(
+    texts.map(async (t) => {
+      const s = (t ?? '').trim()
+      if (!s) return t ?? ''
+      try {
+        const r = await translateText(s, target)
+        const j = JSON.parse(r) as { translation?: string }
+        return j.translation && j.translation.trim() ? j.translation : (t ?? '')
+      } catch {
+        return t ?? ''
+      }
+    }),
+  )
+}
+
 // Knowledge lookup — keyless Wikipedia REST API (search → page summary). Gives
 // Kelion reliable facts to use instead of guessing, and helps while web search
 // is unavailable.
