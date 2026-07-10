@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ContactModal from '../components/ContactModal'
+import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin, startDemo } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
@@ -267,6 +268,7 @@ export default function Landing({ error }: { error?: string | null }) {
           </figure>
         </div>
       )}
+      <VisitorChatWidget />
     </div>
   )
 }

@@ -16,6 +16,9 @@ import {
   deleteUserData,
   listLeads,
   markLeadContacted,
+  listVisitorConvos,
+  getVisitorMessages,
+  addVisitorMessage,
   getDemoStats,
   getUserActivity,
   getDownloadStats,
@@ -337,6 +340,39 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!sent) return reply.code(502).send({ error: 'send_failed' })
       if (req.body?.id) await markLeadContacted(Number(req.body.id))
       return reply.send({ ok: true })
+    },
+  )
+
+  // ── Live visitor chat, owner side (admin only) ────────────────────────────
+  // List conversations, read one, and reply — the owner's inbox for the widget.
+  app.get('/api/admin/visitor-chats', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ convos: await listVisitorConvos() })
+  })
+
+  app.get<{ Querystring: { conv?: string; after?: string } }>(
+    '/api/admin/visitor-chat',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+      const after = Number(req.query?.after ?? 0) || 0
+      if (!conv) return reply.code(400).send({ error: 'bad_request' })
+      return reply.send({ messages: await getVisitorMessages(conv, after) })
+    },
+  )
+
+  app.post<{ Body: { conv?: string; text?: string } }>(
+    '/api/admin/visitor-chat/reply',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const conv = String(req.body?.conv ?? '')
+      const text = String(req.body?.text ?? '')
+      if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
+      const id = await addVisitorMessage(conv, 'owner', text)
+      return reply.send({ ok: id > 0, id })
     },
   )
 }

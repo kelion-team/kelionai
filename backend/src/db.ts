@@ -280,7 +280,81 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_leads_created ON leads (created_at DESC);
+    CREATE TABLE IF NOT EXISTS visitor_chats (
+      id BIGSERIAL PRIMARY KEY,
+      conv_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vchat_conv ON visitor_chats (conv_id, id);
   `)
+}
+
+// ── Live visitor chat (owner ↔ anonymous visitor, via polling) ──────────────
+// The visitor opens a widget on the landing; each thread is a random conv_id
+// kept in their localStorage. The owner replies from the admin inbox. No login,
+// no WebSocket — both sides poll for new lines.
+
+export interface VisitorMsg {
+  id: number
+  role: string // 'visitor' | 'owner'
+  text: string
+  created_at: string
+}
+
+export async function addVisitorMessage(convId: string, role: string, text: string): Promise<number> {
+  if (!dbEnabled() || !convId || !text.trim()) return 0
+  try {
+    const r = await getPool().query<{ id: string }>(
+      'INSERT INTO visitor_chats (conv_id, role, text) VALUES ($1, $2, $3) RETURNING id',
+      [convId.slice(0, 80), role === 'owner' ? 'owner' : 'visitor', text.slice(0, 4000)],
+    )
+    return Number(r.rows[0]?.id ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+export async function getVisitorMessages(convId: string, afterId = 0): Promise<VisitorMsg[]> {
+  if (!dbEnabled() || !convId) return []
+  try {
+    const r = await getPool().query<VisitorMsg>(
+      `SELECT id, role, text, created_at::text FROM visitor_chats
+       WHERE conv_id = $1 AND id > $2 ORDER BY id ASC LIMIT 200`,
+      [convId.slice(0, 80), afterId],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+export interface VisitorConvo {
+  conv_id: string
+  last_text: string
+  last_at: string
+  total: number
+  visitor_msgs: number
+}
+
+export async function listVisitorConvos(): Promise<VisitorConvo[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<VisitorConvo>(
+      `SELECT conv_id,
+              (ARRAY_AGG(text ORDER BY id DESC))[1] AS last_text,
+              MAX(created_at)::text AS last_at,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE role = 'visitor')::int AS visitor_msgs
+       FROM visitor_chats
+       GROUP BY conv_id
+       ORDER BY MAX(id) DESC LIMIT 100`,
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // ── Leads (visitor contact capture) ─────────────────────────────────────────

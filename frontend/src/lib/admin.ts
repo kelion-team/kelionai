@@ -220,6 +220,59 @@ export async function emailLead(
   }
 }
 
+// Live visitor chat — owner side (inbox + reply).
+export interface VisitorConvo {
+  conv_id: string
+  last_text: string
+  last_at: string
+  total: number
+  visitor_msgs: number
+}
+export interface VisitorMsg {
+  id: number
+  role: string
+  text: string
+  created_at: string
+}
+
+export async function fetchVisitorConvos(): Promise<VisitorConvo[]> {
+  try {
+    const r = await fetch('/api/admin/visitor-chats', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { convos: VisitorConvo[] }).convos
+  } catch {
+    return []
+  }
+}
+
+export async function fetchVisitorChat(conv: string, after = 0): Promise<VisitorMsg[]> {
+  try {
+    const r = await fetch(
+      `/api/admin/visitor-chat?conv=${encodeURIComponent(conv)}&after=${after}`,
+      { credentials: 'include' },
+    )
+    if (!r.ok) return []
+    return ((await r.json()) as { messages: VisitorMsg[] }).messages
+  } catch {
+    return []
+  }
+}
+
+export async function replyVisitorChat(conv: string, text: string): Promise<number> {
+  try {
+    const r = await fetch('/api/admin/visitor-chat/reply', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conv, text }),
+    })
+    if (!r.ok) return 0
+    return ((await r.json()) as { id: number }).id
+  } catch {
+    return 0
+  }
+}
+
 // Admin action on a user: block / unblock / credit (amount) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
 export async function manageUser(
