@@ -207,7 +207,50 @@ async function askClaude(prompt, onChunk, hasFiles) {
     log('Fable a esuat — trec pe Opus, revin la Fable in 10 min.')
     answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles })
   }
+  // PLASĂ FINALĂ GARANTATĂ (Adrian, 10 iul: „să nu se mai poată strica"): dacă TOT
+  // n-a ieșit nimic (ex. un flag pe care versiunea de CLI de aici nu-l cunoaște,
+  // exact ce a rupt chatul), încearcă o comandă MINIMALĂ absolută — doar `claude
+  // -p`, fără NICIUN flag opțional. Orice versiune de CLI o suportă, deci un flag
+  // prost nu mai poate lăsa NICIODATĂ chatul complet mut.
+  if (!answer) answer = await runClaudeBare(full, 60_000)
   return answer
+}
+
+// Comanda cea mai simplă cu putință — plasa de siguranță. Fără output-format,
+// fără unelte, fără model: doar text din stdin. Dacă și asta tace, chiar nu se
+// poate (CLI/abonament căzut), și abia atunci serverul dă mesajul cinstit.
+function runClaudeBare(prompt, timeoutMs = 60_000) {
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn(CLAUDE, ['-p'], { env: process.env })
+    } catch {
+      resolve(null)
+      return
+    }
+    let out = ''
+    const killer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {}
+      resolve(out.trim() || null)
+    }, timeoutMs)
+    child.stdout.on('data', (d) => (out += d))
+    child.on('error', () => {
+      clearTimeout(killer)
+      resolve(null)
+    })
+    child.on('close', () => {
+      clearTimeout(killer)
+      resolve(out.trim() || null)
+    })
+    try {
+      child.stdin.write(prompt)
+      child.stdin.end()
+    } catch {
+      /* ignore */
+    }
+  })
 }
 
 async function pull() {

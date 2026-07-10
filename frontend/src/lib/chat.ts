@@ -89,6 +89,8 @@ export async function* streamChat(
   screen?: ScreenTask[],
   // ADMIN only: raw attachments (any file type) that ride the bridge to Claude.
   files?: { name: string; type: string; data: string }[],
+  // STOP: semnal de abandon — „stop" scris/vorbit taie tura PE LOC (nu în coadă).
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -96,6 +98,7 @@ export async function* streamChat(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      signal,
       body: JSON.stringify({
         messages,
         image,
