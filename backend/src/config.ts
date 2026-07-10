@@ -88,7 +88,8 @@ export const config = {
   // Free trial ("demo") for the landing page: a full-access taste, time-boxed,
   // with a daily cap so it can never drain the provider pool.
   demo: {
-    seconds: Number(process.env.DEMO_SECONDS ?? 180), // 3 minutes
+    // 10 minute cu TOATE atributele active (ordin Adrian, 10 iul) — demo-ul vinde.
+    seconds: Number(process.env.DEMO_SECONDS ?? 600), // 10 minutes
     capPerDay: Number(process.env.DEMO_CAP_PER_DAY ?? 10),
   },
   // SALES ARE OPEN: any Google account signs in as a customer — the prepaid
