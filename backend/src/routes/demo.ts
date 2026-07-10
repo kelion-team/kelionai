@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { config } from '../config.js'
 import { setDemoSession, getSessionUser, makeDemoEmail } from '../session.js'
-import { tryStartDemo, logVisit, touchVisit, type DemoVisit } from '../db.js'
+import { tryStartDemo, logVisit, touchVisit, addLead, type DemoVisit } from '../db.js'
 
 // Look up the visitor's location from their IP for the owner's analytics:
 // country/city/region, ISP and timezone. Free, no key (ipwho.is). Short
@@ -160,5 +160,17 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     }
     setDemoSession(reply, config.demo.seconds, sessionEmail)
     return reply.send({ ok: true, seconds: config.demo.seconds })
+  })
+
+  // A visitor leaves their email (the only real channel to an anonymous visitor):
+  // stored as a lead the owner can then email from the admin panel. Public but
+  // rate-limited by the global limiter; validated + capped server-side.
+  app.post<{ Body: { email?: string; note?: string; fp?: string } }>('/api/lead', async (req, reply) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email : ''
+    const note = typeof req.body?.note === 'string' ? req.body.note : ''
+    const fp = typeof req.body?.fp === 'string' ? req.body.fp : ''
+    const ok = await addLead(email, note, fp)
+    if (!ok) return reply.code(400).send({ error: 'bad_email' })
+    return reply.send({ ok: true })
   })
 }

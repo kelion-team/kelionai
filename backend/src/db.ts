@@ -271,7 +271,62 @@ export async function initDb(): Promise<void> {
       email TEXT PRIMARY KEY,
       blocked_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS leads (
+      id BIGSERIAL PRIMARY KEY,
+      email TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      fp TEXT NOT NULL DEFAULT '',
+      contacted BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_leads_created ON leads (created_at DESC);
   `)
+}
+
+// ── Leads (visitor contact capture) ─────────────────────────────────────────
+// A visitor leaves an email on the landing so the owner can reach them (the
+// only real channel to an otherwise anonymous visitor).
+
+export interface Lead {
+  id: number
+  email: string
+  note: string
+  contacted: boolean
+  created_at: string
+}
+
+export async function addLead(email: string, note: string, fp: string): Promise<boolean> {
+  if (!dbEnabled() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return false
+  try {
+    await getPool().query(
+      'INSERT INTO leads (email, note, fp) VALUES ($1, $2, $3)',
+      [email.trim().toLowerCase().slice(0, 200), note.slice(0, 1000), fp.slice(0, 200)],
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function listLeads(): Promise<Lead[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<Lead>(
+      'SELECT id, email, note, contacted, created_at::text FROM leads ORDER BY created_at DESC LIMIT 200',
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+export async function markLeadContacted(id: number): Promise<void> {
+  if (!dbEnabled() || !(id > 0)) return
+  try {
+    await getPool().query('UPDATE leads SET contacted = true WHERE id = $1', [id])
+  } catch {
+    /* non-fatal */
+  }
 }
 
 // ── User management (admin) ─────────────────────────────────────────────────

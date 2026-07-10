@@ -6,6 +6,9 @@ import {
   fetchFinance,
   updatePool,
   manageUser,
+  fetchLeads,
+  emailLead,
+  type Lead,
   fetchDemos,
   fetchActivity,
   fetchDevLog,
@@ -111,6 +114,8 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
   const [poolAmount, setPoolAmount] = useState('')
   const [poolBusy, setPoolBusy] = useState(false)
+  // Lead-uri — vizitatori care și-au lăsat emailul.
+  const [leads, setLeads] = useState<Lead[]>([])
   const [demos, setDemos] = useState<DemoStats | null>(null)
   const [activity, setActivity] = useState<UserActivity | null>(null)
   const [devLog, setDevLog] = useState<string[]>([])
@@ -158,6 +163,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     void fetchGaps().then(setGaps)
     void fetchFinance().then(setFinance)
     void fetchDemos().then(setDemos)
+    void fetchLeads().then(setLeads)
     void fetchActivity().then(setActivity)
     void fetchDevLog().then(setDevLog)
     void fetchReleases().then(setReleases)
@@ -806,6 +812,42 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
         )}
         {tab === 'visitors' && (
           <section className="admin-finance">
+            <div className="fin-breakdown leads-box">
+              <div className="fin-breakdown-head">
+                Contacte — vizitatori care și-au lăsat emailul ({leads.length})
+              </div>
+              {leads.length === 0 && <div className="chat-hint">Niciun contact încă.</div>}
+              {leads.map((l) => (
+                <div className="lead-row" key={l.id}>
+                  <div className="lead-main">
+                    <span className="lead-email">{l.email}</span>
+                    {l.note && <span className="lead-note">„{l.note}"</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {l.contacted && <span className="lead-contacted">contactat</span>}
+                    <button
+                      type="button"
+                      className="user-act"
+                      onClick={async () => {
+                        const subject = window.prompt(`Subiect pentru ${l.email}:`)
+                        if (!subject) return
+                        const body = window.prompt('Mesajul:')
+                        if (!body) return
+                        const ok = await emailLead(l.id, l.email, subject, body)
+                        if (ok) {
+                          await fetchLeads().then(setLeads)
+                          window.alert('Email trimis.')
+                        } else {
+                          window.alert('Nu s-a putut trimite (verifică MAIL_PASS pe server).')
+                        }
+                      }}
+                    >
+                      Trimite email
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
             {!demos && <p className="chat-hint">Se încarcă…</p>}
             {demos && (
               <>
