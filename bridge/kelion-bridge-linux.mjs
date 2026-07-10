@@ -181,7 +181,11 @@ const spawnOpts = (pub) => (pub ? { env: process.env, cwd: '/tmp' } : { env: pro
 // fără context retrimis. Dacă CLI-ul de pe VPS nu ține procesul viu după prima
 // tură, sesiunea „moare" curat și tura următoare amorsează una nouă — adică
 // exact comportamentul de azi, niciodată mai rău.
-const WARM_MAX_TURNS = 30 // reciclare: conversația din proces să nu crească la nesfârșit
+// RECICLARE DES (Adrian, 10 iul: „chatul se degradează") — 30 → 8. Sesiunea
+// caldă acumula conversația peste ture și încetinea/dilua treptat răspunsurile;
+// reciclată la 8 ture, contextul rămâne mic și viteza CONSTANTĂ (fără degradare
+// lentă). A 8-a tură reprimează o dată (cost mic, o singură dată), restul zboară.
+const WARM_MAX_TURNS = 8
 let warm = null
 
 function startWarm(model) {
@@ -611,11 +615,14 @@ async function handleJob(job) {
   }
 }
 
-// ── BENZI SEPARATE ──────────────────────────────────────────────────────────
-// Adminul: banda lui, STRICT în ordine (o conversație = o tură pe rând).
-// Publicul: banda lui, max 2 în paralel — un val de vizitatori nu-l mai pune
-// pe Adrian la coadă, iar bucla de pull nu se mai oprește cât timp se lucrează.
-let adminChain = Promise.resolve()
+// ── BENZI SEPARATE + CHAT LIVE ÎN PARALEL ───────────────────────────────────
+// Adminul: banda lui, max 2 ÎN PARALEL (Adrian, 10 iul: „chatul trebuie live în
+// paralel cât lucrează agenții"). Cât o tură lungă lucrează (raționament greu,
+// agent), un MESAJ NOU nu mai stă la coadă: sesiunea caldă e ocupată de tura în
+// curs, deci noul mesaj cade automat pe un proces `claude` proaspăt (askWarm
+// întoarce null când sesiunea caldă are o tură în zbor) și primește răspuns pe
+// loc. Publicul: banda lui separată, tot max 2, ca un val de vizitatori să nu-l
+// pună pe Adrian la coadă.
 let publicActive = 0
 const PUBLIC_MAX = 2
 const publicWaiters = []
@@ -630,6 +637,24 @@ async function acquirePublic() {
 function releasePublic() {
   publicActive--
   const w = publicWaiters.shift()
+  if (w) w()
+}
+// Banda adminului — aceeași mecanică de concurență (max 2), ca mesajul nou să
+// fie servit cât o tură lungă încă rulează.
+let adminActive = 0
+const ADMIN_MAX = 2
+const adminWaiters = []
+async function acquireAdmin() {
+  if (adminActive < ADMIN_MAX) {
+    adminActive++
+    return
+  }
+  await new Promise((r) => adminWaiters.push(r))
+  adminActive++
+}
+function releaseAdmin() {
+  adminActive--
+  const w = adminWaiters.shift()
   if (w) w()
 }
 
@@ -658,12 +683,17 @@ for (;;) {
         }
       })()
     } else {
-      adminChain = adminChain
-        .then(() => handleJob(job))
-        .catch(async (e) => {
+      void (async () => {
+        await acquireAdmin()
+        try {
+          await handleJob(job)
+        } catch (e) {
           log(`Eroare pe tura admin ${job.id.slice(0, 8)}: ${e.message}`)
           await sendReply(job.id, '').catch(() => {})
-        })
+        } finally {
+          releaseAdmin()
+        }
+      })()
     }
   } catch (e) {
     // 3s, nu 10s (Adrian: „se blochează") — un sughiț de rețea nu mai lasă

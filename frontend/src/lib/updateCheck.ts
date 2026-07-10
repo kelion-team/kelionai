@@ -10,6 +10,25 @@ export interface ServerVersion {
   at: string
 }
 
+// Injectate la build (vezi vite.config.ts).
+declare const __APP_VERSION__: string
+declare const __BUILD_DATE__: string
+
+// ETICHETA DE VERSIUNE — O SINGURĂ SURSĂ (Adrian, 10 iul: „sub fiecare cod QR
+// numărul din filigram, ACELAȘI din browser; nu dubla codul"). Folosită și de
+// filigranul din App.tsx, și sub codurile QR din Landing.tsx. Partea `deploy …
+// UTC` vine din /api/version, deci se schimbă AUTOMAT la orice publicare — la
+// fel ca aplicațiile instalate (aceeași web app), care se „recompilează" cu
+// noile date singure.
+export function deployStamp(srv: ServerVersion | null): string {
+  if (!srv?.at) return ''
+  return `deploy${srv.v && !srv.v.includes('T') ? ` ${srv.v}` : ''} ${srv.at.slice(0, 16).replace('T', ' ')} UTC`
+}
+export function versionLabel(srv: ServerVersion | null): string {
+  const stamp = deployStamp(srv)
+  return `v${__APP_VERSION__} · ${__BUILD_DATE__}${stamp ? ` · ${stamp}` : ''}`
+}
+
 export async function fetchServerVersion(): Promise<ServerVersion | null> {
   try {
     const r = await fetch(`/api/version?_v=${Date.now()}`, { cache: 'no-store' })
