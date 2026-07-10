@@ -21,6 +21,11 @@ const START_RMS = 0.012 // pragul de la care „e voce"
 const DOMINANCE = 2.2 // vocea apropiată domină zgomotul de fond de-atâtea ori
 const SILENCE_MS = 450 // tăcere care închide o frază — redus 6 iul (ordinul lui Adrian: răspunde mai repede)
 const MIN_UTTER_MS = 350 // sub atât = zgomot, nu frază — se ignoră
+// VOCE REALĂ minimă în frază (Adrian, 10 iul: „nu e corect în afara primei
+// fraze" — ASR-ul inventa „Nu."/„Sim, mă simt" din pocnete de zgomot). `uttMs`
+// includea și tăcerea de la coadă, deci un poc scurt + tăcere trecea pragul.
+// Cerem acum destulă VOCE efectivă (nu doar durată) — un poc are <150ms voce.
+const MIN_VOICED_MS = 220
 const MAX_UTTER_MS = 60_000 // buffer mare: o frază poate dura până la 60s
 
 // ── BARGE-IN (cât vorbește Kelion) ──────────────────────────────────────────
@@ -349,11 +354,15 @@ export async function startMic(
     }
     rec.onstop = () => {
       const took = uttMs
+      const voiced = voicedMs
       const blob = new Blob(chunks, { type: mime || 'audio/webm' })
       recording = false
       uttMs = 0
-      // sub minim = zgomot scurt, nu-l trimitem
-      if (took >= MIN_UTTER_MS && blob.size > 0) void send(blob)
+      voicedMs = 0
+      // sub minim = zgomot scurt, nu-l trimitem. Cerem ȘI destulă VOCE efectivă
+      // (nu doar durată totală) ca un poc + tăcere să nu mai producă transcriere
+      // fantomă („Nu.", „Sim, mă simt") — bug 10 iul.
+      if (took >= MIN_UTTER_MS && voiced >= MIN_VOICED_MS && blob.size > 0) void send(blob)
     }
     rec.start()
     recording = true
