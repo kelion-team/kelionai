@@ -1483,30 +1483,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? `\nMEMORIE DESPRE ADRIAN (ce știi deja despre el — când te întreabă ceva de aici, RĂSPUNDE DIRECT cu faptul; dacă NU găsești nicăieri, întreabă-l și ține minte răspunsul):\n${memRecall.trim().slice(0, 2500)}\n`
           : ''
         const bridgePrompt = decision + ctxBlock + sharedBlock + memBlock + langLock + journalBlock + convo
-        // MEMORIA FIRULUI (urgența 2): pachetul turei — context proaspăt + DOAR
-        // mesajul nou. Workerul continuă ACEEAȘI sesiune claude cu el (--resume).
-        // Creierul primește starea VIE la fiecare tură (altfel vorbește din
-        // amintiri — bug-ul „minciunii"), dar pachetul e ținut SUBȚIRE: jurnalul
-        // tuns dur (8 linii × 140 car.); caietul întreg vine doar la începutul
-        // sesiunii. Un pachet umflat costa 15s până la primul cuvânt și ture de
-        // 50s+ (Adrian, 4 iul seara).
-        const turnJournal = recentDevLog(8)
-          .map((l) => l.slice(0, 140))
-          .join('\n')
-        // O SINGURĂ MINTE (Adrian, 5 iul: „dacă scriu aici sau acolo trebuie să
-        // fie același lucru"): ultimele note din caietul comun vin în FIECARE
-        // tură, nu doar la începutul sesiunii — ce notează constructorul acum,
-        // creierul știe la următorul mesaj. Tuns dur (3×150) ca pachetul să
-        // rămână subțire (regula de viteză, 4 iul).
-        const turnShared = shared
-          .slice(-3)
-          .map((m) => `- [${m.source || '?'}] ${m.content.slice(0, 150)}`)
-          .join('\n')
+        // PACHET TURĂ SUBȚIRE (Adrian, 10 iul: „chat live gândit; dacă e nevoie
+        // de ceva, DOAR atunci se caută în istoric"). Sesiunea caldă din worker e
+        // DEJA amorsată cu TOT contextul (bridgePrompt) la începutul sesiunii, deci
+        // per tură trimitem DOAR mesajul nou + blocarea de limbă + (dacă scanarea
+        // a găsit ceva relevant) memoria — adică fix „căutarea la nevoie" în
+        // istoric. Contextul/jurnalul/caietul NU se mai reîncarcă la fiecare tură:
+        // exact asta ținea primul cuvânt în așteptare. Așa tura caldă e minusculă
+        // → primul cuvânt sub 1s. (memBlock = scanare DB pură, fără cost de model.)
         const turnPacket =
-          ctxBlock +
           (memBlock ? `${memBlock}\n` : '') +
-          (turnShared ? `CAIET COMUN (ultimele note — starea știută de amândoi):\n${turnShared}\n\n` : '') +
-          (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
         reanalyzePrompt = bridgePrompt
         // O SINGURĂ tură, ZERO reîncercări (Adrian, 10 iul: „dacă la tura 1 nu
