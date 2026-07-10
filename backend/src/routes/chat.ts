@@ -7,7 +7,6 @@ import {
   googleTools,
   runGoogleTool,
   refreshGoogleAccessToken,
-  reverseGeocode,
   reverseGeocodeCached,
   promoSceneUrl,
   youtubeFirstEmbed,
@@ -58,6 +57,7 @@ import {
   noteBrainActivity,
   resetBrainActivity,
   markFirstWord,
+  brainTurnActive,
   finishBrainTurn,
   setOwnerTz,
   setProgress,
@@ -426,38 +426,74 @@ const DELEGATE_TOOL: Anthropic.Tool = {
 const CTRL = String.fromCharCode(31)
 
 // VOCEA CREIERULUI (Adrian, 4 iul): sinteza se face pe SERVER (Chirp 3 HD, limba
-// userului), audio-ul se trimite prin punte ca UN CADRU {audio} și aplicația
-// doar îl decodează + redă. Frontul NU sintetizează nimic (TTS de front = mort).
-async function streamVoice(
+// userului), audio-ul se trimite ca CADRE {audio} și aplicația doar le decodează
+// + redă la coadă (audioIO.ts). Frontul NU sintetizează nimic (TTS de front = mort).
+// ── VOCE ÎN TIMPUL STREAM-ului (Adrian, 10 iul: „chat live instant") ─────────
+// Înainte, sinteza pornea abia DUPĂ ce tot textul se terminase — la un răspuns
+// lung, Kelion tăcea zeci de secunde după primul cuvânt scris. Acum textul
+// difuzat intră aici PE MĂSURĂ ce curge: la fiecare graniță de frază, bucata
+// pleacă la sinteză și cadrul {audio} se scrie în stream cât timp textul încă
+// vine — Kelion vorbește din PRIMA frază. Sinteza rulează SERIAL (ordinea
+// frazelor = ordinea audio); plafonul de rostire rămâne 4000 de caractere
+// (Adrian, 10 iul: „ieșirea audio minim 1 minut").
+function createVoiceStream(
   reply: { raw: { write(c: string): void } },
-  text: string,
   lang: string | undefined,
-): Promise<void> {
-  // Ce se rostește: textul, curățat de etichete de unelte și de markdown.
-  const spoken = text
-    .replace(/\[[A-Z][^\]]*\]/g, '')
-    .replace(/[*_#`~>|]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    // Plafon de rostire ridicat 1800 → 4000 (Adrian, 10 iul: „ieșirea audio minim
-    // 1 minut"). 4000 caractere ≈ 3-4 minute, sintetizate pe bucăți de frază, deci
-    // un răspuns lung se aude întreg, nu tăiat.
-    .slice(0, 4000)
-  if (!spoken) return
-  // Ordinul lui Adrian (6 iul): „nu vreau să mai aștept atâta până răspunzi".
-  // Sinteza pe TOT textul deodată ținea vocea în așteptare cât dura tot
-  // răspunsul; acum vorbește pe bucăți la graniță de frază — prima bucată
-  // pleacă spre client imediat ce e gata, restul se sintetizează cât redă
-  // clientul bucata anterioară (frontend le pune la coadă, vezi audioIO.ts).
-  for (const chunk of splitForSpeech(spoken)) {
-    try {
-      const r = await synthesize(chunk, lang)
-      if (r.ok) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
+  let pending = '' // text sosit, încă netrimis la sinteză
+  let spoken = 0 // caractere deja rostite (plafonul de 4000)
+  let any = false
+  let chain: Promise<void> = Promise.resolve()
+  const speak = (text: string): void => {
+    if (!text || spoken >= 4000) return
+    const t = text.slice(0, 4000 - spoken)
+    spoken += t.length
+    chain = chain.then(async () => {
+      try {
+        const r = await synthesize(t, lang)
+        if (r.ok) {
+          reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
+        }
+      } catch {
+        /* o bucată pierdută nu oprește restul vocii */
       }
-    } catch {
-      /* o bucată pierdută nu oprește restul vocii */
-    }
+    })
+  }
+  // Ce se rostește: textul, curățat de etichete de unelte și de markdown.
+  const clean = (s: string): string => s.replace(/\[[A-Z][^\]]*\]/g, '').replace(/[*_#`~>|]/g, '')
+  const cut = (final: boolean): void => {
+    // Rupem DOAR după frază încheiată URMATĂ de spațiu (nu în mijlocul lui
+    // „3.14"); fără graniță, o bucată peste 240 de caractere pleacă oricum
+    // (frază-fluviu fără punctuație). La final pleacă tot ce a rămas.
+    let at = -1
+    for (const m of pending.matchAll(/[.!?…](?=\s)/g)) at = m.index ?? -1
+    let ready = ''
+    if (final) {
+      ready = pending
+      pending = ''
+    } else if (at !== -1) {
+      ready = pending.slice(0, at + 1)
+      pending = pending.slice(at + 1)
+    } else if (pending.length > 240) {
+      ready = pending
+      pending = ''
+    } else return
+    for (const c of splitForSpeech(clean(ready))) speak(c)
+  }
+  return {
+    feed(t: string): void {
+      if (!t) return
+      any = true
+      pending += t
+      cut(false)
+    },
+    fed(): boolean {
+      return any
+    },
+    async finish(): Promise<void> {
+      cut(true)
+      await chain
+    },
   }
 }
 
@@ -707,7 +743,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // The user's ESTABLISHED language (what they actually use), not their Google
     // account locale — used for the language lock AND the out-of-credit message.
-    const storedPref = await getSpeechLang(user.email)
+    // UN SINGUR drum spre bază în loc de patru la rând (Adrian, 10 iul: „chat
+    // live instant"): citirile independente pleacă ÎMPREUNĂ — fiecare await
+    // separat mai punea o tură de DB înaintea primului cuvânt.
+    const lastForRecall = messages.at(-1)
+    const [storedPref, userAnthropicKey, meserieId, memRecall] = await Promise.all([
+      getSpeechLang(user.email),
+      getAnthropicKey(user.email),
+      getMeserieActiva(user.email),
+      // Memory agent (recall): DB pur (fără model, fără credite) — faptele
+      // durabile despre user; mesajul curent e indiciul de relevanță.
+      recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+    ])
 
     // DEVICE COMMANDS + SPEECH LANGUAGE — both interpreted on the SERVER now
     // (moved out of the browser; owner's order: as much of the app as possible
@@ -726,8 +773,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const speechPref = committedLang ?? storedPref
     const userLang = speechPref || user.locale || 'unknown'
     const ro = userLang.toLowerCase().startsWith('ro')
-
-    const userAnthropicKey = await getAnthropicKey(user.email)
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop
@@ -804,7 +849,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
-    const meserieId = await getMeserieActiva(user.email)
+    // (meserieId citit mai sus, în drumul unic spre bază.)
     const meserie = meserieId != null ? getMeserie(meserieId) : undefined
     if (meserie) {
       systemPrompt += `\n\nACTIVE ROLE (${meserie.nume}): ${meserie.systemPromptAddon}`
@@ -904,18 +949,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Memory agent (recall): inject the durable facts Kelion has learned about
-    // this user so the conversation is continuous across sessions. The user's
-    // current message is the relevance hint — old facts they ask about resurface.
-    const lastMsg = messages.at(-1)
-    // MEMORIE (Adrian, 8 iul): recall = DB pur (fără model, fără credite) — ia
-    // faptele recente + SCANEAZĂ după cuvintele întrebării în tot ce știe. O
-    // capturăm ca s-o dăm ȘI creierului de pe punte (nu doar systemPrompt-ul API,
-    // pe care calea punții îl ignoră — de-aia Kelion „nu ținea minte" din 4 iul).
-    const memRecall = await recallMemories(
-      user.email,
-      'kelion',
-      lastMsg?.role === 'user' ? lastMsg.content : '',
-    )
+    // this user so the conversation is continuous across sessions. Citit mai
+    // sus (drumul unic spre bază); folosit și de punte (memBlock) și de API.
     systemPrompt += memRecall
 
     const params: Anthropic.MessageParam[] = messages.map((m) => ({
@@ -1040,7 +1075,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .join(' ')
         .trim()
       const noiseKey = normNoise(cleanUserText)
-      if (noiseKey && noiseKey === lastAdminEcho.key && Date.now() - lastAdminEcho.at < 45_000) {
+      // DOAR cât timp o tură chiar RULEAZĂ (Adrian, 10 iul: „se blochează"):
+      // ecoul de microfon apare când Kelion vorbește/răspunde. Când e liniște,
+      // un mesaj identic retrimis e Adrian care insistă fiindcă n-a primit
+      // răspuns — pornește o tură reală, nu-l mai înghiți.
+      if (
+        noiseKey &&
+        noiseKey === lastAdminEcho.key &&
+        Date.now() - lastAdminEcho.at < 45_000 &&
+        brainTurnActive()
+      ) {
         // AICI SE RUPEA ȘI FILTRUL (mesaje scrise „nu ajung", 4 iul): ceasul se
         // reîmprospăta la FIECARE duplicat, deci Adrian care retrimitea același
         // text (fiindcă nu primea răspuns) era înghițit la nesfârșit ca „ecou".
@@ -1058,6 +1102,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // afișează. Nu e ecou local: dacă banda nu se schimbă când vorbești,
       // vocea a murit ÎNAINTE de creier.
       reply.raw.write(`${CTRL}${JSON.stringify({ heard: (cleanUserText || lastUserText).slice(0, 500) })}${CTRL}`)
+      // Vocea pornește DIN PRIMA FRAZĂ, în paralel cu textul (nu după final).
+      const voice = createVoiceStream(reply, speechPref || user.locale)
       let a = ''
       // The exact bridge prompt for this turn, hoisted so the final fallback can
       // RE-QUEUE the request (nothing is ever dropped without an answer).
@@ -1073,7 +1119,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // was discussed, including "what did I ask 5 minutes ago". The current
         // turn's text is appended in case it isn't persisted yet.
         // 15 messages (was 30): half the prompt weight → visibly faster replies.
-        const dbRows = await getRecentHistory(config.adminEmail, 15)
+        // Istoricul + caietul comun pleacă ÎMPREUNĂ spre bază (nu pe rând) —
+        // încă un rând de așteptare tăiat dinaintea primului cuvânt.
+        const [dbRows, shared] = await Promise.all([
+          getRecentHistory(config.adminEmail, 15),
+          getSharedMemory(30),
+        ])
         const past = dbRows.map(
           (m) => `${m.role === 'user' ? 'Adrian' : 'Kelion'}: ${m.content.slice(0, 1500)}`,
         )
@@ -1088,7 +1139,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const bc = req.body?.coords
         let ctxBlock = ''
         if (bc && Number.isFinite(bc.lat) && Number.isFinite(bc.lon)) {
-          const place = await reverseGeocode(bc.lat, bc.lon).catch(() => '')
+          // Din CACHE, sincron (ca pe calea publică): apelul extern de geocodare
+          // nu mai ține primul cuvânt pe loc; numele locului se încălzește în
+          // fundal și e gata la tura următoare — lat/lon (tot ce cer skill-urile)
+          // se injectează oricum imediat.
+          const place = reverseGeocodeCached(bc.lat, bc.lon)
           const windy = `https://embed.windy.com/embed2.html?lat=${bc.lat.toFixed(4)}&lon=${bc.lon.toFixed(4)}&zoom=9&type=map&location=coordinates&metricTemp=%C2%B0C`
           ctxBlock +=
             `LOCUL LUI ADRIAN ACUM (GPS live din aplicație): lat ${bc.lat.toFixed(5)}, lon ${bc.lon.toFixed(5)}` +
@@ -1121,8 +1176,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             : ''
         // SHARED MEMORY ("caietul comun"): everything either Claude wrote — the
         // laptop builder and this server brain read the SAME notebook, so what
-        // was learned/done in one place is known in the other.
-        const shared = await getSharedMemory(30)
+        // was learned/done in one place is known in the other. (Citit mai sus,
+        // în paralel cu istoricul.)
         const sharedBlock =
           shared.length > 0
             ? 'MEMORIA COMUNĂ (caietul pe care-l împărțiți tu și Claude-constructorul de pe laptop):\n' +
@@ -1197,6 +1252,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (!t) return
           reply.raw.write(t)
           streamed += t
+          voice.feed(t) // fraza completă pleacă la sinteză cât textul încă curge
         }
         // ── LEGEA 200 (Adrian, 5 iul): ORICE operațiune se certifică — succes
         // real („200") sau pleacă AUTOMAT la reparat. Fără eșec tăcut, fără
@@ -1612,8 +1668,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             : 'The bridge to the brain is down right now (it restarts itself within seconds). Resend the moment it is back — I will not loop on my own.'
         reply.raw.write(a)
       }
-      // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).
-      await streamVoice(reply, a, speechPref || user.locale)
+      // Vocea a curs DEJA în timpul stream-ului (voice.feed în emit) — aici doar
+      // golim coada de sinteză; mesajele scrise direct (punte jos / fără răspuns)
+      // n-au trecut prin emit, deci intră acum.
+      if (!voice.fed() && a) voice.feed(a)
+      await voice.finish()
       reply.raw.end()
       void saveMessage(user.email, 'assistant', a)
       // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): distil+save și pe punte,
@@ -1622,18 +1681,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
-    // ── PUBLIC PE ABONAMENT (ordin direct Adrian, 10 iul) ───────────────────
-    // „Peste tot unde apare Claude se folosește abonamentul mare; cheia API se
-    // scoate — altceva e total greșit." Chatul PUBLIC (demo/clienți) nu mai
-    // atinge cheia API: răspunde ACELAȘI creier de pe punte (abonamentul), ca la
-    // admin — dar cu personaj NEUTRU: jobul pleacă marcat `persona:'public'`,
-    // iar workerul NU atașează contextul privat al proprietarului (context.md)
-    // la joburile publice, ca proiectul să nu se scurgă către vizitatori.
-    // Demo-ul de 3 minute = prima impresie a fiecărui client — trebuie să miște.
-    // Vechiul drum pe cheia API rămâne mai jos DOAR ca resort de urgență
-    // (KELION_API_CHAT=1 pe Railway l-ar reactiva); implicit NU se atinge.
-    // Ștergerea lui fizică = curățenie separată, după ce drumul nou e dovedit.
-    if (!process.env.KELION_API_CHAT) {
+    // ── RUTAREA CREIERELOR (decizia lui Adrian, 10 iul) ─────────────────────
+    // „Eu și demo userii de la început (cele 10 minute) pe abonamentul mare, și
+    // după — pe abonamentele lor cu credite cumpărate." Adică: ADMIN (mai sus)
+    // + DEMO/gratuiți răspund prin PUNTE (abonament, persona:'public', fără
+    // contextul privat al proprietarului); clienții LOGAȚI care plătesc singuri
+    // — credit cumpărat (paywall-ul de mai sus a garantat credit > 0) sau cheia
+    // lor Anthropic — merg pe drumul DIRECT prin API de mai jos: instant, cu
+    // toate uneltele, debitat din creditele lor (debitWallet la finalul turei).
+    // Fără Stripe configurat (aplicație liberă) totul rămâne pe abonament.
+    // KELION_API_CHAT=1 pe Railway forțează pe API tot ce nu e admin (urgență).
+    const paysOwnWay = !!userAnthropicKey || (!!config.stripe.secretKey && user.role !== 'demo')
+    if (!process.env.KELION_API_CHAT && !paysOwnWay) {
       const roPub = userLang.toLowerCase().startsWith('ro')
       // SPEC FREE/DEMO (Adrian, 10 iul): „fără istoric, chat live în orice
       // limbă 3 minute, cameră DA, nimic-admin". Demo = anonim și curat: fără
@@ -1642,13 +1701,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const isDemo = user.role === 'demo'
       // Bargraf la intrarea în creier — și pe calea publică (vezi calea admin).
       reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
+      // Vocea din prima frază și pentru public (vezi createVoiceStream).
+      const voice = createVoiceStream(reply, userLang)
       if (!bridgeOnline()) {
         // Puntea e jos → mesaj cinstit, scurt. NU cădem pe cheia API (ordinul).
         const msg = roPub
           ? 'Creierul meu se repornește chiar acum — durează câteva secunde. Te rog trimite mesajul încă o dată imediat.'
           : 'My brain is restarting right now — it takes a few seconds. Please resend your message in a moment.'
         reply.raw.write(msg)
-        await streamVoice(reply, msg, userLang)
+        voice.feed(msg)
+        await voice.finish()
         reply.raw.end()
         if (!isDemo) void saveMessage(user.email, 'assistant', msg)
         return
@@ -1759,6 +1821,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (!t) return
         shownAny = true
         reply.raw.write(t)
+        voice.feed(t) // fraza completă pleacă la sinteză cât textul încă curge
       }
       // Prima linie poate purta etichete ([MAP]/[YT]/[SHOW]/[IMG]) — o reținem
       // până la newline, executăm etichetele și afișăm textul CURAT; un răspuns
@@ -1804,7 +1867,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? 'Nu am reușit să răspund de data asta — te rog mai încearcă o dată.'
           : "I couldn't answer this time — please try once more."
         reply.raw.write(msg)
-        await streamVoice(reply, msg, userLang)
+        voice.feed(msg)
+        await voice.finish()
         reply.raw.end()
         if (!isDemo) void saveMessage(user.email, 'assistant', msg)
         return
@@ -1820,9 +1884,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (answer && answer !== BRIDGE_STALL && answer.length > acc.length && answer.startsWith(acc))
         showPub(answer.slice(acc.length))
       else if (!shownAny && finalText) showPub(finalText)
-      // Vocea: sintetizată pe server (Chirp 3 HD), în limba utilizatorului —
-      // streamVoice curăță singur orice etichetă rămasă.
-      await streamVoice(reply, finalText || rawFull, userLang)
+      // Vocea a curs deja în timpul stream-ului (voice.feed în showPub); aici
+      // doar golim coada de sinteză (plus plasa: nimic difuzat → rostește tot).
+      if (!voice.fed()) voice.feed(finalText || rawFull)
+      await voice.finish()
       reply.raw.end()
       // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre el.
       if (!isDemo) {
@@ -1850,6 +1915,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
+    // intră în conductă; sinteza merge în paralel cu textul care încă curge.
+    const voice = createVoiceStream(reply, userLang)
     let assistantText = ''
     let sandboxLog = '' // commands + real output from the code-execution sandbox
     let inTokens = 0
@@ -1913,6 +1981,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             if (guardTripped) return // decided to discard — swallow the rest
             if (released) {
               reply.raw.write(delta)
+              voice.feed(delta)
               return
             }
             gate += delta
@@ -1921,6 +1990,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
               if (checkLang(gate, guardTag).ok) {
                 released = true
                 reply.raw.write(gate)
+                voice.feed(gate)
               } else {
                 guardTripped = true
               }
@@ -1931,6 +2001,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             if (!released && !guardTripped && gate) {
               if (checkLang(gate, guardTag).ok) {
                 reply.raw.write(gate)
+                voice.feed(gate)
                 released = true
               } else {
                 guardTripped = true
@@ -2022,8 +2093,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           `${CTRL}${JSON.stringify({ doc: { title: 'Sandbox — cod și rezultat', text: sandboxLog.slice(0, 8000) } })}${CTRL}`,
         )
       }
-      // Vocea creierului și pentru clienți: sintetizată pe server, redată în app.
-      if (assistantText.trim()) await streamVoice(reply, assistantText, userLang)
+      // Vocea a curs deja în timpul stream-ului (voice.feed la fiecare bucată
+      // difuzată); aici doar golim coada de sinteză.
+      if (!voice.fed() && assistantText.trim()) voice.feed(assistantText)
+      await voice.finish()
       reply.raw.end()
       if (assistantText.trim()) void saveMessage(user.email, 'assistant', assistantText)
       // Memory agent (learn): distil + save any new durable facts about the user,
@@ -2068,6 +2141,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
             : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
         reply.raw.write(assistantText.trim() ? `\n\n${note}` : note)
+        // Eroarea se și AUDE (regula „niciodată tăcere totală"), nu doar se scrie.
+        voice.feed(note)
+        await voice.finish()
         reply.raw.end()
       }
     }
