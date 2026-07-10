@@ -1,0 +1,112 @@
+# AUDIT DE SECURITATE VPS (Contabo) — reacție rapidă la tentative de spargere.
+# Două moduri, alese din input:
+#   audit  = DOAR-CITIRE: strânge dovezile (cine a încercat, de unde, dacă a
+#            reușit cineva, chei SSH străine, cron/procese/porturi suspecte).
+#   harden = APLICĂ apărarea: fail2ban (ban automat), ufw (firewall, dar lasă
+#            SSH deschis ca să NU ne blocăm), opțional parolă root nouă.
+# Parola root a VPS-ului se dă ca input (mascată, nu se salvează).
+
+name: security-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      vps_pass:
+        description: 'Parola root VPS ACTUALĂ (mascată)'
+        required: true
+      mode:
+        description: 'audit (doar-citire) sau harden (aplică apărarea)'
+        required: true
+        default: 'audit'
+      new_root_pass:
+        description: 'Parolă root NOUĂ (doar în mode=harden; gol = nu schimbă)'
+        required: false
+        default: ''
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit / hardening pe VPS
+        env:
+          VPS_PASS: ${{ inputs.vps_pass }}
+          MODE: ${{ inputs.mode }}
+          NEW_PASS: ${{ inputs.new_root_pass }}
+        run: |
+          set -uo pipefail
+          echo "::add-mask::$VPS_PASS"
+          [ -n "$NEW_PASS" ] && echo "::add-mask::$NEW_PASS"
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          if [ "$MODE" = "harden" ]; then
+            echo "MOD: HARDEN — aplic apărarea (fail2ban + firewall + parolă)"
+            NEW_PASS="$NEW_PASS" sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
+              set -uo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              echo "== 1) FIREWALL (ufw) — deschid SSH ÎNAINTE de enable, ca să nu ne blocăm =="
+              apt-get install -y -qq ufw >/dev/null 2>&1
+              ufw allow 22/tcp >/dev/null 2>&1
+              ufw --force enable >/dev/null 2>&1
+              ufw status verbose | head -20
+              echo "== 2) FAIL2BAN — ban automat la brute-force pe SSH =="
+              apt-get install -y -qq fail2ban >/dev/null 2>&1
+              cat > /etc/fail2ban/jail.d/kelion.conf <<'CONF'
+[sshd]
+enabled = true
+port = ssh
+maxretry = 4
+findtime = 600
+bantime = 86400
+CONF
+              systemctl enable fail2ban >/dev/null 2>&1
+              systemctl restart fail2ban
+              sleep 3
+              fail2ban-client status sshd 2>/dev/null | sed 's/^/  /' || echo "  (fail2ban pornește...)"
+              echo "== 3) PAROLĂ ROOT nouă =="
+              if [ -n "${NEW_PASS:-}" ]; then
+                echo "root:${NEW_PASS}" | chpasswd && echo "  Parola root a fost SCHIMBATĂ." || echo "  EȘEC la schimbarea parolei."
+              else
+                echo "  (nicio parolă nouă dată — nu am schimbat-o)"
+              fi
+              echo "== GATA hardening =="
+EOS
+            exit 0
+          fi
+
+          echo "MOD: AUDIT — doar-citire, nu ating nimic"
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
+            set -uo pipefail
+            LOG=/var/log/auth.log; [ -f "$LOG" ] || LOG=/var/log/secure
+            echo "===== SERVER ====="; hostname; uptime; date -u
+            echo; echo "===== CONTURI cu UID 0 (numai root trebuie) + conturi cu shell ====="
+            awk -F: '($3==0){print "UID0: "$1}' /etc/passwd
+            awk -F: '($7 ~ /(bash|sh|zsh)$/){print "SHELL: "$1" "$7}' /etc/passwd
+            echo; echo "===== SESIUNI ACTIVE ACUM (cine e logat) ====="; who -a 2>/dev/null; w 2>/dev/null | head
+            echo; echo "===== ULTIMELE 20 LOGĂRI REUȘITE ====="; last -aiF 2>/dev/null | head -20
+            echo; echo "===== LOGĂRI REUȘITE prin SSH — DE UNDE (atenție dacă vezi IP străin) ====="
+            grep -h "Accepted" $LOG* 2>/dev/null | grep -oE "Accepted (password|publickey) for [^ ]+ from [0-9.]+" | sort | uniq -c | sort -rn | head -20
+            echo; echo "===== TOTAL încercări EȘUATE de parolă ====="
+            FAILS=$(grep -h "Failed password" $LOG* 2>/dev/null | wc -l); echo "  $FAILS încercări eșuate în logurile disponibile"
+            echo; echo "===== TOP 20 IP-uri care au atacat (parole eșuate) ====="
+            grep -h "Failed password" $LOG* 2>/dev/null | grep -oE "from [0-9.]+" | awk '{print $2}' | sort | uniq -c | sort -rn | head -20
+            echo; echo "===== TOP utilizatori încercați (root/admin/etc.) ====="
+            grep -h "Failed password" $LOG* 2>/dev/null | grep -oE "for [^ ]+ from" | awk '{print $2}' | sort | uniq -c | sort -rn | head -12
+            echo; echo "===== CHEI SSH AUTORIZATE (o cheie străină = backdoor!) ====="
+            for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do [ -f "$f" ] && { echo "  $f:"; sed 's/^/    /' "$f"; }; done; echo "  (dacă e gol, nu există chei — bine)"
+            echo; echo "===== PORTURI ÎN ASCULTARE (ceva neașteptat?) ====="; (ss -tulpnH 2>/dev/null || netstat -tulpn 2>/dev/null) | sed 's/^/  /' | head -25
+            echo; echo "===== CRON (sarcini ascunse?) ====="; crontab -l 2>/dev/null | sed 's/^/  root: /'; for d in /etc/cron.d /etc/cron.hourly /etc/cron.daily; do ls -la "$d" 2>/dev/null | sed "s/^/  $d /"; done; grep -vE '^\s*#|^\s*$' /etc/crontab 2>/dev/null | sed 's/^/  sys: /'
+            echo; echo "===== TOP 10 PROCESE după CPU (miner ascuns?) ====="; ps aux --sort=-%cpu 2>/dev/null | head -11 | sed 's/^/  /'
+            echo; echo "===== FIȘIERE modificate în /etc /root /tmp /var/tmp în ultimele 3 zile ====="
+            find /etc /root /tmp /var/tmp -type f -mtime -3 2>/dev/null | grep -vE '/(kelion|node_modules|\.git|\.cache)/' | head -30 | sed 's/^/  /'
+            echo; echo "===== APĂRARE EXISTENTĂ ====="
+            (command -v fail2ban-client >/dev/null && fail2ban-client status 2>/dev/null | sed 's/^/  fail2ban: /') || echo "  fail2ban: NU e instalat (❌ fără ban automat)"
+            (ufw status 2>/dev/null | head -3 | sed 's/^/  ufw: /') || echo "  ufw: neinstalat/inactiv (❌ fără firewall)"
+            echo; echo "===== CONFIG SSH (parolă permisă? root permis?) ====="
+            grep -iE '^\s*(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|Port)' /etc/ssh/sshd_config 2>/dev/null | sed 's/^/  /'
+            grep -rhiE '^\s*(PermitRootLogin|PasswordAuthentication)' /etc/ssh/sshd_config.d/ 2>/dev/null | sed 's/^/  (drop-in) /'
+            echo; echo "===== ULTIMELE 25 comenzi din istoricul root ====="; tail -25 /root/.bash_history 2>/dev/null | sed 's/^/  /'
+            echo "===== GATA AUDIT ====="
+EOS
