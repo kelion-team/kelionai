@@ -1,6 +1,6 @@
-# DIAGNOSTIC ASR STREAMING (doar-citire): ia GOOGLE_SERVICE_ACCOUNT_JSON de pe
-# Railway și încearcă DE PE RUNNER matricea de configurații streamingRecognize —
-# Google răspunde cu eroarea EXACTĂ pentru fiecare. Zero atingere de producție.
+# DIAGNOSTIC ASR (doar-citire): în ce REGIUNE acceptă Google chirp_3 streaming
+# pentru proiectul nostru. Verdictul anterior: us-central1 NU are chirp_3
+# (chirp_2 da). Probăm regiunile candidate cu cheia reală.
 
 name: brain-diag
 
@@ -13,7 +13,7 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Matrice streamingRecognize — ce refuză Google exact
+      - name: chirp_3 streaming — matrice pe regiuni
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -28,38 +28,35 @@ jobs:
             '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
           gql "$VQ" | jq -r '.data.variables.GOOGLE_SERVICE_ACCOUNT_JSON // empty' > /tmp/sa.json
           [ -s /tmp/sa.json ] || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON lipsă"; exit 0; }
-          echo "service account: $(jq -r '.client_email' /tmp/sa.json | sed 's/@.*/@…/') proiect: $(jq -r '.project_id' /tmp/sa.json)"
           npm i --no-save --silent @google-cloud/speech >/dev/null 2>&1
           node - <<'EOF'
           const { v2 } = require('@google-cloud/speech')
           const creds = require('/tmp/sa.json')
-          const REGION = 'us-central1'
           const pid = creds.project_id
-          const rec = `projects/${pid}/locations/${REGION}/recognizers/_`
           const base = { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 }
-          const variants = [
-            ['A: chirp_3 + auto + punct + VAD + interim (PRODUCTIA)', { model: 'chirp_3', languageCodes: ['auto'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
-            ['B: chirp_3 + ro-RO (fara auto)', { model: 'chirp_3', languageCodes: ['ro-RO'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
-            ['C: chirp_3 minimal (fara punct/VAD/interim)', { model: 'chirp_3', languageCodes: ['ro-RO'], explicitDecodingConfig: base }, {}],
-            ['D: chirp_2 + auto (config identic cu A)', { model: 'chirp_2', languageCodes: ['auto'], explicitDecodingConfig: base, features: { enableAutomaticPunctuation: true } }, { interimResults: true, enableVoiceActivityEvents: true }],
-            ['E: chirp_3 + auto, fara VAD', { model: 'chirp_3', languageCodes: ['auto'], explicitDecodingConfig: base }, { interimResults: true }],
-          ]
-          const silence = Buffer.alloc(16000) // 0.5s PCM16 tacere
-          async function probe([name, config, streamingFeatures]) {
-            const client = new v2.SpeechClient({ credentials: creds, projectId: pid, apiEndpoint: `${REGION}-speech.googleapis.com` })
+          const REGIONS = ['us', 'eu', 'us-east1', 'us-west1', 'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4', 'asia-southeast1', 'northamerica-northeast1', 'global']
+          const silence = Buffer.alloc(16000)
+          async function probe(region, langs) {
+            const ep = region === 'global' ? 'speech.googleapis.com' : `${region}-speech.googleapis.com`
+            const rec = `projects/${pid}/locations/${region}/recognizers/_`
+            const client = new v2.SpeechClient({ credentials: creds, projectId: pid, apiEndpoint: ep })
             return new Promise((resolve) => {
               let done = false
               let s
-              const fin = (msg) => { if (!done) { done = true; console.log(`${name} -> ${msg}`); try { s && s.end() } catch {} resolve() } }
+              const fin = (msg) => { if (!done) { done = true; console.log(`chirp_3 @ ${region} [${langs}] -> ${msg}`); try { s && s.end() } catch {} resolve() } }
               try { s = client._streamingRecognize() } catch (e) { return fin(`SPAWN FAIL: ${e.message}`) }
-              s.on('error', (e) => fin(`EROARE: [${e.code ?? '?'}] ${String(e.message).slice(0, 220)}`))
-              s.on('data', () => fin('OK - Google accepta configuratia (a raspuns)'))
-              setTimeout(() => fin('OK - nicio eroare in 5s (config acceptat)'), 5000)
+              s.on('error', (e) => fin(`EROARE: [${e.code ?? '?'}] ${String(e.message).slice(0, 160)}`))
+              s.on('data', () => fin('OK - acceptat (a raspuns)'))
+              setTimeout(() => fin('OK - nicio eroare in 4s (acceptat)'), 4000)
               try {
-                s.write({ recognizer: rec, streamingConfig: { config, streamingFeatures } })
+                s.write({ recognizer: rec, streamingConfig: { config: { model: 'chirp_3', languageCodes: [langs], explicitDecodingConfig: base }, streamingFeatures: { interimResults: true } } })
                 s.write({ audio: silence })
               } catch (e) { fin(`WRITE FAIL: ${e.message}`) }
             })
           }
-          ;(async () => { for (const v of variants) await probe(v) })()
+          ;(async () => {
+            for (const r of REGIONS) await probe(r, 'auto')
+            console.log('--- si cu ro-RO in regiunile-cheie ---')
+            for (const r of ['us', 'eu', 'europe-west4']) await probe(r, 'ro-RO')
+          })()
           EOF
