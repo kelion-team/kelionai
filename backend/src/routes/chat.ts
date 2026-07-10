@@ -674,12 +674,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    if (!config.anthropicKey) {
-      return reply
-        .code(503)
-        .send({ error: 'brain_not_configured', message: 'ANTHROPIC_API_KEY is not set yet.' })
-    }
-
+    // ORDIN DIRECT (Adrian, 10 iul): „peste tot unde apare Claude se folosește
+    // abonamentul mare; cheia API se scoate". Chatul NU mai depinde de
+    // ANTHROPIC_API_KEY — și adminul și publicul răspund prin punte (abonament).
+    // De aceea vechiul gard 503 „brain_not_configured" a dispărut de aici.
     const rawMessages = req.body?.messages
     const image = req.body?.image
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
@@ -1605,6 +1603,85 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): distil+save și pe punte,
       // fire-and-forget (nu adaugă latență răspunsului).
       if (lastUserText.trim() || a.trim()) void learnFromTurn(user.email, lastUserText, a)
+      return
+    }
+
+    // ── PUBLIC PE ABONAMENT (ordin direct Adrian, 10 iul) ───────────────────
+    // „Peste tot unde apare Claude se folosește abonamentul mare; cheia API se
+    // scoate — altceva e total greșit." Chatul PUBLIC (demo/clienți) nu mai
+    // atinge cheia API: răspunde ACELAȘI creier de pe punte (abonamentul), ca la
+    // admin — dar cu personaj NEUTRU: jobul pleacă marcat `persona:'public'`,
+    // iar workerul NU atașează contextul privat al proprietarului (context.md)
+    // la joburile publice, ca proiectul să nu se scurgă către vizitatori.
+    // Demo-ul de 3 minute = prima impresie a fiecărui client — trebuie să miște.
+    // Vechiul drum pe cheia API rămâne mai jos DOAR ca resort de urgență
+    // (KELION_API_CHAT=1 pe Railway l-ar reactiva); implicit NU se atinge.
+    // Ștergerea lui fizică = curățenie separată, după ce drumul nou e dovedit.
+    if (!process.env.KELION_API_CHAT) {
+      const roPub = userLang.toLowerCase().startsWith('ro')
+      if (!bridgeOnline()) {
+        // Puntea e jos → mesaj cinstit, scurt. NU cădem pe cheia API (ordinul).
+        const msg = roPub
+          ? 'Creierul meu se repornește chiar acum — durează câteva secunde. Te rog trimite mesajul încă o dată imediat.'
+          : 'My brain is restarting right now — it takes a few seconds. Please resend your message in a moment.'
+        reply.raw.write(msg)
+        await streamVoice(reply, msg, userLang)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', msg)
+        return
+      }
+      // Conversația recentă (deja igienizată + plafonată mai sus) + limba +
+      // memoria relevantă (scanare DB pură) — pachet subțire, răspuns rapid.
+      const past = messages
+        .slice(-16)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Kelion'}: ${m.content.slice(0, 1200)}`)
+        .join('\n')
+      // Blocare ABSOLUTĂ de limbă doar când limba e STABILITĂ (preferință de
+      // vorbire salvată). Altfel (vizitator nou cu locale implicit 'en' care
+      // scrie română) — adaptiv: răspunde în limba în care scrie utilizatorul.
+      const langLine =
+        speechPref && langName
+          ? `Reply EXCLUSIVELY in ${langName} — every sentence, regardless of the language of anything quoted below.`
+          : 'Reply in the language the user writes in (default to English for short or ambiguous messages).'
+      const pubPrompt =
+        `${langLine}\n` +
+        (memRecall.trim() ? `${memRecall.trim().slice(0, 1500)}\n\n` : '') +
+        `Conversation so far:\n${past}\n\nAnswer the user's LAST message now.`
+      let acc = '' // ce s-a difuzat deja live către client
+      const answer = await bridgeAskStream(
+        pubPrompt,
+        [],
+        (chunk) => {
+          if (!chunk) return // '' = puls de viață, nu text
+          acc += chunk
+          reply.raw.write(chunk)
+        },
+        120_000,
+        45_000,
+        '',
+        'public',
+      )
+      const finalText = (answer && answer !== BRIDGE_STALL ? answer : acc).trim()
+      if (!finalText) {
+        const msg = roPub
+          ? 'Nu am reușit să răspund de data asta — te rog mai încearcă o dată.'
+          : "I couldn't answer this time — please try once more."
+        reply.raw.write(msg)
+        await streamVoice(reply, msg, userLang)
+        reply.raw.end()
+        void saveMessage(user.email, 'assistant', msg)
+        return
+      }
+      // Coada nedifuzată (răspunsul final e mai lung decât ce-a curs live).
+      if (!acc) reply.raw.write(finalText)
+      else if (answer && answer !== BRIDGE_STALL && answer.length > acc.length && answer.startsWith(acc))
+        reply.raw.write(answer.slice(acc.length))
+      // Vocea: sintetizată pe server (Chirp 3 HD), în limba utilizatorului.
+      await streamVoice(reply, finalText, userLang)
+      reply.raw.end()
+      void saveMessage(user.email, 'assistant', finalText)
+      // Memoria învață și pe calea publică (fire-and-forget, zero latență).
+      if (lastUserText.trim() || finalText.trim()) void learnFromTurn(user.email, lastUserText, finalText)
       return
     }
 

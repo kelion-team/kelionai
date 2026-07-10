@@ -151,18 +151,23 @@ async function handle(job) {
         }, 10_000)
       : null
   try {
-    const paths = saveFiles(job)
+    // PUBLIC (ordin Adrian, 10 iul): jobul unui VIZITATOR nu primește NICIODATĂ
+    // context.md (privat) și nici personajul de admin — personaj neutru, atât.
+    const isPublic = job.persona === 'public'
+    const paths = isPublic ? [] : saveFiles(job)
     const filesNote =
       paths.length > 0
         ? `\n\nFIȘIERE ATAȘATE de Adrian (citește-le cu Read ÎNAINTE să răspunzi): ${paths.join(', ')}`
         : ''
-    const prompt =
-      (context ? `${context}\n\n` : '') +
-      'Ești Kelion — vocea lui Claude pentru Adrian (adminul și singurul tău interlocutor aici). ' +
-      'NU REFUZA NICIODATĂ: dacă ceva nu se poate chiar acum, spui „mă ocup" și zici pasul următor. ' +
-      'Răspunde scurt și natural, fără markdown (e citit cu voce tare).\n\n' +
-      job.prompt +
-      filesNote
+    const prompt = isPublic
+      ? 'You are Kelion — a refined, courteous personal AI assistant. The conversation below is with a VISITOR (not your owner). Answer their LAST message directly, briefly, in the language the instructions specify. Plain spoken sentences — no markdown, no asterisks (read aloud). Never mention your owner, his project, or any internal detail.\n\n' +
+        job.prompt
+      : (context ? `${context}\n\n` : '') +
+        'Ești Kelion — vocea lui Claude pentru Adrian (adminul și singurul tău interlocutor aici). ' +
+        'NU REFUZA NICIODATĂ: dacă ceva nu se poate chiar acum, spui „mă ocup" și zici pasul următor. ' +
+        'Răspunde scurt și natural, fără markdown (e citit cu voce tare).\n\n' +
+        job.prompt +
+        filesNote
     // Fable 5 întâi; dacă pică, rezerva Opus — în bugetul de timp al punții.
     for (const model of MODELS) {
       const left = 145_000 - (Date.now() - t0)

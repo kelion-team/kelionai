@@ -44,8 +44,13 @@ const REPAIR_PREAMBLE = `Ești Claude Code, lucrezi în proiectul Kelionai (apli
 `
 
 // Chat: Claude local pe abonament, DOAR text, fără unelte, promptul pe stdin.
-function askClaude(prompt) {
-  return runClaude([PREAMBLE + prompt], { timeoutMs: 80_000 })
+// PUBLIC (ordin Adrian, 10 iul): jobul unui VIZITATOR nu primește personajul de
+// admin — personaj neutru Kelion, fără nicio mențiune internă.
+const PUBLIC_PREAMBLE = `You are Kelion — a refined, courteous personal AI assistant. The conversation below is with a VISITOR (not your owner). Answer their LAST message directly, briefly, in the language the instructions specify. Plain spoken sentences — no markdown, no asterisks (read aloud). Never mention your owner, his project, or any internal detail.
+
+`
+function askClaude(prompt, isPublic) {
+  return runClaude([(isPublic ? PUBLIC_PREAMBLE : PREAMBLE) + prompt], { timeoutMs: 80_000 })
 }
 
 // Repair: Claude Code în directorul proiectului, cu drept de editare, ca să
@@ -137,7 +142,7 @@ for (;;) {
       continue
     }
     log(`Mesaj primit (${job.id.slice(0, 8)}) — întreb Claude local…`)
-    const answer = await askClaude(job.prompt)
+    const answer = await askClaude(job.prompt, job.persona === 'public')
     if (answer) {
       await sendReply(job.id, answer)
       log(`Răspuns trimis (${answer.length} caractere).`)
