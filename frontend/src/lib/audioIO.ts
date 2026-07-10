@@ -293,7 +293,8 @@ export async function startMic(
 
   // analizor separat, cu rezoluție mai mare, doar pentru F0/centroid — nu atinge
   // RMS-ul de mai sus (analyser rămâne exact ca azi pentru VOX și barge-in)
-  const voiceprint = loadVoiceprint()
+  // `let`, nu `const`: profilul se poate ÎNVĂȚA automat în mers (vezi mai jos).
+  let voiceprint = loadVoiceprint()
   const pitchAnalyser = ctx.createAnalyser()
   pitchAnalyser.fftSize = 2048
   source.connect(pitchAnalyser)
@@ -377,8 +378,43 @@ export async function startMic(
   // admin (restrictToOwnerVoice) → false mereu, cât nu s-a calibrat încă (ordinul:
   // „doar vocea mea, nu se acceptă alta"). Poate greși izolat (octavă/zgomot) — de
   //-aia nu se folosește direct, ci prin fereastra de histerezis de mai jos.
+  // AUTO-ÎNROLARE (ordin Adrian, 10 iul: „recunoașterea vocală trebuie s-o
+  // treci pe automat" + „microfon cu autovox, instant"): fără profil salvat,
+  // microfonul NU mai stă mut așteptând calibrarea manuală — acceptă vocea
+  // IMEDIAT (autovox) și învață amprenta SINGUR din primele fraze reale:
+  // strânge F0/centroid din cadrele vocale acceptate (doar cât NU redă Kelion,
+  // ca să nu-și învețe propria voce din ecou) și, când are destule, salvează
+  // profilul și abia apoi începe să-l aplice. Zero butoane, zero „dă-i da".
+  const autoF0: number[] = []
+  const autoCentroids: number[] = []
+  const AUTO_ENROLL_FRAMES = 120 // ~2s de voce efectivă, adunate din primele fraze
   const matchesVoiceprintRaw = (): boolean => {
-    if (!voiceprint) return !restrictToOwnerVoice
+    if (!voiceprint) {
+      if (!restrictToOwnerVoice) return true
+      if (!muted) {
+        pitchAnalyser.getFloatTimeDomainData(pitchBuf)
+        const f0 = estimateF0(pitchBuf, ctx.sampleRate)
+        if (f0 > 0) {
+          autoF0.push(f0)
+          pitchAnalyser.getFloatFrequencyData(freqBuf)
+          autoCentroids.push(estimateCentroid(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize))
+          if (autoF0.length >= AUTO_ENROLL_FRAMES) {
+            voiceprint = {
+              f0Min: Math.min(...autoF0),
+              f0Max: Math.max(...autoF0),
+              centroid: autoCentroids.reduce((a, b) => a + b, 0) / autoCentroids.length,
+              tolerance: F0_TOLERANCE_HZ,
+            }
+            try {
+              localStorage.setItem(VOICEPRINT_KEY, JSON.stringify(voiceprint))
+            } catch {
+              /* localStorage indisponibil — profilul rămâne doar în memorie */
+            }
+          }
+        }
+      }
+      return true // autovox: vocea e acceptată din prima, cât se învață profilul
+    }
     pitchAnalyser.getFloatTimeDomainData(pitchBuf)
     const f0 = estimateF0(pitchBuf, ctx.sampleRate)
     if (f0 < 0) return false
