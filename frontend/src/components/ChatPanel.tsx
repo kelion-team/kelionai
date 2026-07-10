@@ -121,6 +121,10 @@ export default function ChatPanel({
     { id: string; url: string; name: string; text?: string; type?: string }[]
   >([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Câmpul de scris: un singur click oriunde în bară îl focalizează (zona reală a
+  // inputului e îngustă, iar un click „lângă" text nu prindea focus — trebuiau
+  // mai multe click-uri). Ref-ul e țintit de handlerul de pe rândul composer.
+  const composerInputRef = useRef<HTMLInputElement>(null)
   // Admin promo-scenario recorder: type steps, hit Record, Kelion runs them while
   // the screen + voice are recorded, then it saves an MP4 to Downloads.
   const [scenarioOpen, setScenarioOpen] = useState(false)
@@ -1044,7 +1048,16 @@ export default function ChatPanel({
             ))}
           </div>
         )}
-        <div className="composer-row">
+        <div
+          className="composer-row"
+          onMouseDown={(e) => {
+            // Un click oriunde în bară (în afara butoanelor și a inputului însuși)
+            // focalizează câmpul de scris DIN PRIMA — gata cu clickurile multiple.
+            const el = e.target as HTMLElement
+            if (el.closest('button') || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return
+            composerInputRef.current?.focus()
+          }}
+        >
           <div className="fn-wrap" ref={menuRef}>
             <button
               type="button"
@@ -1125,6 +1138,7 @@ export default function ChatPanel({
             )}
           </div>
           <input
+            ref={composerInputRef}
             className="composer-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
