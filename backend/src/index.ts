@@ -179,9 +179,12 @@ app.get('/health', async () => ({ status: 'ok' }))
 // la ORICE publicare, chiar dacă interfața n-a fost atinsă (cache de layer).
 const DEPLOY_SHA = (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7)
 const BOOT_AT = new Date().toISOString()
+// Railway prin `railway up` NU injectează sha-ul (dovedit live: v gol) →
+// momentul pornirii E versiunea: se schimbă la fiecare publicare.
+const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
-  return { v: DEPLOY_SHA, at: BOOT_AT }
+  return { v: DEPLOY_V, at: BOOT_AT }
 })
 
 // Test/verification endpoint for the SDK constructor
