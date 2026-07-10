@@ -8,6 +8,7 @@ import {
   setGapResolved,
   getAdminAccount,
   loadAdminPool,
+  withdrawAdminPool,
   getDemoStats,
   getUserActivity,
   getDownloadStats,
@@ -209,6 +210,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ])
     return reply.send({
       stripe,
+      loaded: account.loaded,
+      remaining: account.remaining,
       spent: account.spent,
       profit: account.profit,
       currency: stripe?.currency ?? 'gbp',
@@ -249,13 +252,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await verifyKeys())
   })
 
-  // Record money the owner loaded into the provider-credit pool (admin only).
-  app.post<{ Body: { amount?: number } }>('/api/admin/pool', async (req, reply) => {
+  // Record money the owner ADDS to or WITHDRAWS from the provider-credit pool
+  // (admin only). direction 'withdraw' takes money out; anything else adds.
+  app.post<{ Body: { amount?: number; direction?: string } }>('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const amount = Number(req.body?.amount)
     if (!(amount > 0)) return reply.code(400).send({ error: 'bad_request' })
-    await loadAdminPool(amount)
+    if (req.body?.direction === 'withdraw') await withdrawAdminPool(amount)
+    else await loadAdminPool(amount)
     return reply.send(await getAdminAccount())
   })
 }

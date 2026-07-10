@@ -4,6 +4,7 @@ import {
   fetchHistory,
   fetchGaps,
   fetchFinance,
+  updatePool,
   fetchDemos,
   fetchActivity,
   fetchDevLog,
@@ -106,6 +107,9 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [finance, setFinance] = useState<Finance | null>(null)
+  // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
+  const [poolAmount, setPoolAmount] = useState('')
+  const [poolBusy, setPoolBusy] = useState(false)
   const [demos, setDemos] = useState<DemoStats | null>(null)
   const [activity, setActivity] = useState<UserActivity | null>(null)
   const [devLog, setDevLog] = useState<string[]>([])
@@ -353,6 +357,56 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                       {sym}
                       {finance.profit.toFixed(2)}
                     </span>
+                  </div>
+                </div>
+                <div className="pool-manage">
+                  <div className="pool-manage-head">
+                    Pool AI — banii puși la dispoziția AI. Încărcat {sym}
+                    {finance.loaded.toFixed(2)} · rămas {sym}
+                    {finance.remaining.toFixed(2)}
+                  </div>
+                  <div className="pool-manage-row">
+                    <input
+                      className="pool-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder={`Sumă (${sym})`}
+                      value={poolAmount}
+                      onChange={(e) => setPoolAmount(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="pool-btn add"
+                      disabled={poolBusy || !(Number(poolAmount) > 0)}
+                      onClick={async () => {
+                        setPoolBusy(true)
+                        const ok = await updatePool(Number(poolAmount), 'add')
+                        if (ok) {
+                          setPoolAmount('')
+                          await fetchFinance().then(setFinance)
+                        }
+                        setPoolBusy(false)
+                      }}
+                    >
+                      + Adaugă bani
+                    </button>
+                    <button
+                      type="button"
+                      className="pool-btn withdraw"
+                      disabled={poolBusy || !(Number(poolAmount) > 0)}
+                      onClick={async () => {
+                        setPoolBusy(true)
+                        const ok = await updatePool(Number(poolAmount), 'withdraw')
+                        if (ok) {
+                          setPoolAmount('')
+                          await fetchFinance().then(setFinance)
+                        }
+                        setPoolBusy(false)
+                      }}
+                    >
+                      − Scoate bani
+                    </button>
                   </div>
                 </div>
                 <div className="fin-breakdown">
