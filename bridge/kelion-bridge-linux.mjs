@@ -92,12 +92,12 @@ function claudeArgs({ streaming, model, hasFiles }) {
   const args = ['-p']
   if (streaming) args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages')
   else args.push('--output-format', 'text')
-  if (hasFiles) {
-    args.push('--allowedTools', 'Read', '--add-dir', INBOX)
-  } else {
-    args.push('--disallowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebFetch', 'WebSearch', 'Task')
-  }
-  args.push('--exclude-dynamic-system-prompt-sections')
+  // CHAT PUR: NU grantăm unelte și NU dăm --add-dir. Cauza reală a celor 31s era
+  // --add-dir /root/kelion (repo întreg de explorat) + unelte. Fără ele, modelul
+  // răspunde direct din context (instant). Folosim DOAR flag-uri dovedite — flag-
+  // urile noi (--disallowedTools/--exclude-dynamic...) lipseau din CLI-ul de pe
+  // VPS și RUPEAU workerul (niciun răspuns). Cu POZĂ: Read + folderul de poze.
+  if (hasFiles) args.push('--allowedTools', 'Read', '--add-dir', INBOX)
   if (model) args.push('--model', model)
   return args
 }
