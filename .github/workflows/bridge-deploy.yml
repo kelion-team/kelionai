@@ -20,6 +20,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # SCURGEREA REALĂ (10 iul): mascarea de mai jos venea PREA TÂRZIU —
+      # runner-ul tipărește blocul `env:` al unui pas ÎNAINTE să-i ruleze
+      # scriptul, deci parola apărea ÎN CLAR în jurnal. Pasul ăsta rulează
+      # primul și citește parola direct din fișierul de eveniment (nu prin
+      # env, nu interpolată în script), deci nu are pe unde să se vadă.
+      - name: Maschează parola în jurnal (înainte de orice)
+        run: |
+          v=$(jq -r '.inputs.vps_pass // empty' "$GITHUB_EVENT_PATH")
+          { [ -n "$v" ] && echo "::add-mask::$v"; } || true
       - name: Adu workerul la zi pe VPS și repornește puntea
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
