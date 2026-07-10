@@ -56,17 +56,19 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           config: {
-            model: 'chirp_2',
+            // chirp_3 PESTE TOT (Adrian, 10 iul: „pune 3 peste tot, scoate total
+            // chirp 2"). Streamingul (dictarea live) e deja chirp_3; acum și calea
+            // de rezervă batch e chirp_3, ca să nu mai existe chirp_2 nicăieri.
+            model: 'chirp_3',
             // ANCHORED language when the user has one established — 'auto' on
             // short utterances kept mis-guessing (Romanian speech transcribed
             // as Polish/Turkish). With a known language we pin it; visitors
             // without one keep full auto-detection.
             languageCodes: langHint ? [langHint] : ['auto'],
             autoDecodingConfig: {},
-            // Adrian's rule: Google's voice improvements apply AUTOMATICALLY.
-            // chirp_2 is Google's flagship (they upgrade it server-side); the
-            // features below make it punctuate for real — question marks,
-            // commas, capitals — instead of a flat word stream.
+            // Google's voice improvements apply AUTOMATICALLY server-side; the
+            // feature below makes it punctuate for real — question marks, commas,
+            // capitals — instead of a flat word stream.
             features: { enableAutomaticPunctuation: true },
           },
           content: audio,
