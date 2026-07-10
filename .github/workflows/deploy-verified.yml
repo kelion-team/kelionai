@@ -1,20 +1,22 @@
-# DEPLOY VERIFICAT REAL — repară „deploy reușit dar producția rămâne veche".
+# DEPLOY VERIFICAT REAL — publică ramura de dezvoltare la ORICE schimbare de cod
+# și dovedește că noul build chiar a preluat traficul (nu doar /health=200).
 #
-# Problema dovedită (10 iul): deploy.yml declara succes doar fiindcă /health
-# răspundea 200 — dar 200 venea de la containerul VECHI pe care Railway îl ține
-# activ când un deploy nou nu-l înlocuiește (cursă/context vechi). Rutele noi
-# rămâneau 404 pe producție deși GitHub zicea „verde".
-#
-# Fixul: după publicare, NU ne mulțumim cu /health. Verificăm că o RUTĂ NOUĂ
-# (/api/admin/mailbox-live, adăugată în #71) răspunde 403 (rutată) în loc de 404
-# (inexistentă). Doar atunci codul nou e CU ADEVĂRAT live. Publică din `master`.
+# „Deploy la fiecare" (Adrian, 10 iul): fiecare push care atinge codul backend/
+# frontend/Docker publică automat pe producție ȘI verifică. Dovada preluării:
+# /api/version raportează momentul pornirii containerului — după publicare cerem
+# să DIFERE de cel de dinainte. Așa nu se mai poate declara fals „reușit".
 name: deploy-verified
 
 on:
   workflow_dispatch:
   push:
     branches: [claude/chat-instant-delay-em5gjf]
-    paths: ['.github/workflows/deploy-verified.yml']
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'Dockerfile'
+      - 'railway.json'
+      - '.github/workflows/deploy-verified.yml'
 
 concurrency:
   group: deploy-production
@@ -24,9 +26,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # Publicăm ramura de dezvoltare (are codul verificat local: fix-uri deploy +
-      # panoul de Setări client). Când PR-ul intră în master, deploy.yml (întărit)
-      # republică master identic.
+      # Publicăm ramura de dezvoltare (are codul verificat local). Când PR-ul intră
+      # în master, deploy.yml (întărit) republică master identic.
       - uses: actions/checkout@v4
         with:
           ref: claude/chat-instant-delay-em5gjf
@@ -37,6 +38,13 @@ jobs:
 
       - name: Instalează Railway CLI
         run: npm i -g @railway/cli
+
+      - name: Amprenta versiunii de dinainte
+        id: before
+        run: |
+          V=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+          echo "Versiune înainte: $V"
+          echo "ver=$V" >> "$GITHUB_OUTPUT"
 
       - name: Găsește ținta (proiect + mediu + serviciu)
         id: target
@@ -55,7 +63,7 @@ jobs:
           echo "Țintă: proiect $(echo "$P"|jq -r .name), serviciu $SVC"
           { echo "project_id=$PID"; echo "env_id=$ENVID"; echo "service=$SVC"; } >> "$GITHUB_OUTPUT"
 
-      - name: Publică pe Railway (context proaspăt din master)
+      - name: Publică pe Railway (context proaspăt din ramură)
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           PROJECT_ID: ${{ steps.target.outputs.project_id }}
@@ -82,23 +90,24 @@ jobs:
           export RAILWAY_TOKEN="$PT"; unset RAILWAY_API_TOKEN || true
           railway up --service "$SERVICE" --ci
 
-      - name: VERIFICĂ REAL că noul cod e live (ruta nouă /api/me/delete)
+      - name: VERIFICĂ REAL că noul build a preluat (versiunea s-a schimbat)
+        env:
+          BEFORE: ${{ steps.before.outputs.ver }}
         run: |
           set -uo pipefail
-          # /api/me/delete există DOAR în acest build nou (panoul de Setări). Fără
-          # login întoarce 401 dacă e rutată, 404 dacă serverul e încă cel vechi.
-          # E semnalul curat că EXACT acest cod a preluat, nu unul mai vechi.
-          # Doar POST e rutat (GET rămâne 404), deci probăm cu POST.
+          echo "Versiune înainte: $BEFORE"
           ok=""
           for i in $(seq 1 48); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST --max-time 8 https://kelionai.app/api/me/delete || echo 000)
-            ver=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
-            echo "încercarea $i → me/delete HTTP $code   version=$ver"
-            if [ "$code" = "401" ]; then ok="1"; break; fi
+            NOW=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/health || echo 000)
+            echo "încercarea $i → HTTP $code   version=$NOW"
+            if [ "$code" = "200" ] && [ -n "$NOW" ] && [ "$NOW" != "$BEFORE" ] && [ "$NOW" != "{}" ]; then
+              ok="1"; break
+            fi
             sleep 5
           done
           if [ -z "$ok" ]; then
-            echo "::error::Deploy trimis, DAR codul nou NU e live (me/delete încă 404 după ~4 min). Producția rămâne pe build vechi."
+            echo "::error::Deploy trimis, DAR versiunea live nu s-a schimbat după ~4 min — producția a rămas pe build vechi."
             exit 1
           fi
-          echo "🟢 CONFIRMAT LIVE — panoul de Setări e pe producție (me/delete rutat = 401)."
+          echo "🟢 PUBLICAT + VERIFICAT LIVE — versiunea s-a schimbat, noul build a preluat."
