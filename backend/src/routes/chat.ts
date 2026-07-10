@@ -1933,7 +1933,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (chunk) feedPub(chunk) // '' = puls de viață, nu text
         },
         120_000,
-        45_000,
+        // Stall 12s (era 45s): workerul sănătos pulsează la ~3s, deci 12s fără
+        // NIMIC = banda chiar e moartă — userul primește mesajul cinstit în 12s,
+        // nu după 45s de așteptare (#7 latență, Adrian 10 iul).
+        12_000,
         '',
         'public',
       )
