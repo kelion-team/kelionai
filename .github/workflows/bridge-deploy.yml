@@ -61,8 +61,24 @@ jobs:
 
           # SINCRONIZARE FORȚATĂ la origin/master — curăță divergența locală (cauza
           # reverterilor) și adoptă scripturile reparate. NU folosim `git clean` ca
-          # să nu ștergem fișiere de config netrack-uite (ex. claude.env). Repornim
-          # TOATE serviciile Kelion ca să ruleze codul nou.
+          # să nu ștergem fișiere de config netrack-uite (ex. claude.env).
+          #
+          # + FIXUL BENZII PUBLICE (dovedit 10 iul, jurnal live: „auth fail: header
+          #   64 chars vs secret 28"): fișierul /root/kelion/bridge-secret.txt de pe
+          #   VPS avea un secret VECHI (64 car.) → serverul respingea TOT ce trimitea
+          #   workerul nou (care declară capabilitatea `persona` pentru joburi
+          #   publice), iar un proces ZOMBIE vechi (secret corect, FĂRĂ persona)
+          #   ținea becul verde dar lăsa vizitatorii fără răspuns. Aici: scriem
+          #   secretul CORECT (din Railway) în fișier, vânăm zombie-ul, repornim.
+          # 1) Secretul punții → fișierul de pe VPS, prin STDIN (nu prin linia de
+          #    comandă: acolo l-ar vedea `ps`). Ia exact valoarea din Railway.
+          if [ -n "${SECRET:-}" ]; then
+            printf '%s' "$SECRET" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
+              'OLD=$(wc -c < /root/kelion/bridge-secret.txt 2>/dev/null || echo 0); cat > /root/kelion/bridge-secret.txt && chmod 600 /root/kelion/bridge-secret.txt && echo "bridge-secret.txt sincronizat (era $OLD octeți → acum $(wc -c < /root/kelion/bridge-secret.txt))"'
+          else
+            echo "⚠️ Nu am BRIDGE_SECRET din Railway — nu ating fișierul de secret"
+          fi
+
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
             set -uo pipefail
             REPO=""
@@ -75,6 +91,15 @@ jobs:
             git fetch origin master || { echo "git fetch a eșuat"; exit 1; }
             git reset --hard origin/master || { echo "reset la origin/master a eșuat"; exit 2; }
             echo "VPS SINCRONIZAT la master: $(git rev-parse --short HEAD)"
+
+            # 2) Vânătoarea de ZOMBIE: orice proces worker în afara systemd-ului
+            #    (pull fără `persona` care înfometa banda publică). Inventar întâi,
+            #    apoi pkill; systemd își repornește singur unitatea legitimă.
+            echo "=== procese worker/punte ÎNAINTE ==="
+            pgrep -af 'kelion-bridge|bridge-linux' || echo "(niciunul)"
+            pkill -f 'kelion-bridge-linux.mjs' 2>/dev/null && echo "worker(e) oprit(e)" || echo "(nimic de oprit)"
+
+            # 3) Repornește serviciile cu secretul + codul corecte.
             for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
               if systemctl list-unit-files "$svc.service" 2>/dev/null | grep -q "^$svc.service"; then
                 systemctl restart "$svc" && echo "restart $svc → $(systemctl is-active "$svc")"
@@ -83,8 +108,10 @@ jobs:
               fi
             done
             sleep 4
+            echo "=== procese worker/punte DUPĂ ==="
+            pgrep -af 'kelion-bridge|bridge-linux' || echo "(niciunul!)"
             echo "=== jurnal punte ==="
-            journalctl -u kelion-bridge -n 8 --no-pager -o cat | tail -8
+            journalctl -u kelion-bridge -n 10 --no-pager -o cat | tail -10
           EOS
 
           # Verifică live că workerul e online după restart.
