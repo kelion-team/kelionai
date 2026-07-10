@@ -37,6 +37,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
+import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 
 // Promo scenario recording: hard cap so a clip never runs away (a short clip is
@@ -91,6 +92,12 @@ export default function ChatPanel({
   const [busy, setBusy] = useState(false)
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
   const [listening, setListening] = useState(false)
+  // DICTARE LIVE: fraza curentă, cuvânt cu cuvânt, cu efect cinematografic pe
+  // bandă cât vorbește Adrian; se golește când fraza pleacă la creier.
+  const [liveVoice, setLiveVoice] = useState('')
+  // Modul microfon: true = dictare live (streaming WS); cade pe batch dovedit
+  // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
+  const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
@@ -692,6 +699,16 @@ export default function ChatPanel({
   const micRetryRef = useRef<number | null>(null)
   const micBackoffRef = useRef(1000)
 
+  const onMicErr = (reason: string): void => {
+    micRef.current = null
+    coalescerRef.current?.cancel()
+    setListening(false)
+    setLiveVoice('')
+    if (reason === 'not-allowed' || reason === 'unsupported') return
+    micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
+    micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
+  }
+
   async function ensureMic(): Promise<void> {
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
     if (micRetryRef.current) {
@@ -699,25 +716,53 @@ export default function ChatPanel({
       micRetryRef.current = null
     }
     micStartingRef.current = true
-    // frază nouă la fiecare pornire de microfon — nu moștenim bucăți stale
-    // dintr-o sesiune anterioară (ar produce un flush fantomă la teardown)
+
+    // ── DICTARE LIVE (streaming): fiecare cuvânt apare pe bandă instant, se
+    // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
+    // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
+    // pe calea batch dovedită — vocea nu se rupe niciodată.
+    if (streamModeRef.current) {
+      const sh = await startMicStream({
+        onLive: (t) => setLiveVoice(t),
+        onPhrase: (t) => {
+          setLiveVoice('')
+          void sendRef.current(t)
+        },
+        onError: (reason) => {
+          if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
+            // streamingul nu merge → treci pe batch pentru restul sesiunii
+            streamModeRef.current = false
+            micRef.current?.stop()
+            micRef.current = null
+            setListening(false)
+            setLiveVoice('')
+            micStartingRef.current = false
+            void ensureMicRef.current()
+            return
+          }
+          onMicErr(reason)
+        },
+        getLang: () => speechLangRef.current,
+        onBargeIn: () => {
+          stopVoice()
+          micRef.current?.setMuted(false)
+        },
+      })
+      micStartingRef.current = false
+      if (sh) {
+        micRef.current = sh
+        micBackoffRef.current = 1000
+        setListening(true)
+        if (isVoicePlaying()) sh.setMuted(true)
+      }
+      return
+    }
+
+    // ── BATCH (dovedit): înregistrează fraza, o transcrie la /api/asr. ──
     coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
     const h = await startMic(
       (text) => coalescerRef.current?.push(text),
-      (reason) => {
-        micRef.current = null
-        coalescerRef.current?.cancel()
-        setListening(false)
-        // Refuz de permisiune / browser fără suport: nu insistăm (am reprompta
-        // la nesfârșit) — butonul de microfon reîncearcă la atingere. Orice
-        // altceva e trecător și se reîncearcă singur, cu pas dublat până la 15s.
-        if (reason === 'not-allowed' || reason === 'unsupported') return
-        micRetryRef.current = window.setTimeout(
-          () => void ensureMicRef.current(),
-          micBackoffRef.current,
-        )
-        micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
-      },
+      onMicErr,
       () => speechLangRef.current,
       // BARGE-IN (ordinul lui Adrian): când i se aude vocea peste Kelion,
       // vocea lui Kelion se taie PE LOC și microfonul revine să-l asculte.
@@ -1032,6 +1077,16 @@ export default function ChatPanel({
         </div>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>
+        {/* DICTARE LIVE cu efect cinematografic (ca în filmele cu AI): pe măsură
+            ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
+            clipește; la pauză > 3s pleacă la creier și banda se golește. */}
+        {liveVoice && (
+          <div className="voice-live" aria-live="polite">
+            <span className="voice-live-dot" />
+            <span className="voice-live-text">{liveVoice}</span>
+            <span className="voice-live-caret" />
+          </div>
+        )}
         {/* Ordinul lui Adrian: „doar vocea mea, nu se acceptă alta" — cât nu e
             calibrat profilul, microfonul e mut la orice voce (audioIO.ts). Indiciu
             discret, non-blocant, ca să înțeleagă de ce nu-i reacționează microfonul. */}

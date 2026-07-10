@@ -1506,12 +1506,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (turnJournal ? `JURNAL LIVE (ce se lucrează ACUM — confirmă doar de aici):\n${turnJournal}\n\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
         reanalyzePrompt = bridgePrompt
-        // O SINGURĂ reîncercare, nu 4 (Adrian, 10 iul: „intră în buclă pe cerință
-        // și nu mai ascultă stop"). Fereastra primului cuvânt e deja generoasă
-        // (75s pentru raționament avansat); dacă tot tace, reîncercăm o dată în
-        // liniște și-atât — fără buclă de „încercarea 2/3/4" care sperie și
-        // întârzie. Restul e tratat cinstit mai jos (re-cozare + răspuns).
-        const maxTries = 2
+        // O SINGURĂ tură, ZERO reîncercări (Adrian, 10 iul: „dacă la tura 1 nu
+        // întoarce răspuns, nu pleacă încă o tură — revine în chat, pentru
+        // clarificări"). Dacă prima tură tace, NU relansăm nimic; mai jos Kelion
+        // se întoarce în chat și cere lămuriri. Fereastra primului cuvânt e
+        // generoasă (75s) tocmai ca să nu tăiem un raționament care chiar lucrează.
+        const maxTries = 1
         for (let attempt = 1; attempt <= maxTries; attempt++) {
           // Fereastra primului cuvânt = 75s, nu 30s (Adrian, 9 iul: „legătura
           // ruptă" pe mesajul curent). Calea de RAȚIONAMENT AVANSAT durează
@@ -1596,26 +1596,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // streaming a fost sărit): fără asta, bara ar rămâne agățată la „Preluare"
         // (turnActive niciodată închis). Idempotent — no-op dacă deja s-a închis.
         finishBrainTurn('chat')
-        // REGULA ABSOLUTĂ A LUI ADRIAN (4 iul, reconfirmată 9 iul: „ce creier de
-        // rezervă, cine a cerut așa ceva?"): mesajele adminului sunt răspunse
-        // EXCLUSIV de creierul Linux (abonament), NICIODATĂ de creierul API cu
-        // plată. Puntea mută → statut cinstit + recozare, fără fallback.
+        // NU MAI BUCLEZ (Adrian, 10 iul: „dacă la tura 1 nu întoarce răspuns, nu
+        // pleacă încă o tură — revine în chat, pentru clarificări"). Prima tură a
+        // tăcut → NU relansez nimic în fundal; mă întorc în chat și cer lămuriri.
         const ro = !langName || /rom/i.test(langName)
         a = bridgeOnline()
           ? ro
-            ? 'Am reanalizat cererea de câteva ori și puntea încă nu a scos un răspuns (e în picioare, dar înțepenită). Nu te ignor — am pus-o din nou la lucru; îți răspund în câteva secunde.'
-            : 'I re-analyzed this a few times and the bridge still produced nothing (it is up, but stuck). I am not ignoring you — I re-queued it and will answer in a few seconds.'
+            ? 'Nu am scos un răspuns din prima și NU mai reîncerc singur — spune-mi mai clar sau reformulează scurt ce vrei și mă apuc imediat.'
+            : "I didn't get a result on the first pass and I won't loop on my own — tell me more clearly or rephrase what you need and I'll get on it."
           : ro
-            ? 'Puntea către Claude e căzută chiar acum (se repornește singură în câteva secunde). Am pus cererea în coadă — îți răspund imediat ce revine, nu se pierde.'
-            : 'The bridge to Claude is down right now (it restarts itself within seconds). I queued your request — I will answer the moment it is back; nothing is lost.'
-        const queuedPrompt =
-          reanalyzePrompt ||
-          `Ești Kelion, creierul lui Adrian (adminul tău). Mesajul de mai jos a sosit cât puntea era căzută — răspunde-i ACUM, în limba lui, scurt și direct, fără markdown.\nAdrian: ${lastUserText}`
-        void bridgeAsk(queuedPrompt, [], 600_000)
-          .then((late) => {
-            if (late && late.trim()) sayToAdmin(`Revin la ce m-ai întrebat: ${late.trim()}`)
-          })
-          .catch(() => {})
+            ? 'Puntea către creier e căzută chiar acum (se repornește singură în câteva secunde). Reia mesajul imediat ce revine — nu bucleez singur.'
+            : 'The bridge to the brain is down right now (it restarts itself within seconds). Resend the moment it is back — I will not loop on my own.'
         reply.raw.write(a)
       }
       // Vocea creierului: sintetizată pe server, trimisă prin punte (app doar redă).
