@@ -27,7 +27,12 @@ export default function App() {
       if (error) window.history.replaceState({}, '', '/')
     })
     void fetchServerVersion().then((j) => {
-      if (alive && j?.v) setSrvV(`deploy ${j.v} · ${j.at.slice(0, 16).replace('T', ' ')} UTC`)
+      // Ștampila arată ORA publicării serverului (mereu alta la orice deploy);
+      // sha-ul apare doar dacă platforma îl oferă.
+      if (alive && j?.at)
+        setSrvV(
+          `deploy${j.v && !j.v.includes('T') ? ` ${j.v}` : ''} ${j.at.slice(0, 16).replace('T', ' ')} UTC`,
+        )
     })
     return () => {
       alive = false
