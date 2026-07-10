@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
 import { config, isAllowed, roleFor } from '../config.js'
 import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
-import { isBlocked } from '../db.js'
+import { isBlocked, saveGoogleRefreshToken, getGoogleRefreshToken } from '../db.js'
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 
@@ -135,11 +135,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (state.startsWith('c.')) {
         const existing = getSessionUser(req)
         if (existing) {
+          const refresh = tokens.refresh_token || existing.googleRefreshToken || ''
+          // PERSISTĂ token-ul în DB (fix definitiv „iar loghez Google"): de-acum
+          // supraviețuiește oricărei re-logări/deploy, nu doar în cookie.
+          if (tokens.refresh_token) void saveGoogleRefreshToken(existing.email, tokens.refresh_token)
           setSession(reply, {
             ...existing,
             googleAccessToken: tokens.access_token ?? existing.googleAccessToken ?? '',
             googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-            googleRefreshToken: tokens.refresh_token || existing.googleRefreshToken || '',
+            googleRefreshToken: refresh,
           })
           return reply.redirect(`${config.frontendOrigin}/?connected=google`)
         }
@@ -156,6 +160,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.redirect(`${config.frontendOrigin}/?error=blocked`)
       }
 
+      // O logare simplă (doar identitate) NU aduce un refresh token de la Google.
+      // Îl RESTAURĂM din DB, ca cine a conectat Google o dată să NU mai fie pus
+      // să reconecteze după fiecare logare (fix definitiv „reparat de 10 ori").
+      const savedRefresh = tokens.refresh_token || (await getGoogleRefreshToken(email))
+      if (tokens.refresh_token) void saveGoogleRefreshToken(email, tokens.refresh_token)
       setSession(reply, {
         email,
         name: claims.name ?? email,
@@ -164,10 +173,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         locale: claims.locale ?? 'en',
         googleAccessToken: tokens.access_token ?? '',
         googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-        // Persist the refresh token so the chat route can mint fresh access
-        // tokens for the Google skills past the first hour. Google only returns
-        // it on the first consent (prompt=consent forces it on every login).
-        googleRefreshToken: tokens.refresh_token ?? '',
+        // Refresh token restaurat din DB → skill-urile Google merg în continuare
+        // fără reconectare la fiecare logare.
+        googleRefreshToken: savedRefresh,
       })
       return reply.redirect(`${config.frontendOrigin}/`)
     },
@@ -185,6 +193,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ authenticated: false })
+    // Dacă sesiunea curentă n-are refresh token dar DB-ul îl are (conectat cândva),
+    // îl restaurăm în sesiune ACUM — fără să te punem să reconectezi Google.
+    let refresh = user.googleRefreshToken || ''
+    if (!refresh) {
+      refresh = await getGoogleRefreshToken(user.email)
+      if (refresh) setSession(reply, { ...user, googleRefreshToken: refresh })
+    }
     return reply.send({
       authenticated: true,
       user: {
@@ -194,7 +209,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         role: user.role,
         locale: user.locale,
         demoUntil: user.demoUntil,
-        googleConnected: Boolean(user.googleRefreshToken),
+        googleConnected: Boolean(refresh),
       },
     })
   })
