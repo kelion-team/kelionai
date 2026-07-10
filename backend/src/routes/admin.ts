@@ -29,6 +29,7 @@ import {
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
+import { translateMany } from '../services/google.js'
 import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
@@ -105,6 +106,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const email = req.query.email
     if (!email) return reply.code(400).send({ error: 'bad_request', message: 'email required' })
     return reply.send({ history: await getHistory(email) })
+  })
+
+  // Traduce în bloc mesajele unei conversații în română (buton „Tradu în română"
+  // din vizualizarea chaturilor — testerii scriu în orice limbă). Admin only.
+  app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const raw = req.body?.texts
+    const texts = Array.isArray(raw) ? raw.slice(0, 300).map((t) => String(t ?? '')) : []
+    if (texts.length === 0) return reply.send({ translations: [] })
+    const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target : 'Romanian'
+    return reply.send({ translations: await translateMany(texts, target) })
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.

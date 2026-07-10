@@ -58,8 +58,20 @@
     <script>
       // PWA: installable on any phone/desktop; the service worker caches the app
       // SHELL only (never live data) so Kelionai opens instantly on weak links.
+      // updateViaCache:'none' — browserul ia MEREU sw.js proaspăt din rețea (nu
+      // dintr-un cache HTTP), iar reg.update() periodic forțează verificarea unei
+      // versiuni noi. Așa un deploy ajunge automat la TOȚI (demo, clienți, PWA/
+      // TWA din magazine care încarcă site-ul live), fără shell vechi lipit.
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'))
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register('/sw.js', { updateViaCache: 'none' })
+            .then((reg) => {
+              void reg.update()
+              setInterval(() => void reg.update(), 60_000)
+            })
+            .catch(() => {})
+        })
       }
     </script>
   </body>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   fetchUsers,
   fetchHistory,
+  translateToRo,
   fetchGaps,
   fetchFinance,
   updatePool,
@@ -186,9 +187,36 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   // singur click, fără să mai treacă prin tabul separat "Istoric chat".
   const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] } | null>(null)
   const [userConvoLoading, setUserConvoLoading] = useState(false)
+  // „Tradu în română" în vizualizarea conversațiilor: roOn = afișăm traducerea;
+  // roMap = cache text-original → traducere (o singură cerere per mesaj nou).
+  const [roOn, setRoOn] = useState(false)
+  const [roMap, setRoMap] = useState<Record<string, string>>({})
+  const [roBusy, setRoBusy] = useState(false)
+
+  async function toggleRo(rows: HistoryRow[]): Promise<void> {
+    if (roOn) {
+      setRoOn(false)
+      return
+    }
+    const missing = Array.from(new Set(rows.map((r) => r.content).filter((c) => c && !(c in roMap))))
+    if (missing.length > 0) {
+      setRoBusy(true)
+      const translated = await translateToRo(missing)
+      setRoMap((m) => {
+        const next = { ...m }
+        missing.forEach((src, i) => (next[src] = translated[i] ?? src))
+        return next
+      })
+      setRoBusy(false)
+    }
+    setRoOn(true)
+  }
+  // La deschiderea unei conversații noi, pornim mereu pe limba originală.
+  const showMsg = (content: string): string => (roOn ? (roMap[content] ?? content) : content)
 
   async function openUserConvo(u: UserActivityRow): Promise<void> {
     setUserConvoLoading(true)
+    setRoOn(false)
     setUserConvo({ u, rows: [] })
     const rows = await fetchHistory(u.email)
     setUserConvo({ u, rows })
@@ -929,6 +957,14 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                         <button
                           type="button"
                           className="user-act"
+                          title="Vezi tot chatul: ce a scris și cum a răspuns Kelion"
+                          onClick={() => void openUserConvo(u)}
+                        >
+                          💬 Vezi chat
+                        </button>
+                        <button
+                          type="button"
+                          className="user-act"
                           onClick={async () => {
                             const r = await manageUser(u.email, u.blocked ? 'unblock' : 'block')
                             if (r) setActivity(r)
@@ -1367,7 +1403,10 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 key={u.email}
                 type="button"
                 className={`admin-user ${selected === u.email ? 'sel' : ''}`}
-                onClick={() => setSelected(u.email)}
+                onClick={() => {
+                  setRoOn(false)
+                  setSelected(u.email)
+                }}
               >
                 <span className="admin-user-email">{u.email}</span>
                 <span className="admin-user-meta">{u.count} msg</span>
@@ -1377,6 +1416,19 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
           <section className="admin-history">
             {!selected && <p className="chat-hint">Select a user to view their history.</p>}
             {loading && <p className="chat-hint">Loading…</p>}
+            {selected && !loading && history.length > 0 && (
+              <div className="convo-head-actions" style={{ marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="user-act"
+                  disabled={roBusy}
+                  title="Traduce toată conversația în română (din orice limbă), instant"
+                  onClick={() => void toggleRo(history)}
+                >
+                  {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
+                </button>
+              </div>
+            )}
             {selected &&
               !loading &&
               groupByDay(history).map((g) => (
@@ -1390,7 +1442,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                           minute: '2-digit',
                         })}
                       </span>
-                      {h.content}
+                      {showMsg(h.content)}
                     </div>
                   ))}
                 </div>
@@ -1457,9 +1509,20 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   {fmtDur(userConvo.u.seconds)} · {userConvo.u.messages} mesaje
                 </span>
               </div>
-              <button type="button" className="ghost" onClick={() => setUserConvo(null)}>
-                Close
-              </button>
+              <div className="convo-head-actions">
+                <button
+                  type="button"
+                  className="user-act"
+                  disabled={roBusy || userConvo.rows.length === 0}
+                  title="Traduce toată conversația în română (din orice limbă), instant"
+                  onClick={() => void toggleRo(userConvo.rows)}
+                >
+                  {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
+                </button>
+                <button type="button" className="ghost" onClick={() => setUserConvo(null)}>
+                  Close
+                </button>
+              </div>
             </header>
             <div className="admin-history convo-body">
               {userConvoLoading && <p className="chat-hint">Se încarcă…</p>}
@@ -1478,7 +1541,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                             minute: '2-digit',
                           })}
                         </span>
-                        {h.content}
+                        {showMsg(h.content)}
                       </div>
                     ))}
                   </div>

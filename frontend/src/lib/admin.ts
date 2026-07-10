@@ -410,6 +410,26 @@ export async function fetchHistory(email: string): Promise<HistoryRow[]> {
   return j.history ?? []
 }
 
+// Traduce în bloc mesajele unei conversații în română (butonul „Tradu în română"
+// din vizualizarea chaturilor). Întoarce traducerile aliniate 1:1 cu intrarea;
+// pe eroare, întoarce textele originale ca să nu se golească afișajul.
+export async function translateToRo(texts: string[]): Promise<string[]> {
+  if (texts.length === 0) return []
+  try {
+    const r = await fetch('/api/admin/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ texts, target: 'Romanian' }),
+    })
+    if (!r.ok) return texts
+    const j = (await r.json()) as { translations?: string[] }
+    return Array.isArray(j.translations) && j.translations.length === texts.length ? j.translations : texts
+  } catch {
+    return texts
+  }
+}
+
 // Capability gaps: things users asked for that Kelion can't do yet (admin only).
 export interface CapabilityGap {
   id: number
