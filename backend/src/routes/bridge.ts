@@ -144,6 +144,53 @@ export function setProgress(pct: number, label: string, file = ''): void {
   procFile = file.slice(0, 80)
   procAt = Date.now()
 }
+
+// ── CRONOMETRUL CREIERULUI (Adrian, 10 iul: „calculează viteza lui, afișează
+// timpii pe chat simplu / chat cu cerință") ──────────────────────────────────
+// Măsurăm FIECARE tură: când a intrat, când a venit PRIMUL cuvânt (viteza reală
+// a creierului Linux) și cât a durat totul. `turnActive` e adevărat DOAR între
+// intrarea comenzii și terminarea ei — bara de proces se arată doar când chiar
+// se lucrează, nu 120s după (bug „lucru fals 30%"). `lastTurn` rămâne ca dovadă:
+// tipul turei (chat/lucru) + timpii, afișat pe monitor și după ce bara se stinge.
+let turnStartAt = 0
+let firstWordAt = 0
+let turnActive = false
+let procDoneAt = 0
+let lastTurn: { kind: 'chat' | 'lucru'; totalMs: number; firstMs: number; at: number } | null = null
+
+export function startTurnClock(): void {
+  turnStartAt = Date.now()
+  firstWordAt = 0
+  turnActive = true
+}
+// Primul cuvânt real de la creier → asta e VITEZA lui (cât a stat „pe gânduri").
+export function markFirstWord(): void {
+  if (turnActive && turnStartAt && !firstWordAt) firstWordAt = Date.now()
+}
+// Tura s-a terminat. `chat` = proces COMPLET (bara ajunge la 100 și apoi se
+// stinge). `lucru` = predat constructorului (bara continuă de la el). În ambele
+// cazuri stampilăm timpii și îi afișăm pe monitor — Adrian VEDE viteza reală.
+export function finishBrainTurn(kind: 'chat' | 'lucru'): void {
+  if (!turnActive) return // deja închisă — nu stampila de două ori aceeași tură
+  const now = Date.now()
+  const totalMs = turnStartAt ? now - turnStartAt : 0
+  const firstMs = firstWordAt && turnStartAt ? firstWordAt - turnStartAt : 0
+  lastTurn = { kind, totalMs, firstMs, at: now }
+  turnActive = false
+  procDoneAt = now
+  const s = (ms: number): string => (ms / 1000).toFixed(1)
+  const timing = firstMs
+    ? `${s(totalMs)}s (primul cuvânt ${s(firstMs)}s)`
+    : `${s(totalMs)}s`
+  if (kind === 'lucru') {
+    noteBrainActivity(`🛠 Trimis la constructor · ${timing}`)
+  } else {
+    setProgress(100, `Gata · ${s(totalMs)}s`)
+    noteBrainActivity(`✅ Răspuns trimis · ${timing}`)
+  }
+  turnStartAt = 0
+  firstWordAt = 0
+}
 // CE ANALIZEAZĂ CREIERUL (ordinul din 5 iul): la click pe bara „Creierul
 // analizează" Adrian deschide detaliul — cererea aflată în analiză. Ținută
 // separat de eticheta barei ca să rămână aceeași cerere pe toate etapele
@@ -813,6 +860,8 @@ export function resetBrainActivity(): void {
   lastDevBeat = Date.now()
   logDevLines([stamped])
   setProgress(6, 'Preluare')
+  // Pornim cronometrul turei chiar la intrare — de aici măsurăm viteza reală.
+  startTurnClock()
 }
 
 // Kelion speaks a line into the admin's chat by himself (delivered by the
@@ -1301,6 +1350,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
+    const owned = ownedRequirement()
+    // Bara de proces se arată DOAR când chiar se lucrează: o tură e în curs
+    // (turnActive), o cerință e deschisă la constructor (owned), sau tocmai s-a
+    // terminat (fulgerul „Gata · Xs", 6s). Altfel NULL — niciun „lucru fals"
+    // agățat la 30% când Adrian deschide pagina (bug 10 iul: „dacă e fals lucru
+    // nu e ok"). Vechiul geam de 120s arăta un procent vechi ca și cum ar lucra.
+    const showProc = turnActive || !!owned || (procDoneAt && Date.now() - procDoneAt < 6_000)
     return {
       active,
       bridge: bridgeOnline(),
@@ -1309,10 +1365,17 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       lanes: wsLaneCount(),
       activity: active ? devActivity : [],
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
-      // THE process bar 0→100% (what's executing, start→finish). Kept for 2 min
-      // after the last update so a just-finished job stays visible, then clears.
+      // VITEZA REALĂ a creierului Linux: timpii ultimei ture (tip + total +
+      // primul cuvânt) și, cât o tură e în curs, cronometrul viu. Adrian VEDE cât
+      // durează un chat simplu vs o cerință de lucru (cerut 10 iul).
+      lastTurn: lastTurn
+        ? { kind: lastTurn.kind, totalMs: lastTurn.totalMs, firstMs: lastTurn.firstMs }
+        : null,
+      elapsedMs: turnActive && turnStartAt ? Date.now() - turnStartAt : 0,
+      // THE process bar 0→100% (what's executing, start→finish). Shown only while
+      // work is genuinely happening (see showProc) — never a stale lingering %.
       progress:
-        procAt && Date.now() - procAt < 120_000
+        showProc && procAt
           ? { pct: procPct, label: procLabel, file: procFile }
           : null,
       // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată

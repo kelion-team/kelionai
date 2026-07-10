@@ -87,6 +87,12 @@ export default function Stage({ user }: { user: User }) {
   // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată live).
   // Rămâne pe monitor până creierul o verifică — dovada că nu „trimite și uită".
   const [mode, setMode] = useState<'chat' | 'lucru' | 'raport'>('chat')
+  // VITEZA CREIERULUI (Adrian, 10 iul): timpii ultimei ture (tip + total + primul
+  // cuvânt) și cronometrul viu cât o tură e în curs — afișați în capul consolei.
+  const [lastTurn, setLastTurn] = useState<{ kind: string; totalMs: number; firstMs: number } | null>(
+    null,
+  )
+  const [elapsedMs, setElapsedMs] = useState(0)
   const [owned, setOwned] = useState<{ summary: string; status: string; ageMs: number } | null>(
     null,
   )
@@ -229,6 +235,8 @@ export default function Stage({ user }: { user: User }) {
             progress?: { pct?: number; label?: string; file?: string }
             owned?: { summary?: string; status?: string; ageMs?: number } | null
             mode?: string
+            lastTurn?: { kind?: string; totalMs?: number; firstMs?: number } | null
+            elapsedMs?: number
           } | null) => {
             if (!j) return // 429 — state unchanged
             setServerUp(true)
@@ -250,6 +258,17 @@ export default function Stage({ user }: { user: User }) {
                 : null,
             )
             setMode(j.mode === 'lucru' || j.mode === 'raport' ? j.mode : 'chat')
+            const lt = j.lastTurn
+            setLastTurn(
+              lt && typeof lt.totalMs === 'number'
+                ? {
+                    kind: lt.kind === 'lucru' ? 'lucru' : 'chat',
+                    totalMs: Number(lt.totalMs),
+                    firstMs: Number(lt.firstMs ?? 0),
+                  }
+                : null,
+            )
+            setElapsedMs(typeof j.elapsedMs === 'number' ? j.elapsedMs : 0)
           },
         )
         .catch(() => {
@@ -403,6 +422,28 @@ export default function Stage({ user }: { user: User }) {
               <span className={`live-dot ${claudeActive ? 'on' : ''}`}>
                 {claudeActive ? 'LIVE' : 'în așteptare'}
               </span>
+              {/* VITEZA REALĂ a creierului Linux: cronometrul viu cât lucrează,
+                  altfel timpii ultimei ture (tip + total + primul cuvânt). */}
+              {elapsedMs > 0 ? (
+                <span className="speed-badge live" title="Cronometru — tura curentă">
+                  ⏱ {(elapsedMs / 1000).toFixed(1)}s
+                </span>
+              ) : lastTurn ? (
+                <span
+                  className="speed-badge"
+                  title={
+                    lastTurn.firstMs
+                      ? `Ultima tură (${lastTurn.kind}): ${(lastTurn.totalMs / 1000).toFixed(1)}s total, primul cuvânt la ${(lastTurn.firstMs / 1000).toFixed(1)}s`
+                      : `Ultima tură (${lastTurn.kind}): ${(lastTurn.totalMs / 1000).toFixed(1)}s`
+                  }
+                >
+                  ⏱ {lastTurn.kind === 'lucru' ? 'lucru' : 'chat'} ·{' '}
+                  {(lastTurn.totalMs / 1000).toFixed(1)}s
+                  {lastTurn.firstMs
+                    ? ` (1ᵘˡ cuvânt ${(lastTurn.firstMs / 1000).toFixed(1)}s)`
+                    : ''}
+                </span>
+              ) : null}
             </div>
             {/* BARA PROCESULUI 0→100% — CE SE EXECUTĂ acum, de la început
                 (preluare) până la final (live/gata). Se umple fluid pe măsură ce
