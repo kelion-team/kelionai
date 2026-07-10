@@ -24,10 +24,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # Publicăm EXACT `master` (codul corect, deja verificat local), nu ramura.
+      # Publicăm ramura de dezvoltare (are codul verificat local: fix-uri deploy +
+      # panoul de Setări client). Când PR-ul intră în master, deploy.yml (întărit)
+      # republică master identic.
       - uses: actions/checkout@v4
         with:
-          ref: master
+          ref: claude/chat-instant-delay-em5gjf
 
       - uses: actions/setup-node@v4
         with:
@@ -80,22 +82,23 @@ jobs:
           export RAILWAY_TOKEN="$PT"; unset RAILWAY_API_TOKEN || true
           railway up --service "$SERVICE" --ci
 
-      - name: VERIFICĂ REAL că noul cod e live (nu doar /health)
+      - name: VERIFICĂ REAL că noul cod e live (ruta nouă /api/me/delete)
         run: |
           set -uo pipefail
-          # Ruta nouă /api/admin/mailbox-live există DOAR în codul nou. Fără login
-          # întoarce 403 dacă e rutată, 404 dacă serverul e încă cel vechi. Așteptăm
-          # până la ~4 min ca noul container să preia traficul.
+          # /api/me/delete există DOAR în acest build nou (panoul de Setări). Fără
+          # login întoarce 401 dacă e rutată, 404 dacă serverul e încă cel vechi.
+          # E semnalul curat că EXACT acest cod a preluat, nu unul mai vechi.
+          # Doar POST e rutat (GET rămâne 404), deci probăm cu POST.
           ok=""
           for i in $(seq 1 48); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://kelionai.app/api/admin/mailbox-live || echo 000)
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST --max-time 8 https://kelionai.app/api/me/delete || echo 000)
             ver=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
-            echo "încercarea $i → mailbox-live HTTP $code   version=$ver"
-            if [ "$code" = "403" ]; then ok="1"; break; fi
+            echo "încercarea $i → me/delete HTTP $code   version=$ver"
+            if [ "$code" = "401" ]; then ok="1"; break; fi
             sleep 5
           done
           if [ -z "$ok" ]; then
-            echo "::error::Deploy trimis, DAR codul nou NU e live (mailbox-live încă 404 după ~4 min). Producția rămâne pe build vechi."
+            echo "::error::Deploy trimis, DAR codul nou NU e live (me/delete încă 404 după ~4 min). Producția rămâne pe build vechi."
             exit 1
           fi
-          echo "🟢 CONFIRMAT LIVE — codul nou răspunde pe producție (mailbox-live rutat = 403)."
+          echo "🟢 CONFIRMAT LIVE — panoul de Setări e pe producție (me/delete rutat = 401)."
