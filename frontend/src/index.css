@@ -1921,7 +1921,11 @@ body {
 }
 .admin-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  /* Toate tab-urile trebuie să încapă în panou — pe mai multe rânduri dacă e
+     nevoie — ca butonul Inbox/Close să nu mai iasă din pagină. */
+  max-width: 100%;
 }
 .admin-tab {
   padding: 6px 12px;
