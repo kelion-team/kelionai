@@ -618,6 +618,24 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
 // onEnd la fel, o singură dată, după ce s-a redat ULTIMA bucată din coadă.
 const voiceQueue: string[] = []
 let pendingVoiceEnd: (() => void) | null = null
+// ANTI-ECOU ÎNTRE FRAZE (Adrian, 10 iul: „ai distrus detecția de voce"). Vocea
+// vine acum frază-cu-frază: bucata 1 se poate TERMINA de redat înainte să
+// sosească sunetul bucății 2 (care încă se sintetizează pe server). Dacă la
+// golirea cozii redeschideam microfonul pe loc, prindea ecoul propriei voci a
+// lui Kelion în golul dintre fraze → detecție falsă / barge-in care tăia
+// răspunsul. Acum, când coada se golește, NU redeschidem microfonul imediat:
+// așteptăm această fereastră; dacă sosește altă bucată, e aceeași replică
+// (timerul se anulează, microfonul rămâne mut); dacă NU mai vine nimic, abia
+// atunci se cheamă onEnd (redeschidem). Acoperă golul de sinteză, ca microfonul
+// să stea mut peste TOT răspunsul, exact ca înainte de vocea pe bucăți.
+let voiceGapTimer: number | null = null
+const VOICE_GAP_MS = 1800
+function clearGapTimer(): void {
+  if (voiceGapTimer !== null) {
+    window.clearTimeout(voiceGapTimer)
+    voiceGapTimer = null
+  }
+}
 
 function playNow(base64Mp3: string): void {
   try {
@@ -643,9 +661,16 @@ function playNextQueued(): void {
     playNow(next)
     return
   }
-  const end = pendingVoiceEnd
-  pendingVoiceEnd = null
-  end?.()
+  // Coada s-a golit — dar poate mai vine o frază (sinteza ei e încă pe drum).
+  // NU redeschide microfonul acum; lasă fereastra anti-ecou. Dacă vine altă
+  // bucată, playVoice anulează timerul; dacă nu, abia atunci onEnd (unmute).
+  clearGapTimer()
+  voiceGapTimer = window.setTimeout(() => {
+    voiceGapTimer = null
+    const end = pendingVoiceEnd
+    pendingVoiceEnd = null
+    end?.()
+  }, VOICE_GAP_MS)
 }
 
 export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () => void): void {
@@ -655,11 +680,20 @@ export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () =>
     voiceQueue.push(base64Mp3)
     return
   }
+  // Într-un GOL între fraze (microfon deja mut, așteptam bucata următoare):
+  // e continuarea ACELEIAȘI replici — anulează redeschiderea, NU rechema
+  // onStart (microfonul e deja mut), redă mai departe.
+  if (voiceGapTimer !== null) {
+    clearGapTimer()
+    playNow(base64Mp3)
+    return
+  }
   onStart?.()
   playNow(base64Mp3)
 }
 
 export function stopVoice(): void {
+  clearGapTimer()
   voiceQueue.length = 0
   pendingVoiceEnd = null
   if (curVoice) {
