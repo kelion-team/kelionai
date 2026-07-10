@@ -1651,12 +1651,84 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         speechPref && langName
           ? `Reply EXCLUSIVELY in ${langName} — every sentence, regardless of the language of anything quoted below.`
           : 'Reply in the language the user writes in (default to English for short or ambiguous messages).'
+      // GPS-ul vizitatorului (dacă l-a acordat) — pentru hărți/vreme „lângă mine".
+      const pubCoords =
+        coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)
+          ? `Visitor GPS: lat ${coords.lat.toFixed(5)}, lon ${coords.lon.toFixed(5)} — use it for "near me", weather and maps.\n`
+          : ''
       const pubPrompt =
         `${langLine}\n` +
+        pubCoords +
         // Demo = FĂRĂ memorie/istoric injectat (anonim); doar clienții logați
         // primesc memoria lor relevantă.
         (!isDemo && memRecall.trim() ? `${memRecall.trim().slice(0, 1500)}\n\n` : '') +
         `Conversation so far:\n${past}\n\nAnswer the user's LAST message now.`
+      // ── ETICHETE SIGURE PE CALEA PUBLICĂ (Adrian, 10 iul: „free cu toate
+      // atributele active") ── aceleași etichete ca la admin, dar DOAR cele care
+      // nu cer contul Google al cuiva: [MAP loc], [YT clip], [SHOW doar
+      // embed-uri sigure de vreme/trafic], [IMG descriere]. Se execută de pe
+      // prima linie a răspunsului (protocolul punții) și se curăță din text.
+      const SAFE_SHOW = /^https:\/\/(embed\.waze\.com|embed\.windy\.com)\//i
+      const stripPubTags = (s: string): string =>
+        s
+          .replace(/\[(?:MAP|YT|SHOW|IMG)[^\]]*\]/gi, '')
+          .replace(/[ \t]{2,}/g, ' ')
+          .trim()
+      const runPublicTags = (line: string): string => {
+        const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
+        if (mapTag) {
+          const place = mapTag[1].trim()
+          void (async () => {
+            let url = config.googleMapsKey
+              ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
+              : ''
+            if (!url) {
+              try {
+                const g = await fetch(
+                  `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
+                  { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
+                )
+                const arr = (await g.json()) as { lat?: string; lon?: string }[]
+                url =
+                  arr[0]?.lat && arr[0]?.lon
+                    ? `https://embed.waze.com/iframe?zoom=12&lat=${arr[0].lat}&lon=${arr[0].lon}`
+                    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+              } catch {
+                url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+              }
+            }
+            reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
+          })()
+        }
+        const ytTag = /\[YT\s+([^\]]+)\]/i.exec(line)
+        if (ytTag) {
+          const q = ytTag[1].trim()
+          void youtubeFirstEmbed(q).then((v) => {
+            if (v)
+              reply.raw.write(
+                `${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`,
+              )
+          })
+        }
+        const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
+        if (showTag && SAFE_SHOW.test(showTag[1]))
+          reply.raw.write(
+            `${CTRL}${JSON.stringify({ monitor: { url: showTag[1], title: (showTag[2] || 'Live').slice(0, 60) } })}${CTRL}`,
+          )
+        const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
+        if (imgTag) {
+          void generateImage(imgTag[1].trim()).then((result) => {
+            if (!('error' in result)) {
+              const url = `${baseUrlPub}/api/image/${result.id}`
+              reply.raw.write(
+                `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
+              )
+            }
+          })
+        }
+        return stripPubTags(line)
+      }
+      const baseUrlPub = `https://${req.headers.host ?? 'kelionai.app'}`
       // CAMERA în free/public: dacă utilizatorul întreabă ceva ce cere văzul și
       // avem cadrul camerei, îl trimitem ca fișier de job — workerul îl privește
       // cu Read în cutia publică (izolată de a adminului).
@@ -1664,22 +1736,55 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         image && VISION_INTENT.test(lastUserText)
           ? [{ name: 'camera.jpg', type: 'image/jpeg', data: image }]
           : []
-      let acc = '' // ce s-a difuzat deja live către client
+      let acc = '' // TOT ce a produs creierul (cu etichete cu tot)
+      let shownAny = false
+      let headBuf = ''
+      let headDone = false
+      const showPub = (t: string): void => {
+        if (!t) return
+        shownAny = true
+        reply.raw.write(t)
+      }
+      // Prima linie poate purta etichete ([MAP]/[YT]/[SHOW]/[IMG]) — o reținem
+      // până la newline, executăm etichetele și afișăm textul CURAT; un răspuns
+      // fără '[' la început curge de la primul caracter (cazul obișnuit).
+      const feedPub = (chunk: string): void => {
+        acc += chunk
+        if (headDone) {
+          showPub(chunk)
+          return
+        }
+        headBuf += chunk
+        const s = headBuf.trimStart()
+        if (s && !s.startsWith('[')) {
+          headDone = true
+          showPub(headBuf)
+          headBuf = ''
+          return
+        }
+        const nl = headBuf.indexOf('\n')
+        if (nl !== -1 || headBuf.length > 300) {
+          headDone = true
+          const first = nl === -1 ? headBuf : headBuf.slice(0, nl)
+          const rest = nl === -1 ? '' : headBuf.slice(nl + 1)
+          const spoken = runPublicTags(first)
+          showPub(spoken && rest ? `${spoken}\n${rest}` : spoken || rest)
+          headBuf = ''
+        }
+      }
       const answer = await bridgeAskStream(
         pubPrompt,
         pubFiles,
         (chunk) => {
-          if (!chunk) return // '' = puls de viață, nu text
-          acc += chunk
-          reply.raw.write(chunk)
+          if (chunk) feedPub(chunk) // '' = puls de viață, nu text
         },
         120_000,
         45_000,
         '',
         'public',
       )
-      const finalText = (answer && answer !== BRIDGE_STALL ? answer : acc).trim()
-      if (!finalText) {
+      const rawFull = (answer && answer !== BRIDGE_STALL ? answer : acc).trim()
+      if (!rawFull) {
         const msg = roPub
           ? 'Nu am reușit să răspund de data asta — te rog mai încearcă o dată.'
           : "I couldn't answer this time — please try once more."
@@ -1689,18 +1794,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (!isDemo) void saveMessage(user.email, 'assistant', msg)
         return
       }
+      // Cap rămas nedescărcat (răspuns scurt, fără newline) → execută + arată.
+      if (!headDone && headBuf) {
+        headDone = true
+        showPub(runPublicTags(headBuf))
+        headBuf = ''
+      }
+      const finalText = stripPubTags(rawFull)
       // Coada nedifuzată (răspunsul final e mai lung decât ce-a curs live).
-      if (!acc) reply.raw.write(finalText)
-      else if (answer && answer !== BRIDGE_STALL && answer.length > acc.length && answer.startsWith(acc))
-        reply.raw.write(answer.slice(acc.length))
-      // Vocea: sintetizată pe server (Chirp 3 HD), în limba utilizatorului.
-      await streamVoice(reply, finalText, userLang)
+      if (answer && answer !== BRIDGE_STALL && answer.length > acc.length && answer.startsWith(acc))
+        showPub(answer.slice(acc.length))
+      else if (!shownAny && finalText) showPub(finalText)
+      // Vocea: sintetizată pe server (Chirp 3 HD), în limba utilizatorului —
+      // streamVoice curăță singur orice etichetă rămasă.
+      await streamVoice(reply, finalText || rawFull, userLang)
       reply.raw.end()
       // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre el.
       if (!isDemo) {
-        void saveMessage(user.email, 'assistant', finalText)
+        void saveMessage(user.email, 'assistant', finalText || rawFull)
         // Memoria învață și pe calea publică (fire-and-forget, zero latență).
-        if (lastUserText.trim() || finalText.trim()) void learnFromTurn(user.email, lastUserText, finalText)
+        if (lastUserText.trim()) void learnFromTurn(user.email, lastUserText, finalText || rawFull)
       }
       return
     }
