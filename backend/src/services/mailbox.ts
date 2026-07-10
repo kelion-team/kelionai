@@ -160,6 +160,66 @@ async function poll(): Promise<void> {
   }
 }
 
+// INBOX LIVE (Adrian, 10 iul: „văd Inbox gol deși cutia are 493 mesaje"). Cauza:
+// poller-ul de mai sus ia DOAR mailul NECITIT și-l marchează citit; mailul deja
+// citit (în Outlook) nu apare nicăieri. Asta citește cutia REALĂ prin IMAP —
+// ultimele `limit` mesaje, indiferent de citit/necitit — DOAR pentru afișare în
+// admin. NU marchează nimic citit (aduce doar envelope + flags, nu corpul) și NU
+// răspunde la nimic. Deschide o conexiune scurtă, la cerere.
+export interface InboxLiveItem {
+  uid: number
+  from: string
+  fromName: string
+  subject: string
+  date: string
+  seen: boolean
+}
+export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
+  if (!mailEnabled()) return []
+  const client = new ImapFlow({
+    host: config.mail.imapHost,
+    port: config.mail.imapPort,
+    secure: true,
+    auth: { user: config.mail.user, pass: config.mail.pass },
+    logger: false,
+  })
+  const out: InboxLiveItem[] = []
+  try {
+    await client.connect()
+    const lock = await client.getMailboxLock('INBOX')
+    try {
+      const mb = client.mailbox
+      const total = mb ? mb.exists : 0
+      if (total > 0) {
+        const start = Math.max(1, total - limit + 1)
+        // envelope + flags DOAR → nu atingem corpul, deci nu marchează citit.
+        for await (const msg of client.fetch(`${start}:*`, { envelope: true, flags: true })) {
+          const f = msg.envelope?.from?.[0]
+          out.push({
+            uid: msg.uid,
+            from: f?.address ?? '',
+            fromName: f?.name ?? '',
+            subject: msg.envelope?.subject ?? '(fără subiect)',
+            date: (msg.envelope?.date ?? new Date()).toISOString(),
+            seen: msg.flags?.has('\\Seen') ?? false,
+          })
+        }
+      }
+    } finally {
+      lock.release()
+    }
+  } catch (e) {
+    console.error('[mailbox] live fetch failed:', (e as Error).message)
+  } finally {
+    try {
+      await client.logout()
+    } catch {
+      /* ignore */
+    }
+  }
+  return out.reverse().slice(0, limit) // cele mai noi primele
+}
+
 // Start the mailbox poller. Off entirely until MAIL_PASS is set (mailEnabled()).
 export function startMailbox(): void {
   if (!mailEnabled()) {

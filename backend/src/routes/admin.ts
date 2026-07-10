@@ -29,6 +29,7 @@ import {
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
+import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
 import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
 
@@ -80,6 +81,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ emails: await listInboundEmails(50) })
+  })
+
+  // INBOX LIVE (Adrian, 10 iul) — citește cutia REALĂ contact@kelionai.app prin
+  // IMAP (ultimele mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie,
+  // nu doar mailul nou pe care l-a prins poller-ul. Doar-citire, admin only.
+  app.get('/api/admin/mailbox-live', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ emails: await fetchRecentInbox(40) })
   })
 
   // Market control: live store presence + direct-download counts + WHO

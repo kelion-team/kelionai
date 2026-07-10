@@ -334,6 +334,26 @@ export async function fetchInbound(): Promise<InboundEmail[]> {
   }
 }
 
+// INBOX LIVE — cutia REALĂ contact@kelionai.app citită direct prin IMAP (ultimele
+// mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie, nu doar mailul nou.
+export interface MailboxLiveItem {
+  uid: number
+  from: string
+  fromName: string
+  subject: string
+  date: string
+  seen: boolean
+}
+export async function fetchMailboxLive(): Promise<MailboxLiveItem[]> {
+  try {
+    const r = await fetch('/api/admin/mailbox-live', { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { emails?: MailboxLiveItem[] }).emails ?? []
+  } catch {
+    return []
+  }
+}
+
 // Mesajele din formularul „Contact" — salvate mereu în DB, vizibile chiar dacă
 // emailul nu e configurat.
 export interface ContactMessage {
