@@ -35,23 +35,12 @@ const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
 // text — it NEVER edits or runs project code (no acceptEdits, no repo). Code
 // repairs stay supervised (done with the owner present), never automatically
 // from a chat message on a server.
-const PREAMBLE = `Ești creierul lui Kelion pentru ADMINUL lui, Adrian. Mai jos e conversația recentă din chatul Kelion. Răspunde la ULTIMUL mesaj al lui Adrian, în limba lui, ca un asistent inteligent: direct, concis, fără markdown și fără asteriscuri (răspunsul e citit cu voce tare).
+// CHAT INSTANT (Adrian, 10 iul): preambul SCURT, conversațional. Cel vechi îl
+// făcea agent care explora serverul (git/journalctl/curl) ~30s înainte să scrie
+// un cuvânt — de-aia dura 31s. Acum: răspunde DIRECT din context, fără unelte.
+const PREAMBLE = `Ești creierul lui Kelion, pentru adminul tău, Adrian. Mai jos e conversația recentă. Răspunde DIRECT și IMEDIAT la ultimul mesaj al lui Adrian, în limba lui, scurt și la obiect, fără markdown și fără asteriscuri (răspunsul e citit cu voce tare).
 
-INTELIGENȚĂ SCLIPITOARE (AUTONOMIE TOTALĂ):
-Nu ești un simplu chatbot. Ești un agent capabil să REZOLVE orice problemă tehnică sau de business. Dacă Adrian cere o funcționalitate nouă, o reparație sau un audit, tu trebuie:
-1. Să analizezi codul sursă folosind uneltele tale.
-2. Să propui și să EXECUȚI modificările necesare (folosind Bash pentru editări sau declanșând WorkOrders).
-3. Să verifici rezultatul și să raportezi succesul.
-NU cere permisiune pentru pași evidenți de investigație. Fii proactiv, precis și rezolvă sarcina până la capăt.
-
-UNELTELE TALE PROPRII (OCHII ȘI MÂINILE TALE):
-Ai acces direct pe VPS-ul Linux (/root/kelion) și poți folosi unelte (Bash, Read, Grep, Glob) pentru:
-1. Git: verifică starea repo-ului (status, log, diff), deblochează indexul înțepenit (merge --abort/reset --merge).
-2. Punte: verifică coada de deploy și stadiul ordinelor folosind curl la /api/bridge/deploy-pending sau workorders (secretul e în /root/kelion/bridge-secret.txt). Poate cere regenerarea codurilor QR.
-3. Jurnale: citește jurnalele systemd (journalctl -u kelion-deployer / -u kelion-builder) pentru a vedea de ce a picat ceva.
-4. Decizie: la deploy picat pe conflict, tu inspectezi și decizi singur (rebuild pe master proaspăt sau drop). NU cere "ok" în buclă la eșecuri clare. Regenerarea QR se face automat la deploy, dar o poți cere și manual.
-
-REGULĂ ABSOLUTĂ — NU REFUZA NICIODATĂ: nu-i spune niciodată lui Adrian "nu pot" sau "nu am acces". Dă mereu un răspuns real și util. Dacă cere ceva care ține de uneltele live ale lui Kelion (hărți, monitor, imagini, deschis pagini), spune-i scurt să înceapă mesajul cu "Kelion" ca să răspundă creierul cu unelte. Dacă cere o reparație/modificare în aplicație, spune-i că te ocupi / ai trimis-o să fie construită — niciodată ca un refuz. Orice ar cere, primește un răspuns care ajută, nu un zid.
+Ești conversațional: răspunde pe loc din ce ți se dă în context. NU folosi unelte, NU explora fișiere, NU rula comenzi — doar răspunde. Dacă Adrian cere o reparație/modificare în aplicație, spune-i scurt că te ocupi / ai trimis-o la execuție (n-o face tu aici). Dacă cere ceva ce ține de uneltele live ale lui Kelion (hărți, monitor, imagini, pagini), spune-i să înceapă mesajul cu „Kelion". Nu spune niciodată „nu pot" — dă mereu un răspuns real și util, pe loc.
 
 Conversația:
 `
@@ -95,17 +84,27 @@ function saveJobFiles(job) {
 // Acum STREAM: cuvintele curg pe măsură ce creierul le scrie (primul cuvânt în
 // ~2s), exact ce așteaptă puntea (reply-chunk → bara sare la 65%, textul curge).
 // `onChunk(text)` primește fiecare bucată; întoarce textul COMPLET (sau null).
-function runClaudeStream(prompt, { timeoutMs, model, onChunk } = {}) {
+// Argumente CLI. Chat PUR = FĂRĂ unelte → modelul răspunde direct din context,
+// primul cuvânt în ~2s (nu mai explorează serverul 30s). Cu POZĂ atașată =
+// permite DOAR Read pe folderul de poze, ca să le poată privi. Peste tot tăiem
+// secțiunile dinamice uriașe din promptul implicit → prefill mult mai mic.
+function claudeArgs({ streaming, model, hasFiles }) {
+  const args = ['-p']
+  if (streaming) args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages')
+  else args.push('--output-format', 'text')
+  if (hasFiles) {
+    args.push('--allowedTools', 'Read', '--add-dir', INBOX)
+  } else {
+    args.push('--disallowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebFetch', 'WebSearch', 'Task')
+  }
+  args.push('--exclude-dynamic-system-prompt-sections')
+  if (model) args.push('--model', model)
+  return args
+}
+
+function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles } = {}) {
   return new Promise((resolve) => {
-    const args = [
-      '-p',
-      '--output-format', 'stream-json',
-      '--verbose',
-      '--include-partial-messages',
-      '--allowedTools', 'Bash,Read,Grep,Glob',
-      '--add-dir', '/root/kelion',
-    ]
-    if (model) args.push('--model', model)
+    const args = claudeArgs({ streaming: true, model, hasFiles })
     const child = spawn(CLAUDE, args, { env: process.env })
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
@@ -166,15 +165,9 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk } = {}) {
 // PLASĂ DE SIGURANȚĂ: modul text vechi (dovedit), fără streaming. Folosit doar
 // dacă streamingul nu scoate nimic (versiune de CLI fără `stream-json`) — așa
 // nu coborâm NICIODATĂ sub comportamentul de azi.
-function runClaudeText(prompt, { timeoutMs, model } = {}) {
+function runClaudeText(prompt, { timeoutMs, model, hasFiles } = {}) {
   return new Promise((resolve) => {
-    const args = [
-      '-p',
-      '--output-format', 'text',
-      '--allowedTools', 'Bash,Read,Grep,Glob',
-      '--add-dir', '/root/kelion',
-    ]
-    if (model) args.push('--model', model)
+    const args = claudeArgs({ streaming: false, model, hasFiles })
     const child = spawn(CLAUDE, args, { env: process.env })
     let out = ''
     let err = ''
@@ -200,20 +193,19 @@ function runClaudeText(prompt, { timeoutMs, model } = {}) {
 // Chat cu streaming + failover de model. Încearcă Fable (dacă nu se odihnește),
 // stream; dacă streamul nu scoate text, cade pe modul text (aceeași cerere);
 // dacă tot nimic și eram pe Fable, trece pe Opus și odihnește Fable 10 min.
-async function askClaude(prompt, onChunk) {
+async function askClaude(prompt, onChunk, hasFiles) {
   const model = brainModel()
   const full = loadContext() + '\n\n' + PREAMBLE + prompt
-  // Timeout generos (120s): întrebările grele (raționament avansat) durează
-  // legitim 60–90s. Pulsul de viață ține serverul în așteptare cât Claude chiar
-  // lucrează, deci nu mai apare fals „mi s-a rupt legătura".
-  let answer = await runClaudeStream(full, { timeoutMs: 120_000, model, onChunk })
-  if (!answer) answer = await runClaudeText(full, { timeoutMs: 120_000, model })
+  // Buget de timp MĂRGINIT (Adrian, 10 iul + audit): serverul renunță la 75s și
+  // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
+  // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
+  // se ating decât la rațiune grea; cascada e scurtă, nu 4×120s ca înainte.
+  let answer = await runClaudeStream(full, { timeoutMs: 90_000, model, onChunk, hasFiles })
+  if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles })
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
     log('Fable a esuat — trec pe Opus, revin la Fable in 10 min.')
-    answer =
-      (await runClaudeStream(full, { timeoutMs: 120_000, model: RESERVE, onChunk })) ||
-      (await runClaudeText(full, { timeoutMs: 120_000, model: RESERVE }))
+    answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles })
   }
   return answer
 }
@@ -305,9 +297,11 @@ for (;;) {
     }, 150)
     let answer
     try {
-      // Atașează pozele/fișierele jobului (dacă există) la prompt.
+      // Atașează pozele/fișierele jobului (dacă există) la prompt. Doar când
+      // există fișiere permitem Read (ca să le privească); altfel chat pur, fără
+      // unelte → instant.
       const fileNote = saveJobFiles(job)
-      answer = await askClaude(job.prompt + fileNote, onChunk)
+      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '')
     } finally {
       clearInterval(pulse)
       flush() // orice bucată rămasă în tampon pleacă acum
