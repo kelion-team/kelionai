@@ -122,6 +122,8 @@ export interface DemoRecent {
   // For a DEMO row: the throwaway email whose conversation the owner can open
   // (click the row). Empty for plain visits.
   session_email: string
+  // Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple.
+  topic: string
 }
 
 export interface DemoStats {
