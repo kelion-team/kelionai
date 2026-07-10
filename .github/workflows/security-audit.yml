@@ -27,6 +27,17 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
+      # SCURGEREA REALĂ (10 iul, dovedită în jurnalul rulării #4): mascarea de
+      # mai jos venea PREA TÂRZIU — runner-ul tipărește blocul `env:` al unui
+      # pas ÎNAINTE să-i ruleze scriptul, deci AMBELE parole (veche + nouă) au
+      # apărut în clar în jurnal. Pasul ăsta rulează primul și citește parolele
+      # direct din fișierul de eveniment — nu au pe unde să se mai vadă.
+      - name: Maschează parolele în jurnal (înainte de orice)
+        run: |
+          for k in vps_pass new_root_pass; do
+            v=$(jq -r ".inputs[\"$k\"] // empty" "$GITHUB_EVENT_PATH")
+            { [ -n "$v" ] && echo "::add-mask::$v"; } || true
+          done
       - name: Audit / hardening pe VPS
         env:
           VPS_PASS: ${{ inputs.vps_pass }}
