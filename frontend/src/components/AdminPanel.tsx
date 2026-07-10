@@ -9,6 +9,11 @@ import {
   fetchLeads,
   emailLead,
   type Lead,
+  fetchVisitorConvos,
+  fetchVisitorChat,
+  replyVisitorChat,
+  type VisitorConvo,
+  type VisitorMsg,
   fetchDemos,
   fetchActivity,
   fetchDevLog,
@@ -101,8 +106,14 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'
   >('finance')
+  // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
+  const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
+  const [vsel, setVsel] = useState<string | null>(null)
+  const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
+  const [vreply, setVreply] = useState('')
+  const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
@@ -164,6 +175,7 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     void fetchFinance().then(setFinance)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
+    void fetchVisitorConvos().then(setVconvos)
     void fetchActivity().then(setActivity)
     void fetchDevLog().then(setDevLog)
     void fetchReleases().then(setReleases)
@@ -176,6 +188,52 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
     return () => window.clearInterval(id)
   }, [tab])
+
+  // Live visitor chat: refresh the conversation list while the tab is open, and
+  // poll the OPEN conversation for new visitor lines (both every few seconds).
+  useEffect(() => {
+    if (tab !== 'vchat') return
+    const id = window.setInterval(() => void fetchVisitorConvos().then(setVconvos), 5000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
+  useEffect(() => {
+    if (tab !== 'vchat' || !vsel) return
+    let alive = true
+    const tick = async (): Promise<void> => {
+      const more = await fetchVisitorChat(vsel, vLastId.id)
+      if (alive && more.length > 0) {
+        vLastId.id = more[more.length - 1].id
+        setVmsgs((m) => [...m, ...more])
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 3000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [tab, vsel, vLastId])
+
+  async function openConvo(conv: string): Promise<void> {
+    vLastId.id = 0
+    setVsel(conv)
+    setVmsgs([])
+    const rows = await fetchVisitorChat(conv, 0)
+    vLastId.id = rows.length ? rows[rows.length - 1].id : 0
+    setVmsgs(rows)
+  }
+
+  async function sendReply(): Promise<void> {
+    const t = vreply.trim()
+    if (!t || !vsel) return
+    const id = await replyVisitorChat(vsel, t)
+    if (id > 0) {
+      setVmsgs((m) => [...m, { id, role: 'owner', text: t, created_at: '' }])
+      vLastId.id = Math.max(vLastId.id, id)
+      setVreply('')
+    }
+  }
 
   // Tab „Joburi" deschis → auto-refresh la 8s (Adrian: „actualizare automată fără
   // alte butoane"), ca stadiul fiecărui ordin să se miște singur în timp real.
@@ -246,6 +304,13 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               {demos && demos.visitsToday + demos.today > 0
                 ? ` (${demos.visitsToday + demos.today})`
                 : ''}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'vchat' ? 'sel' : ''}`}
+              onClick={() => setTab('vchat')}
+            >
+              Chat live{vconvos.length > 0 ? ` (${vconvos.length})` : ''}
             </button>
             <button
               type="button"
@@ -957,6 +1022,68 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                 </div>
               </>
             )}
+          </section>
+        )}
+        {tab === 'vchat' && (
+          <section className="admin-finance vchat-admin">
+            <div className="vchat-admin-list">
+              <div className="fin-breakdown-head">Conversații live cu vizitatorii</div>
+              {vconvos.length === 0 && <div className="chat-hint">Nicio conversație încă.</div>}
+              {vconvos.map((c) => (
+                <div
+                  key={c.conv_id}
+                  className={`vchat-convo ${vsel === c.conv_id ? 'sel' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => void openConvo(c.conv_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') void openConvo(c.conv_id)
+                  }}
+                >
+                  <span className="vchat-convo-last">{c.last_text.slice(0, 60)}</span>
+                  <span className="vchat-convo-meta">
+                    {c.visitor_msgs} de la vizitator ·{' '}
+                    {new Date(c.last_at).toLocaleString('ro-RO', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="vchat-admin-thread">
+              {!vsel && <div className="chat-hint">Alege o conversație ca să răspunzi.</div>}
+              {vsel && (
+                <>
+                  <div className="vchat-admin-log">
+                    {vmsgs.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`vchat-bubble ${m.role === 'owner' ? 'me' : 'owner'}`}
+                      >
+                        {m.text}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="vchat-row">
+                    <input
+                      className="vchat-input"
+                      value={vreply}
+                      placeholder="Răspunde vizitatorului…"
+                      onChange={(e) => setVreply(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void sendReply()
+                      }}
+                    />
+                    <button type="button" className="vchat-send" onClick={() => void sendReply()}>
+                      ↑
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </section>
         )}
         {tab === 'share' && (

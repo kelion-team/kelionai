@@ -1,7 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { config } from '../config.js'
 import { setDemoSession, getSessionUser, makeDemoEmail } from '../session.js'
-import { tryStartDemo, logVisit, touchVisit, addLead, type DemoVisit } from '../db.js'
+import {
+  tryStartDemo,
+  logVisit,
+  touchVisit,
+  addLead,
+  addVisitorMessage,
+  getVisitorMessages,
+  type DemoVisit,
+} from '../db.js'
 
 // Look up the visitor's location from their IP for the owner's analytics:
 // country/city/region, ISP and timezone. Free, no key (ipwho.is). Short
@@ -173,4 +181,25 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     if (!ok) return reply.code(400).send({ error: 'bad_email' })
     return reply.send({ ok: true })
   })
+
+  // Live chat widget (visitor side). The visitor keeps a random conv_id in their
+  // localStorage; they SEND messages and POLL for the owner's replies. Public,
+  // rate-limited by the global limiter; conv_id is just a thread handle.
+  app.post<{ Body: { conv?: string; text?: string } }>('/api/visitor-chat/send', async (req, reply) => {
+    const conv = typeof req.body?.conv === 'string' ? req.body.conv : ''
+    const text = typeof req.body?.text === 'string' ? req.body.text : ''
+    if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
+    const id = await addVisitorMessage(conv, 'visitor', text)
+    return reply.send({ ok: id > 0, id })
+  })
+
+  app.get<{ Querystring: { conv?: string; after?: string } }>(
+    '/api/visitor-chat/poll',
+    async (req, reply) => {
+      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+      const after = Number(req.query?.after ?? 0) || 0
+      if (!conv) return reply.code(400).send({ error: 'bad_request' })
+      return reply.send({ messages: await getVisitorMessages(conv, after) })
+    },
+  )
 }
