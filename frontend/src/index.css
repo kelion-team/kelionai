@@ -2523,3 +2523,62 @@ a.card-item:hover {
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
+
+/* Pool AI — controale de adăugat/scos bani în tab-ul „Bani". */
+.pool-manage {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.pool-manage-head {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.pool-manage-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pool-input {
+  flex: 1;
+  min-width: 120px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+.pool-btn {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.pool-btn.add {
+  border-color: rgba(94, 201, 143, 0.5);
+  color: #7fe0a8;
+}
+.pool-btn.add:hover:not(:disabled) {
+  background: rgba(94, 201, 143, 0.14);
+}
+.pool-btn.withdraw {
+  border-color: rgba(240, 160, 90, 0.5);
+  color: #f0b07a;
+}
+.pool-btn.withdraw:hover:not(:disabled) {
+  background: rgba(240, 160, 90, 0.14);
+}
+.pool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

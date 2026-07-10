@@ -652,6 +652,17 @@ export async function loadAdminPool(amount: number): Promise<void> {
   }
 }
 
+/** Owner withdraws real money from the pool (records taking it back out).
+ *  Clamped at 0 so the recorded pool can't go negative. */
+export async function withdrawAdminPool(amount: number): Promise<void> {
+  if (!dbEnabled() || !(amount > 0)) return
+  try {
+    await getPool().query('UPDATE admin_pool SET loaded = GREATEST(0, loaded - $1), updated_at = now() WHERE id = 1', [amount])
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** Owner's real-money view: pool loaded, remaining (loaded − real cost) and profit. */
 // Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
 // anti-reuse: a fingerprint or IP that already tried within 30 days is refused.

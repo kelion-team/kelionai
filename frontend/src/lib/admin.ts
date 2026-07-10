@@ -14,6 +14,8 @@ export interface HistoryRow {
 // consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
 export interface Finance {
   stripe: { available: number; pending: number; currency: string } | null
+  loaded: number
+  remaining: number
   spent: number
   profit: number
   currency: string
@@ -27,6 +29,22 @@ export async function fetchFinance(): Promise<Finance | null> {
     return (await r.json()) as Finance
   } catch {
     return null
+  }
+}
+
+// Owner adds money to, or withdraws money from, the provider-credit pool.
+// Returns true on success so the caller can refresh the finance view.
+export async function updatePool(amount: number, direction: 'add' | 'withdraw'): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/pool', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, direction }),
+    })
+    return r.ok
+  } catch {
+    return false
   }
 }
 
