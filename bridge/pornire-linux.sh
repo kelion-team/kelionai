@@ -24,16 +24,16 @@ done
 cd "$REPO" || exit 1
 say "repo: $REPO"
 
-# 1. Cod la zi, NON-DISTRUCTIV. Fără --ff-only forțat: dacă nu se poate avansa
-#    curat, oprește-te și raportează (nu călca peste munca locală / worker off-repo).
-say "aduc master…"
+# 1. Cod la zi — SINCRONIZARE FORȚATĂ la origin/master (adevărul unic).
+#    REGULA 100% SINCRON (Adrian, 10 iul): producția = master, mereu. Vechiul
+#    `git pull --ff-only` se OPREA la divergență și lăsa VPS-ul pe cod VECHI, care
+#    apoi era publicat → reverterile „build fantomă". Reparațiile reușite acum se
+#    ÎMPING în master (vezi repair.sh), deci orice rămășiță locală divergentă e
+#    VECHE și se înlătură fără pierdere. Așa VPS-ul publică DOAR cod nou corect.
+say "aduc master (sincronizare forțată la adevărul unic)…"
 git fetch origin master || { say "⚠️ git fetch a eșuat — verifică rețeaua/credentialele git"; exit 1; }
-if ! git pull --ff-only origin master; then
-  say "⚠️ NU pot avansa curat (commituri locale pe VPS). Rezolvă manual: 'git status',"
-  say "   apoi 'git stash' + 'git pull --ff-only origin master' dacă vrei să păstrezi munca locală."
-  exit 1
-fi
-say "cod la zi: $(git rev-parse --short HEAD)"
+git reset --hard origin/master || { say "⚠️ reset la origin/master a eșuat"; exit 1; }
+say "cod la zi (master): $(git rev-parse --short HEAD)"
 
 # 2. Deploy pe producție (Railway, serviciul web).
 say "deploy Railway (poate dura câteva minute)…"
