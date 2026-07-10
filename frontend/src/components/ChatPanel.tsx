@@ -694,6 +694,7 @@ export default function ChatPanel({
         screen,
         bridgeFiles,
         ac.signal,
+        Boolean(attached), // poză lipită/încărcată explicit — analiză fără condiție
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
