@@ -304,7 +304,44 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_messages (created_at DESC);
+    -- CONECTAREA GOOGLE PERSISTENTĂ (Adrian, 10 iul: „iar îmi dai să loghez
+    -- Google? reparată de 10 ori"). Cauza recurenței: refresh-token-ul trăia DOAR
+    -- în cookie-ul de sesiune, deci orice re-logare/expirare/re-emitere îl pierdea.
+    -- Acum îl ținem PERMANENT aici, per cont: conectezi o dată → se restaurează
+    -- singur din DB la fiecare logare. Nu mai cere reconectare niciodată.
+    CREATE TABLE IF NOT EXISTS google_accounts (
+      email TEXT PRIMARY KEY,
+      refresh_token TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `)
+}
+
+// ── Conectarea Google persistentă (refresh token per cont) ──────────────────
+export async function saveGoogleRefreshToken(email: string, token: string): Promise<void> {
+  if (!dbEnabled() || !email || !token) return
+  try {
+    await getPool().query(
+      `INSERT INTO google_accounts (email, refresh_token) VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET refresh_token = $2, updated_at = now()`,
+      [email.toLowerCase(), token],
+    )
+  } catch {
+    /* nu rupem logarea dacă salvarea token-ului dă rateu */
+  }
+}
+
+export async function getGoogleRefreshToken(email: string): Promise<string> {
+  if (!dbEnabled() || !email) return ''
+  try {
+    const r = await getPool().query<{ refresh_token: string }>(
+      'SELECT refresh_token FROM google_accounts WHERE email = $1',
+      [email.toLowerCase()],
+    )
+    return r.rows[0]?.refresh_token ?? ''
+  } catch {
+    return ''
+  }
 }
 
 // ── Live visitor chat (owner ↔ anonymous visitor, via polling) ──────────────
