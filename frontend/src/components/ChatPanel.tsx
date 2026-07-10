@@ -952,6 +952,13 @@ export default function ChatPanel({
   const lastUser = messages.filter((m) => m.role === 'user').at(-1)
   const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1)
   const hint = t.chatHint
+  // Butonul din dreapta ține DOAR de chatul SCRIS. Ai ceva de trimis (text sau
+  // fișier atașat) → e activ. Câmpul gol → chatul e AUDIO (microfonul e mereu
+  // pornit, vocea intră singură), deci butonul rămâne o săgeată neutră, NU un
+  // pătrat-stop mort. Pătratul ■ apare NUMAI când chiar ai text de stivuit peste
+  // o tură în curs (atunci click = îl pui în coadă, nu întrerupe nimic).
+  const hasDraft = input.trim().length > 0 || attachments.length > 0
+  const queueing = busy && hasDraft
 
   return (
     <div className="chat">
@@ -1168,21 +1175,26 @@ export default function ChatPanel({
           </button>
           <button
             type="button"
-            className={`composer-send ${busy ? 'queueing' : ''}`}
+            className={`composer-send ${queueing ? 'queueing' : ''}`}
             onClick={() => {
               // vezi comentariul din onKeyDown Enter: golim orice frază de
               // voce rămasă în așteptare înainte de trimiterea manuală.
               coalescerRef.current?.flushNow()
               void send(input)
             }}
-            // MEREU activ cât ai ceva de trimis — și cât Kelion răspunde. Un mesaj
-            // trimis acum NU întrerupe tura curentă: se pune în coadă (send() îl
-            // stivuiește) și pleacă imediat ce tura se termină. Softul nu se rupe.
-            disabled={!input.trim() && attachments.length === 0}
-            aria-label={busy ? 'Pune în coadă' : t.send}
-            title={busy ? 'Se procesează — mesajul tău se pune în coadă, nu întrerupe' : t.send}
+            // Activ cât ai ceva SCRIS de trimis. Câmpul gol (chat audio) → rămâne
+            // săgeată neutră, dezactivată — nu un pătrat-stop mort. Un text trimis
+            // în timp ce Kelion răspunde NU întrerupe tura: se pune în coadă
+            // (send() îl stivuiește) și pleacă imediat ce tura se termină.
+            disabled={!hasDraft}
+            aria-label={queueing ? 'Pune în coadă' : t.send}
+            title={
+              queueing
+                ? 'Se procesează — mesajul tău se pune în coadă, nu întrerupe'
+                : t.send
+            }
           >
-            {busy ? '■' : '↑'}
+            {queueing ? '■' : '↑'}
           </button>
         </div>
         <input
