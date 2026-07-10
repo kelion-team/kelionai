@@ -10,6 +10,37 @@ function currentBundle(): string | null {
   return m ? m[0] : null
 }
 
+// RESET DUR LA ULTIMA VERSIUNE (Adrian, 10 iul: „resetează ce trebuie ca să fie
+// preluată ultima versiune în permanență"). Golește TOT cache-ul (shell-ul SW +
+// orice altceva), cere și service worker-ului să-și golească cache-urile, apoi
+// reîncarcă pagina cu un parametru anti-cache — garantat ultima versiune, fără
+// build vechi lipit. Conversația se restaurează după reload (kelion_restore_chat).
+let resetting = false
+export async function hardResetToLatest(): Promise<void> {
+  if (resetting) return
+  resetting = true
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((k) => caches.delete(k)))
+    }
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration()
+      reg?.active?.postMessage('kelion-clear-caches')
+    }
+  } catch {
+    /* best-effort — reîncărcăm oricum */
+  }
+  try {
+    sessionStorage.setItem('kelion_restore_chat', '1')
+  } catch {
+    /* storage indisponibil — nu blocăm reload-ul */
+  }
+  const u = new URL(window.location.href)
+  u.searchParams.set('_v', String(Date.now()))
+  window.location.replace(u.toString())
+}
+
 /**
  * Calls `onUpdate` once when a newer deployment is detected. Checks every 5
  * minutes and whenever the tab regains focus (so a returning user learns

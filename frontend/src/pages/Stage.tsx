@@ -10,6 +10,7 @@ import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
 import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
+import { hardResetToLatest } from '../lib/updateCheck'
 import { resolveLang, strings } from '../lib/i18n'
 import {
   getWorkspace,
@@ -326,21 +327,30 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     const current = document.querySelector('script[src*="index-"]')?.getAttribute('src') ?? ''
     if (!current) return
-    const id = window.setInterval(() => {
+    const check = (): void => {
       void fetch('/index.html', { cache: 'no-store' })
         .then((r) => r.text())
         .then((html) => {
           const m = html.match(/index-[A-Za-z0-9_-]+\.js/)
           if (m && !current.includes(m[0])) {
-            // Release refresh — mark it so ChatPanel restores the conversation
-            // (a plain login/new visit starts clean instead).
-            sessionStorage.setItem('kelion_restore_chat', '1')
-            window.location.reload()
+            // Versiune nouă → RESET DUR (golește cache + SW) și ia ultima versiune.
+            // Nu doar reload: un reload simplu putea servi tot build vechi din cache.
+            void hardResetToLatest()
           }
         })
         .catch(() => {})
-    }, 45_000)
-    return () => window.clearInterval(id)
+    }
+    check() // verifică și la deschidere, nu doar din 45 în 45s
+    const id = window.setInterval(check, 45_000)
+    // Verifică și când revii pe tab — prinzi ultima versiune imediat ce te întorci.
+    const onVis = (): void => {
+      if (document.visibilityState === 'visible') check()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it sets
