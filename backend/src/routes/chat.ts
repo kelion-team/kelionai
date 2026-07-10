@@ -976,7 +976,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
-    if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+    // Demo = fără istoric (spec Adrian, 10 iul): mesajele vizitatorilor demo
+    // nu se salvează nicăieri.
+    if (lastTurn?.role === 'user' && user.role !== 'demo')
+      void saveMessage(user.email, 'user', lastTurn.content)
 
     const isAdmin = user.role === 'admin'
 
@@ -1619,6 +1622,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Ștergerea lui fizică = curățenie separată, după ce drumul nou e dovedit.
     if (!process.env.KELION_API_CHAT) {
       const roPub = userLang.toLowerCase().startsWith('ro')
+      // SPEC FREE/DEMO (Adrian, 10 iul): „fără istoric, chat live în orice
+      // limbă 3 minute, cameră DA, nimic-admin". Demo = anonim și curat: fără
+      // memorie injectată, fără învățare, fără salvare în istoric. Camera DA:
+      // cadrul camerei pleacă la creier ca fișier de job (persoana publică).
+      const isDemo = user.role === 'demo'
       if (!bridgeOnline()) {
         // Puntea e jos → mesaj cinstit, scurt. NU cădem pe cheia API (ordinul).
         const msg = roPub
@@ -1627,7 +1635,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         reply.raw.write(msg)
         await streamVoice(reply, msg, userLang)
         reply.raw.end()
-        void saveMessage(user.email, 'assistant', msg)
+        if (!isDemo) void saveMessage(user.email, 'assistant', msg)
         return
       }
       // Conversația recentă (deja igienizată + plafonată mai sus) + limba +
@@ -1645,12 +1653,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           : 'Reply in the language the user writes in (default to English for short or ambiguous messages).'
       const pubPrompt =
         `${langLine}\n` +
-        (memRecall.trim() ? `${memRecall.trim().slice(0, 1500)}\n\n` : '') +
+        // Demo = FĂRĂ memorie/istoric injectat (anonim); doar clienții logați
+        // primesc memoria lor relevantă.
+        (!isDemo && memRecall.trim() ? `${memRecall.trim().slice(0, 1500)}\n\n` : '') +
         `Conversation so far:\n${past}\n\nAnswer the user's LAST message now.`
+      // CAMERA în free/public: dacă utilizatorul întreabă ceva ce cere văzul și
+      // avem cadrul camerei, îl trimitem ca fișier de job — workerul îl privește
+      // cu Read în cutia publică (izolată de a adminului).
+      const pubFiles: BridgeFile[] =
+        image && VISION_INTENT.test(lastUserText)
+          ? [{ name: 'camera.jpg', type: 'image/jpeg', data: image }]
+          : []
       let acc = '' // ce s-a difuzat deja live către client
       const answer = await bridgeAskStream(
         pubPrompt,
-        [],
+        pubFiles,
         (chunk) => {
           if (!chunk) return // '' = puls de viață, nu text
           acc += chunk
@@ -1669,7 +1686,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         reply.raw.write(msg)
         await streamVoice(reply, msg, userLang)
         reply.raw.end()
-        void saveMessage(user.email, 'assistant', msg)
+        if (!isDemo) void saveMessage(user.email, 'assistant', msg)
         return
       }
       // Coada nedifuzată (răspunsul final e mai lung decât ce-a curs live).
@@ -1679,9 +1696,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Vocea: sintetizată pe server (Chirp 3 HD), în limba utilizatorului.
       await streamVoice(reply, finalText, userLang)
       reply.raw.end()
-      void saveMessage(user.email, 'assistant', finalText)
-      // Memoria învață și pe calea publică (fire-and-forget, zero latență).
-      if (lastUserText.trim() || finalText.trim()) void learnFromTurn(user.email, lastUserText, finalText)
+      // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre el.
+      if (!isDemo) {
+        void saveMessage(user.email, 'assistant', finalText)
+        // Memoria învață și pe calea publică (fire-and-forget, zero latență).
+        if (lastUserText.trim() || finalText.trim()) void learnFromTurn(user.email, lastUserText, finalText)
+      }
       return
     }
 

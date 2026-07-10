@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
 import Landing from './pages/Landing'
 import Stage from './pages/Stage'
-import { watchForUpdate, hardResetToLatest } from './lib/updateCheck'
-import { strings, resolveLang, browserLang } from './lib/i18n'
+import { watchForUpdate, hardResetToLatest, fetchServerVersion } from './lib/updateCheck'
 
 // Injectate la build (vezi vite.config.ts): versiunea + data compilării.
 declare const __APP_VERSION__: string
@@ -12,7 +11,10 @@ declare const __BUILD_DATE__: string
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
-  const [updateReady, setUpdateReady] = useState(false)
+  // Ștampila DEPLOY-ului de pe server — pe filigran, ca dovada versiunii să se
+  // schimbe la ORICE publicare (ordinul lui Adrian, 10 iul), nu doar la build
+  // de interfață.
+  const [srvV, setSrvV] = useState('')
 
   const error = new URLSearchParams(window.location.search).get('error')
 
@@ -24,13 +26,18 @@ export default function App() {
       setLoading(false)
       if (error) window.history.replaceState({}, '', '/')
     })
+    void fetchServerVersion().then((j) => {
+      if (alive && j?.v) setSrvV(`deploy ${j.v} · ${j.at.slice(0, 16).replace('T', ' ')} UTC`)
+    })
     return () => {
       alive = false
     }
   }, [error])
 
-  // Notify already-installed users (any platform) when a new version ships.
-  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+  // RUTINA DE VERSIUNE (ordin, 10 iul): deploy nou detectat → reset curat
+  // AUTOMAT la ultima versiune (filigran nou, stare default, memoriile pe
+  // server rămân). Fără butoane, fără întrebări — mereu ultima versiune.
+  useEffect(() => watchForUpdate(() => void hardResetToLatest()), [])
 
   if (loading) {
     return (
@@ -41,24 +48,16 @@ export default function App() {
     )
   }
 
-  // Language for the banner: the signed-in user's, else the browser's.
-  const t = strings(user ? resolveLang(user.locale) : browserLang())
-
   return (
     <>
-      {updateReady && (
-        <div className="update-bar" role="status">
-          <span>{t.updateReady}</span>
-          <button type="button" onClick={() => void hardResetToLatest()}>
-            {t.updateNow}
-          </button>
-        </div>
-      )}
       {user ? <Stage user={user} /> : <Landing error={error} />}
       {/* Filigran versiune + dată update — dovada vizibilă că ultima versiune e
-          instalată (Adrian, 7 iul). Apare pe toate shell-urile (aceeași web app). */}
+          instalată (Adrian, 7 iul). Acum include și ștampila DEPLOY-ului de pe
+          server (10 iul): se schimbă la ORICE publicare, nu doar la build de
+          interfață. Apare pe toate shell-urile (aceeași web app). */}
       <div className="app-watermark" aria-hidden="true">
         v{__APP_VERSION__} · {__BUILD_DATE__}
+        {srvV ? ` · ${srvV}` : ''}
       </div>
     </>
   )
