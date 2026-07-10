@@ -68,7 +68,14 @@ const waiters = new Map<string, (text: string | null) => void>()
 // pull silently overwrote the first, whose request then hung FOREVER (its
 // timeout guard no longer matched) — freezing that worker and losing the
 // admin's messages (4 iul). Every waiting poll now gets served or released.
-const pullWaiters: ((job: PendingJob | null) => void)[] = []
+// Fiecare așteptător de pull vine cu CAPABILITĂȚILE declarate de worker.
+// GARD DE SCURGERE (Adrian, 10 iul — poza cu demo-ul tratat ca „Adrian"): un
+// job PUBLIC se dă DOAR unui worker care a declarat cap "persona" la pull.
+// Workerul vechi/zombie de pe VPS (din afara repo-ului) nu declară nimic →
+// nu mai poate primi NICIODATĂ un job de vizitator (ar fi răspuns cu context.md).
+const pullWaiters: { caps: Set<string>; resolve: (job: PendingJob | null) => void }[] = []
+const canServe = (job: PendingJob, caps: Set<string>): boolean =>
+  job.persona !== 'public' || caps.has('persona')
 // Jobs handed to a worker but not yet confirmed (no ack/chunk/reply). If the
 // long-poll connection died exactly as the job was served, the job used to
 // vanish — the admin's message was simply never answered. Now it is redelivered
@@ -89,7 +96,9 @@ function markServed(job: PendingJob): void {
   inFlight.set(job.id, { job, at: Date.now(), tries: (prev?.tries ?? 0) + 1, confirmed: false })
 }
 // A served-but-unconfirmed job whose turn is still waiting → serve it again.
-function staleJob(): PendingJob | null {
+// Relivrarea respectă ACELEAȘI capabilități — un job public nu se relivrează
+// niciodată unui worker care nu știe de persona.
+function staleJob(caps: Set<string>): PendingJob | null {
   if (!ackSeen) return null
   const now = Date.now()
   for (const [id, e] of inFlight) {
@@ -97,7 +106,7 @@ function staleJob(): PendingJob | null {
       inFlight.delete(id) // turn finished or timed out — nothing to redeliver
       continue
     }
-    if (!e.confirmed && e.tries < 2 && now - e.at > 15_000) return e.job
+    if (!e.confirmed && e.tries < 2 && now - e.at > 15_000 && canServe(e.job, caps)) return e.job
   }
   return null
 }
@@ -617,9 +626,14 @@ export function stageRelease(title: string, detail: string): string {
 // pe calea HTTP (unde stau workerii reali), conexiunile WS sunt refuzate la
 // ușă, iar becul „Bridge" arată doar legătura HTTP reală.
 function dispatch(job: PendingJob): void {
-  const w = pullWaiters.shift()
-  if (w) w(job)
-  else if (!queue.some((j) => j.id === job.id)) {
+  // Alege PRIMUL așteptător care POATE servi jobul: jobul PUBLIC cere cap
+  // "persona" (gard de scurgere — zombiul nu declară nimic); al adminului
+  // merge la oricine.
+  const i = pullWaiters.findIndex((w) => canServe(job, w.caps))
+  if (i !== -1) {
+    const [w] = pullWaiters.splice(i, 1)
+    w.resolve(job)
+  } else if (!queue.some((j) => j.id === job.id)) {
     // PRIORITATE: mesajele PROPRIETARULUI sar în fața cozii — un val de
     // vizitatori (joburi publice) nu-l poate face pe Adrian să aștepte după ei.
     if (job.persona === 'public') queue.push(job)
@@ -1473,20 +1487,28 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/bridge/pull', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     workerBeat()
-    const ready = staleJob() ?? queue.shift()
+    // Capabilitățile declarate de worker în corpul pull-ului. Workerul nou
+    // trimite {"caps":["persona"]}; cel vechi/zombie trimite {} → nu poate primi
+    // joburi publice (gard de scurgere, vezi canServe).
+    const rawCaps = (req.body as { caps?: unknown } | null)?.caps
+    const caps = new Set(
+      Array.isArray(rawCaps) ? rawCaps.filter((c): c is string => typeof c === 'string') : [],
+    )
+    const readyIdx = queue.findIndex((j) => canServe(j, caps))
+    const ready = staleJob(caps) ?? (readyIdx !== -1 ? queue.splice(readyIdx, 1)[0] : undefined)
     if (ready) {
       markServed(ready)
       return { job: ready }
     }
     const job = await new Promise<PendingJob | null>((resolve) => {
-      pullWaiters.push(resolve)
+      pullWaiters.push({ caps, resolve })
       // Release exactly once: on the 25s long-poll expiry OR the moment the
       // worker's connection drops — a job must never be served into a socket
       // that is already dead. The drop signal is 'close' on the RESPONSE (fires
       // early only on premature termination); on the request it fires as soon
       // as the body is consumed and would kill every long-poll instantly.
       const release = (): void => {
-        const i = pullWaiters.indexOf(resolve)
+        const i = pullWaiters.findIndex((w) => w.resolve === resolve)
         if (i !== -1) {
           pullWaiters.splice(i, 1)
           resolve(null)

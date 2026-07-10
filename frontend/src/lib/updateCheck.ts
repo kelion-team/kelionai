@@ -1,8 +1,25 @@
-// Auto-update notification. Every shell (Windows .exe, Android app, iPhone PWA,
-// plain web) loads the SAME live web app, so watching the deployed bundle here
-// tells ANY installed user, for free, the moment a new version ships. We compare
-// the bundle filename the app booted with against the one the server currently
-// serves; when it changes, a new version is live and we invite an upgrade.
+// RUTINA DE VERSIUNE (ordinul lui Adrian, 10 iul): „la ORICE deploy nou se
+// actualizează filigranul, browserul repornește curat ca la prima logare —
+// memoriile și restul nu se pierd (stau pe server), dar totul revine la
+// default." Urmărim VERSIUNEA DEPLOY-ULUI de pe server (/api/version — se
+// schimbă la orice publicare, chiar dacă interfața n-a fost atinsă), nu doar
+// numele bundle-ului. Când se schimbă → reset dur automat.
+
+export interface ServerVersion {
+  v: string
+  at: string
+}
+
+export async function fetchServerVersion(): Promise<ServerVersion | null> {
+  try {
+    const r = await fetch(`/api/version?_v=${Date.now()}`, { cache: 'no-store' })
+    if (!r.ok) return null
+    const j = (await r.json()) as ServerVersion
+    return j && typeof j.v === 'string' ? j : null
+  } catch {
+    return null
+  }
+}
 
 function currentBundle(): string | null {
   const s = document.querySelector('script[src*="/assets/index-"]') as HTMLScriptElement | null
@@ -10,23 +27,20 @@ function currentBundle(): string | null {
   return m ? m[0] : null
 }
 
-// RESET DUR LA ULTIMA VERSIUNE (Adrian, 10 iul: „resetează ce trebuie ca să fie
-// preluată ultima versiune în permanență"). Golește TOT cache-ul (shell-ul SW +
-// orice altceva), cere și service worker-ului să-și golească cache-urile, apoi
-// reîncarcă pagina cu un parametru anti-cache — garantat ultima versiune, fără
-// build vechi lipit. Conversația se restaurează după reload (kelion_restore_chat).
+// RESET DUR LA ULTIMA VERSIUNE: golește TOT (cache-uri, service worker,
+// localStorage, sessionStorage) și reîncarcă anti-cache — browserul pornește
+// curat, ca la prima logare (cookie-ul de sesiune RĂMÂNE — nu te deloghează;
+// memoriile și istoricul stau pe server și revin singure).
 let resetting = false
 export async function hardResetToLatest(): Promise<void> {
   if (resetting) return
   resetting = true
   // ANTI-BUCLĂ de reload (supraviețuiește reîncărcării): dacă am resetat în
-  // ultimele 30s, NU mai reîncărcăm încă o dată. Fără plasa asta, orice cauză care
-  // ar chema resetul din nou după reload ar putea intra într-o buclă de reload care
-  // face aplicația inutilizabilă („distrus"). 30s > timpul unei reîncărcări complete.
+  // ultimele 30s, NU mai reîncărcăm încă o dată — o buclă de reload ar face
+  // aplicația inutilizabilă.
   try {
     const last = Number(sessionStorage.getItem('kelion_last_reset') || 0)
     if (Date.now() - last < 30_000) return
-    sessionStorage.setItem('kelion_last_reset', String(Date.now()))
   } catch {
     /* storage indisponibil — continuăm cu resetul */
   }
@@ -42,42 +56,69 @@ export async function hardResetToLatest(): Promise<void> {
   } catch {
     /* best-effort — reîncărcăm oricum */
   }
+  // „Tot default": starea locală se golește COMPLET (fără restaurare de chat pe
+  // pagină — istoricul revine de pe server la încărcare, ca la prima logare).
   try {
-    sessionStorage.setItem('kelion_restore_chat', '1')
+    localStorage.clear()
   } catch {
-    /* storage indisponibil — nu blocăm reload-ul */
+    /* indisponibil */
+  }
+  try {
+    sessionStorage.clear()
+    sessionStorage.setItem('kelion_last_reset', String(Date.now())) // plasa anti-buclă
+  } catch {
+    /* indisponibil */
   }
   const u = new URL(window.location.href)
-  u.searchParams.set('_v', String(Date.now()))
+  u.search = `?_v=${Date.now()}` // curăță și parametrii vechi — pornire default
   window.location.replace(u.toString())
 }
 
 /**
- * Calls `onUpdate` once when a newer deployment is detected. Checks every 5
- * minutes and whenever the tab regains focus (so a returning user learns
- * quickly). Returns a stop function. No-ops if the boot bundle can't be read.
+ * Cheamă `onUpdate` când apare un DEPLOY nou: versiunea serverului (/api/version)
+ * s-a schimbat față de cea de la pornire — sau, ca plasă (server fără sha),
+ * bundle-ul servit diferă de cel cu care a pornit pagina. Verifică la pornire,
+ * apoi la fiecare 45s și când tab-ul redevine vizibil. Întoarce funcția de stop.
  */
 export function watchForUpdate(onUpdate: () => void): () => void {
-  const booted = currentBundle()
-  if (!booted) return () => {}
+  const bootedBundle = currentBundle()
+  let bootedV = ''
   let stopped = false
   let fired = false
 
+  void fetchServerVersion().then((j) => {
+    if (j?.v) bootedV = j.v
+  })
+
   const check = async (): Promise<void> => {
     if (stopped || fired) return
+    // Calea principală: versiunea deploy-ului de pe server.
+    const j = await fetchServerVersion()
+    if (j?.v) {
+      if (!bootedV) {
+        bootedV = j.v // prima citire reușită devine referința
+      } else if (j.v !== bootedV) {
+        fired = true
+        onUpdate()
+        return
+      }
+    }
+    // Plasa: numele bundle-ului servit (acoperă serverele fără sha).
+    if (!bootedBundle) return
     try {
       const html = await fetch(`/?_v=${Date.now()}`, { cache: 'no-store' }).then((r) => r.text())
       const m = html.match(/index-[A-Za-z0-9_-]+\.js/)
-      if (m && m[0] !== booted) {
+      if (m && m[0] !== bootedBundle) {
         fired = true
         onUpdate()
       }
     } catch {
-      /* offline / transient — try again next tick */
+      /* offline / tranzitoriu — la următoarea bătaie */
     }
   }
 
-  const id = window.setInterval(() => void check(), 5 * 60_000)
+  void check()
+  const id = window.setInterval(() => void check(), 45_000)
   const onVis = (): void => {
     if (document.visibilityState === 'visible') void check()
   }

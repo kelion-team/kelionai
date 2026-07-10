@@ -49,7 +49,7 @@ Conversația:
 // marcate persona:'public' vin de la VIZITATORI/CLIENȚI, nu de la proprietar.
 // NU primesc context.md (proiectul privat NU se scurge către străini) și au
 // personajul neutru Kelion — politicos, direct, în limba utilizatorului.
-const PUBLIC_PREAMBLE = `You are Kelion — a refined, courteous personal AI assistant: a well-mannered gentleman with a first-class mind. The conversation below is with a VISITOR or CUSTOMER (not your owner). Answer their LAST message DIRECTLY and IMMEDIATELY, briefly and to the point, in the language the instructions below specify. Plain spoken sentences only — NO markdown, NO asterisks, NO bullet lists, NO emoji (your words are read ALOUD). Do not use tools, do not explore files, do not run commands — just answer from what you are given. NEVER mention your owner, his name, his project, this server, or any internal detail. If asked for something that needs live tools (maps, email, camera, images), say briefly and kindly that this feature is coming to their account soon.
+const PUBLIC_PREAMBLE = `You are Kelion — a refined, courteous personal AI assistant: a well-mannered gentleman with a first-class mind. The conversation below is with a VISITOR or CUSTOMER (not your owner). Answer their LAST message DIRECTLY and IMMEDIATELY, briefly and to the point, in the language the instructions below specify. Plain spoken sentences only — NO markdown, NO asterisks, NO bullet lists, NO emoji (your words are read ALOUD). Do not use tools, do not explore files, do not run commands — just answer from what you are given. NEVER mention your owner, his name, his project, this server, or any internal detail. If an IMAGE FILE is attached below, LOOK at it with your Read tool before answering — it is the visitor's live camera. For other live tools (maps, email, generated images), say briefly and kindly that the feature is coming to their account soon.
 
 `
 
@@ -62,19 +62,24 @@ function log(msg) {
 // pozele nu ajungeau niciodată la creier. Acum le scriem pe disc în /root/kelion
 // (deja în --add-dir) și-i spunem creierului calea, ca să le citească/privească.
 const INBOX = '/root/kelion/inbox'
-function saveJobFiles(job) {
+// Cutia PUBLICĂ e separată de a adminului: camera vizitatorului (demo are voie
+// să vadă — spec Adrian, 10 iul) se scrie în /tmp, iar Read primește DOAR acest
+// folder — niciodată /root/kelion.
+const PUB_INBOX = '/tmp/kelion-public-inbox'
+function saveJobFiles(job, isPublic = false) {
   const files = Array.isArray(job.files) ? job.files : []
   if (!files.length) return ''
+  const dir = isPublic ? PUB_INBOX : INBOX
   const paths = []
   try {
-    mkdirSync(INBOX, { recursive: true })
+    mkdirSync(dir, { recursive: true })
   } catch {}
   for (const f of files) {
     try {
       const b64 = String(f?.data || '').split(',').pop() || ''
       if (!b64) continue
       const safe = String(f?.name || 'fisier').replace(/[^\w.\-]+/g, '_').slice(0, 80)
-      const p = `${INBOX}/${job.id.slice(0, 8)}_${safe}`
+      const p = `${dir}/${job.id.slice(0, 8)}_${safe}`
       writeFileSync(p, Buffer.from(b64, 'base64'))
       paths.push(p)
     } catch (e) {
@@ -82,8 +87,10 @@ function saveJobFiles(job) {
     }
   }
   if (!paths.length) return ''
-  log(`${paths.length} fisier(e) atasat(e) scrise pentru creier.`)
-  return `\n\nFIȘIERE ATAȘATE de Adrian (citește-le/privește-le cu uneltele tale — Read — ÎNAINTE să răspunzi):\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+  log(`${paths.length} fisier(e) atasat(e) scrise pentru creier${isPublic ? ' (public)' : ''}.`)
+  return isPublic
+    ? `\n\nIMAGE ATTACHED — the visitor's camera frame. LOOK at it with your Read tool BEFORE answering:\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+    : `\n\nFIȘIERE ATAȘATE de Adrian (citește-le/privește-le cu uneltele tale — Read — ÎNAINTE să răspunzi):\n${paths.map((p) => `- ${p}`).join('\n')}\n`
 }
 
 // VITEZA MAXIMĂ (Adrian, 10 iul: „creierul Linux e foarte încet"). Cauza reală:
@@ -96,7 +103,7 @@ function saveJobFiles(job) {
 // primul cuvânt în ~2s (nu mai explorează serverul 30s). Cu POZĂ atașată =
 // permite DOAR Read pe folderul de poze, ca să le poată privi. Peste tot tăiem
 // secțiunile dinamice uriașe din promptul implicit → prefill mult mai mic.
-function claudeArgs({ streaming, model, hasFiles }) {
+function claudeArgs({ streaming, model, hasFiles, pub }) {
   const args = ['-p']
   if (streaming) args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages')
   else args.push('--output-format', 'text')
@@ -104,8 +111,9 @@ function claudeArgs({ streaming, model, hasFiles }) {
   // --add-dir /root/kelion (repo întreg de explorat) + unelte. Fără ele, modelul
   // răspunde direct din context (instant). Folosim DOAR flag-uri dovedite — flag-
   // urile noi (--disallowedTools/--exclude-dynamic...) lipseau din CLI-ul de pe
-  // VPS și RUPEAU workerul (niciun răspuns). Cu POZĂ: Read + folderul de poze.
-  if (hasFiles) args.push('--allowedTools', 'Read', '--add-dir', INBOX)
+  // VPS și RUPEAU workerul (niciun răspuns). Cu POZĂ: Read + folderul de poze —
+  // pentru joburi PUBLICE doar cutia publică din /tmp, NICIODATĂ /root/kelion.
+  if (hasFiles) args.push('--allowedTools', 'Read', '--add-dir', pub ? PUB_INBOX : INBOX)
   if (model) args.push('--model', model)
   return args
 }
@@ -117,7 +125,7 @@ const spawnOpts = (pub) => (pub ? { env: process.env, cwd: '/tmp' } : { env: pro
 
 function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub } = {}) {
   return new Promise((resolve) => {
-    const args = claudeArgs({ streaming: true, model, hasFiles })
+    const args = claudeArgs({ streaming: true, model, hasFiles, pub })
     const child = spawn(CLAUDE, args, spawnOpts(pub))
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
@@ -180,7 +188,7 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub } = 
 // nu coborâm NICIODATĂ sub comportamentul de azi.
 function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub } = {}) {
   return new Promise((resolve) => {
-    const args = claudeArgs({ streaming: false, model, hasFiles })
+    const args = claudeArgs({ streaming: false, model, hasFiles, pub })
     const child = spawn(CLAUDE, args, spawnOpts(pub))
     let out = ''
     let err = ''
@@ -274,7 +282,9 @@ async function pull() {
   const res = await fetch(`${BASE}/api/bridge/pull`, {
     method: 'POST',
     headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
-    body: '{}',
+    // Declaram CAPABILITATEA persona: serverul da joburi PUBLICE doar workerilor
+    // care o declara — zombii/vechii (body gol) nu mai pot primi vizitatori.
+    body: JSON.stringify({ caps: ['persona'] }),
     signal: AbortSignal.timeout(40_000),
   })
   if (res.status === 401) throw new Error('Secret respins de server')
@@ -360,8 +370,11 @@ for (;;) {
       // unelte → instant.
       // GARD: joburile publice nu primesc NICIODATĂ fișiere/Read pe inbox —
       // uneltele și fișierele sunt doar pentru admin.
-      const fileNote = job.persona === 'public' ? '' : saveJobFiles(job)
-      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '', job.persona === 'public')
+      const isPub = job.persona === 'public'
+      // Camera vizitatorului e permisa (spec 10 iul) — dar DOAR prin cutia publica
+      // din /tmp; fisierele adminului raman in cutia lui privata.
+      const fileNote = saveJobFiles(job, isPub)
+      answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '', isPub)
     } finally {
       clearInterval(pulse)
       flush() // orice bucată rămasă în tampon pleacă acum

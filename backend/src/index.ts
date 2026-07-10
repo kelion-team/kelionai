@@ -94,6 +94,7 @@ await app.register(rateLimit, {
     const u = (req.url || '').split('?')[0]
     return (
       u === '/health' ||
+      u === '/api/version' || // sondat la 45s de fiecare client pentru rutina de update
       u === '/api/dev/status' ||
       u === '/api/dev/heartbeat' ||
       u === '/api/chat/incoming' ||
@@ -170,6 +171,18 @@ app.addHook('onSend', async (req, reply) => {
 
 // Health — must return exactly 200 (200-only rule + Railway healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
+
+// VERSIUNEA DEPLOY-ULUI (Adrian, 10 iul: „la orice deploy nou se actualizează
+// filigranul, browserul repornește curat"). Railway injectează sha-ul
+// commitului publicat; frontend-ul îl sondează și, când se schimbă, face
+// resetul curat la ultima versiune. Filigranul îl afișează — deci SE SCHIMBĂ
+// la ORICE publicare, chiar dacă interfața n-a fost atinsă (cache de layer).
+const DEPLOY_SHA = (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7)
+const BOOT_AT = new Date().toISOString()
+app.get('/api/version', async (_req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  return { v: DEPLOY_SHA, at: BOOT_AT }
+})
 
 // Test/verification endpoint for the SDK constructor
 app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
