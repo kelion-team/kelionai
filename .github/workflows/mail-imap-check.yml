@@ -1,7 +1,8 @@
 # VERIFICARE REALĂ A EMAILULUI (doar-citire). Nu doar că MAIL_PASS există, ci că
 # contul contact@kelionai.app CHIAR se autentifică: ia credențialele din Railway
-# (parola MASCATĂ în jurnal, niciodată afișată), încearcă un LOGIN IMAP real și
-# raportează „reușit" / „respins". Nu modifică nimic, nu șterge niciun email.
+# (parola MASCATĂ în jurnal, niciodată afișată), încearcă un LOGIN IMAP real cu
+# un client adevărat (Python imaplib) și raportează reușit/respins. Nu modifică
+# nimic, nu șterge niciun email.
 name: mail-imap-check
 
 on:
@@ -28,34 +29,39 @@ jobs:
           VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
             '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
           VARS=$(gql "$VQ")
-          USER=$(echo "$VARS" | jq -r '.data.variables.MAIL_USER // "contact@kelionai.app"')
-          PASS=$(echo "$VARS" | jq -r '.data.variables.MAIL_PASS // ""')
-          HOST=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_HOST // "mail.privateemail.com"')
-          PORT=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_PORT // "993"')
-          # Parola nu se afișează NICIODATĂ.
-          [ -n "$PASS" ] && echo "::add-mask::$PASS" || true
+          export H=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_HOST // "mail.privateemail.com"')
+          export PORT=$(echo "$VARS" | jq -r '.data.variables.MAIL_IMAP_PORT // "993"')
+          export U=$(echo "$VARS" | jq -r '.data.variables.MAIL_USER // "contact@kelionai.app"')
+          export PW=$(echo "$VARS" | jq -r '.data.variables.MAIL_PASS // ""')
+          [ -n "$PW" ] && echo "::add-mask::$PW" || true
 
-          echo "Cont: $USER   Server: $HOST:$PORT"
-          if [ -z "$PASS" ]; then
-            echo "❌ MAIL_PASS există ca nume, dar VALOAREA E GOALĂ — de-aia emailul nu merge."
+          echo "Cont: $U   Server: $H:$PORT"
+          if [ -z "$PW" ]; then
+            echo "❌ MAIL_PASS există ca nume, dar VALOAREA E GOALĂ."
             exit 0
           fi
 
-          # Escape pentru string-ul IMAP (\\ și ") — ca o parolă cu simboluri să nu strice comanda.
-          ESC=$(printf '%s' "$PASS" | sed 's/\\/\\\\/g; s/"/\\"/g')
-          echo "::add-mask::$ESC"
-
-          # LOGIN IMAP real peste TLS. 'a OK' = autentificare reușită.
-          OUT=$(printf 'a login "%s" "%s"\r\na logout\r\n' "$USER" "$ESC" \
-            | timeout 25 openssl s_client -quiet -crlf -connect "$HOST:$PORT" 2>/dev/null | tr -d '\r')
-
-          echo "--- răspuns server (doar liniile de protocol, fără parolă) ---"
-          echo "$OUT" | grep -E '^(a |\* )' | head -12 || true
-          echo "-------------------------------------------------------------"
-          if echo "$OUT" | grep -qiE '^a OK'; then
-            echo "✅ CONEXIUNE IMAP REUȘITĂ — parola e corectă, contact@kelionai.app se autentifică. Emailul funcționează; Inbox e gol doar fiindcă n-au venit scrisori."
-          elif echo "$OUT" | grep -qiE '^a (NO|BAD)'; then
-            echo "❌ AUTENTIFICARE RESPINSĂ de server — parola MAIL_PASS e greșită/expirată sau contul e blocat. ASTA trebuie reparat."
-          else
-            echo "⚠️ Fără verdict clar (rețea/port/host). Verific manual dacă e nevoie."
-          fi
+          # Client IMAP real. login() reușit = parola corectă; excepția de auth =
+          # respins. Parola NU se afișează niciodată (doar tipul/mesajul erorii).
+          python3 - <<'PY'
+          import imaplib, os
+          host, port = os.environ['H'], int(os.environ['PORT'])
+          user, pw = os.environ['U'], os.environ['PW']
+          try:
+              M = imaplib.IMAP4_SSL(host, port, timeout=20)
+          except Exception as e:
+              print(f"⚠️ NU M-AM PUTUT CONECTA la {host}:{port} de pe runner ({type(e).__name__}: {str(e)[:100]}).")
+              print("   Nu dovedește că e stricat — poate rețeaua GitHub nu ajunge la server; contează cum se conectează Railway.")
+              raise SystemExit(0)
+          try:
+              M.login(user, pw)
+              try:
+                  typ, data = M.select('INBOX', readonly=True)
+                  n = data[0].decode() if data and data[0] else '?'
+                  print(f"✅ LOGIN IMAP REUȘIT — parola e corectă, {user} se autentifică. INBOX are {n} mesaje. Emailul FUNCȚIONEAZĂ.")
+              except Exception:
+                  print(f"✅ LOGIN IMAP REUȘIT — parola e corectă, {user} se autentifică. Emailul FUNCȚIONEAZĂ.")
+              M.logout()
+          except imaplib.IMAP4.error as e:
+              print(f"❌ AUTENTIFICARE RESPINSĂ — parola MAIL_PASS e greșită/expirată sau contul blocat. ({str(e)[:120]})")
+          PY
