@@ -7,7 +7,7 @@
 // is re-served by Opus 4.8 and Fable is rested for 10 minutes; after that it is
 // probed again and, once healthy, becomes primary once more — automatically.
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 
 const BASE = process.env.KELION_BASE ?? 'https://kelionai.app'
 const SECRET = readFileSync('/root/kelion/bridge-secret.txt', 'utf8').trim()
@@ -58,6 +58,35 @@ Conversația:
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`)
+}
+
+// FIȘIERE ATAȘATE (Adrian, 10 iul: „dacă trimit poza cu textul nu merge").
+// Cauza: jobul PURTA fișierele (job.files), dar workerul le ignora complet, deci
+// pozele nu ajungeau niciodată la creier. Acum le scriem pe disc în /root/kelion
+// (deja în --add-dir) și-i spunem creierului calea, ca să le citească/privească.
+const INBOX = '/root/kelion/inbox'
+function saveJobFiles(job) {
+  const files = Array.isArray(job.files) ? job.files : []
+  if (!files.length) return ''
+  const paths = []
+  try {
+    mkdirSync(INBOX, { recursive: true })
+  } catch {}
+  for (const f of files) {
+    try {
+      const b64 = String(f?.data || '').split(',').pop() || ''
+      if (!b64) continue
+      const safe = String(f?.name || 'fisier').replace(/[^\w.\-]+/g, '_').slice(0, 80)
+      const p = `${INBOX}/${job.id.slice(0, 8)}_${safe}`
+      writeFileSync(p, Buffer.from(b64, 'base64'))
+      paths.push(p)
+    } catch (e) {
+      log(`nu am putut scrie un fisier atasat: ${e.message}`)
+    }
+  }
+  if (!paths.length) return ''
+  log(`${paths.length} fisier(e) atasat(e) scrise pentru creier.`)
+  return `\n\nFIȘIERE ATAȘATE de Adrian (citește-le/privește-le cu uneltele tale — Read — ÎNAINTE să răspunzi):\n${paths.map((p) => `- ${p}`).join('\n')}\n`
 }
 
 // VITEZA MAXIMĂ (Adrian, 10 iul: „creierul Linux e foarte încet"). Cauza reală:
@@ -276,7 +305,9 @@ for (;;) {
     }, 150)
     let answer
     try {
-      answer = await askClaude(job.prompt, onChunk)
+      // Atașează pozele/fișierele jobului (dacă există) la prompt.
+      const fileNote = saveJobFiles(job)
+      answer = await askClaude(job.prompt + fileNote, onChunk)
     } finally {
       clearInterval(pulse)
       flush() // orice bucată rămasă în tampon pleacă acum
