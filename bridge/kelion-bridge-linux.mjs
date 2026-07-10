@@ -174,6 +174,77 @@ function claudeArgs({ streaming, model, hasFiles, pub }) {
 // /root/kelion ar primi pe furiș contextul privat. Public → rulează din /tmp.
 const spawnOpts = (pub) => (pub ? { env: process.env, cwd: '/tmp' } : { env: process.env })
 
+// ── PROCESE DE GARDĂ PUBLICE (#7 latență, Adrian 10 iul) ─────────────────────
+// Jobul public rulează într-un proces `claude` PROASPĂT (izolare: un proces = UN
+// vizitator = O tură; între vizitatori nu se scurge nimic). Pornirea procesului
+// costa însă 1–4s la FIECARE mesaj. Aici ținem 2 procese DEJA PORNITE care
+// așteaptă pe stdin: jobul public ia unul gata încălzit (plătește doar gândirea
+// modelului, nu boot-ul), iar în loc se naște imediat alt standby. Izolarea
+// rămâne identică — procesul e folosit O dată și moare.
+const pubStandby = [] // { child, model, born, dead }
+const STANDBY_TARGET = 2 // cât PUBLIC_MAX — un val de 2 vizitatori pornește cald
+const STANDBY_MAX_AGE = 10 * 60_000 // reciclare: un proces stătut se aruncă
+
+function spawnStandby() {
+  const model = brainModel()
+  let child
+  try {
+    child = spawn(CLAUDE, claudeArgs({ streaming: true, model, hasFiles: false, pub: true }), spawnOpts(true))
+  } catch {
+    return null
+  }
+  const entry = { child, model, born: Date.now(), dead: false }
+  child.on('error', () => {
+    entry.dead = true
+  })
+  child.on('close', () => {
+    entry.dead = true
+    const i = pubStandby.indexOf(entry)
+    if (i !== -1) pubStandby.splice(i, 1)
+  })
+  return entry
+}
+function fillStandby() {
+  while (pubStandby.length < STANDBY_TARGET) {
+    const e = spawnStandby()
+    if (!e) break
+    pubStandby.push(e)
+  }
+}
+// Ia un proces cald potrivit (modelul curent, nu prea bătrân); nepotrivitele se
+// aruncă. Locul golit se umple imediat pentru vizitatorul următor.
+function takeStandby() {
+  while (pubStandby.length) {
+    const e = pubStandby.shift()
+    if (e.dead) continue
+    if (e.model !== brainModel() || Date.now() - e.born > STANDBY_MAX_AGE) {
+      try {
+        e.child.kill()
+      } catch {}
+      continue
+    }
+    setTimeout(fillStandby, 10)
+    return e
+  }
+  setTimeout(fillStandby, 10)
+  return null
+}
+// Reciclare periodică: standby-urile îmbătrânite mor și se nasc altele — mereu
+// procese tinere, pe modelul curent.
+setInterval(() => {
+  for (const e of [...pubStandby]) {
+    if (e.dead || e.model !== brainModel() || Date.now() - e.born > STANDBY_MAX_AGE) {
+      try {
+        e.child.kill()
+      } catch {}
+      const i = pubStandby.indexOf(e)
+      if (i !== -1) pubStandby.splice(i, 1)
+    }
+  }
+  fillStandby()
+}, 60_000)
+fillStandby() // de la pornire: primul vizitator prinde deja un proces cald
+
 // ── SESIUNEA CALDĂ (chatul adminului) ───────────────────────────────────────
 // UN proces `claude` viu, în modul conversație (stream-json pe stdin): prima
 // tură îl amorsează cu contextul complet (context.md + preambul + pachetul
@@ -323,10 +394,10 @@ function askWarm(job, onChunk, cancel) {
   return s.ask(text, onChunk)
 }
 
-function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel } = {}) {
+function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel, warmChild } = {}) {
   return new Promise((resolve) => {
-    const args = claudeArgs({ streaming: true, model, hasFiles, pub })
-    const child = spawn(CLAUDE, args, spawnOpts(pub))
+    // Proces de gardă deja pornit (public) → sare peste boot; altfel spawn clasic.
+    const child = warmChild ?? spawn(CLAUDE, claudeArgs({ streaming: true, model, hasFiles, pub }), spawnOpts(pub))
     cancel?.attach(child)
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
@@ -436,7 +507,18 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
   // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
   // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
   // se ating decât la rațiune grea; cascada e scurtă, nu 4×120s ca înainte.
-  let answer = await runClaudeStream(full, { timeoutMs: 90_000, model, onChunk, hasFiles, pub: isPublic, cancel })
+  // Public fără fișiere → proces de gardă (boot-ul deja făcut → primul cuvânt
+  // mult mai devreme). Modelul standby-ului e garantat cel curent (takeStandby).
+  const standby = isPublic && !hasFiles ? takeStandby() : null
+  let answer = await runClaudeStream(full, {
+    timeoutMs: 90_000,
+    model,
+    onChunk,
+    hasFiles,
+    pub: isPublic,
+    cancel,
+    warmChild: standby?.child,
+  })
   if (cancel?.cancelled) return answer
   if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles, pub: isPublic, cancel })
   if (cancel?.cancelled) return answer
