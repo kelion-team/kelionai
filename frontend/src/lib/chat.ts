@@ -46,6 +46,9 @@ export interface ChatControl {
   lang?: string
   // Out of credit — the client should open the top-up (buy credit) flow.
   paywall?: boolean
+  // Puls de viață de la server cât gândește creierul (nimic de afișat) — ține
+  // conexiunea deschisă prin Cloudflare și hrănește ceasul de gardă de mai jos.
+  ping?: number
   // The server has received the message — the delivery check mark in the UI.
   receipt?: boolean
   // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT pe care
@@ -204,15 +207,36 @@ export async function* streamChat(
     }
   }
 
+  // CEAS DE GARDĂ (înghețul din 10 iul): o conexiune moartă dar „deschisă" nu
+  // aruncă niciodată din read() — tura rămânea blocată la nesfârșit și chatul
+  // „ignora" tot ce scriai. Serverul pulsează {ping} la fiecare ≤15s de tăcere,
+  // deci 50s fără NICIUN octet = fir mort sigur → tratăm ca pe o cădere: resume,
+  // iar dacă nici asta nu merge, tura se închide ('offline') și chatul se
+  // deblochează (mesajele scrise între timp pornesc singure).
+  const READ_SILENCE_MS = 50_000
   for (;;) {
     let chunk: ReadableStreamReadResult<Uint8Array>
+    let watchdog: number | undefined
     try {
-      chunk = await reader.read()
+      chunk = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, rej) => {
+          watchdog = window.setTimeout(() => rej(new Error('silent')), READ_SILENCE_MS)
+        }),
+      ])
     } catch {
-      // The stream dropped mid-reply (signal lost). Try to resume where we left
-      // off; only if that fails do we surface 'offline' (partial answer stays).
+      // The stream dropped mid-reply (signal lost) OR went silent past the
+      // watchdog. Kill the old reader, try to resume where we left off; only
+      // if that fails do we surface 'offline' (partial answer stays).
+      try {
+        void reader.cancel()
+      } catch {
+        /* reader deja mort */
+      }
       if (await resume()) continue
       throw new Error('offline')
+    } finally {
+      window.clearTimeout(watchdog)
     }
     if (chunk.done) break
     const text = decoder.decode(chunk.value, { stream: true })

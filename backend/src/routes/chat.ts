@@ -967,14 +967,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     startTurn(turnId)
     const rawWrite = reply.raw.write.bind(reply.raw)
     const rawEnd = reply.raw.end.bind(reply.raw)
+    // ÎNGHEȚUL DIN 10 IUL: cât gândește creierul (60–80s legitim), pe fir nu
+    // pleca NICIUN octet — Cloudflare taie conexiunea tăcută (QUIC reset pe
+    // /api/chat, 524 pe /resume după 100s), tura moare, iar aplicația așteaptă
+    // la nesfârșit o tură moartă (chatul „ignoră"). Plasa: la fiecare 15s de
+    // tăcere trimitem un cadru de control {ping} — ține conexiunea vie prin
+    // Cloudflare și intră în bufferul de resume ca orice alt octet. Aplicația
+    // îl ignoră (câmp necunoscut), dar ceasul ei de gardă îl vede ca semn de viață.
+    let lastByteAt = Date.now()
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
+      lastByteAt = Date.now()
       if (typeof chunk === 'string') appendTurn(turnId, chunk)
       return (rawWrite as (...a: unknown[]) => boolean)(chunk, ...rest)
     }) as typeof reply.raw.write
+    const pingTimer = setInterval(() => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return
+      if (Date.now() - lastByteAt >= 15_000) reply.raw.write(`${CTRL}{"ping":1}${CTRL}`)
+    }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
+      clearInterval(pingTimer)
       finishTurn(turnId)
       return (rawEnd as (...a: unknown[]) => unknown)(...args)
     }) as typeof reply.raw.end
+    // Client plecat (tab închis, net picat) fără end(): oprește pulsul oricum.
+    reply.raw.on('close', () => clearInterval(pingTimer))
     // Announce the turn id FIRST so the client can resume from the very start.
     reply.raw.write(`${CTRL}${JSON.stringify({ turn: turnId })}${CTRL}`)
     // A language switch committed server-side this turn: tell the client so
