@@ -1,6 +1,7 @@
-# DIAGNOSTIC ASR (doar-citire): în ce REGIUNE acceptă Google chirp_3 streaming
-# pentru proiectul nostru. Verdictul anterior: us-central1 NU are chirp_3
-# (chirp_2 da). Probăm regiunile candidate cu cheia reală.
+# DIAGNOSTIC: ULTIMELE DEPLOYMENT-URI RAILWAY (doar-citire, NU atinge producția).
+# Rulează pe pull_request. Listează ultimele 6 deployment-uri cu status/oră
+# exactă/commit, apoi scoate jurnalul de BUILD pentru orice deployment care NU
+# a reușit — ca să vedem EXACT ce a picat și când, nu să presupunem.
 
 name: brain-diag
 
@@ -13,7 +14,7 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: chirp_3 streaming — matrice pe regiuni
+      - name: Ultimele 6 deployment-uri Railway — status, ora, commit, jurnal de build la eșec
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
@@ -22,41 +23,21 @@ jobs:
           gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
           RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
           P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0]')
-          PID=$(echo "$P" | jq -r '.id'); ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
           SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
-          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
-          gql "$VQ" | jq -r '.data.variables.GOOGLE_SERVICE_ACCOUNT_JSON // empty' > /tmp/sa.json
-          [ -s /tmp/sa.json ] || { echo "::error::GOOGLE_SERVICE_ACCOUNT_JSON lipsă"; exit 0; }
-          npm i --no-save --silent @google-cloud/speech >/dev/null 2>&1
-          node - <<'EOF'
-          const { v2 } = require('@google-cloud/speech')
-          const creds = require('/tmp/sa.json')
-          const pid = creds.project_id
-          const base = { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 }
-          const REGIONS = ['us', 'eu', 'us-east1', 'us-west1', 'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4', 'asia-southeast1', 'northamerica-northeast1', 'global']
-          const silence = Buffer.alloc(16000)
-          async function probe(region, langs) {
-            const ep = region === 'global' ? 'speech.googleapis.com' : `${region}-speech.googleapis.com`
-            const rec = `projects/${pid}/locations/${region}/recognizers/_`
-            const client = new v2.SpeechClient({ credentials: creds, projectId: pid, apiEndpoint: ep })
-            return new Promise((resolve) => {
-              let done = false
-              let s
-              const fin = (msg) => { if (!done) { done = true; console.log(`chirp_3 @ ${region} [${langs}] -> ${msg}`); try { s && s.end() } catch {} resolve() } }
-              try { s = client._streamingRecognize() } catch (e) { return fin(`SPAWN FAIL: ${e.message}`) }
-              s.on('error', (e) => fin(`EROARE: [${e.code ?? '?'}] ${String(e.message).slice(0, 160)}`))
-              s.on('data', () => fin('OK - acceptat (a raspuns)'))
-              setTimeout(() => fin('OK - nicio eroare in 4s (acceptat)'), 4000)
-              try {
-                s.write({ recognizer: rec, streamingConfig: { config: { model: 'chirp_3', languageCodes: [langs], explicitDecodingConfig: base }, streamingFeatures: { interimResults: true } } })
-                s.write({ audio: silence })
-              } catch (e) { fin(`WRITE FAIL: ${e.message}`) }
-            })
-          }
-          ;(async () => {
-            for (const r of REGIONS) await probe(r, 'auto')
-            console.log('--- si cu ro-RO in regiunile-cheie ---')
-            for (const r of ['us', 'eu', 'europe-west4']) await probe(r, 'ro-RO')
-          })()
-          EOF
+          echo "proiect=$PID mediu=$ENVID serviciu=$SVCID"
+
+          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:6,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status createdAt updatedAt meta}}}}",variables:{p:$p,e:$e,s:$s}}')
+          DEPS=$(gql "$DQ")
+          echo "=== ULTIMELE 6 DEPLOYMENT-URI (cele mai noi primele) ==="
+          echo "$DEPS" | jq -r '.data.deployments.edges[].node | "\(.createdAt)  status=\(.status)  id=\(.id)  meta=\(.meta)"'
+
+          echo "$DEPS" | jq -r '.data.deployments.edges[].node | select(.status!="SUCCESS") | .id' | while read -r DID; do
+            [ -z "$DID" ] && continue
+            echo ""
+            echo "=== JURNAL BUILD pentru deployment $DID (status non-SUCCESS) ==="
+            LQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){buildLogs(deploymentId:$d,limit:200){message severity timestamp}}",variables:{d:$d}}')
+            gql "$LQ" | jq -r '.data.buildLogs[]? | "\(.timestamp) [\(.severity)] \(.message)"' | tail -60
+          done
