@@ -903,6 +903,12 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                           {r.lang && <span>limbă {r.lang}</span>}
                           <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
                         </div>
+                        {r.topic && (
+                          <div className="vis-interest">
+                            ce l-a interesat: „{r.topic.slice(0, 160)}
+                            {r.topic.length > 160 ? '…' : ''}"
+                          </div>
+                        )}
                       </div>
                     )
                   })}

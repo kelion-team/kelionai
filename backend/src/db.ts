@@ -985,6 +985,9 @@ export interface DemoRecent {
   // For a DEMO row: the throwaway email whose conversation the owner can open.
   // Empty for plain visits (they never chatted).
   session_email: string
+  // CE L-A INTERESAT: prima întrebare/temă a vizitatorului din proba demo (semnal
+  // real de interes). Gol pentru vizitele fără chat.
+  topic: string
 }
 
 export interface DemoStats {
@@ -1049,14 +1052,18 @@ export async function getDemoStats(): Promise<DemoStats> {
         is_bot: boolean
         started_at: string
         session_email: string
+        topic: string
       }>(
         `SELECT * FROM (
-           SELECT 'demo'::text AS kind, ip, country, country_code, city, region, isp,
-                  browser, os, device, lang, referrer, is_bot, started_at, session_email
-           FROM demo_uses
+           SELECT 'demo'::text AS kind, d.ip, d.country, d.country_code, d.city, d.region, d.isp,
+                  d.browser, d.os, d.device, d.lang, d.referrer, d.is_bot, d.started_at, d.session_email,
+                  COALESCE((SELECT m.content FROM messages m
+                            WHERE m.user_email = d.session_email AND m.role = 'user'
+                            ORDER BY m.created_at ASC LIMIT 1), '') AS topic
+           FROM demo_uses d
            UNION ALL
            SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
-                  browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email
+                  browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email, '' AS topic
            FROM visits
          ) AS x ORDER BY started_at DESC LIMIT 60`,
       )
@@ -1076,6 +1083,7 @@ export async function getDemoStats(): Promise<DemoStats> {
       is_bot: r.is_bot,
       started_at: r.started_at,
       session_email: r.session_email,
+      topic: r.topic ?? '',
     }))
     return {
       total: Number(counts?.total ?? 0),
