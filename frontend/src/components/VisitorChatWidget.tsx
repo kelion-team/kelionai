@@ -91,14 +91,14 @@ export default function VisitorChatWidget() {
       {open && (
         <div className="vchat-panel">
           <div className="vchat-head">
-            <span>Scrie-ne — îți răspundem live</span>
-            <button type="button" className="vchat-x" onClick={() => setOpen(false)} aria-label="Închide">
+            <span>Message us — we reply live</span>
+            <button type="button" className="vchat-x" onClick={() => setOpen(false)} aria-label="Close">
               ×
             </button>
           </div>
           <div className="vchat-log">
             {msgs.length === 0 && (
-              <p className="vchat-hint">Salut! Lasă-ne un mesaj și îți răspundem cât mai repede.</p>
+              <p className="vchat-hint">Hi! Leave us a message and we'll reply as soon as we can.</p>
             )}
             {msgs.map((m) => (
               <div key={m.id} className={`vchat-bubble ${m.role === 'owner' ? 'owner' : 'me'}`}>
@@ -111,7 +111,7 @@ export default function VisitorChatWidget() {
             <input
               className="vchat-input"
               value={text}
-              placeholder="Mesajul tău…"
+              placeholder="Your message…"
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void send()
