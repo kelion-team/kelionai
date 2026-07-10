@@ -1,0 +1,85 @@
+# Aduce codul workerului punții (kelion-bridge-linux.mjs) la zi pe VPS și
+# repornește puntea — ca modificările din master (ex. STREAMING pentru viteză)
+# să intre în producție. Backend-ul se publică singur pe Railway la merge, DAR
+# workerul de pe VPS rulează dintr-o clonă locală care trebuie adusă cu git pull.
+#
+# NON-DISTRUCTIV: `git pull --ff-only`. Dacă VPS-ul are commituri locale
+# (ex. auto-repair) care nu se pot avansa curat, se OPREȘTE și raportează —
+# nu calcă peste munca locală. Parola root a VPS-ului se dă ca input (mascată).
+
+name: bridge-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      vps_pass:
+        description: 'Parola root VPS (mascată; nu se salvează)'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Adu workerul la zi pe VPS și repornește puntea
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          VPS_PASS: ${{ inputs.vps_pass }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$VPS_PASS"
+          VPS_HOST=164.68.120.87
+
+          # BRIDGE_SECRET din Railway — doar pentru verificarea de sănătate la final.
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0]')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
+          [ -n "$SECRET" ] && echo "::add-mask::$SECRET" || echo "::warning::BRIDGE_SECRET lipsă — sar peste verificarea de sănătate"
+
+          # SSH pe VPS (runner-ul are internet direct, nu prin proxy).
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          # Găsește clona repo-ului, adu master NON-DISTRUCTIV, repornește puntea.
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<"EOS"
+            set -uo pipefail
+            REPO=""
+            for d in /root/kelion/repo /root/Kelionai /root/kelion; do
+              if [ -d "$d/.git" ] && [ -d "$d/bridge" ]; then REPO="$d"; break; fi
+            done
+            [ -z "$REPO" ] && { echo "NU găsesc clona repo-ului cu bridge/"; exit 1; }
+            cd "$REPO" || exit 1
+            echo "repo: $REPO (înainte: $(git rev-parse --short HEAD))"
+            git fetch origin master || { echo "git fetch a eșuat"; exit 1; }
+            if ! git pull --ff-only origin master; then
+              echo "⚠️ NU pot avansa curat (commituri locale pe VPS). Rezolvă manual (git status / git stash)."
+              exit 2
+            fi
+            echo "cod la zi: $(git rev-parse --short HEAD)"
+            systemctl restart kelion-bridge
+            sleep 4
+            echo "kelion-bridge → $(systemctl is-active kelion-bridge)"
+            echo "=== jurnal punte ==="
+            journalctl -u kelion-bridge -n 8 --no-pager -o cat | tail -8
+          EOS
+
+          # Verifică live că workerul e online după restart.
+          if [ -n "${SECRET:-}" ]; then
+            echo "=== verificare live /api/bridge/health ==="
+            ok=0
+            for i in $(seq 1 6); do
+              sleep 8
+              ST=$(curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/health || echo '{}')
+              echo "$ST"
+              if echo "$ST" | grep -q '"online":true'; then ok=1; break; fi
+            done
+            [ "$ok" = 1 ] && echo "✅ Puntea online cu codul nou (streaming activ)." || echo "::warning::Puntea încă nu raportează online."
+          fi
