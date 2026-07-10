@@ -28,7 +28,12 @@ function getAuth(): GoogleAuth | null {
   return auth
 }
 
-const REGION = 'us-central1'
+// REGIUNEA DOVEDITĂ (matrice live, 10 iul): chirp_3 NU EXISTĂ în us-central1
+// (eroarea exactă de la Google) — există în multi-regiunile 'us' și 'eu'.
+// 'eu' = latență minimă pentru utilizatorii europeni. Dimineața mergea pentru
+// că batch era chirp_2 (valid în us-central1); #37 l-a trecut pe chirp_3 și
+// a omorât TOATĂ vocea. Aceeași regiune și la streaming (asr-stream.ts).
+const REGION = 'eu'
 
 export async function asrRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { audio?: string; lang?: string } }>('/api/asr', async (req, reply) => {

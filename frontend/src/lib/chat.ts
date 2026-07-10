@@ -48,6 +48,10 @@ export interface ChatControl {
   paywall?: boolean
   // The server has received the message — the delivery check mark in the UI.
   receipt?: boolean
+  // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT pe care
+  // serverul îl predă creierului la această tură — trimis de pe server, nu un
+  // ecou local. Se afișează ca bandă distinctă, ca să se vadă ce „a auzit".
+  heard?: string
   // VOCEA CREIERULUI: MP3 (base64) sintetizat pe server (Chirp 3) și trimis prin
   // punte. Aplicația doar îl decodează + redă — nu sintetizează nimic local.
   audio?: string

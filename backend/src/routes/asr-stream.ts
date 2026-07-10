@@ -15,7 +15,11 @@ import { normalizeLang } from '../services/tts.js'
 // {partial|final|speech_begin|speech_end}. Ruta batch /api/asr rămâne NEATINSĂ
 // până la cutover (zero dublură DUPĂ cutover, nu în timpul lui).
 
-const REGION = 'us-central1'
+// REGIUNEA DOVEDITĂ (matrice live, 10 iul): chirp_3 NU EXISTĂ în us-central1 —
+// Google: 'The model "chirp_3" does not exist in the location named
+// "us-central1"'. Acceptat în 'us' și 'eu' (testat cu auto și ro-RO). 'eu' =
+// latență minimă pentru Adrian și utilizatorii europeni.
+const REGION = 'eu'
 // Cel mai avansat model cerut de Adrian. chirp_2 e dovedit în batch; chirp_3 e
 // Adrian confirmă: chirp_3 SUPORTĂ streaming → păstrăm chirp_3. Mic-ul mut la
 // primul deploy NU e de la model — bug-ul e pe drum (WS/auth/format), de găsit.
