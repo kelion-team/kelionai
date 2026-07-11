@@ -512,7 +512,17 @@ async function build(order) {
   const sumMatch = res.out.match(/SUMAR:\s*(.+)/)
   const title = (sumMatch ? sumMatch[1] : order.text).slice(0, 180)
   // Verdictul pleacă lui Adrian CU dovada atașată — niciodată „gata" gol.
-  if (v.ok) {
+  // GARDĂ ANTI-RECURSIVITATE (12 iul, Adrian: „ultimele 10 relesuri nu au
+  // existat — e un bug"): un ordin de PUBLICARE (generat de decide-approve,
+  // nu o cerere de cod nouă) nu se restagează NICIODATĂ ca release nou —
+  // altfel un mic commit administrativ (fără linie SUMAR:) ducea la titlul
+  // ordinului însuși devenind un release fantomă, aprobat la nesfârșit.
+  const isPublishOrder = /^RELEASE APROBAT DE ADRIAN:/.test(order.text)
+  if (v.ok && isPublishOrder) {
+    say(`✅ Ordin de publicare executat: ${v.proof}`)
+    await tellAdmin(`Am dus la capăt publicarea: ${title.slice(0, 120)}. Dovada: ${v.proof}.`)
+    pushProgress(100, 'Publicare executată')
+  } else if (v.ok) {
     say('🔍 Constructorul a trecut dovada — pornesc verificatorul independent GLM înainte de a declara gata')
     pushProgress(90, 'Verificare independentă GLM')
     const verdict = await runIndependentVerifier(order.text, title, v)

@@ -1459,6 +1459,31 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return { releases: await listStagedReleases(50) }
   })
+
+  // CURĂȚARE RELEASE-URI FANTOMĂ (12 iul, Adrian: „ultimele 10 relesuri cel
+  // puțin nu au existat"): respinge orice release ÎNCĂ PENDING al cărui titlu
+  // e produsul bug-ului de recursivitate descris mai sus (titlul începe cu
+  // „RELEASE APROBAT DE ADRIAN:" — nu e o lucrare reală, e un commit
+  // administrativ trivial reambalat). Gard secret, folosit o singură dată de
+  // Claude ca să golească coada de zgomot, apoi bug-ul rămâne imposibil (garda
+  // de mai sus îl oprește la sursă).
+  app.post('/api/bridge/releases/purge-phantom', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const all = await listStagedReleases(50)
+    let purged = 0
+    for (const r of all) {
+      if (r.status === 'pending' && /^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
+        await setReleaseStatus(r.id, 'rejected')
+        const ai = releaseAlerts.findIndex((a) => a.id === r.id)
+        if (ai !== -1) {
+          releaseAlerts.splice(ai, 1)
+        }
+        purged++
+      }
+    }
+    if (purged > 0) persistReleaseAlerts()
+    return { ok: true, purged }
+  })
   // Admin → approve or reject a staged release (the human gate).
   app.post<{ Body: { id?: string; decision?: 'approve' | 'reject' } }>(
     '/api/admin/releases/decide',
@@ -1489,7 +1514,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
         // /api/bridge/approved-releases): „da"-ul lui Adrian pornește ordinul
         // de publicare pe pipeline-ul verificat, nu o publicare directă.
-        if (r.status === 'approved') {
+        // GARDĂ ANTI-RECURSIVITATE (12 iul, Adrian: „ultimele 10 relesuri cel
+        // puțin nu au existat — e un bug"): ordinul de publicare trecea prin
+        // ACELAȘI build() al constructorului, care — dacă face doar un mic
+        // commit administrativ (ex. AI-HANDOFF.md) și nu produce SUMAR: —
+        // restagea titlul ORDINULUI ÎNSUȘI ca release nou de aprobat, cu
+        // „RELEASE APROBAT DE ADRIAN:" încă o dată în față. Fiecare aprobare
+        // genera altă „aprobare" fantomă. NU mai retrimitem un ordin de
+        // publicare pentru un release al cărui titlu e deja produsul unui
+        // astfel de ordin — se oprește lanțul chiar aici.
+        if (r.status === 'approved' && !/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
           bridgeRepair(
             `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
           )

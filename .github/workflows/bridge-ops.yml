@@ -23,7 +23,7 @@ on:
         description: 'Operațiunea'
         required: true
         type: choice
-        options: [health, orders-report, chat-tail, workorder, say, client-errors, files, tier-events]
+        options: [health, orders-report, chat-tail, workorder, say, client-errors, files, tier-events, purge-phantom-releases]
       text:
         description: 'Textul (doar pentru workorder/say)'
         required: false
@@ -91,5 +91,9 @@ jobs:
               # când a revenit singur la ordinea prestabilită (Adrian, 12 iul).
               curl -sS --max-time 20 -H "$H" "$B/api/bridge/tier-events" \
                 | jq -r '.events[] | "\(.at) [\(.worker)] \(.action): \(.from_tier // "—") → \(.to_tier)\(if .reason then " (" + (.reason|.[0:80]) + ")" else "" end)"' ;;
+            purge-phantom-releases)
+              # Curăță release-urile fantomă generate de bug-ul de recursivitate
+              # („RELEASE APROBAT DE ADRIAN: ...” restagiat pe sine — Adrian, 12 iul).
+              curl -sS --max-time 20 -X POST -H "$H" "$B/api/bridge/releases/purge-phantom" | jq . ;;
             *) echo "::error::operațiune necunoscută: $OP"; exit 1 ;;
           esac
