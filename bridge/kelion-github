@@ -1,0 +1,58 @@
+#!/bin/bash
+# MÂINILE GITHUB ALE LUI KELION (ordinul lui Adrian, 11 iul: „identic ca tine").
+# Aceleași operațiuni pe care le face Claude: PR, merge, deploy VERIFICAT,
+# citirea rulărilor. Token: /root/kelion/github-token.txt (pus prin vps-keys,
+# token fin-granulat DOAR pe repo-ul kelion-team/kelionai).
+#
+#   kelion-github pr <branch> "titlu" ["descriere"]   → deschide PR spre master
+#   kelion-github merge <numar-pr>                    → squash-merge
+#   kelion-github deploy                              → deploy.yml + verificare anti-fantomă
+#   kelion-github runs [workflow.yml]                 → ultimele rulări (stare+concluzie)
+#
+# REGULA DE FIER rămâne: NICIODATĂ railway up direct — doar `deploy` de aici,
+# care trece prin pipeline-ul cu verificarea că versiunea live CHIAR s-a schimbat.
+set -u
+REPO="kelion-team/kelionai"
+API="https://api.github.com/repos/$REPO"
+TOKEN=$(cat /root/kelion/github-token.txt 2>/dev/null || true)
+[ -z "$TOKEN" ] && { echo "EROARE: lipsește /root/kelion/github-token.txt (Adrian îl pune prin vps-keys)"; exit 1; }
+gh_api() { curl -sS --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
+
+cmd=${1:-}; shift || true
+case "$cmd" in
+  pr)
+    branch=${1:?branch}; title=${2:?titlu}; body=${3:-}
+    gh_api -X POST "$API/pulls" -d "$(jq -nc --arg h "$branch" --arg t "$title" --arg b "$body" \
+      '{title:$t, head:$h, base:"master", body:$b}')" | jq -r '.number // .message | "PR: \(.)"'
+    ;;
+  merge)
+    n=${1:?numar PR}
+    gh_api -X PUT "$API/pulls/$n/merge" -d '{"merge_method":"squash"}' | jq -r '.merged // .message | "merge: \(.)"'
+    ;;
+  deploy)
+    BEFORE=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+    echo "versiune înainte: $BEFORE"
+    CODE=$(gh_api -o /dev/null -w '%{http_code}' -X POST "$API/actions/workflows/deploy.yml/dispatches" -d '{"ref":"master"}')
+    [ "$CODE" != "204" ] && { echo "EROARE: dispatch deploy.yml → HTTP $CODE"; exit 1; }
+    echo "deploy.yml pornit — aștept verificarea anti-fantomă (versiunea TREBUIE să se schimbe)…"
+    for i in $(seq 1 60); do
+      sleep 8
+      NOW=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
+      if [ -n "$NOW" ] && [ "$NOW" != "$BEFORE" ] && [ "$NOW" != "{}" ]; then
+        echo "✅ PUBLICAT + VERIFICAT: $NOW"
+        exit 0
+      fi
+    done
+    echo "❌ Versiunea NU s-a schimbat în ~8 min — deploy eșuat sau fantomă. NU declara succes."
+    exit 1
+    ;;
+  runs)
+    wf=${1:-}
+    if [ -n "$wf" ]; then url="$API/actions/workflows/$wf/runs?per_page=5"; else url="$API/actions/runs?per_page=5"; fi
+    gh_api "$url" | jq -r '.workflow_runs[] | "\(.created_at)  \(.name)  \(.status)/\(.conclusion // "-")  \(.html_url)"'
+    ;;
+  *)
+    echo "folosire: kelion-github pr|merge|deploy|runs (vezi comentariile din script)"
+    exit 1
+    ;;
+esac
