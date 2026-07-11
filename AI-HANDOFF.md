@@ -1,11 +1,18 @@
 # KELIONAI — DOCUMENT COMPLET DE PRELUARE PENTRU ORICE AI
-*(actualizat 11 iulie 2026 — dacă deschizi acest fișier ca AI nou, aici ai TOT ce trebuie ca să lucrezi imediat)*
+*(actualizat 11 iulie 2026 — dacă deschizi acest fișier ca AI nou, aici ai TOT ce trebuie ca să lucrezi imediat, fără să mai explorezi de la zero)*
+
+> **DOCUMENT VIU — regulă obligatorie:** dacă schimbi cod, arhitectură, reguli sau
+> starea proiectului, **actualizează secțiunea relevantă de aici (și §13 Starea)
+> ÎNAINTE să închei sesiunea/PR-ul.** Nu există alt mecanism de auto-actualizare —
+> convenția asta E mecanismul. Un document de preluare depășit e mai periculos
+> decât unul lipsă (induce în eroare AI-ul următor). Vezi și §11.
 
 ## 0. Ce este proiectul
 **Kelionai** = asistent AI live la **https://kelionai.app**: avatar 3D (Ready Player Me),
 voce hands-free (wake word „Hey Kelion", TTS Chirp 3 HD, barge-in), vedere prin cameră,
-GPS, 14 skill-uri Google/tool-use, chat multilingv. Proprietar unic + singurul admin:
-**Adrian — adrianenc11@gmail.com**.
+GPS, 14+ skill-uri Google/tool-use, chat multilingv, browser live navigabil de Kelion,
+generare imagini, corectare transcriere. Proprietar unic + singurul admin:
+**Adrian — adrianenc11@gmail.com**. Repo: `kelion-team/kelionai` (GitHub).
 
 ## 1. REGULI NE-NEGOCIABILE (ordinea lui Adrian)
 1. **Vorbește cu Adrian în ROMÂNĂ.** Limba lui de chat cu Kelion e blocată permanent pe română; restul userilor pe detecție automată.
@@ -18,6 +25,8 @@ GPS, 14 skill-uri Google/tool-use, chat multilingv. Proprietar unic + singurul a
 8. Marcaje de sistem în producție (versiune sub QR, filigran): **ora Londrei**. Ora către utilizator: **a utilizatorului** (clientul trimite `now`/`tz` per tură).
 9. Toți userii au aceleași capabilități consumer (voce/față/ochi/GPS/Google); ingineria de cod la nivel Claude Code e pentru admin prin punte (userii obișnuiți = milestone sandbox).
 10. Nu atinge `C:\Users\adria\Downloads\k` (proiect vechi arhivat, doar pe mașina lui Adrian).
+11. **Autonomie „în lesă"** (`services/autonomy.ts`): max 20 reparații automate/24h; aceeași eroare de 2 ori → oprire, nu retry orb. Fără force-push, fără publicare fără „da"-ul lui Adrian (vezi `bridge/UNELTELE-LUI-KELION.md`).
+12. **Ține acest document la zi** — vezi banda de sus.
 
 ## 2. ARHITECTURA
 ```
@@ -28,9 +37,76 @@ GPS, 14 skill-uri Google/tool-use, chat multilingv. Proprietar unic + singurul a
         │                      abonamentul lui Adrian + paznic + builder + deployer]
         └── PWA/TWA/instalatoare = învelișuri live peste kelionai.app
 ```
-- **Frontend** `frontend/`: UI principal `src/components/ChatPanel.tsx`, scena 3D `src/pages/Stage.tsx`, landing+QR `src/pages/Landing.tsx`, voce `src/lib/voice.ts`, audio `src/lib/audioIO.ts` (anti-ecou: `VOICE_GAP_MS=1800` ține microfonul mut între propozițiile rostite — NU strica asta), versiune/update `src/lib/updateCheck.ts` (sursa UNICĂ a etichetei de versiune: filigran + sub QR; ora Londrei), setări client `src/components/CustomerSettings.tsx` (⚙: Preferințe, Credit cu mențiunea 25%, BYOK, Cont+ștergere), admin `src/components/AdminPanel.tsx` („Vezi chat" per user, „Tradu în română", Inbox live).
-- **Backend** `backend/src/`: rute în `routes/` — `chat.ts` (creierul: rutare admin→punte, public→punte, clienți→API; vocea din prima frază `createVoiceStream`; guardian de limbă; tool-use loop), `bridge.ts` (puntea: coadă joburi, `pull/ack/reply/reply-chunk`, `authed()` cu log de nepotrivire), `auth.ts` (Google OAuth, allowlist), `admin.ts`, `prefs.ts` (limbă/meserie/BYOK), `billing.ts` (credite Stripe), `me.ts` (auto-ștergere cont), `demo.ts`. Servicii în `services/`: `google.ts` (toate skill-urile + `webSearch` îmbogățit: knowledge graph, PAA, știri, related), `modelRouter.ts` (§4.3), `agents.ts` (memorie: recall + learn), `mailbox.ts` (contact@ + Inbox live), `lang.ts`, `tts.ts`+`pronounce.ts` (mod academic), `stripe.ts`.
-- **Puntea/VPS** `bridge/kelion-bridge-linux.mjs`: worker pe abonament; benzi separate admin/public (max 2 fiecare); sesiune caldă admin (`WARM_MAX_TURNS=8`); **sesiuni calde per-vizitator** (`warmPub`, plafon 6, LRU, stingere 10 min); **procese de gardă publice** (standby ×2, pre-pornite); puls la 3s; prima bucată de text pleacă instant. Alte fișiere: `repair.sh` (auto-reparare ANCORATĂ la origin/master + push în master la succes), `pornire-linux.sh` (sincronizare forțată la master), servicii systemd: `kelion-bridge`, `kelion-paznic`, `kelion-builder`, `kelion-deployer`.
+
+### 2.1 Frontend (`frontend/src/`)
+- **Pagini:** `pages/Stage.tsx` (scena 3D + orchestrarea UI), `pages/Landing.tsx` (site public + QR-uri).
+- **Componente:** `ChatPanel.tsx` (panoul de chat), `AdminPanel.tsx` („Vezi chat" per user, „Tradu în română", Inbox live, finanțe, useri), `CustomerSettings.tsx` (⚙ client: Preferințe, Credit cu mențiunea 25%, BYOK, Cont+ștergere), `ContactModal.tsx`, `WalletButton.tsx` (credit + reminder escaladant), `AvatarModel.tsx` (randare RPM + idle + lip-sync moderat intenționat), `AvatarLoading.tsx` (progres GLB ~9MB, altfel ecran negru pe mobil), `CameraView.tsx` (ochii lui Kelion — ascuns pe ecran, gard anti-cadru-negru), `CardView.tsx` (rezultate skill: email/calendar/tasks/Drive/contacts/search), `VisitorChatWidget.tsx` (chat live vizitator↔OWNER, nu AI, poll 3s).
+- **Lib (`src/lib/`):** `voice.ts`/`audioIO.ts` (voce — anti-ecou `VOICE_GAP_MS=1800` NU se atinge), `updateCheck.ts` (sursă unică versiune: filigran + sub QR, ora Londrei), `chat.ts` (streaming client, „ceas de gardă" 50s + `/api/chat/resume`), `admin.ts` (toate fetch-urile panoului admin), `api.ts` (auth Google + `startGoogleConnect` consimțământ incremental + `startDemo`), `camera.ts`, `fingerprint.ts` (anti-abuz demo, SHA-256 semnale browser), `i18n.ts` (7 limbi UI), `micStream.ts` (dictare live, pauză 3000ms închide fraza — „ordinul lui Adrian"), `recorder.ts` (clipuri promo admin), `turnManager.ts` (**COD MORT — neimportat**, vezi §10), `utteranceCoalescer.ts` (leagă fragmente STT, debounce 900ms), `wakelock.ts`, `workspace.ts` (mod monitor multi-taburi, o singură voce), `prefs.ts`, `billing.ts`, `languages.ts`.
+
+### 2.2 Backend (`backend/src/`)
+**Rute (`routes/`):**
+| Fișier | Ce face |
+|---|---|
+| `chat.ts` | Creierul: rutare admin→punte / public→punte / clienți→API; voce din prima frază; guardian limbă; tool-use loop; router model |
+| `bridge.ts` | Puntea: coadă joburi, `pull/ack/reply/reply-chunk`, `authed()` (log nepotrivire secret) |
+| `auth.ts` | Google OAuth, allowlist, consimțământ incremental |
+| `admin.ts` | Panou admin (useri, finanțe, gaps, inbox live, traducere) |
+| `prefs.ts` | Limbă/meserie/BYOK per user |
+| `billing.ts` | Credite Stripe, webhook 75/25 |
+| `me.ts` | Auto-ștergere cont (GDPR) |
+| `demo.ts` | Pornire probă gratuită + leads + chat vizitator |
+| `asr.ts` | Transcriere batch (Google STT v2, `chirp_3`, regiune `eu`) — costă bani |
+| `asr-stream.ts` | Transcriere live WebSocket, start/stop vorbire pentru barge-in |
+| `tts.ts` | Sinteză Chirp 3 HD, plafon 5000 car. — costă bani |
+| `correct.ts` | Corectare STT via Gemini (doar la încredere scăzută) — costă bani |
+| `image.ts` | Servește bytes-ii imaginilor generate |
+| `ingest.ts` | Document base64 → Markdown (Kelion citește fișiere) |
+| `mapview.ts` | Hartă Leaflet+OSRM cu GPS live, fără cheie Google (merge în iframe) |
+| `meserii.ts` | Lista rolurilor/personajelor disponibile |
+| `contact.ts` | Formular contact public, salvat mereu în DB + royal letter |
+| `greet.ts` | Salutul avatarului la hover pe landing (4 replici fixe, cache) |
+| `legal.ts` | `/privacy`, `/terms`, `/delete-account` static (cerut de Google verification) |
+
+**Servicii (`services/`):**
+| Fișier | Ce face |
+|---|---|
+| `google.ts` | Toate skill-urile Google + `webSearch` (Serper: answerBox+KG+PAA+news+related) |
+| `modelRouter.ts` | Router capabilitate↔cost — vezi §4.3 |
+| `agents.ts` | Memorie: `recallMemories`/`learnFromTurn` |
+| `mailbox.ts` | Poller contact@ + Inbox live (fetchRecentInbox, nu marchează citit) |
+| `mail.ts` | Client SMTP (Namecheap), scrisori „royal letter" cu referință KA-AN-NNNN |
+| `lang.ts` | Detecție limbă deterministă server-side |
+| `pronounce.ts` | Mod academic: pronunție acronime litere-cu-litere |
+| `stripe.ts` | Checkout + verificare webhook |
+| `autonomy.ts` | Lesa autonomiei: `budgetCheck` (20/24h), `sameFailure` (stop la eșec repetat) |
+| `commands.ts` | Interpretor comenzi dispozitiv server-side (cameră/monitor) — instant, fără cost model |
+| `feedback.ts` (+`.verify.ts`) | Re-cheamă creierul admin când constructor/tester termină (ready/pass/fail) |
+| `orders.ts` (+`.verify.ts`) | Registrul de ordine: conflict vs eroare, duplicate, raport de stadii |
+| `supervisor.ts` (+`.verify.ts`) | Supervizare agent constructor: wait/deploy-check/reassign (1×)/giveup |
+| `replayStore.ts` | Buffer reluare răspuns chat întrerupt (expiră 2 min) |
+| `speech-chunk.ts` | `splitForSpeech` — TTS începe din prima propoziție (folosit activ în chat.ts) |
+| `image.ts` (serviciul) | Generare imagini Gemini `2.5-flash-image` (service account, nu cheia gratuită) |
+| `linuxPackage.ts` | Construiește `/dl/Kelionai-linux.zip` on-the-fly, cache după prima construcție |
+| `markitdown.ts` | Document→Markdown via subprocess Python, timeout 30s |
+| `meserii.ts` (serviciul) | 15 „meserii" (Influencer, Avocat, Contabil...) cu `systemPromptAddon` |
+| `anthropic.ts` | Clientul Claude — O SINGURĂ cheie plătită, FĂRĂ cheie de rezervă (ordin) |
+| `browser.ts` (serviciul) | Browser real (Playwright/Chromium) navigabil de Kelion, gard SSRF, `/api/browser/shot/:id` |
+| `cost.ts` | Tabel prețuri reale per model/serviciu — date admin-only |
+
+### 2.3 Puntea/VPS (`bridge/`) — 164.68.120.87
+**ACTIV (rulează pe VPS acum):**
+- `kelion-bridge-linux.mjs` — workerul principal: benzi separate admin/public (max 2 fiecare); sesiune caldă admin (`WARM_MAX_TURNS=8`); **sesiuni calde per-vizitator** (`warmPub`, plafon 6, LRU, stingere 10 min); **procese de gardă publice** (standby ×2); puls 3s; prima bucată text instant.
+- `context.md` — briefing-ul privat trimis creierului admin la fiecare tură (cine e Adrian, arhitectura, banii, reguli); **NICIODATĂ** trimis joburilor `persona:'public'` (gard anti-scurgere).
+- `repair.sh` — reparație autonomă: ANCORATĂ la `origin/master` (nu la HEAD local vechi); succes → **push în master**.
+- `pornire-linux.sh` — sincronizare forțată VPS la `origin/master` + restart servicii.
+- `kelion-builder-server.mjs` — constructor headless pe VPS (servicul systemd `kelion-builder`): trage ordine, streamează pași, staghează release, așteaptă „da"-ul lui Adrian.
+- `blindare-punte.sh` (+ `BLINDEAZA-PUNTEA.cmd`) — hardening manual: systemd `Restart=always`, cron pază la 1 min.
+- `kelion-linux.cmd` — scurtătură SSH Windows→shell `claude` pe VPS (unealtă manuală Adrian).
+- `UNELTELE-LUI-KELION.md` — specificația contractului de unelte + reguli de decizie autonomă (referință validă, nu cod).
+
+**COD VECHI/ARHIVAT — era laptop Windows (înlocuită de migrarea pe VPS, 9 iul):** vezi §10.
+
+Servicii systemd pe VPS: `kelion-bridge`, `kelion-paznic`, `kelion-builder`, `kelion-deployer`.
 
 ## 3. RUTAREA CREIERULUI (cine răspunde cui) — chat.ts
 - **Admin (Adrian)** → puntea (worker `claude` pe VPS = echivalent Claude Code, cu context privat + memorie + fișiere). Punte jos → mesaj cinstit (NU cădea pe API — ordin).
@@ -40,7 +116,7 @@ GPS, 14 skill-uri Google/tool-use, chat multilingv. Proprietar unic + singurul a
 
 ## 4. SISTEME CHEIE
 ### 4.1 Memoria (dublată, #20)
-Tabel `memories` (namespace per agent). `recallMemories` (DB pur, în paralel — zero latență) injectat în system prompt; `learnFromTurn` (Haiku, fire-and-forget) învață fapte; **tool-uri pentru TOȚI userii**: `list_memories` („ce știi despre mine?"), `forget_memory` („uită că…" → `deleteMemory` ILIKE); **continuitate**: pauză >45 min → prompt de „reîntâlnire". Notițe explicite = tabel separat (`save_note`/`list_notes`/`delete_note`).
+Tabel `memories` (namespace per agent). `recallMemories` (DB pur, în paralel — zero latență) injectat în system prompt; `learnFromTurn` (Haiku, fire-and-forget) învață fapte; **tool-uri pentru TOȚI userii**: `list_memories` („ce știi despre mine?"), `forget_memory` („uită că…" → `deleteMemory` ILIKE); **continuitate**: pauză >45 min → prompt de „reîntâlnire". Notițe explicite = tabel separat (`save_note`/`list_notes`/`delete_note`). **Status real (corectează STATUS.md, care încă o listează la „Next"): LIVE, DONE.**
 ### 4.2 Limbă
 Admin blocat `ro-RO` (`adminLocked` în chat.ts). Restul: detecție deterministă server (`services/lang.ts`, comitere după 2 mesaje consecutive), guardian care re-servește o singură dată la limbă greșită. Mod academic: registru + pronunție acronime (`pronounce.ts`, `academicPronounce`).
 ### 4.3 Router model (capabilitate↔cost)
@@ -49,6 +125,10 @@ Admin blocat `ro-RO` (`adminLocked` în chat.ts). Restul: detecție determinist�
 Server: stall punte public 12s (era 45s); voce din prima frază; recall DB în paralel. Worker: standby ×2 + sesiuni calde per-vizitator + prima bucată instant + puls 3s. Țintă: tura 1 ~1–2s, turele 2+ <1s. Măsurătoare: workflow `public-latency-test` (sesiune demo reală de pe runner, IP proaspăt) sau scriptul din scratchpad.
 ### 4.5 Căutare web (#12)
 `webSearch` în `google.ts`: Serper cu answerBox + knowledgeGraph + peopleAlsoAsk + topStories/news + relatedSearches, 8 (max 12) rezultate; fallback Gemini grounded search. Cost: `SERPER_USD_PER_CALL`.
+### 4.6 Autonomie & reparare (buclă completă)
+`commands.ts` (interpretor server, instant) → creierul admin decide reparația → constructor (`kelion-builder-server.mjs`) execută → `orders.ts` ține registrul (conflict vs eroare, duplicate) → `supervisor.ts` verifică progresul (1 re-asignare, apoi giveup) → `feedback.ts` re-cheamă creierul admin cu verdictul → `autonomy.ts` plafonează totul (20 reparații/24h, stop la eroare repetată de 2×).
+### 4.7 Browser live + documente
+`services/browser.ts` — Chromium real navigabil de Kelion (o sesiune per user, gard SSRF, capturi `/api/browser/shot/:id`). `ingest.ts` + `markitdown.ts` — orice document (PDF/Word/Excel) → Markdown, tăiat la 120.000 car.
 
 ## 5. BANII (nu confunda portofelele!)
 | Portofel | Cine consumă | Unde se vede/încarcă |
@@ -57,6 +137,8 @@ Server: stall punte public 12s (era 45s); voce din prima frază; recall DB în p
 | **Cheia API platformă** (`ANTHROPIC_API_KEY` în Railway) | clienții plătitori fără BYOK | console.anthropic.com → Billing |
 | **Cheia clientului (BYOK)** | doar acel client | contul lui |
 | **Portofelele clienților în app** (Stripe) | creditele lor de chat; **din fiecare reîncărcare 75% credit client, 25% platformă** | kelionai.app (billing.ts, webhook `/api/credits/webhook`) |
+
+Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie platformă după caz): ASR (`ASR_USD_PER_CALL`), TTS Chirp 3 HD, Serper (`SERPER_USD_PER_CALL`), generare imagini Gemini, corectare Gemini.
 
 ## 6. DEPLOY — LECȚIA CRITICĂ „DEPLOY FANTOMĂ" (10 iul)
 **Simptom:** GitHub zicea „success", producția rămânea pe build vechi (rute noi 404).
@@ -74,25 +156,66 @@ Server: stall punte public 12s (era 45s); voce din prima frază; recall DB în p
 - `security-audit.yml`. **Notă:** `workflow_dispatch` merge doar de pe branch-ul default (master); de pe ramuri se declanșează prin `push:` cu filtru de `paths`.
 
 ## 8. MEDIU/SECRETE (nume, niciodată valori aici)
-Railway (serviciul `web`, production): `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID/SECRET`, `GOOGLE_REDIRECT_URI`, `SESSION_SECRET`, `DATABASE_URL`, `SERPER_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON` (TTS Chirp), `GEMINI_API_KEY`, `BRIDGE_SECRET` (28 car. — aceeași valoare TREBUIE să fie în `/root/kelion/bridge-secret.txt` pe VPS), `MAIL_*` (privateemail.com, contact@kelionai.app), `STRIPE_*`, `RAILWAY_TOKEN` doar în GitHub Secrets. GCloud proiect `gen-lang-client-0460348646` (API-urile Calendar/Gmail/Drive/Tasks/People/TTS trebuie ACTIVATE de Adrian; 403 pe un skill = API dezactivat, nu bug).
-VPS: `/root/kelion/repo` (clona), `/root/kelion/claude.env` (auth CLI), `/root/kelion/bridge-secret.txt`.
+**Railway** (serviciul `web`, production) — toate citite în `config.ts`:
+`NODE_ENV`, `PORT`, `ADMIN_EMAIL`, `ALLOWLIST`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_API_KEY`, `GOOGLE_MAPS_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON` (TTS Chirp), `GOOGLE_TTS_API_KEY`, `GOOGLE_TTS_VOICE`, `KELION_GOOGLE_CHIRP_TTS_STYLE`, `SESSION_SECRET`, `DATABASE_URL`, `SERPER_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `BRIDGE_SECRET` (28 car. — aceeași valoare TREBUIE să fie în `/root/kelion/bridge-secret.txt` pe VPS), `MAIL_IMAP_HOST/PORT`, `MAIL_SMTP_HOST/PORT`, `MAIL_USER`, `MAIL_PASS`, `MAIL_FORWARD_TO`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY`, `CREDIT_VALUE`, `USD_TO_CURRENCY`, `USER_SHARE`, `DEMO_CAP_PER_DAY`, `DEMO_SECONDS`, `OPEN_SIGNUP`, `AUTONOMY_DAILY_MAX`, `FRONTEND_DIST`, `FRONTEND_ORIGIN`, `KELION_FAST_MODEL` (opțional, §4.3), `KELION_TOP_MODEL` (opțional, §4.3).
+`RAILWAY_TOKEN` — DOAR în GitHub Secrets (nu în Railway).
+GCloud proiect `gen-lang-client-0460348646` (API-urile Calendar/Gmail/Drive/Tasks/People/TTS trebuie ACTIVATE de Adrian; 403 pe un skill = API dezactivat, nu bug).
+**Neconfigurate încă (din STATUS.md, verifică dacă s-au adăugat între timp):** `LIVEKIT_URL/API_KEY/API_SECRET` (full-duplex voice — există „în backup", nu setate), `VITE_GOOGLE_MAPS_KEY` (există „în backup"), **Picovoice** (nedisponibil — wake word merge pe Web Speech interimar).
+**VPS:** `/root/kelion/repo` (clona), `/root/kelion/claude.env` (auth CLI), `/root/kelion/bridge-secret.txt`.
+**Local:** copiază `backend/.env.example` → `backend/.env` și completează.
 
-## 9. COMENZI
+## 9. SCHEMA BAZEI DE DATE (Postgres, `db.ts`)
+`messages` (istoric chat), `user_prefs` (limbă/meserie/BYOK), `memories` (memorie învățată, per agent), `notes` (notițe explicite), `shared_memory` (caiet comun între cei doi Claude — admin+bridge), `wallets` (credite clienți), `billing_events`, `blocked_users`, `visits`/`demo_uses` (analytics + plafon probă gratuită), `leads` (emailuri lăsate de vizitatori), `contact_messages`, `inbound_emails` (mailbox contact@), `visitor_chats` (chat vizitator↔owner), `capability_gaps` („ce nu știe Kelion să facă" — cu triaj/escaladare), `work_orders` (coada persistentă a constructorului), `staged_releases` (release-uri care așteaptă aprobarea lui Adrian), `admin_pool` (pool provider/finanțe), `app_files`/`app_downloads` (instalatoare + jurnal descărcări), `generated_images`, `google_accounts` (refresh tokens), `cost_events` (cheltuieli reale per apel), `kv_state` (generic key-value, ex. `last_worker_seen`).
+
+## 10. COD VECHI/ARHIVAT — NU LUCRA AICI, NU-L TRATA CA SURSĂ DE ADEVĂR
+Era „laptop Windows", înlocuită integral de migrarea pe VPS (9 iul, „Laptop Eliminat" — STATUS.md):
+- `bridge/kelion-bridge.mjs` — workerul Windows original (caută `claude.exe` în `APPDATA`, citește secretul din `C:\Users\adria\...`). Predecesorul lui `kelion-bridge-linux.mjs`.
+- `bridge/kelion-bridge-hidden.vbs` — lansa ascuns `kelion-bridge.mjs` la login Windows.
+- `bridge/kelion-wake-agent.ps1` + `bridge/kelion-wake-launch.cmd` — agent PowerShell pe laptop, rol preluat de `kelion-builder-server.mjs` pe VPS.
+- `bridge/kelion-bridge-server.mjs` — prototip timpuriu al workerului VPS, depășit de `kelion-bridge-linux.mjs` (18 commituri de dezvoltare activă vs. o atingere incidentală).
+- `bridge/kelion-builder-sdk.mjs` — probă de concept pe `@anthropic-ai/claude-agent-sdk` (5 iul), neatinsă de atunci — păstrată, nu confirmat activă.
+- `frontend/src/lib/turnManager.ts` — mașină de stări pentru full-duplex, scrisă dar **niciodată importată** (confirmat: zero referințe în frontend).
+- `HANDOFF.md` (rădăcina proiectului) — presupune root Windows `C:\Users\adria\Kelionai`, pre-migrare VPS. **Înlocuit de acest document.**
+- `AUDIT-COD-MORT-2026-07-05.md` — raport istoric (5 iul), nu se actualizează; câteva concluzii ale lui sunt deja depășite (`speech-chunk.ts` a devenit activ ulterior).
+
+## 11. DOCUMENTE ÎN REPO — care e sursa de adevăr
+| Fișier | Stare | Folosește pentru |
+|---|---|---|
+| **`AI-HANDOFF.md`** (acesta) | **VIU, sursa principală** | preluare completă, orice AI nou |
+| `CLAUDE.md` | viu, scurt | auto-încărcat la fiecare sesiune → trimite aici |
+| `STATUS.md` | parțial depășit (9 iul) | istoric de milestone-uri + lista credențialelor neconfigurate (§8) — restul, verifică contra acestui document |
+| `HANDOFF.md` | **depășit** (presupune Windows/laptop) | doar valoare istorică |
+| `AUDIT-COD-MORT-2026-07-05.md` | **instantaneu istoric** (5 iul) | listă de pornire pentru curățenie, verifică înainte de a acționa (unele concluzii nu mai sunt valide) |
+| `README.md` | — | verifică dacă mai e la zi înainte de a te baza pe el |
+
+## 12. COMENZI
 ```bash
-# local
-cd backend  && npm run dev      # :8080      | npx tsc --noEmit | npx vitest run
-cd frontend && npm run dev      # :5173      | npx tsc -b && npx vite build
+# backend (din backend/)
+npm run dev         # tsx watch, :8080
+npm run build       # tsc → dist/
+npm run typecheck   # tsc --noEmit
+npm test            # vitest run
+npm run lint        # oxlint
+
+# frontend (din frontend/)
+npm run dev         # vite, :5173
+npm run build       # tsc -b && vite build
+npm run lint        # oxlint
+
+# worker
 node --check bridge/kelion-bridge-linux.mjs
-# fluxul de lucru al AI-ului: ramură → commit → push → PR → merge în master → deploy automat → VERIFICĂ LIVE
+
+# fluxul de lucru al AI-ului:
+# ramură → commit → push → PR → merge în master → deploy automat → VERIFICĂ LIVE
 ```
 
-## 10. STAREA LA 11 IULIE 2026 (dimineața) + CE URMEAZĂ
-- ✅ Live și verificat: setări client (⚙), căutare web max, router model, memorie dublată, stall 12s, ora Londrei, QR Linux → `/dl/Kelionai-linux.zip`, deploy-uri anti-fantomă. QR-uri: win → `Kelionai-Setup.exe` (NSIS real), apk → APK real (TWA), ios → site (PWA, fără App Store nu se poate altfel), play → Play Store.
+## 13. STAREA LA 11 IULIE 2026 (dimineața) + CE URMEAZĂ
+- ✅ Live și verificat: setări client (⚙), căutare web max, router model, memorie dublată (LIVE, nu „next"), stall 12s, ora Londrei, QR Linux → `/dl/Kelionai-linux.zip`, deploy-uri anti-fantomă. QR-uri: win → `Kelionai-Setup.exe` (NSIS real), apk → APK real (TWA), ios → site (PWA, fără App Store nu se poate altfel), play → Play Store.
 - 🔴 **ÎN AȘTEPTARE: o rulare `bridge-deploy` de către Adrian (parola root VPS)** — activează pe VPS: secretul corect + vânarea zombie-ului + workerul nou (standby + sesiuni calde per-vizitator). Fără ea, **chatul public/demo e MORT** (stall 12s → mesaj de eroare). După rulare: rulează `public-latency-test` și pune dovada <1s în tabelul de capabilități.
-- Milestone-uri nepornite: sandbox de cod per user obișnuit, aplicații native „full packaged" (iOS App Store etc.), Picovoice wake word, LiveKit full-duplex, carduri rezultate skill-uri, monetizare completă (Stripe 75/25 există pe webhook), panou admin extins.
-- Istoric PR-uri relevante: #72 (fantomă+setări), #73 (router+memorie+stall), #74 (secret VPS+zombie), #75 (standby), #76 (QR Linux), #77 (sesiuni calde per-vizitator + prima bucată instant + ora Londrei).
+- Milestone-uri nepornite: sandbox de cod per user obișnuit, aplicații native „full packaged" (iOS App Store etc.), Picovoice wake word, LiveKit full-duplex, carduri rezultate skill-uri (parțial — `CardView.tsx` există), monetizare completă (Stripe 75/25 există pe webhook), panou admin extins, curățare cod mort (`turnManager.ts` + orice altceva găsit de un audit nou).
+- Istoric PR-uri relevante: #72 (fantomă+setări), #73 (router+memorie+stall), #74 (secret VPS+zombie), #75 (standby), #76 (QR Linux), #77 (sesiuni calde per-vizitator + prima bucată instant + ora Londrei), #78 (acest document).
 
-## 11. CUM VERIFICI CĂ TOTUL E SĂNĂTOS (60 de secunde)
+## 14. CUM VERIFICI CĂ TOTUL E SĂNĂTOS (60 de secunde)
 ```bash
 curl -s https://kelionai.app/api/version            # {v,at} cu boot recent
 curl -s https://kelionai.app/health                 # 200
