@@ -677,7 +677,10 @@ export default function Stage({ user }: { user: User }) {
       </div>
       {/* Avatar canvas — shrinks to the top-right corner in monitor mode. */}
       <div ref={stageRef} className={`stage-canvas ${monitorOn ? 'pip' : ''}`}>
-      <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
+      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" — camera veche
+          (y 0.7, z 2.4) încadra doar bustul; trasă înapoi și centrată, silueta
+          încape întreagă (picioarele la −1.65, capul la ~+1.32) cu aer sus/jos. */}
+      <Canvas shadows camera={{ position: [0, 0.05, 4.8], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
         {!monitorOn && <color attach="background" args={['#0b0d12']} />}
