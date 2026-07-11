@@ -288,6 +288,12 @@ export async function initDb(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- DRIFT DE SCHEMĂ REAL (12 iul, prins de purge-phantom: eroare Postgres
+    -- 42703 „column branch does not exist"): tabelul a fost creat înainte ca
+    -- branch să fie adăugat în definiție, iar CREATE TABLE IF NOT EXISTS
+    -- e un no-op pe un tabel deja existent — coloana rămăsese lipsă pe
+    -- producție de la introducerea ei. Plasă de siguranță, ca la memories.
+    ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_releases ON staged_releases (status, at DESC);
     -- Tiny key-value state that must survive restarts (e.g. the bridge worker's
     -- last-seen beat — a deploy must never blink the Bridge light).
@@ -827,26 +833,39 @@ export interface StagedReleaseRow {
 
 export async function saveStagedRelease(id: string, title: string, detail: string, branch = ''): Promise<void> {
   if (!dbEnabled()) return
-  await getPool().query('INSERT INTO staged_releases (id, title, detail, branch) VALUES ($1,$2,$3,$4)', [
-    id,
-    title,
-    detail,
-    branch,
-  ])
+  try {
+    await getPool().query('INSERT INTO staged_releases (id, title, detail, branch) VALUES ($1,$2,$3,$4)', [
+      id,
+      title,
+      detail,
+      branch,
+    ])
+  } catch {
+    // Un release nesalvat nu are voie să dărâme constructorul — Adrian
+    // pierde o aprobare, nu tot fluxul.
+  }
 }
 
 export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<StagedReleaseRow>(
-    'SELECT id, title, detail, branch, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
-    [n],
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<StagedReleaseRow>(
+      'SELECT id, title, detail, branch, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
+      [n],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 export async function setReleaseStatus(id: string, status: string): Promise<void> {
   if (!dbEnabled()) return
-  await getPool().query('UPDATE staged_releases SET status=$2 WHERE id=$1', [id, status])
+  try {
+    await getPool().query('UPDATE staged_releases SET status=$2 WHERE id=$1', [id, status])
+  } catch {
+    /* non-fatal */
+  }
 }
 
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
