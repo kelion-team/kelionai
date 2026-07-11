@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { config } from './config.js'
+import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 
 let pool: pg.Pool | null = null
 
@@ -82,6 +83,11 @@ export async function initDb(): Promise<void> {
     -- scor de relevanță, nu doar un substring literal.
     CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
       USING GIN (to_tsvector('simple', content));
+    -- MEMORIE SEMANTICĂ (12 iul, foaia de parcurs #5): vectorul de înțeles al
+    -- amintirii (Gemini text-embedding-004), scris asincron la învățare.
+    -- JSONB, nu pgvector: fără extensii de instalat, cosine se calculează în
+    -- Node peste ultimele câteva sute — la volumul actual e instant.
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
     -- Prepaid credit wallet (Stripe). Balance is in the display currency (GBP);
     -- topup_ref = the credited amount of the LAST top-up, so we can show the
     -- "% of credit left" for the escalating low-credit alerts (30/20/10/5%).
@@ -1873,8 +1879,81 @@ export async function addMemory(email: string, content: string, agent = 'kelion'
        ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
       [email, agent, c],
     )
+    // Vectorul de înțeles, ASINCRON (nu ține tura pe loc): dacă embedding-ul
+    // pică, amintirea rămâne oricum — full-text-ul o găsește după cuvinte.
+    if (embeddingsEnabled()) {
+      void embedText(c)
+        .then((v) => {
+          if (!v) return
+          return getPool().query(
+            `UPDATE memories SET embedding = $4
+             WHERE user_email = $1 AND agent = $2 AND content = $3`,
+            [email, agent, c, JSON.stringify(v)],
+          )
+        })
+        .catch(() => {})
+    }
   } catch {
     // Never break the chat because memory write failed.
+  }
+}
+
+// BACKFILL (12 iul): amintirile de dinaintea memoriei semantice primesc și ele
+// vector, în loturi mici (apelat periodic din index.ts) — după câteva ore tot
+// trecutul e căutabil după sens. Cost neglijabil (embeddings Gemini).
+export async function backfillMemoryEmbeddings(batch = 40): Promise<number> {
+  if (!dbEnabled() || !embeddingsEnabled()) return 0
+  try {
+    const r = await getPool().query<{ id: string; content: string }>(
+      `SELECT id, content FROM memories WHERE embedding IS NULL ORDER BY last_seen DESC LIMIT $1`,
+      [batch],
+    )
+    let done = 0
+    for (const row of r.rows) {
+      const v = await embedText(row.content)
+      if (!v) continue
+      await getPool().query(`UPDATE memories SET embedding = $2 WHERE id = $1`, [
+        row.id,
+        JSON.stringify(v),
+      ])
+      done++
+    }
+    return done
+  } catch {
+    return 0
+  }
+}
+
+// RECALL SEMANTIC (12 iul): amintirile cele mai apropiate ca SENS de întrebare
+// — completează full-text-ul (care cere cuvinte comune). Vectorii ultimelor
+// ~400 de amintiri se compară în Node (cosine); prag ca să nu injectăm zgomot.
+export async function semanticMemories(
+  email: string,
+  agent: string,
+  query: string,
+  limit = 8,
+): Promise<Memory[]> {
+  if (!dbEnabled() || !embeddingsEnabled()) return []
+  try {
+    const qv = await embedText(query)
+    if (!qv) return []
+    const r = await getPool().query<{ content: string; embedding: number[] | null }>(
+      `SELECT content, embedding FROM memories
+       WHERE user_email = $1 AND agent = $2 AND embedding IS NOT NULL
+       ORDER BY last_seen DESC LIMIT 400`,
+      [email, agent],
+    )
+    return r.rows
+      .map((row) => ({
+        content: row.content,
+        score: Array.isArray(row.embedding) ? cosine(qv, row.embedding) : 0,
+      }))
+      .filter((x) => x.score > 0.45)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((x) => ({ content: x.content }))
+  } catch {
+    return []
   }
 }
 
