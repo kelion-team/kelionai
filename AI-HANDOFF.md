@@ -160,6 +160,9 @@ Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie plat
 - `railway-deploy-status.yml` — diagnostic doar-citire: sursa serviciului, repoTriggers, ultimele deploy-uri (cine+de ce), build/deploy logs.
 - `railway-env-check.yml` — listează NUMELE variabilelor Railway (niciodată valorile). `mail-imap-check.yml` — login IMAP real (Python) la contact@.
 - `security-audit.yml`. **Notă:** `workflow_dispatch` merge doar de pe branch-ul default (master); de pe ramuri se declanșează prin `push:` cu filtru de `paths`.
+- `read-caiet.yml` — citește caietul + istoricul admin; input opțional `post_content` = Claude scrie DIRECT în caiet (canalul rămas între cei doi AI).
+- `vps-keys.yml` — Adrian pune cheile Kimi/GLM pe VPS (mascate). `vps-tier-test.yml` — dovada că rezervele răspund (KIMI OK/GLM OK + markerii pe căile reale).
+- `vps-repo-sync.yml` — instalare O DATĂ (parolă): timer systemd pe VPS care aduce `/root/kelion/repo` la zi cu master la 5 min (doar fast-forward, sare dacă constructorul are modificări locale) → AI-HANDOFF.md din capul lui Kelion e mereu proaspăt, fără parolă.
 
 ## 8. MEDIU/SECRETE (nume, niciodată valori aici)
 **Railway** (serviciul `web`, production) — toate citite în `config.ts`:
