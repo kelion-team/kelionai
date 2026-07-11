@@ -153,8 +153,16 @@ let lastDevBeat = 0
 let srvLoad = ''
 let srvLoadAt = 0
 // Motorul de lucru raportat de constructor (max/kimi/glm) — ultima valoare
-// cunoscută, afișată permanent în admin.
+// cunoscută, afișată permanent în admin. PERSISTENT peste restarturi (11 iul,
+// dovadă live: după deploy-ul din 19:17 indicatorul era gol, deși Adrian a
+// cerut „afișat permanent" — constructorul anunță doar SCHIMBĂRILE de treaptă,
+// deci fără persistență fiecare deploy îl golea până la următoarea comutare).
 let workEngine = ''
+void loadKv('work_engine')
+  .then((v) => {
+    if (v && !workEngine) workEngine = v
+  })
+  .catch(() => {})
 // Codul scris de constructor, bucată cu bucată — arătat SUB bara de progres
 // la click (Adrian, 11 iul). Plafonat la ultimele 120 de editări.
 const workCode: { ts: number; file: string; text: string }[] = []
@@ -1458,7 +1466,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const e = typeof req.body?.engine === 'string' ? req.body.engine.trim().slice(0, 20) : ''
-      if (e) workEngine = e
+      if (e) {
+        workEngine = e
+        void saveKv('work_engine', e).catch(() => {})
+      }
       return { ok: true }
     },
   )
