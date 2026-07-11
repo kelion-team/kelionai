@@ -933,7 +933,11 @@ body {
    top-left of the monitor, the status line sits bottom-left, the composer is
    bottom-center — so his corner is BOTTOM-RIGHT, clear of all of them. */
 .stage-canvas.pip {
-  transform: translate(calc(74vw - 14px), calc(74vh - 180px)) scale(0.26);
+  /* Adrian, 11 iul: „mărește avatarul când e în dreapta jos la mărimea
+     inițială și fă-l să se vadă tot" — scala urcă de la 0.26 la 0.42
+     (silueta întreagă, vizibil mai mare), ancorat tot dreapta-jos, cu
+     aceeași gardă de 180px deasupra composer-ului. */
+  transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
