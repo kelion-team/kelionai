@@ -1314,6 +1314,11 @@ body {
   gap: 8px;
   padding: 4px 2px;
   scrollbar-width: thin;
+  /* Adrian, 11 iul: „săgeata de mișcare sus-jos nu merge". Părintele .chat e
+     pointer-events:none (să nu acopere avatarul), bulele își reactivează
+     clickurile — dar BARA DE DERULARE aparține containerului ăstuia, care
+     ignora mouse-ul: săgețile/cursorul barei erau moarte. Reactivat aici. */
+  pointer-events: auto;
 }
 .chat-hint {
   color: var(--muted);
