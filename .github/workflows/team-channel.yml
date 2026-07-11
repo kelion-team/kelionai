@@ -48,5 +48,16 @@ jobs:
           fi
 
           echo "=== CANALUL DE ECHIPĂ (fir complet) ==="
-          curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/team-channel | jq -r '
+          # -w scoate codul HTTP separat, ca sa nu se confunde "canal gol" cu
+          # "raspuns cazut" (401/5xx) inghitit tacut de jq cu `?`. Cache-buster
+          # in query (Cloudflare sta in fata kelionai.app si a mai cache-uit
+          # raspunsuri dinamice pe alte rute — vezi comentariul din index.ts
+          # despre .exe/.apk cache-uite 4h desi originea zicea max-age=0).
+          HTTP_RESP=$(curl -sS --max-time 15 -w '\n%{http_code}' -H "x-bridge-secret: $SECRET" -H "Cache-Control: no-cache" \
+            "https://kelionai.app/api/bridge/team-channel?_=$(date +%s%N)")
+          HTTP_CODE=$(echo "$HTTP_RESP" | tail -n1)
+          HTTP_BODY=$(echo "$HTTP_RESP" | sed '$d')
+          echo "cod HTTP: $HTTP_CODE"
+          echo "raspuns brut: $HTTP_BODY"
+          echo "$HTTP_BODY" | jq -r '
             .messages[]? | "[\(.created_at)] \(.author)\(if .addressed_to then " → " + .addressed_to else "" end): \(.content)"'
