@@ -216,6 +216,18 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_shared_mem ON shared_memory (created_at DESC);
+    -- CANALUL DE ECHIPĂ (Adrian, 11 iul): „buton chat în care suntem toți 3" —
+    -- discuție LIVE (nu jurnal de lucru ca shared_memory), autor + destinatar
+    -- clar, gândită să crească — orice AI nou de la orice firmă se alătură fără
+    -- schimbare de schemă (author = text liber). Un singur scop: inteligența Kelion.
+    CREATE TABLE IF NOT EXISTS team_channel (
+      id BIGSERIAL PRIMARY KEY,
+      author TEXT NOT NULL,
+      addressed_to TEXT,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_channel ON team_channel (id);
     -- Installer downloads from OUR site (/dl/*.exe|.apk) — the verifiable
     -- download log: WHO (email when signed in, else IP + country), WHAT, WHEN.
     -- Store installs are aggregate-only via the stores' own APIs; no store ever
@@ -829,6 +841,64 @@ export async function getSharedMemory(limit = 30): Promise<SharedMemoryRow[]> {
          ORDER BY created_at DESC LIMIT $1
        ) x ORDER BY created_at ASC`,
       [limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+// ── Canalul de echipă (Adrian, 11 iul): „buton chat în care suntem toți 3" —
+// spre deosebire de shared_memory (jurnal de lucru, append-only, citit doar la
+// pornirea sesiunii), ăsta e o discuție LIVE, cu autor + destinatar clar, gândit
+// să crească — orice AI nou de la orice firmă se alătură fără schimbare de
+// schemă (author e text liber, nu enum). Un singur scop: inteligența lui Kelion.
+export interface TeamMessage {
+  id: number
+  author: string // 'adrian' | 'kelion' | 'claude' | orice viitor coechipier
+  addressed_to: string | null // null = towards toți
+  content: string
+  created_at: string
+}
+
+export async function postTeamMessage(
+  author: string,
+  content: string,
+  addressedTo: string | null = null,
+): Promise<TeamMessage | null> {
+  if (!dbEnabled()) return null
+  const c = content.trim()
+  if (!c) return null
+  try {
+    const r = await getPool().query<TeamMessage>(
+      `INSERT INTO team_channel (author, addressed_to, content)
+       VALUES ($1, $2, $3) RETURNING id, author, addressed_to, content, created_at`,
+      [author.slice(0, 40), addressedTo ? addressedTo.slice(0, 40) : null, c.slice(0, 8000)],
+    )
+    // Nelimitat de istoric scurt ca shared_memory — e discuția de echipă,
+    // păstrăm mai mult (ultimele 2000), tot cu plafon ca să nu crească veșnic.
+    await getPool().query(
+      `DELETE FROM team_channel WHERE id NOT IN
+         (SELECT id FROM team_channel ORDER BY created_at DESC LIMIT 2000)`,
+    )
+    return r.rows[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function getTeamChannel(afterId = 0, limit = 200): Promise<TeamMessage[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<TeamMessage>(
+      afterId > 0
+        ? `SELECT id, author, addressed_to, content, created_at FROM team_channel
+           WHERE id > $1 ORDER BY id ASC LIMIT $2`
+        : `SELECT id, author, addressed_to, content, created_at FROM (
+             SELECT id, author, addressed_to, content, created_at FROM team_channel
+             ORDER BY id DESC LIMIT $2
+           ) x ORDER BY id ASC`,
+      afterId > 0 ? [afterId, limit] : [0, limit],
     )
     return r.rows
   } catch {
