@@ -11,6 +11,8 @@ import {
   getRecentHistory,
   getSharedMemory,
   appendSharedMemory,
+  getTeamChannel,
+  postTeamMessage,
   saveWorkOrder,
   pullPendingWorkOrders,
   listWorkOrders,
@@ -1391,6 +1393,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
       await appendSharedMemory(req.body?.source || 'laptop', content)
       return { ok: true }
+    },
+  )
+
+  // CANALUL DE ECHIPĂ, calea PENTRU CLAUDE (nu are cookie-ul de sesiune al lui
+  // Adrian — se trezește printr-o verificare programată, prin GitHub Actions,
+  // cu BRIDGE_SECRET, exact ca puntea). GET citește ce a scris Adrian/Kelion;
+  // POST postează răspunsul lui Claude înapoi în canal.
+  app.get<{ Querystring: { after?: string } }>('/api/bridge/team-channel', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const after = Number(req.query?.after ?? 0) || 0
+    return { messages: await getTeamChannel(after) }
+  })
+  app.post<{ Body: { content?: string; to?: string } }>(
+    '/api/bridge/team-channel',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const content = typeof req.body?.content === 'string' ? req.body.content : ''
+      if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
+      const to = typeof req.body?.to === 'string' ? req.body.to : null
+      const saved = await postTeamMessage('claude', content, to)
+      return { ok: !!saved, message: saved }
     },
   )
 
