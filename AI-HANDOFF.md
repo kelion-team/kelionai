@@ -152,6 +152,9 @@ Alte costuri reale (contorizate în `cost.ts`, plătite din abonament/cheie plat
 **Fix:** `bridge-deploy.yml` + `pornire-linux.sh` acum citesc calea EXACTĂ din `systemctl show kelion-bridge -p ExecStart` și copiază codul corect exact acolo (indiferent de nume/locație), cu verificare prin marker (`grep warmPub`) ca dovadă că noul cod chiar a ajuns pe disc — nu doar presupunere.
 **Regulă pentru orice AI viitor:** un deploy „reușit" pe VPS NU e dovadă că workerul rulează codul nou. Verifică mereu conținutul fișierului de la calea REALĂ din systemd, nu doar starea repo-ului.
 
+**A PATRA LECȚIE — „procesul din memorie ≠ codul de pe disc" (11 iul, plătită cu ore de blocaj).** Constructorul a picat TOATE ordinele cu „spawn git ENOENT" deși fix-ul era scris, aprobat și PE DISC de ore (PR #100) — procesul systemd rula în memorie codul vechi, iar pe Linux `spawn` cu `cwd` inexistent dă exact eroarea asta pentru ORICE comandă (git era instalat perfect). S-au pierdut ore vânând „mediul stricat"/„git lipsă din PATH" — diagnostic greșit, circular (constructorul care trebuia să se repare era chiar cel blocat).
+**REGULĂ OBLIGATORIE pentru ORICE AI (inclusiv Kelion), înaintea ORICĂRUI diagnostic de eșec repetat la punte/constructor:** compară `md5sum` între codul RULAT (calea din `systemctl show <svc> -p ExecStart`) și fișierul-sursă din repo. Dacă diferă → cauza probabilă e procesul vechi; **deblocarea = copiere din repo peste calea reală + `systemctl restart`** (exact pașii 2/2b din `bridge-deploy.yml`) — NU „reparații de mediu". Timer-ul `repo-sync` scrie de-acum alertă în jurnal la orice divergență (repornirea rămâne manuală — Adrian nu a autorizat repornire automată nesupravegheată).
+
 ## 7. CI/WORKFLOWS (`.github/workflows/`)
 - `deploy.yml` — push pe master → Railway (token → proiect „Kelionai", serviciul `web`), verificare prin schimbarea versiunii.
 - `deploy-verified.yml` — deploy de pe ramura de lucru la schimbări de cod (aceeași verificare).
