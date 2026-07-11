@@ -41,6 +41,17 @@ if ! railway up --service web --detach; then
   say "⚠️ railway up a eșuat — verifică login-ul railway pe VPS (railway whoami)"
 fi
 
+# 2b. CALEA REALĂ RULATĂ (11 iul: latența nu scădea deloc — dovedit că systemd
+#     rulează o COPIE separată, ex. /root/kelion/kelion-bridge.mjs, ÎN AFARA
+#     repo-ului, pe care pasul 1 (git reset în $REPO) n-o atinge niciodată).
+#     Aflăm calea EXACTĂ din systemd și scriem codul corect EXACT acolo.
+EXEC=$(systemctl show kelion-bridge -p ExecStart --value 2>/dev/null | grep -oE '/[^ ]*\.mjs' | head -1)
+SRC="$REPO/bridge/kelion-bridge-linux.mjs"
+if [ -n "$EXEC" ] && [ "$EXEC" != "$SRC" ]; then
+  cp "$SRC" "$EXEC"
+  say "cale reală diferită de repo — copiat codul corect peste $EXEC"
+fi
+
 # 3. Repornește DOAR serviciile Kelion care există pe mașina asta.
 for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
   if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && \

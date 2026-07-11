@@ -92,14 +92,42 @@ jobs:
             git reset --hard origin/master || { echo "reset la origin/master a eșuat"; exit 2; }
             echo "VPS SINCRONIZAT la master: $(git rev-parse --short HEAD)"
 
-            # 2) Vânătoarea de ZOMBIE: orice proces worker în afara systemd-ului
-            #    (pull fără `persona` care înfometa banda publică). Inventar întâi,
-            #    apoi pkill; systemd își repornește singur unitatea legitimă.
+            # 2) CALEA REALĂ RULATĂ (dovedit 11 iul, LIVE 13s+eroare deși deploy-ul
+            #    zicea „reușit"): systemd rulează adesea o COPIE separată, ex.
+            #    /root/kelion/kelion-bridge.mjs — ÎN AFARA repo-ului — pe care
+            #    `git reset --hard` din $REPO NU o atinge niciodată. Toate fixurile
+            #    de cod (sesiuni calde, standby, stall 12s) rulau doar în repo, NU
+            #    și pe VPS. Aflăm calea EXACTĂ din systemd și scriem codul corect
+            #    EXACT acolo — indiferent cum se numește sau unde e.
+            EXEC=$(systemctl show kelion-bridge -p ExecStart --value 2>/dev/null | grep -oE '/[^ ]*\.mjs' | head -1)
+            SRC="$REPO/bridge/kelion-bridge-linux.mjs"
+            echo "ExecStart real (systemd): ${EXEC:-necunoscut}"
+            if [ -z "$EXEC" ]; then
+              echo "::warning::Nu am putut citi ExecStart din systemd — sar peste sincronizarea calei reale"
+            elif [ "$EXEC" = "$SRC" ]; then
+              echo "Calea rulată DEJA e fișierul din repo — fără copiere necesară."
+            else
+              BEFORE=$(md5sum "$EXEC" 2>/dev/null | cut -d' ' -f1 || echo "lipsă")
+              cp "$SRC" "$EXEC"
+              AFTER=$(md5sum "$EXEC" | cut -d' ' -f1)
+              echo "MISMATCH găsit — copiat codul corect peste calea reală."
+              echo "  $EXEC   md5 înainte: $BEFORE   md5 după: $AFTER"
+              grep -q "warmPub" "$EXEC" && echo "  ✅ confirmat: codul nou (sesiuni calde per-vizitator) e acum pe disc" \
+                || echo "::warning::  codul copiat NU conține markerul așteptat — verifică manual"
+            fi
+
+            # 3) Vânătoarea de ZOMBIE: orice worker pornit manual, în afara
+            #    systemd-ului (nume vechi SAU noi — nu presupunem un singur nume).
             echo "=== procese worker/punte ÎNAINTE ==="
             pgrep -af 'kelion-bridge|bridge-linux' || echo "(niciunul)"
-            pkill -f 'kelion-bridge-linux.mjs' 2>/dev/null && echo "worker(e) oprit(e)" || echo "(nimic de oprit)"
+            MAIN_PID=$(systemctl show kelion-bridge -p MainPID --value 2>/dev/null || echo 0)
+            for pid in $(pgrep -f 'kelion-bridge.*\.mjs' 2>/dev/null || true); do
+              if [ "$pid" != "$MAIN_PID" ]; then
+                kill "$pid" 2>/dev/null && echo "proces orfan oprit: pid $pid" || true
+              fi
+            done
 
-            # 3) Repornește serviciile cu secretul + codul corecte.
+            # 4) Repornește serviciile cu secretul + codul corecte.
             for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
               if systemctl list-unit-files "$svc.service" 2>/dev/null | grep -q "^$svc.service"; then
                 systemctl restart "$svc" && echo "restart $svc → $(systemctl is-active "$svc")"
