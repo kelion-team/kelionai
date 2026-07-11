@@ -1580,6 +1580,26 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // BECUL DE RELEASE-URI (Adrian, 11 iul: „când sunt release-uri trebuie să
+  // apară pe interfață un bec care pâlpâie, să știu să verific"). Numărul
+  // deciziilor care ÎL așteaptă: release-uri pregătite (aprobarea din tab) +
+  // fixuri gata care așteaptă „da"-ul din chat. Numărat din DB cu memoie de
+  // 15s — status-ul e interogat des, baza nu se bate la fiecare poll.
+  let relPendingAt = 0
+  let relPending = 0
+  async function pendingDecisions(): Promise<number> {
+    if (Date.now() - relPendingAt > 15_000) {
+      relPendingAt = Date.now()
+      try {
+        const all = await listStagedReleases(50)
+        relPending = all.filter((r) => r.status === 'pending').length
+      } catch {
+        /* păstrează ultima valoare */
+      }
+    }
+    return relPending + readyDeploys.length
+  }
+
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
     const owned = ownedRequirement()
@@ -1599,6 +1619,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
       // Motorul de lucru activ (max/kimi/glm) — permanent, ultima valoare.
       workEngine,
+      // Becul: câte decizii (release-uri) îl așteaptă pe Adrian chiar acum.
+      releases: await pendingDecisions(),
       // VITEZA REALĂ a creierului Linux: timpii ultimei ture (tip + total +
       // primul cuvânt) și, cât o tură e în curs, cronometrul viu. Adrian VEDE cât
       // durează un chat simplu vs o cerință de lucru (cerut 10 iul).
