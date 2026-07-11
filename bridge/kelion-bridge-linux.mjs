@@ -46,6 +46,59 @@ const REST_MS = 10 * 60_000
 let fableDownUntil = 0
 const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
 
+// ── LANȚUL DE ABONAMENTE (ordinul lui Adrian, 11 iul): Max → Kimi → GLM ──────
+// Când abonamentul Claude Max se golește („usage limit"), worker-ul comută
+// AUTOMAT pe cheia Kimi for Coding, apoi pe GLM Coding Plan — și REVINE singur
+// pe Max după pauza de răcire (Max-ul se reîncearcă primul la fiecare spawn).
+// Cheile stau pe VPS ca fișiere (puse de Adrian prin vps-keys.yml) — fără
+// fișier-cheie, treapta e sărită, deci codul e complet inert până există chei.
+// Endpoint-urile sunt compatibile Anthropic: același CLI, doar env schimbat.
+// Kimi: model FIX `kimi-for-coding` (docs kimi.com/code — planul servește
+// automat cel mai nou K2). GLM: numele claude e mapat de endpoint-ul lor.
+// Valorile Kimi sunt din docs-ul lor oficial pentru Claude Code (kimi.com/code/
+// docs → third-party tools): ANTHROPIC_BASE_URL=https://api.kimi.com/coding/ +
+// ANTHROPIC_API_KEY + fereastra de context 262144. Punem și AUTH_TOKEN (GLM îl
+// folosește pe ăla) — e inofensiv să fie ambele setate.
+const TIERS = [
+  { name: 'max' }, // abonamentul Claude, exact ca azi (fără env suplimentar)
+  {
+    name: 'kimi',
+    keyFile: '/root/kelion/kimi-key.txt',
+    base: 'https://api.kimi.com/coding/',
+    model: 'kimi-for-coding',
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
+  },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: null },
+]
+const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
+const tierDownUntil = Object.create(null)
+function tierKeyOf(t) {
+  if (!t.keyFile) return null
+  try {
+    return readFileSync(t.keyFile, 'utf8').trim() || null
+  } catch {
+    return null
+  }
+}
+function currentTier() {
+  for (const t of TIERS) {
+    if ((tierDownUntil[t.name] ?? 0) > Date.now()) continue
+    if (t.keyFile && !tierKeyOf(t)) continue
+    return t
+  }
+  return TIERS[0] // toate golite → tot Max (cel mai probabil să-și revină primul)
+}
+// Semnăturile de cotă golită. Se verifică DOAR pe canalele de EROARE (stderr,
+// result cu is_error) — NICIODATĂ pe textul răspunsului normal, altfel o simplă
+// discuție despre limite ar comuta treapta din greșeală.
+const QUOTA_RE = /usage limit|usage credits|credit balance|rate.?limit|quota|429/i
+function quotaHit(tierName, errText) {
+  if (!errText || !QUOTA_RE.test(String(errText))) return false
+  tierDownUntil[tierName] = Date.now() + TIER_COOLDOWN_MS
+  log(`[abonament] treapta „${tierName}" e golită — comut pe următoarea, revin în ${TIER_COOLDOWN_MS / 60_000} min.`)
+  return true
+}
+
 // CHAT ONLY. This unattended server worker answers the admin's messages with
 // text — it NEVER edits or runs project code (no acceptEdits, no repo). Code
 // repairs stay supervised (done with the owner present), never automatically
@@ -172,7 +225,24 @@ function claudeArgs({ streaming, model, hasFiles, pub }) {
 // cwd NEUTRU pentru joburile PUBLICE: `claude -p` își încarcă automat CLAUDE.md
 // și contextul din directorul curent — un job de vizitator pornit din
 // /root/kelion ar primi pe furiș contextul privat. Public → rulează din /tmp.
-const spawnOpts = (pub) => (pub ? { env: process.env, cwd: '/tmp' } : { env: process.env })
+// Env-ul vine de la TREAPTA de abonament activă: pe „max" e mediul de azi,
+// neschimbat; pe rezerve se adaugă baza + cheia (compatibil Anthropic).
+function tierSpawnEnv(tier) {
+  const key = tierKeyOf(tier)
+  if (!key) return process.env
+  return {
+    ...process.env,
+    ...(tier.extraEnv ?? {}),
+    ANTHROPIC_BASE_URL: tier.base,
+    ANTHROPIC_API_KEY: key,
+    ANTHROPIC_AUTH_TOKEN: key,
+  }
+}
+const spawnOpts = (pub, tier = currentTier()) =>
+  pub ? { env: tierSpawnEnv(tier), cwd: '/tmp' } : { env: tierSpawnEnv(tier) }
+// Modelul efectiv al unei trepte: rezervele își impun modelul lor (ex. Kimi
+// cere fix `kimi-for-coding`); pe „max" rămâne modelul cerut (Fable/Opus).
+const tierModel = (tier, model) => (tier.model !== undefined && tier.model !== null ? tier.model : model)
 
 // ── PROCESE DE GARDĂ PUBLICE (#7 latență, Adrian 10 iul) ─────────────────────
 // Jobul public rulează într-un proces `claude` PROASPĂT (izolare: un proces = UN
@@ -186,14 +256,15 @@ const STANDBY_TARGET = 2 // cât PUBLIC_MAX — un val de 2 vizitatori pornește
 const STANDBY_MAX_AGE = 10 * 60_000 // reciclare: un proces stătut se aruncă
 
 function spawnStandby() {
-  const model = brainModel()
+  const tier = currentTier()
+  const model = tierModel(tier, brainModel())
   let child
   try {
-    child = spawn(CLAUDE, claudeArgs({ streaming: true, model, hasFiles: false, pub: true }), spawnOpts(true))
+    child = spawn(CLAUDE, claudeArgs({ streaming: true, model, hasFiles: false, pub: true }), spawnOpts(true, tier))
   } catch {
     return null
   }
-  const entry = { child, model, born: Date.now(), dead: false }
+  const entry = { child, model, tier: tier.name, born: Date.now(), dead: false }
   child.on('error', () => {
     entry.dead = true
   })
@@ -217,7 +288,8 @@ function takeStandby() {
   while (pubStandby.length) {
     const e = pubStandby.shift()
     if (e.dead) continue
-    if (e.model !== brainModel() || Date.now() - e.born > STANDBY_MAX_AGE) {
+    const t = currentTier()
+    if (e.model !== tierModel(t, brainModel()) || e.tier !== t.name || Date.now() - e.born > STANDBY_MAX_AGE) {
       try {
         e.child.kill()
       } catch {}
@@ -232,8 +304,9 @@ function takeStandby() {
 // Reciclare periodică: standby-urile îmbătrânite mor și se nasc altele — mereu
 // procese tinere, pe modelul curent.
 setInterval(() => {
+  const t = currentTier()
   for (const e of [...pubStandby]) {
-    if (e.dead || e.model !== brainModel() || Date.now() - e.born > STANDBY_MAX_AGE) {
+    if (e.dead || e.model !== tierModel(t, brainModel()) || e.tier !== t.name || Date.now() - e.born > STANDBY_MAX_AGE) {
       try {
         e.child.kill()
       } catch {}
@@ -259,7 +332,16 @@ fillStandby() // de la pornire: primul vizitator prinde deja un proces cald
 const WARM_MAX_TURNS = 8
 let warm = null
 
+// O sesiune caldă e „stătută" și când s-a schimbat treapta de abonament sau
+// modelul ei — se taie și se amorsează una nouă pe treapta/modelul curent.
+function staleWarm(s) {
+  const t = currentTier()
+  return !s.alive || s.turns >= WARM_MAX_TURNS || s.tier !== t.name || s.model !== tierModel(t, brainModel())
+}
+
 function startWarm(model, pub = false) {
+  const tier = currentTier()
+  const effModel = tierModel(tier, model)
   const args = [
     '-p',
     '--input-format', 'stream-json',
@@ -267,12 +349,12 @@ function startWarm(model, pub = false) {
     '--verbose',
     '--include-partial-messages',
   ]
-  if (model) args.push('--model', model)
+  if (effModel) args.push('--model', effModel)
   let child
   try {
     // pub=true → cwd /tmp (fără CLAUDE.md/contextul privat) — aceeași izolare
     // ca procesele proaspete publice, dar cu sesiune vie per vizitator.
-    child = spawn(CLAUDE, args, spawnOpts(pub))
+    child = spawn(CLAUDE, args, spawnOpts(pub, tier))
   } catch {
     return null
   }
@@ -289,7 +371,8 @@ function startWarm(model, pub = false) {
   const s = {
     alive: true,
     turns: 0,
-    model,
+    model: effModel,
+    tier: tier.name,
     kill() {
       s.alive = false
       try {
@@ -348,6 +431,9 @@ function startWarm(model, pub = false) {
           turn.onChunk?.(t)
         }
       } else if (ev.type === 'result') {
+        // Cotă golită → doar pe canalul de EROARE al CLI-ului (is_error), nu
+        // pe textul unui răspuns normal.
+        if (ev.is_error) quotaHit(tier.name, typeof ev.result === 'string' ? ev.result : '')
         const final = typeof ev.result === 'string' ? ev.result.trim() : ''
         const full = final.length >= turn.streamed.trim().length ? final : turn.streamed.trim()
         // Coada nedifuzată (finalul e mai lung decât ce-a curs) pleacă și ea.
@@ -358,9 +444,13 @@ function startWarm(model, pub = false) {
       }
     }
   })
-  child.stderr.on('data', () => {})
+  let warmErr = ''
+  child.stderr.on('data', (d) => {
+    warmErr += d
+  })
   child.on('close', () => {
     s.alive = false
+    quotaHit(tier.name, warmErr)
     endTurn(null)
   })
   child.on('error', () => {
@@ -374,7 +464,7 @@ function startWarm(model, pub = false) {
 // veche, cu prompt complet — comportamentul de azi, deci niciodată mai rău).
 function askWarm(job, onChunk, cancel) {
   if (!job.turn) return Promise.resolve(null) // server vechi, fără pachet subțire
-  if (warm && (!warm.alive || warm.turns >= WARM_MAX_TURNS || warm.model !== brainModel())) {
+  if (warm && staleWarm(warm)) {
     warm.kill()
     warm = null
   }
@@ -409,7 +499,7 @@ const WARM_PUB_IDLE_MS = 10 * 60_000 // vizitator plecat → sesiunea se stinge
 function askWarmPub(job, onChunk, cancel) {
   if (!job.turn || !job.visitor) return Promise.resolve(null)
   let s = warmPub.get(job.visitor)
-  if (s && (!s.alive || s.turns >= WARM_MAX_TURNS || s.model !== brainModel())) {
+  if (s && staleWarm(s)) {
     s.kill()
     warmPub.delete(job.visitor)
     s = null
@@ -464,8 +554,13 @@ setInterval(() => {
 
 function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel, warmChild } = {}) {
   return new Promise((resolve) => {
+    // Treapta de abonament curentă (standby-ul luat e garantat pe aceeași
+    // treaptă — takeStandby aruncă nepotrivitele).
+    const tier = currentTier()
     // Proces de gardă deja pornit (public) → sare peste boot; altfel spawn clasic.
-    const child = warmChild ?? spawn(CLAUDE, claudeArgs({ streaming: true, model, hasFiles, pub }), spawnOpts(pub))
+    const child =
+      warmChild ??
+      spawn(CLAUDE, claudeArgs({ streaming: true, model: tierModel(tier, model), hasFiles, pub }), spawnOpts(pub, tier))
     cancel?.attach(child)
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
@@ -500,6 +595,8 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
             onChunk?.(t)
           }
         } else if (ev.type === 'result' && typeof ev.result === 'string') {
+          // Cotă golită → doar pe eroare reală (is_error), nu pe text normal.
+          if (ev.is_error) quotaHit(tier.name, ev.result)
           // Răspunsul final complet (autoritar). Îl păstrăm pe cel mai lung.
           if (ev.result.trim().length > finalText.trim().length) finalText = ev.result
         }
@@ -515,7 +612,12 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
         const tail = full.slice(streamed.length)
         if (tail) onChunk?.(tail)
       }
-      if (!full && err.trim()) log(`claude stderr: ${err.trim().slice(0, 200)}`)
+      if (!full && err.trim()) {
+        log(`claude stderr: ${err.trim().slice(0, 200)}`)
+        // Treapta golită se marchează → următorul spawn (inclusiv fallback-ul
+        // text din cascada askClaude, în ACEEAȘI tură) pornește pe următoarea.
+        quotaHit(tier.name, err)
+      }
       resolve(full || null)
     })
     child.stdin.write(prompt)
@@ -528,8 +630,9 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
 // nu coborâm NICIODATĂ sub comportamentul de azi.
 function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel } = {}) {
   return new Promise((resolve) => {
-    const args = claudeArgs({ streaming: false, model, hasFiles, pub })
-    const child = spawn(CLAUDE, args, spawnOpts(pub))
+    const tier = currentTier()
+    const args = claudeArgs({ streaming: false, model: tierModel(tier, model), hasFiles, pub })
+    const child = spawn(CLAUDE, args, spawnOpts(pub, tier))
     cancel?.attach(child)
     let out = ''
     let err = ''
@@ -543,7 +646,10 @@ function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel } = {})
       clearTimeout(killer)
       if (out.trim()) resolve(out.trim())
       else {
-        if (err.trim()) log(`claude stderr: ${err.trim().slice(0, 200)}`)
+        if (err.trim()) {
+          log(`claude stderr: ${err.trim().slice(0, 200)}`)
+          quotaHit(tier.name, err)
+        }
         resolve(null)
       }
     })
@@ -611,8 +717,9 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
 function runClaudeBare(prompt, timeoutMs = 60_000, pub = false, cancel) {
   return new Promise((resolve) => {
     let child
+    const tier = currentTier()
     try {
-      child = spawn(CLAUDE, ['-p'], spawnOpts(pub))
+      child = spawn(CLAUDE, ['-p'], spawnOpts(pub, tier))
     } catch {
       resolve(null)
       return
