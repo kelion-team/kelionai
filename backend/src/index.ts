@@ -31,7 +31,7 @@ import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { livekitRoutes } from './routes/livekit.js'
-import { initDb, recordDownload, initAppFiles, getAppFile } from './db.js'
+import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
 
@@ -234,6 +234,16 @@ try {
 } catch (err) {
   app.log.error({ err }, 'initDb failed — chat persistence disabled')
 }
+
+// MEMORIE SEMANTICĂ — backfill lent (12 iul): amintirile vechi primesc vector
+// de înțeles în loturi mici, la 10 minute; fără cheie Gemini e un no-op ieftin.
+setTimeout(() => {
+  const tick = (): void => {
+    void backfillMemoryEmbeddings(40).catch(() => {})
+  }
+  tick()
+  setInterval(tick, 10 * 60_000)
+}, 30_000)
 
 // Download endpoint: the installer MASTER lives on the Linux server and is
 // pushed into app_files, so this serves the LATEST bytes with NO app redeploy.

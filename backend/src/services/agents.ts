@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import { getMemories, searchMemories, addMemory, recordCost } from '../db.js'
+import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
 import { claudeCost } from './cost.js'
 import { anthropic } from './anthropic.js'
 
@@ -22,9 +22,22 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
   let mems = recent
   if (hint.trim()) {
     const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
-    const relevant = await searchMemories(email, agent, words, 12)
+    // DUBLU RECALL (12 iul, foaia de parcurs #5): după CUVINTE (full-text, ca
+    // până acum) + după SENS (embeddings, semanticMemories) — în paralel, ca
+    // să nu adauge latență. „Ce mașină am?" găsește „conduce un BMW" chiar
+    // fără niciun cuvânt comun; fără cheie Gemini, ramura semantică tace.
+    const [relevant, semantic] = await Promise.all([
+      searchMemories(email, agent, words, 12),
+      semanticMemories(email, agent, hint, 8),
+    ])
     const seen = new Set(recent.map((m) => m.content))
-    mems = [...recent, ...relevant.filter((m) => !seen.has(m.content))]
+    mems = [...recent]
+    for (const m of [...relevant, ...semantic]) {
+      if (!seen.has(m.content)) {
+        seen.add(m.content)
+        mems.push(m)
+      }
+    }
   }
   if (mems.length === 0) return ''
   const lines = mems.map((m) => `- ${m.content}`).join('\n')
