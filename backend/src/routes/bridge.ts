@@ -22,6 +22,7 @@ import {
   addMemory,
   saveKv,
   loadKv,
+  putAppFile,
   saveClientError,
   listClientErrors,
   getCostToday,
