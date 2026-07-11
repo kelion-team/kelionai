@@ -472,32 +472,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Monitor mode: Kelion's words in a slim black bar just above the composer,
-   full width, so they never cover what's on the monitor. */
-.monitor-speech {
-  margin: 0 auto 8px;
-  max-width: min(1100px, 94%);
-  background: rgba(0, 0, 0, 0.82);
-  color: #eef1f6;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 8px 16px;
-  font-size: 15px;
-  line-height: 1.45;
-  /* Adrian, 11 iul: „răspunsul redus la UN RÂND, curgător, ca să se vadă
-     monitorul" — banda nu mai crește pe verticală (era până la 22vh, acoperea
-     consola de lucru); textul curge teletext pe o singură linie (.ticker). */
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-  white-space: nowrap;
-  backdrop-filter: blur(4px);
-}
-/* „Coada" textului: containerul e RTL (ancorat la dreapta), textul dinăuntru
-   rămâne LTR — pe măsură ce răspunsul curge, se vede mereu SFÂRȘITUL lui,
-   pe un singur rând, fără nicio animație care s-ar reporni la fiecare literă. */
-.monitor-speech .speech-tail {
+/* „Coada" textului care CURGE: containerul e RTL (ancorat la dreapta), textul
+   dinăuntru rămâne LTR — pe măsură ce răspunsul vine, se vede mereu SFÂRȘITUL
+   lui, pe un singur rând, fără nicio animație care s-ar reporni la fiecare
+   literă. Folosită în banda K (răspunsul lui Kelion) cât timp streamează. */
+.speech-tail {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -505,7 +484,7 @@ body {
   direction: rtl;
   text-align: left;
 }
-.monitor-speech .speech-tail-text {
+.speech-tail-text {
   direction: ltr;
   unicode-bidi: plaintext;
 }
@@ -3135,6 +3114,39 @@ a.card-item:hover {
 .heard-band-label {
   flex: 0 0 auto;
   font-size: 15px;
+}
+/* TOT CHATUL PE ROLURI, în spațiul benzilor (Adrian, 11 iul): tu = 👤 pe
+   verde, Kelion = pastila K pe albastru; nimic din chat nu se mai afișează
+   în afara acestui spațiu. */
+.user-band {
+  background: linear-gradient(90deg, rgba(0, 20, 12, 0.88), rgba(0, 14, 10, 0.88));
+  border: 1px solid rgba(90, 220, 160, 0.3);
+  box-shadow: 0 0 18px rgba(70, 220, 150, 0.08), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.user-band .ticker-text {
+  color: #d9ffe9;
+}
+.kelion-band {
+  background: linear-gradient(90deg, rgba(6, 12, 26, 0.9), rgba(4, 10, 22, 0.9));
+  border: 1px solid rgba(120, 180, 255, 0.35);
+  box-shadow: 0 0 18px rgba(110, 170, 255, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.kelion-band .ticker-text,
+.kelion-band .speech-tail-text {
+  color: #cfe0ff;
+}
+.heard-band-label.kelion-k {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0b0d12;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
 }
 /* TICKER / TELETEXT: o singură linie, care derulează în loc să se rupă sau să
    crească pagina. Text scurt (încape) → static; text lung → derulează stânga. */
