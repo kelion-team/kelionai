@@ -282,6 +282,13 @@ async function build(order) {
       const f = toolFile(b)
       if (f) lastFile = f
       say(toolLine(b))
+      // CODUL SUB BARĂ (Adrian, 11 iul): conținutul fiecărei editări pleacă
+      // la server — click pe bara de progres îl arată scriptic, live.
+      if (b.name === 'Edit' || b.name === 'Write' || b.name === 'MultiEdit') {
+        const inp = b.input || {}
+        const text = String(inp.new_string ?? inp.content ?? '').slice(0, 2000)
+        if (text) void api('/api/bridge/work-detail', 'POST', { file: baseName(inp.file_path), text }).catch(() => {})
+      }
       // Executia umple 12→84%; verificarea si stagearea duc restul pana la 100.
       pushProgress(Math.min(84, 12 + steps * 2), 'Execuție', lastFile)
     }

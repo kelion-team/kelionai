@@ -107,6 +107,9 @@ export default function Stage({ user }: { user: User }) {
     request: string
     stage: { pct: number; label: string; file: string } | null
     steps: string[]
+    // Codul scris SUB bară (Adrian, 11 iul: „să văd scriptic softul care se
+    // scrie") — ultimele editări ale constructorului, live.
+    code: { file: string; text: string }[]
   } | null>(null)
   // The live-work console is NOT permanent on the owner's monitor — the AIs
   // see the journal server-side regardless. He opens it only when he wants:
@@ -304,6 +307,7 @@ export default function Stage({ user }: { user: User }) {
             request?: string
             stage?: { pct?: number; label?: string; file?: string } | null
             steps?: string[]
+            code?: { file?: string; text?: string }[]
           } | null) => {
             if (!j) return
             setAnalysis({
@@ -317,6 +321,9 @@ export default function Stage({ user }: { user: User }) {
                     }
                   : null,
               steps: Array.isArray(j.steps) ? j.steps : [],
+              code: Array.isArray(j.code)
+                ? j.code.map((c) => ({ file: String(c.file ?? ''), text: String(c.text ?? '') }))
+                : [],
             })
           },
         )
@@ -498,6 +505,22 @@ export default function Stage({ user }: { user: User }) {
                             consola de dedesubt; repetarea lor dubla monitorul
                             (Adrian, 5 iul: „vezi dublat?"). Detaliul arată DOAR
                             cererea; jurnalul complet rămâne în Admin → Jurnal. */}
+                        {/* CODUL SUB BARĂ (Adrian, 11 iul: „să văd scriptic
+                            softul care se scrie, tot ce se face sub bară"):
+                            fiecare editare a constructorului, live. */}
+                        {analysis.code.length > 0 && (
+                          <>
+                            <div className="proc-detail-title">Codul care se scrie</div>
+                            <div className="proc-code">
+                              {analysis.code.map((c, i) => (
+                                <div key={i} className="proc-code-block">
+                                  {c.file && <div className="proc-code-file">{c.file}</div>}
+                                  <pre>{c.text}</pre>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
                   </div>

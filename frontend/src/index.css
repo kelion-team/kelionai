@@ -1711,6 +1711,35 @@ body {
 .proc-detail-title:first-child {
   margin-top: 0;
 }
+/* Codul care se scrie, sub bară (Adrian, 11 iul) — bucăți live, monospace. */
+.proc-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.proc-code-block {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.proc-code-file {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8fb6ff;
+  padding: 4px 8px 0;
+}
+.proc-code-block pre {
+  margin: 0;
+  padding: 6px 8px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d7e3ff;
+  max-height: 160px;
+  overflow-y: auto;
+}
 .proc-detail-req {
   font-size: 13px;
   color: #ffe3c2;
