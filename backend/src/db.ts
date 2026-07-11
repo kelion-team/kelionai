@@ -60,6 +60,15 @@ export async function initDb(): Promise<void> {
     DROP INDEX IF EXISTS uniq_memory;
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, agent, content);
     CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, agent, last_seen DESC);
+    -- CĂUTARE REALĂ ÎN MEMORIE (Adrian, 11 iul: „calitatea memoriei" — ILIKE pe
+    -- substring exact rata orice reformulare). Full-text nativ Postgres:
+    -- config 'simple' (fără dicționar de limbă — tokenizează orice text ro/en
+    -- mixat, fără să presupună o singură limbă), indexat GIN pentru viteză la
+    -- multe amintiri. Nu e embeddings/AI (ar cere pgvector + apel API pe scriere,
+    -- cost și risc de infra neconfirmată) — dar e potrivire pe CUVINTE reale, cu
+    -- scor de relevanță, nu doar un substring literal.
+    CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
+      USING GIN (to_tsvector('simple', content));
     -- Prepaid credit wallet (Stripe). Balance is in the display currency (GBP);
     -- topup_ref = the credited amount of the LAST top-up, so we can show the
     -- "% of credit left" for the escalating low-credit alerts (30/20/10/5%).
@@ -1618,12 +1627,34 @@ export async function searchMemories(
 ): Promise<Memory[]> {
   if (!dbEnabled() || words.length === 0) return []
   try {
-    const patterns = words.slice(0, 8).map((w) => `%${w.replaceAll('%', '').replaceAll('_', '')}%`)
+    // Full-text real (Adrian, 11 iul): fiecare cuvânt-cheie e un termen OR în
+    // interogare, cu POTRIVIRE DE PREFIX (`:*`) — găsește amintiri care conțin
+    // ORICE cuvânt ce ÎNCEPE cu termenul căutat (cafea → cafeaua, prinde
+    // pluralul/declinarea ro fără dicționar de limbă), în ORICE ordine, nu doar
+    // un substring literal exact. DOVEDIT cu teste reale (Postgres local): config
+    // 'simple' fără prefix rata "cafeaua" la căutarea "cafea" (regresie față de
+    // ILIKE) — prefixul repară exact asta. Rezultatele sunt SORTATE după
+    // relevanță (`ts_rank`), nu doar recență — un fapt vechi dar foarte relevant
+    // nu mai e îngropat de unul recent dar nepotrivit.
+    // Fiecare token trebuie să rămână UN singur cuvânt alfanumeric — orice
+    // rest (spații, punctuație, operatori tsquery) SCOS complet, nu doar
+    // înlocuit cu spațiu (un rest de spațiu intern rupe sintaxa to_tsquery,
+    // dovedit cu un test real: "o'reilly!" → "o reilly" → eroare de sintaxă).
+    const clean = words
+      .slice(0, 8)
+      .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+      .filter(Boolean)
+    if (clean.length === 0) return []
+    const orQuery = clean
+      .map((_, i) => `to_tsquery('simple', (($2::text[])[${i + 1}]) || ':*')`)
+      .join(' || ')
     const r = await getPool().query<Memory>(
       `SELECT content FROM memories
-       WHERE user_email = $1 AND agent = $2 AND content ILIKE ANY($3)
-       ORDER BY last_seen DESC LIMIT $4`,
-      [email, agent, patterns, limit],
+       WHERE user_email = $1 AND agent = $3
+         AND to_tsvector('simple', content) @@ (${orQuery})
+       ORDER BY ts_rank(to_tsvector('simple', content), (${orQuery})) DESC, last_seen DESC
+       LIMIT $4`,
+      [email, clean, agent, limit],
     )
     return r.rows
   } catch {
