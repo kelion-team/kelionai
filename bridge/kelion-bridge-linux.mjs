@@ -230,13 +230,17 @@ function claudeArgs({ streaming, model, hasFiles, pub }) {
 function tierSpawnEnv(tier) {
   const key = tierKeyOf(tier)
   if (!key) return process.env
-  return {
+  const env = {
     ...process.env,
     ...(tier.extraEnv ?? {}),
     ANTHROPIC_BASE_URL: tier.base,
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
+  // Blindare: fără autentificarea pe abonament în env — altfel CLI-ul poate
+  // ocoli cheia de rezervă și lucra pe furiș tot pe Max.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  return env
 }
 const spawnOpts = (pub, tier = currentTier()) =>
   pub ? { env: tierSpawnEnv(tier), cwd: '/tmp' } : { env: tierSpawnEnv(tier) }

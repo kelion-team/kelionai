@@ -152,6 +152,9 @@ let lastDevBeat = 0
 // Real Linux server load, posted by the VPS paznic every ~2s.
 let srvLoad = ''
 let srvLoadAt = 0
+// Motorul de lucru raportat de constructor (max/kimi/glm) — ultima valoare
+// cunoscută, afișată permanent în admin.
+let workEngine = ''
 // THE PROCESS PROGRESS BAR (Adrian's real requirement, 4 iul): the current job,
 // 0→100%, from intake to finish — NOT server resources. chat/builder/deployer
 // push the percentage as the process moves through its stages.
@@ -1415,6 +1418,20 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // MOTORUL DE LUCRU ACTIV (Adrian, 11 iul: „să fie afișat permanent pe
+  // interfața admin care constructor lucrează"). Constructorul de pe VPS
+  // raportează treapta la fiecare pornire de lucru (max/kimi/glm); ultima
+  // valoare rămâne afișată permanent — nu expiră.
+  app.post<{ Body: { engine?: string } }>(
+    '/api/bridge/work-engine',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const e = typeof req.body?.engine === 'string' ? req.body.engine.trim().slice(0, 20) : ''
+      if (e) workEngine = e
+      return { ok: true }
+    },
+  )
+
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
     const owned = ownedRequirement()
@@ -1432,6 +1449,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       lanes: wsLaneCount(),
       activity: active ? devActivity : [],
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
+      // Motorul de lucru activ (max/kimi/glm) — permanent, ultima valoare.
+      workEngine,
       // VITEZA REALĂ a creierului Linux: timpii ultimei ture (tip + total +
       // primul cuvânt) și, cât o tură e în curs, cronometrul viu. Adrian VEDE cât
       // durează un chat simplu vs o cerință de lucru (cerut 10 iul).
