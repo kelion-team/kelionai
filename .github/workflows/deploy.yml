@@ -33,6 +33,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Dispatch-ul automat al testului de latență (pasul de la final) cere
+    # dreptul de a porni workflow-uri — tokenul implicit nu-l are singur
+    # (dovada: 6 deploy-uri fără nicio rulare de test, 11 iul seara).
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
