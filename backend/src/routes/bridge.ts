@@ -1469,6 +1469,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (r.status === 'pending') {
         r.status = req.body?.decision === 'approve' ? 'approved' : 'rejected'
         await setReleaseStatus(r.id, r.status)
+        // Alerta „ai de aprobat" moare ODATĂ cu decizia (Adrian, 12 iul 00:02:
+        // „relesuri goale" — bannerul/anunțul persistau după decizie, iar
+        // panoul, corect, nu mai avea nimic).
+        const ai = releaseAlerts.findIndex((a) => a.id === r.id)
+        if (ai !== -1) {
+          releaseAlerts.splice(ai, 1)
+          persistReleaseAlerts()
+        }
         // ARHIVĂ APELABILĂ INDEXATĂ (Adrian, 10 iul): decizia iese din câmpul de
         // aprobat și intră în memoria pe care creierul o recheamă — ce s-a aprobat
         // și ce s-a respins, datat. Câmpul „Release-uri" arată apoi doar pending-ul.
@@ -1494,6 +1502,23 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/release-alerts', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    // AUTO-CURĂȚARE (Adrian, 12 iul: „relesuri goale"): o alertă trăiește DOAR
+    // cât release-ul ei e încă „pending" în panou. Orice alertă rămasă orfană
+    // (release decis/dispărut — inclusiv vechiturile persistate în kv înainte
+    // de fixul din decide) se șterge aici, definitiv. Alertele = oglinda
+    // panoului, niciodată mai mult.
+    try {
+      const pending = new Set(
+        (await listStagedReleases(50)).filter((x) => x.status === 'pending').map((x) => x.id),
+      )
+      const before = releaseAlerts.length
+      for (let i = releaseAlerts.length - 1; i >= 0; i--) {
+        if (!pending.has(releaseAlerts[i].id)) releaseAlerts.splice(i, 1)
+      }
+      if (releaseAlerts.length !== before) persistReleaseAlerts()
+    } catch {
+      /* DB indisponibil — arată ce avem, curățăm la următorul poll */
+    }
     return { alerts: releaseAlerts.slice() }
   })
   app.post<{ Body: { id?: string } }>('/api/admin/release-alerts/dismiss', async (req, reply) => {
