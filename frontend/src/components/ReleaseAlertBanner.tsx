@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { User } from '../lib/api'
+import { resolveLang } from '../lib/i18n'
 
 interface ReleaseAlert {
   id: string
@@ -33,7 +34,7 @@ export default function ReleaseAlertBanner({
         for (const a of arr) {
           if (spokenRef.current.has(a.id)) continue
           spokenRef.current.add(a.id)
-          speak(`Adrian, ai un release de aprobat: ${a.title}`)
+          void speak(`Ai un release de aprobat: ${a.title}`, resolveLang(user.locale))
         }
       } catch {
         // notificarea e non-critică; eșecul rețelei nu deranjează UI-ul
@@ -102,12 +103,26 @@ export default function ReleaseAlertBanner({
   )
 }
 
-function speak(text: string): void {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'ro-RO'
-  u.rate = 1
-  // Anulează orice vorbire în curs ca anunțul de release să fie instant.
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(u)
+// Adrian, 11 iul: „vocea care spune release de aprobat trebuie să fie în limba
+// userului admin, Chirp 3" — anunțul trece prin sinteza de pe SERVER (aceeași
+// voce Chirp 3 HD ca tot restul aplicației), nu prin vocea browserului
+// (speechSynthesis e INTERZISĂ — dezinstalată din front pe 4 iul; reintrodusă
+// din greșeală aici și scoasă la ordinul lui Adrian).
+async function speak(text: string, lang: string): Promise<void> {
+  try {
+    const r = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ text, lang }),
+    })
+    if (!r.ok) return
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    audio.onended = () => URL.revokeObjectURL(url)
+    void audio.play().catch(() => URL.revokeObjectURL(url))
+  } catch {
+    // anunțul vocal e best-effort; bannerul vizual rămâne oricum pe ecran
+  }
 }
