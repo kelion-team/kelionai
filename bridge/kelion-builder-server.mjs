@@ -36,6 +36,73 @@ function readSecret() {
 if (!SECRET) { console.error('BRIDGE_SECRET lipsa'); process.exit(1) }
 const H = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 
+// ── MOTORUL DE LUCRU (ordinul lui Adrian, 11 iul): munca NU mai consumă
+// abonamentul Claude Max — ăla rămâne DOAR pentru chatul adminului și demo.
+// Constructorul lucrează pe Kimi (primar), apoi GLM (secundar), cu revenire
+// automată (treapta golită se reîncearcă după 30 min). Config Kimi din docs-ul
+// lor oficial pentru Claude Code (api.kimi.com/coding/, model kimi-for-coding);
+// GLM mapează singur numele de model claude. Cheile: fișiere pe VPS, puse prin
+// vps-keys.yml. AVARIE: fără NICIO cheie pe disc, cade pe Max cu anunț tare în
+// jurnal (mai bine reparații pe Max decât reparații moarte) — dar cu cheile
+// puse, Max nu e atins NICIODATĂ de muncă.
+const WORK_TIERS = [
+  {
+    name: 'kimi',
+    keyFile: '/root/kelion/kimi-key.txt',
+    base: 'https://api.kimi.com/coding/',
+    model: 'kimi-for-coding',
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
+  },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'claude-fable-5' },
+]
+const WORK_COOLDOWN_MS = 30 * 60_000
+const workDownUntil = Object.create(null)
+const workKeyOf = (t) => {
+  try { return readFileSync(t.keyFile, 'utf8').trim() || null } catch { return null }
+}
+function workTier() {
+  for (const t of WORK_TIERS) {
+    if ((workDownUntil[t.name] ?? 0) > Date.now()) continue
+    if (workKeyOf(t)) return t
+  }
+  return null
+}
+// Semnăturile de cotă golită — DOAR pe canalele de eroare, niciodată pe textul
+// normal al modelului.
+const WORK_QUOTA_RE = /usage limit|usage credits|credit balance|rate.?limit|quota|429/i
+function workQuotaHit(tierName, errText) {
+  if (!errText || !WORK_QUOTA_RE.test(String(errText))) return false
+  workDownUntil[tierName] = Date.now() + WORK_COOLDOWN_MS
+  console.log(`[munca] treapta „${tierName}" e golită — comut pe următoarea, revin în ${WORK_COOLDOWN_MS / 60_000} min.`)
+  return true
+}
+// MOTORUL ACTIV pe interfața admin (Adrian, 11 iul: „să fie afișat permanent
+// care constructor lucrează"): la fiecare pornire de lucru, constructorul
+// raportează serverului treapta folosită; se retrimite doar la schimbare.
+let lastEngineReported = ''
+function reportEngine(name) {
+  if (!name || name === lastEngineReported) return
+  lastEngineReported = name
+  void api('/api/bridge/work-engine', 'POST', { engine: name }).catch(() => {})
+}
+// Env-ul treptei de lucru: baza + cheia compatibile Anthropic. IMPORTANT:
+// scoatem CLAUDE_CODE_OAUTH_TOKEN (autentificarea pe abonament) ca CLI-ul să
+// nu poată ocoli cheia de rezervă și să lucreze pe furiș tot pe Max.
+function workEnv(tier) {
+  if (!tier) return process.env
+  const key = workKeyOf(tier)
+  if (!key) return process.env
+  const env = {
+    ...process.env,
+    ...(tier.extraEnv ?? {}),
+    ANTHROPIC_BASE_URL: tier.base,
+    ANTHROPIC_API_KEY: key,
+    ANTHROPIC_AUTH_TOKEN: key,
+  }
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  return env
+}
+
 async function api(path, method = 'GET', body) {
   const r = await fetch(BASE + path, { method, headers: H, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30_000) })
   if (!r.ok) throw new Error(`${path} -> ${r.status}`)
@@ -83,14 +150,21 @@ function run(cmd, args, opts = {}) {
 // MASURA ce se intampla; rezultatul final (textul cu SUMAR:) se intoarce la final.
 function runClaudeLive(prompt, onEvent, timeoutMs) {
   return new Promise((resolve) => {
+    // Treapta de LUCRU curentă (Kimi → GLM). null = nicio cheie pe disc →
+    // avarie pe Max, anunțată tare (o singură dată pe pornire ar fi ideal,
+    // dar mai bine zgomotos decât pe furiș).
+    const tier = workTier()
+    if (!tier) console.log('[munca] AVARIE: nicio cheie de lucru pe disc — muncesc pe Max (pune cheile prin vps-keys).')
+    reportEngine(tier ? tier.name : 'max')
     const c = spawn('claude', [
       '-p', prompt,
-      '--model', 'claude-fable-5',
+      '--model', tier?.model ?? 'claude-fable-5',
       '--allowedTools', 'Read,Edit,Write,Bash',
       '--output-format', 'stream-json', '--verbose',
-    ], { cwd: REPO, env: process.env })
+    ], { cwd: REPO, env: workEnv(tier) })
     let buf = ''
     let finalText = ''
+    let errText = ''
     const t = setTimeout(() => c.kill('SIGKILL'), timeoutMs)
     c.stdout.on('data', (d) => {
       buf += d
@@ -101,13 +175,23 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
         if (!line) continue
         try {
           const ev = JSON.parse(line)
-          if (ev.type === 'result' && typeof ev.result === 'string') finalText = ev.result
+          if (ev.type === 'result' && typeof ev.result === 'string') {
+            // Cotă golită → doar pe eroare reală (is_error), nu pe text normal.
+            if (ev.is_error && tier) workQuotaHit(tier.name, ev.result)
+            finalText = ev.result
+          }
           onEvent(ev)
         } catch { /* linie partiala/non-JSON — ignorata */ }
       }
     })
-    c.stderr.on('data', () => {})
-    c.on('close', (code) => { clearTimeout(t); resolve({ code, out: finalText }) })
+    c.stderr.on('data', (d) => (errText += d))
+    c.on('close', (code) => {
+      clearTimeout(t)
+      // Treapta golită se marchează → următoarea încercare a supervizorului
+      // (re-asignarea existentă) pornește deja pe treapta următoare.
+      if (tier && errText) workQuotaHit(tier.name, errText)
+      resolve({ code, out: finalText })
+    })
     c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
   })
 }

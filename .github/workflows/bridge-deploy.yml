@@ -116,6 +116,26 @@ jobs:
                 || echo "::warning::  codul copiat NU conține markerul așteptat — verifică manual"
             fi
 
+            # 2b) ACEEAȘI lecție pentru CONSTRUCTOR (11 iul, lanțul de lucru
+            #     Kimi→GLM): kelion-builder rulează și el adesea o copie în afara
+            #     repo-ului. Fără sincronizarea asta, motorul de muncă ar rămâne
+            #     pe Max deși repo-ul zice Kimi. Marker: „MOTORUL DE LUCRU".
+            BEXEC=$(systemctl show kelion-builder -p ExecStart --value 2>/dev/null | grep -oE '/[^ ]*\.mjs' | head -1)
+            BSRC="$REPO/bridge/kelion-builder-server.mjs"
+            echo "ExecStart real constructor (systemd): ${BEXEC:-necunoscut}"
+            if [ -z "$BEXEC" ]; then
+              echo "::warning::Nu am putut citi ExecStart-ul constructorului — sar peste sincronizare"
+            elif [ "$BEXEC" = "$BSRC" ]; then
+              echo "Constructorul rulează DEJA fișierul din repo — fără copiere."
+            else
+              BB=$(md5sum "$BEXEC" 2>/dev/null | cut -d' ' -f1 || echo "lipsă")
+              cp "$BSRC" "$BEXEC"
+              BA=$(md5sum "$BEXEC" | cut -d' ' -f1)
+              echo "Constructor sincronizat la calea reală.  md5 înainte: $BB   după: $BA"
+              grep -q "MOTORUL DE LUCRU" "$BEXEC" && echo "  ✅ confirmat: lanțul de lucru Kimi→GLM e pe disc la calea rulată" \
+                || echo "::warning::  constructorul copiat NU conține markerul lanțului — verifică manual"
+            fi
+
             # 3) Vânătoarea de ZOMBIE: orice worker pornit manual, în afara
             #    systemd-ului (nume vechi SAU noi — nu presupunem un singur nume).
             echo "=== procese worker/punte ÎNAINTE ==="

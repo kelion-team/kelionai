@@ -81,6 +81,8 @@ export default function Stage({ user }: { user: User }) {
   const [claudeActivity, setClaudeActivity] = useState<string[]>([])
   // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
   const [srvLoad, setSrvLoad] = useState('')
+  // Motorul de lucru activ al constructorului (max/kimi/glm) — afișat permanent.
+  const [workEngine, setWorkEngine] = useState('')
   // The CURRENT process, 0→100%, from intake to finish (his real requirement:
   // the bar tracks what's being executed, start to end — not server resources).
   const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
@@ -234,6 +236,7 @@ export default function Stage({ user }: { user: User }) {
             lanes?: number
             activity?: string[]
             srv?: string
+            workEngine?: string
             progress?: { pct?: number; label?: string; file?: string }
             owned?: { summary?: string; status?: string; ageMs?: number } | null
             mode?: string
@@ -247,6 +250,7 @@ export default function Stage({ user }: { user: User }) {
             setBridgeLanes(Number(j.lanes ?? 0))
             setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
             setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
+            setWorkEngine(typeof j.workEngine === 'string' ? j.workEngine : '')
             const p = j.progress
             setProgress(
               p && typeof p.pct === 'number'
@@ -530,9 +534,14 @@ export default function Stage({ user }: { user: User }) {
             {/* Bottom-left: the REAL Linux server load in percentages (posted
                 by the VPS paznic every minute) — replaces the old status line
                 that duplicated the top-bar work ticker. */}
-            {srvLoad && (
+            {(srvLoad || workEngine) && (
               <div className="claude-status">
-                <div className="claude-status-line srv-load">Serv. Linux — {srvLoad}</div>
+                {srvLoad && <div className="claude-status-line srv-load">Serv. Linux — {srvLoad}</div>}
+                {/* Adrian, 11 iul: „să fie afișat permanent care constructor
+                    lucrează" — motorul de lucru activ (MAX/KIMI/GLM). */}
+                {workEngine && (
+                  <div className="claude-status-line srv-load">Motor lucru — {workEngine.toUpperCase()}</div>
+                )}
               </div>
             )}
           </div>
