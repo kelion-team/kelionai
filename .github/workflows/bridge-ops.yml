@@ -23,7 +23,7 @@ on:
         description: 'Operațiunea'
         required: true
         type: choice
-        options: [health, orders-report, chat-tail, workorder, say, client-errors]
+        options: [health, orders-report, chat-tail, workorder, say, client-errors, files]
       text:
         description: 'Textul (doar pentru workorder/say)'
         required: false
@@ -81,5 +81,10 @@ jobs:
               # utilă și lui Claude la diagnostic: „camera nu merge" etc.).
               curl -sS --max-time 20 -H "$H" "$B/api/bridge/client-errors" \
                 | jq -r '.errors[-40:][] | "\(.at) [\(.kind)] \(.msg[0:220])"' ;;
+            files)
+              # Cutia atașamentelor adminului: a ajuns poza pe server? când? cât de
+              # mare? (diagnostic „Kelion nu-mi analizează poza" — 11 iul.)
+              curl -sS --max-time 20 -H "$H" "$B/api/bridge/files" \
+                | jq -r '.files[0:20][] | "\(.at) \(.name) \(.type) octeți:\((.data | length))"' ;;
             *) echo "::error::operațiune necunoscută: $OP"; exit 1 ;;
           esac

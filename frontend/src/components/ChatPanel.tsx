@@ -39,15 +39,24 @@ import {
   clearPendingVoiceFeatures,
   type MicHandle,
 } from '../lib/audioIO'
-import { pushGesture, isGestureLabel } from '../lib/gestureQueue'
-import { pushFacial } from '../lib/facialQueue'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
+import { pushFacial } from '../lib/facialQueue'
 
-// Promo scenario recording: hard cap so a clip never runs away (a short clip is
-// ~15s; a full landing demo can use the whole window).
-const SCENARIO_MAX_MS = 60_000
+// Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3" al
+// constructorului) traduse în clipurile REALE din biblioteca RPM — scheletul
+// se mișcă doar din clipuri (regula #125), deci eticheta devine numele
+// clipului echivalent și pleacă pe același canal 'kelion-gesture'.
+const GESTURE_TO_CLIP: Record<string, string> = {
+  salute: 'expresie-1',
+  raiseRightHand: 'expresie-13',
+  pointMonitor: 'expresie-2',
+}
+
+// FĂRĂ plafon de durată la înregistrări (Adrian, 11 iul seara: „nu trebuie să
+// aibă setări de timp sau limitări") — scenariul se termină când i se termină
+// pașii sau când spune el stop, nu când expiră un cronometru arbitrar.
 
 // Camera + monitor-tab commands ("închide harta", "camera spate", "switch to
 // the video") are interpreted on the SERVER now (backend services/commands.ts,
@@ -223,6 +232,11 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: c.gest }))
       return
     }
+    // Cadrul {gesture} al tool-ului server-side — tradus în clipul echivalent.
+    if (c.gesture && GESTURE_TO_CLIP[c.gesture]) {
+      window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: GESTURE_TO_CLIP[c.gesture] }))
+      return
+    }
     // Bargraf-ul intrării în creier: serverul spune EXACT ce text predă
     // creierului — se afișează pe banda dedicată până la tura următoare.
     if (c.heard !== undefined) {
@@ -260,11 +274,6 @@ export default function ChatPanel({
       else if (scr?.op === 'switchKind' && scr.kind) switchToKind(scr.kind)
       return
     }
-    // A SERVER-triggered avatar gesture: validate and enqueue it for AvatarModel.
-    if (c.gesture && isGestureLabel(c.gesture)) {
-      pushGesture(c.gesture)
-      return
-    }
     // The server committed a speech-language switch (detected + persisted
     // there): apply it to the recognizer and mirror it locally.
     if (c.lang) {
@@ -299,32 +308,19 @@ export default function ChatPanel({
     suggestFacial(text)
   }
 
-  // Pick a facial expression from the assistant's completed text so the avatar's
-  // micro-expressions match context and tone. Kept deterministic and cheap.
+  // Micro-expresia feței aleasă din tonul replicii încheiate (păstrată din
+  // release-ul „v2.3": fața pe morph-uri e permisă) — determinist și gratuit.
   function suggestFacial(text: string): void {
     const s = text.trim()
     if (!s) return
-    if (/[?？]\s*$/.test(s)) {
-      pushFacial('raisedBrow')
-      return
-    }
-    if (/[!！]\s*$/.test(s)) {
-      pushFacial('surprise')
-      return
-    }
-    if (/\b(mulţumesc|multumesc|mulțumesc|thank|bravo|excelent|minunat|foarte bine|wonderful|great|superb)\b/i.test(s)) {
-      pushFacial('warmth')
-      return
-    }
-    if (/\b(îmi pare rău|imi pare rau|scuze|sorry|regret|păcat|pacat|din păcate)\b/i.test(s)) {
-      pushFacial('empathy')
-      return
-    }
-    if (/\b(hmm|ei bine|să vedem|sa vedem|să gândim|sa gandim|let me think|let's see|o clipă|o clipa)\b/i.test(s)) {
-      pushFacial('think')
-      return
-    }
-    // A gentle smile as the default alive reaction to a completed thought.
+    if (/[?？]\s*$/.test(s)) return pushFacial('raisedBrow')
+    if (/[!！]\s*$/.test(s)) return pushFacial('surprise')
+    if (/\b(mul[țt]umesc|thank|bravo|excelent|minunat|foarte bine|wonderful|great|superb)\b/i.test(s))
+      return pushFacial('warmth')
+    if (/\b([îi]mi pare r[ăa]u|scuze|sorry|regret|p[ăa]cat|din p[ăa]cate)\b/i.test(s))
+      return pushFacial('empathy')
+    if (/\b(hmm|ei bine|s[ăa] vedem|s[ăa] g[âa]ndim|let me think|let's see|o clip[ăa])\b/i.test(s))
+      return pushFacial('think')
     pushFacial('smile')
   }
 
@@ -585,7 +581,6 @@ export default function ChatPanel({
     scenarioRunningRef.current = true
     setScenarioRunning(true)
     setScenarioOpen(false)
-    const hardStop = globalThis.setTimeout(() => handle.stop(), SCENARIO_MAX_MS)
     for (const step of steps) {
       if (!scenarioRunningRef.current) break
       await sendRef.current(step) // waits for Kelion's full reply to stream in
@@ -593,7 +588,6 @@ export default function ChatPanel({
     }
     // Let the final sentence finish speaking, then stop + save.
     await new Promise((r) => globalThis.setTimeout(r, 2500))
-    globalThis.clearTimeout(hardStop)
     handle.stop()
   }
   function stopScenario(): void {
@@ -788,7 +782,7 @@ export default function ChatPanel({
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
-      else suggestFacial(acc)
+      else suggestFacial(acc) // fața însoțește tonul replicii încheiate
     } catch (err) {
       if (ac.signal.aborted) {
         // OPRIT de Adrian — fără mesaj de eroare; textul deja afișat rămâne așa.

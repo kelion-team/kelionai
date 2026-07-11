@@ -15,10 +15,19 @@ export function loadLocalLang(): string | null {
   }
 }
 
+// Aranjarea avatarului în colț (poziție vw/vh + scală) — a lui Adrian, salvată
+// PE SERVER (11 iul: „salvează mărimea actuală a lui Kelion").
+export interface AvatarBox {
+  x: number
+  y: number
+  s: number
+}
+
 export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
   anthropicKeySet: boolean
+  avatarBox?: AvatarBox | null
 } | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
@@ -28,9 +37,25 @@ export async function loadServerPrefs(): Promise<{
       speechLang: string | null
       meserieActiva: number | null
       anthropicKeySet: boolean
+      avatarBox?: AvatarBox | null
     }
   } catch {
     return null
+  }
+}
+
+// Persistă aranjarea avatarului per utilizator; best-effort, nu aruncă.
+export async function saveAvatarBox(box: AvatarBox): Promise<boolean> {
+  try {
+    const res = await fetch('/api/prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ avatarBox: box }),
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }
 
