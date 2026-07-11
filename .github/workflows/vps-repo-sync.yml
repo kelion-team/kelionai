@@ -40,17 +40,39 @@ jobs:
           cat > /root/kelion/repo-sync.sh <<'SYNC'
           #!/bin/bash
           cd /root/kelion/repo || exit 0
-          # Constructorul lucrează (modificări locale)? Nu atinge NIMIC.
+          # Constructorul lucrează (modificări locale)? Nu atinge NIMIC în ciclul ăsta.
           [ -n "$(git status --porcelain)" ] && exit 0
           git fetch -q origin master || exit 0
           L=$(git rev-parse HEAD)
           R=$(git rev-parse origin/master)
-          [ "$L" = "$R" ] && exit 0
-          if git merge --ff-only origin/master >/dev/null 2>&1; then
-            echo "$(date -Is) sincronizat la $R" >> /root/kelion/repo-sync.log
-          else
-            echo "$(date -Is) DIVERGENT (comituri locale nepublicate) — rezolvă cu bridge-deploy" >> /root/kelion/repo-sync.log
+          if [ "$L" != "$R" ]; then
+            if git merge --ff-only origin/master >/dev/null 2>&1; then
+              echo "$(date -Is) sincronizat la $R" >> /root/kelion/repo-sync.log
+            else
+              echo "$(date -Is) DIVERGENT (comituri locale nepublicate) — rezolvă cu bridge-deploy" >> /root/kelion/repo-sync.log
+            fi
           fi
+          # V2 (lecția „constructorul din memorie a rămas pe cod vechi", 11 iul):
+          # repo-ul la zi NU ajunge singur în procesele care rulează — systemd
+          # rulează COPII la căi proprii. DOAR-ALERTĂ (Adrian nu a autorizat
+          # încă repornire automată nesupravegheată a serviciilor de producție):
+          # se compară md5 la calea REALĂ din ExecStart și se scrie clar în
+          # jurnal dacă divergă — repornirea rămâne manuală, prin bridge-deploy.
+          check_svc() {
+            local svc="$1" rel="$2"
+            local src="/root/kelion/repo/$rel"
+            [ -f "$src" ] || return 0
+            local exec
+            exec=$(systemctl show "$svc" -p ExecStart --value 2>/dev/null | grep -oE '/[^ ]*\.mjs' | head -1)
+            [ -z "$exec" ] && return 0
+            local a b
+            a=$(md5sum "$src" | cut -d' ' -f1)
+            b=$(md5sum "$exec" 2>/dev/null | cut -d' ' -f1 || echo lipsa)
+            [ "$a" = "$b" ] && return 0
+            echo "$(date -Is) ATENȚIE $svc: codul rulat ($exec, md5 $b) DIFERĂ de repo ($a) — rulează bridge-deploy" >> /root/kelion/repo-sync.log
+          }
+          check_svc kelion-bridge  bridge/kelion-bridge-linux.mjs
+          check_svc kelion-builder bridge/kelion-builder-server.mjs
           tail -n 200 /root/kelion/repo-sync.log > /root/kelion/repo-sync.log.tmp && mv /root/kelion/repo-sync.log.tmp /root/kelion/repo-sync.log
           SYNC
           chmod +x /root/kelion/repo-sync.sh
