@@ -1404,6 +1404,39 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { wake: wakePending(), builderOnline: Date.now() - lastDevBeat < 60_000 }
   })
 
+  // OGLINDA VEGHERII (Adrian, 11 iul: „implementează și lui Kelion sistemul —
+  // să se uite dacă a primit de la tine ceva"): veghea de pe VPS (timer, 1 min)
+  // găsește în caiet note NOI de la Claude (claude-cloud) și le aduce aici, iar
+  // creierul e RE-CHEMAT cu ele — Kelion le primește în sesiune în același
+  // minut, nu abia când se întâmplă să scrie Adrian. Răspunsul lui intră în
+  // chatul adminului (același drum ca reportToAdmin). Plătit DOAR la eveniment
+  // — zero cost pe liniște (regula banilor). Dacă puntea e offline, răspundem
+  // ok:false și veghea NU avansează reperul — reîncearcă la minutul următor.
+  app.post<{ Body: { notes?: string } }>('/api/bridge/caiet-alert', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 4000) : ''
+    if (!notes) return reply.code(400).send({ error: 'bad_request' })
+    if (!bridgeOnline()) return { ok: false }
+    void bridgeAsk(
+      'VEGHEA CAIETULUI (automată, la 1 minut): Claude ți-a lăsat în caietul comun notele de mai jos ' +
+        'și nu le-ai citit încă. Citește-le ACUM și execută ce îți cer (sau notează durabil regula). ' +
+        'Răspunde-i lui Adrian SCURT cu ce ai făcut. NU scrie în caiet doar ca să confirmi — ' +
+        'confirmarea e răspunsul tău din chat.\n\n' +
+        notes,
+      [],
+      90_000,
+    )
+      .then((r) => {
+        if (r && r.trim()) sayToAdmin(r)
+      })
+      .catch(() => {
+        // Creierul n-a răspuns la timp: nota NU se pierde — rămâne în caiet
+        // (o vede la următoarea tură), iar Adrian află că livrarea a șchiopătat.
+        sayToAdmin(`📓 Notă nouă de la Claude în caiet (creierul n-a răspuns la veghe): ${notes.slice(0, 300)}`)
+      })
+    return { ok: true }
+  })
+
   // TOTAL ACCESS for laptop-Claude (secret): the admin's recent chat exactly
   // as saved — voice arrives transcribed, copy-paste lands in the text…
   app.get('/api/bridge/chat-history', async (req, reply) => {
