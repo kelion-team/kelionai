@@ -1,0 +1,21 @@
+#!/bin/bash
+# VOCEA DE MONITOR (ordinul lui Adrian: „tot ce faci, live pe monitor, în timp
+# real — ce nu e pe monitor NU există"). Un pas = un apel:
+#
+#   kelion-monitor "citesc chat.ts"                 → linie în jurnalul live
+#   kelion-monitor "execut reparația" 40 "execuție" → linie + bara la 40%
+#
+# Orice agent al lui Kelion cheamă asta la FIECARE acțiune. Secretul e cel
+# existent din bridge-secret.txt — zero configurare nouă.
+set -u
+LINE=${1:?text pas}
+PCT=${2:-}
+LABEL=${3:-}
+SECRET=$(cat /root/kelion/bridge-secret.txt 2>/dev/null | tr -d '[:space:]')
+[ -z "$SECRET" ] && exit 0
+curl -sS --max-time 10 -X POST -H "x-bridge-secret: $SECRET" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg l "$LINE" '{line:$l}')" https://kelionai.app/api/bridge/activity >/dev/null 2>&1 || true
+if [ -n "$PCT" ]; then
+  curl -sS --max-time 10 -X POST -H "x-bridge-secret: $SECRET" -H "Content-Type: application/json" \
+    -d "$(jq -nc --argjson p "$PCT" --arg l "${LABEL:-lucru}" '{pct:$p,label:$l}')" https://kelionai.app/api/bridge/progress >/dev/null 2>&1 || true
+fi
