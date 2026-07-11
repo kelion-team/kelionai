@@ -148,11 +148,16 @@ jobs:
             done
 
             # 4) Repornește serviciile cu secretul + codul corecte.
+            # LECȚIE (11 iul, rulările #24/#25): verificarea cu `list-unit-files |
+            # grep` era NEDETERMINISTĂ — la #24 a sărit builder+deployer, la #25
+            # exact invers a sărit bridge+paznic → puntea a rămas cu codul VECHI
+            # în memorie deși fișierul nou era pe disc. Acum: încercăm DIRECT
+            # restartul pe fiecare; eșecul se vede explicit, nu se maschează.
             for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
-              if systemctl list-unit-files "$svc.service" 2>/dev/null | grep -q "^$svc.service"; then
-                systemctl restart "$svc" && echo "restart $svc → $(systemctl is-active "$svc")"
+              if systemctl restart "$svc" 2>/dev/null; then
+                echo "restart $svc → $(systemctl is-active "$svc")"
               else
-                echo "($svc nu există aici — sar peste)"
+                echo "::warning::restart $svc A EȘUAT (unitate lipsă sau eroare reală) — verifică manual"
               fi
             done
             sleep 4
