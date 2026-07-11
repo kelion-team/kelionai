@@ -33,7 +33,7 @@ import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
-import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
+import { bridgeRepair, bridgeAsk, bridgeOnline, forwardToKelion } from './bridge.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -433,15 +433,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Adresat lui Kelion → chiar TRIMITEM tura pe puntea reală (contextul lui
       // complet de admin, nu doar o notă) și postăm răspunsul înapoi în canal,
       // fire-and-forget — Adrian nu așteaptă blocat răspunsul aici.
-      if (to === 'kelion' && bridgeOnline()) {
-        void bridgeAsk(
-          `[Mesaj din canalul de echipă, de la Adrian — către tine, Kelion]\n${content}`,
-          [],
-          120_000,
-        ).then((answer) => {
-          if (answer && answer.trim()) void postTeamMessage('kelion', answer.trim(), 'adrian')
-        })
-      }
+      if (to === 'kelion') forwardToKelion(content, 'adrian')
       return reply.send({ ok: !!saved, message: saved })
     },
   )

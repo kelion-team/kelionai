@@ -704,6 +704,22 @@ export function bridgeAsk(
   })
 }
 
+// CANALUL DE ECHIPĂ → KELION (Adrian, 11 iul): o SINGURĂ implementare, folosită
+// de ambele rute (admin și bridge) — un mesaj „către kelion" trebuie livrat la
+// fel de sigur indiferent cine l-a scris (Adrian sau Claude). Tura pleacă pe
+// puntea REALĂ (contextul complet de admin al lui Kelion), răspunsul se
+// postează singur înapoi în canal — fire-and-forget, apelantul nu așteaptă.
+export function forwardToKelion(content: string, fromAuthor: string): void {
+  if (!bridgeOnline()) return
+  void bridgeAsk(
+    `[Mesaj din canalul de echipă, de la ${fromAuthor} — către tine, Kelion]\n${content}`,
+    [],
+    120_000,
+  ).then((answer) => {
+    if (answer && answer.trim()) void postTeamMessage('kelion', answer.trim(), fromAuthor)
+  })
+}
+
 // ── STREAMING bridge (viteza sunetului, Adrian 4 iul) ───────────────────────
 // The worker posts text CHUNKS as the model writes them; the chat route
 // forwards them straight into the open reply, so Kelion starts writing AND
@@ -1413,6 +1429,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
       const to = typeof req.body?.to === 'string' ? req.body.to : null
       const saved = await postTeamMessage('claude', content, to)
+      // SIMETRIC cu ruta admin (Claude → Kelion trebuie să ajungă la fel de
+      // sigur ca Adrian → Kelion — altfel mesajul stă necitit în canal, Kelion
+      // n-are de unde ști singur să-l caute acolo).
+      if (to === 'kelion') void forwardToKelion(content, 'claude')
       return { ok: !!saved, message: saved }
     },
   )
