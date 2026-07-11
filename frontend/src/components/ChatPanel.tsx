@@ -1254,7 +1254,11 @@ export default function ChatPanel({
             <span className="heard-band-label kelion-k" title="Kelion — răspunsul">K</span>
             {busy ? (
               <span className="speech-tail">
-                <span className="speech-tail-text">{lastAssistant?.content || '…'}</span>
+                <span className="speech-tail-text">
+                  {/* NICIODATĂ gol în pauza de gândire (ordin, 10 iul): până
+                      curg primele cuvinte, banda ține sinteza cererii auzite. */}
+                  {lastAssistant?.content || (heard ? synthesize(heard) : '…')}
+                </span>
               </span>
             ) : (
               <span className="ticker">
