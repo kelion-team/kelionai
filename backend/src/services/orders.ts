@@ -79,7 +79,12 @@ const STAGE: Record<string, string> = {
   ready: '📦 gata, așteaptă „da" pentru publicare',
   published: '🟢 publicat pe live',
   certified: '✅ certificat (tester PASS)',
-  finalized: '✅ finalizat (închis)',
+  // ADEVĂRUL ÎN REGISTRU (auditul din 8 iul + Adrian, 11 iul: „ce s-a
+  // întâmplat cu cerințele mele?"): `finalized` înseamnă închis ADMINISTRATIV
+  // de reconciliere (agent abandonat/înlocuit/mort) — NU lucrat și dovedit.
+  // Bifa verde de aici păcălea pe toată lumea că s-a făcut. Doar
+  // published/certified înseamnă făcut.
+  finalized: '⚪ închis administrativ (NEDOVEDIT — nu înseamnă făcut)',
   failed: '🔴 a picat',
 }
 const hm = (v?: string | Date | null): string => {
