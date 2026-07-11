@@ -890,17 +890,24 @@ export async function postTeamMessage(
 export async function getTeamChannel(afterId = 0, limit = 200): Promise<TeamMessage[]> {
   if (!dbEnabled()) return []
   try {
+    if (afterId > 0) {
+      const r = await getPool().query<TeamMessage>(
+        `SELECT id, author, addressed_to, content, created_at FROM team_channel
+         WHERE id > $1 ORDER BY id ASC LIMIT $2`,
+        [afterId, limit],
+      )
+      return r.rows
+    }
+    // Ultimele `limit` mesaje, în ordine cronologică — se ia DESC (ca să
+    // limiteze la cele mai recente), apoi se întoarce ordinea în JS, nu în SQL
+    // (evită un subquery cu parametru nefolosit — tipar neobișnuit, greu de
+    // depanat fără acces direct la Postgres).
     const r = await getPool().query<TeamMessage>(
-      afterId > 0
-        ? `SELECT id, author, addressed_to, content, created_at FROM team_channel
-           WHERE id > $1 ORDER BY id ASC LIMIT $2`
-        : `SELECT id, author, addressed_to, content, created_at FROM (
-             SELECT id, author, addressed_to, content, created_at FROM team_channel
-             ORDER BY id DESC LIMIT $2
-           ) x ORDER BY id ASC`,
-      afterId > 0 ? [afterId, limit] : [0, limit],
+      `SELECT id, author, addressed_to, content, created_at FROM team_channel
+       ORDER BY id DESC LIMIT $1`,
+      [limit],
     )
-    return r.rows
+    return r.rows.reverse()
   } catch {
     return []
   }
