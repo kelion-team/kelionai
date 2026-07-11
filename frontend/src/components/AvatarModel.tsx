@@ -254,6 +254,9 @@ export default function AvatarModel() {
       state.current = 'idle'
       current.current = null
       play('idle')
+      // Scena (Stage) află că gestul s-a terminat — de ex. revine din poziția
+      // de dans înapoi în colțul lui Adrian.
+      window.dispatchEvent(new Event('kelion-gesture-done'))
     }
     mixer.addEventListener('finished', onFinished)
     // CANALUL DE COMANDĂ: orice parte a aplicației (în viitor: creierul, prin
