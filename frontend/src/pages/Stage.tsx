@@ -83,6 +83,8 @@ export default function Stage({ user }: { user: User }) {
   const [srvLoad, setSrvLoad] = useState('')
   // Motorul de lucru activ al constructorului (max/kimi/glm) — afișat permanent.
   const [workEngine, setWorkEngine] = useState('')
+  // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
+  const [relPending, setRelPending] = useState(0)
   // The CURRENT process, 0→100%, from intake to finish (his real requirement:
   // the bar tracks what's being executed, start to end — not server resources).
   const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
@@ -240,6 +242,7 @@ export default function Stage({ user }: { user: User }) {
             activity?: string[]
             srv?: string
             workEngine?: string
+            releases?: number
             progress?: { pct?: number; label?: string; file?: string }
             owned?: { summary?: string; status?: string; ageMs?: number } | null
             mode?: string
@@ -254,6 +257,7 @@ export default function Stage({ user }: { user: User }) {
             setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
             setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
             setWorkEngine(typeof j.workEngine === 'string' ? j.workEngine : '')
+            setRelPending(typeof j.releases === 'number' ? j.releases : 0)
             const p = j.progress
             setProgress(
               p && typeof p.pct === 'number'
@@ -418,6 +422,17 @@ export default function Stage({ user }: { user: User }) {
               <span className={`mode-badge mode-${mode}`}>
                 {mode === 'lucru' ? '🛠 Lucru' : mode === 'raport' ? '📊 Raport' : '💬 Chat'}
               </span>
+              {/* BECUL (Adrian, 11 iul: „când sunt release-uri să apară un bec
+                  care pâlpâie, să știu să verific") — pâlpâie cât timp există
+                  decizii care îl așteaptă; dispare singur după decizie. */}
+              {relPending > 0 && (
+                <span
+                  className="rel-alert"
+                  title={`${relPending} release-uri așteaptă decizia ta — Admin → Release-uri sau „da" în chat`}
+                >
+                  💡 {relPending}
+                </span>
+              )}
               <span className={`live-dot ${claudeActive ? 'on' : ''}`}>
                 {claudeActive ? 'LIVE' : 'în așteptare'}
               </span>
