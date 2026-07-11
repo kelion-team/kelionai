@@ -1,0 +1,49 @@
+# CITEȘTE CAIETUL COMUN + ISTORICUL ADMIN (doar-citire, diagnostic).
+# AUTORIZAT EXPLICIT de Adrian (11 iul): conținutul poate apărea în jurnalul
+# rulării GitHub Actions (repo privat, vizibil doar owner-ului).
+#
+# NU cere parola VPS — endpoint-urile /api/bridge/memory și /api/bridge/chat-history
+# sunt deja protejate de BRIDGE_SECRET (același model ca health check-ul din
+# bridge-deploy.yml). Luăm secretul din Railway (RAILWAY_TOKEN, deja secret
+# GitHub) și citim direct — fără SSH, fără să distribuim secretul mai departe.
+name: read-caiet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/chat-instant-delay-em5gjf]
+    paths: ['.github/workflows/read-caiet.yml']
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Citește caietul comun (shared_memory) + istoricul admin
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -uo pipefail
+          [ -z "$TOKEN" ] && { echo "::error::RAILWAY_TOKEN lipsește"; exit 1; }
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0]')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
+          [ -z "$SECRET" ] && { echo "::error::BRIDGE_SECRET lipsă din Railway"; exit 1; }
+          echo "::add-mask::$SECRET"
+
+          echo "=== CAIETUL COMUN (shared_memory, ultimele 60) ==="
+          curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/memory | jq -r '
+            .memory[]? | "[\(.created_at // .at // "?")] \(.source // "?"): \(.content // .text // .)"' 2>/dev/null \
+            || curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/memory
+
+          echo ""
+          echo "=== ISTORICUL RECENT ADMIN (ultimele 40 mesaje) ==="
+          curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/chat-history | jq -r '
+            .history[]? | "[\(.role // "?")] \((.content // "") | .[0:200])"' 2>/dev/null \
+            || curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/chat-history
