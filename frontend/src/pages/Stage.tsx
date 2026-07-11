@@ -26,6 +26,7 @@ import {
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { useAvatarScale, DEFAULT_AVATAR_SCALE } from '../lib/avatarScale'
 
 // Live-work feed shown ON KELION'S MONITOR. A line shaped "[NN%] text" is a
 // WORK ITEM: it stays on the monitor permanently, its bar fills 0→100% in
@@ -90,6 +91,7 @@ export default function Stage({ user }: { user: User }) {
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
   // colțului, ținute minte între sesiuni; editate cu dublu-click pe avatar.
   const [avatarEdit, setAvatarEdit] = useState(false)
+  const [avatarScale, setAvatarScale] = useAvatarScale()
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>(() => {
     try {
       const v = JSON.parse(localStorage.getItem('avatar-box') || '') as {
@@ -97,10 +99,16 @@ export default function Stage({ user }: { user: User }) {
         y?: number
         s?: number
       }
-      if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number')
-        return { x: v.x, y: v.y, s: v.s }
+      if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number') {
+        // Migrate the old container scale into the real 3D model scale so the
+        // visible size the owner set is preserved, instead of snapping back.
+        if (v.s !== 0.42) {
+          setAvatarScale(DEFAULT_AVATAR_SCALE * (v.s / 0.42))
+        }
+        return { x: v.x, y: v.y, s: 0.42 }
+      }
     } catch {
-      /* fără preferință salvată — folosim așezarea implicită */
+      /* no saved layout — use the default */
     }
     return { x: 58, y: 58, s: 0.42 }
   })
@@ -744,10 +752,7 @@ export default function Stage({ user }: { user: User }) {
             avatarDragRef.current = null
           }}
           onWheel={(e) => {
-            setAvatarBox((b) => ({
-              ...b,
-              s: Math.min(0.9, Math.max(0.12, b.s * (e.deltaY < 0 ? 1.07 : 0.935))),
-            }))
+            setAvatarScale(avatarScale * (e.deltaY < 0 ? 1.07 : 0.935))
           }}
         >
           <span className="avatar-edit-hint">Trage = muți · rotița = mărime · dublu-click = gata</span>

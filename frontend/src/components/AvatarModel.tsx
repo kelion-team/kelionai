@@ -5,6 +5,7 @@ import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
 import { useGestureQueue, type GestureLabel } from '../lib/gestureQueue'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
+import { useAvatarScale } from '../lib/avatarScale'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -167,6 +168,7 @@ const COMMANDED_GESTURES: Record<GestureLabel, Partial<Record<CommandedBoneKey, 
 // moderate lip-sync and micro head motion. Everything is procedural and frame-cheap.
 // NEW: commanded one-time gestures from the brain blend on top without breaking idle.
 export default function AvatarModel() {
+  const [scale] = useAvatarScale()
   const { scene } = useGLTF('/kelion-rpm.glb')
   const root = useRef<Group>(null)
   const bones = useRef<Record<string, Bone>>({})
@@ -540,7 +542,7 @@ export default function AvatarModel() {
     }
   })
 
-  return <primitive ref={root} object={scene} scale={1.65} position={[0, -1.65, 0]} />
+  return <primitive ref={root} object={scene} scale={scale} position={[0, -1.65, 0]} />
 }
 
 useGLTF.preload('/kelion-rpm.glb')
