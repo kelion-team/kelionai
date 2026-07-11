@@ -685,9 +685,10 @@ export default function ChatPanel({
     // bridge to Claude alongside the text.
     // + VEDEREA CONTINUĂ (Adrian, 11 iul): cu camera pornită, pleacă ULTIMELE
     // 4 CADRE (≈ultima secundă la 4 fps), nu unul singur — Kelion vede
-    // mișcarea, nu o clipă înghețată. Serverul acceptă deja files[] multiple.
-    const camFrames =
-      isAdmin && cameraOnRef.current && !attached ? frameBufRef.current.slice(-4) : []
+    // mișcarea, nu o clipă înghețată. Pentru TOȚI userii (regula nr. 9):
+    // adminului îi merg pe punte ca files, publicului ca `images` (serverul
+    // le face fișiere de job în cutia publică).
+    const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-4) : []
     const adminFiles = isAdmin
       ? [
           ...atts
@@ -720,6 +721,9 @@ export default function ChatPanel({
         bridgeFiles,
         ac.signal,
         Boolean(attached), // poză lipită/încărcată explicit — analiză fără condiție
+        // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele 4 cadre.
+        // Adminul le trimite deja ca files pe punte — nu le dublăm în corp.
+        !isAdmin && camFrames.length > 0 ? camFrames : undefined,
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
