@@ -1309,10 +1309,29 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
   // Builder → poll which releases the owner APPROVED (so it can deploy them).
+  // GARD ANTI-COADĂ-MOARTĂ (Adrian, 11 iul): la 18:15, repornirea
+  // deployer-ului a drenat aprobări VECHI din 5–8 iulie și a încercat să le
+  // publice pe toate ("Deploy eșuat" în lanț pe monitor) — dacă vreo una
+  // reușea, publica pe producție cod mai vechi decât master (deploy fantomă).
+  // O aprobare are termen de valabilitate: peste 6 ore nepublicată = EXPIRATĂ
+  // (marcată failed, vizibilă în admin) — nu se mai servește NICIODATĂ
+  // deployer-ului, indiferent ce cod rulează pe VPS. Gardul stă în server,
+  // la sursa cozii — singurul loc pe care repo-ul îl garantează.
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     const all = await listStagedReleases(50)
-    return { releases: all.filter((r) => r.status === 'approved') }
+    const MAX_APPROVAL_AGE_MS = 6 * 3600_000
+    const fresh: typeof all = []
+    for (const r of all) {
+      if (r.status !== 'approved') continue
+      if (Date.now() - new Date(r.at).getTime() > MAX_APPROVAL_AGE_MS) {
+        await setReleaseStatus(r.id, 'failed')
+        app.log.warn(`release ${r.id} („${r.title.slice(0, 60)}") EXPIRAT — aprobat de peste 6h, nu se mai publică`)
+        continue
+      }
+      fresh.push(r)
+    }
+    return { releases: fresh }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
