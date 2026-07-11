@@ -273,6 +273,40 @@ export async function replyVisitorChat(conv: string, text: string): Promise<numb
   }
 }
 
+// ── Canalul de echipă (Adrian, 11 iul): Adrian + Kelion + Claude + oricine se
+// alătură. Poll simplu (after=ultimul id), consecvent cu visitor-chat de mai sus.
+export interface TeamMsg {
+  id: number
+  author: string
+  addressed_to: string | null
+  content: string
+  created_at: string
+}
+
+export async function fetchTeamChannel(after = 0): Promise<TeamMsg[]> {
+  try {
+    const r = await fetch(`/api/admin/team-channel?after=${after}`, { credentials: 'include' })
+    if (!r.ok) return []
+    return ((await r.json()) as { messages: TeamMsg[] }).messages
+  } catch {
+    return []
+  }
+}
+
+export async function postTeamChannel(content: string, to: string): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/team-channel', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, to }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 // Admin action on a user: block / unblock / credit (amount) / delete.
 // Returns the refreshed activity so the caller can update the list in place.
 export async function manageUser(

@@ -25,6 +25,8 @@ import {
   getDownloadStats,
   listInboundEmails,
   markGapEscalated,
+  postTeamMessage,
+  getTeamChannel,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
 import { getStripeBalance } from '../services/stripe.js'
@@ -405,6 +407,42 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
       const id = await addVisitorMessage(conv, 'owner', text)
       return reply.send({ ok: id > 0, id })
+    },
+  )
+
+  // ── CANALUL DE ECHIPĂ (Adrian, 11 iul): „buton chat în care suntem toți 3" ──
+  // Discuție persistentă, vizibilă tuturor — Adrian, Kelion, Claude, și oricine
+  // se alătură în viitor (author = text liber, nu enum fix). Poll simplu (ca la
+  // visitor-chat de mai sus), nu WebSocket — consecvent cu restul aplicației.
+  app.get<{ Querystring: { after?: string } }>('/api/admin/team-channel', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const after = Number(req.query?.after ?? 0) || 0
+    return reply.send({ messages: await getTeamChannel(after) })
+  })
+
+  app.post<{ Body: { content?: string; to?: string } }>(
+    '/api/admin/team-channel',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const content = String(req.body?.content ?? '').trim()
+      const to = typeof req.body?.to === 'string' ? req.body.to.trim().toLowerCase() : ''
+      if (!content) return reply.code(400).send({ error: 'bad_request' })
+      const saved = await postTeamMessage('adrian', content, to || null)
+      // Adresat lui Kelion → chiar TRIMITEM tura pe puntea reală (contextul lui
+      // complet de admin, nu doar o notă) și postăm răspunsul înapoi în canal,
+      // fire-and-forget — Adrian nu așteaptă blocat răspunsul aici.
+      if (to === 'kelion' && bridgeOnline()) {
+        void bridgeAsk(
+          `[Mesaj din canalul de echipă, de la Adrian — către tine, Kelion]\n${content}`,
+          [],
+          120_000,
+        ).then((answer) => {
+          if (answer && answer.trim()) void postTeamMessage('kelion', answer.trim(), 'adrian')
+        })
+      }
+      return reply.send({ ok: !!saved, message: saved })
     },
   )
 }
