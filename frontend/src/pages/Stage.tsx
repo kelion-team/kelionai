@@ -125,6 +125,24 @@ export default function Stage({ user }: { user: User }) {
     return { x: 58, y: 58, s: 0.42 }
   })
   const avatarDragRef = useRef<{ px: number; py: number } | null>(null)
+  // RING DE DANS (Adrian, 12 iul, prin Kelion: „la dansuri, avatarul se
+  // repoziționează automat mai spre centrul ecranului cât durează clipul"):
+  // pe un gest de dans, colțul se mută lin spre centru și crește; la finalul
+  // clipului (kelion-gesture-done) revine exact în aranjarea lui Adrian.
+  const [dancing, setDancing] = useState(false)
+  useEffect(() => {
+    const onGest = (e: Event): void => {
+      const name = String((e as CustomEvent).detail ?? '')
+      if (/^dans/.test(name)) setDancing(true)
+    }
+    const onDone = (): void => setDancing(false)
+    window.addEventListener('kelion-gesture', onGest)
+    window.addEventListener('kelion-gesture-done', onDone)
+    return () => {
+      window.removeEventListener('kelion-gesture', onGest)
+      window.removeEventListener('kelion-gesture-done', onDone)
+    }
+  }, [])
   // Nu scriem la server ÎNAINTE să fi citit de la el — altfel implicitul local
   // ar călca peste aranjarea salvată. 'ready' abia după primul GET /api/prefs.
   const avatarSyncRef = useRef<'pending' | 'ready'>('pending')
@@ -763,7 +781,11 @@ export default function Stage({ user }: { user: User }) {
         style={
           monitorOn
             ? {
-                transform: `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
+                // În timpul unui dans, ringul e centrul ecranului (mai mare,
+                // vizibil); altfel, exact aranjarea salvată a lui Adrian.
+                transform: dancing
+                  ? `translate(calc(30vw - 14px), calc(30vh - 180px)) scale(${Math.max(avatarBox.s, 0.62)})`
+                  : `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
               }
             : undefined
         }
