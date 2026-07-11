@@ -1137,20 +1137,15 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {/* Centre bubbles — HIDDEN while the monitor shows content OR the brain is
-          executing live, so they never cover it (Kelion's words go to the black
-          bar above the composer). */}
+      {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
+          spațiul unde apare semnul de creier... nu se mai afișează în afara
+          spațiului de acolo răspunsurile de chat"). Bulele care pluteau peste
+          monitor au fost SCOASE — schimbul de replici trăiește exclusiv în
+          benzile de lângă composer (👤 tu / K Kelion, teletext). În centru
+          rămân doar îndemnul de start și imaginile generate. */}
       {!monitorMode && (
         <div className="chat-log">
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-          {lastUser && lastUser.content && (
-            <div className="bubble user">{lastUser.content.slice(0, 600)}{busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}{lastUser.ts && <span className="bubble-time">{new Date(lastUser.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span>}</div>
-          )}
-          {(lastAssistant || busy) && (
-            <div className="bubble assistant">
-              {lastAssistant?.content ? lastAssistant.content : busy ? '…' : ''}{lastAssistant?.ts && lastAssistant.content ? <span className="bubble-time">{new Date(lastAssistant.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span> : null}
-            </div>
-          )}
           {chatImage && (
             <img className="chat-image" src={chatImage} alt="Kelion generated" />
           )}
@@ -1189,25 +1184,6 @@ export default function ChatPanel({
           ■ {t.scenarioStop}
         </button>
       )}
-      {/* Monitor mode: Kelion's words in a slim black bar ABOVE the composer,
-          so nothing covers what's on the monitor. */}
-      {/* Adrian's rule (4 iul): ce e AFIȘAT pe monitor (un surface deschis) NU se
-          mai repetă în bara de chat — dublarea acoperea monitorul. Bara vorbește
-          doar când monitorul arată consola de lucru (fără surface). */}
-      {monitorBusy && !wsOpen && (lastAssistant?.content || busy) && (
-        /* UN RÂND curgător (Adrian, 11 iul: „răspunsul redus la un rând, ca să
-           se vadă monitorul") — același teletext ca la benzile de voce: textul
-           derulează pe o singură linie, nu crește niciodată pe verticală. */
-        <div className="monitor-speech">
-          <span className="speech-tail">
-            <span className="speech-tail-text">
-              {/* NICIODATĂ gol în pauza de gândire (ordin, 10 iul). */}
-              {lastAssistant?.content ? lastAssistant.content : heard ? synthesize(heard) : '…'}
-            </span>
-          </span>
-          {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
-        </div>
-      )}
       <div className={`composer ${busy ? 'working' : ''}`}>
         {/* DICTARE LIVE cu efect cinematografic (ca în filmele cu AI): pe măsură
             ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
@@ -1232,6 +1208,24 @@ export default function ChatPanel({
             <span className="voice-live-caret" />
           </div>
         )}
+        {/* TOT CHATUL, PE ROLURI, în spațiul benzilor (Adrian, 11 iul: „când e
+            user, ceva cu user") — mesajul TĂU trimis, cu semnul 👤 și bifa de
+            livrare, pe un rând, teletext. */}
+        {lastUser?.content && (
+          <div className="heard-band user-band" aria-live="polite">
+            <span className="heard-band-label" title="Tu — mesajul trimis">👤</span>
+            <span className="ticker">
+              <span
+                className="ticker-text"
+                key={lastUser.content}
+                style={{ '--ticker-dur': tickerDur(lastUser.content) } as CSSProperties}
+              >
+                {lastUser.content.slice(0, 400)}
+              </span>
+            </span>
+            {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
+          </div>
+        )}
         {/* BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): ce a primit EFECTIV
             creierul la ultima tură — confirmat de server, nu ecou local. Dacă
             vorbești și banda asta NU se schimbă, vocea a murit ÎNAINTE de
@@ -1248,6 +1242,31 @@ export default function ChatPanel({
                 „{heard}"
               </span>
             </span>
+          </div>
+        )}
+        {/* RĂSPUNSUL LUI KELION — pastila K (Adrian: „când e chat, semnul vocii
+            lui K"), tot aici, un rând. Cât timp răspunsul CURGE se vede coada
+            lui (fără animație care s-ar reporni la fiecare literă); când e
+            terminat, derulează teletext, ca banda creierului. Bulele din
+            centru au fost scoase — asta e SINGURA scenă a chatului. */}
+        {(lastAssistant?.content || busy) && (
+          <div className="heard-band kelion-band" aria-live="polite">
+            <span className="heard-band-label kelion-k" title="Kelion — răspunsul">K</span>
+            {busy ? (
+              <span className="speech-tail">
+                <span className="speech-tail-text">{lastAssistant?.content || '…'}</span>
+              </span>
+            ) : (
+              <span className="ticker">
+                <span
+                  className="ticker-text"
+                  key={lastAssistant?.content ?? ''}
+                  style={{ '--ticker-dur': tickerDur(lastAssistant?.content ?? '') } as CSSProperties}
+                >
+                  {lastAssistant?.content}
+                </span>
+              </span>
+            )}
           </div>
         )}
         {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
