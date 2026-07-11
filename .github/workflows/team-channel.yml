@@ -1,0 +1,52 @@
+# CANALUL DE ECHIPĂ — citire + (opțional) postare, pentru Claude.
+# Aceeași cale sigură ca read-caiet.yml: BRIDGE_SECRET din Railway (RAILWAY_TOKEN,
+# secret GitHub), fără SSH, fără parola VPS. Poate posta un mesaj (opțional,
+# adresat cui trebuie) și întotdeauna afișează firul curent.
+name: team-channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      post_content:
+        description: 'Mesaj de postat (gol = doar citește)'
+        required: false
+      post_to:
+        description: 'Destinatar: kelion / adrian / gol = toți'
+        required: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Citește / postează în canalul de echipă
+        env:
+          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          POST_CONTENT: ${{ inputs.post_content }}
+          POST_TO: ${{ inputs.post_to }}
+        run: |
+          set -uo pipefail
+          [ -z "$TOKEN" ] && { echo "::error::RAILWAY_TOKEN lipsește"; exit 1; }
+          GQL=https://backboard.railway.com/graphql/v2
+          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
+          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
+          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0]')
+          PID=$(echo "$P" | jq -r '.id')
+          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id')
+          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
+          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
+            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
+          SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
+          [ -z "$SECRET" ] && { echo "::error::BRIDGE_SECRET lipsă din Railway"; exit 1; }
+          echo "::add-mask::$SECRET"
+
+          if [ -n "$POST_CONTENT" ]; then
+            echo "=== POSTEZ (către: ${POST_TO:-toți}) ==="
+            BODY=$(jq -nc --arg c "$POST_CONTENT" --arg t "$POST_TO" '{content:$c} + (if $t != "" then {to:$t} else {} end)')
+            curl -sS --max-time 15 -X POST -H "x-bridge-secret: $SECRET" -H "Content-Type: application/json" \
+              -d "$BODY" https://kelionai.app/api/bridge/team-channel
+            echo ""
+          fi
+
+          echo "=== CANALUL DE ECHIPĂ (fir complet) ==="
+          curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/team-channel | jq -r '
+            .messages[]? | "[\(.created_at)] \(.author)\(if .addressed_to then " → " + .addressed_to else "" end): \(.content)"'
