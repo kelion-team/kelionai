@@ -1209,9 +1209,12 @@ export default function ChatPanel({
           </div>
         )}
         {/* TOT CHATUL, PE ROLURI, în spațiul benzilor (Adrian, 11 iul: „când e
-            user, ceva cu user") — mesajul TĂU trimis, cu semnul 👤 și bifa de
-            livrare, pe un rând, teletext. */}
-        {lastUser?.content && (
+            user, ceva cu user") — mesajul TĂU, cu semnul 👤, pe un rând.
+            Adrian, 11 iul seara: „după ce ai baleiat ce am scris, asta nu mai
+            trebuie să fie afișată" — banda trăiește DOAR până serverul
+            confirmă preluarea (delivered); apoi dispare, iar dovada rămâne
+            banda 🧠 cu ce a auzit efectiv creierul. */}
+        {busy && !delivered && lastUser?.content && (
           <div className="heard-band user-band" aria-live="polite">
             <span className="heard-band-label" title="Tu — mesajul trimis">👤</span>
             <span className="ticker">
@@ -1223,7 +1226,6 @@ export default function ChatPanel({
                 {lastUser.content.slice(0, 400)}
               </span>
             </span>
-            {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
           </div>
         )}
         {/* BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): ce a primit EFECTIV

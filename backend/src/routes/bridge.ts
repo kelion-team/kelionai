@@ -1437,6 +1437,39 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true }
   })
 
+  // ERORILE DIN CONSOLA CLIENTULUI (Adrian, 11 iul: „Kelion trebuie să poată
+  // deschide să vadă erorile astea de consolă, permanent"). Aplicația trimite
+  // aici, la pachet, tot ce moare în consola browserului (lib/errlog.ts);
+  // fereastra PERMANENTĂ a lui Kelion e endpoint-ul de mai jos, cu secretul
+  // lui de pe disc:
+  //   curl -H "x-bridge-secret: $(cat /root/kelion/bridge-secret.txt)" \
+  //        https://kelionai.app/api/bridge/client-errors
+  const clientErrors: { at: string; ua: string; kind: string; msg: string }[] = []
+  app.post<{ Body: { errors?: { ts?: string; kind?: string; msg?: string }[] } }>(
+    '/api/client-errors',
+    async (req) => {
+      const list = Array.isArray(req.body?.errors) ? req.body.errors.slice(0, 40) : []
+      const ua = String(req.headers['user-agent'] ?? '').slice(0, 60)
+      for (const e of list) {
+        const msg = String(e?.msg ?? '').slice(0, 500)
+        if (!msg) continue
+        clientErrors.push({
+          at: String(e?.ts ?? new Date().toISOString()).slice(0, 32),
+          ua,
+          kind: String(e?.kind ?? '?').slice(0, 12),
+          msg,
+        })
+      }
+      // Tampon circular — nu crește veșnic, oricâte erori ar produce clienții.
+      if (clientErrors.length > 300) clientErrors.splice(0, clientErrors.length - 300)
+      return { ok: true }
+    },
+  )
+  app.get('/api/bridge/client-errors', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { errors: clientErrors.slice(-200) }
+  })
+
   // TOTAL ACCESS for laptop-Claude (secret): the admin's recent chat exactly
   // as saved — voice arrives transcribed, copy-paste lands in the text…
   app.get('/api/bridge/chat-history', async (req, reply) => {
