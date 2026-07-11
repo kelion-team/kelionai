@@ -24,9 +24,9 @@ import {
   setMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
+import { loadServerPrefs, saveAvatarBox } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
-import { useAvatarScale, DEFAULT_AVATAR_SCALE } from '../lib/avatarScale'
 
 // Live-work feed shown ON KELION'S MONITOR. A line shaped "[NN%] text" is a
 // WORK ITEM: it stays on the monitor permanently, its bar fills 0→100% in
@@ -89,9 +89,11 @@ export default function Stage({ user }: { user: User }) {
   // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
   const [relPending, setRelPending] = useState(0)
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
-  // colțului, ținute minte între sesiuni; editate cu dublu-click pe avatar.
+  // colțului, editate cu dublu-click pe avatar. SALVATĂ PE SERVER per
+  // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
+  // localStorage rămâne doar oglinda pentru primul paint, sursa de adevăr
+  // e /api/prefs, ca aranjarea să supraviețuiască oricărei curățări de browser.
   const [avatarEdit, setAvatarEdit] = useState(false)
-  const [avatarScale, setAvatarScale] = useAvatarScale()
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>(() => {
     try {
       const v = JSON.parse(localStorage.getItem('avatar-box') || '') as {
@@ -100,25 +102,64 @@ export default function Stage({ user }: { user: User }) {
         s?: number
       }
       if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number') {
-        // Migrate the old container scale into the real 3D model scale so the
-        // visible size the owner set is preserved, instead of snapping back.
-        if (v.s !== 0.42) {
-          setAvatarScale(DEFAULT_AVATAR_SCALE * (v.s / 0.42))
+        let s = v.s
+        // MIGRARE INVERSĂ (11 iul noaptea): „avatar v2.3" mutase mărimea lui
+        // Adrian din containerul CSS în scala modelului 3D (localStorage
+        // kelion-avatar-scale) și resetase s la 0.42 — dar scalarea 3D taie
+        // capul/tălpile din cadru la mărimi mari. Mărimea aleasă se aduce
+        // ÎNAPOI în container și cheia veche se șterge.
+        try {
+          const old = Number(localStorage.getItem('kelion-avatar-scale'))
+          if (Number.isFinite(old) && old > 0 && Math.abs(old - 1.65) > 0.01) {
+            s = Math.min(0.9, Math.max(0.12, s * (old / 1.65)))
+            localStorage.removeItem('kelion-avatar-scale')
+          }
+        } catch {
+          /* fără cheia veche — nimic de migrat */
         }
-        return { x: v.x, y: v.y, s: 0.42 }
+        return { x: v.x, y: v.y, s }
       }
     } catch {
-      /* no saved layout — use the default */
+      /* fără preferință salvată — folosim așezarea implicită */
     }
     return { x: 58, y: 58, s: 0.42 }
   })
   const avatarDragRef = useRef<{ px: number; py: number } | null>(null)
+  // Nu scriem la server ÎNAINTE să fi citit de la el — altfel implicitul local
+  // ar călca peste aranjarea salvată. 'ready' abia după primul GET /api/prefs.
+  const avatarSyncRef = useRef<'pending' | 'ready'>('pending')
+  const avatarBoxRef = useRef(avatarBox)
   useEffect(() => {
+    let alive = true
+    void (async () => {
+      const prefs = await loadServerPrefs()
+      if (!alive) return
+      const b = prefs?.avatarBox
+      if (b && typeof b.x === 'number' && typeof b.y === 'number' && typeof b.s === 'number') {
+        setAvatarBox({ x: b.x, y: b.y, s: b.s })
+      } else if (prefs) {
+        // Prima sincronizare: aranjarea CURENTĂ (cea din browserul lui Adrian)
+        // devine cea salvată pe server — exact „salvează mărimea actuală".
+        void saveAvatarBox(avatarBoxRef.current)
+      }
+      avatarSyncRef.current = 'ready'
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+  useEffect(() => {
+    avatarBoxRef.current = avatarBox
     try {
       localStorage.setItem('avatar-box', JSON.stringify(avatarBox))
     } catch {
       /* stocarea locală poate lipsi — aranjarea rămâne doar pe sesiunea asta */
     }
+    if (avatarSyncRef.current !== 'ready') return
+    // Debounce: în timpul tragerii/rotiței vin zeci de valori pe secundă —
+    // pe server pleacă doar așezarea finală, la 800ms după ultima mișcare.
+    const t = window.setTimeout(() => void saveAvatarBox(avatarBox), 800)
+    return () => window.clearTimeout(t)
   }, [avatarBox])
   // The CURRENT process, 0→100%, from intake to finish (his real requirement:
   // the bar tracks what's being executed, start to end — not server resources).
@@ -714,7 +755,8 @@ export default function Stage({ user }: { user: User }) {
           ADRIAN (11 iul: „vreau acces să rescalez eu avatarul și să-l
           poziționez cum cred eu, dând dublu click pe el"): dublu-click pe
           avatar = mod de aranjare — tragi ca să-l muți, rotița ca să-l
-          scalezi, dublu-click din nou = gata; se ține minte (localStorage). */}
+          scalezi, dublu-click din nou = gata; se ține minte PE SERVER
+          (/api/prefs, per utilizator) cu oglindă în localStorage. */}
       <div
         ref={stageRef}
         className={`stage-canvas ${monitorOn ? 'pip' : ''} ${avatarEdit ? 'editing' : ''}`}
@@ -752,7 +794,10 @@ export default function Stage({ user }: { user: User }) {
             avatarDragRef.current = null
           }}
           onWheel={(e) => {
-            setAvatarScale(avatarScale * (e.deltaY < 0 ? 1.07 : 0.935))
+            setAvatarBox((b) => ({
+              ...b,
+              s: Math.min(0.9, Math.max(0.12, b.s * (e.deltaY < 0 ? 1.07 : 0.935))),
+            }))
           }}
         >
           <span className="avatar-edit-hint">Trage = muți · rotița = mărime · dublu-click = gata</span>

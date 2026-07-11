@@ -1702,7 +1702,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         /* păstrează ultima valoare */
       }
     }
-    return relPending + readyDeploys.length
+    // DOAR ce se vede în panoul Release-uri (Adrian, 11 iul noaptea: „îmi zice
+    // să aprob release-uri dar când deschid e gol"): readyDeploys era canalul
+    // VECHI al deployerului — mort de la închiderea robinetului railway up
+    // (#132) — și umfla becul cu intrări pe care panoul nu le arată nicăieri.
+    // Becul = fix numărul rândurilor „pending" din tab; nimic invizibil.
+    return relPending
   }
 
   app.get('/api/dev/status', async () => {

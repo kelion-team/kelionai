@@ -41,8 +41,6 @@ export interface ChatControl {
     camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
     screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
   }
-  // A one-time avatar gesture triggered by the brain (spoken command or tool).
-  gesture?: 'raiseRightHand' | 'salute' | 'pointMonitor'
   // The server committed a new speech language (detected + persisted there);
   // the client applies it to the recognizer and mirrors it locally.
   lang?: string
@@ -56,6 +54,9 @@ export interface ChatControl {
   // GEST LA COMANDĂ: numele clipului din regia de mișcare (AvatarModel) pe
   // care creierul îl cere prin eticheta [GEST nume] — avatarul îl execută o dată.
   gest?: string
+  // Eticheta tool-ului server-side play_avatar_gesture (release v2.3) —
+  // ChatPanel o traduce în clipul RPM echivalent, pe același canal de gest.
+  gesture?: string
   // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT pe care
   // serverul îl predă creierului la această tură — trimis de pe server, nu un
   // ecou local. Se afișează ca bandă distinctă, ca să se vadă ce „a auzit".
