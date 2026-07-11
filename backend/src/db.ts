@@ -1500,6 +1500,24 @@ export interface CostSummary {
   byKind: Record<string, number>
 }
 
+// Costul de AZI, pe motoare (Adrian, 11 iul, aprobat: „6 da" — raportul zilnic
+// de bani): doar evenimentele zilei curente, grupate pe fel, cele mai scumpe
+// primele. Abonamentele fixe (Max/Kimi/GLM) nu trec pe aici — doar API-urile
+// plătite la consum (tts/asr/memory/chat-API/căutare/imagini).
+export async function getCostToday(): Promise<{ kind: string; sum: number }[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<{ kind: string; sum: string }>(
+      `SELECT kind, SUM(cost_usd) AS sum FROM cost_events
+        WHERE created_at >= date_trunc('day', now())
+        GROUP BY kind ORDER BY SUM(cost_usd) DESC`,
+    )
+    return r.rows.map((x) => ({ kind: x.kind, sum: Number(x.sum) }))
+  } catch {
+    return []
+  }
+}
+
 export async function getCostSummary(): Promise<CostSummary> {
   const empty: CostSummary = { total: 0, today: 0, byKind: {} }
   if (!dbEnabled()) return empty

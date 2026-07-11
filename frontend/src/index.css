@@ -472,21 +472,21 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Monitor mode: Kelion's words in a slim black bar just above the composer,
-   full width, so they never cover what's on the monitor. */
-.monitor-speech {
-  margin: 0 auto 8px;
-  max-width: min(1100px, 94%);
-  background: rgba(0, 0, 0, 0.82);
-  color: #eef1f6;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 16px;
-  font-size: 15px;
-  line-height: 1.45;
-  max-height: 22vh;
-  overflow-y: auto;
-  backdrop-filter: blur(4px);
+/* „Coada" textului care CURGE: containerul e RTL (ancorat la dreapta), textul
+   dinăuntru rămâne LTR — pe măsură ce răspunsul vine, se vede mereu SFÂRȘITUL
+   lui, pe un singur rând, fără nicio animație care s-ar reporni la fiecare
+   literă. Folosită în banda K (răspunsul lui Kelion) cât timp streamează. */
+.speech-tail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.speech-tail-text {
+  direction: ltr;
+  unicode-bidi: plaintext;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
@@ -933,7 +933,41 @@ body {
    top-left of the monitor, the status line sits bottom-left, the composer is
    bottom-center — so his corner is BOTTOM-RIGHT, clear of all of them. */
 .stage-canvas.pip {
-  transform: translate(calc(74vw - 14px), calc(74vh - 180px)) scale(0.26);
+  /* Adrian, 11 iul: „mărește avatarul când e în dreapta jos la mărimea
+     inițială și fă-l să se vadă tot" — scala urcă de la 0.26 la 0.42
+     (silueta întreagă, vizibil mai mare), ancorat tot dreapta-jos, cu
+     aceeași gardă de 180px deasupra composer-ului. Poziția/scala REALĂ
+     vine ca stil inline din aranjarea lui Adrian (dublu-click). */
+  transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
+}
+/* MODUL DE ARANJARE (Adrian: „să rescalez eu avatarul și să-l poziționez cum
+   cred eu, dând dublu click pe el"): contur vizibil + fără tranziție (tragerea
+   trebuie să urmeze mâna instant), overlay care prinde gesturile. */
+.stage-canvas.editing {
+  transition: none;
+}
+.avatar-edit-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: move;
+  touch-action: none;
+  outline: 3px dashed rgba(110, 168, 254, 0.85);
+  outline-offset: -3px;
+  border-radius: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.avatar-edit-hint {
+  margin-top: 10px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #cfe0ff;
+  /* textul stă într-un element scalat (~0.42) — fontul mare rămâne lizibil */
+  font-size: 30px;
+  white-space: nowrap;
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
@@ -1326,30 +1360,9 @@ body {
   text-align: center;
   opacity: 0.7;
 }
-.bubble {
-  pointer-events: auto;
-  max-width: 85%;
-  padding: 9px 13px;
-  border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-.bubble.user {
-  align-self: flex-end;
-  background: rgba(110, 168, 254, 0.22);
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  border-bottom-right-radius: 4px;
-}
-.bubble.assistant {
-  align-self: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
+/* BULELE DE CHAT AU FOST ELIMINATE COMPLET (Adrian, 11 iul: „nimic în afara
+   barei aceleia de la creier") — tot chatul curge teletext în benzile 👤/🧠/K
+   de lângă composer; CSS-ul lor mort a fost șters odată cu JSX-ul. */
 /* ChatGPT-style composer: rounded glass container, + on the side, a round
    send button, and image thumbnails above the row. */
 .composer {
@@ -3114,6 +3127,59 @@ a.card-item:hover {
 .heard-band-label {
   flex: 0 0 auto;
   font-size: 15px;
+}
+/* BECUL DE RELEASE-URI (Adrian, 11 iul: „un bec care pâlpâie, să știu să
+   verific") — pâlpâit vizibil dar nu enervant; dispare singur după decizie. */
+.rel-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 210, 90, 0.55);
+  background: rgba(60, 44, 0, 0.55);
+  color: #ffd95e;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: help;
+  animation: rel-blink 1.1s steps(2, start) infinite;
+}
+@keyframes rel-blink {
+  0%, 54% { opacity: 1; }
+  55%, 100% { opacity: 0.3; }
+}
+/* TOT CHATUL PE ROLURI, în spațiul benzilor (Adrian, 11 iul): tu = 👤 pe
+   verde, Kelion = pastila K pe albastru; nimic din chat nu se mai afișează
+   în afara acestui spațiu. */
+.user-band {
+  background: linear-gradient(90deg, rgba(0, 20, 12, 0.88), rgba(0, 14, 10, 0.88));
+  border: 1px solid rgba(90, 220, 160, 0.3);
+  box-shadow: 0 0 18px rgba(70, 220, 150, 0.08), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.user-band .ticker-text {
+  color: #d9ffe9;
+}
+.kelion-band {
+  background: linear-gradient(90deg, rgba(6, 12, 26, 0.9), rgba(4, 10, 22, 0.9));
+  border: 1px solid rgba(120, 180, 255, 0.35);
+  box-shadow: 0 0 18px rgba(110, 170, 255, 0.1), inset 0 0 16px rgba(0, 0, 0, 0.35);
+}
+.kelion-band .ticker-text,
+.kelion-band .speech-tail-text {
+  color: #cfe0ff;
+}
+.heard-band-label.kelion-k {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0b0d12;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
 }
 /* COADĂ MESAJE SCRISE (Adrian, 11 iul): vizibile în timp ce așteaptă tura activă,
    ca să nu pară pierdute. Culoare neutră/albastră, distinctă de voci. */

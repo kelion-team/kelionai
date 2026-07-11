@@ -22,9 +22,9 @@ import {
   addMemory,
   saveKv,
   loadKv,
-  putAppFile,
   saveClientError,
   listClientErrors,
+  getCostToday,
 } from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
@@ -167,8 +167,16 @@ let lastDevBeat = 0
 let srvLoad = ''
 let srvLoadAt = 0
 // Motorul de lucru raportat de constructor (max/kimi/glm) — ultima valoare
-// cunoscută, afișată permanent în admin.
+// cunoscută, afișată permanent în admin. PERSISTENT peste restarturi (11 iul,
+// dovadă live: după deploy-ul din 19:17 indicatorul era gol, deși Adrian a
+// cerut „afișat permanent" — constructorul anunță doar SCHIMBĂRILE de treaptă,
+// deci fără persistență fiecare deploy îl golea până la următoarea comutare).
 let workEngine = ''
+void loadKv('work_engine')
+  .then((v) => {
+    if (v && !workEngine) workEngine = v
+  })
+  .catch(() => {})
 // Codul scris de constructor, bucată cu bucată — arătat SUB bara de progres
 // la click (Adrian, 11 iul). Plafonat la ultimele 120 de editări.
 const workCode: { ts: number; file: string; text: string }[] = []
@@ -988,6 +996,32 @@ export function sayToAdmin(text: string): void {
   void saveMessage(config.adminEmail, 'assistant', t)
 }
 
+// RAPORTUL ZILNIC DE BANI (Adrian, 11 iul, aprobat: „6 da"): o dată pe zi,
+// seara după ora 21 (ora lui Adrian), Kelion spune singur în chat cât a costat
+// ziua pe fiecare motor plătit la consum — Adrian știe mereu unde se duc banii
+// fără să întrebe. Abonamentele fixe (Max/Kimi/GLM) nu apar — nu variază.
+setInterval(() => {
+  void (async () => {
+    const h = Number(
+      new Date().toLocaleString('en-GB', { timeZone: ownerTz, hour: '2-digit', hour12: false }),
+    )
+    if (Number.isNaN(h) || h < 21) return
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: ownerTz })
+    const last = await loadKv('cost_report_day').catch(() => null)
+    if (last === day) return
+    await saveKv('cost_report_day', day).catch(() => {})
+    const rows = await getCostToday()
+    const total = rows.reduce((s, r) => s + r.sum, 0)
+    const parts = rows
+      .filter((r) => r.sum > 0.0005)
+      .map((r) => `${r.kind} $${r.sum.toFixed(2)}`)
+      .join(' · ')
+    sayToAdmin(
+      `💰 Banii zilei (API la consum): $${total.toFixed(2)}${parts ? ` — ${parts}` : ' — nimic azi'}. Abonamentele (Max/Kimi/GLM) sunt fixe și nu intră aici.`,
+    )
+  })()
+}, 10 * 60_000).unref()
+
 // ÎNCHIDE BUCLA ÎN CREIER (Adrian, 5 iul: „kelion nu primește niciodată în chat").
 // În loc să împingem un text gata-făcut în chat (creier orb), RE-CHEMĂM creierul
 // cu rezultatul agentului ca să-l raporteze cu VOCEA lui, verificat, cu dovada —
@@ -1106,6 +1140,15 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/bridge/workorders', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     const rows = await pullPendingWorkOrders()
+    // Adrian, 11 iul: „de ce nu apare la ce se lucrează?" — caseta „Cererea în
+    // analiză" se umplea DOAR din chat; ordinele lucrate de constructor n-o
+    // atingeau niciodată, deci în plin lucru scria „nicio cerere activă".
+    // Livrarea e chiar momentul în care constructorul se apucă de ordin —
+    // exact atunci textul lui devine cererea afișată.
+    if (rows.length > 0 && rows[0].text) {
+      const rest = rows.length > 1 ? ` (+${rows.length - 1} în coadă)` : ''
+      setAnalysisDetail(`⚒ La constructor: ${rows[0].text}${rest}`)
+    }
     return { orders: rows.map((r) => ({ id: r.id, text: r.text, at: r.created_at })) }
   })
 
@@ -1224,6 +1267,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           persistSay()
           void saveMessage(config.adminEmail, 'assistant', msg)
           noteBrainActivity(`🛑 „${r.summary}" — aceeași eroare de două ori, opresc reparația automată`)
+          // ÎNVĂȚARE DIN GREȘELI (Adrian, 11 iul, aprobat: „1 da"): eșecul
+          // terminal devine LECȚIE durabilă în caietul comun — Kelion o
+          // recitește la fiecare tură, iar veghea îl trezește pe Claude.
+          void appendSharedMemory(
+            'lecție-eșec',
+            `LECȚIE (aceeași eroare de 2 ori): „${r.summary.slice(0, 180)}" — ${detail?.slice(0, 300) || 'fără detaliu'}. Nu repeta același drum: alt unghi sau decizia lui Adrian.`,
+          )
           ownedReq.nudged = Date.now() + 24 * 3600_000
           persistOwned()
           void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
@@ -1245,6 +1295,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           persistSay()
           void saveMessage(config.adminEmail, 'assistant', msg)
           noteBrainActivity(`🛑 „${r.summary}" blocată după ${attempts} eșecuri de verificare — la decizia lui Adrian`)
+          // Lecție durabilă și aici (Adrian, 11 iul): blocajul după N încercări
+          // e cunoștință, nu doar mesaj trecător în chat.
+          void appendSharedMemory(
+            'lecție-eșec',
+            `LECȚIE (blocat după ${attempts} încercări): „${r.summary.slice(0, 180)}" — ultimul motiv: ${detail?.slice(0, 300) || 'fără detaliu'}. Specificație neclară sau drum greșit — nu se reîncearcă automat; cere reformulare/alt unghi.`,
+          )
           ownedReq.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată (watchdog) până se schimbă ceva
           persistOwned()
         } else {
@@ -1377,19 +1433,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // la sursa cozii — singurul loc pe care repo-ul îl garantează.
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    const all = await listStagedReleases(50)
-    const MAX_APPROVAL_AGE_MS = 6 * 3600_000
-    const fresh: typeof all = []
-    for (const r of all) {
-      if (r.status !== 'approved') continue
-      if (Date.now() - new Date(r.at).getTime() > MAX_APPROVAL_AGE_MS) {
-        await setReleaseStatus(r.id, 'failed')
-        app.log.warn(`release ${r.id} („${r.title.slice(0, 60)}") EXPIRAT — aprobat de peste 6h, nu se mai publică`)
-        continue
-      }
-      fresh.push(r)
-    }
-    return { releases: fresh }
+    // ROBINET ÎNCHIS DEFINITIV (11 iul, seara — după DOUĂ deploy-uri fantomă
+    // în aceeași zi: 20:40 și 21:44, ambele au publicat prin `railway up` cod
+    // mai vechi decât master și au șters de pe live munca zilei). Regula de
+    // fier nr. 3 a lui Adrian: NIMIC nu publică cod mai vechi decât master.
+    // Deployer-ul de pe VPS nu mai primește NICIODATĂ release-uri de publicat
+    // direct — drumul unui release aprobat e acum automat prin pipeline-ul
+    // verificat: vezi /api/admin/releases/decide (ordin de merge+deploy).
+    // Gardul stă AICI, în server — singurul loc garantat de repo, indiferent
+    // ce cod vechi rulează pe VPS.
+    return { releases: [] }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
@@ -1422,6 +1475,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           config.adminEmail,
           `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
         )
+        // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
+        // /api/bridge/approved-releases): „da"-ul lui Adrian pornește ordinul
+        // de publicare pe pipeline-ul verificat, nu o publicare directă.
+        if (r.status === 'approved') {
+          bridgeRepair(
+            `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
+          )
+        }
       }
       return { ok: true, status: r.status }
     },
@@ -1461,6 +1522,39 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/bridge/wake-status', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     return { wake: wakePending(), builderOnline: Date.now() - lastDevBeat < 60_000 }
+  })
+
+  // OGLINDA VEGHERII (Adrian, 11 iul: „implementează și lui Kelion sistemul —
+  // să se uite dacă a primit de la tine ceva"): veghea de pe VPS (timer, 1 min)
+  // găsește în caiet note NOI de la Claude (claude-cloud) și le aduce aici, iar
+  // creierul e RE-CHEMAT cu ele — Kelion le primește în sesiune în același
+  // minut, nu abia când se întâmplă să scrie Adrian. Răspunsul lui intră în
+  // chatul adminului (același drum ca reportToAdmin). Plătit DOAR la eveniment
+  // — zero cost pe liniște (regula banilor). Dacă puntea e offline, răspundem
+  // ok:false și veghea NU avansează reperul — reîncearcă la minutul următor.
+  app.post<{ Body: { notes?: string } }>('/api/bridge/caiet-alert', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 4000) : ''
+    if (!notes) return reply.code(400).send({ error: 'bad_request' })
+    if (!bridgeOnline()) return { ok: false }
+    void bridgeAsk(
+      'VEGHEA CAIETULUI (automată, la 1 minut): Claude ți-a lăsat în caietul comun notele de mai jos ' +
+        'și nu le-ai citit încă. Citește-le ACUM și execută ce îți cer (sau notează durabil regula). ' +
+        'Răspunde-i lui Adrian SCURT cu ce ai făcut. NU scrie în caiet doar ca să confirmi — ' +
+        'confirmarea e răspunsul tău din chat.\n\n' +
+        notes,
+      [],
+      90_000,
+    )
+      .then((r) => {
+        if (r && r.trim()) sayToAdmin(r)
+      })
+      .catch(() => {
+        // Creierul n-a răspuns la timp: nota NU se pierde — rămâne în caiet
+        // (o vede la următoarea tură), iar Adrian află că livrarea a șchiopătat.
+        sayToAdmin(`📓 Notă nouă de la Claude în caiet (creierul n-a răspuns la veghe): ${notes.slice(0, 300)}`)
+      })
+    return { ok: true }
   })
 
   // TOTAL ACCESS for laptop-Claude (secret): the admin's recent chat exactly
@@ -1525,7 +1619,10 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const e = typeof req.body?.engine === 'string' ? req.body.engine.trim().slice(0, 20) : ''
-      if (e) workEngine = e
+      if (e) {
+        workEngine = e
+        void saveKv('work_engine', e).catch(() => {})
+      }
       return { ok: true }
     },
   )
@@ -1587,6 +1684,26 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { errors: await listClientErrors(100) }
   })
 
+  // BECUL DE RELEASE-URI (Adrian, 11 iul: „când sunt release-uri trebuie să
+  // apară pe interfață un bec care pâlpâie, să știu să verific"). Numărul
+  // deciziilor care ÎL așteaptă: release-uri pregătite (aprobarea din tab) +
+  // fixuri gata care așteaptă „da"-ul din chat. Numărat din DB cu memoie de
+  // 15s — status-ul e interogat des, baza nu se bate la fiecare poll.
+  let relPendingAt = 0
+  let relPending = 0
+  async function pendingDecisions(): Promise<number> {
+    if (Date.now() - relPendingAt > 15_000) {
+      relPendingAt = Date.now()
+      try {
+        const all = await listStagedReleases(50)
+        relPending = all.filter((r) => r.status === 'pending').length
+      } catch {
+        /* păstrează ultima valoare */
+      }
+    }
+    return relPending + readyDeploys.length
+  }
+
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000
     const owned = ownedRequirement()
@@ -1606,6 +1723,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
       // Motorul de lucru activ (max/kimi/glm) — permanent, ultima valoare.
       workEngine,
+      // Becul: câte decizii (release-uri) îl așteaptă pe Adrian chiar acum.
+      releases: await pendingDecisions(),
       // VITEZA REALĂ a creierului Linux: timpii ultimei ture (tip + total +
       // primul cuvânt) și, cât o tură e în curs, cronometrul viu. Adrian VEDE cât
       // durează un chat simplu vs o cerință de lucru (cerut 10 iul).

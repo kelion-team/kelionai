@@ -1383,6 +1383,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '- Parcurgi un site pagină cu pagină și-l treci în revistă pe monitor: [CRAWL https://adresa] (ex: [CRAWL https://exemplu.ro]).\n' +
           '- Afișezi TEXT pe monitor (un răspuns, o listă, un plan, un rezumat — orice nu e o pagină web): [DOC titlu scurt] pe prima linie; TOT ce scrii după aceea apare automat și pe monitorul lui ca document. Când Adrian zice „afișează pe monitor" / „pune pe ecran" / „arată-mi pe monitor" și nu cere o pagină web, folosește [DOC] — nu spune că nu poți.\n' +
           '- Cureți ecranul/monitorul: [CLEAR].\n' +
+          '- FACI UN GEST cu corpul tău 3D: [GEST nume] cu unul din: variatie / variatie-2 / variatie-3 (schimbări DOMOALE de postură), expresie-1 / expresie-2 / expresie-3 / expresie-4 (gesturi expresive), dans (DOAR dacă Adrian îți cere explicit să dansezi). REGULA DE ȚINUTĂ (Adrian): ești un DOMN — gesturile se leagă de CONTEXT și SENTIMENT (bucurie, mulțumire, subliniere, salut), cu măsură: cel mult un gest pe replică, preferă variațiile domoale; nu gesticula gratuit. La comanda lui directă („dansează", „fă un gest") execuți imediat cu eticheta.\n' +
           'ECHIPA TA de 7 agenți specialiști (rulează pe server, pe abonament). Deleagă un task greu/de domeniu cu [AGENT nume: sarcina completă], apoi spune scurt „întreb <agentul>":\n' +
           '  • researcher — căutare web, fapte reale, cifre, actualități\n' +
           '  • scribe — scris, redactare, rezumat, traducere\n' +
@@ -1392,7 +1393,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '  • tester — testează cod și dă verdict PASS/FAIL\n' +
           '  • secretary — redactează emailuri/mesaje (accesul la Gmail-ul real cere contul conectat)\n' +
           'Când Adrian cere ceva din aceste domenii (mai ales căutare/informații actuale, scris serios, cod), FOLOSEȘTE [AGENT …] — nu inventa răspunsul.\n' +
-          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[DOC],[CLEAR],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
+          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[DOC],[CLEAR],[GEST],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
         // ANY attachment rides the bridge to Claude: photos, texts, archives,
         // video (voice arrives already transcribed as text). Base64 payloads —
         // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
@@ -1511,6 +1512,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
           const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
           const crawlTag = /\[CRAWL\s+(\S+)\]/i.exec(line)
+          // GEST LA COMANDĂ (Adrian, 11 iul: „mișcări comandate la tot ce vreau
+          // să facă"): [GEST nume] → cadrul {gest} → regia de mișcare din
+          // avatar execută clipul o dată și revine singură la repaus.
+          const gestTag = /\[GEST\s+([a-z0-9-]+)\s*\]/i.exec(line)
+          if (gestTag) {
+            reply.raw.write(`${CTRL}${JSON.stringify({ gest: gestTag[1].toLowerCase() })}${CTRL}`)
+          }
           if (noteTag) {
             noteBrainActivity(`Salvez notița: ${noteTag[1].trim().slice(0, 80)}`)
             certify('salvez notița', async () => {
@@ -1683,6 +1691,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             .replace(/\[NOTES\]/gi, '')
             .replace(/\[DELNOTE[^\]]*\]/gi, '')
             .replace(/\[CLEAR\]/gi, '')
+            .replace(/\[GEST[^\]]*\]/gi, '') // gestul pleacă drept cadru {gest}, nu text
             .replace(/\[AGENT[^\]]*\]/gi, '') // agent tag: executed on Linux (subscription)
             .replace(/[ \t]{2,}/g, ' ')
             .trim()

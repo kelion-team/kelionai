@@ -33,10 +33,18 @@ export async function startRecording(
 
   let display: MediaStream
   try {
-    display = await navigator.mediaDevices.getDisplayMedia({
+    // „SELECTARE AUTOMATĂ" (Adrian, 11 iul): browserul preselectează TABUL
+    // CURENT (aplicația, cu chatul audio) în loc să-l caute Adrian prin listă
+    // — rămâne UN singur click de confirmare, cerință de securitate a
+    // browserului care nu se poate ocoli.
+    const opts = {
       video: { frameRate: 30 },
       audio: true, // tab/system audio → captures Kelion's voice
-    })
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include',
+      systemAudio: 'include',
+    }
+    display = await navigator.mediaDevices.getDisplayMedia(opts as DisplayMediaStreamOptions)
   } catch {
     onError('denied')
     return null

@@ -30,11 +30,11 @@ export default function ReleaseAlertBanner({
         if (!alive) return
         const arr = j.alerts ?? []
         setAlerts(arr)
-        for (const a of arr) {
-          if (spokenRef.current.has(a.id)) continue
-          spokenRef.current.add(a.id)
-          speak(`Adrian, ai un release de aprobat: ${a.title}`)
-        }
+        // FĂRĂ VOCE la release-uri (Adrian, 11 iul seara: „scoate vocea când
+        // se fac release-uri") — anunțul rămâne vizual: bannerul de aici +
+        // becul 💡 care pâlpâie lângă cipul de mod. Setul spokenRef rămâne ca
+        // să nu re-anunțăm vizual aceeași alertă la fiecare poll.
+        for (const a of arr) spokenRef.current.add(a.id)
       } catch {
         // notificarea e non-critică; eșecul rețelei nu deranjează UI-ul
       }
@@ -102,12 +102,3 @@ export default function ReleaseAlertBanner({
   )
 }
 
-function speak(text: string): void {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'ro-RO'
-  u.rate = 1
-  // Anulează orice vorbire în curs ca anunțul de release să fie instant.
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(u)
-}

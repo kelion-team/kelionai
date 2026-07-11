@@ -137,7 +137,9 @@ export default function ChatPanel({
   const [delivered, setDelivered] = useState(false)
   // Mesaje scrise în timpul unei ture active — vizibile, nu pierdute în coadă.
   const [queued, setQueued] = useState<string[]>([])
-  const [cameraOn, setCameraOn] = useState(false)
+  // Adrian, 11 iul: „camera nu a pornit [după restart] — e greșit" → camera
+  // pornește IMPLICIT la fiecare încărcare; butonul rămâne pentru oprire.
+  const [cameraOn, setCameraOn] = useState(true)
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
   // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
@@ -212,6 +214,13 @@ export default function ChatPanel({
     // Delivery receipt: the server's first frame arrived — the message got there.
     if (c.receipt) {
       setDelivered(true)
+      return
+    }
+    // GEST LA COMANDĂ (Adrian, 11 iul: „mișcări comandate la tot ce vreau să
+    // facă"): creierul a pus [GEST nume] în răspuns → serverul l-a transformat
+    // în cadrul {gest} → regia de mișcare (AvatarModel) execută clipul o dată.
+    if (c.gest) {
+      window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: c.gest }))
       return
     }
     // Bargraf-ul intrării în creier: serverul spune EXACT ce text predă
@@ -850,81 +859,90 @@ export default function ChatPanel({
     }
     micStartingRef.current = true
 
-    // ── DICTARE LIVE (streaming): fiecare cuvânt apare pe bandă instant, se
-    // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
-    // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
-    // pe calea batch dovedită — vocea nu se rupe niciodată.
-    if (streamModeRef.current) {
-      const sh = await startMicStream({
-        onLive: (t) => setLiveVoice(t),
-        onPhrase: (t) => {
-          setLiveVoice('')
-          void sendRef.current(t)
-        },
-        onError: (reason) => {
-          if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
-            // streamingul nu merge → treci pe batch pentru restul sesiunii
-            streamModeRef.current = false
-            micRef.current?.stop()
-            micRef.current = null
-            setListening(false)
+    // Adrian, 11 iul: „la restart butonul microfon se blochează / se
+    // dezactivează". Cauza: dacă pornirea arunca o excepție, flagul „pornesc
+    // acum" rămânea agățat pe true pentru totdeauna → fiecare apăsare cădea pe
+    // ramura de OPRIRE (nimic de oprit) și butonul părea mort. try/finally
+    // garantează eliberarea flagului pe ORICE drum de ieșire.
+    try {
+      // ── DICTARE LIVE (streaming): fiecare cuvânt apare pe bandă instant, se
+      // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
+      // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
+      // pe calea batch dovedită — vocea nu se rupe niciodată.
+      if (streamModeRef.current) {
+        const sh = await startMicStream({
+          onLive: (t) => setLiveVoice(t),
+          onPhrase: (t) => {
             setLiveVoice('')
-            micStartingRef.current = false
-            void ensureMicRef.current()
+            void sendRef.current(t)
+          },
+          onError: (reason) => {
+            if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
+              // streamingul nu merge → treci pe batch pentru restul sesiunii
+              streamModeRef.current = false
+              micRef.current?.stop()
+              micRef.current = null
+              setListening(false)
+              setLiveVoice('')
+              micStartingRef.current = false
+              void ensureMicRef.current()
+              return
+            }
+            onMicErr(reason)
+          },
+          getLang: () => speechLangRef.current,
+          onBargeIn: () => {
+            stopVoice()
+            micRef.current?.setMuted(false)
+          },
+        })
+        if (sh) {
+          // Apăsat OPRIT cât porneam, sau altă pornire a instalat deja un
+          // microfon — respectă starea existentă, nu instala peste ea.
+          if (micManualOffRef.current || micRef.current) {
+            sh.stop()
             return
           }
-          onMicErr(reason)
-        },
-        getLang: () => speechLangRef.current,
-        onBargeIn: () => {
+          micRef.current = sh
+          micBackoffRef.current = 1000
+          setListening(true)
+          if (isVoicePlaying()) sh.setMuted(true)
+        }
+        return
+      }
+
+      // ── BATCH (dovedit): înregistrează fraza, o transcrie la /api/asr. ──
+      coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
+      const h = await startMic(
+        (text) => coalescerRef.current?.push(text),
+        onMicErr,
+        () => speechLangRef.current,
+        // BARGE-IN (ordinul lui Adrian): când i se aude vocea peste Kelion,
+        // vocea lui Kelion se taie PE LOC și microfonul revine să-l asculte.
+        () => {
           stopVoice()
           micRef.current?.setMuted(false)
         },
-      })
-      micStartingRef.current = false
-      if (sh) {
-        // Utilizatorul a apăsat OPRIT cât porneam — respectă-i decizia.
-        if (micManualOffRef.current) {
-          sh.stop()
+        // „doar vocea mea sau scrisul meu, nu se acceptă alta" — adminul e singurul
+        // rol restrâns la vocea proprie calibrată; demo (vizitatori) rămâne neschimbat.
+        isAdmin,
+      )
+      if (h) {
+        // Apăsat OPRIT cât porneam, sau altă pornire a instalat deja un
+        // microfon — respectă starea existentă, nu instala peste ea.
+        if (micManualOffRef.current || micRef.current) {
+          h.stop()
           return
         }
-        micRef.current = sh
+        micRef.current = h
         micBackoffRef.current = 1000
         setListening(true)
-        if (isVoicePlaying()) sh.setMuted(true)
+        // Repornit cât încă vorbește creierul: pornește mut (anti-ecou); revine
+        // singur la finalul redării, ca la orice replică.
+        if (isVoicePlaying()) h.setMuted(true)
       }
-      return
-    }
-
-    // ── BATCH (dovedit): înregistrează fraza, o transcrie la /api/asr. ──
-    coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
-    const h = await startMic(
-      (text) => coalescerRef.current?.push(text),
-      onMicErr,
-      () => speechLangRef.current,
-      // BARGE-IN (ordinul lui Adrian): când i se aude vocea peste Kelion,
-      // vocea lui Kelion se taie PE LOC și microfonul revine să-l asculte.
-      () => {
-        stopVoice()
-        micRef.current?.setMuted(false)
-      },
-      // „doar vocea mea sau scrisul meu, nu se acceptă alta" — adminul e singurul
-      // rol restrâns la vocea proprie calibrată; demo (vizitatori) rămâne neschimbat.
-      isAdmin,
-    )
-    micStartingRef.current = false
-    if (h) {
-      // Utilizatorul a apăsat OPRIT cât porneam — respectă-i decizia.
-      if (micManualOffRef.current) {
-        h.stop()
-        return
-      }
-      micRef.current = h
-      micBackoffRef.current = 1000
-      setListening(true)
-      // Repornit cât încă vorbește creierul: pornește mut (anti-ecou); revine
-      // singur la finalul redării, ca la orice replică.
-      if (isVoicePlaying()) h.setMuted(true)
+    } finally {
+      micStartingRef.current = false
     }
   }
   const ensureMicRef = useRef(ensureMic)
@@ -939,6 +957,10 @@ export default function ChatPanel({
     // ensureMic verifică manualOff după fiecare await înainte să instaleze.
     if (micRef.current || micStartingRef.current) {
       micManualOffRef.current = true
+      // Eliberează și flagul de pornire: dacă boot-ul chiar e în zbor, vede
+      // manualOff la final și se oprește singur; dacă flagul era agățat dintr-o
+      // eroare veche, butonul se vindecă aici în loc să rămână mort.
+      micStartingRef.current = false
       micRef.current?.stop()
       micRef.current = null
       // oprire intenționată: un fragment agățat NU trebuie trimis după teardown
@@ -1172,20 +1194,15 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {/* Centre bubbles — HIDDEN while the monitor shows content OR the brain is
-          executing live, so they never cover it (Kelion's words go to the black
-          bar above the composer). */}
+      {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
+          spațiul unde apare semnul de creier... nu se mai afișează în afara
+          spațiului de acolo răspunsurile de chat"). Bulele care pluteau peste
+          monitor au fost SCOASE — schimbul de replici trăiește exclusiv în
+          benzile de lângă composer (👤 tu / K Kelion, teletext). În centru
+          rămân doar îndemnul de start și imaginile generate. */}
       {!monitorMode && (
         <div className="chat-log">
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-          {lastUser && lastUser.content && (
-            <div className="bubble user">{lastUser.content.slice(0, 600)}{busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}{lastUser.ts && <span className="bubble-time">{new Date(lastUser.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span>}</div>
-          )}
-          {(lastAssistant || busy) && (
-            <div className="bubble assistant">
-              {lastAssistant?.content ? lastAssistant.content : busy ? '…' : ''}{lastAssistant?.ts && lastAssistant.content ? <span className="bubble-time">{new Date(lastAssistant.ts).toLocaleTimeString("ro-RO",{hour:"2-digit",minute:"2-digit"})}</span> : null}
-            </div>
-          )}
           {chatImage && (
             <img className="chat-image" src={chatImage} alt="Kelion generated" />
           )}
@@ -1224,19 +1241,6 @@ export default function ChatPanel({
           ■ {t.scenarioStop}
         </button>
       )}
-      {/* Monitor mode: Kelion's words in a slim black bar ABOVE the composer,
-          so nothing covers what's on the monitor. */}
-      {/* Adrian's rule (4 iul): ce e AFIȘAT pe monitor (un surface deschis) NU se
-          mai repetă în bara de chat — dublarea acoperea monitorul. Bara vorbește
-          doar când monitorul arată consola de lucru (fără surface). */}
-      {monitorBusy && !wsOpen && (lastAssistant?.content || busy) && (
-        <div className="monitor-speech">
-          {/* NICIODATĂ gol în pauza de gândire (ordin, 10 iul): cât nu a sosit
-              niciun cuvânt real, arată o sinteză scurtă a cererii — nu „…". */}
-          {lastAssistant?.content ? lastAssistant.content : heard ? synthesize(heard) : '…'}
-          {busy && delivered && <span className="sent-check" title="Mesaj primit de server">✓</span>}
-        </div>
-      )}
       <div className={`composer ${busy ? 'working' : ''}`}>
         {/* DICTARE LIVE cu efect cinematografic (ca în filmele cu AI): pe măsură
             ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
@@ -1261,24 +1265,63 @@ export default function ChatPanel({
             <span className="voice-live-caret" />
           </div>
         )}
-        {/* BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): ce a primit EFECTIV
-            creierul la ultima tură — confirmat de server, nu ecou local. Dacă
-            vorbești și banda asta NU se schimbă, vocea a murit ÎNAINTE de
-            creier (microfon/ureche); dacă textul e greșit, urechea aude prost. */}
-        {heard && (
-          <div className="heard-band" aria-live="polite">
-            <span className="heard-band-label">🧠</span>
+        {/* O SINGURĂ BANDĂ, AMBELE SENSURI (Adrian, 11 iul seara: „aici
+            trebuiesc baleiate dinspre creier și înspre creier — în afară de
+            asta nu se mai afișează chat scris"). Aceeași bandă de la creier
+            își schimbă semnul după faza turei: 👤 = mesajul tău pleacă
+            ÎNSPRE creier (dispare la preluare — „după ce ai baleiat ce am
+            scris, nu se mai afișează"); 🧠 = creierul l-a primit și gândește
+            (arată ce a auzit efectiv — confirmat de server, nu ecou local);
+            K = răspunsul curge DINSPRE creier (coada textului cât streamează,
+            teletext când e terminat). Un rând, mereu, nimic în afara ei. */}
+        {busy && !delivered && lastUser?.content ? (
+          <div className="heard-band user-band" aria-live="polite">
+            <span className="heard-band-label" title="Tu — înspre creier">👤</span>
             <span className="ticker">
               <span
                 className="ticker-text"
-                key={heard}
-                style={{ '--ticker-dur': tickerDur(heard) } as CSSProperties}
+                key={lastUser.content}
+                style={{ '--ticker-dur': tickerDur(lastUser.content) } as CSSProperties}
               >
-                „{heard}"
+                {lastUser.content.slice(0, 400)}
               </span>
             </span>
           </div>
-        )}
+        ) : busy && !lastAssistant?.content ? (
+          <div className="heard-band" aria-live="polite">
+            <span className="heard-band-label" title="Creierul a primit și gândește">🧠</span>
+            <span className="ticker">
+              <span
+                className="ticker-text"
+                key={heard || '…'}
+                style={{ '--ticker-dur': tickerDur(heard || '…') } as CSSProperties}
+              >
+                {heard ? `„${heard}"` : '…'}
+              </span>
+            </span>
+          </div>
+        ) : lastAssistant?.content || busy ? (
+          <div className="heard-band kelion-band" aria-live="polite">
+            <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
+            {busy ? (
+              <span className="speech-tail">
+                <span className="speech-tail-text">
+                  {lastAssistant?.content || (heard ? synthesize(heard) : '…')}
+                </span>
+              </span>
+            ) : (
+              <span className="ticker">
+                <span
+                  className="ticker-text"
+                  key={lastAssistant?.content ?? ''}
+                  style={{ '--ticker-dur': tickerDur(lastAssistant?.content ?? '') } as CSSProperties}
+                >
+                  {lastAssistant?.content}
+                </span>
+              </span>
+            )}
+          </div>
+        ) : null}
         {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
             că e greșită" + „microfon cu autovox, instant"): microfonul nu mai
             stă mut până la calibrare — amprenta se învață AUTOMAT din primele

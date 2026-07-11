@@ -53,6 +53,9 @@ export interface ChatControl {
   ping?: number
   // The server has received the message — the delivery check mark in the UI.
   receipt?: boolean
+  // GEST LA COMANDĂ: numele clipului din regia de mișcare (AvatarModel) pe
+  // care creierul îl cere prin eticheta [GEST nume] — avatarul îl execută o dată.
+  gest?: string
   // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): textul EXACT pe care
   // serverul îl predă creierului la această tură — trimis de pe server, nu un
   // ecou local. Se afișează ca bandă distinctă, ca să se vadă ce „a auzit".

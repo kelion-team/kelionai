@@ -33,6 +33,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Dispatch-ul automat al testului de latență (pasul de la final) cere
+    # dreptul de a porni workflow-uri — tokenul implicit nu-l are singur
+    # (dovada: 6 deploy-uri fără nicio rulare de test, 11 iul seara).
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -197,6 +203,26 @@ jobs:
             exit 1
           fi
           echo "🟢 PUBLICAT + VERIFICAT LIVE — versiunea s-a schimbat, noul build a preluat."
+
+      # TEST DE LATENȚĂ DUPĂ FIECARE DEPLOY (Adrian, 11 iul, aprobat: „8 da"):
+      # imediat ce noul build a preluat, pornim automat public-latency-test —
+      # viteza nu se mai degradează pe furiș; regresiile se văd în Actions la
+      # fiecare publicare, nu când se plânge cineva. GITHUB_TOKEN poate porni
+      # workflow_dispatch (una din cele două excepții permise de GitHub).
+      - name: Pornește testul de latență pe live
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/public-latency-test.yml/dispatches" \
+            -d '{"ref":"master"}')
+          if [ "$CODE" = "204" ]; then
+            echo "🏁 public-latency-test pornit — rezultatul apare în Actions."
+          else
+            echo "::warning::Nu am putut porni testul de latență (HTTP $CODE) — pornește-l manual."
+          fi
 
       # ALERTĂ INSTANT (Adrian, 10 iul: „kelion trebuie să primească instant err
       # de la railway" — nu tu să-mi arăți poze din dashboard). Rulează la ORICE

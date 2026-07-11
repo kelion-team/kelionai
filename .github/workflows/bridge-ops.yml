@@ -23,7 +23,7 @@ on:
         description: 'Operațiunea'
         required: true
         type: choice
-        options: [health, orders-report, chat-tail, workorder, say]
+        options: [health, orders-report, chat-tail, workorder, say, client-errors]
       text:
         description: 'Textul (doar pentru workorder/say)'
         required: false
@@ -76,5 +76,10 @@ jobs:
               [ -n "$TEXT" ] || { echo "::error::text gol"; exit 1; }
               curl -sS --max-time 20 -X POST -H "$H" -H "content-type: application/json" \
                 -d "$(jq -nc --arg t "$TEXT" '{text:$t}')" "$B/api/bridge/say" | jq . ;;
+            client-errors)
+              # Jurnalul erorilor de consolă ale clienților (fereastra lui Kelion,
+              # utilă și lui Claude la diagnostic: „camera nu merge" etc.).
+              curl -sS --max-time 20 -H "$H" "$B/api/bridge/client-errors" \
+                | jq -r '.errors[-40:][] | "\(.at) [\(.kind)] \(.msg[0:220])"' ;;
             *) echo "::error::operațiune necunoscută: $OP"; exit 1 ;;
           esac
