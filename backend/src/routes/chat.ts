@@ -1398,7 +1398,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           ? `SARCINA (mesajul lui Adrian „${lastUserText.trim()}" doar aprobă sau cere reluarea; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde la fragment):\n${past.slice(-8).join('\n')}`
           : lastUserText
         const runTags = (line: string): string => {
-          if (/\[EXECUT\]/i.test(line)) execOrderId = bridgeRepair(dispatchTask) ?? undefined
+          // BUG REPARAT (11 iul, dovada: ordinul „identificare vorbitor" al lui
+          // Adrian n-a ajuns NICIODATĂ în registru): Kelion scrie eticheta CU
+          // conținut — „[EXECUT Sistem de identificare…]" — dar regexul vechi
+          // cerea exact „[EXECUT]" gol, deci dispatch-ul tăcea. Acum ambele
+          // forme sunt valide, iar conținutul etichetei (formularea completă a
+          // lui Kelion) devine textul ordinului — mai fidel decât mesajul brut.
+          const execTag = /\[EXECUT\b([^\]]*)\]/i.exec(line)
+          if (execTag) {
+            const spec = execTag[1].trim()
+            execOrderId =
+              bridgeRepair(
+                spec.length > 10
+                  ? `${spec}\n\n(Contextul cererii lui Adrian: „${dispatchTask.slice(0, 400)}")`
+                  : dispatchTask,
+              ) ?? undefined
+          }
           const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
           const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
           const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
@@ -1563,7 +1578,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             })
           }
           return line
-            .replace(/\[EXECUT\]/gi, '')
+            .replace(/\[EXECUT\b[^\]]*\]/gi, '')
             .replace(/\[SKILL\]/gi, '')
             .replace(/\[SHOW[^\]]*\]/gi, '')
             .replace(/\[IMG[^\]]*\]/gi, '')
@@ -1715,7 +1730,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             `${CTRL}${JSON.stringify({ doc: { title: docTitle || 'Pe monitor', text: a.slice(0, 9000) } })}${CTRL}`,
           )
         }
-        if (/\[EXECUT\]/i.test(answer ?? '')) {
+        if (/\[EXECUT\b[^\]]*\]/i.test(answer ?? '')) {
           // Handed to the builder — the process bar continues from the builder
           // (agent → files → build → deploy → live), so don't jump to 100 here.
           setProgress(15, 'Trimis la constructor')
