@@ -155,6 +155,9 @@ let srvLoadAt = 0
 // Motorul de lucru raportat de constructor (max/kimi/glm) — ultima valoare
 // cunoscută, afișată permanent în admin.
 let workEngine = ''
+// Codul scris de constructor, bucată cu bucată — arătat SUB bara de progres
+// la click (Adrian, 11 iul). Plafonat la ultimele 120 de editări.
+const workCode: { ts: number; file: string; text: string }[] = []
 // THE PROCESS PROGRESS BAR (Adrian's real requirement, 4 iul): the current job,
 // 0→100%, from intake to finish — NOT server resources. chat/builder/deployer
 // push the percentage as the process moves through its stages.
@@ -1514,8 +1517,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           ? { pct: procPct, label: procLabel, file: procFile }
           : null,
       steps: devLog.slice(-20),
+      // Codul scris SUB bară, live (ultimele editări ale constructorului).
+      code: workCode.slice(-30).map((c) => ({ file: c.file, text: c.text })),
     }
   })
+
+  // CODUL SUB BARĂ (Adrian, 11 iul: „dacă dau clic pe bară să văd scriptic
+  // softul care se scrie, tot ce se face sub bară"). Constructorul trimite
+  // aici CONȚINUTUL fiecărei editări (fișier + textul scris); panoul de detaliu
+  // al barei îl arată live. Tampon circular, plafonat — nu crește veșnic.
+  app.post<{ Body: { file?: string; text?: string } }>(
+    '/api/bridge/work-detail',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 2000) : ''
+      if (text) {
+        workCode.push({ ts: Date.now(), file: String(req.body?.file ?? '').slice(0, 80), text })
+        if (workCode.length > 120) workCode.splice(0, workCode.length - 120)
+      }
+      return { ok: true }
+    },
+  )
 
   // chat/builder/deployer → push the process progress (secret-protected).
   app.post<{ Body: { pct?: number; label?: string; file?: string } }>(
