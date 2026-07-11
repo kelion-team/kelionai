@@ -1412,27 +1412,33 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // CANALUL DE ECHIPĂ, calea PENTRU CLAUDE (nu are cookie-ul de sesiune al lui
-  // Adrian — se trezește printr-o verificare programată, prin GitHub Actions,
-  // cu BRIDGE_SECRET, exact ca puntea). GET citește ce a scris Adrian/Kelion;
-  // POST postează răspunsul lui Claude înapoi în canal.
+  // CANALUL DE ECHIPĂ, calea prin BRIDGE_SECRET (nu are cookie-ul de sesiune al
+  // lui Adrian — Claude se trezește printr-o verificare programată, prin
+  // GitHub Actions; Kelion o folosește direct de pe VPS, are același secret în
+  // bridge-secret.txt). GET citește firul; POST postează un mesaj.
   app.get<{ Querystring: { after?: string } }>('/api/bridge/team-channel', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     const after = Number(req.query?.after ?? 0) || 0
     return { messages: await getTeamChannel(after) }
   })
-  app.post<{ Body: { content?: string; to?: string } }>(
+  app.post<{ Body: { content?: string; to?: string; author?: string } }>(
     '/api/bridge/team-channel',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const content = typeof req.body?.content === 'string' ? req.body.content : ''
       if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
       const to = typeof req.body?.to === 'string' ? req.body.to : null
-      const saved = await postTeamMessage('claude', content, to)
-      // SIMETRIC cu ruta admin (Claude → Kelion trebuie să ajungă la fel de
+      // Ruta e comună (BRIDGE_SECRET nu distinge apelantul) — Kelion, de pe
+      // VPS, poate posta direct pe ea la fel ca Claude. Fără `author` explicit
+      // în body, presupune Claude (comportamentul de dinainte, păstrat).
+      const author =
+        typeof req.body?.author === 'string' && req.body.author.trim() ? req.body.author.trim() : 'claude'
+      const saved = await postTeamMessage(author, content, to)
+      // SIMETRIC cu ruta admin (oricine → Kelion trebuie să ajungă la fel de
       // sigur ca Adrian → Kelion — altfel mesajul stă necitit în canal, Kelion
-      // n-are de unde ști singur să-l caute acolo).
-      if (to === 'kelion') void forwardToKelion(content, 'claude')
+      // n-are de unde ști singur să-l caute acolo). Kelion nu se forward-uiește
+      // pe sine (author === 'kelion' și to === 'kelion' n-are sens).
+      if (to === 'kelion' && author !== 'kelion') void forwardToKelion(content, author)
       return { ok: !!saved, message: saved }
     },
   )
