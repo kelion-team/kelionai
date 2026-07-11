@@ -8,6 +8,12 @@
 #   kelion-github merge <numar-pr>                    → squash-merge
 #   kelion-github deploy                              → deploy.yml + verificare anti-fantomă
 #   kelion-github runs [workflow.yml]                 → ultimele rulări (stare+concluzie)
+#   kelion-github api <cale>                          → ORICE citire GitHub, cu tokenul
+#
+# NICIODATĂ GitHub prin BROWSER (lecția din 11 iul: repo-ul e PRIVAT — browserul
+# anonim primește 404 + zid de „Sign in" și te blochezi acolo). Orice pagină
+# GitHub ai vrea să „vezi", citește-o cu `api`: ex. `kelion-github api /pulls/106`,
+# `api /commits/master`, `api "/actions/runs?per_page=3"`. Trece direct, cu cheia.
 #
 # REGULA DE FIER rămâne: NICIODATĂ railway up direct — doar `deploy` de aici,
 # care trece prin pipeline-ul cu verificarea că versiunea live CHIAR s-a schimbat.
@@ -51,8 +57,13 @@ case "$cmd" in
     if [ -n "$wf" ]; then url="$API/actions/workflows/$wf/runs?per_page=5"; else url="$API/actions/runs?per_page=5"; fi
     gh_api "$url" | jq -r '.workflow_runs[] | "\(.created_at)  \(.name)  \(.status)/\(.conclusion // "-")  \(.html_url)"'
     ;;
+  api)
+    # Citire GitHub „la liber", cu tokenul — înlocuiește complet browserul.
+    p=${1:?cale API, ex: /pulls/106 sau /commits/master sau "/actions/runs?per_page=3"}
+    gh_api "$API$p" | jq . 2>/dev/null || gh_api "$API$p"
+    ;;
   *)
-    echo "folosire: kelion-github pr|merge|deploy|runs (vezi comentariile din script)"
+    echo "folosire: kelion-github pr|merge|deploy|runs|api (vezi comentariile din script)"
     exit 1
     ;;
 esac
