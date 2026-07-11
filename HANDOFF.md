@@ -1,5 +1,9 @@
 # Kelionai — Handoff (read me first)
 
+> ⚠️ **ÎNVECHIT (11 iul 2026).** Acest fișier presupune root-ul Windows
+> `C:\Users\adria\Kelionai` — proiectul e migrat pe VPS Linux de pe 9 iul.
+> **Sursa de adevăr e `AI-HANDOFF.md`** (rădăcina proiectului). Citește acolo.
+
 This is the **live** Kelionai app. If you are a fresh Claude session opening this
 folder, read this file, then `STATUS.md`, then `README.md`.
 

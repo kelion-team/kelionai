@@ -1,5 +1,11 @@
 # Kelionai — Status
 
+> ⚠️ **PARȚIAL ÎNVECHIT (11 iul 2026).** Ex: „memoria între sesiuni" de mai jos
+> apare la „Next" dar E LIVE de pe 10 iul. **Sursa de adevăr e `AI-HANDOFF.md`**
+> (rădăcina proiectului) — acest fișier rămâne util pentru istoric și lista de
+> credențiale neconfigurate (§ Credentials), dar verifică orice altceva contra
+> AI-HANDOFF.md.
+
 > Where the build is right now. Updated as milestones land. The full locked
 > product spec lives in Claude's project memory (`kelion-rewrite-spec.md`).
 
