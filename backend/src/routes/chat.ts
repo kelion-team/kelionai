@@ -714,6 +714,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     Body: {
       messages?: ChatMessage[]
       image?: string
+      // VEDEREA CONTINUĂ (Adrian, 11 iul): ultimele 4 cadre ale camerei —
+      // pentru TOȚI userii (regula nr. 9), nu doar admin (adminul le trimite
+      // deja prin `files` pe punte; publicul le trimite aici).
+      images?: string[]
       // Poza a fost ATAȘATĂ EXPLICIT (Ctrl+V / încărcată), nu e cadrul ambient
       // al camerei — cerere de analiză fără condiție (vezi VISION_INTENT mai jos).
       imageIsAttachment?: boolean
@@ -745,6 +749,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // De aceea vechiul gard 503 „brain_not_configured" a dispărut de aici.
     const rawMessages = req.body?.messages
     const image = req.body?.image
+    // Cadrele multiple (max 4, doar imagini reale) — cad înapoi pe `image`
+    // singular dacă clientul e vechi.
+    const camFrames = (Array.isArray(req.body?.images) ? req.body.images : [])
+      .filter((s): s is string => typeof s === 'string' && s.startsWith('data:image'))
+      .slice(0, 4)
     const imageIsAttachment = req.body?.imageIsAttachment === true
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
@@ -1022,7 +1031,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // reading signs and labels — all must summon Kelion's eyes instantly.
     const VISION_INTENT =
       /(\bsee\b|\blook\b|\bwatch\b|show me what|what('?s| is) this|what am i|what do you see|\bcamera\b|\bpicture\b|\bphoto\b|\bimage\b|colou?r|read this|\bscan\b|describe|in front of|ahead of me|obstacle|traffic light|cross(ing)? the (street|road)|\bsign\b|\blabel\b|\bdanger\b)|vezi|vede|uit[aăâ]|uite|prive[sșş]te|ce (e|este|am|[țt]in|ai[ -])|camer[aă]|imagin|poz[aă]|culoar|cite[sșş]te|scanea|descrie|[îi]n fa[țt][aă]|ce se afl[aă]|obstacol|pericol|semafor|trec(e|i)? strada|indicator|etichet[aă]|panou|u[șs][aă]|sc[aă]ri|trotuar|bordur[aă]/i
-    if (image && params.length > 0) {
+    // VEDEREA CONTINUĂ și pe calea API (clienți): toate cadrele primite (max 4),
+    // nu doar unul — Claude acceptă mai multe blocuri de imagine per mesaj.
+    const apiCam = camFrames.length > 0 ? camFrames : image ? [image] : []
+    if (apiCam.length > 0 && params.length > 0) {
       const lastIdx = params.length - 1
       const lm = params[lastIdx]
       if (
@@ -1030,11 +1042,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         typeof lm.content === 'string' &&
         (imageIsAttachment || VISION_INTENT.test(lm.content))
       ) {
-        const data = image.includes(',') ? image.slice(image.indexOf(',') + 1) : image
+        const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
         params[lastIdx] = {
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
+            ...apiCam.map((f) => ({
+              type: 'image' as const,
+              source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: strip(f) },
+            })),
             { type: 'text', text: lm.content },
           ],
         }
@@ -1302,7 +1317,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             addFile(f.name || 'fisier', f.type || 'application/octet-stream', f.data)
           }
         }
-        if (image && files.length === 0) addFile('captura.jpg', 'image/jpeg', image)
+        if (files.length === 0) {
+          // Fără atașamente: cadrele camerei (toate 4, vederea continuă) sau,
+          // pe clienți vechi, cadrul singular.
+          if (camFrames.length > 0) camFrames.forEach((d, i) => addFile(`cadru-${i + 1}.jpg`, 'image/jpeg', d))
+          else if (image) addFile('captura.jpg', 'image/jpeg', image)
+        }
         // TOTAL ACCESS: everything the admin drops in chat (photos, pasted
         // screenshots, archives, video) is stashed for laptop-Claude too, so
         // the builder sees exactly what the voice saw.
@@ -1883,11 +1903,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
       const baseUrlPub = `https://${req.headers.host ?? 'kelionai.app'}`
       // CAMERA în free/public: dacă utilizatorul întreabă ceva ce cere văzul și
-      // avem cadrul camerei, îl trimitem ca fișier de job — workerul îl privește
-      // cu Read în cutia publică (izolată de a adminului).
-      const pubFiles: BridgeFile[] =
-        image && (imageIsAttachment || VISION_INTENT.test(lastUserText))
-          ? [{ name: imageIsAttachment ? 'atasament.jpg' : 'camera.jpg', type: 'image/jpeg', data: image }]
+      // avem cadre, le trimitem ca fișiere de job — workerul le privește cu
+      // Read în cutia publică (izolată de a adminului). VEDEREA CONTINUĂ
+      // (Adrian, 11 iul, regula nr. 9 — toți userii la fel): ultimele 4 cadre
+      // când clientul le trimite, nu doar unul înghețat.
+      const pubCam = camFrames.length > 0 ? camFrames : image ? [image] : []
+      const pubFiles: BridgeFile[] = imageIsAttachment
+        ? image
+          ? [{ name: 'atasament.jpg', type: 'image/jpeg', data: image }]
+          : []
+        : pubCam.length > 0 && VISION_INTENT.test(lastUserText)
+          ? pubCam.map((d, i) => ({ name: `cadru-${i + 1}.jpg`, type: 'image/jpeg', data: d }))
           : []
       let acc = '' // TOT ce a produs creierul (cu etichete cu tot)
       let shownAny = false

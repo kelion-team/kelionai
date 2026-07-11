@@ -102,6 +102,9 @@ export async function* streamChat(
   // analiză fără echivoc, spre deosebire de cadrul camerei mereu-pornite (care
   // se analizează doar la cerere explicită în text). Vezi ChatPanel.tsx.
   imageIsAttachment?: boolean,
+  // VEDEREA CONTINUĂ (Adrian, 11 iul): ultimele 4 cadre ale camerei — pentru
+  // TOȚI userii (regula nr. 9: aceleași capabilități), nu doar admin.
+  images?: string[],
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -113,6 +116,7 @@ export async function* streamChat(
       body: JSON.stringify({
         messages,
         image,
+        images,
         imageIsAttachment,
         coords,
         screen,
