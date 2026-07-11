@@ -11,8 +11,6 @@ import {
   getRecentHistory,
   getSharedMemory,
   appendSharedMemory,
-  getTeamChannel,
-  postTeamMessage,
   saveWorkOrder,
   pullPendingWorkOrders,
   listWorkOrders,
@@ -701,22 +699,6 @@ export function bridgeAsk(
       resolve(text)
     })
     dispatch(job)
-  })
-}
-
-// CANALUL DE ECHIPĂ → KELION (Adrian, 11 iul): o SINGURĂ implementare, folosită
-// de ambele rute (admin și bridge) — un mesaj „către kelion" trebuie livrat la
-// fel de sigur indiferent cine l-a scris (Adrian sau Claude). Tura pleacă pe
-// puntea REALĂ (contextul complet de admin al lui Kelion), răspunsul se
-// postează singur înapoi în canal — fire-and-forget, apelantul nu așteaptă.
-export function forwardToKelion(content: string, fromAuthor: string): void {
-  if (!bridgeOnline()) return
-  void bridgeAsk(
-    `[Mesaj din canalul de echipă, de la ${fromAuthor} — către tine, Kelion]\n${content}`,
-    [],
-    120_000,
-  ).then((answer) => {
-    if (answer && answer.trim()) void postTeamMessage('kelion', answer.trim(), fromAuthor)
   })
 }
 
@@ -1409,37 +1391,6 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
       await appendSharedMemory(req.body?.source || 'laptop', content)
       return { ok: true }
-    },
-  )
-
-  // CANALUL DE ECHIPĂ, calea prin BRIDGE_SECRET (nu are cookie-ul de sesiune al
-  // lui Adrian — Claude se trezește printr-o verificare programată, prin
-  // GitHub Actions; Kelion o folosește direct de pe VPS, are același secret în
-  // bridge-secret.txt). GET citește firul; POST postează un mesaj.
-  app.get<{ Querystring: { after?: string } }>('/api/bridge/team-channel', async (req, reply) => {
-    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    const after = Number(req.query?.after ?? 0) || 0
-    return { messages: await getTeamChannel(after) }
-  })
-  app.post<{ Body: { content?: string; to?: string; author?: string } }>(
-    '/api/bridge/team-channel',
-    async (req, reply) => {
-      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-      const content = typeof req.body?.content === 'string' ? req.body.content : ''
-      if (!content.trim()) return reply.code(400).send({ error: 'bad_request' })
-      const to = typeof req.body?.to === 'string' ? req.body.to : null
-      // Ruta e comună (BRIDGE_SECRET nu distinge apelantul) — Kelion, de pe
-      // VPS, poate posta direct pe ea la fel ca Claude. Fără `author` explicit
-      // în body, presupune Claude (comportamentul de dinainte, păstrat).
-      const author =
-        typeof req.body?.author === 'string' && req.body.author.trim() ? req.body.author.trim() : 'claude'
-      const saved = await postTeamMessage(author, content, to)
-      // SIMETRIC cu ruta admin (oricine → Kelion trebuie să ajungă la fel de
-      // sigur ca Adrian → Kelion — altfel mesajul stă necitit în canal, Kelion
-      // n-are de unde ști singur să-l caute acolo). Kelion nu se forward-uiește
-      // pe sine (author === 'kelion' și to === 'kelion' n-are sens).
-      if (to === 'kelion' && author !== 'kelion') void forwardToKelion(content, author)
-      return { ok: !!saved, message: saved }
     },
   )
 
