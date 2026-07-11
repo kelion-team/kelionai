@@ -68,12 +68,42 @@ const workDownUntil = Object.create(null)
 const workKeyOf = (t) => {
   try { return readFileSync(t.keyFile, 'utf8').trim() || null } catch { return null }
 }
+// SISTEM DE URMĂRIRE A TREPTELOR (Adrian, 12 iul: „sistem de urmărit când sunt
+// repuse valorile noi, interogare când se alocă prin cheie, revenire la
+// ordinea prestabilită automat"). „max" e virtual aici (workTier() → null
+// înseamnă „a căzut pe Max", avaria din comentariul de mai sus) — ordinea
+// preferată completă pentru calculul direcției e ['kimi','glm','max'].
+const WORK_ORDER = ['kimi', 'glm', 'max']
+let lastWorkTierReported = null
+let lastWorkQuotaReason = null
+function reportWorkTierChange(from, to) {
+  const fromIdx = from ? WORK_ORDER.indexOf(from) : -1
+  const toIdx = WORK_ORDER.indexOf(to)
+  const action = fromIdx === -1 ? 'boot' : toIdx < fromIdx ? 'revert' : 'switch'
+  void api('/api/bridge/tier-event', 'POST', {
+    worker: 'work',
+    from,
+    to,
+    action,
+    reason: lastWorkQuotaReason,
+  }).catch(() => {})
+}
 function workTier() {
+  let picked = null
   for (const t of WORK_TIERS) {
     if ((workDownUntil[t.name] ?? 0) > Date.now()) continue
-    if (workKeyOf(t)) return t
+    if (workKeyOf(t)) {
+      picked = t
+      break
+    }
   }
-  return null
+  const name = picked ? picked.name : 'max'
+  if (name !== lastWorkTierReported) {
+    const from = lastWorkTierReported
+    lastWorkTierReported = name
+    reportWorkTierChange(from, name)
+  }
+  return picked
 }
 // Semnăturile de cotă golită — DOAR pe canalele de eroare, niciodată pe textul
 // normal al modelului.
@@ -81,6 +111,7 @@ const WORK_QUOTA_RE = /usage limit|usage credits|credit balance|rate.?limit|quot
 function workQuotaHit(tierName, errText) {
   if (!errText || !WORK_QUOTA_RE.test(String(errText))) return false
   workDownUntil[tierName] = Date.now() + WORK_COOLDOWN_MS
+  lastWorkQuotaReason = String(errText).slice(0, 300)
   console.log(`[munca] treapta „${tierName}" e golită — comut pe următoarea, revin în ${WORK_COOLDOWN_MS / 60_000} min.`)
   return true
 }

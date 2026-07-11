@@ -23,7 +23,7 @@ on:
         description: 'Operațiunea'
         required: true
         type: choice
-        options: [health, orders-report, chat-tail, workorder, say, client-errors, files]
+        options: [health, orders-report, chat-tail, workorder, say, client-errors, files, tier-events]
       text:
         description: 'Textul (doar pentru workorder/say)'
         required: false
@@ -86,5 +86,10 @@ jobs:
               # mare? (diagnostic „Kelion nu-mi analizează poza" — 11 iul.)
               curl -sS --max-time 20 -H "$H" "$B/api/bridge/files" \
                 | jq -r '.files[0:20][] | "\(.at) \(.name) \(.type) octeți:\((.data | length))"' ;;
+            tier-events)
+              # Treptele de abonament (max/kimi/glm): când s-a comutat prin cheie,
+              # când a revenit singur la ordinea prestabilită (Adrian, 12 iul).
+              curl -sS --max-time 20 -H "$H" "$B/api/bridge/tier-events" \
+                | jq -r '.events[] | "\(.at) [\(.worker)] \(.action): \(.from_tier // "—") → \(.to_tier)\(if .reason then " (" + (.reason|.[0:80]) + ")" else "" end)"' ;;
             *) echo "::error::operațiune necunoscută: $OP"; exit 1 ;;
           esac
