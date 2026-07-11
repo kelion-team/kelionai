@@ -13,6 +13,9 @@ on:
       post_to:
         description: 'Destinatar: kelion / adrian / gol = toți'
         required: false
+      after:
+        description: 'Diagnostic: citește doar id > after (gol = comportament normal)'
+        required: false
 
 jobs:
   run:
@@ -23,6 +26,7 @@ jobs:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           POST_CONTENT: ${{ inputs.post_content }}
           POST_TO: ${{ inputs.post_to }}
+          AFTER: ${{ inputs.after }}
         run: |
           set -uo pipefail
           [ -z "$TOKEN" ] && { echo "::error::RAILWAY_TOKEN lipsește"; exit 1; }
@@ -54,7 +58,7 @@ jobs:
           # raspunsuri dinamice pe alte rute — vezi comentariul din index.ts
           # despre .exe/.apk cache-uite 4h desi originea zicea max-age=0).
           HTTP_RESP=$(curl -sS --max-time 15 -w '\n%{http_code}' -H "x-bridge-secret: $SECRET" -H "Cache-Control: no-cache" \
-            "https://kelionai.app/api/bridge/team-channel?_=$(date +%s%N)")
+            "https://kelionai.app/api/bridge/team-channel?after=${AFTER:-0}&_=$(date +%s%N)")
           HTTP_CODE=$(echo "$HTTP_RESP" | tail -n1)
           HTTP_BODY=$(echo "$HTTP_RESP" | sed '$d')
           echo "cod HTTP: $HTTP_CODE"
