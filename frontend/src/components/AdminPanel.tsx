@@ -42,9 +42,6 @@ import {
   type InboundEmail,
   fetchContactMessages,
   type ContactMessage,
-  fetchTeamChannel,
-  postTeamChannel,
-  type TeamMsg,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -133,29 +130,13 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
 
 export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
   const [tab, setTab] = useState<
-    | 'finance'
-    | 'users'
-    | 'visitors'
-    | 'vchat'
-    | 'team'
-    | 'history'
-    | 'gaps'
-    | 'share'
-    | 'joburi'
-    | 'jurnal'
-    | 'releases'
-    | 'stores'
-    | 'inbox'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'
   >('finance')
   // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
   const [vreply, setVreply] = useState('')
-  // Canalul de echipă (Adrian, Kelion, Claude — și oricine se alătură).
-  const [teamMsgs, setTeamMsgs] = useState<TeamMsg[]>([])
-  const [teamText, setTeamText] = useState('')
-  const [teamTo, setTeamTo] = useState<'kelion' | 'claude' | ''>('')
   const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
@@ -292,36 +273,6 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
     }
   }, [tab, vsel, vLastId])
 
-  // Canalul de echipă: refresh la 4s cât tab-ul e deschis (poll simplu, ca la
-  // vchat) — noi mesaje de la Kelion/Claude/Adrian intră singure în fir.
-  useEffect(() => {
-    if (tab !== 'team') return
-    let alive = true
-    const tick = async (): Promise<void> => {
-      const last = teamMsgs.length ? teamMsgs[teamMsgs.length - 1].id : 0
-      const more = await fetchTeamChannel(last)
-      if (alive && more.length > 0) setTeamMsgs((m) => [...m, ...more])
-    }
-    if (teamMsgs.length === 0) void fetchTeamChannel(0).then((m) => alive && setTeamMsgs(m))
-    const id = window.setInterval(() => void tick(), 4000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
-
-  async function sendTeamMessage(): Promise<void> {
-    const t = teamText.trim()
-    if (!t) return
-    setTeamText('')
-    const ok = await postTeamChannel(t, teamTo)
-    if (ok) {
-      const more = await fetchTeamChannel(teamMsgs.length ? teamMsgs[teamMsgs.length - 1].id : 0)
-      if (more.length) setTeamMsgs((m) => [...m, ...more])
-    }
-  }
-
   async function openConvo(conv: string): Promise<void> {
     vLastId.id = 0
     setVsel(conv)
@@ -418,13 +369,6 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               onClick={() => setTab('vchat')}
             >
               Chat live{vconvos.length > 0 ? ` (${vconvos.length})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'team' ? 'sel' : ''}`}
-              onClick={() => setTab('team')}
-            >
-              Echipă
             </button>
             <button
               type="button"
@@ -1346,53 +1290,6 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
                   </div>
                 </>
               )}
-            </div>
-          </section>
-        )}
-        {tab === 'team' && (
-          <section className="admin-finance vchat-admin">
-            <div className="vchat-admin-thread" style={{ width: '100%' }}>
-              <div className="fin-breakdown-head">Echipă — Adrian, Kelion, Claude</div>
-              <div className="vchat-admin-log">
-                {teamMsgs.length === 0 && (
-                  <div className="chat-hint">Niciun mesaj încă — scrie primul.</div>
-                )}
-                {teamMsgs.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`vchat-bubble ${m.author === 'adrian' ? 'me' : 'owner'}`}
-                  >
-                    <strong style={{ display: 'block', fontSize: 11, opacity: 0.7 }}>
-                      {m.author}
-                      {m.addressed_to ? ` → ${m.addressed_to}` : ''}
-                    </strong>
-                    {m.content}
-                  </div>
-                ))}
-              </div>
-              <div className="vchat-row" style={{ gap: 6 }}>
-                <select
-                  value={teamTo}
-                  onChange={(e) => setTeamTo(e.target.value as 'kelion' | 'claude' | '')}
-                  style={{ width: 'auto' }}
-                >
-                  <option value="">toți</option>
-                  <option value="kelion">Kelion</option>
-                  <option value="claude">Claude</option>
-                </select>
-                <input
-                  className="vchat-input"
-                  value={teamText}
-                  placeholder="Scrie în canalul de echipă…"
-                  onChange={(e) => setTeamText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void sendTeamMessage()
-                  }}
-                />
-                <button type="button" className="vchat-send" onClick={() => void sendTeamMessage()}>
-                  ↑
-                </button>
-              </div>
             </div>
           </section>
         )}
