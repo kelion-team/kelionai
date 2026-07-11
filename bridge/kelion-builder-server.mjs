@@ -25,10 +25,17 @@
 // Mediu (din /root/kelion/claude.env): BRIDGE_SECRET, CLAUDE_CODE_OAUTH_TOKEN,
 // RAILWAY_TOKEN (pentru deploy). Repo la /root/kelion/app (clona proiectului).
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const BASE = process.env.KELION_BASE || 'https://kelionai.app'
-const REPO = process.env.KELION_REPO || '/root/kelion/app'
+// Clona reală de pe VPS e /root/kelion/repo (dovedit în jurnalul bridge-deploy);
+// vechiul default /root/kelion/app nu există pe serverul actual → orice spawn
+// cu cwd-ul ăla pică cu ENOENT („Error: spawn git ENOENT" în chat, 11 iul).
+// Alegem PRIMUL director care chiar există.
+const REPO =
+  [process.env.KELION_REPO, '/root/kelion/repo', '/root/kelion/app']
+    .filter(Boolean)
+    .find((d) => existsSync(d)) || '/root/kelion/repo'
 const SECRET = (process.env.BRIDGE_SECRET || readSecret()).trim()
 function readSecret() {
   try { return readFileSync('/root/kelion/bridge-secret.txt', 'utf8') } catch { return '' }
