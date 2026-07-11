@@ -1,5 +1,12 @@
-import { useEffect, useRef, type MutableRefObject } from 'react'
-import { startCamera, stopStream, boostLowLight, type Facing } from '../lib/camera'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import {
+  startCamera,
+  stopStream,
+  boostLowLight,
+  isFatalCameraError,
+  getCameraErrorCode,
+  type Facing,
+} from '../lib/camera'
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
@@ -19,18 +26,23 @@ export default function CameraView({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const [retryNonce, setRetryNonce] = useState(0)
 
+  // Start/stop the camera stream. Camera access is serialised inside camera.ts,
+  // so rapid flips (front/back) or React StrictMode remounts cannot grab the
+  // sensor before the previous stop has released it.
   useEffect(() => {
     if (!active) {
       stopStream(streamRef.current)
       streamRef.current = null
       return
     }
-    let cancelled = false
+
+    const controller = new AbortController()
     void (async () => {
       try {
-        const stream = await startCamera(facing)
-        if (cancelled) {
+        const stream = await startCamera(facing, controller.signal)
+        if (controller.signal.aborted) {
           stopStream(stream)
           return
         }
@@ -42,16 +54,43 @@ export default function CameraView({
         // Lift exposure/gain after the stream is alive — the browser may have
         // started conservatively in dim light.
         await boostLowLight(stream).catch(() => undefined)
-      } catch {
+      } catch (err) {
+        // If our own cleanup aborted the request, this is not a real error.
+        if (controller.signal.aborted) return
+        const code = getCameraErrorCode(err)
+        const fatal = isFatalCameraError(err)
+        const message = err instanceof Error ? err.message : String(err)
+        // eslint-disable-next-line no-console
+        console.error(`camera nu pornește: ${code}${fatal ? ' (fatal)' : ''} (facing=${facing})`, message)
         onError()
       }
     })()
+
     return () => {
-      cancelled = true
+      controller.abort()
       stopStream(streamRef.current)
       streamRef.current = null
     }
-  }, [active, facing, onError])
+  }, [active, facing, onError, retryNonce])
+
+  // If the page regains focus or comes back online, try to recover from a
+  // transient failure (camera busy, permission prompt dismissed, etc.).
+  useEffect(() => {
+    if (!active) return
+    const tryResume = () => {
+      if (document.hidden) return
+      if (streamRef.current) return
+      setRetryNonce((n) => n + 1)
+    }
+    window.addEventListener('focus', tryResume)
+    document.addEventListener('visibilitychange', tryResume)
+    window.addEventListener('online', tryResume)
+    return () => {
+      window.removeEventListener('focus', tryResume)
+      document.removeEventListener('visibilitychange', tryResume)
+      window.removeEventListener('online', tryResume)
+    }
+  }, [active])
 
   // Register a frame grabber (latest frame as a downscaled JPEG data URL).
   useEffect(() => {
