@@ -29,6 +29,10 @@ import {
   getAnthropicKey,
   getMemories,
   deleteMemory,
+  identifyVoiceprint,
+  getVoiceprint,
+  saveVoiceprint,
+  vectorDistance,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -77,6 +81,7 @@ import {
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
 import { MODEL_FAST, MODEL_TOP, chooseModel } from '../services/modelRouter.js'
+import { inferGender, type VoiceFeatures } from './voiceprint.js'
 
 // STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
 // modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
@@ -728,6 +733,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Raw attachments for the ADMIN bridge: photos, archives, video — any
       // file rides the bridge to Claude (saved server-side by the worker).
       files?: { name?: string; type?: string; data?: string }[]
+      // Features vocale extrase 100% client-side pentru identificare speaker + gen.
+      voiceFeatures?: VoiceFeatures
     }
   }>(
     '/api/chat',
@@ -1003,6 +1010,46 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // sus (drumul unic spre bază); folosit și de punte (memBlock) și de API.
     systemPrompt += memRecall
 
+    // SPEAKER IDENTIFICATION: voice features (extracted 100% client-side) tell
+    // Kelion who is speaking, their detected gender, and whether the voice is
+    // verified as the owner. For every voice turn the profile is refreshed so
+    // it improves over time without a manual calibration step.
+    const vf = req.body?.voiceFeatures
+    if (vf?.vector?.length && vf?.meta) {
+      const gender = inferGender(vf.meta.pitchMean)
+      const stored = await getVoiceprint(user.email)
+      const match = await identifyVoiceprint(vf.vector, 0.38)
+      const isOwnerByEmail = user.email.toLowerCase() === config.adminEmail.toLowerCase()
+      // Pentru admin comparam DIRECT cu amprenta lui stocata, nu cu orice match
+      // din baza de date — asa evitam ca un alt user cu vector apropiat sa fie
+      // confundat cu ownerul.
+      let voiceVerifiedAdmin = false
+      if (isOwnerByEmail) {
+        const adminPrint = await getVoiceprint(config.adminEmail)
+        if (adminPrint?.features?.length) {
+          voiceVerifiedAdmin = vectorDistance(vf.vector, adminPrint.features) < 0.38
+        }
+      }
+      await saveVoiceprint({
+        email: user.email,
+        name: user.name || stored?.name || user.email.split('@')[0],
+        gender,
+        isAdmin: isOwnerByEmail,
+        features: vf.vector,
+        featureMeta: vf.meta,
+      })
+      const speakerName = voiceVerifiedAdmin
+        ? 'Adrian'
+        : match?.name || stored?.name || user.name || 'the user'
+      const genderLabel =
+        gender === 'male' ? 'bărbat' : gender === 'female' ? 'femeie' : 'necunoscut'
+      systemPrompt +=
+        `\n\nSPEAKER: ${speakerName}. Gen detectat după voce: ${genderLabel}. ` +
+        (voiceVerifiedAdmin
+          ? 'Voce verificată ca fiind a ownerului Adrian.'
+          : 'NU este verificată ca fiind vocea ownerului.')
+    }
+
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
     // Kelion ȘTIE că e o reîntâlnire (nu un fir continuu) și salută natural cu
     // continuitate. DB pur — timestamp-ul citit în paralel mai sus, zero cost.
@@ -1124,7 +1171,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // o cerință e în lucru, o ÎNCHIDEM — supervizorul vede că nu mai e nimic de
       // dus la capăt (ownedReq = null) și nu mai re-asignează. Fără asta, bucla de
       // re-asignare (până la 3 încercări) ignora comanda. Revenim la modul chat.
-      const stopCmd = /^\s*(stop|opre[șs]te(?:\-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
+      const stopCmd = /^\s*(stop|stai|opre[șs]te(?:\-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
       if (stopCmd.test(lastUserText) && ownedRequirement()) {
         resolveRequirement()
         const msg = 'Am oprit — cerința e închisă, nu mai reîncerc. Sunt pe modul chat, spune-mi ce vrei.'

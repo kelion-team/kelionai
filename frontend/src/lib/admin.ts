@@ -516,3 +516,46 @@ export async function triageGaps(): Promise<{ done: number; sent: number; offlin
   }
 }
 
+// Amprente vocale înregistrate (admin only).
+export interface VoiceprintRow {
+  email: string
+  name: string
+  gender: 'male' | 'female' | 'unknown'
+  isAdmin: boolean
+  updatedAt: string
+}
+
+export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
+  try {
+    const r = await fetch('/api/voiceprint/list', { credentials: 'include' })
+    if (!r.ok) return []
+    const j = (await r.json()) as { rows?: unknown[] }
+    return (j.rows ?? []).map((row: unknown) => {
+      const r = row as Record<string, unknown>
+      return {
+        email: String(r.email ?? ''),
+        name: String(r.name ?? ''),
+        gender: String(r.gender ?? 'unknown') as VoiceprintRow['gender'],
+        isAdmin: Boolean(r.isAdmin ?? r.is_admin),
+        updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+export async function deleteVoiceprint(email: string): Promise<boolean> {
+  try {
+    const r = await fetch('/api/voiceprint/me', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+

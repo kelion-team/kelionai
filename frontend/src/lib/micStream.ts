@@ -9,6 +9,17 @@
 // LINEAR16 și-l trimitem în cadre binare. Trimitem cadre DOAR când e voce (+3s
 // coadă) ca să nu curgă tăcere spre Google (cost degeaba).
 
+import {
+  estimateF0,
+  estimateCentroid,
+  estimateZcr,
+  estimateEnergy,
+  estimateRolloff,
+  buildVoiceFeatures,
+  setPendingVoiceFeatures,
+  type VoiceFeatures,
+} from './audioIO.js'
+
 const TARGET_RATE = 16000
 const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza (ordinul lui Adrian)
 const VOICE_RMS = 0.02 // prag ABSOLUT de voce (ridicat de la 0.012 — scoate zgomotul de fond)
@@ -83,6 +94,13 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   // sigur pentru „doar merge", exact ce trebuie pe calea critică a vocii.
   const proc = ctx.createScriptProcessor(4096, 1, 1)
 
+  // Analizor paralel pentru features vocale (identificare speaker + gen).
+  const featAnalyser = ctx.createAnalyser()
+  featAnalyser.fftSize = 2048
+  source.connect(featAnalyser)
+  const featTimeBuf = new Float32Array(featAnalyser.fftSize)
+  const featFreqBuf = new Float32Array(featAnalyser.frequencyBinCount)
+
   let closed = false
   let muted = false
   let ws: WebSocket | null = null
@@ -98,6 +116,58 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let sentAudio = false
   let gotAnyMsg = false
   let silentTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Buffer-e pentru features vocale ale frazei curente.
+  const phraseF0: number[] = []
+  const phraseEnergies: number[] = []
+  let phraseCentroidSum = 0
+  let phraseCentroidCount = 0
+  let phraseRolloffSum = 0
+  let phraseZcrSum = 0
+  let phraseEnergySum = 0
+  let phraseFrames = 0
+
+  const collectFrame = (): void => {
+    featAnalyser.getFloatTimeDomainData(featTimeBuf)
+    const energy = estimateEnergy(featTimeBuf)
+    const f0 = estimateF0(featTimeBuf, ctx.sampleRate)
+    phraseEnergies.push(energy)
+    phraseEnergySum += energy
+    phraseZcrSum += estimateZcr(featTimeBuf)
+    if (f0 > 0) phraseF0.push(f0)
+    featAnalyser.getFloatFrequencyData(featFreqBuf)
+    const centroid = estimateCentroid(featFreqBuf, ctx.sampleRate, featAnalyser.fftSize)
+    if (centroid > 0) {
+      phraseCentroidSum += centroid
+      phraseCentroidCount++
+    }
+    phraseRolloffSum += estimateRolloff(featFreqBuf, ctx.sampleRate, featAnalyser.fftSize)
+    phraseFrames++
+  }
+
+  const finalizeFeatures = (): VoiceFeatures | null => {
+    if (phraseFrames < 8) return null
+    const centroid = phraseCentroidCount > 0 ? phraseCentroidSum / phraseCentroidCount : 0
+    return buildVoiceFeatures(
+      phraseF0,
+      phraseEnergies,
+      centroid,
+      phraseRolloffSum / phraseFrames,
+      phraseZcrSum / phraseFrames,
+      phraseEnergySum / phraseFrames,
+    )
+  }
+
+  const resetFeatures = (): void => {
+    phraseF0.length = 0
+    phraseEnergies.length = 0
+    phraseCentroidSum = 0
+    phraseCentroidCount = 0
+    phraseRolloffSum = 0
+    phraseZcrSum = 0
+    phraseEnergySum = 0
+    phraseFrames = 0
+  }
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   try {
@@ -129,7 +199,12 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     phraseFinal = ''
     lastPartial = ''
     opts.onLive('') // golește MEREU banda la sfârșit de frază (nu rămâne agățat)
-    if (text) opts.onPhrase(text)
+    if (text) {
+      const features = finalizeFeatures()
+      if (features) setPendingVoiceFeatures(features)
+      opts.onPhrase(text)
+    }
+    resetFeatures()
   }
 
   // pauză > 3s de la ULTIMA bucată de transcript → fraza s-a terminat.
@@ -198,6 +273,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (voicedRun >= VOICED_FRAMES_TO_OPEN) lastVoiceAt = now
     // trimite DOAR cât e voce sau în coada de 3.2s de după — fără tăcere la Google
     if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
+    collectFrame()
     const ds = downsample(input, ctx.sampleRate)
     try {
       ws.send(floatToPcm16(ds))

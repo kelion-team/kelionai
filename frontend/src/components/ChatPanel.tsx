@@ -35,6 +35,8 @@ import {
   calibrateVoiceprint,
   hasVoiceprint,
   clearVoiceprint,
+  getPendingVoiceFeatures,
+  clearPendingVoiceFeatures,
   type MicHandle,
 } from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
@@ -131,6 +133,8 @@ export default function ChatPanel({
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
+  // Mesaje scrise în timpul unei ture active — vizibile, nu pierdute în coadă.
+  const [queued, setQueued] = useState<string[]>([])
   // Adrian, 11 iul: „camera nu a pornit [după restart] — e greșit" → camera
   // pornește IMPLICIT la fiecare încărcare; butonul rămâne pentru oprire.
   const [cameraOn, setCameraOn] = useState(true)
@@ -623,11 +627,12 @@ export default function ChatPanel({
     // NU se rupe: backendul își termină singur tura în fundal; eu doar nu mai
     // aștept și nu mai vorbesc. Se verifică ÎNAINTE de garda „ocupat".
     const STOP_CMD =
-      /^\s*(stop|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
+      /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (msg && STOP_CMD.test(msg)) {
       stopVoice()
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop înseamnă stop — golește coada
+      setQueued([])
       inFlightRef.current = false
       setBusy(false)
       setLiveVoice('')
@@ -655,6 +660,7 @@ export default function ChatPanel({
       // next turn the moment this one ends. Attachment-only sends still wait.
       if (msg) {
         pendingSendsRef.current.push(msg)
+        setQueued((cur) => [...cur, msg])
         setInput('')
       }
       return
@@ -701,6 +707,10 @@ export default function ChatPanel({
       : []
     const bridgeFiles = adminFiles.length > 0 ? adminFiles : undefined
 
+    // Features vocale colectate de la ultima frază vorbită (dictare live sau batch).
+    const voiceFeatures = getPendingVoiceFeatures() ?? undefined
+    clearPendingVoiceFeatures()
+
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
     setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
     setChatImage(null) // a new turn clears any previously shown image
@@ -726,6 +736,7 @@ export default function ChatPanel({
         // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele 4 cadre.
         // Adminul le trimite deja ca files pe punte — nu le dublăm în corp.
         !isAdmin && camFrames.length > 0 ? camFrames : undefined,
+        voiceFeatures,
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
@@ -768,6 +779,7 @@ export default function ChatPanel({
       if (pendingSendsRef.current.length > 0) {
         const combined = pendingSendsRef.current.join('\n')
         pendingSendsRef.current = []
+        setQueued([])
         window.setTimeout(() => void sendRef.current(combined), 50)
       }
     }
@@ -1286,6 +1298,18 @@ export default function ChatPanel({
             ))}
           </div>
         )}
+        {queued.length > 0 && (
+          <div className="queued-band" aria-live="polite">
+            <span className="queued-dot" />
+            <span className="ticker">
+              <span className="ticker-text" key={queued.join('|')} style={{ '--ticker-dur': tickerDur(queued.join(' · ')) } as CSSProperties}>
+                {queued.map((q, i) => (
+                  <span key={i} className="queued-chip">{q.slice(0, 80)}{i < queued.length - 1 ? ' · ' : ''}</span>
+                ))}
+              </span>
+            </span>
+          </div>
+        )}
         <div
           className="composer-row"
           onMouseDown={(e) => {
@@ -1386,10 +1410,10 @@ export default function ChatPanel({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                // Un gând spus poate încă aștepta în coalescer (fereastra de
-                // 900ms n-a expirat) — îl trimitem PE LOC, în ordine, înainte
-                // de textul scris manual, ca să nu rămână agățat/pierdut.
-                coalescerRef.current?.flushNow()
+                // Textul scris are PRIORITATE peste vocea in asteptare (Adrian,
+                // 11 iul: mesaje scrise pierdute — nu lasa un fragment de voce
+                // sa sara inaintea textului). Coalescerul se anuleaza, nu flush.
+                coalescerRef.current?.cancel()
                 void send(input)
               }
             }}
@@ -1408,9 +1432,9 @@ export default function ChatPanel({
             type="button"
             className={`composer-send ${queueing ? 'queueing' : ''}`}
             onClick={() => {
-              // vezi comentariul din onKeyDown Enter: golim orice frază de
-              // voce rămasă în așteptare înainte de trimiterea manuală.
-              coalescerRef.current?.flushNow()
+              // Textul scris are PRIORITATE: anulăm vocea în așteptare,
+              // nu o trimitem înaintea textului (bug mesaje scrise pierdute).
+              coalescerRef.current?.cancel()
               void send(input)
             }}
             // Activ cât ai ceva SCRIS de trimis. Câmpul gol (chat audio) → rămâne

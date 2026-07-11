@@ -67,20 +67,32 @@ interface PendingJob {
   // pornirea + re-amorsarea → primul cuvânt ca la admin. Fără cheie → proces
   // proaspăt ca până acum.
   visitor?: string
+  // LANE separare trafic (Adrian, 11 iul): 'chat' = voce/chat admin+public
+  // (benzi rezervate, prioritate absolută); 'work' = rapoarte/veghe/caiet-alert,
+  // agenți, ordine (benzi separate, nu poate ocupa benzile de chat).
+  lane?: 'chat' | 'work'
 }
 
-const queue: PendingJob[] = []
+const chatQueue: PendingJob[] = []
+const workQueue: PendingJob[] = []
 const waiters = new Map<string, (text: string | null) => void>()
-// FIFO of pending worker long-polls. It was a SINGLE slot: a second concurrent
-// pull silently overwrote the first, whose request then hung FOREVER (its
-// timeout guard no longer matched) — freezing that worker and losing the
-// admin's messages (4 iul). Every waiting poll now gets served or released.
-// Fiecare așteptător de pull vine cu CAPABILITĂȚILE declarate de worker.
-// GARD DE SCURGERE (Adrian, 10 iul — poza cu demo-ul tratat ca „Adrian"): un
-// job PUBLIC se dă DOAR unui worker care a declarat cap "persona" la pull.
-// Workerul vechi/zombie de pe VPS (din afara repo-ului) nu declară nimic →
-// nu mai poate primi NICIODATĂ un job de vizitator (ar fi răspuns cu context.md).
-const pullWaiters: { caps: Set<string>; resolve: (job: PendingJob | null) => void }[] = []
+// FIFO of pending worker long-polls, split by LANE so chat/voice traffic can
+// never be blocked by system work. Each lane has its own waiter list; a worker
+// declares which lane it is pulling from.
+// GARD DE SCURGERE (Adrian, 10 iul — poza cu demo-ul tratata ca „Adrian"): un
+// job PUBLIC se da DOAR unui worker care a declarat cap "persona" la pull.
+// Workerul vechi/zombie de pe VPS (din afara repo-ului) nu declara nimic →
+// nu mai poate primi NICIODATA un job de vizitator (ar fi raspuns cu context.md).
+const chatPullWaiters: { caps: Set<string>; resolve: (job: PendingJob | null) => void }[] = []
+const workPullWaiters: { caps: Set<string>; resolve: (job: PendingJob | null) => void }[] = []
+const laneQueues = {
+  chat: chatQueue,
+  work: workQueue,
+}
+const laneWaiters = {
+  chat: chatPullWaiters,
+  work: workPullWaiters,
+}
 const canServe = (job: PendingJob, caps: Set<string>): boolean =>
   job.persona !== 'public' || caps.has('persona')
 // Jobs handed to a worker but not yet confirmed (no ack/chunk/reply). If the
@@ -105,7 +117,7 @@ function markServed(job: PendingJob): void {
 // A served-but-unconfirmed job whose turn is still waiting → serve it again.
 // Relivrarea respectă ACELEAȘI capabilități — un job public nu se relivrează
 // niciodată unui worker care nu știe de persona.
-function staleJob(caps: Set<string>): PendingJob | null {
+function staleJob(caps: Set<string>, lane: 'chat' | 'work'): PendingJob | null {
   if (!ackSeen) return null
   const now = Date.now()
   for (const [id, e] of inFlight) {
@@ -113,7 +125,7 @@ function staleJob(caps: Set<string>): PendingJob | null {
       inFlight.delete(id) // turn finished or timed out — nothing to redeliver
       continue
     }
-    if (!e.confirmed && e.tries < 2 && now - e.at > 15_000 && canServe(e.job, caps)) return e.job
+    if (!e.confirmed && e.tries < 2 && now - e.at > 15_000 && canServe(e.job, caps) && (e.job.lane ?? 'chat') === lane) return e.job
   }
   return null
 }
@@ -582,6 +594,30 @@ void loadKv('say_queue')
     }
   })
   .catch(() => {})
+
+// ALERTE RELEASE — notificare vizuală + vocală persistentă pentru Adrian,
+// separată de chat, ca să nu se piardă dacă panoul de chat nu e deschis.
+interface ReleaseAlert {
+  id: string
+  title: string
+  at: string
+}
+const releaseAlerts: ReleaseAlert[] = []
+function persistReleaseAlerts(): void {
+  void saveKv('release_alerts', JSON.stringify(releaseAlerts)).catch(() => {})
+}
+void loadKv('release_alerts')
+  .then((v) => {
+    if (!v) return
+    const arr = JSON.parse(v) as unknown[]
+    if (Array.isArray(arr)) {
+      for (const m of arr) {
+        const a = m as Partial<ReleaseAlert>
+        if (a.id && a.title && a.at) releaseAlerts.push({ id: a.id, title: a.title, at: a.at })
+      }
+    }
+  })
+  .catch(() => {})
 // TOTAL chat access for laptop-Claude: the admin's latest attachments (photos,
 // pasted screenshots, archives, video…) are stashed here so the builder can
 // fetch them while executing a work order. Newest first, memory-capped.
@@ -637,6 +673,10 @@ export function stageRelease(title: string, detail: string): string {
   // aprobat"): spune-i lui Adrian în chat + cu voce că are ceva de aprobat, ca
   // să nu-i scape release-ul agățat în tabul Release-uri.
   sayToAdmin(`Am ceva de aprobat: „${title.slice(0, 120)}". Deschide Release-uri și aprobă sau respinge.`)
+  // NOTIFICARE ÎN TIMP REAL (Adrian, 11 iul): banner vizual + anunț vocal
+  // persistent, separat de chat, ca să nu depindă de ChatPanel deschis.
+  releaseAlerts.push({ id, title: title.slice(0, 200), at: new Date().toISOString() })
+  persistReleaseAlerts()
   return id
 }
 
@@ -654,12 +694,15 @@ export function stageRelease(title: string, detail: string): string {
 // pe calea HTTP (unde stau workerii reali), conexiunile WS sunt refuzate la
 // ușă, iar becul „Bridge" arată doar legătura HTTP reală.
 function dispatch(job: PendingJob): void {
+  const lane: 'chat' | 'work' = job.lane ?? 'chat'
+  const queue = laneQueues[lane]
+  const waiters = laneWaiters[lane]
   // Alege PRIMUL așteptător care POATE servi jobul: jobul PUBLIC cere cap
   // "persona" (gard de scurgere — zombiul nu declară nimic); al adminului
   // merge la oricine.
-  const i = pullWaiters.findIndex((w) => canServe(job, w.caps))
+  const i = waiters.findIndex((w) => canServe(job, w.caps))
   if (i !== -1) {
-    const [w] = pullWaiters.splice(i, 1)
+    const [w] = waiters.splice(i, 1)
     w.resolve(job)
   } else if (!queue.some((j) => j.id === job.id)) {
     // PRIORITATE: mesajele PROPRIETARULUI sar în fața cozii — un val de
@@ -698,12 +741,16 @@ export function bridgeOnline(): boolean {
 
 // Enqueue a prompt for the local worker and wait for its answer (or null on
 // timeout / worker gone — callers must fall back to the normal brain).
+// DEFAULT lane = 'work' because the awaited bridgeAsk() is used for system
+// reports, agents, notebook alerts, etc. Chat/voice always uses bridgeAskStream
+// with lane 'chat'.
 export function bridgeAsk(
   prompt: string,
   files: BridgeFile[] = [],
   timeoutMs = 150_000,
+  lane: 'chat' | 'work' = 'work',
 ): Promise<string | null> {
-  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files }
+  const job: PendingJob = { id: randomUUID(), kind: 'chat', prompt, files, lane }
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       forgetJob(job.id)
@@ -731,8 +778,11 @@ function forgetJob(id: string): void {
   waiters.delete(id)
   chunkSinks.delete(id)
   inFlight.delete(id)
-  const i = queue.findIndex((j) => j.id === id)
-  if (i !== -1) queue.splice(i, 1)
+  for (const lane of ['chat', 'work'] as const) {
+    const q = laneQueues[lane]
+    const i = q.findIndex((j) => j.id === id)
+    if (i !== -1) q.splice(i, 1)
+  }
 }
 
 // Sentinel: no first word arrived within firstTokenMs → the caller RE-ANALYZES
@@ -749,6 +799,7 @@ export function bridgeAskStream(
   turn = '',
   persona: 'public' | '' = '',
   visitor = '',
+  lane: 'chat' | 'work' = 'chat',
 ): Promise<string | null> {
   const job: PendingJob = {
     id: randomUUID(),
@@ -758,6 +809,7 @@ export function bridgeAskStream(
     turn: turn || undefined,
     persona: persona || undefined,
     visitor: visitor || undefined,
+    lane,
   }
   return new Promise((resolve) => {
     let gotChunk = false
@@ -1429,6 +1481,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // Admin → real-time release alerts: banner + voice notification, separate from
+  // chat, so the owner cannot miss a pending approval when ChatPanel is closed.
+  app.get('/api/admin/release-alerts', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return { alerts: releaseAlerts.slice() }
+  })
+  app.post<{ Body: { id?: string } }>('/api/admin/release-alerts/dismiss', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = typeof req.body?.id === 'string' ? req.body.id : ''
+    if (id) {
+      const idx = releaseAlerts.findIndex((a) => a.id === id)
+      if (idx !== -1) {
+        releaseAlerts.splice(idx, 1)
+        persistReleaseAlerts()
+      }
+    }
+    return { ok: true }
+  })
+
   // The app fires this the moment it sees an ADMIN user (admin session) — the
   // automatic "activate Claude" command. No manual step.
   app.post('/api/bridge/request-wake', async (req, reply) => {
@@ -1734,8 +1807,15 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const caps = new Set(
       Array.isArray(rawCaps) ? rawCaps.filter((c): c is string => typeof c === 'string') : [],
     )
+    // LANE separare trafic (Adrian, 11 iul): 'chat' = voce/chat admin+public;
+    // 'work' = rapoarte/veghe/caiet-alert, agenți, ordine. Fiecare lane are coada
+    // și waiterii proprii, deci traficul de lucru nu poate ocupa niciodată benzile
+    // de chat.
+    const lane: 'chat' | 'work' = (req.body as { lane?: unknown } | null)?.lane === 'work' ? 'work' : 'chat'
+    const queue = laneQueues[lane]
+    const pullWaiters = laneWaiters[lane]
     const readyIdx = queue.findIndex((j) => canServe(j, caps))
-    const ready = staleJob(caps) ?? (readyIdx !== -1 ? queue.splice(readyIdx, 1)[0] : undefined)
+    const ready = staleJob(caps, lane) ?? (readyIdx !== -1 ? queue.splice(readyIdx, 1)[0] : undefined)
     if (ready) {
       markServed(ready)
       return { job: ready }
