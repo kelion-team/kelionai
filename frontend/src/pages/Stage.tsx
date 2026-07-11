@@ -87,6 +87,31 @@ export default function Stage({ user }: { user: User }) {
   const [workEngine, setWorkEngine] = useState('')
   // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
   const [relPending, setRelPending] = useState(0)
+  // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
+  // colțului, ținute minte între sesiuni; editate cu dublu-click pe avatar.
+  const [avatarEdit, setAvatarEdit] = useState(false)
+  const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('avatar-box') || '') as {
+        x?: number
+        y?: number
+        s?: number
+      }
+      if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number')
+        return { x: v.x, y: v.y, s: v.s }
+    } catch {
+      /* fără preferință salvată — folosim așezarea implicită */
+    }
+    return { x: 58, y: 58, s: 0.42 }
+  })
+  const avatarDragRef = useRef<{ px: number; py: number } | null>(null)
+  useEffect(() => {
+    try {
+      localStorage.setItem('avatar-box', JSON.stringify(avatarBox))
+    } catch {
+      /* stocarea locală poate lipsi — aranjarea rămâne doar pe sesiunea asta */
+    }
+  }, [avatarBox])
   // The CURRENT process, 0→100%, from intake to finish (his real requirement:
   // the bar tracks what's being executed, start to end — not server resources).
   const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
@@ -677,13 +702,63 @@ export default function Stage({ user }: { user: User }) {
           </div>
         )}
       </div>
-      {/* Avatar canvas — shrinks to the top-right corner in monitor mode. */}
-      <div ref={stageRef} className={`stage-canvas ${monitorOn ? 'pip' : ''}`}>
-      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „l-ai micșorat
-          prea mult" — camera stă exact cât să încapă TOATĂ silueta (tălpi la
-          −1.65, creștet la ~+1.32) cu margini mici: centrată pe corp (y −0.15)
-          și la 4.3 distanță — silueta umple ~95% din înălțimea cadrului. */}
-      <Canvas shadows camera={{ position: [0, -0.15, 4.3], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
+      {/* Avatar canvas — shrinks to the corner in monitor mode. ARANJAREA LUI
+          ADRIAN (11 iul: „vreau acces să rescalez eu avatarul și să-l
+          poziționez cum cred eu, dând dublu click pe el"): dublu-click pe
+          avatar = mod de aranjare — tragi ca să-l muți, rotița ca să-l
+          scalezi, dublu-click din nou = gata; se ține minte (localStorage). */}
+      <div
+        ref={stageRef}
+        className={`stage-canvas ${monitorOn ? 'pip' : ''} ${avatarEdit ? 'editing' : ''}`}
+        style={
+          monitorOn
+            ? {
+                transform: `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,
+              }
+            : undefined
+        }
+        onDoubleClick={() => {
+          if (monitorOn) setAvatarEdit((e) => !e)
+        }}
+      >
+      {avatarEdit && monitorOn && (
+        <div
+          className="avatar-edit-overlay"
+          onPointerDown={(e) => {
+            avatarDragRef.current = { px: e.clientX, py: e.clientY }
+            ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerMove={(e) => {
+            const d = avatarDragRef.current
+            if (!d) return
+            const dx = e.clientX - d.px
+            const dy = e.clientY - d.py
+            avatarDragRef.current = { px: e.clientX, py: e.clientY }
+            setAvatarBox((b) => ({
+              ...b,
+              x: b.x + (dx / window.innerWidth) * 100,
+              y: b.y + (dy / window.innerHeight) * 100,
+            }))
+          }}
+          onPointerUp={() => {
+            avatarDragRef.current = null
+          }}
+          onWheel={(e) => {
+            setAvatarBox((b) => ({
+              ...b,
+              s: Math.min(0.9, Math.max(0.12, b.s * (e.deltaY < 0 ? 1.07 : 0.935))),
+            }))
+          }}
+        >
+          <span className="avatar-edit-hint">Trage = muți · rotița = mărime · dublu-click = gata</span>
+        </div>
+      )}
+      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „picioarele nu
+          i se văd complet" — clipurile de mișcare leagănă șoldurile, deci sub
+          tălpi (−1.65) trebuie aer real: camera centrată la y −0.25, distanța
+          4.6 → cadrul acoperă −1.93…+1.43. Mărimea finală o decide Adrian cu
+          dublu-click (modul de aranjare de mai jos). */}
+      <Canvas shadows camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
         {!monitorOn && <color attach="background" args={['#0b0d12']} />}

@@ -214,6 +214,13 @@ export default function ChatPanel({
       setDelivered(true)
       return
     }
+    // GEST LA COMANDĂ (Adrian, 11 iul: „mișcări comandate la tot ce vreau să
+    // facă"): creierul a pus [GEST nume] în răspuns → serverul l-a transformat
+    // în cadrul {gest} → regia de mișcare (AvatarModel) execută clipul o dată.
+    if (c.gest) {
+      window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: c.gest }))
+      return
+    }
     // Bargraf-ul intrării în creier: serverul spune EXACT ce text predă
     // creierului — se afișează pe banda dedicată până la tura următoare.
     if (c.heard !== undefined) {
