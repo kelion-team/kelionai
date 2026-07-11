@@ -36,23 +36,41 @@ const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
 //     putea cere explicit un gest („salută", „arată spre monitor" etc.).
 // Tranzițiile sunt mereu crossfade (0.35s) — niciodată salt sec între poziții.
 // Clipirea și lip-sync-ul rămân pe morph targets (clipurile nu le ating).
+// Numele clipurilor comandabile = exact numele pe care le știe CREIERUL
+// (eticheta [GEST nume] din chat.ts): Adrian cere prin viu grai sau tonul
+// replicii o cere (context/sentimente), creierul alege numele, avatarul
+// execută (Adrian, 11 iul: „mișcări comandate la tot ce vreau să facă" +
+// „mișcările trebuiesc legate de context, sentimente").
 const CLIP_FILES: Record<string, string> = {
   idle: '/anim/M_Standing_Idle_001.glb',
-  idleVar: '/anim/M_Standing_Idle_Variations_002.glb',
-  talk1: '/anim/M_Talking_Variations_001.glb',
-  talk2: '/anim/M_Talking_Variations_004.glb',
-  expr1: '/anim/M_Standing_Expressions_001.glb',
-  expr2: '/anim/M_Standing_Expressions_004.glb',
+  variatie: '/anim/M_Standing_Idle_Variations_002.glb',
+  // UN SINGUR clip de vorbit, cel reținut (Adrian: „gesturile actuale
+  // nepotrivite pentru gentleman") — gesticulația amplă a fost scoasă
+  // din rotația automată; expresiile mari rămân DOAR la comandă.
+  talk: '/anim/M_Talking_Variations_004.glb',
+  'expresie-1': '/anim/M_Standing_Expressions_001.glb',
+  'expresie-2': '/anim/M_Standing_Expressions_002.glb',
+  'expresie-3': '/anim/M_Standing_Expressions_008.glb',
+  'expresie-4': '/anim/M_Standing_Expressions_004.glb',
+  dans: '/anim/M_Dances_001.glb',
+  // Gesturile DOMOALE (Adrian: „ce gesturi mai domoale poate face") — variații
+  // de repaus din bibliotecă: mutare subtilă de greutate, privire în jur.
+  'variatie-2': '/anim/M_Standing_Idle_Variations_003.glb',
+  'variatie-3': '/anim/M_Standing_Idle_Variations_007.glb',
 }
 
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const idle = useGLTF(CLIP_FILES.idle)
-  const idleVar = useGLTF(CLIP_FILES.idleVar)
-  const talk1 = useGLTF(CLIP_FILES.talk1)
-  const talk2 = useGLTF(CLIP_FILES.talk2)
-  const expr1 = useGLTF(CLIP_FILES.expr1)
-  const expr2 = useGLTF(CLIP_FILES.expr2)
+  const variatie = useGLTF(CLIP_FILES.variatie)
+  const talk = useGLTF(CLIP_FILES.talk)
+  const expr1 = useGLTF(CLIP_FILES['expresie-1'])
+  const expr2 = useGLTF(CLIP_FILES['expresie-2'])
+  const expr3 = useGLTF(CLIP_FILES['expresie-3'])
+  const expr4 = useGLTF(CLIP_FILES['expresie-4'])
+  const dans = useGLTF(CLIP_FILES.dans)
+  const variatie2 = useGLTF(CLIP_FILES['variatie-2'])
+  const variatie3 = useGLTF(CLIP_FILES['variatie-3'])
   const root = useRef<Group>(null)
 
   // Fiecare GLB din bibliotecă are un singur clip, toate cu același nume
@@ -67,19 +85,22 @@ export default function AvatarModel() {
       }
     }
     add(idle, 'idle')
-    add(idleVar, 'idleVar')
-    add(talk1, 'talk1')
-    add(talk2, 'talk2')
-    add(expr1, 'expr1')
-    add(expr2, 'expr2')
+    add(variatie, 'variatie')
+    add(talk, 'talk')
+    add(expr1, 'expresie-1')
+    add(expr2, 'expresie-2')
+    add(expr3, 'expresie-3')
+    add(expr4, 'expresie-4')
+    add(dans, 'dans')
+    add(variatie2, 'variatie-2')
+    add(variatie3, 'variatie-3')
     return out
-  }, [idle, idleVar, talk1, talk2, expr1, expr2])
+  }, [idle, variatie, talk, expr1, expr2, expr3, expr4, dans, variatie2, variatie3])
 
   const { actions, mixer } = useAnimations(clips, root)
   const current = useRef<AnimationAction | null>(null)
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
   const talkHold = useRef(0) // vocea „ține" starea de vorbit peste micro-pauze
-  const nextVarAt = useRef(14 + Math.random() * 14)
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
@@ -158,20 +179,19 @@ export default function AvatarModel() {
     const level = getVoiceLevel()
 
     // ── Regia: alege mișcarea după ce face Kelion acum ──
+    // ȚINUTĂ DE DOMN (Adrian, 11 iul: „astea sunt gesturi de gym, nu e bine"):
+    // în repaus NU se mai rulează automat nicio variație — doar respirația
+    // demnă din clipul de bază. Orice alt gest vine EXCLUSIV la comandă
+    // ([GEST nume] de la creier), legat de context/sentiment, cu măsură.
     if (level > 0.05) talkHold.current = t + 0.7
     const talking = t < talkHold.current
     if (state.current !== 'gesture') {
       if (talking && state.current !== 'talking') {
         state.current = 'talking'
-        play(Math.random() < 0.5 ? 'talk1' : 'talk2')
+        play('talk')
       } else if (!talking && state.current === 'talking') {
         state.current = 'idle'
         play('idle')
-      } else if (!talking && state.current === 'idle' && t >= nextVarAt.current) {
-        // Din când în când, o variație de repaus — apoi „finished" ne întoarce.
-        nextVarAt.current = t + 18 + Math.random() * 16
-        state.current = 'gesture'
-        play('idleVar', true)
       }
     }
 

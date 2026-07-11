@@ -936,8 +936,38 @@ body {
   /* Adrian, 11 iul: „mărește avatarul când e în dreapta jos la mărimea
      inițială și fă-l să se vadă tot" — scala urcă de la 0.26 la 0.42
      (silueta întreagă, vizibil mai mare), ancorat tot dreapta-jos, cu
-     aceeași gardă de 180px deasupra composer-ului. */
+     aceeași gardă de 180px deasupra composer-ului. Poziția/scala REALĂ
+     vine ca stil inline din aranjarea lui Adrian (dublu-click). */
   transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
+}
+/* MODUL DE ARANJARE (Adrian: „să rescalez eu avatarul și să-l poziționez cum
+   cred eu, dând dublu click pe el"): contur vizibil + fără tranziție (tragerea
+   trebuie să urmeze mâna instant), overlay care prinde gesturile. */
+.stage-canvas.editing {
+  transition: none;
+}
+.avatar-edit-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: move;
+  touch-action: none;
+  outline: 3px dashed rgba(110, 168, 254, 0.85);
+  outline-offset: -3px;
+  border-radius: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.avatar-edit-hint {
+  margin-top: 10px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #cfe0ff;
+  /* textul stă într-un element scalat (~0.42) — fontul mare rămâne lizibil */
+  font-size: 30px;
+  white-space: nowrap;
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
