@@ -1208,15 +1208,18 @@ export default function ChatPanel({
             <span className="voice-live-caret" />
           </div>
         )}
-        {/* TOT CHATUL, PE ROLURI, în spațiul benzilor (Adrian, 11 iul: „când e
-            user, ceva cu user") — mesajul TĂU, cu semnul 👤, pe un rând.
-            Adrian, 11 iul seara: „după ce ai baleiat ce am scris, asta nu mai
-            trebuie să fie afișată" — banda trăiește DOAR până serverul
-            confirmă preluarea (delivered); apoi dispare, iar dovada rămâne
-            banda 🧠 cu ce a auzit efectiv creierul. */}
-        {busy && !delivered && lastUser?.content && (
+        {/* O SINGURĂ BANDĂ, AMBELE SENSURI (Adrian, 11 iul seara: „aici
+            trebuiesc baleiate dinspre creier și înspre creier — în afară de
+            asta nu se mai afișează chat scris"). Aceeași bandă de la creier
+            își schimbă semnul după faza turei: 👤 = mesajul tău pleacă
+            ÎNSPRE creier (dispare la preluare — „după ce ai baleiat ce am
+            scris, nu se mai afișează"); 🧠 = creierul l-a primit și gândește
+            (arată ce a auzit efectiv — confirmat de server, nu ecou local);
+            K = răspunsul curge DINSPRE creier (coada textului cât streamează,
+            teletext când e terminat). Un rând, mereu, nimic în afara ei. */}
+        {busy && !delivered && lastUser?.content ? (
           <div className="heard-band user-band" aria-live="polite">
-            <span className="heard-band-label" title="Tu — mesajul trimis">👤</span>
+            <span className="heard-band-label" title="Tu — înspre creier">👤</span>
             <span className="ticker">
               <span
                 className="ticker-text"
@@ -1227,38 +1230,25 @@ export default function ChatPanel({
               </span>
             </span>
           </div>
-        )}
-        {/* BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): ce a primit EFECTIV
-            creierul la ultima tură — confirmat de server, nu ecou local. Dacă
-            vorbești și banda asta NU se schimbă, vocea a murit ÎNAINTE de
-            creier (microfon/ureche); dacă textul e greșit, urechea aude prost. */}
-        {heard && (
+        ) : busy && !lastAssistant?.content ? (
           <div className="heard-band" aria-live="polite">
-            <span className="heard-band-label">🧠</span>
+            <span className="heard-band-label" title="Creierul a primit și gândește">🧠</span>
             <span className="ticker">
               <span
                 className="ticker-text"
-                key={heard}
-                style={{ '--ticker-dur': tickerDur(heard) } as CSSProperties}
+                key={heard || '…'}
+                style={{ '--ticker-dur': tickerDur(heard || '…') } as CSSProperties}
               >
-                „{heard}"
+                {heard ? `„${heard}"` : '…'}
               </span>
             </span>
           </div>
-        )}
-        {/* RĂSPUNSUL LUI KELION — pastila K (Adrian: „când e chat, semnul vocii
-            lui K"), tot aici, un rând. Cât timp răspunsul CURGE se vede coada
-            lui (fără animație care s-ar reporni la fiecare literă); când e
-            terminat, derulează teletext, ca banda creierului. Bulele din
-            centru au fost scoase — asta e SINGURA scenă a chatului. */}
-        {(lastAssistant?.content || busy) && (
+        ) : lastAssistant?.content || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
-            <span className="heard-band-label kelion-k" title="Kelion — răspunsul">K</span>
+            <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
             {busy ? (
               <span className="speech-tail">
                 <span className="speech-tail-text">
-                  {/* NICIODATĂ gol în pauza de gândire (ordin, 10 iul): până
-                      curg primele cuvinte, banda ține sinteza cererii auzite. */}
                   {lastAssistant?.content || (heard ? synthesize(heard) : '…')}
                 </span>
               </span>
@@ -1274,7 +1264,7 @@ export default function ChatPanel({
               </span>
             )}
           </div>
-        )}
+        ) : null}
         {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
             că e greșită" + „microfon cu autovox, instant"): microfonul nu mai
             stă mut până la calibrare — amprenta se învață AUTOMAT din primele
