@@ -1051,6 +1051,15 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/bridge/workorders', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     const rows = await pullPendingWorkOrders()
+    // Adrian, 11 iul: „de ce nu apare la ce se lucrează?" — caseta „Cererea în
+    // analiză" se umplea DOAR din chat; ordinele lucrate de constructor n-o
+    // atingeau niciodată, deci în plin lucru scria „nicio cerere activă".
+    // Livrarea e chiar momentul în care constructorul se apucă de ordin —
+    // exact atunci textul lui devine cererea afișată.
+    if (rows.length > 0 && rows[0].text) {
+      const rest = rows.length > 1 ? ` (+${rows.length - 1} în coadă)` : ''
+      setAnalysisDetail(`⚒ La constructor: ${rows[0].text}${rest}`)
+    }
     return { orders: rows.map((r) => ({ id: r.id, text: r.text, at: r.created_at })) }
   })
 
