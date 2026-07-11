@@ -159,6 +159,10 @@ export default function ChatPanel({
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
+  // Ultimele 4 cadre (Adrian, 11 iul: „camera nu captează 4 cadre pe secundă"
+  // + auditul lui Kelion: „trimite un singur cadru în loc de patru — vederea
+  // nu e continuă"). Tampon circular; la fiecare tură pleacă TOATE 4.
+  const frameBufRef = useRef<string[]>([])
   const coordsRef = useRef<Coords | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
@@ -679,11 +683,20 @@ export default function ChatPanel({
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
     // ADMIN: every raw attachment (photo, arhivă, video, orice) rides the
     // bridge to Claude alongside the text.
-    const bridgeFiles = isAdmin
-      ? atts
-          .filter((a) => a.url.startsWith('data:'))
-          .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url }))
-      : undefined
+    // + VEDEREA CONTINUĂ (Adrian, 11 iul): cu camera pornită, pleacă ULTIMELE
+    // 4 CADRE (≈ultima secundă la 4 fps), nu unul singur — Kelion vede
+    // mișcarea, nu o clipă înghețată. Serverul acceptă deja files[] multiple.
+    const camFrames =
+      isAdmin && cameraOnRef.current && !attached ? frameBufRef.current.slice(-4) : []
+    const adminFiles = isAdmin
+      ? [
+          ...atts
+            .filter((a) => a.url.startsWith('data:'))
+            .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url })),
+          ...camFrames.map((url, i) => ({ name: `cadru-${i + 1}.jpg`, type: 'image/jpeg', data: url })),
+        ]
+      : []
+    const bridgeFiles = adminFiles.length > 0 ? adminFiles : undefined
 
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
     setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
@@ -816,6 +829,11 @@ export default function ChatPanel({
       })
       micStartingRef.current = false
       if (sh) {
+        // Utilizatorul a apăsat OPRIT cât porneam — respectă-i decizia.
+        if (micManualOffRef.current) {
+          sh.stop()
+          return
+        }
         micRef.current = sh
         micBackoffRef.current = 1000
         setListening(true)
@@ -842,6 +860,11 @@ export default function ChatPanel({
     )
     micStartingRef.current = false
     if (h) {
+      // Utilizatorul a apăsat OPRIT cât porneam — respectă-i decizia.
+      if (micManualOffRef.current) {
+        h.stop()
+        return
+      }
       micRef.current = h
       micBackoffRef.current = 1000
       setListening(true)
@@ -854,9 +877,15 @@ export default function ChatPanel({
   ensureMicRef.current = ensureMic
 
   function toggleMic(): void {
-    if (micRef.current) {
+    // Adrian, 11 iul: „butonul microfon nu funcționează corect". Cauza: pornirea
+    // e asincronă (~0,5–2s); o apăsare în fereastra aia nu găsea încă micRef
+    // și cădea pe ramura de PORNIRE — adică oprirea era imposibil de exprimat
+    // cât timp boot-ul era în zbor, iar dublu-click lăsa microfonul mereu
+    // aprins. Acum: apăsat în timpul pornirii = OPRIRE (manualOff), iar
+    // ensureMic verifică manualOff după fiecare await înainte să instaleze.
+    if (micRef.current || micStartingRef.current) {
       micManualOffRef.current = true
-      micRef.current.stop()
+      micRef.current?.stop()
       micRef.current = null
       // oprire intenționată: un fragment agățat NU trebuie trimis după teardown
       coalescerRef.current?.cancel()
@@ -967,19 +996,26 @@ export default function ChatPanel({
     return () => navigator.geolocation.clearWatch(id)
   }, [])
 
-  // Capture frames at a GPS-driven rate (1 fps still, 4 fps moving, scaling up
-  // with speed). Frames are buffered locally; the latest is sent to Claude on a
-  // turn (continuous send would be cost-prohibitive — see spec).
+  // Captură la 4 cadre/s PERMANENT (Adrian, 11 iul — vechiul ritm de 1 fps pe
+  // loc lăsa vederea discontinuă; GPS-ul în casă nu detectează mișcare, deci
+  // rămânea veșnic pe 1). În mișcare urcă până la 8 fps. Cadrele se strâng în
+  // tamponul circular (ultimele 4); pleacă la creier doar la o tură — trimiterea
+  // continuă rămâne interzisă de cost.
   useEffect(() => {
     if (!cameraOn) return
     let timer: number | null = null
     let watchId: number | null = null
-    let fps = 1
+    let fps = 4
     let last: { lat: number; lon: number; t: number } | null = null
 
     const tick = (): void => {
       const f = captureRef.current?.()
-      if (f) latestFrameRef.current = f
+      if (f) {
+        latestFrameRef.current = f
+        const b = frameBufRef.current
+        b.push(f)
+        if (b.length > 4) b.shift()
+      }
     }
     const arm = (): void => {
       if (timer) globalThis.clearInterval(timer)
@@ -997,7 +1033,7 @@ export default function ChatPanel({
             if (dt > 0) mps = metersBetween(last.lat, last.lon, latitude, longitude) / dt
           }
           last = { lat: latitude, lon: longitude, t: pos.timestamp }
-          const next = mps < 0.5 ? 1 : Math.min(8, 4 + Math.floor(mps / 2))
+          const next = mps < 0.5 ? 4 : Math.min(8, 4 + Math.floor(mps / 2))
           if (next !== fps) {
             fps = next
             arm()
@@ -1011,6 +1047,9 @@ export default function ChatPanel({
     return () => {
       if (timer) globalThis.clearInterval(timer)
       if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId)
+      // Cameră oprită → tamponul se golește (cadre vechi nu au voie să apară
+      // într-o tură de mai târziu, după repornire).
+      frameBufRef.current = []
     }
   }, [cameraOn])
 
