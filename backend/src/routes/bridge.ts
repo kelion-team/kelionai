@@ -26,6 +26,8 @@ import {
   saveClientError,
   listClientErrors,
   getCostToday,
+  saveTierEvent,
+  listTierEvents,
 } from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
@@ -1708,6 +1710,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return { errors: await listClientErrors(100) }
+  })
+
+  // TREPTELE DE ABONAMENT — SISTEM DE URMĂRIRE (12 iul, ordinul lui Adrian:
+  // „sistem de urmărit când sunt repuse valorile noi, interogare când se
+  // alocă prin cheie, revenire la ordinea prestabilită automat"). Worker-ii
+  // (chat + constructor) scriu aici DE FIECARE DATĂ când comută treapta
+  // (max→kimi/glm, cotă golită) sau revin automat la treapta de sus (după
+  // cooldown-ul de 30 min) — un rând per tranziție, cu motivul.
+  app.post<{
+    Body: { worker?: string; from?: string; to?: string; action?: string; reason?: string }
+  }>('/api/bridge/tier-event', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const b = req.body ?? {}
+    if (!b.worker || !b.to || !b.action) return reply.code(400).send({ error: 'bad_request' })
+    await saveTierEvent({ worker: b.worker, from: b.from, to: b.to, action: b.action, reason: b.reason })
+    return { ok: true }
+  })
+
+  app.get('/api/bridge/tier-events', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { events: await listTierEvents(50) }
   })
 
   // BECUL DE RELEASE-URI (Adrian, 11 iul: „când sunt release-uri trebuie să

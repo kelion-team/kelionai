@@ -95,21 +95,49 @@ function tierKeyOf(t) {
     return null
   }
 }
+// SISTEM DE URMĂRIRE A TREPTELOR (Adrian, 12 iul: „sistem de urmărit când sunt
+// repuse valorile noi, interogare când se alocă prin cheie, revenire la
+// ordinea prestabilită automat"). Fiecare tranziție reală (nu doar fiecare
+// verificare — currentTier() e chemată des) pleacă spre server, o singură
+// dată per schimbare: `action` e „switch" când treapta nouă e mai jos în
+// ordinea preferată (cotă golită) sau „revert" când e mai sus (revenire
+// automată după cooldown — exact „ordinea prestabilită").
+let lastReportedTier = null
+function reportTierChange(from, to, reason) {
+  const fromIdx = from ? TIERS.findIndex((t) => t.name === from) : -1
+  const toIdx = TIERS.findIndex((t) => t.name === to)
+  const action = fromIdx === -1 ? 'boot' : toIdx < fromIdx ? 'revert' : 'switch'
+  fetch(`${BASE}/api/bridge/tier-event`, {
+    method: 'POST',
+    headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ worker: 'chat', from, to, action, reason }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => {})
+}
 function currentTier() {
+  let picked = TIERS[0] // toate golite → tot Max (cel mai probabil să-și revină primul)
   for (const t of TIERS) {
     if ((tierDownUntil[t.name] ?? 0) > Date.now()) continue
     if (t.keyFile && !tierKeyOf(t)) continue
-    return t
+    picked = t
+    break
   }
-  return TIERS[0] // toate golite → tot Max (cel mai probabil să-și revină primul)
+  if (picked.name !== lastReportedTier) {
+    const from = lastReportedTier
+    lastReportedTier = picked.name
+    reportTierChange(from, picked.name, lastQuotaReason)
+  }
+  return picked
 }
 // Semnăturile de cotă golită. Se verifică DOAR pe canalele de EROARE (stderr,
 // result cu is_error) — NICIODATĂ pe textul răspunsului normal, altfel o simplă
 // discuție despre limite ar comuta treapta din greșeală.
 const QUOTA_RE = /usage limit|usage credits|credit balance|rate.?limit|quota|429/i
+let lastQuotaReason = null
 function quotaHit(tierName, errText) {
   if (!errText || !QUOTA_RE.test(String(errText))) return false
   tierDownUntil[tierName] = Date.now() + TIER_COOLDOWN_MS
+  lastQuotaReason = String(errText).slice(0, 300)
   log(`[abonament] treapta „${tierName}" e golită — comut pe următoarea, revin în ${TIER_COOLDOWN_MS / 60_000} min.`)
   return true
 }

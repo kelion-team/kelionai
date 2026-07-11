@@ -355,6 +355,22 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_client_errors_recent ON client_errors (created_at DESC);
+    -- SISTEM DE URMĂRIRE A TREPTELOR DE ABONAMENT (12 iul, ordinul lui Adrian:
+    -- „sistem de urmărit când sunt repuse valorile noi, interogare când se
+    -- alocă prin cheie, revenire la ordinea prestabilită automat"). Fiecare
+    -- comutare (max→kimi/glm la cotă golită) SAU revenire automată (înapoi la
+    -- treapta de sus, după cooldown) e un rând aici — worker-ul o scrie chiar
+    -- în clipa tranziției, nu doar în jurnalul systemd care se pierde.
+    CREATE TABLE IF NOT EXISTS tier_events (
+      id BIGSERIAL PRIMARY KEY,
+      worker TEXT NOT NULL,
+      from_tier TEXT,
+      to_tier TEXT NOT NULL,
+      action TEXT NOT NULL,
+      reason TEXT,
+      at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tier_events_recent ON tier_events (at DESC);
   `)
 }
 
@@ -400,6 +416,55 @@ export async function listClientErrors(n = 100): Promise<ClientErrorRow[]> {
       `SELECT id, type, message, stack, url, ip, created_at::text
        FROM client_errors ORDER BY created_at DESC LIMIT $1`,
       [Math.max(1, Math.min(500, n))],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+export interface TierEventRow {
+  id: number
+  worker: string
+  from_tier: string | null
+  to_tier: string
+  action: string
+  reason: string | null
+  at: string
+}
+
+export async function saveTierEvent(e: {
+  worker: string
+  from?: string | null
+  to: string
+  action: string
+  reason?: string
+}): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO tier_events (worker, from_tier, to_tier, action, reason)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        String(e.worker).slice(0, 20),
+        e.from ? String(e.from).slice(0, 20) : null,
+        String(e.to).slice(0, 20),
+        String(e.action).slice(0, 20),
+        e.reason ? String(e.reason).slice(0, 500) : null,
+      ],
+    )
+  } catch {
+    /* non-fatal: nu blocăm worker-ul pentru un log */
+  }
+}
+
+export async function listTierEvents(n = 50): Promise<TierEventRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<TierEventRow>(
+      `SELECT id, worker, from_tier, to_tier, action, reason, at::text
+       FROM tier_events ORDER BY at DESC LIMIT $1`,
+      [Math.max(1, Math.min(300, n))],
     )
     return r.rows
   } catch {
