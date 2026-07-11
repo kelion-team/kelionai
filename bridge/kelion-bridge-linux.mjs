@@ -33,11 +33,26 @@ const CLAUDE = 'claude'
 // admin message so Kelion never starts "blank". Reloaded on each message so it
 // can be updated without restarting the service.
 function loadContext() {
+  let ctx = ''
   try {
-    return readFileSync('/root/kelion/context.md', 'utf8')
-  } catch {
-    return ''
-  }
+    ctx = readFileSync('/root/kelion/context.md', 'utf8')
+  } catch {}
+  // ORDINUL LUI ADRIAN (11 iul: „să ajungă identic cu tine"): Kelion primește
+  // ACEEAȘI sursă de adevăr din care lucrează Claude-din-cloud — AI-HANDOFF.md,
+  // ținut la zi la fiecare schimbare și sincronizat pe VPS de bridge-deploy.
+  // Se încarcă la amorsarea sesiunii calde (o dată la 8 ture), nu la fiecare
+  // mesaj — cunoaștere completă cu cost mic. DOAR pe calea adminului (funcția
+  // asta nu e chemată pe joburi publice — nimic privat nu curge la vizitatori).
+  let handoff = ''
+  try {
+    handoff = readFileSync('/root/kelion/repo/AI-HANDOFF.md', 'utf8').slice(0, 120_000)
+  } catch {}
+  if (!handoff) return ctx
+  return (
+    ctx +
+    '\n\n=== AI-HANDOFF.md — SURSA DE ADEVĂR COMUNĂ (aceeași din care lucrează Claude; ține cont de ea ca de propriile reguli) ===\n' +
+    handoff
+  )
 }
 
 const MODEL = 'claude-fable-5'
