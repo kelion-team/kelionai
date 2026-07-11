@@ -9,6 +9,7 @@ import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
+import ReleaseAlertBanner from '../components/ReleaseAlertBanner'
 import type { User } from '../lib/api'
 import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
@@ -57,6 +58,7 @@ export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'>('finance')
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -818,13 +820,23 @@ export default function Stage({ user }: { user: User }) {
         </div>
       </header>
 
+      <ReleaseAlertBanner
+        user={user}
+        onOpenReleases={() => {
+          setAdminTab('releases')
+          setAdminOpen(true)
+        }}
+      />
+
       {/* FULL-MONITOR live work feed (admin only): every step Claude executes on
           the laptop is mirrored here in real time. Floats over the whole monitor
           but never blocks clicks (pointer-events: none), so the owner keeps
           talking to Kelion while WATCHING the work happen. */}
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} isDemo={user.role === 'demo'} />
 
-      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
+      {adminOpen && (
+        <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
+      )}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
 

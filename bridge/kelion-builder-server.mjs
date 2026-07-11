@@ -231,24 +231,137 @@ function toolFile(t) {
 // dovada") ─────────────────────────────────────────────────────────────────
 // Constructorul NU mai crede pe cuvânt raportul modelului. După execuție
 // verifică EL însuși: git diff (ce fișiere s-au schimbat efectiv) + npm run
-// build în backend ȘI frontend, rulate de constructor. Rezultatul real
-// (fișiere, exit code-uri, coada erorii) intră în release și pleacă lui Adrian
-// în chat — iar „Gata" se spune DOAR când dovada există; altfel se spune
-// cinstit ce a picat.
+// build în backend ȘI frontend + npm test în backend, rulate de constructor.
+// Rezultatul real (fișiere, exit code-uri, coada erorii) intră în release și
+// pleacă lui Adrian în chat — iar „Gata" se spune DOAR când dovada există;
+// altfel se spune cinstit ce a picat.
 async function verifyWork() {
   const diff = (await run('git', ['diff', '--stat'])).out.trim()
   const summary = diff.split('\n').pop()?.trim() || '' // „3 files changed, 41 insertions(+)…"
   const be = await run('npm', ['run', 'build'], { cwd: REPO + '/backend' })
   const fe = await run('npm', ['run', 'build'], { cwd: REPO + '/frontend' })
+  const te = await run('npm', ['test'], { cwd: REPO + '/backend' })
   const verdict = (r) => (r.code === 0 ? 'OK' : `PICĂ (exit ${r.code})`)
-  const proof = `${summary || 'NICIUN fișier modificat'}; build backend: ${verdict(be)}; build frontend: ${verdict(fe)}`
+  const proof = `${summary || 'NICIUN fișier modificat'}; build backend: ${verdict(be)}; build frontend: ${verdict(fe)}; test backend: ${verdict(te)}`
   const detail =
     '--- DOVADA (verificată de constructor, nu pe cuvântul modelului) ---\n' +
     `git diff --stat:\n${diff || '(gol — niciun fișier modificat)'}\n\n` +
     `npm run build (backend) → exit ${be.code}${be.code !== 0 ? `\n${be.out.slice(-1500)}` : ''}\n` +
-    `npm run build (frontend) → exit ${fe.code}${fe.code !== 0 ? `\n${fe.out.slice(-1500)}` : ''}`
-  const builtOk = be.code === 0 && fe.code === 0
+    `npm run build (frontend) → exit ${fe.code}${fe.code !== 0 ? `\n${fe.out.slice(-1500)}` : ''}\n` +
+    `npm test (backend) → exit ${te.code}${te.code !== 0 ? `\n${te.out.slice(-1500)}` : ''}`
+  const builtOk = be.code === 0 && fe.code === 0 && te.code === 0
   return { ok: builtOk && diff !== '', changed: diff !== '', proof, detail }
+}
+
+// ── VERIFICATOR INDEPENDENT GLM (Adrian, 11 iul: „dai la GLM") ─────────────
+// După ce constructorul trece dovada mecanică, un agent SEPARAT, forțat pe GLM,
+// demonizează lucrarea: citește diff-ul critic, re-rulează build-urile și
+// testele, caută cazuri-limită. Returnează verdict structurat TRECE/PICĂ.
+// DOAR ce trece ajunge la ready-deploy; ce pică se întoarce la reparat.
+function glmEnv() {
+  let key
+  try { key = readFileSync('/root/kelion/glm-key.txt', 'utf8').trim() || null } catch { key = null }
+  if (!key) return null
+  const env = {
+    ...process.env,
+    ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+    ANTHROPIC_API_KEY: key,
+    ANTHROPIC_AUTH_TOKEN: key,
+  }
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  return env
+}
+
+function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
+  return new Promise((resolve) => {
+    const env = glmEnv()
+    if (!env) {
+      resolve({ code: -1, out: 'LIPSA_CHEIE_GLM: /root/kelion/glm-key.txt nu există sau e gol' })
+      return
+    }
+    say('🔬 Verificator independent pornit pe GLM')
+    const c = spawn('claude', [
+      '-p', prompt,
+      '--model', 'claude-fable-5',
+      '--allowedTools', 'Read,Bash',
+      '--output-format', 'stream-json', '--verbose',
+    ], { cwd: REPO, env })
+    let buf = ''
+    let finalText = ''
+    let errText = ''
+    const t = setTimeout(() => c.kill('SIGKILL'), timeoutMs)
+    c.stdout.on('data', (d) => {
+      buf += d
+      let i
+      while ((i = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, i).trim()
+        buf = buf.slice(i + 1)
+        if (!line) continue
+        try {
+          const ev = JSON.parse(line)
+          if (ev.type === 'result' && typeof ev.result === 'string') finalText = ev.result
+          onEvent(ev)
+        } catch { /* linie parțială/non-JSON — ignorată */ }
+      }
+    })
+    c.stderr.on('data', (d) => (errText += d))
+    c.on('close', (code) => { clearTimeout(t); resolve({ code, out: finalText || errText }) })
+    c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
+  })
+}
+
+function parseVerifierVerdict(text) {
+  if (!text) return { pass: false, reason: 'Verificatorul nu a returnat text', details: '' }
+  const m = text.match(/VERDICT:\s*(TRECE|PIC[ĂA])/i)
+  if (!m) return { pass: false, reason: 'Verificatorul nu a returnat verdict structurat (lipsește „VERDICT:")', details: text.slice(-2000) }
+  const pass = m[1].toUpperCase().startsWith('TRECE')
+  const reasonMatch = text.match(/MOTIVE:\s*([\s\S]*?)(?:\nRISCURI:|\nRECOMAND[AĂ]RI:|\n---|$)/i)
+  const reason = reasonMatch ? reasonMatch[1].trim().slice(0, 800) : '(fără motive detaliate)'
+  return { pass, reason, details: text.slice(-3000) }
+}
+
+async function runIndependentVerifier(orderText, builderSummary, verificationResult) {
+  const { proof, detail } = verificationResult
+  const prompt =
+    `Ești VERIFICATOR INDEPENDENT în proiectul Kelionai. Nu editezi nimic — doar demonizezi lucrarea constructorului.\n\n` +
+    `Sarcina constructorului: "${orderText}"\n` +
+    `Sumarul constructorului: ${builderSummary}\n` +
+    `Dovada mecanică: ${proof}\n\n` +
+    `Detalii complete (diff + build + test):\n${detail}\n\n` +
+    `Misiunea ta:\n` +
+    `1. Citește diff-ul complet (\`git diff\`) și fișierele modificate relevante.\n` +
+    `2. Rulează încă o dată \`npm run build\` în backend/ și frontend/ și \`npm test\` în backend/ (confirmă sau infirmă rezultatele constructorului).\n` +
+    `3. Gândește-te la cazuri-limită: input-uri goale/null, erori, securitate, regresii, race conditions, side-effects.\n` +
+    `4. Dă un verdict structurat EXACT în formatul:\n\n` +
+    `VERDICT: TRECE\n` +
+    `sau\n` +
+    `VERDICT: PICĂ\n\n` +
+    `MOTIVE:\n` +
+    `- (puncte clare; pentru PICĂ: ce e greșit și de ce; pentru TRECE: ce ai verificat)\n\n` +
+    `RISCURI:\n` +
+    `- (riscuri reziduale, chiar dacă TRECE)\n\n` +
+    `RECOMANDĂRI (doar dacă PICĂ):\n` +
+    `- (cum să repare constructorul)\n\n` +
+    `La final, repetă verdictul pe o linie nouă: VERDICT: TRECE sau VERDICT: PICĂ.`
+  let steps = 0
+  let lastFile = ''
+  const res = await runClaudeGLMVerifier(prompt, (ev) => {
+    if (ev.type !== 'assistant') return
+    const blocks = ev.message?.content
+    if (!Array.isArray(blocks)) return
+    for (const b of blocks) {
+      if (b.type !== 'tool_use') continue
+      steps++
+      const f = toolFile(b)
+      if (f) lastFile = f
+      say(toolLine(b))
+      pushProgress(Math.min(98, 90 + steps), 'Verificare independentă GLM', lastFile)
+    }
+  }, 600000)
+  if (res.code !== 0) {
+    return { pass: false, reason: `Verificatorul GLM s-a terminat cu exit ${res.code}: ${res.out.slice(0, 400)}`, details: res.out }
+  }
+  return parseVerifierVerdict(res.out)
 }
 
 // O veste către chatul lui Adrian (rostită + salvată în istoric). Fire-and-
@@ -262,7 +375,8 @@ async function build(order) {
   const prompt =
     `Esti constructorul Kelionai. Sarcina de la Adrian: "${order.text}". ` +
     `Editeaza codul in acest repo ca sa o rezolvi. Compileaza (npm run build in backend SI frontend) ` +
-    `pana trece fara erori. NU face deploy, NU rula railway. La final scrie pe o singura linie, ` +
+    `si ruleaza testele (npm test in backend) pana trec fara erori. ` +
+    `NU face deploy, NU rula railway. La final scrie pe o singura linie, ` +
     `dupa "SUMAR:", ce ai schimbat.`
   const short = order.text.replace(/\s+/g, ' ').slice(0, 70)
   say(`🔨 Am preluat ordinul și încep execuția: ${short}`)
@@ -300,13 +414,30 @@ async function build(order) {
   const v = await verifyWork()
   const sumMatch = res.out.match(/SUMAR:\s*(.+)/)
   const title = (sumMatch ? sumMatch[1] : order.text).slice(0, 180)
-  const detail = `Ordin: ${order.text}\n\n${v.detail}\n\n--- notele constructorului ---\n${res.out.slice(-2000)}`
-  await api('/api/bridge/stage-release', 'POST', { title, detail })
   // Verdictul pleacă lui Adrian CU dovada atașată — niciodată „gata" gol.
   if (v.ok) {
-    say(`✅ Gata, cu dovadă: ${v.proof} — aștept aprobarea (Admin → Release-uri)`)
-    await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. E pregătit — aprobă în Admin → Release-uri.`)
-    pushProgress(100, 'Gata — dovadă atașată, aștept aprobarea')
+    say('🔍 Constructorul a trecut dovada — pornesc verificatorul independent GLM înainte de a declara gata')
+    pushProgress(90, 'Verificare independentă GLM')
+    const verdict = await runIndependentVerifier(order.text, title, v)
+    if (verdict.pass) {
+      const detail =
+        `Ordin: ${order.text}\n\n` +
+        `Verificator independent GLM: TRECE\n${verdict.reason}\n\n` +
+        `${v.detail}\n\n` +
+        `--- notele constructorului ---\n${res.out.slice(-2000)}`
+      await api('/api/bridge/stage-release', 'POST', { title, detail })
+      say(`✅ Gata, verificat independent: ${v.proof} — aștept aprobarea (Admin → Release-uri)`)
+      await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. Verificator independent GLM: TRECE (${verdict.reason}). E pregătit — aprobă în Admin → Release-uri.`)
+      pushProgress(100, 'Gata — dovadă + verificare independentă, aștept aprobarea')
+    } else {
+      say(`🔴 NU e gata — verificatorul independent GLM a PICĂ: ${verdict.reason}`)
+      await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: verificatorul independent GLM a PICĂ (${verdict.reason}). Nu public nimic stricat; repar și retrimite.`)
+      pushProgress(100, 'Verificare independentă PICĂ — întors la reparat')
+      // Întoarce la reparat cu motivele verificatorului.
+      await api('/api/bridge/workorders', 'POST', {
+        text: `VERIFICATOR INDEPENDENT PICĂ pentru „${order.text.slice(0, 200)}": ${verdict.reason}. Repară problema și retrimite.`,
+      }).catch(() => {})
+    }
   } else if (!v.changed) {
     say('⚠️ NU declar gata: niciun fișier modificat — nu am dovadă că s-a lucrat ceva (detaliile în Release-uri)')
     await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" s-a terminat FĂRĂ fișiere modificate — nu am dovadă de lucru, nu declar gata. Detaliile sunt în Admin → Release-uri.`)

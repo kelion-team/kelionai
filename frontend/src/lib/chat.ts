@@ -72,6 +72,8 @@ export interface ChatControl {
   }
 }
 
+import type { VoiceFeatures } from './audioIO.js'
+
 // U+001F (unit separator) brackets a JSON control frame in the text stream.
 const CTRL = String.fromCharCode(31)
 
@@ -105,6 +107,8 @@ export async function* streamChat(
   // VEDEREA CONTINUĂ (Adrian, 11 iul): ultimele 4 cadre ale camerei — pentru
   // TOȚI userii (regula nr. 9: aceleași capabilități), nu doar admin.
   images?: string[],
+  // Features vocale extrase client-side pentru identificare speaker + gen.
+  voiceFeatures?: VoiceFeatures,
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -121,6 +125,7 @@ export async function* streamChat(
         coords,
         screen,
         files,
+        voiceFeatures,
         // Kelion's built-in sense of "now": the client's real local time + zone,
         // sent every turn so he always knows today's date and the current time.
         now: new Date().toISOString(),

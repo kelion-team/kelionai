@@ -50,6 +50,39 @@ export interface VoicePrint {
   tolerance: number // marjă în jurul [f0Min, f0Max] la potrivire (Hz)
 }
 
+// Features vocale trimise backendului pentru identificare speaker + gen.
+export interface VoiceFeatureMeta {
+  pitchMean: number
+  pitchStd: number
+  pitchMin: number
+  pitchMax: number
+  centroid: number
+  rolloff: number
+  zcr: number
+  energy: number
+  jitter: number
+  shimmer: number
+}
+
+export interface VoiceFeatures {
+  vector: number[]
+  meta: VoiceFeatureMeta
+}
+
+let pendingVoiceFeatures: VoiceFeatures | null = null
+
+export function getPendingVoiceFeatures(): VoiceFeatures | null {
+  return pendingVoiceFeatures
+}
+
+export function setPendingVoiceFeatures(features: VoiceFeatures | null): void {
+  pendingVoiceFeatures = features
+}
+
+export function clearPendingVoiceFeatures(): void {
+  pendingVoiceFeatures = null
+}
+
 const VOICEPRINT_KEY = 'kelion.voiceprint'
 const CALIBRATION_MIN_FRAMES = 30 // cadre vocale minime ca să considerăm calibrarea reușită
 // 6 iul: prima variantă (25Hz / 35%) surprindea DOAR intonația celor 3s de calibrare —
@@ -103,7 +136,7 @@ function loadVoiceprint(): VoicePrint | null {
 
 // autocorelație pe semnalul din domeniul timp — estimează frecvența fundamentală
 // (algoritm ACF2+ clasic: trim la zero-crossing, autocorelație, interpolare parabolică)
-function estimateF0(buf: Float32Array, sampleRate: number): number {
+export function estimateF0(buf: Float32Array, sampleRate: number): number {
   const SIZE = buf.length
   let rmsSum = 0
   for (let i = 0; i < SIZE; i++) rmsSum += buf[i] * buf[i]
@@ -161,7 +194,7 @@ function estimateF0(buf: Float32Array, sampleRate: number): number {
 }
 
 // centroid spectral — media frecvențelor ponderată cu energia din fiecare bin
-function estimateCentroid(freqData: Float32Array, sampleRate: number, fftSize: number): number {
+export function estimateCentroid(freqData: Float32Array, sampleRate: number, fftSize: number): number {
   let num = 0
   let den = 0
   const binHz = sampleRate / fftSize
@@ -173,6 +206,119 @@ function estimateCentroid(freqData: Float32Array, sampleRate: number, fftSize: n
     den += mag
   }
   return den > 0 ? num / den : 0
+}
+
+// zero-crossing rate — cât de "șuierătoare" e vocea; ajută la separare voce/zgomot
+export function estimateZcr(buf: Float32Array): number {
+  let crossings = 0
+  for (let i = 1; i < buf.length; i++) {
+    if ((buf[i] >= 0) !== (buf[i - 1] >= 0)) crossings++
+  }
+  return crossings / buf.length
+}
+
+// energie RMS normalizată
+export function estimateEnergy(buf: Float32Array): number {
+  let sum = 0
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+  return Math.sqrt(sum / buf.length)
+}
+
+// spectral rolloff — frecvența sub care stă 85% din energia spectrală
+export function estimateRolloff(freqData: Float32Array, sampleRate: number, fftSize: number): number {
+  let total = 0
+  for (let i = 0; i < freqData.length; i++) {
+    const db = freqData[i]
+    if (Number.isFinite(db) && db > -100) total += Math.pow(10, db / 20)
+  }
+  let acc = 0
+  const target = total * 0.85
+  const binHz = sampleRate / fftSize
+  for (let i = 0; i < freqData.length; i++) {
+    const db = freqData[i]
+    if (Number.isFinite(db) && db > -100) acc += Math.pow(10, db / 20)
+    if (acc >= target) return i * binHz
+  }
+  return freqData.length * binHz
+}
+
+// jitter = variație relativă a perioadei fundamentale (F0)
+export function estimateJitter(f0s: number[]): number {
+  if (f0s.length < 2) return 0
+  let sum = 0
+  for (let i = 1; i < f0s.length; i++) {
+    sum += Math.abs(f0s[i] - f0s[i - 1])
+  }
+  const mean = f0s.reduce((a, b) => a + b, 0) / f0s.length
+  return mean > 0 ? sum / ((f0s.length - 1) * mean) : 0
+}
+
+// shimmer = variație relativă a amplitudinii pe cadre vocale consecutive
+export function estimateShimmer(energies: number[]): number {
+  if (energies.length < 2) return 0
+  let sum = 0
+  for (let i = 1; i < energies.length; i++) {
+    sum += Math.abs(energies[i] - energies[i - 1])
+  }
+  const mean = energies.reduce((a, b) => a + b, 0) / energies.length
+  return mean > 0 ? sum / ((energies.length - 1) * mean) : 0
+}
+
+// Normalizează un vector de features la medie=0, deviație=1, cu clipping.
+export function normalizeVector(v: number[]): number[] {
+  const n = v.length
+  if (n === 0) return []
+  const mean = v.reduce((a, b) => a + b, 0) / n
+  const std = Math.sqrt(v.reduce((sum, x) => sum + (x - mean) ** 2, 0) / n) || 1
+  return v.map((x) => Math.max(-3, Math.min(3, (x - mean) / std)))
+}
+
+// Construiește features vocale complete dintr-un buffer de F0, energii și un
+// cadru spectral. Vectorul e normalizat pentru a fi robust la volum/microfon.
+export function buildVoiceFeatures(
+  f0s: number[],
+  energies: number[],
+  centroid: number,
+  rolloff: number,
+  zcr: number,
+  energy: number,
+): VoiceFeatures {
+  const validF0 = f0s.filter((x) => x > 0)
+  const pitchMean = validF0.length ? validF0.reduce((a, b) => a + b, 0) / validF0.length : 0
+  const pitchMin = validF0.length ? Math.min(...validF0) : 0
+  const pitchMax = validF0.length ? Math.max(...validF0) : 0
+  const pitchStd =
+    validF0.length > 1
+      ? Math.sqrt(validF0.reduce((s, x) => s + (x - pitchMean) ** 2, 0) / validF0.length)
+      : 0
+  const jitter = estimateJitter(validF0)
+  const shimmer = estimateShimmer(energies.length ? energies : [energy])
+
+  const meta: VoiceFeatureMeta = {
+    pitchMean,
+    pitchStd,
+    pitchMin,
+    pitchMax,
+    centroid,
+    rolloff,
+    zcr,
+    energy,
+    jitter,
+    shimmer,
+  }
+
+  const rawVector = [
+    pitchMean,
+    pitchStd,
+    pitchMax - pitchMin,
+    centroid,
+    rolloff,
+    zcr * 1000,
+    energy * 100,
+    jitter * 1000,
+    shimmer * 1000,
+  ]
+  return { vector: normalizeVector(rawVector), meta }
 }
 
 // Calibrare: captează scurt vocea lui Adrian și salvează profilul în localStorage.
@@ -345,6 +491,7 @@ export async function startMic(
   const startRec = (): void => {
     if (recording || !mime) return
     chunks = []
+    resetVoiceFrameBuffers()
     try {
       rec = new MediaRecorder(stream, { mimeType: mime })
     } catch {
@@ -360,6 +507,7 @@ export async function startMic(
       recording = false
       uttMs = 0
       voicedMs = 0
+      void finalizeVoiceFeatures()
       // sub minim = zgomot scurt, nu-l trimitem. Cerem ȘI destulă VOCE efectivă
       // (nu doar durată totală) ca un poc + tăcere să nu mai producă transcriere
       // fantomă („Nu.", „Sim, mă simt") — bug 10 iul.
@@ -441,6 +589,60 @@ export async function startMic(
   const matchesForStart = makeMatcher()
   const matchesForBargeIn = makeMatcher()
 
+  // Colectare features vocale pentru backend (identificare speaker + gen).
+  // Se strâng DOAR cât înregistrăm o frază reală și NU cât Kelion vorbește.
+  const phraseF0: number[] = []
+  const phraseEnergies: number[] = []
+  let phraseCentroidSum = 0
+  let phraseCentroidCount = 0
+  let phraseRolloffSum = 0
+  let phraseZcrSum = 0
+  let phraseEnergySum = 0
+  let phraseFrames = 0
+
+  function collectVoiceFrame(): void {
+    pitchAnalyser.getFloatTimeDomainData(pitchBuf)
+    const f0 = estimateF0(pitchBuf, ctx.sampleRate)
+    const energy = estimateEnergy(pitchBuf)
+    phraseEnergies.push(energy)
+    phraseEnergySum += energy
+    phraseZcrSum += estimateZcr(pitchBuf)
+    if (f0 > 0) phraseF0.push(f0)
+    pitchAnalyser.getFloatFrequencyData(freqBuf)
+    const centroid = estimateCentroid(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize)
+    if (centroid > 0) {
+      phraseCentroidSum += centroid
+      phraseCentroidCount++
+    }
+    phraseRolloffSum += estimateRolloff(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize)
+    phraseFrames++
+  }
+
+  function finalizeVoiceFeatures(): VoiceFeatures | null {
+    if (phraseFrames < 8) return null
+    const centroid = phraseCentroidCount > 0 ? phraseCentroidSum / phraseCentroidCount : 0
+    pendingVoiceFeatures = buildVoiceFeatures(
+      phraseF0,
+      phraseEnergies,
+      centroid,
+      phraseRolloffSum / phraseFrames,
+      phraseZcrSum / phraseFrames,
+      phraseEnergySum / phraseFrames,
+    )
+    return pendingVoiceFeatures
+  }
+
+  function resetVoiceFrameBuffers(): void {
+    phraseF0.length = 0
+    phraseEnergies.length = 0
+    phraseCentroidSum = 0
+    phraseCentroidCount = 0
+    phraseRolloffSum = 0
+    phraseZcrSum = 0
+    phraseEnergySum = 0
+    phraseFrames = 0
+  }
+
   const cleanup = (): void => {
     if (stopped) return
     stopped = true
@@ -498,6 +700,7 @@ export async function startMic(
       if (isVoice) {
         voicedMs += dt
         silenceMs = 0
+        collectVoiceFrame()
       } else {
         silenceMs += dt
       }

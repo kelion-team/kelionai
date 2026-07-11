@@ -42,6 +42,9 @@ import {
   type InboundEmail,
   fetchContactMessages,
   type ContactMessage,
+  fetchVoiceprints,
+  deleteVoiceprint,
+  type VoiceprintRow,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -128,10 +131,16 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
   return groups
 }
 
-export default function AdminPanel({ onClose }: { readonly onClose: () => void }) {
+export default function AdminPanel({
+  onClose,
+  initialTab,
+}: {
+  readonly onClose: () => void
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
+}) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'
-  >('finance')
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
+  >(initialTab ?? 'finance')
   // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
@@ -164,6 +173,8 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   const [releases, setReleases] = useState<StagedRelease[]>([])
   const [stores, setStores] = useState<StoresData | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
+  const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
+  const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
   const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
   const [triaging, setTriaging] = useState(false)
@@ -298,6 +309,20 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
   useEffect(() => {
     if (tab !== 'joburi') return
     const id = window.setInterval(() => void fetchWorkOrders().then(setOrders), 8_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
+  // Tab „Amprente vocale" deschis → încarcă lista și reîmprospătează la 10s.
+  useEffect(() => {
+    if (tab !== 'voiceprints') return
+    const load = async (): Promise<void> => {
+      setVoiceprintsLoading(true)
+      const rows = await fetchVoiceprints()
+      setVoiceprints(rows)
+      setVoiceprintsLoading(false)
+    }
+    void load()
+    const id = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(id)
   }, [tab])
 
@@ -450,6 +475,13 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               }}
             >
               Inbox
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'voiceprints' ? 'sel' : ''}`}
+              onClick={() => setTab('voiceprints')}
+            >
+              Amprente vocale{voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -932,6 +964,56 @@ export default function AdminPanel({ onClose }: { readonly onClose: () => void }
               {[...devLog].reverse().map((l, i) => (
                 <div className="devlog-line" key={i}>
                   {l}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {tab === 'voiceprints' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Amprente vocale înregistrate — identificare speaker + gen detectat
+              </div>
+              {voiceprintsLoading && voiceprints.length === 0 && (
+                <div className="chat-hint">Se încarcă…</div>
+              )}
+              {!voiceprintsLoading && voiceprints.length === 0 && (
+                <div className="chat-hint">Nicio amprentă vocală înregistrată încă.</div>
+              )}
+              {voiceprints.map((v) => (
+                <div className="fin-row" key={v.email}>
+                  <span>
+                    <strong>{v.name || v.email}</strong>
+                    {' · '}
+                    <span className={`vis-badge ${v.isAdmin ? 'kind-demo' : 'human'}`}>
+                      {v.isAdmin ? 'ADMIN' : 'USER'}
+                    </span>
+                    {' · '}
+                    <span>
+                      gen: {v.gender === 'male' ? 'bărbat' : v.gender === 'female' ? 'femeie' : 'necunoscut'}
+                    </span>
+                  </span>
+                  <span>
+                    {new Date(v.updatedAt).toLocaleString('ro-RO', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                    {' · '}
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() =>
+                        void deleteVoiceprint(v.email).then((ok) => {
+                          if (ok) setVoiceprints((cur) => cur.filter((x) => x.email !== v.email))
+                        })
+                      }
+                    >
+                      șterge
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
