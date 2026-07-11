@@ -23,6 +23,8 @@ import {
   saveKv,
   loadKv,
   putAppFile,
+  saveClientError,
+  listClientErrors,
 } from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
@@ -251,7 +253,8 @@ export function setAnalysisDetail(text: string): void {
 // ── OK → DEPLOY (Adrian, 4 iul): NO approval tab. A finished fix is "ready";
 // Adrian just replies "ok" in chat and the server publishes it immediately.
 // The builder stages a fix when it built clean; an "ok" in chat sets
-// `deployWanted`; the server deployer polls, runs railway up, marks done.
+// `deployWanted`; the server deployer polls, opens PR → merges → dispatches
+// deploy.yml (pipeline GitHub/Railway, NOT railway up direct), marks done.
 // COADĂ, nu sertar unic (5 iul): două fixuri gata în același timp se călcau pe
 // picior — al doilea îl SUPRASCRIA pe primul și un „da" publica altceva decât
 // credea Adrian. Acum fiecare fix stă la rând; fiecare „da" publică PRIMUL.
@@ -657,9 +660,9 @@ export interface StagedRelease {
   at: string
 }
 
-export function stageRelease(title: string, detail: string): string {
+export function stageRelease(title: string, detail: string, branch = ''): string {
   const id = randomUUID()
-  void saveStagedRelease(id, title.slice(0, 200), detail.slice(0, 12000)).catch(() => {})
+  void saveStagedRelease(id, title.slice(0, 200), detail.slice(0, 12000), branch.slice(0, 200)).catch(() => {})
   // KELION ANUNȚĂ (Adrian, 10 iul: „cu mențiune că Kelion anunță că e ceva de
   // aprobat"): spune-i lui Adrian în chat + cu voce că are ceva de aprobat, ca
   // să nu-i scape release-ul agățat în tabul Release-uri.
@@ -1355,11 +1358,11 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // ── APPROVAL GATE ──
   // Builder → stage a finished-but-unpublished release for the owner to review.
-  app.post<{ Body: { title?: string; detail?: string } }>(
+  app.post<{ Body: { title?: string; detail?: string; branch?: string } }>(
     '/api/bridge/stage-release',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-      const id = stageRelease(req.body?.title ?? 'Change', req.body?.detail ?? '')
+      const id = stageRelease(req.body?.title ?? 'Change', req.body?.detail ?? '', req.body?.branch ?? '')
       return { ok: true, id }
     },
   )
@@ -1526,6 +1529,63 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true }
     },
   )
+
+  // ERORI DE CONSOLĂ CLIENT (Adrian, 11 iul): dovezi de la browser înainte de
+  // diagnostic. Endpoint public (fără bridge secret) — clienții nu au secretul —
+  // dar cu rate-limit per IP ca să nu devină vector de spam.
+  const clientErrorBuckets = new Map<string, number[]>()
+  function clientErrorRateLimited(ip: string): boolean {
+    const now = Date.now()
+    const windowMs = 60_000
+    const max = 30
+    const bucket = clientErrorBuckets.get(ip) ?? []
+    const fresh = bucket.filter((t) => now - t < windowMs)
+    clientErrorBuckets.set(ip, fresh)
+    if (fresh.length >= max) return true
+    fresh.push(now)
+    return false
+  }
+  app.post(
+    '/api/bridge/client-errors',
+    async (req, reply) => {
+      const ip = String(req.ip ?? 'unknown')
+      if (clientErrorRateLimited(ip)) return reply.code(429).send({ error: 'rate_limited' })
+      const raw = (req.body ?? {}) as Record<string, unknown>
+      const reports: Array<{ type?: unknown; message?: unknown; stack?: unknown; url?: unknown; ts?: unknown }> = []
+      if ('batch' in raw && typeof raw.batch === 'string') {
+        try {
+          const parsed = JSON.parse(raw.batch) as unknown
+          if (Array.isArray(parsed)) reports.push(...parsed)
+        } catch {
+          /* ignore malformed batch */
+        }
+      } else {
+        reports.push(raw as { type?: unknown; message?: unknown; stack?: unknown; url?: unknown; ts?: unknown })
+      }
+      for (const r of reports.slice(0, 20)) {
+        if (!r || typeof r.message !== 'string' || !r.message.trim()) continue
+        await saveClientError({
+          type: typeof r.type === 'string' ? r.type : 'unknown',
+          message: r.message,
+          stack: typeof r.stack === 'string' ? r.stack : undefined,
+          url: typeof r.url === 'string' ? r.url : '',
+          ip,
+        })
+      }
+      return { ok: true }
+    },
+  )
+
+  app.get('/api/bridge/client-errors', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { errors: await listClientErrors(100) }
+  })
+
+  app.get('/api/admin/client-errors', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return { errors: await listClientErrors(100) }
+  })
 
   app.get('/api/dev/status', async () => {
     const active = Date.now() - lastDevBeat < 60_000

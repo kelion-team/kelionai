@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
-import { startCamera, stopStream, type Facing } from '../lib/camera'
+import { startCamera, stopStream, boostLowLight, type Facing } from '../lib/camera'
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
@@ -39,6 +39,9 @@ export default function CameraView({
           videoRef.current.srcObject = stream
           await videoRef.current.play().catch(() => undefined)
         }
+        // Lift exposure/gain after the stream is alive — the browser may have
+        // started conservatively in dim light.
+        await boostLowLight(stream).catch(() => undefined)
       } catch {
         onError()
       }
@@ -68,23 +71,55 @@ export default function CameraView({
       canvas.height = h
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
-      ctx.drawImage(v, 0, 0, w, h)
-      // GUARD against sending a black frame (camera warming up, covered, or a
-      // decode gap): read the pixels ONCE and sample every ~64th; if virtually
-      // all are near-black the frame is useless — return null so Kelion never
-      // receives a black image.
-      try {
-        const data = ctx.getImageData(0, 0, w, h).data
+
+      // Helper: sample luminance and return fraction of "lit" pixels.
+      const measureLit = (imageData?: ImageData): number => {
+        const data = imageData?.data
+        if (!data || data.length === 0) return 0
         let lit = 0
         let total = 0
+        // Sample roughly every 64th pixel (stride = 256 bytes = 64 pixels × 4).
         for (let i = 0; i < data.length; i += 256) {
           total++
           if (data[i] + data[i + 1] + data[i + 2] > 36) lit++ // above near-black
         }
-        if (total > 0 && lit / total < 0.02) return null // <2% lit = black frame
-      } catch {
-        /* getImageData can throw on a tainted canvas — then just trust the frame */
+        return total > 0 ? lit / total : 0
       }
+
+      // First pass: draw normally so we can measure the real sensor output.
+      ctx.filter = 'none'
+      ctx.drawImage(v, 0, 0, w, h)
+      let imageData: ImageData | undefined
+      try {
+        imageData = ctx.getImageData(0, 0, w, h)
+      } catch {
+        // Tainted canvas — can't sample, so trust the frame rather than dropping it.
+        return canvas.toDataURL('image/jpeg', 0.6)
+      }
+      const lit = measureLit(imageData)
+
+      // Second pass: if the scene is dim but not dead-black, boost it on the
+      // canvas so Kelion still receives a usable frame in low light. We keep
+      // the guard against pure black frames (lens covered / not ready).
+      if (lit > 0 && lit < 0.08) {
+        const boost = lit < 0.02 ? 2.8 : lit < 0.04 ? 2.2 : 1.8
+        ctx.filter = `brightness(${boost}) contrast(${Math.min(1.4, 1 + boost * 0.15)})`
+        ctx.drawImage(v, 0, 0, w, h)
+        try {
+          imageData = ctx.getImageData(0, 0, w, h)
+        } catch {
+          // Tainted canvas after boost — ship the boosted frame.
+          return canvas.toDataURL('image/jpeg', 0.6)
+        }
+        const litBoosted = measureLit(imageData)
+        // If even a heavy boost leaves the frame virtually black, the lens is
+        // covered or the sensor is not producing data — don't ship it.
+        if (litBoosted < 0.02) return null
+      } else if (lit === 0) {
+        // No measurable pixels at all — reject.
+        return null
+      }
+
       return canvas.toDataURL('image/jpeg', 0.6)
     }
     return () => {

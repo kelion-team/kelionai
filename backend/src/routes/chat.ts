@@ -39,7 +39,7 @@ import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
-import { interpretDeviceCommand, deviceAck } from '../services/commands.js'
+import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, type GestureLabel } from '../services/commands.js'
 import { geoLookupCached } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
@@ -155,6 +155,25 @@ const LOG_GAP_TOOL: Anthropic.Tool = {
       reason: { type: 'string', description: 'Why it is not possible right now (e.g. "no taxi-booking integration").' },
     },
     required: ['request'],
+  },
+}
+
+// Let Kelion trigger a one-time avatar gesture on the user's screen. Use when
+// the user asks for a gesture or when a gesture adds natural expression.
+const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
+  name: 'play_avatar_gesture',
+  description:
+    "Trigger a one-time avatar gesture on the user's screen. Use when the user asks for a gesture (wave, raise hand, point at the monitor) or when a gesture adds natural expression to your reply. The gesture plays once and blends smoothly back to idle.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      gesture: {
+        type: 'string',
+        enum: ['raiseRightHand', 'salute', 'pointMonitor'],
+        description: 'Which gesture to play.',
+      },
+    },
+    required: ['gesture'],
   },
 }
 
@@ -811,6 +830,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const lastIncoming = messages.at(-1)
     const lastIncomingText = lastIncoming?.role === 'user' ? lastIncoming.content : ''
     const deviceCmd = interpretDeviceCommand(lastIncomingText, req.body?.screen)
+    const gestureCmd = interpretGestureCommand(lastIncomingText)
     // LIMBA (Adrian, 10 iul: „blochează limba admin pe română, restul pe detecție
     // automată"). ADMINUL e blocat PERMANENT pe română — NU detectăm, NU comutăm
     // niciodată pe locale-ul contului sau pe ce citește (asta rezolvă „nu respectă
@@ -819,8 +839,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const adminLocked = user.role === 'admin'
     const committedLang = adminLocked
       ? null // adminul nu comută niciodată — e mereu ro
-      : deviceCmd
-        ? null // a device command is an order, not conversation — never shifts the language
+      : deviceCmd || gestureCmd
+        ? null // a device/gesture command is an order, not conversation — never shifts the language
         : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
     if (committedLang) await setSpeechLangPref(user.email, committedLang)
     // Ce anunțăm clientului ca limbă: adminul primește MEREU ro-RO (idempotent pe
@@ -870,6 +890,31 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
+        ack
+      appendTurn(cmdTurnId, payload)
+      finishTurn(cmdTurnId)
+      reply.raw.write(payload)
+      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
+      if (ack) void saveMessage(user.email, 'assistant', ack)
+      reply.raw.end()
+      return
+    }
+
+    // A gesture command: interpreted on the server, answered instantly with a
+    // {gesture} control frame for the avatar — no model call, full speed.
+    if (gestureCmd) {
+      reply.hijack()
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      })
+      const cmdTurnId = randomUUID()
+      startTurn(cmdTurnId)
+      const ack = gestureAck(gestureCmd, ro)
+      const payload =
+        `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
+        `${CTRL}${JSON.stringify({ gesture: gestureCmd })}${CTRL}` +
         ack
       appendTurn(cmdTurnId, payload)
       finishTurn(cmdTurnId)
@@ -2087,8 +2132,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // developer bridge is actually online — no point otherwise.
     const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
     const tools: Anthropic.Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
+      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -2763,6 +2808,16 @@ async function runTool(
     return jobId
       ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer (Claude Code). It will be worked on now.' })
       : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+  }
+  if (block.name === 'play_avatar_gesture') {
+    const inp = (block.input ?? {}) as { gesture?: string }
+    const label: GestureLabel | undefined =
+      inp.gesture === 'raiseRightHand' || inp.gesture === 'salute' || inp.gesture === 'pointMonitor'
+        ? inp.gesture
+        : undefined
+    if (!label) return JSON.stringify({ error: 'unknown_gesture' })
+    reply.raw.write(`${CTRL}${JSON.stringify({ gesture: label })}${CTRL}`)
+    return JSON.stringify({ played: true, gesture: label })
   }
   const out = await runGoogleTool(block.name, block.input, token)
   // Weather map or route map: if the tool returned an embeddable screen_url, show

@@ -1,0 +1,260 @@
+#!/usr/bin/env node
+// INSTALARE LIVEKIT SELF-HOSTED PE VPS + SCRIERE AUTOMATĂ ÎN RAILWAY.
+//
+// Ce face:
+//   1. Generează perechea API_KEY / API_SECRET local, cu imaginea oficială LiveKit.
+//   2. Pornește containerul LiveKit pe VPS (porturile 7880/7881/7882).
+//   3. Scrie LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET în Railway prin
+//      GraphQL API — același mecanism folosit de deploy.yml (NU prin CLI, NU
+//      manual, NICIO acțiune de la Adrian).
+//   4. Testează conexiunea la serverul propriu și afișează dovada.
+//
+// Rulare: pe VPS, ca root, din repo:
+//   bridge/kelion-livekit
+//
+// Depinde de: docker (pe VPS) și RAILWAY_TOKEN în /root/kelion/claude.env.
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { existsSync, readFileSync } from 'node:fs'
+import { networkInterfaces } from 'node:os'
+
+const require = createRequire(import.meta.url)
+
+const CLAUDE_ENV = '/root/kelion/claude.env'
+const REPO =
+  [process.env.KELION_REPO, '/root/kelion/repo', '/root/Kelionai', '/root/kelion']
+    .filter(Boolean)
+    .find((d) => existsSync(`${d}/backend/package.json`)) || '/root/kelion/repo'
+const IMAGE = 'livekit/livekit-server:latest'
+const CONTAINER = 'kelion-livekit'
+const RAILWAY_GQL = 'https://backboard.railway.com/graphql/v2'
+
+function log(...args) {
+  console.log(`[livekit ${new Date().toISOString()}]`, ...args)
+}
+
+function fail(msg) {
+  console.error(`[livekit EROARE] ${msg}`)
+  process.exit(1)
+}
+
+// Încarcă variabilele din /root/kelion/claude.env (RAILWAY_TOKEN, BRIDGE_SECRET etc.)
+function loadEnvFile(path) {
+  const out = {}
+  if (!existsSync(path)) return out
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([^#=\s]+)\s*=\s*(.*?)\s*$/)
+    if (!m) continue
+    let v = m[2]
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1)
+    }
+    out[m[1]] = v
+  }
+  return out
+}
+
+const ENV = { ...process.env, ...loadEnvFile(CLAUDE_ENV) }
+const RAILWAY_TOKEN = ENV.RAILWAY_TOKEN?.trim()
+if (!RAILWAY_TOKEN) fail(`RAILWAY_TOKEN lipsește din ${CLAUDE_ENV}`)
+
+// Descoperă adresa publică a VPS-ului. Folosim IP-ul pentru URL implicit;
+// pentru browser real e nevoie de domeniu + certificat valid (lăsăm comentariu).
+function publicIp() {
+  const custom = ENV.LIVEKIT_HOST?.trim()
+  if (custom) return custom
+  const nics = networkInterfaces()
+  for (const [, addrs] of Object.entries(nics)) {
+    for (const a of addrs ?? []) {
+      if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('127.')) {
+        return a.address
+      }
+    }
+  }
+  return '127.0.0.1'
+}
+
+function run(cmd, args = [], opts = {}) {
+  return new Promise((resolve) => {
+    const c = spawn(cmd, args, { env: ENV, stdio: ['ignore', 'pipe', 'pipe'], ...opts })
+    let out = ''
+    let err = ''
+    c.stdout?.on('data', (d) => (out += d))
+    c.stderr?.on('data', (d) => (err += d))
+    c.on('close', (code) => resolve({ code, out, err }))
+    c.on('error', (e) => resolve({ code: -1, out, err: err || String(e) }))
+  })
+}
+
+async function ensureDocker() {
+  const r = await run('docker', ['--version'])
+  if (r.code !== 0) fail('docker nu e disponibil pe VPS — instalează-l mai întâi')
+  log('docker OK')
+}
+
+async function pullImage() {
+  log('pull imagine LiveKit...')
+  const r = await run('docker', ['pull', IMAGE])
+  if (r.code !== 0) fail(`docker pull a eșuat: ${r.err || r.out}`)
+  log('imagine LiveKit actualizată')
+}
+
+async function generateKeys() {
+  log('generez chei LiveKit...')
+  const r = await run('docker', ['run', '--rm', IMAGE, 'generate-keys'])
+  if (r.code !== 0) fail(`generate-keys a eșuat: ${r.err || r.out}`)
+  const keyMatch = r.out.match(/API key:\s*(\S+)/i)
+  const secretMatch = r.out.match(/API secret:\s*(\S+)/i)
+  if (!keyMatch || !secretMatch) fail(`nu am putut parseze cheile din:\n${r.out}`)
+  return { apiKey: keyMatch[1], apiSecret: secretMatch[1] }
+}
+
+async function stopExisting() {
+  log('opresc container vechi (dacă există)...')
+  await run('docker', ['rm', '-f', CONTAINER])
+}
+
+async function startLiveKit(apiKey, apiSecret) {
+  log('pornesc container LiveKit...')
+  const r = await run('docker', [
+    'run', '-d', '--name', CONTAINER, '--restart', 'always',
+    '-p', '7880:7880',
+    '-p', '7881:7881',
+    '-p', '7882:7882/udp',
+    IMAGE,
+    '--keys', `${apiKey}:${apiSecret}`,
+    '--bind', '0.0.0.0',
+  ])
+  if (r.code !== 0) fail(`pornire LiveKit a eșuat: ${r.err || r.out}`)
+  log('container pornit:', r.out.trim())
+}
+
+async function waitForServer() {
+  log('aștept ca serverul să răspundă...')
+  for (let i = 0; i < 30; i++) {
+    // Portul 7880 e mapat pe host; LiveKit răspunde 404 pe / când e viu.
+    const r = await run('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '2', 'http://localhost:7880/'])
+    if (r.out.trim() === '404') {
+      log('server LiveKit răspunde pe portul 7880')
+      return
+    }
+    await new Promise((res) => setTimeout(res, 1000))
+  }
+  fail('serverul LiveKit nu a răspuns în 30s')
+}
+
+// Test real: generăm un JWT și apelăm ListRooms prin API-ul Twirp al serverului.
+async function testConnection(apiKey, apiSecret) {
+  log('testez conexiunea la serverul LiveKit propriu...')
+  const jwtMod = require(`${REPO}/backend/node_modules/jsonwebtoken`)
+  const token = jwtMod.sign(
+    {
+      video: { roomList: true },
+      iss: apiKey,
+      sub: 'kelion-livekit-setup',
+    },
+    apiSecret,
+    { expiresIn: '5m' },
+  )
+
+  // Testăm de pe VPS (localhost) — nu depinde de firewall/certificat extern.
+  const r = await run('curl', [
+    '-sS', '-o', '/dev/null', '-w', '%{http_code}',
+    '-H', `Authorization: Bearer ${token}`,
+    '-H', 'Content-Type: application/json',
+    '-d', '{}',
+    'http://localhost:7880/twirp/livekit.Room/ListRooms',
+  ])
+  const code = r.out.trim()
+  if (code !== '200') {
+    fail(`test conexiune LiveKit a picat: HTTP ${code} (așteptat 200)`)
+  }
+  log('✅ CONEXIUNE DE TEST REUȘITĂ: LiveKit răspunde la ListRooms cu HTTP 200')
+}
+
+async function gql(query, variables) {
+  const body = JSON.stringify({ query, variables })
+  const r = await run('curl', [
+    '-sS', '--max-time', '30',
+    '-H', `Authorization: Bearer ${RAILWAY_TOKEN}`,
+    '-H', 'Content-Type: application/json',
+    '-d', body,
+    RAILWAY_GQL,
+  ])
+  if (r.code !== 0) fail(`GraphQL request failed: ${r.err || r.out}`)
+  try {
+    return JSON.parse(r.out)
+  } catch {
+    fail(`GraphQL response invalid JSON: ${r.out}`)
+  }
+}
+
+async function railwayTarget() {
+  const resp = await gql('query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}')
+  const projects = resp?.data?.projects?.edges?.map((e) => e.node) || []
+  const match = projects.find((p) => /kelion/i.test(p.name))
+  if (!match) fail(`nu am găsit proiectul Railway care conține „kelion"`)
+  const env = match.environments?.edges?.map((e) => e.node)?.find((e) => e.name === 'production')
+    || match.environments?.edges?.[0]?.node
+  const svc = match.services?.edges?.map((e) => e.node)?.find((s) => s.name === 'web')
+    || match.services?.edges?.[0]?.node
+  if (!env || !svc) fail('nu am găsit environment/serviciu Railway')
+  return { projectId: match.id, environmentId: env.id, serviceId: svc.id }
+}
+
+async function writeRailwayVars(target, vars) {
+  log('scriu variabilele LiveKit în Railway (mascat)...')
+  const input = {
+    projectId: target.projectId,
+    environmentId: target.environmentId,
+    serviceId: target.serviceId,
+    variables: vars,
+  }
+  const resp = await gql(
+    'mutation($input: VariableCollectionUpsertInput!){variableCollectionUpsert(input:$input)}',
+    { input },
+  )
+  if (resp?.errors?.length) {
+    fail(`variableCollectionUpsert a eșuat: ${JSON.stringify(resp.errors)}`)
+  }
+  log('✅ variabilele LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET au fost scrise în Railway')
+}
+
+async function main() {
+  log('START — instalez LiveKit self-hosted și scriu credențialele în Railway')
+  await ensureDocker()
+  await pullImage()
+
+  const { apiKey, apiSecret } = await generateKeys()
+  log('API key generată:', apiKey.slice(0, 8) + '...')
+
+  await stopExisting()
+  await startLiveKit(apiKey, apiSecret)
+  await waitForServer()
+  await testConnection(apiKey, apiSecret)
+
+  const host = publicIp()
+  const url = `wss://${host}:7880`
+  log('URL LiveKit propriu:', url)
+
+  const target = await railwayTarget()
+  await writeRailwayVars(target, {
+    LIVEKIT_URL: url,
+    LIVEKIT_API_KEY: apiKey,
+    LIVEKIT_API_SECRET: apiSecret,
+  })
+
+  log('')
+  log('═══════════════════════════════════════════════════════════════')
+  log('DOVADĂ: conexiune de test REUȘITĂ la serverul LiveKit propriu.')
+  log('URL:        ', url)
+  log('API key:    ', apiKey.slice(0, 8) + '...')
+  log('Container:  ', CONTAINER)
+  log('Railway vars: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (setate)')
+  log('Pentru test din backend/admin: GET /api/admin/livekit/status')
+  log('NOTĂ: browserul necesită wss + certificat valid; pentru IP simplu,')
+  log('      setează LIVEKIT_HOST=livekit.kelionai.app și un reverse proxy/TLS.')
+  log('═══════════════════════════════════════════════════════════════')
+}
+
+main().catch((e) => fail(String(e)))

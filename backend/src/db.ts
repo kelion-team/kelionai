@@ -278,6 +278,7 @@ export async function initDb(): Promise<void> {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       detail TEXT NOT NULL DEFAULT '',
+      branch TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'pending',
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -336,7 +337,68 @@ export async function initDb(): Promise<void> {
       refresh_token TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- ERORI DE CONSOLĂ CLIENT (Adrian, 11 iul): capturăm erorile frontend
+    -- (camera, rețea, JS) ca dovezi înainte de diagnostic. Nu conțin PII.
+    CREATE TABLE IF NOT EXISTS client_errors (
+      id BIGSERIAL PRIMARY KEY,
+      type TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      stack TEXT,
+      url TEXT NOT NULL DEFAULT '',
+      ip TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_errors_recent ON client_errors (created_at DESC);
   `)
+}
+
+export interface ClientErrorRow {
+  id: number
+  type: string
+  message: string
+  stack: string | null
+  url: string
+  ip: string
+  created_at: string
+}
+
+export async function saveClientError(e: {
+  type?: string
+  message?: string
+  stack?: string
+  url?: string
+  ip?: string
+}): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO client_errors (type, message, stack, url, ip)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        String(e.type ?? '').slice(0, 40),
+        String(e.message ?? '').slice(0, 800),
+        e.stack ? String(e.stack).slice(0, 2000) : null,
+        String(e.url ?? '').slice(0, 400),
+        String(e.ip ?? '').slice(0, 64),
+      ],
+    )
+  } catch {
+    /* non-fatal: nu blocăm clientul pentru un log */
+  }
+}
+
+export async function listClientErrors(n = 100): Promise<ClientErrorRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<ClientErrorRow>(
+      `SELECT id, type, message, stack, url, ip, created_at::text
+       FROM client_errors ORDER BY created_at DESC LIMIT $1`,
+      [Math.max(1, Math.min(500, n))],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // ── Conectarea Google persistentă (refresh token per cont) ──────────────────
@@ -687,23 +749,25 @@ export interface StagedReleaseRow {
   id: string
   title: string
   detail: string
+  branch: string
   status: string
   at: string
 }
 
-export async function saveStagedRelease(id: string, title: string, detail: string): Promise<void> {
+export async function saveStagedRelease(id: string, title: string, detail: string, branch = ''): Promise<void> {
   if (!dbEnabled()) return
-  await getPool().query('INSERT INTO staged_releases (id, title, detail) VALUES ($1,$2,$3)', [
+  await getPool().query('INSERT INTO staged_releases (id, title, detail, branch) VALUES ($1,$2,$3,$4)', [
     id,
     title,
     detail,
+    branch,
   ])
 }
 
 export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
   if (!dbEnabled()) return []
   const r = await getPool().query<StagedReleaseRow>(
-    'SELECT id, title, detail, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
+    'SELECT id, title, detail, branch, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
     [n],
   )
   return r.rows

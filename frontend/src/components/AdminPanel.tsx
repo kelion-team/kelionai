@@ -625,6 +625,7 @@ export default function AdminPanel({
                 <div key={r.id} className={`release-row status-${r.status}`}>
                   <div className="release-main">
                     <span className="release-title">{r.title}</span>
+                    {r.branch && <span className="release-branch">{r.branch}</span>}
                     <span className={`release-badge b-${r.status}`}>
                       {r.status === 'pending'
                         ? 'ÎN AȘTEPTARE'

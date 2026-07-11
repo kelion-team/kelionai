@@ -3,6 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import type { Group, Bone, Mesh, SkinnedMesh } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
+import { useGestureQueue, type GestureLabel } from '../lib/gestureQueue'
+import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
 
 // Rest pose (arms hanging down along the body, natural A-pose) for THIS RPM
 // asset's skeleton. The GLB bind pose ships with arms raised, so we override
@@ -30,6 +32,8 @@ const BONE_NAMES = {
   head: ['Head', 'mixamorigHead'],
   leftShoulder: ['LeftShoulder', 'LeftCollar', 'mixamorigLeftShoulder', 'mixamorigLeftCollar'],
   rightShoulder: ['RightShoulder', 'RightCollar', 'mixamorigRightShoulder', 'mixamorigRightCollar'],
+  leftArm: ['LeftArm', 'LeftUpperArm', 'mixamorigLeftArm'],
+  rightArm: ['RightArm', 'RightUpperArm', 'mixamorigRightArm'],
   leftForeArm: ['LeftForeArm', 'mixamorigLeftForeArm'],
   rightForeArm: ['RightForeArm', 'mixamorigRightForeArm'],
   leftHand: ['LeftHand', 'mixamorigLeftHand'],
@@ -48,13 +52,120 @@ function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
 }
 
-type GestureTarget = Partial<
+// ── FACIAL EXPRESSIONS (ARKit blendshapes on Ready Player Me) ─────────────────
+// Gentleman style: subtle, rare, elegant. Amplitudes are intentionally low so
+// they read as micro-expressions, not grimaces. They blend additively on top of
+// the neutral face and never replace blink or lip-sync.
+
+type FaceTarget = Partial<Record<string, number>>
+
+const FACE_EXPRESSIONS: Record<FacialLabel, FaceTarget> = {
+  smile: {
+    mouthSmileLeft: 0.28,
+    mouthSmileRight: 0.28,
+    cheekSquintLeft: 0.12,
+    cheekSquintRight: 0.12,
+  },
+  raisedBrow: {
+    browInnerUp: 0.32,
+    browOuterUpLeft: 0.22,
+    browOuterUpRight: 0.22,
+  },
+  surprise: {
+    browInnerUp: 0.26,
+    eyeWideLeft: 0.30,
+    eyeWideRight: 0.30,
+    jawOpen: 0.07,
+  },
+  think: {
+    browDownLeft: 0.16,
+    browDownRight: 0.16,
+    mouthPressLeft: 0.20,
+    mouthPressRight: 0.20,
+    mouthPucker: 0.08,
+  },
+  empathy: {
+    browInnerUp: 0.18,
+    mouthFrownLeft: 0.14,
+    mouthFrownRight: 0.14,
+  },
+  warmth: {
+    mouthSmileLeft: 0.16,
+    mouthSmileRight: 0.16,
+    cheekSquintLeft: 0.09,
+    cheekSquintRight: 0.09,
+    browInnerUp: 0.07,
+  },
+}
+
+// RPM can ship blendshape names with a few conventions; try the ARKit standard
+// first, then common _L/_R suffixes, then Viseme equivalents.
+const MORPH_ALIASES: Record<string, string[]> = {
+  eyeBlinkLeft: ['eyeBlinkLeft', 'eyeBlink_L'],
+  eyeBlinkRight: ['eyeBlinkRight', 'eyeBlink_R'],
+  eyeWideLeft: ['eyeWideLeft', 'eyeWide_L'],
+  eyeWideRight: ['eyeWideRight', 'eyeWide_R'],
+  browInnerUp: ['browInnerUp'],
+  browOuterUpLeft: ['browOuterUpLeft', 'browOuterUp_L'],
+  browOuterUpRight: ['browOuterUpRight', 'browOuterUp_R'],
+  browDownLeft: ['browDownLeft', 'browDown_L'],
+  browDownRight: ['browDownRight', 'browDown_R'],
+  mouthSmileLeft: ['mouthSmileLeft', 'mouthSmile_L'],
+  mouthSmileRight: ['mouthSmileRight', 'mouthSmile_R'],
+  mouthFrownLeft: ['mouthFrownLeft', 'mouthFrown_L'],
+  mouthFrownRight: ['mouthFrownRight', 'mouthFrown_R'],
+  mouthPucker: ['mouthPucker'],
+  mouthPressLeft: ['mouthPressLeft', 'mouthPress_L'],
+  mouthPressRight: ['mouthPressRight', 'mouthPress_R'],
+  cheekSquintLeft: ['cheekSquintLeft', 'cheekSquint_L'],
+  cheekSquintRight: ['cheekSquintRight', 'cheekSquint_R'],
+  jawOpen: ['jawOpen', 'mouthOpen', 'viseme_aa'],
+}
+
+function findMorphIndex(d: Record<string, number>, names: string[]): number | undefined {
+  for (const n of names) {
+    if (n in d) return d[n]
+  }
+  return undefined
+}
+
+type AutoGestureTarget = Partial<
   Record<'leftFore' | 'rightFore' | 'leftHand' | 'rightHand', { x: number; y: number; z: number }>
 >
 
-// v2 avatar: natural idle from the neck down — shoulders, trunk, weight shift,
-// visible breathing, occasional small hand gestures — plus the existing moderate
-// lip-sync and micro head motion. Everything is procedural and frame-cheap.
+type CommandedBoneKey =
+  | 'leftArm'
+  | 'rightArm'
+  | 'leftForeArm'
+  | 'rightForeArm'
+  | 'leftHand'
+  | 'rightHand'
+
+// Commands from the brain: each gesture is a set of bone offsets from the rest
+// pose. They play ONCE, blend in/out linearly, and the idle animation (breath,
+// shoulders, head, lip-sync) continues underneath.
+const COMMANDED_GESTURES: Record<GestureLabel, Partial<Record<CommandedBoneKey, { x: number; y: number; z: number }>>> = {
+  raiseRightHand: {
+    rightArm: { x: -1.05, y: -0.25, z: 0.1 },
+    rightForeArm: { x: -0.15, y: 0, z: 0 },
+    rightHand: { x: 0, y: 0, z: 0 },
+  },
+  salute: {
+    rightArm: { x: -1.35, y: -0.45, z: 0.2 },
+    rightForeArm: { x: -1.65, y: 0.35, z: 0.45 },
+    rightHand: { x: 0, y: 0, z: 0.25 },
+  },
+  pointMonitor: {
+    rightArm: { x: -0.55, y: -0.35, z: 0.1 },
+    rightForeArm: { x: -0.25, y: 0, z: 0 },
+    rightHand: { x: 0, y: 0, z: 0.2 },
+  },
+}
+
+// v2.2 avatar: natural idle from the neck down — shoulders, trunk, weight shift,
+// visible breathing, rare small hand gestures synced to breath — plus the existing
+// moderate lip-sync and micro head motion. Everything is procedural and frame-cheap.
+// NEW: commanded one-time gestures from the brain blend on top without breaking idle.
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const root = useRef<Group>(null)
@@ -64,11 +175,42 @@ export default function AvatarModel() {
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
   const hipsBaseY = useRef<number | null>(null)
   const gesture = useRef({
-    nextAt: 3 + Math.random() * 4,
+    nextAt: 6 + Math.random() * 6,
     active: false,
     t: 0,
-    duration: 1.2,
-    target: {} as GestureTarget,
+    duration: 2,
+    target: {} as AutoGestureTarget,
+  })
+
+  // Commanded gesture state: attack -> hold -> release, then cleared.
+  const cmd = useRef<
+    | { label: GestureLabel; t: number; phase: 'in' | 'hold' | 'out' }
+    | null
+  >(null)
+
+  useGestureQueue((label) => {
+    cmd.current = { label, t: 0, phase: 'in' }
+  })
+
+  // Facial expression state: commanded expressions interrupt the autonomous
+  // micro-expression cycle and take precedence until they release.
+  const face = useRef({
+    current: {} as FaceTarget,       // smoothed current values
+    commanded: null as { label: FacialLabel; t: number; phase: 'in' | 'hold' | 'out' } | null,
+    auto: {
+      nextAt: 4 + Math.random() * 5,
+      active: false,
+      t: 0,
+      duration: 0,
+      label: null as FacialLabel | null,
+    },
+    voiceSmile: 0,
+  })
+
+  useFacialQueue((label) => {
+    face.current.commanded = { label, t: 0, phase: 'in' }
+    face.current.auto.active = false
+    face.current.auto.label = null
   })
 
   const applyArms = (b: Record<string, Bone>) => {
@@ -120,6 +262,8 @@ export default function AvatarModel() {
     const head = firstBone(b, BONE_NAMES.head)
     const leftShoulder = firstBone(b, BONE_NAMES.leftShoulder)
     const rightShoulder = firstBone(b, BONE_NAMES.rightShoulder)
+    const leftArm = firstBone(b, BONE_NAMES.leftArm)
+    const rightArm = firstBone(b, BONE_NAMES.rightArm)
     const leftForeArm = firstBone(b, BONE_NAMES.leftForeArm)
     const rightForeArm = firstBone(b, BONE_NAMES.rightForeArm)
     const leftHand = firstBone(b, BONE_NAMES.leftHand)
@@ -161,28 +305,81 @@ export default function AvatarModel() {
       head.rotation.x = Math.sin(t * 0.62) * 0.025 - 0.02
     }
 
-    // Occasional small hand gesture: one or both hands, slow and subtle.
+    // Commanded gesture: linear blend in / hold / blend out. The set of bones
+    // touched by the current gesture is recorded so the idle hand gesture below
+    // does not fight it on the same bones.
+    const affected = new Set<Bone>()
+    const c = cmd.current
+    let cmdWeight = 0
+    if (c) {
+      c.t += delta
+      const attack = 0.35
+      const hold = 0.85
+      const release = 0.5
+      if (c.phase === 'in') {
+        cmdWeight = Math.min(1, c.t / attack)
+        if (c.t >= attack) {
+          c.phase = 'hold'
+          c.t = 0
+        }
+      } else if (c.phase === 'hold') {
+        cmdWeight = 1
+        if (c.t >= hold) {
+          c.phase = 'out'
+          c.t = 0
+        }
+      } else {
+        cmdWeight = Math.max(0, 1 - c.t / release)
+        if (c.t >= release) cmd.current = null
+      }
+
+      const addCmd = (
+        bone: Bone | null,
+        off: { x: number; y: number; z: number } | undefined,
+      ) => {
+        if (!bone || !off) return
+        bone.rotation.x += off.x * cmdWeight
+        bone.rotation.y += off.y * cmdWeight
+        bone.rotation.z += off.z * cmdWeight
+        affected.add(bone)
+      }
+
+      const target = COMMANDED_GESTURES[c.label]
+      addCmd(leftArm, target.leftArm)
+      addCmd(rightArm, target.rightArm)
+      addCmd(leftForeArm, target.leftForeArm)
+      addCmd(rightForeArm, target.rightForeArm)
+      addCmd(leftHand, target.leftHand)
+      addCmd(rightHand, target.rightHand)
+    }
+
+    // Occasional hand gesture: rare, small, slow, and synced to breath so the
+    // hands feel relaxed, not agitated. A gesture only starts during the exhale
+    // half of the breath cycle; its size is modulated by that same breath phase.
+    // It is suppressed on bones already occupied by a commanded gesture.
     const g = gesture.current
     g.t += delta
-    if (!g.active && g.t >= g.nextAt) {
+    if (!g.active && g.t >= g.nextAt && breath > 0) {
       g.active = true
       g.t = 0
-      g.duration = 0.9 + Math.random() * 1.1
-      const both = Math.random() > 0.75
+      g.duration = 1.8 + Math.random() * 1.2
+      const both = Math.random() > 0.9
       const side = Math.random() > 0.5 ? 'left' : 'right'
+      // Exhale = slightly fuller motion; inhale = more restrained.
+      const breathMod = 0.55 + ((breath + 1) / 2) * 0.45
       const make = (mag: number) => ({
-        x: (Math.random() - 0.5) * 2 * mag,
-        y: (Math.random() - 0.5) * 2 * mag,
-        z: (Math.random() - 0.5) * 2 * mag,
+        x: (Math.random() - 0.5) * 2 * mag * breathMod,
+        y: (Math.random() - 0.5) * 2 * mag * breathMod,
+        z: (Math.random() - 0.5) * 2 * mag * breathMod,
       })
-      const next: GestureTarget = {}
+      const next: AutoGestureTarget = {}
       if (both || side === 'left') {
-        next.leftFore = make(0.04)
-        next.leftHand = make(0.06)
+        next.leftFore = make(0.018)
+        next.leftHand = make(0.025)
       }
       if (both || side === 'right') {
-        next.rightFore = make(0.04)
-        next.rightHand = make(0.06)
+        next.rightFore = make(0.018)
+        next.rightHand = make(0.025)
       }
       g.target = next
     }
@@ -191,7 +388,7 @@ export default function AvatarModel() {
       const phase = p < 0.5 ? p * 2 : 2 - p * 2
       const f = easeInOutQuad(phase)
       const add = (bone: Bone | null, off: { x: number; y: number; z: number } | undefined) => {
-        if (!bone || !off) return
+        if (!bone || !off || affected.has(bone)) return
         bone.rotation.x += off.x * f
         bone.rotation.y += off.y * f
         bone.rotation.z += off.z * f
@@ -203,11 +400,13 @@ export default function AvatarModel() {
       if (g.t >= g.duration) {
         g.active = false
         g.t = 0
-        g.nextAt = 5 + Math.random() * 7
+        g.nextAt = 10 + Math.random() * 10
       }
     }
 
-    // Natural blink
+    // ── FACE: natural blink, lip-sync, and gentleman micro-expressions ─────────
+
+    // Natural blink with occasional double-blinks and variable timing.
     const bl = blink.current
     bl.t += delta
     if (bl.phase === 0 && bl.t >= bl.nextAt) {
@@ -221,27 +420,123 @@ export default function AvatarModel() {
       if (bl.t >= bl.duration) {
         bl.phase = 0
         bl.t = 0
-        bl.nextAt = 2.5 + Math.random() * 4.5
+        // Occasional double-blink (3%) and natural interval 2.5–6.5s.
+        if (Math.random() < 0.03) {
+          bl.nextAt = 0.12
+        } else {
+          bl.nextAt = 2.5 + Math.random() * 4
+        }
       }
     }
 
-    // Lip-sync — gura urmărește amplitudinea reală a vocii redate acum (Chirp
-    // 3), netezit ca blink-ul; deschidere MODERATĂ (Adrian s-a plâns cândva că
-    // gura se deschide prea mult).
+    // Lip-sync — mouth follows real voice amplitude, smoothed.
     const level = getVoiceLevel()
     mouth.current += (level - mouth.current) * 0.4
-    const jawOpen = Math.min(0.5, mouth.current * 0.55)
+    const jawOpen = Math.min(0.55, mouth.current * 0.55)
+
+    // Voice-driven subtle warmth while speaking: a gentle smile that breathes
+    // with the voice so the face feels alive during sentences.
+    const f = face.current
+    const voiceSmileTarget = Math.min(0.16, level * 0.35)
+    f.voiceSmile += (voiceSmileTarget - f.voiceSmile) * 0.25
+
+    // Commanded facial expression: attack / hold / release.
+    let exprWeight = 0
+    let exprTarget: FaceTarget = {}
+    const fc = f.commanded
+    if (fc) {
+      fc.t += delta
+      const attack = 0.45
+      const hold = 1.2
+      const release = 0.55
+      if (fc.phase === 'in') {
+        exprWeight = Math.min(1, fc.t / attack)
+        if (fc.t >= attack) {
+          fc.phase = 'hold'
+          fc.t = 0
+        }
+      } else if (fc.phase === 'hold') {
+        exprWeight = 1
+        if (fc.t >= hold) {
+          fc.phase = 'out'
+          fc.t = 0
+        }
+      } else {
+        exprWeight = Math.max(0, 1 - fc.t / release)
+        if (fc.t >= release) f.commanded = null
+      }
+      exprTarget = FACE_EXPRESSIONS[fc.label]
+    }
+
+    // Autonomous micro-expression: rare, small, brief — gentleman style.
+    const a = f.auto
+    if (!fc) {
+      a.t += delta
+      if (!a.active && a.t >= a.nextAt) {
+        // 25% chance to actually start, so most intervals stay neutral.
+        if (Math.random() < 0.25) {
+          const labels: FacialLabel[] = ['smile', 'raisedBrow', 'warmth', 'think']
+          a.active = true
+          a.t = 0
+          a.label = labels[Math.floor(Math.random() * labels.length)]
+          a.duration = 1.2 + Math.random() * 1.3
+        } else {
+          a.nextAt = 4 + Math.random() * 5
+          a.t = 0
+        }
+      }
+      if (a.active && a.label) {
+        const p = Math.min(1, a.t / a.duration)
+        const phase = p < 0.5 ? p * 2 : 2 - p * 2
+        exprWeight = easeInOutQuad(phase) * 0.55 // micro-expressions at 55% intensity
+        exprTarget = FACE_EXPRESSIONS[a.label]
+        if (a.t >= a.duration) {
+          a.active = false
+          a.label = null
+          a.t = 0
+          a.nextAt = 5 + Math.random() * 6
+        }
+      }
+    }
+
+    // Blend expression + voice-smile into the target face state.
+    const desired: FaceTarget = {}
+    for (const [key, base] of Object.entries(exprTarget)) {
+      const v = (base ?? 0) * exprWeight
+      if (v !== 0) desired[key] = (desired[key] ?? 0) + v
+    }
+    desired.mouthSmileLeft = (desired.mouthSmileLeft ?? 0) + f.voiceSmile
+    desired.mouthSmileRight = (desired.mouthSmileRight ?? 0) + f.voiceSmile
+    desired.cheekSquintLeft = (desired.cheekSquintLeft ?? 0) + f.voiceSmile * 0.6
+    desired.cheekSquintRight = (desired.cheekSquintRight ?? 0) + f.voiceSmile * 0.6
+
+    // Smooth all face channels toward desired values.
+    for (const key of Object.keys(MORPH_ALIASES)) {
+      const cur = f.current[key] ?? 0
+      const tgt = desired[key] ?? 0
+      f.current[key] = cur + (tgt - cur) * 0.18
+    }
 
     for (const mesh of morphs.current) {
-      const d = mesh.morphTargetDictionary
+      const d = mesh.morphTargetDictionary as Record<string, number> | undefined
       const inf = mesh.morphTargetInfluences
       if (!d || !inf) continue
-      const l = d['eyeBlinkLeft'] ?? d['eyeBlink_L']
-      const r = d['eyeBlinkRight'] ?? d['eyeBlink_R']
-      if (l !== undefined) inf[l] = eye
-      if (r !== undefined) inf[r] = eye
-      const jaw = d['jawOpen'] ?? d['mouthOpen'] ?? d['viseme_aa']
-      if (jaw !== undefined) inf[jaw] = jawOpen
+      const blinkL = findMorphIndex(d, MORPH_ALIASES.eyeBlinkLeft)
+      const blinkR = findMorphIndex(d, MORPH_ALIASES.eyeBlinkRight)
+      if (blinkL !== undefined) inf[blinkL] = eye
+      if (blinkR !== undefined) inf[blinkR] = eye
+
+      // Lip-sync jaw is additive to any surprise micro-expression, but clamped.
+      const jawIdx = findMorphIndex(d, MORPH_ALIASES.jawOpen)
+      if (jawIdx !== undefined) {
+        inf[jawIdx] = Math.min(0.8, jawOpen + (f.current.jawOpen ?? 0))
+      }
+
+      for (const [key, aliases] of Object.entries(MORPH_ALIASES)) {
+        if (key === 'eyeBlinkLeft' || key === 'eyeBlinkRight' || key === 'jawOpen') continue
+        const idx = findMorphIndex(d, aliases)
+        if (idx !== undefined) inf[idx] = f.current[key] ?? 0
+      }
     }
   })
 

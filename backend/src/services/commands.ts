@@ -118,3 +118,63 @@ export function deviceAck(cmd: DeviceCommand, ro: boolean): string {
       return ''
   }
 }
+
+// ── AVATAR GESTURES ─────────────────────────────────────────────────────────
+// One-time gestures the server can trigger on the avatar, either from a spoken
+// command (interpreted deterministically here) or from the brain via the
+// play_avatar_gesture tool. They play once and blend back to idle.
+export type GestureLabel = 'raiseRightHand' | 'salute' | 'pointMonitor'
+
+const GESTURE_KEYWORDS: { label: GestureLabel; patterns: RegExp[] }[] = [
+  {
+    label: 'raiseRightHand',
+    patterns: [
+      /\b(ridic[ăa]\s+(m(â|a)na\s+dreapt[ăa]|bra[țt]ul\s+drept)|raise\s+(your\s+)?right\s+(hand|arm))\b/i,
+      /\bm(â|a)na\s+dreapt[ăa]\s+sus\b/i,
+    ],
+  },
+  {
+    label: 'salute',
+    patterns: [
+      /\b(salut[ăa](-m[aă])?|f(ă|a)\s+salut|f(ă|a)-mi\s+salut|d(ă|a)\s+un\s+salut)\b/i,
+      /\b(salute(\s+me)?|give\s+a\s+salute|wave\s+hello)\b/i,
+    ],
+  },
+  {
+    label: 'pointMonitor',
+    patterns: [
+      /\b(arat[ăa](-mi)?\s+(spre\s+)?monitor(ul)?|point\s+(to\s+|at\s+)?the\s+monitor)\b/i,
+      /\b(arat[ăa]\s+(cu\s+degetul\s+)?spre\s+ecran)\b/i,
+    ],
+  },
+]
+
+export function interpretGestureCommand(text: string): GestureLabel | null {
+  const msg = (text ?? '').trim()
+  if (!msg) return null
+  for (const { label, patterns } of GESTURE_KEYWORDS) {
+    if (patterns.some((re) => re.test(msg))) return label
+  }
+  return null
+}
+
+export function gestureAck(label: GestureLabel, ro: boolean): string {
+  if (!ro) {
+    switch (label) {
+      case 'raiseRightHand':
+        return 'Raising my right hand.'
+      case 'salute':
+        return 'Salute.'
+      case 'pointMonitor':
+        return 'Pointing at the monitor.'
+    }
+  }
+  switch (label) {
+    case 'raiseRightHand':
+      return 'Ridic mâna dreaptă.'
+    case 'salute':
+      return 'Salut.'
+    case 'pointMonitor':
+      return 'Arăt spre monitor.'
+  }
+}

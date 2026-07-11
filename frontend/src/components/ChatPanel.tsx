@@ -39,6 +39,8 @@ import {
   clearPendingVoiceFeatures,
   type MicHandle,
 } from '../lib/audioIO'
+import { pushGesture, isGestureLabel } from '../lib/gestureQueue'
+import { pushFacial } from '../lib/facialQueue'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
@@ -249,6 +251,11 @@ export default function ChatPanel({
       else if (scr?.op === 'switchKind' && scr.kind) switchToKind(scr.kind)
       return
     }
+    // A SERVER-triggered avatar gesture: validate and enqueue it for AvatarModel.
+    if (c.gesture && isGestureLabel(c.gesture)) {
+      pushGesture(c.gesture)
+      return
+    }
     // The server committed a speech-language switch (detected + persisted
     // there): apply it to the recognizer and mirror it locally.
     if (c.lang) {
@@ -280,6 +287,36 @@ export default function ChatPanel({
   // Short on-screen acknowledgement for a local command (camera, etc.).
   function ack(text: string): void {
     setMessages((cur) => [...cur, { role: 'assistant', content: text, ts: Date.now() }])
+    suggestFacial(text)
+  }
+
+  // Pick a facial expression from the assistant's completed text so the avatar's
+  // micro-expressions match context and tone. Kept deterministic and cheap.
+  function suggestFacial(text: string): void {
+    const s = text.trim()
+    if (!s) return
+    if (/[?？]\s*$/.test(s)) {
+      pushFacial('raisedBrow')
+      return
+    }
+    if (/[!！]\s*$/.test(s)) {
+      pushFacial('surprise')
+      return
+    }
+    if (/\b(mulţumesc|multumesc|mulțumesc|thank|bravo|excelent|minunat|foarte bine|wonderful|great|superb)\b/i.test(s)) {
+      pushFacial('warmth')
+      return
+    }
+    if (/\b(îmi pare rău|imi pare rau|scuze|sorry|regret|păcat|pacat|din păcate)\b/i.test(s)) {
+      pushFacial('empathy')
+      return
+    }
+    if (/\b(hmm|ei bine|să vedem|sa vedem|să gândim|sa gandim|let me think|let's see|o clipă|o clipa)\b/i.test(s)) {
+      pushFacial('think')
+      return
+    }
+    // A gentle smile as the default alive reaction to a completed thought.
+    pushFacial('smile')
   }
 
   // The conversation SURVIVES a RELEASE refresh — and ONLY that. The release
@@ -742,6 +779,7 @@ export default function ChatPanel({
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
+      else suggestFacial(acc)
     } catch (err) {
       if (ac.signal.aborted) {
         // OPRIT de Adrian — fără mesaj de eroare; textul deja afișat rămâne așa.

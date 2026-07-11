@@ -299,6 +299,7 @@ export interface StagedRelease {
   id: string
   title: string
   detail: string
+  branch?: string
   status: 'pending' | 'approved' | 'rejected' | 'deployed'
   at: string
 }

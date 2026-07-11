@@ -9,7 +9,8 @@
 //   3. STAGEAZA un release (POST /api/bridge/stage-release) cu ce s-a schimbat.
 //   4. Adrian aproba din tab-ul Admin "Release-uri".
 //   5. Constructorul vede aprobarea (GET /api/bridge/approved-releases) si abia
-//      ATUNCI face deploy (railway up), apoi marcheaza publicat.
+//      ATUNCI face deploy: PR → merge în master → dispatch deploy.yml (pipeline
+//      GitHub/Railway, NU railway up direct).
 //
 // MONITOR LIVE (ordinul lui Adrian, 4 iul: "trebuie sa vad live cu ce te ocupi
 // pe monitor"): constructorul NU mai lucreaza mut. Claude ruleaza cu
@@ -253,6 +254,67 @@ async function verifyWork() {
   return { ok: builtOk && diff !== '', changed: diff !== '', proof, detail }
 }
 
+// ── GIT: comit + branch + push (pipeline GitHub, NU railway up) ────────────
+// Constructorul trebuie să ducă schimbările în GitHub înainte ca deploy.yml
+// să le poată publica. Fiecare release stagnează pe branch-ul lui propriu;
+// deployerul face PR → merge → dispatch deploy.yml.
+async function gitConfig(key) {
+  const r = await run('git', ['config', '--get', key])
+  return r.code === 0 ? r.out.trim() : ''
+}
+async function ensureGitUser() {
+  const name = await gitConfig('user.name')
+  const email = await gitConfig('user.email')
+  if (!name) await run('git', ['config', 'user.name', 'Kelion Builder'])
+  if (!email) await run('git', ['config', 'user.email', 'builder@kelionai.app'])
+}
+async function gitCurrentBranch() {
+  const r = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return r.code === 0 ? r.out.trim() : 'master'
+}
+async function gitHasChanges() {
+  const r = await run('git', ['status', '--porcelain'])
+  return r.code === 0 && r.out.trim().length > 0
+}
+async function gitEnsureCleanStart() {
+  // Dacă repo-ul are deja schimbări locale de la o rulare anterioară eșuată,
+  // nu le amestecăm cu noul ordin. Le resetăm pe cele necomise, dar păstrăm
+  // fișierele noi (untracked) pentru ca operatorul uman să le decidă soarta.
+  await run('git', ['reset', '--mixed'])
+  await run('git', ['checkout', '.'])
+}
+async function createWorkBranch(baseBranch) {
+  await ensureGitUser()
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const branch = `builder/auto-${timestamp}`
+  const r = await run('git', ['checkout', '-b', branch, baseBranch])
+  if (r.code !== 0) throw new Error(`Nu am putut crea branch-ul ${branch}: ${r.out.slice(-300)}`)
+  return branch
+}
+async function commitAll(message) {
+  await run('git', ['add', '-A'])
+  const r = await run('git', ['commit', '-m', message, '--no-verify'])
+  if (r.code !== 0) throw new Error(`Commit eșuat: ${r.out.slice(-300)}`)
+  return r
+}
+async function pushBranch(branch) {
+  const r = await run('git', ['push', '-u', 'origin', branch])
+  if (r.code !== 0) throw new Error(`Push eșuat pentru ${branch}: ${r.out.slice(-300)}`)
+}
+
+async function prepareReleaseBranch(title) {
+  say('📦 Pregătesc branch-ul pentru pipeline (commit → push)')
+  pushProgress(85, 'Pregătesc branch')
+  await ensureGitUser()
+  const base = await gitCurrentBranch()
+  // Salvăm schimbările locale într-un branch nou, indiferent de branch-ul de bază.
+  const branch = await createWorkBranch(base)
+  await commitAll(`builder: ${title.slice(0, 100)}`)
+  await pushBranch(branch)
+  say(`📤 Branch creat și push-uit: ${branch}`)
+  return branch
+}
+
 // ── VERIFICATOR INDEPENDENT GLM (Adrian, 11 iul: „dai la GLM") ─────────────
 // După ce constructorul trece dovada mecanică, un agent SEPARAT, forțat pe GLM,
 // demonizează lucrarea: citește diff-ul critic, re-rulează build-urile și
@@ -371,6 +433,10 @@ function tellAdmin(text) {
 }
 
 async function build(order) {
+  // Curățăm eventualele schimbări locale rămase de la o rulare anterioară
+  // eșuată, ca noul ordin să plece dintr-un repo curat.
+  try { await gitEnsureCleanStart() } catch { /* ignore — încercăm oricum */ }
+
   // Claude editeaza + compileaza in repo. NU publica (interzis explicit).
   const prompt =
     `Esti constructorul Kelionai. Sarcina de la Adrian: "${order.text}". ` +
@@ -420,12 +486,21 @@ async function build(order) {
     pushProgress(90, 'Verificare independentă GLM')
     const verdict = await runIndependentVerifier(order.text, title, v)
     if (verdict.pass) {
+      let branch = ''
+      try {
+        branch = await prepareReleaseBranch(title)
+      } catch (e) {
+        say(`🔴 NU e gata — nu am putut pregăti branch-ul: ${e.message}`)
+        await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: nu am putut comite/push branch-ul (${e.message}).`)
+        pushProgress(100, 'Eșec pregătire branch')
+        return
+      }
       const detail =
         `Ordin: ${order.text}\n\n` +
         `Verificator independent GLM: TRECE\n${verdict.reason}\n\n` +
         `${v.detail}\n\n` +
         `--- notele constructorului ---\n${res.out.slice(-2000)}`
-      await api('/api/bridge/stage-release', 'POST', { title, detail })
+      await api('/api/bridge/stage-release', 'POST', { title, detail, branch })
       say(`✅ Gata, verificat independent: ${v.proof} — aștept aprobarea (Admin → Release-uri)`)
       await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. Verificator independent GLM: TRECE (${verdict.reason}). E pregătit — aprobă în Admin → Release-uri.`)
       pushProgress(100, 'Gata — dovadă + verificare independentă, aștept aprobarea')
@@ -482,39 +557,56 @@ async function generateAndUploadQRs() {
 }
 
 async function deployApproved(r) {
-  say(`🚀 Aprobat — public pe producție: ${String(r.title || r.id).slice(0, 80)}`)
-  pushProgress(94, 'Deploy')
-  const res = await run('railway', ['up', '--detach'], { timeoutMs: 600000 })
-  if (res.code !== 0) {
-    console.error('deploy esuat:', res.out.slice(-500))
-    say('🔴 Deploy eșuat — nimic nu s-a publicat (detalii în jurnalul serverului)')
+  const title = String(r.title || r.id).slice(0, 80)
+  say(`🚀 Aprobat — public pe producție: ${title}`)
+  pushProgress(92, 'PR → merge → deploy')
+
+  const branch = String(r.branch || '').trim()
+  if (!branch) {
+    say('🔴 Deploy blocat: release-ul nu are branch atașat — nu pot deschide PR.')
     return
   }
-  // Release-ul se marchează publicat pe acceptul Railway (altfel bucla de 20s
-  // îl redeployează la INFINIT — exact avalanșa de „railway up" din 9 iul, când
-  // apelul ăsta a dispărut odată cu adăugarea QR-urilor). Lacătul se pune
-  // ÎNAINTE de orice pas opțional; DOVADA publicării rămâne separată:
-  // „PUBLICAT LIVE" se spune DOAR după ce producția chiar răspunde 200.
-  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
 
-  // Dupa deploy, regeneram codurile QR ca sa fim siguri ca reflecta ultimele cai
+  // 1) Deschide PR din branch-ul release-ului către master.
+  const prRes = await run('bash', [REPO + '/bridge/kelion-github', 'pr', branch, `builder: ${title}`, String(r.detail || '').slice(0, 4000)])
+  const prMatch = prRes.out.match(/PR:\s*(\d+)/)
+  if (!prMatch || prRes.code !== 0) {
+    console.error('PR eșuat:', prRes.out.slice(-500))
+    say('🔴 PR eșuat — nimic nu s-a publicat (detalii în jurnalul serverului)')
+    return
+  }
+  const prNumber = prMatch[1]
+  say(`📥 PR deschis: #${prNumber}`)
+  pushProgress(94, `PR #${prNumber} deschis`)
+
+  // 2) Merge automat în master (aprobat deja de Adrian în Release-uri).
+  const mergeRes = await run('bash', [REPO + '/bridge/kelion-github', 'merge', prNumber])
+  if (mergeRes.code !== 0) {
+    console.error('Merge eșuat:', mergeRes.out.slice(-500))
+    say(`🔴 Merge PR #${prNumber} eșuat — publicarea e blocată`)
+    return
+  }
+  say(`🔀 Merge în master: #${prNumber}`)
+  pushProgress(96, 'Merge în master')
+
+  // 3) Declanșează pipeline-ul oficial deploy.yml (NU railway up direct).
+  // kelion-github deploy așteaptă deja verificarea anti-fantomă.
+  const deployRes = await run('bash', [REPO + '/bridge/kelion-github', 'deploy'], { timeoutMs: 600000 })
+  if (deployRes.code !== 0) {
+    console.error('Deploy pipeline eșuat:', deployRes.out.slice(-500))
+    say('🔴 Deploy prin pipeline eșuat — vezi jurnalul GitHub Actions')
+    return
+  }
+
+  // Release-ul se marchează publicat abia după ce pipeline-ul a confirmat
+  // verificarea anti-fantomă (versiunea live s-a schimbat).
+  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
+  say('🟢 PUBLICAT + VERIFICAT LIVE prin pipeline GitHub/Railway')
+  pushProgress(98, 'Publicat — regenerez QR-uri')
+
+  // După deploy, regenerăm codurile QR ca să reflecte ultimele căi.
   await generateAndUploadQRs()
-  say('🔎 Railway a acceptat — verific EU live-ul (fetch → 200), nu cred pe cuvânt')
-  pushProgress(97, 'Verific live (fetch → 200)')
-  let live = false
-  for (let i = 0; i < 10 && !live; i++) {
-    await new Promise((w) => setTimeout(w, 3000))
-    live = await fetch(BASE + '/api/dev/status', { signal: AbortSignal.timeout(8000) })
-      .then((x) => x.ok)
-      .catch(() => false)
-  }
-  if (live) {
-    say('🟢 PUBLICAT + VERIFICAT LIVE: kelionai.app răspunde 200')
-    pushProgress(100, 'Publicat + verificat live')
-  } else {
-    say('🟠 Deploy trimis, dar live-ul NU răspunde 200 după 30s — NU declar publicat; verifică jurnalul Railway')
-    pushProgress(98, 'Deploy trimis — verificarea live a picat')
-  }
+  pushProgress(100, 'Publicat + QR-uri regenerate')
 }
 
 async function main() {

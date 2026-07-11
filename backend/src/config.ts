@@ -106,6 +106,13 @@ export const config = {
   // Code (his subscription) instead of the paid API. Shared secret between this
   // server and the local worker on the owner's PC. Optional — unset = bridge off.
   bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
+  // LiveKit self-hosted on the VPS (full-duplex voice). Generated automatically
+  // by bridge/kelion-livekit; empty until the VPS script runs.
+  livekit: {
+    url: (process.env.LIVEKIT_URL ?? '').trim(),
+    apiKey: (process.env.LIVEKIT_API_KEY ?? '').trim(),
+    apiSecret: (process.env.LIVEKIT_API_SECRET ?? '').trim(),
+  },
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
 } as const

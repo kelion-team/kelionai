@@ -41,6 +41,8 @@ export interface ChatControl {
     camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
     screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
   }
+  // A one-time avatar gesture triggered by the brain (spoken command or tool).
+  gesture?: 'raiseRightHand' | 'salute' | 'pointMonitor'
   // The server committed a new speech language (detected + persisted there);
   // the client applies it to the recognizer and mirrors it locally.
   lang?: string
