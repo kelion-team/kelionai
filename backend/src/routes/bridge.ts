@@ -1431,19 +1431,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // la sursa cozii — singurul loc pe care repo-ul îl garantează.
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    const all = await listStagedReleases(50)
-    const MAX_APPROVAL_AGE_MS = 6 * 3600_000
-    const fresh: typeof all = []
-    for (const r of all) {
-      if (r.status !== 'approved') continue
-      if (Date.now() - new Date(r.at).getTime() > MAX_APPROVAL_AGE_MS) {
-        await setReleaseStatus(r.id, 'failed')
-        app.log.warn(`release ${r.id} („${r.title.slice(0, 60)}") EXPIRAT — aprobat de peste 6h, nu se mai publică`)
-        continue
-      }
-      fresh.push(r)
-    }
-    return { releases: fresh }
+    // ROBINET ÎNCHIS DEFINITIV (11 iul, seara — după DOUĂ deploy-uri fantomă
+    // în aceeași zi: 20:40 și 21:44, ambele au publicat prin `railway up` cod
+    // mai vechi decât master și au șters de pe live munca zilei). Regula de
+    // fier nr. 3 a lui Adrian: NIMIC nu publică cod mai vechi decât master.
+    // Deployer-ul de pe VPS nu mai primește NICIODATĂ release-uri de publicat
+    // direct — drumul unui release aprobat e acum automat prin pipeline-ul
+    // verificat: vezi /api/admin/releases/decide (ordin de merge+deploy).
+    // Gardul stă AICI, în server — singurul loc garantat de repo, indiferent
+    // ce cod vechi rulează pe VPS.
+    return { releases: [] }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
@@ -1476,6 +1473,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           config.adminEmail,
           `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
         )
+        // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
+        // /api/bridge/approved-releases): „da"-ul lui Adrian pornește ordinul
+        // de publicare pe pipeline-ul verificat, nu o publicare directă.
+        if (r.status === 'approved') {
+          bridgeRepair(
+            `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
+          )
+        }
       }
       return { ok: true, status: r.status }
     },
