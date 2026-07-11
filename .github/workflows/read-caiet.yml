@@ -10,6 +10,13 @@ name: read-caiet
 
 on:
   workflow_dispatch:
+    inputs:
+      post_content:
+        description: 'Notă de scris în caiet înainte de citire (gol = doar citește)'
+        required: false
+      post_source:
+        description: 'Semnătura notei (implicit: claude-cloud)'
+        required: false
   push:
     branches: [claude/chat-instant-delay-em5gjf]
     paths: ['.github/workflows/read-caiet.yml']
@@ -21,6 +28,8 @@ jobs:
       - name: Citește caietul comun (shared_memory) + istoricul admin
         env:
           TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          POST_CONTENT: ${{ inputs.post_content }}
+          POST_SOURCE: ${{ inputs.post_source }}
         run: |
           set -uo pipefail
           [ -z "$TOKEN" ] && { echo "::error::RAILWAY_TOKEN lipsește"; exit 1; }
@@ -36,6 +45,17 @@ jobs:
           SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
           [ -z "$SECRET" ] && { echo "::error::BRIDGE_SECRET lipsă din Railway"; exit 1; }
           echo "::add-mask::$SECRET"
+
+          # SCRIERE în caiet (opțional) — convenția ORIGINALĂ dintre cei doi
+          # Claude: Kelion citește caietul la FIECARE mesaj, deci o notă pusă
+          # aici ajunge la el garantat, fără bridgeAsk (zero cost de abonament).
+          if [ -n "${POST_CONTENT:-}" ]; then
+            echo "=== SCRIU ÎN CAIET (semnat: ${POST_SOURCE:-claude-cloud}) ==="
+            jq -nc --arg s "${POST_SOURCE:-claude-cloud}" --arg c "$POST_CONTENT" '{source:$s,content:$c}' | \
+              curl -sS --max-time 15 -X POST -H "x-bridge-secret: $SECRET" -H "Content-Type: application/json" \
+                -d @- https://kelionai.app/api/bridge/memory
+            echo ""
+          fi
 
           echo "=== CAIETUL COMUN (shared_memory, ultimele 60) ==="
           curl -sS --max-time 15 -H "x-bridge-secret: $SECRET" https://kelionai.app/api/bridge/memory | jq -r '
