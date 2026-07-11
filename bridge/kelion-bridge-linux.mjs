@@ -259,7 +259,7 @@ fillStandby() // de la pornire: primul vizitator prinde deja un proces cald
 const WARM_MAX_TURNS = 8
 let warm = null
 
-function startWarm(model) {
+function startWarm(model, pub = false) {
   const args = [
     '-p',
     '--input-format', 'stream-json',
@@ -270,7 +270,9 @@ function startWarm(model) {
   if (model) args.push('--model', model)
   let child
   try {
-    child = spawn(CLAUDE, args, spawnOpts(false))
+    // pub=true → cwd /tmp (fără CLAUDE.md/contextul privat) — aceeași izolare
+    // ca procesele proaspete publice, dar cu sesiune vie per vizitator.
+    child = spawn(CLAUDE, args, spawnOpts(pub))
   } catch {
     return null
   }
@@ -393,6 +395,72 @@ function askWarm(job, onChunk, cancel) {
   cancel?.attach({ kill: () => s.kill() })
   return s.ask(text, onChunk)
 }
+
+// ── SESIUNI CALDE PER-VIZITATOR (#7 latență, 11 iul) ─────────────────────────
+// Fiecare vizitator (cheia = job.visitor, emailul sesiunii lui) are PROPRIA
+// sesiune caldă, complet izolată de a adminului și de ale celorlalți vizitatori
+// (un vizitator nu vede NICIODATĂ sesiunea altuia — cheia e a lui). Prima tură
+// amorsează cu personajul public + conversația; turele 2+ trimit doar pachetul
+// subțire → primul cuvânt ca la admin, sub secundă când modelul curge.
+const warmPub = new Map() // visitor -> sesiune caldă
+const WARM_PUB_MAX = 6 // plafon RAM pe VPS; peste → LRU afară
+const WARM_PUB_IDLE_MS = 10 * 60_000 // vizitator plecat → sesiunea se stinge
+
+function askWarmPub(job, onChunk, cancel) {
+  if (!job.turn || !job.visitor) return Promise.resolve(null)
+  let s = warmPub.get(job.visitor)
+  if (s && (!s.alive || s.turns >= WARM_MAX_TURNS || s.model !== brainModel())) {
+    s.kill()
+    warmPub.delete(job.visitor)
+    s = null
+  }
+  let text
+  if (!s) {
+    // Plafon: sesiunea cea mai demult folosită iese (LRU).
+    if (warmPub.size >= WARM_PUB_MAX) {
+      let oldK = null
+      let oldT = Infinity
+      for (const [k, v] of warmPub) {
+        if ((v.lastUsed ?? 0) < oldT) {
+          oldT = v.lastUsed ?? 0
+          oldK = k
+        }
+      }
+      if (oldK) {
+        warmPub.get(oldK)?.kill()
+        warmPub.delete(oldK)
+      }
+    }
+    s = startWarm(brainModel(), true)
+    if (!s) return Promise.resolve(null)
+    warmPub.set(job.visitor, s)
+    log(`Sesiune caldă publică nouă (${job.visitor.slice(0, 12)}…, model ${s.model}).`)
+    text = PUBLIC_PREAMBLE + job.prompt
+  } else {
+    text = job.turn
+  }
+  s.lastUsed = Date.now()
+  const sess = s
+  const key = job.visitor
+  cancel?.attach({
+    kill: () => {
+      sess.kill()
+      if (warmPub.get(key) === sess) warmPub.delete(key)
+    },
+  })
+  return sess.ask(text, onChunk)
+}
+// Mătură sesiunile publice părăsite — vizitatorul plecat nu ține procese vii.
+setInterval(() => {
+  for (const [k, v] of warmPub) {
+    if (!v.alive || Date.now() - (v.lastUsed ?? 0) > WARM_PUB_IDLE_MS) {
+      try {
+        v.kill()
+      } catch {}
+      warmPub.delete(k)
+    }
+  }
+}, 60_000)
 
 function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel, warmChild } = {}) {
   return new Promise((resolve) => {
@@ -642,8 +710,12 @@ async function handleJob(job) {
     void post({ id: job.id, text })
   }
   const onChunk = (t) => {
+    const isFirst = !firstAt
     if (!firstAt) firstAt = Date.now()
     pending += t
+    // PRIMA bucată pleacă INSTANT (#7 latență): nu mai stă până la 150ms în
+    // tampon — primul cuvânt al utilizatorului nu are voie să aștepte ceasul.
+    if (isFirst) flush()
   }
   // La 150ms: dacă a curs text, trimite-l; altfel PULS DE VIAȚĂ (creierul
   // gândește) — ține tura vie cât timp Claude chiar lucrează (răspunsurile de
@@ -672,8 +744,10 @@ async function handleJob(job) {
     // din /tmp; fisierele adminului raman in cutia lui privata.
     const fileNote = saveJobFiles(job, isPubJob)
     // ADMIN fără fișiere → SESIUNEA CALDĂ (pachet subțire, primul cuvânt rapid).
-    // Cu fișiere (are nevoie de Read) sau PUBLIC (izolare) → proces proaspăt.
+    // PUBLIC fără fișiere → sesiunea caldă A VIZITATORULUI (izolată per cheie).
+    // Cu fișiere (are nevoie de Read) → proces proaspăt.
     if (!isPubJob && !fileNote) answer = await askWarm(job, onChunk, cancel)
+    if (isPubJob && !fileNote) answer = await askWarmPub(job, onChunk, cancel)
     if (!answer && !cancel.cancelled) {
       answer = await askClaude(job.prompt + fileNote, onChunk, fileNote !== '', isPubJob, cancel)
     }

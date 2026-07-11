@@ -22,7 +22,25 @@ declare const __BUILD_DATE__: string
 // noile date singure.
 export function deployStamp(srv: ServerVersion | null): string {
   if (!srv?.at) return ''
-  return `deploy${srv.v && !srv.v.includes('T') ? ` ${srv.v}` : ''} ${srv.at.slice(0, 16).replace('T', ' ')} UTC`
+  // ORA LONDREI PESTE TOT ÎN PRODUCȚIE (Adrian, 11 iul): orice marcaj de sistem
+  // (versiunea de sub QR, filigranul) arată ora Londrei, cu comutare automată
+  // vară/iarnă. Ora către UTILIZATOR rămâne a utilizatorului (clientul trimite
+  // `now`/`tz` la fiecare tură — neatins aici).
+  const d = new Date(srv.at)
+  const stamp = Number.isFinite(d.getTime())
+    ? new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+        .format(d)
+        .replace(',', '')
+    : srv.at.slice(0, 16).replace('T', ' ')
+  return `deploy${srv.v && !srv.v.includes('T') ? ` ${srv.v}` : ''} ${stamp} London`
 }
 export function versionLabel(srv: ServerVersion | null): string {
   const stamp = deployStamp(srv)
