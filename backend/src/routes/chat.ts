@@ -1926,6 +1926,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           headBuf = ''
         }
       }
+      // PACHETUL SUBȚIRE pentru sesiunea caldă a vizitatorului (#7, 11 iul):
+      // doar directiva de limbă + mesajul NOU. Prima tură amorsează cu
+      // pubPrompt complet; turele 2+ trimit doar asta → primul cuvânt rapid.
+      const pubTurn =
+        `${langLine}\nUser: ${lastUserText.slice(0, 1200)}\n\nAnswer the user's LAST message now.`
       const answer = await bridgeAskStream(
         pubPrompt,
         pubFiles,
@@ -1937,8 +1942,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // NIMIC = banda chiar e moartă — userul primește mesajul cinstit în 12s,
         // nu după 45s de așteptare (#7 latență, Adrian 10 iul).
         12_000,
-        '',
+        pubTurn,
         'public',
+        // Cheia sesiunii calde: emailul sesiunii (unic per demo/client) —
+        // izolare strictă vizitator-cu-vizitator pe worker.
+        user.email,
       )
       const rawFull = (answer && answer !== BRIDGE_STALL ? answer : acc).trim()
       if (!rawFull) {

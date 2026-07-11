@@ -60,6 +60,12 @@ interface PendingJob {
   // contextul privat (context.md) și folosește personajul neutru Kelion —
   // proiectul proprietarului nu se scurge niciodată către străini.
   persona?: 'public'
+  // SESIUNI CALDE PER-VIZITATOR (#7 latență, 11 iul): cheia stabilă a
+  // vizitatorului (emailul sesiunii — unic per demo/client). Workerul ține câte
+  // o sesiune caldă IZOLATĂ pentru fiecare cheie: turele 2+ nu mai plătesc
+  // pornirea + re-amorsarea → primul cuvânt ca la admin. Fără cheie → proces
+  // proaspăt ca până acum.
+  visitor?: string
 }
 
 const queue: PendingJob[] = []
@@ -727,6 +733,7 @@ export function bridgeAskStream(
   firstTokenMs = 30_000,
   turn = '',
   persona: 'public' | '' = '',
+  visitor = '',
 ): Promise<string | null> {
   const job: PendingJob = {
     id: randomUUID(),
@@ -735,6 +742,7 @@ export function bridgeAskStream(
     files,
     turn: turn || undefined,
     persona: persona || undefined,
+    visitor: visitor || undefined,
   }
   return new Promise((resolve) => {
     let gotChunk = false
