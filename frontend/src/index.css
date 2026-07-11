@@ -1326,30 +1326,9 @@ body {
   text-align: center;
   opacity: 0.7;
 }
-.bubble {
-  pointer-events: auto;
-  max-width: 85%;
-  padding: 9px 13px;
-  border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-.bubble.user {
-  align-self: flex-end;
-  background: rgba(110, 168, 254, 0.22);
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  border-bottom-right-radius: 4px;
-}
-.bubble.assistant {
-  align-self: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-}
+/* BULELE DE CHAT AU FOST ELIMINATE COMPLET (Adrian, 11 iul: „nimic în afara
+   barei aceleia de la creier") — tot chatul curge teletext în benzile 👤/🧠/K
+   de lângă composer; CSS-ul lor mort a fost șters odată cu JSX-ul. */
 /* ChatGPT-style composer: rounded glass container, + on the side, a round
    send button, and image thumbnails above the row. */
 .composer {
