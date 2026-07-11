@@ -730,6 +730,40 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
   return answer
 }
 
+// LUCRU/rapoarte/agenți: promptul vine deja construit de server; nu adăugăm
+// PREAMBLE conversațional și nu folosim SESIUNEA CALDĂ a chatului. Rulează pe
+// canale separate, deci un raport greu NU poate ține mesajul următor al lui
+// Adrian la coadă.
+async function askWorkClaude(prompt, onChunk, cancel) {
+  const model = brainModel()
+  let answer = await runClaudeStream(prompt, {
+    timeoutMs: 120_000,
+    model,
+    onChunk,
+    hasFiles: false,
+    pub: false,
+    cancel,
+  })
+  if (cancel?.cancelled) return answer
+  if (!answer) answer = await runClaudeText(prompt, { timeoutMs: 60_000, model, hasFiles: false, pub: false, cancel })
+  if (cancel?.cancelled) return answer
+  if (!answer && model === MODEL) {
+    fableDownUntil = Date.now() + REST_MS
+    log('Fable a esuat pe lucru — trec pe Opus, revin la Fable in 10 min.')
+    answer = await runClaudeStream(prompt, {
+      timeoutMs: 120_000,
+      model: RESERVE,
+      onChunk,
+      hasFiles: false,
+      pub: false,
+      cancel,
+    })
+  }
+  if (cancel?.cancelled) return answer
+  if (!answer) answer = await runClaudeBare(prompt, 60_000, false, cancel)
+  return answer
+}
+
 // Comanda cea mai simplă cu putință — plasa de siguranță. Fără output-format,
 // fără unelte, fără model: doar text din stdin. Dacă și asta tace, chiar nu se
 // poate (CLI/abonament căzut), și abia atunci serverul dă mesajul cinstit.
@@ -769,7 +803,7 @@ function runClaudeBare(prompt, timeoutMs = 60_000, pub = false, cancel) {
   })
 }
 
-async function pull() {
+async function pull(lane = 'chat') {
   // Timeout obligatoriu: fără el, un sughiț de rețea lăsa fetch-ul agățat pe
   // veci și bucla murea „vie" — puntea părea căzută (4 iul). Long-poll = 25s.
   const res = await fetch(`${BASE}/api/bridge/pull`, {
@@ -777,7 +811,7 @@ async function pull() {
     headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
     // Declaram CAPABILITATEA persona: serverul da joburi PUBLICE doar workerilor
     // care o declara — zombii/vechii (body gol) nu mai pot primi vizitatori.
-    body: JSON.stringify({ caps: ['persona'] }),
+    body: JSON.stringify({ caps: ['persona'], lane }),
     signal: AbortSignal.timeout(40_000),
   })
   if (res.status === 401) throw new Error('Secret respins de server')
@@ -805,8 +839,9 @@ async function sendReply(id, text) {
   })
 }
 
-// Un job, cap-coadă: streaming spre punte + puls de viață + anulare la abandon.
-async function handleJob(job) {
+// Un job CHAT/VOCE, cap-coadă: streaming spre punte + puls de viață + anulare la abandon.
+// Folosește SESIUNILE CALDE dedicate chatului (admin sau per-vizitator).
+async function handleChatJob(job) {
   const isPub = job.persona === 'public'
   log(`${isPub ? 'Mesaj public' : 'Mesaj admin'} (${job.id.slice(0, 8)}) — model ${brainModel()}...`)
   const t0 = Date.now()
@@ -897,6 +932,70 @@ async function handleJob(job) {
   }
 }
 
+// Un job de LUCRU (raport/veghe/caiet-alert/agent/ordin): prompt deja construit
+// de server, fără PREAMBLE conversațional și FĂRĂ a folosi sesiunea caldă a
+// chatului. Rulează pe canale separate, deci nu poate bloca vocea/chatul.
+async function handleWorkJob(job) {
+  log(`Lucru sistem (${job.id.slice(0, 8)}) — model ${brainModel()}...`)
+  const t0 = Date.now()
+  let firstAt = 0
+  const cancel = makeCancel()
+  let pending = ''
+  const post = (body) =>
+    fetch(`${BASE}/api/bridge/reply-chunk`, {
+      method: 'POST',
+      headers: { 'x-bridge-secret': SECRET, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j && j.gone) cancel.cancel()
+      })
+      .catch(() => {})
+  const flush = () => {
+    if (!pending) return
+    const text = pending
+    pending = ''
+    void post({ id: job.id, text })
+  }
+  const onChunk = (t) => {
+    if (!firstAt) firstAt = Date.now()
+    pending += t
+  }
+  let sinceBeat = 0
+  const pulse = setInterval(() => {
+    if (pending) {
+      flush()
+      sinceBeat = 0
+    } else if ((sinceBeat += 150) >= 3000) {
+      sinceBeat = 0
+      void post({ id: job.id, keepalive: true })
+    }
+  }, 150)
+  let answer
+  try {
+    answer = await askWorkClaude(job.prompt, onChunk, cancel)
+  } finally {
+    clearInterval(pulse)
+    flush()
+  }
+  if (cancel.cancelled) {
+    await sendReply(job.id, '').catch(() => {})
+    log(`Lucru ${job.id.slice(0, 8)} abandonat de server — banda de lucru eliberată.`)
+    return
+  }
+  if (answer) {
+    await sendReply(job.id, answer)
+    const totalMs = Date.now() - t0
+    const firstMs = firstAt ? firstAt - t0 : 0
+    log(`Raspuns lucru trimis (${answer.length} car, ${totalMs}ms, primul cuvant ${firstMs || '—'}ms).`)
+  } else {
+    await sendReply(job.id, '')
+    log('Fara raspuns la lucru — serverul isi raspunde singur.')
+  }
+}
+
 // ── BENZI SEPARATE + CHAT LIVE ÎN PARALEL ───────────────────────────────────
 // Adminul: banda lui, max 2 ÎN PARALEL (Adrian, 10 iul: „chatul trebuie live în
 // paralel cât lucrează agenții"). Cât o tură lungă lucrează (raționament greu,
@@ -939,48 +1038,109 @@ function releaseAdmin() {
   const w = adminWaiters.shift()
   if (w) w()
 }
+// Banda de LUCRU — separată de chat/voice: rapoarte, veghe, caiet-alert, agenți,
+// ordine. Max 2 în paralel; indiferent câte joburi de lucru vin, ele NU pot lua
+// niciodată canalele rezervate pentru chat (admin/public).
+let workActive = 0
+const WORK_MAX = 2
+const workWaiters = []
+async function acquireWork() {
+  if (workActive < WORK_MAX) {
+    workActive++
+    return
+  }
+  await new Promise((r) => workWaiters.push(r))
+  workActive++
+}
+function releaseWork() {
+  workActive--
+  const w = workWaiters.shift()
+  if (w) w()
+}
 
 log(`Puntea non-stop PORNITA -> ${BASE} (model principal ${MODEL}, rezerva ${RESERVE})`)
-for (;;) {
-  try {
-    const job = await pull()
-    if (!job) continue
-    if (job.kind === 'repair') {
-      // Repairs are NOT executed by this unattended server worker (safety).
-      // Return empty so the request is handled supervised elsewhere.
-      await sendReply(job.id, '')
-      log(`Reparatie ignorata pe server (se fac supravegheat): ${job.id.slice(0, 8)}`)
-      continue
+
+// Buclă CHAT/VOCE: trage DOAR joburi lane='chat'. Sesiunea caldă admin + sesiuni
+// calde per-vizitator aparțin exclusiv acestei bucle.
+async function chatLoop() {
+  for (;;) {
+    try {
+      const job = await pull('chat')
+      if (!job) continue
+      if (job.kind === 'repair') {
+        // Repairs are NOT executed by this unattended server worker (safety).
+        // Return empty so the request is handled supervised elsewhere.
+        await sendReply(job.id, '')
+        log(`Reparatie ignorata pe server (se fac supravegheat): ${job.id.slice(0, 8)}`)
+        continue
+      }
+      if (job.persona === 'public') {
+        void (async () => {
+          await acquirePublic()
+          try {
+            await handleChatJob(job)
+          } catch (e) {
+            log(`Eroare pe tura publica ${job.id.slice(0, 8)}: ${e.message}`)
+            await sendReply(job.id, '').catch(() => {})
+          } finally {
+            releasePublic()
+          }
+        })()
+      } else {
+        void (async () => {
+          await acquireAdmin()
+          try {
+            await handleChatJob(job)
+          } catch (e) {
+            log(`Eroare pe tura admin ${job.id.slice(0, 8)}: ${e.message}`)
+            await sendReply(job.id, '').catch(() => {})
+          } finally {
+            releaseAdmin()
+          }
+        })()
+      }
+    } catch (e) {
+      // 3s, nu 10s (Adrian: „se blochează") — un sughiț de rețea nu mai lasă
+      // puntea moartă zece secunde; long-poll-ul oricum absoarbe graba.
+      log(`Eroare chat loop: ${e.message} — reincerc in 3s`)
+      await new Promise((r) => setTimeout(r, 3000))
     }
-    if (job.persona === 'public') {
-      void (async () => {
-        await acquirePublic()
-        try {
-          await handleJob(job)
-        } catch (e) {
-          log(`Eroare pe tura publica ${job.id.slice(0, 8)}: ${e.message}`)
-          await sendReply(job.id, '').catch(() => {})
-        } finally {
-          releasePublic()
-        }
-      })()
-    } else {
-      void (async () => {
-        await acquireAdmin()
-        try {
-          await handleJob(job)
-        } catch (e) {
-          log(`Eroare pe tura admin ${job.id.slice(0, 8)}: ${e.message}`)
-          await sendReply(job.id, '').catch(() => {})
-        } finally {
-          releaseAdmin()
-        }
-      })()
-    }
-  } catch (e) {
-    // 3s, nu 10s (Adrian: „se blochează") — un sughiț de rețea nu mai lasă
-    // puntea moartă zece secunde; long-poll-ul oricum absoarbe graba.
-    log(`Eroare: ${e.message} — reincerc in 3s`)
-    await new Promise((r) => setTimeout(r, 3000))
   }
 }
+
+// Buclă de LUCRU: trage DOAR joburi lane='work'. Fără sesiune caldă, fără
+// preamble; canalele sunt separate de chat, deci un raport greu nu blochează vocea.
+async function workLoop() {
+  for (;;) {
+    try {
+      const job = await pull('work')
+      if (!job) continue
+      if (job.kind === 'repair') {
+        // Repairs are NOT executed by this unattended server worker (safety).
+        // Return empty so the request is handled supervised elsewhere.
+        await sendReply(job.id, '')
+        log(`Reparatie ignorata pe server (se fac supravegheat): ${job.id.slice(0, 8)}`)
+        continue
+      }
+      void (async () => {
+        await acquireWork()
+        try {
+          await handleWorkJob(job)
+        } catch (e) {
+          log(`Eroare pe lucrul ${job.id.slice(0, 8)}: ${e.message}`)
+          await sendReply(job.id, '').catch(() => {})
+        } finally {
+          releaseWork()
+        }
+      })()
+    } catch (e) {
+      // 3s, nu 10s (Adrian: „se blochează") — un sughiț de rețea nu mai lasă
+      // puntea moartă zece secunde; long-poll-ul oricum absoarbe graba.
+      log(`Eroare work loop: ${e.message} — reincerc in 3s`)
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
+}
+
+chatLoop()
+workLoop()

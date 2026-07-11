@@ -36,6 +36,19 @@ export async function initDb(): Promise<void> {
     );
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS anthropic_key TEXT;
+    -- Amprente vocale: timbru + gen + flag admin per cont.
+    -- vectorul e normalizat client-side; meta păstrează valorile brute pentru debug.
+    CREATE TABLE IF NOT EXISTS voiceprints (
+      user_email TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      gender TEXT NOT NULL DEFAULT 'unknown',
+      is_admin BOOLEAN NOT NULL DEFAULT false,
+      features DOUBLE PRECISION[] NOT NULL DEFAULT '{}',
+      feature_meta JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_voiceprints_admin ON voiceprints (is_admin, updated_at DESC);
     CREATE TABLE IF NOT EXISTS cost_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -1910,5 +1923,153 @@ export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
     return r.rows
   } catch {
     return []
+  }
+}
+
+// ── Speaker identification by voiceprint ───────────────────────────────────
+
+export interface VoiceFeatureMeta {
+  pitchMean: number
+  pitchStd: number
+  pitchMin: number
+  pitchMax: number
+  centroid: number
+  rolloff: number
+  zcr: number
+  energy: number
+  jitter: number
+  shimmer: number
+}
+
+export interface VoiceprintRow {
+  email: string
+  name: string
+  gender: 'male' | 'female' | 'unknown'
+  isAdmin: boolean
+  features: number[]
+  featureMeta: VoiceFeatureMeta
+  createdAt: string
+  updatedAt: string
+}
+
+interface VoiceprintDbRow {
+  user_email: string
+  name: string
+  gender: string
+  is_admin: boolean
+  features: number[]
+  feature_meta: VoiceFeatureMeta
+  created_at: string
+  updated_at: string
+}
+
+function rowToVoiceprint(r: VoiceprintDbRow): VoiceprintRow {
+  return {
+    email: r.user_email,
+    name: r.name,
+    gender: (r.gender as VoiceprintRow['gender']) || 'unknown',
+    isAdmin: r.is_admin,
+    features: r.features || [],
+    featureMeta: r.feature_meta || ({} as VoiceFeatureMeta),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+export async function saveVoiceprint(v: {
+  email: string
+  name: string
+  gender: VoiceprintRow['gender']
+  isAdmin: boolean
+  features: number[]
+  featureMeta: VoiceFeatureMeta
+}): Promise<void> {
+  if (!dbEnabled() || !v.email) return
+  try {
+    const vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    await getPool().query(
+      `INSERT INTO voiceprints
+         (user_email, name, gender, is_admin, features, feature_meta, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (user_email) DO UPDATE
+         SET name = $2, gender = $3, is_admin = $4, features = $5,
+             feature_meta = $6, updated_at = now()`,
+      [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta)],
+    )
+  } catch {
+    // Never break the chat because voiceprint persistence failed.
+  }
+}
+
+export async function getVoiceprint(email: string): Promise<VoiceprintRow | null> {
+  if (!dbEnabled() || !email) return null
+  try {
+    const r = await getPool().query<VoiceprintDbRow>(
+      `SELECT user_email, name, gender, is_admin, features, feature_meta,
+              created_at, updated_at
+       FROM voiceprints WHERE user_email = $1`,
+      [email.toLowerCase()],
+    )
+    return r.rows[0] ? rowToVoiceprint(r.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
+export async function deleteVoiceprint(email: string): Promise<boolean> {
+  if (!dbEnabled() || !email) return false
+  try {
+    await getPool().query('DELETE FROM voiceprints WHERE user_email = $1', [email.toLowerCase()])
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<VoiceprintDbRow>(
+      `SELECT user_email, name, gender, is_admin, features, feature_meta,
+              created_at, updated_at
+       FROM voiceprints ORDER BY updated_at DESC LIMIT $1`,
+      [limit],
+    )
+    return r.rows.map(rowToVoiceprint)
+  } catch {
+    return []
+  }
+}
+
+/** Euclidean distance between two equal-length vectors. */
+export function vectorDistance(a: number[], b: number[]): number {
+  const len = Math.min(a.length, b.length)
+  if (len === 0) return Infinity
+  let sum = 0
+  for (let i = 0; i < len; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0)
+    sum += d * d
+  }
+  return Math.sqrt(sum / len)
+}
+
+export async function identifyVoiceprint(
+  vector: number[],
+  threshold: number,
+): Promise<(VoiceprintRow & { distance: number }) | null> {
+  if (!dbEnabled() || vector.length === 0) return null
+  try {
+    const rows = await listVoiceprints(1000)
+    let best: (VoiceprintRow & { distance: number }) | null = null
+    for (const row of rows) {
+      if (!row.features || row.features.length === 0) continue
+      const d = vectorDistance(vector, row.features)
+      if (d < threshold && (!best || d < best.distance)) {
+        best = { ...row, distance: d }
+      }
+    }
+    return best
+  } catch {
+    return null
   }
 }

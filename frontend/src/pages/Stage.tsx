@@ -9,6 +9,7 @@ import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
+import ReleaseAlertBanner from '../components/ReleaseAlertBanner'
 import type { User } from '../lib/api'
 import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
@@ -57,6 +58,7 @@ export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'>('finance')
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -677,10 +679,11 @@ export default function Stage({ user }: { user: User }) {
       </div>
       {/* Avatar canvas — shrinks to the top-right corner in monitor mode. */}
       <div ref={stageRef} className={`stage-canvas ${monitorOn ? 'pip' : ''}`}>
-      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" — camera veche
-          (y 0.7, z 2.4) încadra doar bustul; trasă înapoi și centrată, silueta
-          încape întreagă (picioarele la −1.65, capul la ~+1.32) cu aer sus/jos. */}
-      <Canvas shadows camera={{ position: [0, 0.05, 4.8], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
+      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „l-ai micșorat
+          prea mult" — camera stă exact cât să încapă TOATĂ silueta (tălpi la
+          −1.65, creștet la ~+1.32) cu margini mici: centrată pe corp (y −0.15)
+          și la 4.3 distanță — silueta umple ~95% din înălțimea cadrului. */}
+      <Canvas shadows camera={{ position: [0, -0.15, 4.3], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
         {!monitorOn && <color attach="background" args={['#0b0d12']} />}
@@ -836,13 +839,23 @@ export default function Stage({ user }: { user: User }) {
         </div>
       </header>
 
+      <ReleaseAlertBanner
+        user={user}
+        onOpenReleases={() => {
+          setAdminTab('releases')
+          setAdminOpen(true)
+        }}
+      />
+
       {/* FULL-MONITOR live work feed (admin only): every step Claude executes on
           the laptop is mirrored here in real time. Floats over the whole monitor
           but never blocks clicks (pointer-events: none), so the owner keeps
           talking to Kelion while WATCHING the work happen. */}
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} isDemo={user.role === 'demo'} />
 
-      {adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}
+      {adminOpen && (
+        <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
+      )}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}
 
