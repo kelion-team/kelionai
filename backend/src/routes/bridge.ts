@@ -23,6 +23,7 @@ import {
   saveKv,
   loadKv,
   putAppFile,
+  getCostToday,
 } from '../db.js'
 
 // Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
@@ -941,6 +942,32 @@ export function sayToAdmin(text: string): void {
   void saveMessage(config.adminEmail, 'assistant', t)
 }
 
+// RAPORTUL ZILNIC DE BANI (Adrian, 11 iul, aprobat: „6 da"): o dată pe zi,
+// seara după ora 21 (ora lui Adrian), Kelion spune singur în chat cât a costat
+// ziua pe fiecare motor plătit la consum — Adrian știe mereu unde se duc banii
+// fără să întrebe. Abonamentele fixe (Max/Kimi/GLM) nu apar — nu variază.
+setInterval(() => {
+  void (async () => {
+    const h = Number(
+      new Date().toLocaleString('en-GB', { timeZone: ownerTz, hour: '2-digit', hour12: false }),
+    )
+    if (Number.isNaN(h) || h < 21) return
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: ownerTz })
+    const last = await loadKv('cost_report_day').catch(() => null)
+    if (last === day) return
+    await saveKv('cost_report_day', day).catch(() => {})
+    const rows = await getCostToday()
+    const total = rows.reduce((s, r) => s + r.sum, 0)
+    const parts = rows
+      .filter((r) => r.sum > 0.0005)
+      .map((r) => `${r.kind} $${r.sum.toFixed(2)}`)
+      .join(' · ')
+    sayToAdmin(
+      `💰 Banii zilei (API la consum): $${total.toFixed(2)}${parts ? ` — ${parts}` : ' — nimic azi'}. Abonamentele (Max/Kimi/GLM) sunt fixe și nu intră aici.`,
+    )
+  })()
+}, 10 * 60_000).unref()
+
 // ÎNCHIDE BUCLA ÎN CREIER (Adrian, 5 iul: „kelion nu primește niciodată în chat").
 // În loc să împingem un text gata-făcut în chat (creier orb), RE-CHEMĂM creierul
 // cu rezultatul agentului ca să-l raporteze cu VOCEA lui, verificat, cu dovada —
@@ -1186,6 +1213,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           persistSay()
           void saveMessage(config.adminEmail, 'assistant', msg)
           noteBrainActivity(`🛑 „${r.summary}" — aceeași eroare de două ori, opresc reparația automată`)
+          // ÎNVĂȚARE DIN GREȘELI (Adrian, 11 iul, aprobat: „1 da"): eșecul
+          // terminal devine LECȚIE durabilă în caietul comun — Kelion o
+          // recitește la fiecare tură, iar veghea îl trezește pe Claude.
+          void appendSharedMemory(
+            'lecție-eșec',
+            `LECȚIE (aceeași eroare de 2 ori): „${r.summary.slice(0, 180)}" — ${detail?.slice(0, 300) || 'fără detaliu'}. Nu repeta același drum: alt unghi sau decizia lui Adrian.`,
+          )
           ownedReq.nudged = Date.now() + 24 * 3600_000
           persistOwned()
           void reportToAdmin({ kind: 'fail', summary: r.summary, detail })
@@ -1207,6 +1241,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           persistSay()
           void saveMessage(config.adminEmail, 'assistant', msg)
           noteBrainActivity(`🛑 „${r.summary}" blocată după ${attempts} eșecuri de verificare — la decizia lui Adrian`)
+          // Lecție durabilă și aici (Adrian, 11 iul): blocajul după N încercări
+          // e cunoștință, nu doar mesaj trecător în chat.
+          void appendSharedMemory(
+            'lecție-eșec',
+            `LECȚIE (blocat după ${attempts} încercări): „${r.summary.slice(0, 180)}" — ultimul motiv: ${detail?.slice(0, 300) || 'fără detaliu'}. Specificație neclară sau drum greșit — nu se reîncearcă automat; cere reformulare/alt unghi.`,
+          )
           ownedReq.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată (watchdog) până se schimbă ceva
           persistOwned()
         } else {

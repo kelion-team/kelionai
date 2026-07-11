@@ -233,7 +233,22 @@ node --check bridge/kelion-bridge-linux.mjs
 - 🔗 **Lanțul de abonamente în worker (11 iul, ordinul lui Adrian): Claude Max → Kimi for Coding → GLM Coding Plan.** Workerul comută automat pe treapta următoare când CLI-ul raportează cotă golită (DOAR pe canalele de eroare — stderr / `result` cu `is_error`, niciodată pe text normal) și revine singur pe Max după 30 min (Max se reîncearcă primul la fiecare spawn). Cheile: fișiere pe VPS (§8), puse prin `vps-keys.yml` — fără chei, codul e inert, comportamentul de azi. Kimi: base `https://api.kimi.com/coding/`, model fix `kimi-for-coding` (docs oficiale kimi.com/code). GLM: base `https://api.z.ai/api/anthropic`, numele de model claude e mapat de endpoint-ul lor. Deploy pe VPS: DOAR prin `bridge-deploy.yml` (parola lui Adrian) — de verificat live la prima golire reală de cotă.
 - ⛔ **Canalul de echipă (PR #85–#90) — CONSTRUIT ȘI SCOS INTEGRAL în aceeași zi (11 iul), la ordinul lui Adrian**, după un incident de cost: fiecare mesaj „către kelion" declanșa `bridgeAsk` (abonamentul personal al lui Adrian), iar un bug de afișare în tab (poll-ul re-adăuga tot firul la fiecare 4s — closure învechit pe `teamMsgs`) arăta ca o buclă de trimitere continuă. Tabelul `team_channel` rămâne în Postgres cu datele lui, dar NICIUN cod nu-l mai atinge. NU reconstrui feature-ul fără ordin explicit de la Adrian.
 
-## 14. CUM VERIFICI CĂ TOTUL E SĂNĂTOS (60 de secunde)
+## 14. FOAIA DE PARCURS — OBIECTIVELE LUI ADRIAN, ÎN ORDINE (aprobate 11 iul, „toate da")
+**Pentru Kelion: asta e direcția TA.** Când nu ai semnale urgente (Perpetuum tăcut,
+nicio cerință deschisă), iei SINGUR următorul obiectiv nefinalizat de aici — UNUL
+singur odată, dus până la capăt cu dovadă, apoi următorul. Publicarea trece mereu
+prin aprobarea lui Adrian; munca rulează pe Kimi/GLM, niciodată pe Max.
+1. ✅ Învățare din greșeli — memorie pe punte (chat.ts:1789, din 8 iul) + lecții durabile la eșec terminal (`lecție-eșec` în caiet) — LIVE.
+2. 🔜 **Verificator independent pe GLM** — după fiecare lucrare a constructorului, un agent SEPARAT pe GLM (claude-munca, treapta forțată glm) încearcă să o DEMONTEZE înainte de „gata"; doar ce supraviețuiește ajunge la ready-deploy. (ordin trimis constructorului, 11 iul)
+3. ✅ Foaia de parcurs — chiar acest capitol; se citește la fiecare amorsare.
+4. 🔜 **QA care patrulează** — agent pe Chromium-ul din VPS care exercită aplicația cap-coadă (chat public, voce, cameră, /dl, plăți-sandbox) și deschide ordine precise când ceva șchiopătează; populează agent_tasks (schema din 8 iul e goală). După #2.
+5. 🔜 **Memorie semantică (embeddings)** — recall după înțeles, nu doar cuvinte: embeddings Gemini pe memories + căutare cosine; schema și migrarea prin PR. După #4.
+6. 🔜 **Raport zilnic de cost** — services/cost.ts însumat pe motoare (Max/Kimi/GLM/Chirp), spus în chat o dată pe zi + alertă la salt. (Claude îl face în backend)
+7. 🔜 **Profilarea latenței** — cronometre pe segmente (ureche→creier→primul token→prima silabă TTS) în punte + backend; raport cu tabelul milisecundelor pe 5 ture reale. Ținta finală: sub 1s primul cuvânt.
+8. 🔜 **Test de latență după fiecare deploy** — deploy.yml pornește automat public-latency-test după verificarea anti-fantomă. (Claude, în workflow)
+9. 🔜 **Voce totală** — LiveKit full-duplex (cheile există „în backup") apoi cuvânt de trezire Picovoice („Hei, Kelion"). Ultimul, cel mai greu.
+
+## 15. CUM VERIFICI CĂ TOTUL E SĂNĂTOS (60 de secunde)
 ```bash
 curl -s https://kelionai.app/api/version            # {v,at} cu boot recent
 curl -s https://kelionai.app/health                 # 200
