@@ -1,0 +1,48 @@
+{
+  "_doc": "REGISTRU DE RETETE. Cunoasterea lui Kelion despre ce unealta rezolva ce problema si cum se instaleaza DETERMINIST (Adrian, 12 iul: sa stie de ce are nevoie, sa-si instaleze dependintele constient). Fiecare intrare: detect (verific daca exista), install (cum il pun), verify (dovada ca merge). Niciun LLM nu interpreteaza aici. Kelion ALEGE numele, registrul EXECUTA fix. Reteta noua invatata se adauga aici.",
+  "recipes": {
+    "docker": {
+      "descriere": "Motor de containere. Necesar pentru orice serviciu izolat (LiveKit, Caddy).",
+      "detect": "command -v docker >/dev/null 2>&1",
+      "install": "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io && systemctl enable --now docker",
+      "verify": "docker --version"
+    },
+    "caddy": {
+      "descriere": "Reverse-proxy cu TLS automat (Let's Encrypt). Rezolva certificatul valid fara munca manuala.",
+      "detect": "docker image inspect caddy:2 >/dev/null 2>&1 || command -v caddy >/dev/null 2>&1",
+      "install": "docker pull caddy:2",
+      "verify": "docker image inspect caddy:2 >/dev/null 2>&1 && echo caddy2-prezent"
+    },
+    "ffmpeg": {
+      "descriere": "Prelucrare audio/video (transcodare, extragere cadre, conversie formate).",
+      "detect": "command -v ffmpeg >/dev/null 2>&1",
+      "install": "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg",
+      "verify": "ffmpeg -version | head -1"
+    },
+    "sshpass": {
+      "descriere": "Autentificare SSH cu parola in scripturi neinteractive.",
+      "detect": "command -v sshpass >/dev/null 2>&1",
+      "install": "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y sshpass",
+      "verify": "sshpass -V | head -1"
+    },
+    "python3": {
+      "descriere": "Runtime Python 3 pentru scripturi/skill-uri.",
+      "detect": "command -v python3 >/dev/null 2>&1",
+      "install": "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip",
+      "verify": "python3 --version"
+    },
+    "tls-pentru-ip": {
+      "descriere": "PATTERN (rezolvat 12 iul): certificat TLS VALID pentru un server pe IP simplu, fara domeniu cumparat si fara a atinge DNS-ul. Folosim <a-b-c-d>.sslip.io (mapeaza direct IP-ul) plus Caddy auto-TLS. Reteta completa e in bridge/kelion-livekit-tls.mjs. Nu e un pachet, e o solutie de aplicat.",
+      "necesita": ["docker", "caddy"],
+      "detect": "false",
+      "install": "echo PATTERN-nu-pachet: vezi bridge/kelion-livekit-tls.mjs (hostname sslip.io + Caddy reverse-proxy --from HOST --to localhost:PORT)",
+      "verify": "echo verifica-cu: curl -sS -o /dev/null -w %{http_code} https://HOST/ (fara -k = cert valid)"
+    },
+    "deschide-port": {
+      "descriere": "PATTERN: deschide un port in firewall (ufw) daca e activ. Necesar ex. pentru 80/443 (ACME) sau 7882/udp (WebRTC).",
+      "detect": "command -v ufw >/dev/null 2>&1 && ufw status | grep -qi active",
+      "install": "echo foloseste: ufw allow PORT/PROTO (ex ufw allow 443/tcp)",
+      "verify": "ufw status 2>/dev/null | head -20 || echo fara-ufw"
+    }
+  }
+}
