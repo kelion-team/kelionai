@@ -101,6 +101,22 @@ export async function fetchWorkOrders(): Promise<WorkOrder[]> {
   }
 }
 
+// Finalizează toate joburile ne-terminale (admin only). Întoarce numărul de
+// rânduri schimbate sau 0 la eroare.
+export async function finalizeAllWorkOrders(): Promise<number> {
+  try {
+    const r = await fetch('/api/admin/workorders/finalize-all', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (!r.ok) return 0
+    const j = (await r.json()) as { count?: number }
+    return typeof j.count === 'number' ? j.count : 0
+  } catch {
+    return 0
+  }
+}
+
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.

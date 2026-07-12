@@ -35,6 +35,7 @@ import {
   fetchStores,
   type StoresData,
   fetchWorkOrders,
+  finalizeAllWorkOrders,
   type WorkOrder,
   fetchInbound,
   fetchMailboxLive,
@@ -173,6 +174,7 @@ export default function AdminPanel({
   const [releases, setReleases] = useState<StagedRelease[]>([])
   const [stores, setStores] = useState<StoresData | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
+  const [finalizing, setFinalizing] = useState(false)
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
@@ -182,6 +184,15 @@ export default function AdminPanel({
   async function decide(id: string, d: 'approve' | 'reject'): Promise<void> {
     await decideRelease(id, d)
     setReleases((cur) => cur.map((r) => (r.id === id ? { ...r, status: d === 'approve' ? 'approved' : 'rejected' } : r)))
+  }
+  async function handleFinalizeAll(): Promise<void> {
+    if (finalizing) return
+    setFinalizing(true)
+    const count = await finalizeAllWorkOrders()
+    setFinalizing(false)
+    if (count > 0) {
+      void fetchWorkOrders().then(setOrders)
+    }
   }
   // The conversation of a clicked TRIAL visitor — what interested them, and in
   // what language they wrote / Kelion answered.
@@ -872,9 +883,17 @@ export default function AdminPanel({
         {tab === 'joburi' && (
           <section className="admin-finance">
             <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                Joburi ÎN LUCRU — cererile trimise la execuție, cu stadiul lor real (se
-                actualizează singur). Cele terminate se mută în arhiva de mai jos.
+              <div className="fin-breakdown-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                <span>Joburi ÎN LUCRU — cererile trimise la execuție, cu stadiul lor real (se actualizează singur). Cele terminate se mută în arhiva de mai jos.</span>
+                <button
+                  type="button"
+                  className="admin-tab"
+                  disabled={finalizing || orders.filter((o) => !JOB_DONE.has(o.status)).length === 0}
+                  onClick={() => void handleFinalizeAll()}
+                  title="Finalizează toate joburile ne-terminale (le închide stadiul, nu le șterge)"
+                >
+                  {finalizing ? 'Se finalizează…' : 'Finalizează toate'}
+                </button>
               </div>
               {orders.filter((o) => !JOB_DONE.has(o.status)).length === 0 && (
                 <div className="chat-hint">Niciun job în lucru acum.</div>

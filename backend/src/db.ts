@@ -847,6 +847,25 @@ export async function finalizeStaleWorkOrders(
   return r.rows.map((x) => x.id)
 }
 
+// FINALIZARE BULK (Adrian: „scoateți să finalizeze toate joburile"). Marchează
+// TOATE ordinele care nu sunt deja terminale (certified/finalized) ca `finalized`
+// = închise administrativ, fără să se piardă din registru. Doar admin.
+export async function finalizeAllWorkOrders(): Promise<number> {
+  if (!dbEnabled()) return 0
+  const r = await getPool()
+    .query<{ n: string }>(
+      `WITH upd AS (
+         UPDATE work_orders
+         SET status='finalized'
+         WHERE status NOT IN ('certified','finalized')
+         RETURNING id
+       )
+       SELECT count(*)::int AS n FROM upd`,
+    )
+    .catch(() => ({ rows: [] as { n: string }[] }))
+  return Number(r.rows[0]?.n ?? 0)
+}
+
 // ── Staged releases (persistent approval gate) ──────────────────────────────
 
 export interface StagedReleaseRow {

@@ -18,6 +18,7 @@ import {
   listWorkOrders,
   setWorkOrderStatus,
   finalizeStaleWorkOrders,
+  finalizeAllWorkOrders,
   saveStagedRelease,
   listStagedReleases,
   setReleaseStatus,
@@ -1418,6 +1419,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return { orders: await listWorkOrders(50) }
+  })
+
+  // Admin → finalizează BULK toate joburile ne-terminale (nu șterge nimic,
+  // doar le închide stadiul ca să nu rămână „în lucru" la nesfârșit).
+  app.post('/api/admin/workorders/finalize-all', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const count = await finalizeAllWorkOrders()
+    noteBrainActivity(`🧹 Admin: ${count} joburi închise (finalizate) în bloc.`)
+    return { ok: true, count }
   })
 
   // ── APPROVAL GATE ──
