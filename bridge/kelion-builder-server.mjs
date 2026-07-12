@@ -553,7 +553,15 @@ async function build(order) {
     `NU edita AI-HANDOFF/documente ca substitut de lucru — scrie clar "OPS_NECESITA_RUNBOOK: <ce comanda exacta trebuie>" ` +
     `si opreste-te, ca sa preia un workflow determinist (vps-*). ` +
     `(2) DOVADA INAINTE DE AFIRMATIE: nu spune ca ceva merge fara sa fi VERIFICAT (curl/status/loguri reale), ` +
-    `niciodata din presupunere. (3) La orice esec, citeste faptele (loguri, status) inainte de concluzie.`
+    `niciodata din presupunere. (3) La orice esec, citeste faptele (loguri, status) inainte de concluzie. ` +
+    // Problema noua (Adrian, 12 iul: „reparara o fantoma — consuma credite, bani;
+    // creierul trebuie sa lucreze CONSTIENT INFIPT IN REALITATE, nu doar masina").
+    `(4) POARTA DE REALITATE — REPRODU INAINTE SA REPARI: daca sarcina spune ca ceva e stricat ` +
+    `(un endpoint da 500, o pagina crapa, o functie pica), PRIMUL lucru pe care-l faci e sa REPRODUCI defectul ACUM ` +
+    `cu o comanda reala (ex: curl -s -o /dev/null -w '%{http_code}' <url>). Daca NU se mai reproduce ` +
+    `(endpoint-ul da 200, functia merge), NU repara nimic — un esec tranzitoriu (ex: in timpul unui redeploy) ` +
+    `NU e un bug. Scrie "NU SE MAI REPRODUCE: <dovada>" si INCHIDE sarcina. Repari DOAR ce ai vazut ca e ` +
+    `chiar rupt acum. Un avertisment de browser (ceva „is deprecated") NU e o eroare — nu il repara niciodata.`
   const short = order.text.replace(/\s+/g, ' ').slice(0, 70)
   say(`🔨 Am preluat ordinul și încep execuția: ${short}`)
   pushProgress(10, 'Execuție')
