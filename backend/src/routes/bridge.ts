@@ -13,6 +13,8 @@ import {
   appendSharedMemory,
   saveWorkOrder,
   pullPendingWorkOrders,
+  claimOneWorkOrder,
+  countPendingWorkOrders,
   listWorkOrders,
   setWorkOrderStatus,
   finalizeStaleWorkOrders,
@@ -1153,6 +1155,23 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       setAnalysisDetail(`⚒ La constructor: ${rows[0].text}${rest}`)
     }
     return { orders: rows.map((r) => ({ id: r.id, text: r.text, at: r.created_at })) }
+  })
+
+  // POOL ELASTIC DE REPARATORI (Adrian, 12 iul). Un worker efemer revendică UN
+  // ordin (atomic, FOR UPDATE SKIP LOCKED — sigur în paralel), îl repară, revine
+  // după altul; când primește null, coada e goală și iese (nu consumă). NU atinge
+  // `GET /api/bridge/workorders` (grab-all) folosit de builder-ul clasic.
+  app.post('/api/bridge/workorders/claim', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const row = await claimOneWorkOrder()
+    if (row?.text) setAnalysisDetail(`⚒ La reparator: ${row.text}`)
+    return { order: row ? { id: row.id, text: row.text, at: row.created_at } : null }
+  })
+
+  // Câte ordine așteaptă — supervizorul decide câți workeri să pornească.
+  app.get('/api/bridge/workorders/pending-count', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { count: await countPendingWorkOrders() }
   })
 
   // Enqueue a work order directly (secret) — lets the builder or a tool requeue

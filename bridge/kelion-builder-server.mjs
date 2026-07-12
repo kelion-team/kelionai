@@ -774,12 +774,52 @@ async function deployApproved(r) {
   pushProgress(100, 'Publicat + QR-uri regenerate')
 }
 
+// REPARATOR EFEMER (pool elastic, Adrian 12 iul: „mai mulți reparatori
+// sincronizați care se opresc când termină și repornesc când cresc sarcinile").
+// Revendică UN ordin (atomic — /workorders/claim, FOR UPDATE SKIP LOCKED, sigur
+// în paralel), îl repară, revine după altul; când coada e goală → IESE
+// (scale-to-zero, nu mai consumă abonament). Rulează în worktree-ul propriu
+// (KELION_REPO) → nu se bate pe git cu alți reparatori. Modul clasic (fără flag)
+// rămâne NEATINS = plasa de siguranță; supervizorul îl comută deliberat.
+async function repairerLoop() {
+  const tag = process.env.REPAIRER_TAG || '1'
+  console.log(`Reparator ${tag} pornit -> ${BASE}, repo ${REPO}`)
+  for (;;) {
+    let order = null
+    try {
+      const r = await api('/api/bridge/workorders/claim', 'POST', {})
+      order = r?.order || null
+    } catch (e) {
+      console.error(`reparator ${tag} claim:`, e.message)
+      await new Promise((res) => setTimeout(res, 5000))
+      continue
+    }
+    if (!order) {
+      console.log(`Reparator ${tag}: coadă goală — ies (scale-to-zero).`)
+      process.exit(0)
+    }
+    try {
+      await build(order)
+    } catch (e) {
+      console.error(`reparator ${tag} build:`, e.message)
+    }
+  }
+}
+
 async function main() {
-  console.log('Constructorul Kelion (headless) pornit ->', BASE, 'repo', REPO)
+  // Mod reparator efemer (pornit de supervizor) vs. constructorul clasic (default).
+  if (process.env.REPAIRER_MODE === '1') return repairerLoop()
+  // DOAR deploy: când pool-ul elastic e activ, reparatorii fac build-urile, iar
+  // ACEST proces publică doar release-urile aprobate — nu mai trage ordine de
+  // lucru (altfel s-ar bate cu reparatorii pe revendicare).
+  const deployOnly = process.env.DEPLOY_ONLY === '1'
+  console.log(`Constructorul Kelion (headless${deployOnly ? ' — DOAR deploy' : ''}) pornit ->`, BASE, 'repo', REPO)
   for (;;) {
     try {
-      const { orders } = await api('/api/bridge/workorders')
-      for (const o of orders || []) await build(o)
+      if (!deployOnly) {
+        const { orders } = await api('/api/bridge/workorders')
+        for (const o of orders || []) await build(o)
+      }
       const { releases } = await api('/api/bridge/approved-releases')
       for (const r of releases || []) await deployApproved(r)
     } catch (e) {
