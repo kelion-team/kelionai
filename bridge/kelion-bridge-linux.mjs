@@ -997,11 +997,19 @@ async function handleChatJob(job) {
         if (j && j.gone) cancel.cancel()
       })
       .catch(() => {})
+  // ORDINEA BUCĂȚILOR (bug „degradare continuă", 12 iul): `void post` lăsa două
+  // POST-uri în zbor simultan; când al doilea sosea la backend înaintea primului
+  // (jitter/încărcare — tot mai des în sesiuni lungi), backend-ul le lipea în
+  // ordinea SOSIRII → textul lui Kelion ieșea amestecat („B acum?ună dimineața").
+  // Le înlănțuim: fiecare POST pleacă DOAR după ce precedentul s-a întors, deci
+  // sosesc garantat în ordine. `pending` se acumulează cât un POST e în zbor →
+  // se grupează singur, rămâne rapid, primul cuvânt pleacă tot instant.
+  let postChain = Promise.resolve()
   const flush = () => {
     if (!pending) return
     const text = pending
     pending = ''
-    void post({ id: job.id, text })
+    postChain = postChain.then(() => post({ id: job.id, text })).catch(() => {})
   }
   const onChunk = (t) => {
     const isFirst = !firstAt
@@ -1086,11 +1094,19 @@ async function handleWorkJob(job) {
         if (j && j.gone) cancel.cancel()
       })
       .catch(() => {})
+  // ORDINEA BUCĂȚILOR (bug „degradare continuă", 12 iul): `void post` lăsa două
+  // POST-uri în zbor simultan; când al doilea sosea la backend înaintea primului
+  // (jitter/încărcare — tot mai des în sesiuni lungi), backend-ul le lipea în
+  // ordinea SOSIRII → textul lui Kelion ieșea amestecat („B acum?ună dimineața").
+  // Le înlănțuim: fiecare POST pleacă DOAR după ce precedentul s-a întors, deci
+  // sosesc garantat în ordine. `pending` se acumulează cât un POST e în zbor →
+  // se grupează singur, rămâne rapid, primul cuvânt pleacă tot instant.
+  let postChain = Promise.resolve()
   const flush = () => {
     if (!pending) return
     const text = pending
     pending = ''
-    void post({ id: job.id, text })
+    postChain = postChain.then(() => post({ id: job.id, text })).catch(() => {})
   }
   const onChunk = (t) => {
     if (!firstAt) firstAt = Date.now()
