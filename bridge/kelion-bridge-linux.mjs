@@ -536,15 +536,29 @@ function startWarm(model, pub = false) {
           turn.onChunk?.(t)
         }
       } else if (ev.type === 'result') {
-        // Cotă golită → doar pe canalul de EROARE al CLI-ului (is_error), nu
-        // pe textul unui răspuns normal.
-        if (ev.is_error) quotaHit(tier.name, typeof ev.result === 'string' ? ev.result : '')
+        if (ev.is_error) {
+          // Cotă golită / eroare CLI pe CALEA PRIMARĂ (sesiunea caldă a
+          // adminului). BUG 12 iul: textul erorii („out of usage credits") era
+          // pus ca `final` și întors ca RĂSPUNS — de-aia Adrian îl vedea deși
+          // celelalte 3 producătoare erau deja reparate. Acum: marchează treapta,
+          // OMOARĂ sesiunea (e pe treapta moartă) și încheie GOL → askWarm
+          // întoarce null → cascada askClaude pornește pe treapta următoare.
+          quotaHit(tier.name, typeof ev.result === 'string' ? ev.result : '')
+          return s.kill()
+        }
         const final = typeof ev.result === 'string' ? ev.result.trim() : ''
         const full = final.length >= turn.streamed.trim().length ? final : turn.streamed.trim()
+        // Plasă: dacă „răspunsul" e chiar mesajul de eroare al CLI-ului (scăpat
+        // pe stdout, nu marcat is_error), tratează-l identic.
+        if (full && isCliError(full)) {
+          quotaHit(tier.name, full)
+          return s.kill()
+        }
         // Coada nedifuzată (finalul e mai lung decât ce-a curs) pleacă și ea.
         if (full && full.length > turn.streamed.length && full.startsWith(turn.streamed)) {
           turn.onChunk?.(full.slice(turn.streamed.length))
         }
+        if (full) noteTierOk(tier.name) // treapta a răspuns real → resetează backoff-ul
         endTurn(full || null)
       }
     }
