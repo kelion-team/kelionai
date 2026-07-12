@@ -266,7 +266,13 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,
-      '--allowedTools', 'Read,Edit,Write,Bash',
+      // CAPACITATE MAXIMĂ (Adrian, 12 iul: „cele 2 modele la capacitate maximă"):
+      // ambele trepte de lucru (Kimi + GLM, același spawn) primesc TOT setul de
+      // unelte de editare + căutare + execuție. Lipsa lui Grep/Glob/MultiEdit era
+      // o gaură reală: promptul îi spune modelului „caută cu grep/glob" înainte
+      // să editeze, dar acele unelte NU erau permise → blocate în headless →
+      // constructorul ieșea „fără fișiere". Acum are ce-i trebuie ca să editeze.
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env: workEnv(tier) })
     let buf = ''
