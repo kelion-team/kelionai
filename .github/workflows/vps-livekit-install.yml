@@ -49,8 +49,11 @@ jobs:
           REPO=/root/kelion/repo
           [ -d "$REPO" ] || REPO=/root/kelion
           cd "$REPO"
+          # Aduce EFECTIV codul proaspăt (nu doar fetch) — altfel rulează versiunea
+          # veche a scriptului. reset --hard e sigur: e o clonă-țintă de deploy.
           git fetch origin master -q || true
-          git log --oneline -1 origin/master || true
+          git reset --hard origin/master -q || true
+          git log --oneline -1 || true
           node "$REPO/bridge/kelion-livekit"
 
           echo "=== 3) STARE CONTAINER ==="
