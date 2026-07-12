@@ -546,7 +546,14 @@ async function build(order) {
     `Editeaza codul in acest repo ca sa o rezolvi. Compileaza (npm run build in backend SI frontend) ` +
     `si ruleaza testele (npm test in backend) pana trec fara erori. ` +
     `NU face deploy, NU rula railway. La final scrie pe o singura linie, ` +
-    `dupa "SUMAR:", ce ai schimbat.`
+    `dupa "SUMAR:", ce ai schimbat.\n` +
+    // Problema 1 (Adrian, 12 iul): NU „documenta blocajul" in loc sa lucrezi.
+    `REGULI DE FIER: (1) Daca sarcina cere OPERATIUNI de sistem (instalare pachete, ` +
+    `pornire/repornire servicii, docker, config VPS) si NU le poti rula EXACT si dovedit, ` +
+    `NU edita AI-HANDOFF/documente ca substitut de lucru — scrie clar "OPS_NECESITA_RUNBOOK: <ce comanda exacta trebuie>" ` +
+    `si opreste-te, ca sa preia un workflow determinist (vps-*). ` +
+    `(2) DOVADA INAINTE DE AFIRMATIE: nu spune ca ceva merge fara sa fi VERIFICAT (curl/status/loguri reale), ` +
+    `niciodata din presupunere. (3) La orice esec, citeste faptele (loguri, status) inainte de concluzie.`
   const short = order.text.replace(/\s+/g, ' ').slice(0, 70)
   say(`🔨 Am preluat ordinul și încep execuția: ${short}`)
   pushProgress(10, 'Execuție')

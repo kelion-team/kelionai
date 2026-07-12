@@ -1,0 +1,60 @@
+# AUTO-REPORNIRE VPS LA DEPLOY — rezolvă Problema 3 (Adrian, 12 iul: „rulează
+# cod vechi"). repo-sync copia fișierele pe VPS, dar NU repornea serviciile,
+# deci procesul viu rămânea pe codul vechi până la o repornire MANUALĂ. Aici,
+# când master schimbă codul unui worker (bridge/*.mjs), serviciile se
+# reîmprospătează SINGURE: SSH → git reset --hard origin/master → copiază .mjs-ul
+# în calea reală (ExecStart) → restart → verifică is-active. Determinist, fără
+# LLM, fără intervenția lui Adrian. Decalajul „cod în master, proces viu vechi"
+# dispare definitiv.
+name: vps-auto-restart
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'bridge/kelion-builder-server.mjs'
+      - 'bridge/kelion-bridge-linux.mjs'
+  workflow_dispatch: {}
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reîmprospătează codul + repornește serviciile worker (SSH)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<'EOS'
+          set -e
+          REPO=/root/kelion/repo
+          [ -d "$REPO" ] || REPO=/root/kelion
+          cd "$REPO"
+          git fetch origin master -q || true
+          git reset --hard origin/master -q || true
+          echo "cod proaspăt: $(git log --oneline -1)"
+          refresh() {
+            SVC="$1"; SRC="$2"
+            EXEC=$(systemctl show "$SVC" -p ExecStart --value | grep -oE '/[^ ]*[.]mjs' | head -1)
+            if [ -z "$EXEC" ]; then echo "$SVC: fără ExecStart .mjs, sar"; return 0; fi
+            cp "$REPO/$SRC" "$EXEC"
+            systemctl restart "$SVC"
+            echo "$SVC: reîmprospătat ($SRC) + repornit"
+          }
+          refresh kelion-builder bridge/kelion-builder-server.mjs
+          refresh kelion-bridge   bridge/kelion-bridge-linux.mjs
+          sleep 2
+          echo "=== is-active ==="
+          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer; do
+            printf '%s: ' "$s"; systemctl is-active "$s" 2>/dev/null || true
+          done
+          EOS

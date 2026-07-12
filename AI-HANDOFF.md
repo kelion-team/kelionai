@@ -272,7 +272,19 @@ prin aprobarea lui Adrian; munca rulează pe Kimi/GLM, niciodată pe Max.
 6. 🔜 **Raport zilnic de cost** — services/cost.ts însumat pe motoare (Max/Kimi/GLM/Chirp), spus în chat o dată pe zi + alertă la salt. (Claude îl face în backend)
 7. 🔜 **Profilarea latenței** — cronometre pe segmente (ureche→creier→primul token→prima silabă TTS) în punte + backend; raport cu tabelul milisecundelor pe 5 ture reale. Ținta finală: sub 1s primul cuvânt.
 8. 🔜 **Test de latență după fiecare deploy** — deploy.yml pornește automat public-latency-test după verificarea anti-fantomă. (Claude, în workflow)
-9. 🔜 **Voce totală** — LiveKit full-duplex (cheile există „în backup") apoi cuvânt de trezire Picovoice („Hei, Kelion"). Ultimul, cel mai greu.
+9. 🟡 **Voce totală** — LiveKit self-hosted INSTALAT și LIVE (12 iul: container `kelion-livekit` pe VPS porturile 7880/7881/7882, `LIVEKIT_URL/API_KEY/API_SECRET` scrise în Railway, `/api/admin/livekit/status` OK). RĂMÂNE: URL pe IP simplu (`wss://164.68.120.87:7880`) — browserele cer wss+TLS valid, deci pasul final e un domeniu `livekit.kelionai.app` + reverse proxy/cert; apoi legarea în aplicație (LiveKitRoom în front) și cuvânt de trezire Picovoice.
+
+## 14.b AUTONOMIA LUI KELION — CE TREBUIE FĂCUT DETERMINIST (Adrian, 12 iul: „ce-i lipsește să finalizeze singur, fără să apelez la Claude")
+**PRINCIPIUL (dovedit în noaptea de 12 iul):** operațiunile care trebuie să fie EXACTE și repetabile (instalări, reporniri, config, publicare, diagnostic) = **unealtă deterministă** (workflow/script care rulează comenzi fixe), NICIODATĂ un LLM care „interpretează". LLM-ul (Kimi/GLM) e rezervat DOAR raționamentului real de cod (a scrie/repara cod). Motivele: constructorul-LLM a „documentat blocajul" în loc să ruleze `apt-get`; a diagnosticat „din memorie" în loc de loguri; a rulat cod vechi; și-a alimentat bucle proprii. Fiecare a cerut intervenția lui Claude.
+**DEJA DETERMINIST (12 iul):** `vps-restart.yml` (repornire cu cod proaspăt), `vps-livekit-install.yml` (docker+LiveKit prin SSH), `vps-keys.yml` (secrete mascate din Repo Secrets), auto-sincronizarea modelului (`resolveTierModel` interoghează `/v1/models`), gărzi anti-buclă (release fantomă #138, verificator crăpat #143), health-check LiveKit robust.
+**DE FĂCUT, în ordine (fiecare mută o clasă de sarcini de la LLM la determinist):**
+- **A. Auto-restart la deploy** — când master schimbă fișiere din `bridge/`, un workflow declanșat pe push repornește automat serviciile VPS afectate (elimină definitiv decalajul „cod în master, proces viu vechi"; azi îl declanșez manual).
+- **B. Colector de diagnostic determinist** — un runbook care, la ORICE eșec, adună întâi FAPTELE (systemctl status, journalctl tail, docker ps/logs, curl health, md5 cod-rulat vs repo) și le pune în caiet ÎNAINTE de orice concluzie. Înlocuiește „presupun" cu dovadă.
+- **C. Runbook-uri de operațiuni** — registru de proceduri numite (install-X, restart-Y, rotate-Z, publish-release) care rulează comenzi EXACTE. Sarcina LLM-ului devine „recunoaște că e ops → declanșează runbook-ul R", nu „ghicește comenzile".
+- **D. Liveness automat pe trepte** — verificare periodică (cheie+endpoint+model chiar merg, cu modelul auto-sincronizat) ca o treaptă stricată să fie prinsă înainte să blocheze munca.
+- **E. Probe de sănătate proactive** — check periodic (fiecare serviciu activ? versiune live == master? containere sus? endpoint-uri 200?) care ridică problema singur, nu când o observă Adrian.
+- **F. Publicare release ca pipeline fix** — approve→branch→PR→merge→deploy→verificare anti-fantomă ca workflow determinist, nu ordin LLM (azi trece prin constructor).
+**REGULA PENTRU KELION:** înainte să dai o sarcină de OPERAȚIUNI constructorului-LLM, întreabă-te „asta cere comenzi EXACTE?" — dacă da, folosește/creează un runbook determinist, nu lăsa LLM-ul să „interpreteze". Dovadă (loguri, curl, status) înainte de orice afirmație de succes.
 
 ## 15. CUM VERIFICI CĂ TOTUL E SĂNĂTOS (60 de secunde)
 ```bash
