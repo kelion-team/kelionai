@@ -56,7 +56,6 @@ import {
 import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/replayStore.js'
 import {
   bridgeOnline,
-  bridgeAsk,
   bridgeAskStream,
   BRIDGE_STALL,
   bridgeRepair,
@@ -68,7 +67,6 @@ import {
   setOwnerTz,
   setProgress,
   setAnalysisDetail,
-  sayToAdmin,
   getReadyDeploy,
   triggerDeploy,
   recentDevLog,
@@ -1216,7 +1214,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // o cerință e în lucru, o ÎNCHIDEM — supervizorul vede că nu mai e nimic de
       // dus la capăt (ownedReq = null) și nu mai re-asignează. Fără asta, bucla de
       // re-asignare (până la 3 încercări) ignora comanda. Revenim la modul chat.
-      const stopCmd = /^\s*(stop|stai|opre[șs]te(?:\-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
+      const stopCmd = /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
       if (stopCmd.test(lastUserText) && ownedRequirement()) {
         resolveRequirement()
         const msg = 'Am oprit — cerința e închisă, nu mai reîncerc. Sunt pe modul chat, spune-mi ce vrei.'
@@ -1228,7 +1226,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // OK → DEPLOY: PRIMUL, înaintea oricărui filtru (bug 5 iul: filtrul de
       // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
       // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
-      const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
+      const affirm = /^\s*(ok(ay)?|da|d[aă]-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
       if (getReadyDeploy() && affirm.test(lastUserText)) {
         const t = triggerDeploy()
         const msg = t
@@ -1285,9 +1283,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Vocea pornește DIN PRIMA FRAZĂ, în paralel cu textul (nu după final).
       const voice = createVoiceStream(reply, speechPref || user.locale)
       let a = ''
-      // The exact bridge prompt for this turn, hoisted so the final fallback can
-      // RE-QUEUE the request (nothing is ever dropped without an answer).
-      let reanalyzePrompt = ''
       // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
       // feed so this command starts clean and shows ONLY its own flow. History
       // is kept (Jurnal Claude) and the telemetry bars keep running.
@@ -1774,7 +1769,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const turnPacket =
           (memBlock ? `${memBlock}\n` : '') +
           `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
-        reanalyzePrompt = bridgePrompt
         // O SINGURĂ tură, ZERO reîncercări (Adrian, 10 iul: „dacă la tura 1 nu
         // întoarce răspuns, nu pleacă încă o tură — revine în chat, pentru
         // clarificări"). Dacă prima tură tace, NU relansăm nimic; mai jos Kelion

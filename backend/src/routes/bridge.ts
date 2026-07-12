@@ -1491,7 +1491,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const all = await listStagedReleases(50)
     let purged = 0
     for (const r of all) {
-      if (r.status === 'pending' && /^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
+      if (r.status === 'pending' && r.title.startsWith('RELEASE APROBAT DE ADRIAN:')) {
         await setReleaseStatus(r.id, 'rejected')
         const ai = releaseAlerts.findIndex((a) => a.id === r.id)
         if (ai !== -1) {
@@ -1542,7 +1542,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // genera altă „aprobare" fantomă. NU mai retrimitem un ordin de
         // publicare pentru un release al cărui titlu e deja produsul unui
         // astfel de ordin — se oprește lanțul chiar aici.
-        if (r.status === 'approved' && !/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
+        if (r.status === 'approved' && !r.title.startsWith('RELEASE APROBAT DE ADRIAN:')) {
           bridgeRepair(
             `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
           )

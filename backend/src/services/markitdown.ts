@@ -44,8 +44,12 @@ export async function documentToMarkdown(bytes: Buffer, filename: string): Promi
       })
       py.on('error', (e) => { clearTimeout(killer); reject(e) })
       py.on('close', (code) => {
-        clearTimeout(killer)
-        code === 0 ? resolve(out) : reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
+        void clearTimeout(killer)
+        if (code === 0) {
+          resolve(out)
+        } else {
+          reject(new Error(err.trim().slice(0, 200) || `exit ${code}`))
+        }
       })
     })
     return md.trim()

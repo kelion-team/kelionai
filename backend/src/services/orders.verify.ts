@@ -22,7 +22,6 @@ check('conflict → spune că a retrimis la reconstruit', /reconstruit/i.test(c1
 const c2 = decideDeployFailure('npm run build a picat: type error', 'ceva')
 check('build fail (fără conflict) → action retry', c2.action === 'retry' && c2.conflict === false)
 check('retry → cere „ok"', /zi „ok"/i.test(c2.message))
-const c3 = decideDeployFailure('CONFLICT (content): Merge conflict in chat.ts')
 check('conflict englezesc „CONFLICT/Merge conflict" → rebuild', decideDeployFailure('CONFLICT (content): Merge conflict in chat.ts').action === 'rebuild')
 
 console.log('#3 isDuplicateOrder — același lucru nu se mai construiește de 2 ori:')
