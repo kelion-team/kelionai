@@ -20,6 +20,18 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + '…'
 }
 
+// ZGOMOT BENIGN, NU BUG (Adrian, 12 iul: „reparară o fantomă — consumă credite,
+// bani; corectează-i ce trebuie să știe"). Un AVERTISMENT de browser (o funcție
+// depreciată, o violare de performanță, un observer care buclează) NU e o eroare
+// de reparat. Raportat, se aduna și arata ca un bug — creierul pornea o reparație
+// costisitoare pentru ceva ce NU e stricat. Aici le tăiem înainte să plece: doar
+// erorile reale (excepții, respingeri, console.error real) ajung la server.
+const BENIGN = /\bis deprecated\b|deprecat|will be removed|has been deprecated|ScriptProcessorNode|AudioWorkletNode|createScriptProcessor|\[Violation\]|non-passive event listener|passive event listener|ResizeObserver loop|Download the React DevTools|chrome-extension:\/\//i
+
+function isBenign(text: string): boolean {
+  return BENIGN.test(text)
+}
+
 function currentReports(): ClientErrorReport[] {
   try {
     const raw = localStorage.getItem(KEY)
@@ -81,6 +93,10 @@ function flush(): void {
 }
 
 export function reportError(type: ClientErrorReport['type'], message: string, stack?: string): void {
+  // Avertismentele de consolă benigne (deprecări, violări de performanță) nu sunt
+  // bug-uri — nu le trimite, ca să nu declanșeze reparații-fantomă. Erorile reale
+  // (excepții JS, respingeri de promisiuni) trec MEREU, indiferent de text.
+  if ((type === 'console-warn' || type === 'console-error') && isBenign(message)) return
   const report: ClientErrorReport = {
     type,
     message,

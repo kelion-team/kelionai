@@ -1692,6 +1692,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // ERORI DE CONSOLĂ CLIENT (Adrian, 11 iul): dovezi de la browser înainte de
   // diagnostic. Endpoint public (fără bridge secret) — clienții nu au secretul —
   // dar cu rate-limit per IP ca să nu devină vector de spam.
+  // Avertismente de browser care NU sunt bug-uri (deprecări, violări de perf,
+  // ResizeObserver loop, zgomot de extensii). Nu se salvează → nu se adună →
+  // nu declanșează reparații-fantomă. Sincronizat cu filtrul din frontend
+  // (frontend/src/lib/errorReporting.ts).
+  const BENIGN_CLIENT_NOISE =
+    /\bis deprecated\b|deprecat|will be removed|has been deprecated|ScriptProcessorNode|AudioWorkletNode|createScriptProcessor|\[Violation\]|non-passive event listener|passive event listener|ResizeObserver loop|Download the React DevTools|chrome-extension:\/\//i
   const clientErrorBuckets = new Map<string, number[]>()
   function clientErrorRateLimited(ip: string): boolean {
     const now = Date.now()
@@ -1723,6 +1729,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       }
       for (const r of reports.slice(0, 20)) {
         if (!r || typeof r.message !== 'string' || !r.message.trim()) continue
+        // ZGOMOT BENIGN, NU BUG (Adrian, 12 iul): avertismentele de browser
+        // (deprecări, violări de performanță, ResizeObserver loop) nu sunt erori
+        // de reparat. Filtrul de pe client le taie deja, dar îl dublăm AICI ca să
+        // prindem și clienții vechi (deja livrați) — altfel un warning se salva,
+        // se aduna și arăta ca un bug, iar creierul pornea o reparație-fantomă.
+        if (BENIGN_CLIENT_NOISE.test(r.message)) continue
         await saveClientError({
           type: typeof r.type === 'string' ? r.type : 'unknown',
           message: r.message,
