@@ -1056,6 +1056,12 @@ async function handleChatJob(job) {
   } finally {
     clearInterval(pulse)
     flush() // orice bucată rămasă în tampon pleacă acum
+    // AȘTEAPTĂ golirea lanțului de bucăți ÎNAINTE de sendReply. Fără asta, /reply
+    // ajungea la backend înaintea ULTIMEI bucăți (înlănțuită de #158) → backend-ul
+    // ștergea sink-ul → ultimele cuvinte se pierdeau din text, istoric ȘI voce
+    // (regresie #158, 12 iul: replicile își pierdeau finalul). Acum coada se
+    // golește prima, deci `streamed` de pe backend e complet.
+    await postChain.catch(() => {})
   }
   if (cancel.cancelled) {
     await sendReply(job.id, '').catch(() => {})
@@ -1128,6 +1134,10 @@ async function handleWorkJob(job) {
   } finally {
     clearInterval(pulse)
     flush()
+    // Aceeași gardă ca pe calea de chat: golește lanțul de bucăți ÎNAINTE de
+    // sendReply, ca ultima bucată (înlănțuită de #158) să nu se piardă când /reply
+    // ajunge prima și șterge sink-ul.
+    await postChain.catch(() => {})
   }
   if (cancel.cancelled) {
     await sendReply(job.id, '').catch(() => {})
