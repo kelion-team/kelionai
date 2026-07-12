@@ -63,4 +63,44 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(500).send({ error: (err as Error).message })
     }
   })
+
+  // ── VOCE FULL-DUPLEX (Adrian, 12 iul: „chatul full duplex") ──────────────────
+  // Token pentru UTILIZATORUL LOGAT (nu doar admin) ca să intre în camera lui de
+  // voce LiveKit. Fiecare user are o cameră PROPRIE, deterministă (numele derivă
+  // din email), în care agentul de voce al lui Kelion intră și ține bucla
+  // audio↔audio. Zero efect pe traseul de voce HTTP actual — e o cale nouă,
+  // paralelă, pornită doar când clientul cere explicit un token de aici.
+  app.post('/api/livekit/token', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+
+    const { url, apiKey, apiSecret } = config.livekit
+    if (!url || !apiKey || !apiSecret) {
+      return reply.code(503).send({ error: 'LiveKit not configured' })
+    }
+
+    try {
+      const { AccessToken } = await sdk()
+      const identity = user.email.slice(0, 128)
+      const room = voiceRoomFor(user.email)
+      const token = new AccessToken(apiKey, apiSecret, {
+        identity,
+        // Numele afișat în cameră — pentru agentul de voce și diagnostic.
+        name: user.name || user.email.split('@')[0],
+        ttl: '2h',
+      })
+      token.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true })
+      const jwt = await token.toJwt()
+      return { ok: true, url, identity, room, token: jwt }
+    } catch (err) {
+      app.log.warn({ err }, 'LiveKit user token generation failed')
+      return reply.code(500).send({ error: (err as Error).message })
+    }
+  })
+}
+
+// Numele camerei de voce a unui user: determinist din email, doar caractere
+// sigure. Același nume îl folosește și agentul de voce ca să știe unde să intre.
+export function voiceRoomFor(email: string): string {
+  return 'voice-' + email.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
 }
