@@ -308,20 +308,22 @@ export default function ChatPanel({
     suggestFacial(text)
   }
 
-  // Micro-expresia feței aleasă din tonul replicii încheiate (păstrată din
-  // release-ul „v2.3": fața pe morph-uri e permisă) — determinist și gratuit.
+  // Micro-expresia feței, în stil GENTLEMAN (Adrian, 12 iul: „mimică de golan,
+  // nu gentleman"). Un domn e COMPUS: fața rămâne neutră IMPLICIT; o expresie
+  // apare RAR și DOAR la un sentiment real și clar — niciodată reactiv la
+  // fiecare semn de punctuație (mirare la fiecare „!", sprânceană la fiecare
+  // „?" — asta arăta agitat). Fără expresie implicită: tăcerea feței e demnă.
   function suggestFacial(text: string): void {
     const s = text.trim()
     if (!s) return
-    if (/[?？]\s*$/.test(s)) return pushFacial('raisedBrow')
-    if (/[!！]\s*$/.test(s)) return pushFacial('surprise')
-    if (/\b(mul[țt]umesc|thank|bravo|excelent|minunat|foarte bine|wonderful|great|superb)\b/i.test(s))
+    // Recunoștință caldă, sinceră → un zâmbet reținut.
+    if (/\b(mul[țt]umesc|[îi][țt]i mul[țt]umesc|thank you|apreciez|bravo|felicit)\b/i.test(s))
       return pushFacial('warmth')
-    if (/\b([îi]mi pare r[ăa]u|scuze|sorry|regret|p[ăa]cat|din p[ăa]cate)\b/i.test(s))
+    // Regret/empatie autentică → expresie blândă.
+    if (/\b([îi]mi pare r[ăa]u|regret|condolean|din p[ăa]cate|sympath|my condolences)\b/i.test(s))
       return pushFacial('empathy')
-    if (/\b(hmm|ei bine|s[ăa] vedem|s[ăa] g[âa]ndim|let me think|let's see|o clip[ăa])\b/i.test(s))
-      return pushFacial('think')
-    pushFacial('smile')
+    // Altfel: NICIO expresie — fața compusă, neutră, demnă. (Gesturile de corp
+    // și expresiile mai ample vin DOAR la comanda creierului prin [GEST], rar.)
   }
 
   // The conversation SURVIVES a RELEASE refresh — and ONLY that. The release
