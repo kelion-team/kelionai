@@ -1,91 +1,83 @@
-# CHEILE DE REZERVĂ (Adrian, 11 iul): lanțul Claude Max → Kimi → GLM Max.
-# Aici Adrian LIPEȘTE cheile cumpărate (Kimi for Coding / GLM Coding Plan) ca
-# input-uri mascate — ele NU trec prin Claude, NU intră în repo, NU apar în
-# loguri (add-mask + scriere prin stdin). Workflow-ul le pune pe VPS exact în
-# fișierele pe care workerul le va citi pentru comutarea automată:
-#   /root/kelion/kimi-key.txt   (rezerva 1 — Kimi for Coding)
-#   /root/kelion/glm-key.txt    (rezerva 2 — GLM Coding Plan)
-# Mecanica SSH e copiată din bridge-fix.yml (dovedită: stdin → cat, parolă
-# mascată, PreferredAuthentications=password).
+# CHEILE DE REZERVĂ pe VPS — CITITE DIN REPO SECRETS (nu mai tastate).
+#
+# SECURITATE (Adrian, 12 iul — după ce vechea formă cu input-uri a afișat parola
+# root în clar în env-group înainte de mascare): valorile sensibile NU mai sunt
+# input-uri workflow_dispatch (care se scurg în log). Vin din GitHub Secrets,
+# pe care GitHub le maschează AUTOMAT de la începutul job-ului — nu apar
+# NICIODATĂ în clar, nicăieri. Singurul input rămas e o ALEGERE (ce cheie scriem
+# acum), care nu e un secret.
+#
+# ── CE TREBUIE SETAT O SINGURĂ DATĂ (Settings → Secrets and variables → Actions):
+#   VPS_ROOT_PASS      — parola root a VPS-ului (OBLIGATORIU)
+#   KIMI_KEY           — cheia Kimi for Coding (dacă vrei s-o scrii/rotești)
+#   GLM_KEY            — cheia GLM Coding Plan
+#   VPS_GITHUB_TOKEN   — token GitHub fin-granulat pentru VPS
+#   RAILWAY_TOKEN      — token Railway (există deja, folosit și de alte workflow-uri)
+#
+# Scrie pe VPS exact în fișierele pe care le citește workerul:
+#   /root/kelion/kimi-key.txt · /root/kelion/glm-key.txt ·
+#   /root/kelion/github-token.txt · RAILWAY_TOKEN în /root/kelion/claude.env
 name: vps-keys
 
 on:
   workflow_dispatch:
     inputs:
-      vps_pass:
-        description: 'Parola root VPS (mascată; nu se salvează)'
+      which:
+        description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
-      kimi_key:
-        description: 'Cheia Kimi for Coding (gol = nu se schimbă)'
-        required: false
-      glm_key:
-        description: 'Cheia GLM Coding Plan (gol = nu se schimbă)'
-        required: false
-      github_token:
-        description: 'Token GitHub fin-granulat, DOAR repo-ul ăsta (gol = nu se schimbă)'
-        required: false
-      railway_token:
-        description: 'Railway API token (railway.app → Account Settings → Tokens) — necesar pentru bridge/kelion-livekit; gol = nu se schimbă'
-        required: false
+        type: choice
+        options: [railway, kimi, glm, github, all]
 
 jobs:
   put:
     runs-on: ubuntu-latest
     steps:
-      - name: Scrie cheile pe VPS (mascate, prin stdin)
+      - name: Scrie cheile pe VPS (din Secrets, mascate automat)
         env:
-          VPS_PASS: ${{ inputs.vps_pass }}
-          KIMI_KEY: ${{ inputs.kimi_key }}
-          GLM_KEY: ${{ inputs.glm_key }}
-          GH_KEY: ${{ inputs.github_token }}
-          RW_TOKEN: ${{ inputs.railway_token }}
+          # Toate din secrets.* → GitHub le maschează de la începutul job-ului,
+          # deci NU apar în clar în env-group (spre deosebire de input-uri).
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+          KIMI_KEY: ${{ secrets.KIMI_KEY }}
+          GLM_KEY: ${{ secrets.GLM_KEY }}
+          GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
+          RW_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          WHICH: ${{ inputs.which }}
         run: |
           set -euo pipefail
-          echo "::add-mask::$VPS_PASS"
-          [ -n "$KIMI_KEY" ] && echo "::add-mask::$KIMI_KEY"
-          [ -n "$GLM_KEY" ] && echo "::add-mask::$GLM_KEY"
-          [ -n "$GH_KEY" ] && echo "::add-mask::$GH_KEY"
-          [ -n "$RW_TOKEN" ] && echo "::add-mask::$RW_TOKEN"
-          # Maschează orice apariție și în payload-ul evenimentului (inputurile
-          # workflow_dispatch ajung în $GITHUB_EVENT_PATH) — aceeași lecție ca
-          # la bridge-deploy.yml.
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS (Settings → Secrets → Actions)."; exit 1
+          fi
           VPS_HOST=164.68.120.87
-
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
           export SSHPASS="$VPS_PASS"
           SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
 
-          if [ -n "$KIMI_KEY" ]; then
+          want() { [ "$WHICH" = "all" ] || [ "$WHICH" = "$1" ]; }
+
+          if want kimi; then
+            [ -n "$KIMI_KEY" ] || { echo "::error::secretul KIMI_KEY lipsește"; exit 1; }
             printf '%s' "$KIMI_KEY" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
               'cat > /root/kelion/kimi-key.txt && chmod 600 /root/kelion/kimi-key.txt && echo "kimi-key.txt scris: $(wc -c < /root/kelion/kimi-key.txt) octeti"'
-          else
-            echo "kimi_key gol — nu se schimbă."
           fi
 
-          if [ -n "$GLM_KEY" ]; then
+          if want glm; then
+            [ -n "$GLM_KEY" ] || { echo "::error::secretul GLM_KEY lipsește"; exit 1; }
             printf '%s' "$GLM_KEY" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
               'cat > /root/kelion/glm-key.txt && chmod 600 /root/kelion/glm-key.txt && echo "glm-key.txt scris: $(wc -c < /root/kelion/glm-key.txt) octeti"'
-          else
-            echo "glm_key gol — nu se schimbă."
           fi
 
-          if [ -n "$GH_KEY" ]; then
+          if want github; then
+            [ -n "$GH_KEY" ] || { echo "::error::secretul VPS_GITHUB_TOKEN lipsește"; exit 1; }
             printf '%s' "$GH_KEY" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
               'cat > /root/kelion/github-token.txt && chmod 600 /root/kelion/github-token.txt && echo "github-token.txt scris: $(wc -c < /root/kelion/github-token.txt) octeti"'
-          else
-            echo "github_token gol — nu se schimbă."
           fi
 
-          # RAILWAY_TOKEN nu e un fișier separat — bridge/kelion-livekit îl
-          # citește din /root/kelion/claude.env, ca CLAUDE_CODE_OAUTH_TOKEN/
-          # BRIDGE_SECRET. UPSERT: înlocuiește linia dacă există deja, altfel
-          # o adaugă — restul fișierului rămâne neatins.
-          if [ -n "$RW_TOKEN" ]; then
+          if want railway; then
+            [ -n "$RW_TOKEN" ] || { echo "::error::secretul RAILWAY_TOKEN lipsește"; exit 1; }
+            # UPSERT în claude.env: înlocuiește linia dacă există, altfel o adaugă.
             printf '%s' "$RW_TOKEN" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
               'RT=$(cat); F=/root/kelion/claude.env; touch "$F"; grep -v "^RAILWAY_TOKEN=" "$F" > "$F.tmp" || true; echo "RAILWAY_TOKEN=$RT" >> "$F.tmp"; mv "$F.tmp" "$F"; chmod 600 "$F"; echo "RAILWAY_TOKEN scris în claude.env"'
-          else
-            echo "railway_token gol — nu se schimbă."
           fi
 
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
