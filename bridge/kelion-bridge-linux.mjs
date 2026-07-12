@@ -89,7 +89,37 @@ const TIERS = [
   { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
 ]
 const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
+const TIER_COOLDOWN_MAX_MS = 6 * 3600_000 // plafon backoff (o treaptă cronic goală)
 const tierDownUntil = Object.create(null)
+// PERSISTENȚA STĂRII TREPTELOR (Adrian, 12 iul: „să nu mai revină la următorul
+// deploy"). tierDownUntil era DOAR în memorie → la fiecare restart/deploy chatul
+// pornea iar pe Max epuizat și reflappa (max→kimi la fiecare mesaj). O salvăm pe
+// disc și o reîncărcăm la boot: o treaptă golită RĂMÂNE golită peste deploy,
+// până-i expiră răcirea. `fails` = câte cote la rând (pentru backoff).
+const TIER_STATE_FILE = '/root/kelion/tier-state.json'
+const tierFails = Object.create(null)
+function persistTierState() {
+  try {
+    writeFileSync(TIER_STATE_FILE, JSON.stringify({ downUntil: tierDownUntil, fails: tierFails }))
+  } catch {
+    /* disc plin/readonly — nu blocăm chatul pentru persistență */
+  }
+}
+function loadTierState() {
+  try {
+    const s = JSON.parse(readFileSync(TIER_STATE_FILE, 'utf8'))
+    const now = Date.now()
+    for (const [name, until] of Object.entries(s.downUntil ?? {})) {
+      if (typeof until === 'number' && until > now) tierDownUntil[name] = until
+    }
+    for (const [name, n] of Object.entries(s.fails ?? {})) {
+      if (typeof n === 'number' && n > 0) tierFails[name] = n
+    }
+  } catch {
+    /* prima pornire / fișier lipsă — pornim curat */
+  }
+}
+loadTierState()
 function tierKeyOf(t) {
   if (!t.keyFile) return null
   try {
@@ -136,13 +166,38 @@ function currentTier() {
 // result cu is_error) — NICIODATĂ pe textul răspunsului normal, altfel o simplă
 // discuție despre limite ar comuta treapta din greșeală.
 const QUOTA_RE = /usage limit|usage credits|credit balance|rate.?limit|quota|429/i
+// SEMNĂTURA MESAJULUI DE EROARE AL CLI-ULUI, ca RĂSPUNS (nu doar pe stderr).
+// Când abonamentul e golit, `claude -p` scrie EXACT „You're out of usage
+// credits. /model to switch models." la STDOUT, ca și cum ar fi replica lui
+// Kelion — și ajungea la Adrian ca răspuns (bug 12 iul). Astea sunt șiruri
+// emise de CLI, nu ceva ce ar spune Kelion natural, deci le prindem sigur.
+const CLI_ERR_RE =
+  /you'?re out of usage credits|out of usage credits|\/model to switch models|credit balance is too low|please run \/login|invalid api key|authentication_error|401 unauthorized/i
+function isCliError(text) {
+  return CLI_ERR_RE.test(String(text ?? ''))
+}
 let lastQuotaReason = null
 function quotaHit(tierName, errText) {
   if (!errText || !QUOTA_RE.test(String(errText))) return false
-  tierDownUntil[tierName] = Date.now() + TIER_COOLDOWN_MS
+  // BACKOFF (Adrian, 12 iul: „fără întrerupere, fără flapp"): o treaptă cronic
+  // golită (ex. Max) nu se mai reîncearcă la fiecare 30 min (ceea ce o făcea să
+  // reflappe max→kimi→max), ci la intervale tot mai mari: 30m → 1h → 2h... 6h.
+  tierFails[tierName] = (tierFails[tierName] || 0) + 1
+  const cooldown = Math.min(TIER_COOLDOWN_MS * 2 ** (tierFails[tierName] - 1), TIER_COOLDOWN_MAX_MS)
+  tierDownUntil[tierName] = Date.now() + cooldown
   lastQuotaReason = String(errText).slice(0, 300)
-  log(`[abonament] treapta „${tierName}" e golită — comut pe următoarea, revin în ${TIER_COOLDOWN_MS / 60_000} min.`)
+  persistTierState()
+  log(`[abonament] treapta „${tierName}" golită (a ${tierFails[tierName]}-a oară) — comut, revin în ${Math.round(cooldown / 60_000)} min.`)
   return true
+}
+// O treaptă a răspuns cu text REAL → resetează contorul de eșecuri (backoff-ul
+// pleacă de la zero data viitoare). Așa Max, când chiar revine, e reîncercat
+// prompt, nu ținut degeaba la răcire lungă.
+function noteTierOk(tierName) {
+  if (tierFails[tierName]) {
+    tierFails[tierName] = 0
+    persistTierState()
+  }
 }
 
 // CHAT ONLY. This unattended server worker answers the admin's messages with
@@ -645,10 +700,16 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
             onChunk?.(t)
           }
         } else if (ev.type === 'result' && typeof ev.result === 'string') {
-          // Cotă golită → doar pe eroare reală (is_error), nu pe text normal.
-          if (ev.is_error) quotaHit(tier.name, ev.result)
-          // Răspunsul final complet (autoritar). Îl păstrăm pe cel mai lung.
-          if (ev.result.trim().length > finalText.trim().length) finalText = ev.result
+          if (ev.is_error) {
+            // Cotă golită / eroare CLI → marchează treapta jos, dar NU păstra
+            // textul erorii ca răspuns (bug 12 iul: „out of usage credits"
+            // ajungea la Adrian ca replica lui Kelion). Îl lăsăm gol → cascada
+            // askClaude trece TĂCUT pe treapta următoare (kimi/glm).
+            quotaHit(tier.name, ev.result)
+          } else if (ev.result.trim().length > finalText.trim().length) {
+            // Răspunsul final complet (autoritar). Îl păstrăm pe cel mai lung.
+            finalText = ev.result
+          }
         }
       }
     })
@@ -656,6 +717,13 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
     child.on('close', () => {
       clearTimeout(killer)
       const full = (finalText.trim().length >= streamed.trim().length ? finalText : streamed).trim()
+      // Plasă: dacă răspunsul E de fapt mesajul de eroare al CLI-ului (cotă
+      // golită scăpată pe stdout, nu pe is_error), marchează treapta și întoarce
+      // GOL — nu-l arăta ca replică, nu difuza coada. Cascada trece pe următoarea.
+      if (full && isCliError(full)) {
+        quotaHit(tier.name, full)
+        return resolve(null)
+      }
       // Dacă finalul e mai lung decât ce-am difuzat (și e o continuare curată),
       // trimite coada lipsă ca ultimă bucată — să nu piardă Adrian sfârșitul.
       if (full && full.length > streamed.length && full.startsWith(streamed)) {
@@ -668,6 +736,7 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
         // text din cascada askClaude, în ACEEAȘI tură) pornește pe următoarea.
         quotaHit(tier.name, err)
       }
+      if (full) noteTierOk(tier.name) // treapta a răspuns real → resetează backoff-ul
       resolve(full || null)
     })
     child.stdin.write(prompt)
@@ -694,14 +763,22 @@ function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel } = {})
     child.stderr.on('data', (d) => (err += d))
     child.on('close', () => {
       clearTimeout(killer)
-      if (out.trim()) resolve(out.trim())
-      else {
-        if (err.trim()) {
-          log(`claude stderr: ${err.trim().slice(0, 200)}`)
-          quotaHit(tier.name, err)
-        }
-        resolve(null)
+      const text = out.trim()
+      // CLI a scris eroarea de cotă la stdout ca „răspuns" → marchează treapta,
+      // întoarce GOL (nu ajunge la user), cascada trece pe următoarea.
+      if (text && isCliError(text)) {
+        quotaHit(tier.name, text)
+        return resolve(null)
       }
+      if (text) {
+        noteTierOk(tier.name) // răspuns real → resetează backoff-ul treptei
+        return resolve(text)
+      }
+      if (err.trim()) {
+        log(`claude stderr: ${err.trim().slice(0, 200)}`)
+        quotaHit(tier.name, err)
+      }
+      resolve(null)
     })
     child.stdin.write(prompt)
     child.stdin.end()
@@ -810,11 +887,22 @@ function runClaudeBare(prompt, timeoutMs = 60_000, pub = false, cancel) {
     }
     cancel?.attach(child)
     let out = ''
+    // Întoarce răspunsul, dar dacă e mesajul de eroare al CLI-ului (cotă golită),
+    // marchează treapta și întoarce GOL — nu-l arăta ca replică.
+    const finish = () => {
+      const text = out.trim()
+      if (text && isCliError(text)) {
+        quotaHit(tier.name, text)
+        return resolve(null)
+      }
+      if (text) noteTierOk(tier.name)
+      resolve(text || null)
+    }
     const killer = setTimeout(() => {
       try {
         child.kill()
       } catch {}
-      resolve(out.trim() || null)
+      finish()
     }, timeoutMs)
     child.stdout.on('data', (d) => (out += d))
     child.on('error', () => {
@@ -823,7 +911,7 @@ function runClaudeBare(prompt, timeoutMs = 60_000, pub = false, cancel) {
     })
     child.on('close', () => {
       clearTimeout(killer)
-      resolve(out.trim() || null)
+      finish()
     })
     try {
       child.stdin.write(prompt)
