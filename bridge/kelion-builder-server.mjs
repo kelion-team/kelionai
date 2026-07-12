@@ -8,9 +8,9 @@
 //      + testeze. NU publica.
 //   3. STAGEAZA un release (POST /api/bridge/stage-release) cu ce s-a schimbat.
 //   4. Adrian aproba din tab-ul Admin "Release-uri".
-//   5. Constructorul vede aprobarea (GET /api/bridge/approved-releases) si abia
-//      ATUNCI face deploy: PR → merge în master → dispatch deploy.yml (pipeline
-//      GitHub/Railway, NU railway up direct).
+//   5. Serverul pune release-ul aprobat in coada `deploy-pending`; constructorul
+//      o citeste si face deploy: PR → merge în master → dispatch deploy.yml
+//      (pipeline GitHub/Railway, NU railway up direct), cu verificare anti-fantomă.
 //
 // MONITOR LIVE (ordinul lui Adrian, 4 iul: "trebuie sa vad live cu ce te ocupi
 // pe monitor"): constructorul NU mai lucreaza mut. Claude ruleaza cu
@@ -670,9 +670,13 @@ async function build(order) {
   // ordinului însuși devenind un release fantomă, aprobat la nesfârșit.
   const isPublishOrder = /^RELEASE APROBAT DE ADRIAN:/.test(order.text)
   if (v.ok && isPublishOrder) {
-    say(`✅ Ordin de publicare executat: ${v.proof}`)
-    await tellAdmin(`Am dus la capăt publicarea: ${title.slice(0, 120)}. Dovada: ${v.proof}.`)
-    pushProgress(100, 'Publicare executată')
+    // Ordinele vechi de publicare (generate înainte de fixul auto-deploy) nu mai
+    // trebuie să ocupe constructorul — noua cale pune release-ul aprobat direct în
+    // readyDeploys. Închidem ordinul fantomă ca „finalized" ca să nu rămână blocat.
+    say(`✅ Ordin de publicare închis (fantomă/vorbit): ${v.proof}`)
+    await tellAdmin(`Am închis ordinul de publicare vechi „${title.slice(0, 120)}" — acum release-urile aprobate merg automat prin pipeline.`)
+    if (order.id) void api('/api/bridge/workorders/status', 'POST', { id: order.id, status: 'finalized' })
+    pushProgress(100, 'Ordin de publicare închis')
   } else if (v.ok) {
     say('🔍 Constructorul a trecut dovada — pornesc verificatorul independent GLM înainte de a declara gata')
     pushProgress(90, 'Verificare independentă GLM')
@@ -803,6 +807,9 @@ async function deployApproved(r) {
     say(`🔴 Publicare eșuată — nimic nu s-a publicat: ${tail.slice(0, 160)}`)
     await tellAdmin(`Publicarea „${title.slice(0, 100)}" a eșuat: ${tail.slice(0, 200)}. Nimic nu a ajuns live.`)
     pushProgress(100, 'Publicare eșuată')
+    // Eliberează deployWanted și trimite detaliul eșecului înapoi în backend,
+    // ca serverul să decidă dacă e conflict (reconstruire) sau retry.
+    void api('/api/bridge/deploy-done', 'POST', { ok: false, detail: tail.slice(0, 200) })
     return
   }
   say('🔀 branch→master + deploy verificat anti-fantomă: OK')
@@ -810,9 +817,13 @@ async function deployApproved(r) {
 
   // Release-ul se marchează publicat abia după ce pipeline-ul a confirmat
   // verificarea anti-fantomă (versiunea live s-a schimbat).
-  await api('/api/bridge/release-deployed', 'POST', { id: r.id })
+  if (r.id) await api('/api/bridge/release-deployed', 'POST', { id: r.id })
   say('🟢 PUBLICAT + VERIFICAT LIVE prin pipeline GitHub/Railway')
   pushProgress(98, 'Publicat — regenerez QR-uri')
+
+  // Anunță backend-ul că deploy-ul s-a terminat cu bine, ca verificarea live
+  // și închiderea cerinței să continue acolo.
+  void api('/api/bridge/deploy-done', 'POST', { ok: true, detail: 'branch→master + deploy anti-fantomă OK' })
 
   // După deploy, regenerăm codurile QR ca să reflecte ultimele căi.
   await generateAndUploadQRs()
@@ -865,8 +876,8 @@ async function main() {
         const { orders } = await api('/api/bridge/workorders')
         for (const o of orders || []) await build(o)
       }
-      const { releases } = await api('/api/bridge/approved-releases')
-      for (const r of releases || []) await deployApproved(r)
+      const { deploy } = await api('/api/bridge/deploy-pending')
+      if (deploy) await deployApproved(deploy)
     } catch (e) {
       console.error('bucla:', e.message)
     }

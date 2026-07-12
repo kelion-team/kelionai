@@ -271,8 +271,8 @@ export function setAnalysisDetail(text: string): void {
 // COADĂ, nu sertar unic (5 iul): două fixuri gata în același timp se călcau pe
 // picior — al doilea îl SUPRASCRIA pe primul și un „da" publica altceva decât
 // credea Adrian. Acum fiecare fix stă la rând; fiecare „da" publică PRIMUL.
-const readyDeploys: { branch: string; summary: string; at: number }[] = []
-let deployWanted: { branch: string; summary: string } | null = null
+const readyDeploys: { branch: string; summary: string; at: number; id?: string; title?: string; detail?: string }[] = []
+let deployWanted: { branch: string; summary: string; id?: string; title?: string; detail?: string } | null = null
 // FĂRĂ AMNEZIE LA RESTART (Adrian, 5 iul: „da"-ul lui a căzut în gol după un
 // restart Railway care a uitat sertarul din RAM): coada de release se persistă
 // în Postgres la fiecare schimbare și se reîncarcă la pornire.
@@ -282,24 +282,28 @@ function persistReady(): void {
 void loadKv('ready_deploys')
   .then((v) => {
     if (!v) return
-    const arr = JSON.parse(v) as { branch?: string; summary?: string; at?: number }[]
+    const arr = JSON.parse(v) as { branch?: string; summary?: string; at?: number; id?: string; title?: string; detail?: string }[]
     for (const r of arr) {
       if (r && typeof r.branch === 'string' && !readyDeploys.some((x) => x.branch === r.branch)) {
-        readyDeploys.push({ branch: r.branch, summary: String(r.summary ?? ''), at: Number(r.at ?? Date.now()) })
+        readyDeploys.push({ branch: r.branch, summary: String(r.summary ?? ''), at: Number(r.at ?? Date.now()), id: r.id, title: r.title, detail: r.detail })
       }
     }
+    // Dacă serverul a fost restartat în timpul unui deploy, redeclanșează
+    // imediat primul release așteptat — altfel deployWanted (în memorie) se
+    // pierdea și publicarea rămânea blocată "la infinit".
+    if (readyDeploys.length > 0 && !deployWanted) triggerDeploy()
   })
   .catch(() => {})
-export function getReadyDeploy(): { branch: string; summary: string } | null {
+export function getReadyDeploy(): { branch: string; summary: string; id?: string; title?: string; detail?: string } | null {
   const r = readyDeploys[0]
-  return r ? { branch: r.branch, summary: r.summary } : null
+  return r ? { branch: r.branch, summary: r.summary, id: r.id, title: r.title, detail: r.detail } : null
 }
 // Called from chat.ts when Adrian says "ok/da/publică…" and a fix is ready.
-export function triggerDeploy(): { summary: string } | null {
+export function triggerDeploy(): { summary: string; id?: string } | null {
   const r = readyDeploys.shift()
   if (!r) return null
   persistReady()
-  deployWanted = { branch: r.branch, summary: r.summary }
+  deployWanted = { branch: r.branch, summary: r.summary, id: r.id, title: r.title, detail: r.detail }
   noteBrainActivity('🚀 Public pe producție — pornesc deploy-ul')
   updateRequirement('deploy pornit')
   if (readyDeploys.length > 0) {
@@ -1183,6 +1187,18 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, id: bridgeRepair(text) }
   })
 
+  // Set explicit status on a work order (secret) — used by the builder to close
+  // stale/phantom orders it can no longer execute (e.g. old "RELEASE APROBAT"
+  // orders left over before the auto-deploy fix).
+  app.post<{ Body: { id?: string; status?: string } }>('/api/bridge/workorders/status', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const id = typeof req.body?.id === 'string' ? req.body.id.trim() : ''
+    const status = typeof req.body?.status === 'string' ? req.body.status.trim() : ''
+    if (!id || !status) return reply.code(400).send({ error: 'bad_request' })
+    await setWorkOrderStatus(id, status)
+    return { ok: true }
+  })
+
   // A parallel builder AGENT → its live step, shown on Adrian's monitor console
   // (each agent announces itself so he SEES all of them working at once).
   app.post<{ Body: { line?: string } }>('/api/bridge/activity', async (req, reply) => {
@@ -1356,9 +1372,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
       const failedBranch = deployWanted?.branch ?? ''
       const failedSummary = deployWanted?.summary ?? ''
+      const failedId = deployWanted?.id ?? ''
+      const failedTitle = deployWanted?.title ?? ''
+      const failedDetail = deployWanted?.detail ?? ''
       deployWanted = null
       const ok = req.body?.ok !== false
       if (ok) {
+        // Marchează release-ul ca deployed imediat ce deployerul raportează OK;
+        // confirmLiveThenAnnounce verifică separat live-ul, dar stadiul release-ului
+        // nu mai trebuie să rămână „approved".
+        if (failedId) void setReleaseStatus(failedId, 'deployed')
         // NU mai anunțăm „publicat" pe cuvântul deployerului. Creierul verifică
         // el însuși live-ul (fetch → 200) și abia apoi confirmă (Adrian, 5 iul:
         // „trimis ≠ gata"). Rulează asincron ca deployerul să primească răspuns
@@ -1387,7 +1410,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           noteBrainActivity('🔁 Deploy picat pe conflict → retrimis la reconstruit (fără buclă pe „ok")')
         } else {
           if (failedBranch && !readyDeploys.some((r) => r.branch === failedBranch)) {
-            readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now() })
+            readyDeploys.unshift({ branch: failedBranch, summary: failedSummary, at: Date.now(), id: failedId || undefined, title: failedTitle || undefined, detail: failedDetail || undefined })
             persistReady()
           }
           noteBrainActivity('🔴 Deploy eșuat — aștept „ok" să reîncerc')
@@ -1543,9 +1566,28 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // publicare pentru un release al cărui titlu e deja produsul unui
         // astfel de ordin — se oprește lanțul chiar aici.
         if (r.status === 'approved' && !/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
-          bridgeRepair(
-            `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
-          )
+          // DRUM VERIFICAT, FĂRĂ WORK-ORDER FANTOMĂ: pun release-ul aprobat direct
+          // în coada de deploy (readyDeploys) și pornesc deploy-ul imediat.
+          // Constructorul (modul deploy) citește /api/bridge/deploy-pending și
+          // publică prin kelion-github publish + verificare anti-fantomă.
+          const dup = readyDeploys.find((x) => x.branch === r.branch)
+          if (dup) {
+            dup.summary = r.title
+            dup.at = Date.now()
+            dup.id = r.id
+            dup.title = r.title
+            dup.detail = r.detail
+          } else {
+            readyDeploys.push({ branch: r.branch, summary: r.title, at: Date.now(), id: r.id, title: r.title, detail: r.detail })
+            if (readyDeploys.length > 10) readyDeploys.shift()
+          }
+          persistReady()
+          const started = triggerDeploy()
+          if (started) {
+            noteBrainActivity('🚀 Release aprobat — pornesc deploy-ul verificat')
+            sayQueue.push(`Release aprobat: „${r.title.slice(0, 120)}" — pornesc publicarea prin pipeline verificat.`)
+            persistSay()
+          }
         }
       }
       return { ok: true, status: r.status }
