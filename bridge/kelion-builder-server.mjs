@@ -365,7 +365,10 @@ async function verifyWork() {
     `npm run build (frontend) → exit ${fe.code}${fe.code !== 0 ? `\n${fe.out.slice(-1500)}` : ''}\n` +
     `npm test (backend) → exit ${te.code}${te.code !== 0 ? `\n${te.out.slice(-1500)}` : ''}`
   const builtOk = be.code === 0 && fe.code === 0 && te.code === 0
-  return { ok: builtOk && diff !== '', changed: diff !== '', proof, detail }
+  // BLOCAJ SCOS (Adrian: „scoate absolut TOATE" — fără excepții): poarta nu mai
+  // gâtuie nimic. `ok` e mereu true; dovada (diff + build-uri) pleacă în continuare
+  // lui Adrian ca informație, dar NU mai blochează stagearea release-ului.
+  return { ok: true, changed: diff !== '', proof, detail, builtOk }
 }
 
 // ── GIT: comit + branch + push (pipeline GitHub, NU railway up) ────────────
