@@ -24,6 +24,9 @@ on:
       github_token:
         description: 'Token GitHub fin-granulat, DOAR repo-ul ăsta (gol = nu se schimbă)'
         required: false
+      railway_token:
+        description: 'Railway API token (railway.app → Account Settings → Tokens) — necesar pentru bridge/kelion-livekit; gol = nu se schimbă'
+        required: false
 
 jobs:
   put:
@@ -35,12 +38,14 @@ jobs:
           KIMI_KEY: ${{ inputs.kimi_key }}
           GLM_KEY: ${{ inputs.glm_key }}
           GH_KEY: ${{ inputs.github_token }}
+          RW_TOKEN: ${{ inputs.railway_token }}
         run: |
           set -euo pipefail
           echo "::add-mask::$VPS_PASS"
           [ -n "$KIMI_KEY" ] && echo "::add-mask::$KIMI_KEY"
           [ -n "$GLM_KEY" ] && echo "::add-mask::$GLM_KEY"
           [ -n "$GH_KEY" ] && echo "::add-mask::$GH_KEY"
+          [ -n "$RW_TOKEN" ] && echo "::add-mask::$RW_TOKEN"
           # Maschează orice apariție și în payload-ul evenimentului (inputurile
           # workflow_dispatch ajung în $GITHUB_EVENT_PATH) — aceeași lecție ca
           # la bridge-deploy.yml.
@@ -72,8 +77,20 @@ jobs:
             echo "github_token gol — nu se schimbă."
           fi
 
+          # RAILWAY_TOKEN nu e un fișier separat — bridge/kelion-livekit îl
+          # citește din /root/kelion/claude.env, ca CLAUDE_CODE_OAUTH_TOKEN/
+          # BRIDGE_SECRET. UPSERT: înlocuiește linia dacă există deja, altfel
+          # o adaugă — restul fișierului rămâne neatins.
+          if [ -n "$RW_TOKEN" ]; then
+            printf '%s' "$RW_TOKEN" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
+              'RT=$(cat); F=/root/kelion/claude.env; touch "$F"; grep -v "^RAILWAY_TOKEN=" "$F" > "$F.tmp" || true; echo "RAILWAY_TOKEN=$RT" >> "$F.tmp"; mv "$F.tmp" "$F"; chmod 600 "$F"; echo "RAILWAY_TOKEN scris în claude.env"'
+          else
+            echo "railway_token gol — nu se schimbă."
+          fi
+
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
             'for f in /root/kelion/kimi-key.txt /root/kelion/glm-key.txt /root/kelion/github-token.txt; do
                if [ -f "$f" ]; then echo "$f: $(wc -c < "$f") octeti, permisiuni $(stat -c %a "$f")"; else echo "$f: LIPSĂ"; fi
-             done'
+             done
+             echo "claude.env are RAILWAY_TOKEN: $(grep -c "^RAILWAY_TOKEN=" /root/kelion/claude.env 2>/dev/null || echo 0) linie(i)"'
