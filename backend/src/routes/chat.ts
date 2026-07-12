@@ -488,7 +488,7 @@ function createVoiceStream(
 ): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
   let pending = '' // text sosit, încă netrimis la sinteză
   let spoken = 0 // caractere deja rostite (plafonul de 4000)
-  let any = false
+  let hasSpoken = false
   let chain: Promise<void> = Promise.resolve()
   const speak = (text: string): void => {
     if (!text || spoken >= 4000) return
@@ -529,12 +529,12 @@ function createVoiceStream(
   return {
     feed(t: string): void {
       if (!t) return
-      any = true
+      hasSpoken = true
       pending += t
       cut(false)
     },
     fed(): boolean {
-      return any
+      return hasSpoken
     },
     async finish(): Promise<void> {
       cut(true)

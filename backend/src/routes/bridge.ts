@@ -665,14 +665,6 @@ function logDevLines(lines: string[]): void {
 // admin "Releases" tab and approves; only then does the builder deploy it. This
 // is the human-in-the-loop gate that keeps autonomous building SAFE.
 // PERSISTED IN POSTGRES: a pending release must survive backend restarts.
-export interface StagedRelease {
-  id: string
-  title: string
-  detail: string
-  status: 'pending' | 'approved' | 'rejected' | 'deployed'
-  at: string
-}
-
 export function stageRelease(title: string, detail: string, branch = ''): string {
   const id = randomUUID()
   void saveStagedRelease(id, title.slice(0, 200), detail.slice(0, 12000), branch.slice(0, 200)).catch(() => {})
@@ -859,12 +851,6 @@ export function bridgeAskStream(
 // by the chat brain (or escalated from the admin panel) land here; the laptop
 // session polls them (secret-protected), executes, and reports back in chat +
 // on the monitor. Fire-and-forget — the chat turn never waits for a build.
-export interface WorkOrder {
-  id: string
-  text: string
-  at: string
-}
-
 // PERSISTED IN POSTGRES: the old in-memory queue was wiped by every deploy —
 // the admin's "am trimis la execuție" orders vanished into thin air. Never
 // again: an order survives any restart and stays visible (with its status) in
