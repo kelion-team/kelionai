@@ -3,13 +3,16 @@ import { config } from '../config.js'
 import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
 import { claudeCost } from './cost.js'
 import { anthropic } from './anthropic.js'
+import { MODEL_FAST } from './modelRouter.js'
 
 // Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
-// route's streaming loop (low-latency Opus); this module hosts the Memory agent
-// — it recalls what Kelion knows about the user and, after each turn, learns +
-// saves new durable facts (cheap Haiku, off the response path).
+// route's streaming loop; this module hosts the Memory agent — it recalls what
+// Kelion knows about the user and, after each turn, learns + saves new durable
+// facts (off the response path).
 
-const HAIKU = 'claude-haiku-4-5-20251001'
+// Agentul de memorie rulează pe creierul primar (Kimi) — Anthropic scos complet
+// (Adrian, 12 iul). E off-path (fire-and-forget), deci nu afectează latența.
+const MEMORY_MODEL = MODEL_FAST
 
 // ── Memory agent (recall) ─────────────────────────────────────────────────
 // Pull durable facts about the user into the system prompt so Kelion is
@@ -50,18 +53,19 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
 }
 
 // ── Memory agent (learn) ──────────────────────────────────────────────────
-// After a turn, Haiku distils any NEW durable facts about the user and saves
-// them. Runs off the response path (fire-and-forget) so it never adds latency.
+// After a turn, the memory model (Kimi) distils any NEW durable facts about the
+// user and saves them. Runs off the response path (fire-and-forget) so it never
+// adds latency.
 export async function learnFromTurn(
   email: string,
   userMsg: string,
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if (!config.anthropicKey || (!userMsg.trim() && !assistantMsg.trim())) return
+  if ((!config.kimiKey && !config.glmKey) || (!userMsg.trim() && !assistantMsg.trim())) return
   // An EXPLICIT "remember this" is a guarantee, not a judgement call — store the
   // user's own words deterministically (upsert refreshes recency if repeated).
-  // Haiku below still distils implicit facts; this path can never be skipped.
+  // The memory model below still distils implicit facts; this path can never be skipped.
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
@@ -70,7 +74,7 @@ export async function learnFromTurn(
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
     const res = await anthropic.messages.create({
-      model: HAIKU,
+      model: MEMORY_MODEL,
       max_tokens: 400,
       system:
         'You maintain long-term memory about ONE user for a personal assistant. ' +
@@ -95,7 +99,7 @@ export async function learnFromTurn(
       ],
     })
     // Meter the Memory agent's real cost too (admin accounting completeness).
-    void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
+    void recordCost(email, 'memory', claudeCost(MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)

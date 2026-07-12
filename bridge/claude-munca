@@ -53,7 +53,8 @@ if [ -n "$GLM_KEY" ]; then
     claude "$@"
 fi
 
-# AVARIE: nicio cheie de muncă pe disc — anunț tare și cad pe Max (mai bine
-# muncă scumpă decât muncă moartă). Cu cheile puse, aici nu se ajunge.
-echo "[claude-munca] AVARIE: nicio cheie Kimi/GLM pe disc — muncesc pe Max (pune cheile prin vps-keys)!" >&2
-exec claude "$@"
+# ANTHROPIC/MAX SCOS COMPLET (Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi
+# și GLM"): fără cheie de muncă pe disc NU mai cădem pe Max — ieșim cu eroare, ca
+# să nu atingem niciodată Anthropic. Cu cheile puse, aici nu se ajunge.
+echo "[claude-munca] OPRIT: nicio cheie Kimi/GLM pe disc — Anthropic e scos, nu pornesc pe Max. Pune cheile prin vps-keys." >&2
+exit 1

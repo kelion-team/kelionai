@@ -1,19 +1,31 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
 
-// UN SINGUR creier, pe UN SINGUR cont: cheia plătită de Adrian (ANTHROPIC_API_KEY).
-// Regula absolută a lui Adrian (9 iul): NU există cheie de rezervă / al doilea cont
-// de facturare — nimeni nu decide pe banii lui. Dacă cheia plătită pică, eroarea
-// se raportează cinstit; nu se comută pe nimic în spate.
-export const anthropic = new Anthropic({ apiKey: config.anthropicKey })
+// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max a fost SCOS complet
+// (ordinul lui Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM").
+// Ambele endpoint-uri sunt compatibile Anthropic-API, deci refolosim SDK-ul
+// oficial doar cu `baseURL` + cheie schimbate — niciun apel nu mai pleacă spre
+// api.anthropic.com. Numele fișierului rămâne `anthropic.ts` doar pentru a nu
+// atinge zecile de importuri din restul codului.
+export const KIMI_BASE = 'https://api.kimi.com/coding/'
+export const GLM_BASE = 'https://api.z.ai/api/anthropic'
 
-// Ping the brain models themselves (on the paid key): does Fable 5 actually
-// serve this account right now, and does the Opus 4.8 reserve? Real 200s, not
-// assumptions — this is how "what model is the brain on" gets verified live.
+// Kimi: primar. GLM: rezervă (folosit la eșecul lui Kimi — vezi failover-ul din
+// routes/chat.ts). Fără cheie, clientul respectiv dă eroare la primul apel, care
+// e raportată cinstit (nu se comută pe nimic Anthropic — nu mai există).
+export const kimi = new Anthropic({ apiKey: config.kimiKey, baseURL: KIMI_BASE })
+export const glm = new Anthropic({ apiKey: config.glmKey, baseURL: GLM_BASE })
+// Clientul implicit al creierului = Kimi (primar). Restul codului importă
+// `anthropic` — acum e Kimi, nu Anthropic.
+export const anthropic = kimi
+
+// Ping the brain tiers on their real endpoints: does Kimi serve, and does GLM
+// (the reserve)? Real 200s, not assumptions — this is how "what model is the
+// brain on" gets verified live.
 export async function verifyModels(): Promise<Record<string, string>> {
-  const ping = async (model: string): Promise<string> => {
+  const ping = async (client: Anthropic, model: string): Promise<string> => {
     try {
-      const r = await anthropic.messages.create({
+      const r = await client.messages.create({
         model,
         max_tokens: 64,
         messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
@@ -25,22 +37,23 @@ export async function verifyModels(): Promise<Record<string, string>> {
     }
   }
   return {
-    'claude-fable-5': await ping('claude-fable-5'),
-    'claude-opus-4-8': await ping('claude-opus-4-8'),
+    'kimi-for-coding': await ping(kimi, 'kimi-for-coding'),
+    'glm-4.6': await ping(glm, 'glm-4.6'),
   }
 }
 
-// Ping the paid key with a 1-token request to verify it authenticates and has
+// Ping each brain key with a 1-token request to verify it authenticates and has
 // credit. Reports a status WITHOUT ever exposing the key value:
 // 'ok' | 'not_configured' | 'fail' | 'fail_<httpStatus>'.
 export async function verifyKeys(): Promise<{
   primary: string
+  reserve: string
   diag: Record<string, unknown>
 }> {
-  const ping = async (client: Anthropic): Promise<string> => {
+  const ping = async (client: Anthropic, model: string): Promise<string> => {
     try {
       await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'ping' }],
       })
@@ -50,15 +63,17 @@ export async function verifyKeys(): Promise<{
       return status ? `fail_${status}` : 'fail'
     }
   }
-  const primary = config.anthropicKey ? await ping(anthropic) : 'not_configured'
+  const primary = config.kimiKey ? await ping(kimi, 'kimi-for-coding') : 'not_configured'
+  const reserve = config.glmKey ? await ping(glm, 'glm-4.6') : 'not_configured'
   // Non-secret diagnostics to pinpoint a bad key without exposing its value:
-  // length (a real key is ~108 chars), the public prefix, and whether the raw
-  // env value carried surrounding whitespace (a common paste error).
-  const rawP = process.env.ANTHROPIC_API_KEY ?? ''
+  // length + whether the raw env value carried surrounding whitespace.
+  const rawK = process.env.KIMI_API_KEY ?? process.env.KIMI_KEY ?? ''
+  const rawG = process.env.GLM_API_KEY ?? process.env.GLM_KEY ?? ''
   const diag = {
-    primaryLen: config.anthropicKey.length,
-    primaryPrefixOk: config.anthropicKey.startsWith('sk-ant-'),
-    primaryRawHadWhitespace: rawP !== rawP.trim(),
+    kimiLen: config.kimiKey.length,
+    glmLen: config.glmKey.length,
+    kimiRawHadWhitespace: rawK !== rawK.trim(),
+    glmRawHadWhitespace: rawG !== rawG.trim(),
   }
-  return { primary, diag }
+  return { primary, reserve, diag }
 }

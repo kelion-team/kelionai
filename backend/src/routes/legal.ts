@@ -90,7 +90,8 @@ const PRIVACY = page(
 
   <h2>Sub-processors</h2>
   <ul>
-    <li><strong>Anthropic</strong> — processes conversation content to generate replies.</li>
+    <li><strong>Moonshot AI (Kimi)</strong> — processes conversation content to generate replies (primary).</li>
+    <li><strong>Zhipu AI (GLM / z.ai)</strong> — processes conversation content to generate replies (reserve).</li>
     <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice).</li>
     <li><strong>Railway</strong> — hosting and database.</li>
   </ul>

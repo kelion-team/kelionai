@@ -36,7 +36,6 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
-    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS anthropic_key TEXT;
     -- Amprente vocale: timbru + gen + flag admin per cont.
     -- vectorul e normalizat client-side; meta păstrează valorile brute pentru debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
@@ -1714,34 +1713,6 @@ export async function setMeserieActivaPref(email: string, id: number | null): Pr
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET meserie_activa = $2, updated_at = now()`,
       [email, id],
-    )
-  } catch {
-    // Never break the chat because persistence failed.
-  }
-}
-
-export async function getAnthropicKey(email: string): Promise<string | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query<{ anthropic_key: string | null }>(
-      'SELECT anthropic_key FROM user_prefs WHERE user_email = $1',
-      [email],
-    )
-    return r.rows[0]?.anthropic_key ?? null
-  } catch {
-    return null
-  }
-}
-
-export async function setAnthropicKey(email: string, key: string | null): Promise<void> {
-  if (!dbEnabled()) return
-  const k = key?.trim() || null
-  try {
-    await getPool().query(
-      `INSERT INTO user_prefs (user_email, anthropic_key, updated_at)
-       VALUES ($1, $2, now())
-       ON CONFLICT (user_email) DO UPDATE SET anthropic_key = $2, updated_at = now()`,
-      [email, k],
     )
   } catch {
     // Never break the chat because persistence failed.
