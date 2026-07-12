@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
+import { MODEL_FAST, MODEL_TOP } from './modelRouter.js'
 
 // UN SINGUR creier, pe UN SINGUR cont: cheia plătită de Adrian (ANTHROPIC_API_KEY).
 // Regula absolută a lui Adrian (9 iul): NU există cheie de rezervă / al doilea cont
@@ -25,8 +26,8 @@ export async function verifyModels(): Promise<Record<string, string>> {
     }
   }
   return {
-    'claude-fable-5': await ping('claude-fable-5'),
-    'claude-opus-4-8': await ping('claude-opus-4-8'),
+    [MODEL_FAST]: await ping(MODEL_FAST),
+    [MODEL_TOP]: await ping(MODEL_TOP),
   }
 }
 
@@ -40,7 +41,7 @@ export async function verifyKeys(): Promise<{
   const ping = async (client: Anthropic): Promise<string> => {
     try {
       await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: process.env.KELION_PING_MODEL || MODEL_FAST,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'ping' }],
       })

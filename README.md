@@ -48,3 +48,5 @@ cd frontend && npm install && npm run dev
 ```
 
 Create `backend/.env` from `backend/.env.example` first.
+
+<!-- test-drept-editare-kelion -->
