@@ -273,6 +273,12 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
       // să editeze, dar acele unelte NU erau permise → blocate în headless →
       // constructorul ieșea „fără fișiere". Acum are ce-i trebuie ca să editeze.
       '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
+      // DREPT EFECTIV DE EDITARE (Adrian: „nu au drepturi de editare, dă-le ce
+      // ți-am cerut"): a permite uneltele în listă NU e același lucru cu dreptul
+      // de a scrie pe disc. În headless, poarta de permisiuni blochează Edit/
+      // Write dacă modul nu le acceptă explicit. `acceptEdits` = auto-accept la
+      // toate editările → modelul chiar poate modifica fișiere, nu doar „cere".
+      '--permission-mode', 'acceptEdits',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env: workEnv(tier) })
     let buf = ''
@@ -462,6 +468,9 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
       // ce găsește. Ambele modele (Kimi + GLM) au acum ambele atribute: și
       // editare (poarta de muncă), și verificare (poarta asta) — complet.
       '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
+      // DREPT EFECTIV DE EDITARE și la verificare — acceptEdits, ca verificatorul
+      // să poată repara ce găsește, nu doar să raporteze.
+      '--permission-mode', 'acceptEdits',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env })
     let buf = ''
