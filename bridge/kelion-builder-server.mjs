@@ -141,9 +141,14 @@ function workEnv(tier) {
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
-  // BLOCAJ SCOS (Adrian: „scoate absolut toate îngrădirile modelelor"): NU mai
-  // scoatem CLAUDE_CODE_OAUTH_TOKEN — CLI-ul poate cădea și pe Claude/Max, nu
-  // doar pe cheia treptei. Modelele nu mai sunt forțate în afara Max.
+  // ROUTARE, NU „îngrădire de model" (regresia #166 — cauza reală a „nu se
+  // apucă de nimic"): dacă lăsăm CLAUDE_CODE_OAUTH_TOKEN în env cât timp treapta
+  // e Kimi/GLM, CLI-ul intră în modul abonament și trimite cererea la Anthropic
+  // cu modelul treptei (`kimi-for-coding`/`glm-4.6`) → „Unknown Model" → spawn
+  // picat, ZERO fișiere. Îl scoatem DOAR aici, unde chiar avem cheie de treaptă
+  // (același lucru pe care-l face `claude-munca` cu `env -u`); când nu-i nicio
+  // cheie, workEnv întoarce process.env neatins → fallback-ul pe Max rămâne.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
   return env
 }
 
@@ -447,9 +452,12 @@ function glmEnv() {
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
-  // BLOCAJ SCOS (Adrian: „scoate absolut toate îngrădirile modelelor"): NU mai
-  // scoatem CLAUDE_CODE_OAUTH_TOKEN — CLI-ul poate cădea și pe Claude/Max, nu
-  // doar pe cheia treptei. Modelele nu mai sunt forțate în afara Max.
+  // ROUTARE, NU „îngrădire de model" (aceeași regresie #166 ca la workEnv):
+  // cu CLAUDE_CODE_OAUTH_TOKEN prezent, verificatorul intră în modul abonament
+  // și trimite `glm-4.6` la Anthropic → „Unknown Model" → verificatorul pică
+  // mereu. Îl scoatem aici, unde avem cheie GLM reală (glmEnv întoarce null dacă
+  // n-o are, deci nu se ajunge aici fără cheie).
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
   return env
 }
 
