@@ -46,7 +46,8 @@ while ($true) {
       $prompt = "Esti constructorul Kelionai, in repo-ul $repo. Sarcina lui Adrian: `"$t`". Rezolv-o: editeaza codul, compileaza (npm run build in backend SI frontend) pana trece. NU face deploy, NU rula railway up. La final scrie dupa 'SUMAR:' pe o linie ce ai schimbat."
       # HEADLESS: ruleaza in consola ascunsa a acestui proces -> fara fereastra.
       Push-Location $repo
-      $out = & $claude -p $prompt --model claude-opus-4-8 --allowedTools 'Read,Edit,Write,Bash' 2>&1 | Out-String
+      $model = if ($env:KELION_TOP_MODEL) { $env:KELION_TOP_MODEL } else { 'claude-opus-4-8' }
+      $out = & $claude -p $prompt --model $model --allowedTools 'Read,Edit,Write,Bash' 2>&1 | Out-String
       $diff = (& git diff --stat 2>&1 | Out-String)
       Pop-Location
       $sumMatch = [regex]::Match($out, 'SUMAR:\s*(.+)')

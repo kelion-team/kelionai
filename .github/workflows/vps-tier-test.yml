@@ -30,12 +30,12 @@ jobs:
           export SSHPASS="$VPS_PASS"
           SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
 
-          echo "=== TREAPTA 2: KIMI (kimi-for-coding) ==="
+          echo "=== TREAPTA 2: KIMI (${KELION_WORK_KIMI_MODEL:-kimi-for-coding}) ==="
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" '
             K=$(cat /root/kelion/kimi-key.txt 2>/dev/null || true)
             if [ -z "$K" ]; then echo "FĂRĂ CHEIE — sărit"; exit 0; fi
             timeout 90 env ANTHROPIC_BASE_URL=https://api.kimi.com/coding/ ANTHROPIC_API_KEY="$K" ANTHROPIC_AUTH_TOKEN="$K" \
-              claude -p "Răspunde EXACT cu: KIMI OK" --model kimi-for-coding 2>&1 | tail -3
+              claude -p "Răspunde EXACT cu: KIMI OK" --model "${KELION_WORK_KIMI_MODEL:-kimi-for-coding}" 2>&1 | tail -3
           '
 
           echo ""

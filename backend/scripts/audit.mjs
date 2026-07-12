@@ -19,6 +19,7 @@ async function http(name, url, opts) {
 
 const GK = process.env.GEMINI_API_KEY ?? ''
 const GM = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+const AUDIT_MODEL = process.env.KELION_TOP_MODEL || 'claude-opus-4-8'
 const UA = { 'User-Agent': 'KelionAudit/1.0 (kelionai.app)' }
 
 // ---- External services (web search, maps, weather, knowledge, currency) ----
@@ -35,7 +36,7 @@ await http('convert_currency (er-api)', 'https://open.er-api.com/v6/latest/USD')
 await http('translate_text / search-fallback (Gemini text)', `https://generativelanguage.googleapis.com/v1beta/models/${GM}:generateContent`,
   { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GK }, body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }] }) })
 await http('brain (Claude / Anthropic)', 'https://api.anthropic.com/v1/messages',
-  { method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'claude-opus-4-8', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }) })
+  { method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: AUDIT_MODEL, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }) })
 try { const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Bucharest', hour: '2-digit', minute: '2-digit' }).format(new Date()); add('get_time (local Intl)', true, 'OK ' + t) }
 catch (e) { add('get_time', false, String(e).slice(0, 60)) }
 await http('/health (app)', 'https://kelionai.app/health')
