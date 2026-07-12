@@ -1709,18 +1709,38 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const ip = String(req.ip ?? 'unknown')
       if (clientErrorRateLimited(ip)) return reply.code(429).send({ error: 'rate_limited' })
-      const raw = (req.body ?? {}) as Record<string, unknown>
-      const reports: Array<{ type?: unknown; message?: unknown; stack?: unknown; url?: unknown; ts?: unknown }> = []
-      if ('batch' in raw && typeof raw.batch === 'string') {
+
+      // The client sends this endpoint in two ways:
+      // 1) fetch() with application/json -> Fastify parses to an object/array.
+      // 2) navigator.sendBeacon() with a JSON string -> Fastify leaves it as a
+      //    raw string because sendBeacon uses text/plain. We must parse it here
+      //    instead of crashing on `'batch' in string`.
+      let body = req.body
+      if (typeof body === 'string') {
         try {
-          const parsed = JSON.parse(raw.batch) as unknown
-          if (Array.isArray(parsed)) reports.push(...parsed)
+          body = JSON.parse(body)
         } catch {
-          /* ignore malformed batch */
+          body = {}
         }
-      } else {
-        reports.push(raw as { type?: unknown; message?: unknown; stack?: unknown; url?: unknown; ts?: unknown })
       }
+
+      const reports: Array<{ type?: unknown; message?: unknown; stack?: unknown; url?: unknown; ts?: unknown }> = []
+      if (Array.isArray(body)) {
+        reports.push(...body)
+      } else if (body && typeof body === 'object') {
+        const raw = body as Record<string, unknown>
+        if ('batch' in raw && typeof raw.batch === 'string') {
+          try {
+            const parsed = JSON.parse(raw.batch) as unknown
+            if (Array.isArray(parsed)) reports.push(...parsed)
+          } catch {
+            /* ignore malformed batch */
+          }
+        } else {
+          reports.push(raw)
+        }
+      }
+
       for (const r of reports.slice(0, 20)) {
         if (!r || typeof r.message !== 'string' || !r.message.trim()) continue
         await saveClientError({
