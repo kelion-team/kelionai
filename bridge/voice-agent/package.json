@@ -1,0 +1,11 @@
+{
+  "name": "kelion-voice-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent de voce full-duplex al lui Kelion: intra in camera LiveKit, asculta userul (STT), intreaba creierul-punte, raspunde cu vocea (TTS), cu barge-in. Ruleaza pe VPS, izolat de backend-ul live.",
+  "dependencies": {
+    "@livekit/rtc-node": "^0.13.0",
+    "livekit-server-sdk": "^2.9.0"
+  }
+}
