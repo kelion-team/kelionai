@@ -122,7 +122,11 @@ async function startLiveKit(apiKey, apiSecret) {
     '-p', '7881:7881',
     '-p', '7882:7882/udp',
     IMAGE,
-    '--keys', `${apiKey}:${apiSecret}`,
+    // LiveKit cere formatul EXACT „cheie: secret" — CU SPAȚIU după două puncte
+    // (12 iul, din logurile containerului: „Could not parse keys, it needs to
+    // be exactly „key: secret", including the space"). Fără spațiu, serverul
+    // refuză cheile și nu pornește.
+    '--keys', `${apiKey}: ${apiSecret}`,
     '--bind', '0.0.0.0',
   ])
   if (r.code !== 0) fail(`pornire LiveKit a eșuat: ${r.err || r.out}`)
