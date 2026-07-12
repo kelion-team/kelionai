@@ -141,7 +141,9 @@ function workEnv(tier) {
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
-  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  // BLOCAJ SCOS (Adrian: „scoate absolut toate îngrădirile modelelor"): NU mai
+  // scoatem CLAUDE_CODE_OAUTH_TOKEN — CLI-ul poate cădea și pe Claude/Max, nu
+  // doar pe cheia treptei. Modelele nu mai sunt forțate în afara Max.
   return env
 }
 
@@ -180,7 +182,7 @@ function run(cmd, args, opts = {}) {
   return new Promise((resolve) => {
     const c = spawn(cmd, args, { cwd: REPO, env: process.env, ...opts })
     let out = ''
-    const t = setTimeout(() => c.kill('SIGKILL'), opts.timeoutMs || 600000)
+    const t = setTimeout(() => c.kill('SIGKILL'), opts.timeoutMs || 86400000) // BLOCAJ SCOS: fără cuțit de timp
     c.stdout?.on('data', (d) => (out += d))
     c.stderr?.on('data', (d) => (out += d))
     c.on('close', (code) => { clearTimeout(t); resolve({ code, out }) })
@@ -442,7 +444,9 @@ function glmEnv() {
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
-  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  // BLOCAJ SCOS (Adrian: „scoate absolut toate îngrădirile modelelor"): NU mai
+  // scoatem CLAUDE_CODE_OAUTH_TOKEN — CLI-ul poate cădea și pe Claude/Max, nu
+  // doar pe cheia treptei. Modelele nu mai sunt forțate în afara Max.
   return env
 }
 
@@ -545,7 +549,7 @@ async function runIndependentVerifier(orderText, builderSummary, verificationRes
       say(toolLine(b))
       pushProgress(Math.min(98, 90 + steps), 'Verificare independentă GLM', lastFile)
     }
-  }, 600000)
+  }, 86400000)
   if (res.code !== 0) {
     return { pass: false, reason: `Verificatorul GLM s-a terminat cu exit ${res.code}: ${res.out.slice(0, 400)}`, details: res.out }
   }
@@ -633,7 +637,7 @@ async function build(order) {
       // Executia umple 12→84%; verificarea si stagearea duc restul pana la 100.
       pushProgress(Math.min(84, 12 + steps * 2), 'Execuție', lastFile)
     }
-  }, 900000)
+  }, 86400000)
   clearInterval(hb)
   if (res.code !== 0) say('⚠️ Execuția s-a terminat cu erori — verific oricum ce s-a schimbat efectiv')
   else say('🧪 Execuția s-a încheiat — verific EU dovada (diff + build-uri), nu cred pe cuvânt')
