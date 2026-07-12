@@ -1,0 +1,75 @@
+# REPORNIRE SERVICII VPS CU CODUL PROASPĂT DIN MASTER.
+#
+# Problema pe care o rezolvă (12 iul, Adrian): repo-sync copiază fișierele pe
+# VPS, dar NU repornește serviciile — deci procesul viu (kelion-builder /
+# kelion-bridge) rulează cod VECHI până la o repornire. Ordinul de repornire
+# prin coadă e lent (stă în spatele altor ordine) și fragil (procesul se omoară
+# pe el însuși). Aici repornim DIRECT prin SSH, cu parola root stocată ca secret
+# (VPS_ROOT_PASS — mascat automat de GitHub, nu apare niciodată în log).
+#
+# Ce face: pentru fiecare serviciu ales, copiază .mjs-ul din /root/kelion/repo
+# în calea reală (ExecStart), repornește, verifică is-active. Idempotent.
+name: vps-restart
+
+on:
+  workflow_dispatch:
+    inputs:
+      which:
+        description: 'Ce serviciu reporneşti cu codul proaspăt'
+        required: true
+        type: choice
+        options: [builder, bridge, both]
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copiază codul proaspăt + repornește (SSH, parolă mascată din secret)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+          WHICH: ${{ inputs.which }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS (Settings → Secrets → Actions)."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          # Script rulat pe VPS. Pentru fiecare serviciu cerut: află calea reală
+          # din ExecStart, copiază fișierul proaspăt din repo peste ea, apoi
+          # repornește. La final raportează is-active (dovada). Restartul își
+          # omoară propriul proces — de aceea rulăm din SSH, nu din worker.
+          REMOTE=$(cat <<'EOS'
+          set -e
+          REPO=/root/kelion/repo
+          do_one() {
+            SVC="$1"; SRC="$2"
+            EXEC=$(systemctl show "$SVC" -p ExecStart --value | grep -oE '/[^ ]*[.]mjs' | head -1)
+            if [ -z "$EXEC" ]; then echo "$SVC: nu am gasit ExecStart .mjs"; return 1; fi
+            cp "$REPO/$SRC" "$EXEC"
+            echo "$SVC: copiat $SRC -> $EXEC"
+            systemctl restart "$SVC"
+          }
+          EOS
+          )
+          case "$WHICH" in
+            builder) REMOTE="$REMOTE
+          do_one kelion-builder bridge/kelion-builder-server.mjs" ;;
+            bridge)  REMOTE="$REMOTE
+          do_one kelion-bridge bridge/kelion-bridge-linux.mjs" ;;
+            both)    REMOTE="$REMOTE
+          do_one kelion-builder bridge/kelion-builder-server.mjs
+          do_one kelion-bridge bridge/kelion-bridge-linux.mjs" ;;
+          esac
+          REMOTE="$REMOTE
+          sleep 2
+          echo '=== is-active dupa restart ==='
+          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer; do
+            printf '%s: ' \"\$s\"; systemctl is-active \"\$s\" 2>/dev/null || true
+          done"
+
+          printf '%s' "$REMOTE" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s'
