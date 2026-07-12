@@ -5,8 +5,6 @@ import {
   setSpeechLangPref,
   getMeserieActiva,
   setMeserieActivaPref,
-  getAnthropicKey,
-  setAnthropicKey,
   saveKv,
   loadKv,
 } from '../db.js'
@@ -59,10 +57,6 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       speechLang: await getSpeechLang(user.email),
       meserieActiva: await getMeserieActiva(user.email),
-      // NICIODATĂ cheia în clar către browser (audit 9 iul): un secret cu putere
-      // de bani nu se trimite înapoi la client — doar DACĂ e setată. UI-ul
-      // afișează „Modifică/Adaugă" din boolean; câmpul pornește gol, nu preumplut.
-      anthropicKeySet: !!(await getAnthropicKey(user.email)),
       avatarBox,
     })
   })
@@ -71,7 +65,6 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
     Body: {
       speechLang?: string
       meserieActiva?: number | null
-      anthropicKey?: string | null
       avatarBox?: AvatarBox
     }
   }>(
@@ -94,14 +87,6 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'bad_request' })
       }
       await setMeserieActivaPref(user.email, id)
-    }
-
-    if (req.body?.anthropicKey !== undefined) {
-      const key = req.body.anthropicKey
-      if (key !== null && typeof key !== 'string') {
-        return reply.code(400).send({ error: 'bad_request' })
-      }
-      await setAnthropicKey(user.email, key)
     }
 
     if (req.body?.avatarBox !== undefined) {

@@ -55,16 +55,19 @@ function loadContext() {
   )
 }
 
-const MODEL = 'claude-fable-5'
-const RESERVE = 'claude-opus-4-8'
+// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max scos complet (Adrian,
+// 12 iul: „renunț la Anthropic, rămâne Kimi și GLM"). Numele efectiv al modelului
+// îl impune treapta (tierModel); astea rămân doar ca implicit ne-Anthropic.
+const MODEL = 'kimi-for-coding'
+const RESERVE = 'glm-4.6'
 const REST_MS = 10 * 60_000
 let fableDownUntil = 0
 const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
 
-// ── LANȚUL DE ABONAMENTE (ordinul lui Adrian, 11 iul): Max → Kimi → GLM ──────
-// Când abonamentul Claude Max se golește („usage limit"), worker-ul comută
-// AUTOMAT pe cheia Kimi for Coding, apoi pe GLM Coding Plan — și REVINE singur
-// pe Max după pauza de răcire (Max-ul se reîncearcă primul la fiecare spawn).
+// ── LANȚUL DE ABONAMENTE (Adrian, 12 iul: „renunț la Anthropic"): Kimi → GLM ──
+// ANTHROPIC/MAX SCOS COMPLET. Când cheia Kimi for Coding se golește („usage
+// limit"), worker-ul comută AUTOMAT pe GLM Coding Plan și revine singur pe Kimi
+// după pauza de răcire (Kimi se reîncearcă primul la fiecare spawn).
 // Cheile stau pe VPS ca fișiere (puse de Adrian prin vps-keys.yml) — fără
 // fișier-cheie, treapta e sărită, deci codul e complet inert până există chei.
 // Endpoint-urile sunt compatibile Anthropic: același CLI, doar env schimbat.
@@ -74,8 +77,10 @@ const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
 // docs → third-party tools): ANTHROPIC_BASE_URL=https://api.kimi.com/coding/ +
 // ANTHROPIC_API_KEY + fereastra de context 262144. Punem și AUTH_TOKEN (GLM îl
 // folosește pe ăla) — e inofensiv să fie ambele setate.
+// ANTHROPIC/MAX SCOS COMPLET (Adrian, 12 iul): treapta `max` (abonamentul Claude)
+// a fost eliminată. Lanțul e Kimi (primar) → GLM (rezervă); fără cheie, chatul
+// eșuează cinstit (fără auth), NU cade pe Anthropic.
 const TIERS = [
-  { name: 'max' }, // abonamentul Claude, exact ca azi (fără env suplimentar)
   {
     name: 'kimi',
     keyFile: '/root/kelion/kimi-key.txt',
@@ -148,7 +153,7 @@ function reportTierChange(from, to, reason) {
   }).catch(() => {})
 }
 function currentTier() {
-  let picked = TIERS[0] // toate golite → tot Max (cel mai probabil să-și revină primul)
+  let picked = TIERS[0] // toate golite → tot Kimi (primarul; Anthropic/Max scos)
   for (const t of TIERS) {
     if ((tierDownUntil[t.name] ?? 0) > Date.now()) continue
     if (t.keyFile && !tierKeyOf(t)) continue
@@ -330,18 +335,19 @@ function claudeArgs({ streaming, model, hasFiles, pub }) {
 // neschimbat; pe rezerve se adaugă baza + cheia (compatibil Anthropic).
 function tierSpawnEnv(tier) {
   const key = tierKeyOf(tier)
-  if (!key) return process.env
-  const env = {
-    ...process.env,
+  // ANTHROPIC/MAX SCOS (Adrian, 12 iul): în ORICE caz scoatem tokenul de abonament
+  // din env, ca CLI-ul să nu poată autentifica pe Anthropic. Fără cheie Kimi/GLM,
+  // spawn-ul eșuează cinstit (fără auth) — NICIODATĂ pe Max.
+  const env = { ...process.env }
+  delete env.CLAUDE_CODE_OAUTH_TOKEN
+  if (!key) return env
+  return {
+    ...env,
     ...(tier.extraEnv ?? {}),
     ANTHROPIC_BASE_URL: tier.base,
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_AUTH_TOKEN: key,
   }
-  // Blindare: fără autentificarea pe abonament în env — altfel CLI-ul poate
-  // ocoli cheia de rezervă și lucra pe furiș tot pe Max.
-  delete env.CLAUDE_CODE_OAUTH_TOKEN
-  return env
 }
 const spawnOpts = (pub, tier = currentTier()) =>
   pub ? { env: tierSpawnEnv(tier), cwd: '/tmp' } : { env: tierSpawnEnv(tier) }

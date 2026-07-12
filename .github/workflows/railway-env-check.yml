@@ -60,6 +60,7 @@ jobs:
           check GOOGLE_MAPS_KEY "rute Google Maps cu trafic"
           check STRIPE_SECRET_KEY "plăți/credite"
           check STRIPE_WEBHOOK_SECRET "confirmare plăți Stripe"
-          check ANTHROPIC_API_KEY "creierul pe API (acum ocolit)"
+          check KIMI_API_KEY "creierul — Kimi (primar)"
+          check GLM_API_KEY "creierul — GLM (rezervă/verificator)"
           echo ""
           echo "== GATA — niciun secret afișat, nimic modificat. =="

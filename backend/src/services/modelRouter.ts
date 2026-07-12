@@ -12,8 +12,11 @@
 // model mai nou/mai puternic — acum sau în viitor — setezi variabila și intră
 // INSTANT, fără deploy. Pentru mai multe trepte, extinzi MODEL_LADDER.
 
-export const MODEL_FAST = process.env.KELION_FAST_MODEL || 'claude-fable-5'
-export const MODEL_TOP = process.env.KELION_TOP_MODEL || 'claude-opus-4-8'
+// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
+// iul). Configurabile din Railway (KELION_FAST_MODEL / KELION_TOP_MODEL) dacă
+// furnizorii schimbă numele; implicit modelele native ale planurilor.
+export const MODEL_FAST = process.env.KELION_FAST_MODEL || 'kimi-for-coding'
+export const MODEL_TOP = process.env.KELION_TOP_MODEL || 'glm-4.6'
 
 export interface ModelRung {
   id: string
@@ -23,9 +26,12 @@ export interface ModelRung {
 
 // Scara de modele, de la ieftin/rapid la scump/puternic. Ordinea nu contează —
 // routerul sortează după cost. Adaugi o treaptă nouă și e folosită automat.
+// Kimi e PRIMARUL pentru tot (capability 100 → chooseModel îl alege mereu); GLM
+// nu e o treaptă „mai puternică" aleasă după dificultate, ci REZERVA folosită
+// doar la eșecul lui Kimi (failover-ul din routes/chat.ts, brainModel()).
 export const MODEL_LADDER: ModelRung[] = [
-  { id: MODEL_FAST, capability: 75, costRel: 1 }, // rapid, ieftin — chatul de zi cu zi
-  { id: MODEL_TOP, capability: 98, costRel: 5 }, // cel mai puternic — cereri grele
+  { id: MODEL_FAST, capability: 100, costRel: 1 }, // Kimi — primar pentru orice cerere
+  { id: MODEL_TOP, capability: 100, costRel: 5 }, // GLM — rezervă la eșec, nu escaladare de dificultate
 ]
 
 // Dificultatea cerută de sarcină (0-100), estimată PUR euristic din text (0 cost).

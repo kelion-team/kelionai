@@ -271,16 +271,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Which brain models actually serve right now (admin only): live ping of
-  // Fable 5 and the Opus 4.8 reserve.
+  // Kimi (primar) și GLM (rezervă). Anthropic scos complet (Adrian, 12 iul).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain's Anthropic key live (admin only). Pings the single paid
-  // key with a 1-token call; reports ok/fail without ever exposing the key value.
-  // Prin regula lui Adrian nu există cheie de rezervă — doar cea plătită.
+  // Verify the brain keys live (admin only): Kimi (primar) + GLM (rezervă). Pings
+  // each with a 1-token call; reports ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

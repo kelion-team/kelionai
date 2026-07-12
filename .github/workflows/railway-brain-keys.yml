@@ -1,0 +1,106 @@
+# CHEILE CREIERULUI în RAILWAY env — scrise AUTOMAT din Repo Secrets.
+#
+# Backend-ul de pe Railway (chatul public + demo) rulează pe Kimi (primar) → GLM
+# (rezervă) și citește KIMI_API_KEY / GLM_API_KEY din env-ul Railway. Spre
+# deosebire de VPS (alimentat de vps-keys.yml prin SSH), Railway se alimentează
+# prin GraphQL API — același mecanism dovedit de kelion-livekit / deploy.yml
+# (variableCollectionUpsert), NU prin CLI, NU prin acțiunea manuală a lui Adrian.
+#
+# SECURITATE: valorile vin din GitHub Secrets (mascate automat de la începutul
+# job-ului) — nu apar niciodată în clar în log. Zero input-uri sensibile.
+#
+# ── CE TREBUIE SETAT O SINGURĂ DATĂ (Settings → Secrets and variables → Actions):
+#   KIMI_KEY       — cheia Kimi for Coding (aceeași folosită și de vps-keys)
+#   GLM_KEY        — cheia GLM Coding Plan (aceeași folosită și de vps-keys)
+#   RAILWAY_TOKEN  — token Railway (există deja, folosit de alte workflow-uri)
+#
+# Scrie în Railway (production / serviciul web): KIMI_API_KEY, GLM_API_KEY.
+# Verifică rezultatul oricând cu workflow-ul `railway-env-check`.
+name: railway-brain-keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      which:
+        description: 'Ce chei scrii în Railway acum (valorile vin din Repo Secrets, NU se tastează)'
+        required: true
+        type: choice
+        options: [all, kimi, glm]
+        default: all
+
+jobs:
+  put:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scrie cheile creierului în Railway (din Secrets, mascate automat)
+        env:
+          # Din secrets.* → GitHub le maschează de la începutul job-ului.
+          KIMI_KEY: ${{ secrets.KIMI_KEY }}
+          GLM_KEY: ${{ secrets.GLM_KEY }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          WHICH: ${{ inputs.which }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "::error::Lipsește secretul RAILWAY_TOKEN (Settings → Secrets → Actions)."; exit 1
+          fi
+          case "$WHICH" in
+            all) [ -n "${KIMI_KEY:-}" ] || { echo "::error::Lipsește KIMI_KEY."; exit 1; }
+                 [ -n "${GLM_KEY:-}" ]  || { echo "::error::Lipsește GLM_KEY.";  exit 1; } ;;
+            kimi) [ -n "${KIMI_KEY:-}" ] || { echo "::error::Lipsește KIMI_KEY."; exit 1; } ;;
+            glm)  [ -n "${GLM_KEY:-}" ]  || { echo "::error::Lipsește GLM_KEY.";  exit 1; } ;;
+          esac
+
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+
+          GQL = 'https://backboard.railway.com/graphql/v2'
+          TOKEN = os.environ['RAILWAY_TOKEN'].strip()
+
+          def gql(query, variables=None):
+              body = json.dumps({'query': query, 'variables': variables or {}}).encode()
+              req = urllib.request.Request(GQL, data=body, headers={
+                  'Authorization': f'Bearer {TOKEN}',
+                  'Content-Type': 'application/json',
+              })
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  out = json.loads(r.read().decode())
+              if out.get('errors'):
+                  print('::error::GraphQL a returnat erori:', json.dumps(out['errors']))
+                  sys.exit(1)
+              return out
+
+          # 1) Găsește proiectul „kelion", environment-ul production, serviciul web.
+          q = 'query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}'
+          projects = [e['node'] for e in gql(q)['data']['projects']['edges']]
+          match = next((p for p in projects if 'kelion' in p['name'].lower()), None)
+          if not match:
+              print('::error::nu am găsit proiectul Railway care conține „kelion".'); sys.exit(1)
+          envs = [e['node'] for e in match['environments']['edges']]
+          svcs = [e['node'] for e in match['services']['edges']]
+          env = next((e for e in envs if e['name'] == 'production'), envs[0] if envs else None)
+          svc = next((s for s in svcs if s['name'] == 'web'), svcs[0] if svcs else None)
+          if not env or not svc:
+              print('::error::nu am găsit environment/serviciu Railway.'); sys.exit(1)
+
+          # 2) Construiește variabilele de scris în funcție de alegere.
+          which = os.environ.get('WHICH', 'all')
+          variables = {}
+          if which in ('all', 'kimi') and os.environ.get('KIMI_KEY'):
+              variables['KIMI_API_KEY'] = os.environ['KIMI_KEY'].strip()
+          if which in ('all', 'glm') and os.environ.get('GLM_KEY'):
+              variables['GLM_API_KEY'] = os.environ['GLM_KEY'].strip()
+          if not variables:
+              print('::error::nicio cheie de scris (verifică secretele).'); sys.exit(1)
+
+          # 3) Upsert (același mecanism ca LiveKit / deploy).
+          mut = 'mutation($input: VariableCollectionUpsertInput!){variableCollectionUpsert(input:$input)}'
+          gql(mut, {'input': {
+              'projectId': match['id'],
+              'environmentId': env['id'],
+              'serviceId': svc['id'],
+              'variables': variables,
+          }})
+          print(f"OK — scrise în Railway ({match['name']} / {env['name']} / {svc['name']}): {', '.join(sorted(variables))}")
+          print("Un redeploy Railway le va prelua; verifică cu railway-env-check.")
+          PY

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import { anthropic } from '../services/anthropic.js'
+import { anthropic, glm } from '../services/anthropic.js'
 import { getSessionUser, setSession, type SessionUser } from '../session.js'
 import {
   googleTools,
@@ -26,7 +26,6 @@ import {
   deleteNote,
   getRecentHistory,
   getSharedMemory,
-  getAnthropicKey,
   getMemories,
   deleteMemory,
   identifyVoiceprint,
@@ -97,6 +96,13 @@ function brainModel(): string {
 }
 function restFable(): void {
   fableDownUntil = Date.now() + FABLE_REST_MS
+}
+// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
+// iul). Kimi și GLM sunt provideri DIFERIȚI (baseURL + cheie diferite), deci
+// failover-ul trebuie să schimbe CLIENTUL, nu doar numele modelului: modelul
+// rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
+function brainClientFor(model: string): Anthropic {
+  return model === MODEL_RESERVE ? glm : anthropic
 }
 
 // Admin-only tool so Kelion can report its own real running cost when asked.
@@ -767,10 +773,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // ORDIN DIRECT (Adrian, 10 iul): „peste tot unde apare Claude se folosește
-    // abonamentul mare; cheia API se scoate". Chatul NU mai depinde de
-    // ANTHROPIC_API_KEY — și adminul și publicul răspund prin punte (abonament).
-    // De aceea vechiul gard 503 „brain_not_configured" a dispărut de aici.
+    // CREIERUL e pe Kimi (primar) → GLM (rezervă). Anthropic/Max scos complet
+    // (Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM"). Dacă lipsesc
+    // ambele chei, plasa de siguranță din streaming dă o eroare clară în limba
+    // userului — de aceea nu mai există aici un gard 503 „brain_not_configured".
     const rawMessages = req.body?.messages
     const image = req.body?.image
     // Cadrele multiple (max 4, doar imagini reale) — cad înapoi pe `image`
@@ -805,10 +811,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // UN SINGUR drum spre bază în loc de patru la rând (Adrian, 10 iul: „chat
     // live instant"): citirile independente pleacă ÎMPREUNĂ — fiecare await
     // separat mai punea o tură de DB înaintea primului cuvânt.
+    // BYOK-ANTHROPIC SCOS COMPLET (Adrian, 12 iul: „renunț la Anthropic, scoți
+    // total, fără cârpeli"): creierul e Kimi→GLM; nu mai există cheie de client.
+    // Toți userii trec prin paywall-ul normal (creditul din portofel).
     const lastForRecall = messages.at(-1)
-    const [storedPref, userAnthropicKey, meserieId, memRecall, lastSavedRow] = await Promise.all([
+    const [storedPref, meserieId, memRecall, lastSavedRow] = await Promise.all([
       getSpeechLang(user.email),
-      getAnthropicKey(user.email),
       getMeserieActiva(user.email),
       // Memory agent (recall): DB pur (fără model, fără credite) — faptele
       // durabile despre user; mesajul curent e indiciul de relevanță.
@@ -856,7 +864,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       config.stripe.secretKey &&
       user.role !== 'admin' &&
       user.role !== 'demo' &&
-      !userAnthropicKey &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -1895,7 +1902,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // toate uneltele, debitat din creditele lor (debitWallet la finalul turei).
     // Fără Stripe configurat (aplicație liberă) totul rămâne pe abonament.
     // KELION_API_CHAT=1 pe Railway forțează pe API tot ce nu e admin (urgență).
-    const paysOwnWay = !!userAnthropicKey || (!!config.stripe.secretKey && user.role !== 'demo')
+    const paysOwnWay = !!config.stripe.secretKey && user.role !== 'demo'
     if (!process.env.KELION_API_CHAT && !paysOwnWay) {
       const roPub = userLang.toLowerCase().startsWith('ro')
       // SPEC FREE/DEMO (Adrian, 10 iul): „fără istoric, chat live în orice
@@ -2149,20 +2156,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Provider cost incurred by delegated specialist agents (their own Claude
     // calls + tool costs), accumulated so it's billed to the same wallet.
     const usage = { usd: 0 }
-    // One safety net: MODEL-level only. Fable 5 is the brain; if a round fails
-    // (or is refused) before any text streams, the SAME round is re-served by
-    // Opus 4.8 — on the SAME paid key. REGULA LUI ADRIAN (9 iul): nu există
-    // cheie de rezervă / al doilea cont; dacă acest cont pică, eroarea se vede.
-    const active: Anthropic = userAnthropicKey ? new Anthropic({ apiKey: userAnthropicKey }) : anthropic
-    // GAURA DE BANI (Adrian, audit 9 iul): un client care-și pune CHEIA LUI sărea
-    // paywall-ul, iar dacă cheia era invalidă/fără credit, failover-ul de mai jos
-    // muta conversația pe cheia NOASTRĂ de rezervă — vorbea gratis pe contul
-    // nostru. Regula: o cerere pe cheia clientului NU atinge NICIODATĂ cheile
-    // platformei. Pică pe cheia lui → primește o eroare clară, nu o cursă gratis.
-    const usingUserKey = !!userAnthropicKey
-    // Router automat capabilitate↔cost: cel mai ieftin model care poate duce
-    // sarcina (șanse mari la cost mic). Dacă modelul rapid „se odihnește" după un
-    // eșec, brainModel() ridică baza automat la modelul TOP.
+    // Plasa de siguranță a creierului: Kimi (primar) → GLM (rezervă). Dacă o
+    // rundă pică (sau e refuzată) înainte să curgă text, aceeași rundă e re-servită
+    // pe GLM — CLIENT diferit, nu doar model diferit (vezi brainClientFor).
+    // Router automat capabilitate↔cost: Kimi acoperă orice cerere (primar); GLM e
+    // rezerva la eșec, ridicată automat de brainModel() după o „odihnă".
     const chosen = chooseModel(lastUserText)
     let model = chosen === MODEL_FAST ? brainModel() : chosen
     // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
@@ -2239,36 +2237,33 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         let final: Anthropic.Message
         try {
-          final = await runRound(active, model)
+          final = await runRound(brainClientFor(model), model)
         } catch (e) {
-          // Cheia clientului: NICIUN failover pe platformă, NICIO odihnă de Fable
-          // provocată de cheia lui. Pică → aruncă (jos, catch-ul exterior îi dă
-          // un mesaj clar despre cheie). Așa se închide cursa gratis pe contul nostru.
-          if (usingUserKey) throw e
+          // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
+          // Ambele picate → aruncă, catch-ul exterior explică cinstit.
           if (roundText === '' && model === MODEL) {
-            // Fable itself has a problem — rest it and re-serve on Opus 4.8
-            // (same paid account; there is deliberately NO reserve key).
+            // Kimi însuși are o problemă — îl odihnim și re-servim pe GLM (rezerva).
             restFable()
             model = MODEL_RESERVE
-            final = await runRound(active, model)
+            final = await runRound(brainClientFor(model), model)
           } else throw e
         }
-        // A Fable safety refusal (HTTP 200, stop_reason "refusal", no content):
-        // re-serve THIS request on Opus 4.8 — content-specific, so no resting.
+        // Un refuz de siguranță (HTTP 200, stop_reason "refusal", fără conținut):
+        // re-servim AceastĂ cerere pe GLM — specific conținutului, fără odihnă.
         if (
           (final as { stop_reason?: string }).stop_reason === 'refusal' &&
           roundText === '' &&
           model === MODEL
         ) {
           model = MODEL_RESERVE
-          final = await runRound(active, model)
+          final = await runRound(brainClientFor(model), model)
         }
         // Guardian tripped: the opening was the wrong language and NOTHING was
         // sent — re-serve this round once, corrected and ungated (never silent).
         if (guardTripped && guardTag) {
           inTokens += final.usage.input_tokens
           outTokens += final.usage.output_tokens
-          final = await runRound(active, model, true, false)
+          final = await runRound(brainClientFor(model), model, true, false)
         }
         assistantText += roundText
         inTokens += final.usage.input_tokens
@@ -2344,7 +2339,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         config.stripe.secretKey &&
         user.role !== 'admin' &&
         user.role !== 'demo' &&
-        !userAnthropicKey &&
         usageUsd > 0
       ) {
         const charge = usageUsd * config.stripe.usdToCurrency
@@ -2357,16 +2351,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // credit. Tell the user calmly in THEIR language instead of a raw
         // "[connection error]"; the frontend shows AND speaks whatever we stream.
         const ro = userLang.toLowerCase().startsWith('ro')
-        // Cheia proprie a picat (invalidă/expirată/fără credit): spune-i EXACT
-        // asta, ca să știe că e cheia lui, nu serviciul — și că nu trecem tacit
-        // pe cheia noastră (gaura de bani închisă mai sus).
-        const note = usingUserKey
-          ? ro
-            ? 'Cheia ta Anthropic nu a funcționat (invalidă, expirată sau fără credit). Verific-o în meniul ⊕ → cheie Anthropic.'
-            : 'Your Anthropic key did not work (invalid, expired, or out of credit). Check it in the ⊕ menu → Anthropic key.'
-          : ro
-            ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
-            : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
+        // Ambele trepte ale creierului (Kimi + GLM) au picat — răspuns calm în
+        // limba userului (nu „[connection error]" brut).
+        const note = ro
+          ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
+          : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
         reply.raw.write(assistantText.trim() ? `\n\n${note}` : note)
         // Eroarea se și AUDE (regula „niciodată tăcere totală"), nu doar se scrie.
         voice.feed(note)
@@ -2464,7 +2453,7 @@ async function runAgent(
   usage: { usd: number },
   lang: string,
 ): Promise<string> {
-  if (!config.anthropicKey) return 'agent unavailable'
+  if (!config.kimiKey && !config.glmKey) return 'agent unavailable'
   try {
     const memory = await recallMemories(email, spec.id, task)
     const system =
@@ -2494,10 +2483,10 @@ async function runAgent(
     let outTok = 0
     let agentModel = brainModel()
     for (let round = 0; round < 4; round++) {
-      // Same model net as the brain: Fable → Opus 4.8 on any model problem
-      // (incl. a safety refusal) — always on the single paid key, never another.
+      // Aceeași plasă ca la creier: Kimi → GLM la orice problemă de model (inclusiv
+      // un refuz de siguranță) — client selectat după model (brainClientFor).
       const make = (m: string): Promise<Anthropic.Message> =>
-        anthropic.messages.create({
+        brainClientFor(m).messages.create({
           model: m,
           // Code agents get room to write real programs; text agents stay tight.
           max_tokens: spec.code ? 4000 : m === MODEL ? 2200 : 1500,

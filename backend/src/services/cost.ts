@@ -11,16 +11,18 @@ interface ModelPrice {
 }
 
 const PRICES: Record<string, ModelPrice> = {
-  'claude-fable-5': { input: 10 / 1e6, output: 50 / 1e6 },
-  'claude-opus-4-8': { input: 5 / 1e6, output: 25 / 1e6 },
-  'claude-haiku-4-5': { input: 1 / 1e6, output: 5 / 1e6 },
+  // CREIERUL e pe Kimi/GLM (planuri cu abonament FLAT, nu per-token) → costul
+  // marginal per apel e ~0; le ținem la 0 ca să nu inventăm cifre false în
+  // contabilitatea adminului. Anthropic scos complet (Adrian, 12 iul).
+  'kimi-for-coding': { input: 0, output: 0 },
+  'glm-4.6': { input: 0, output: 0 },
   'gemini-2.5-flash': { input: 0.3 / 1e6, output: 2.5 / 1e6 },
 }
 
 export function claudeCost(model: string, inputTokens: number, outputTokens: number): number {
-  // Accept dated model ids (e.g. claude-haiku-4-5-20251001) by stripping the suffix.
+  // Accept dated model ids (e.g. kimi-for-coding-20260101) by stripping the suffix.
   const base = model.replace(/-\d{6,}$/, '')
-  const p = PRICES[base] ?? PRICES[model] ?? PRICES['claude-opus-4-8']
+  const p = PRICES[base] ?? PRICES[model] ?? PRICES['kimi-for-coding']
   return inputTokens * p.input + outputTokens * p.output
 }
 
