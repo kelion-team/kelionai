@@ -49,10 +49,13 @@ const H = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 // Constructorul lucrează pe Kimi (primar), apoi GLM (secundar), cu revenire
 // automată (treapta golită se reîncearcă după 30 min). Config Kimi din docs-ul
 // lor oficial pentru Claude Code (api.kimi.com/coding/, model kimi-for-coding);
-// GLM mapează singur numele de model claude. Cheile: fișiere pe VPS, puse prin
-// vps-keys.yml. AVARIE: fără NICIO cheie pe disc, cade pe Max cu anunț tare în
-// jurnal (mai bine reparații pe Max decât reparații moarte) — dar cu cheile
-// puse, Max nu e atins NICIODATĂ de muncă.
+// GLM: endpoint-ul z.ai NU mapează numele de model claude noi — trimiterea lui
+// `claude-fable-5` a dat „400 [1211] Unknown Model" (12 iul, cauza reală a
+// picării verificatorului). Se cere modelul NATIV al planului GLM Coding:
+// `glm-4.6`. Cheile: fișiere pe VPS, puse prin vps-keys.yml. AVARIE: fără NICIO
+// cheie pe disc, cade pe Max cu anunț tare în jurnal (mai bine reparații pe Max
+// decât reparații moarte) — dar cu cheile puse, Max nu e atins de muncă.
+const GLM_MODEL = 'glm-4.6'
 const WORK_TIERS = [
   {
     name: 'kimi',
@@ -61,7 +64,7 @@ const WORK_TIERS = [
     model: 'kimi-for-coding',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'claude-fable-5' },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: GLM_MODEL },
 ]
 const WORK_COOLDOWN_MS = 30 * 60_000
 const workDownUntil = Object.create(null)
@@ -185,19 +188,81 @@ function run(cmd, args, opts = {}) {
   })
 }
 
+// ── AUTO-SINCRONIZARE MODEL (Adrian, 12 iul: „nu rămân fixe, trebuie să se
+// auto-sincronizeze cu modelul") ──────────────────────────────────────────
+// Un nume de model hardcodat se strică la fiecare update al furnizorului (exact
+// ce s-a întâmplat: `claude-fable-5` a devenit „400 Unknown Model" pe GLM). În
+// loc de asta, interogăm endpoint-ul standard `/v1/models` al fiecărei trepte
+// (cu cheia de pe disc) și alegem SINGURI modelul potrivit: cel mai nou glm-X.Y
+// pentru GLM, modelul de cod pentru Kimi. Cache 6h (nu batem endpoint-ul la
+// fiecare job) + fallback sigur dacă interogarea pică. Max (fără base) rămâne pe
+// modelul claude cerut.
+const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
+const MODEL_TTL_MS = 6 * 60 * 60 * 1000
+const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-for-coding' }
+function verNum(id) {
+  const m = String(id).match(/(\d+(?:\.\d+)?)/)
+  return m ? parseFloat(m[1]) : 0
+}
+function pickBestModel(tierName, ids) {
+  if (tierName === 'glm') {
+    const glms = ids.filter((id) => /^glm-/i.test(id)).sort((a, b) => verNum(b) - verNum(a))
+    return glms[0] || null
+  }
+  if (tierName === 'kimi') {
+    return ids.find((id) => /coding/i.test(id)) || ids.find((id) => /^kimi/i.test(id)) || null
+  }
+  return null
+}
+async function resolveTierModel(tier) {
+  if (!tier || !tier.base) return null // Max → modelul claude cerut, nu se atinge
+  const cached = MODEL_CACHE[tier.name]
+  if (cached && Date.now() - cached.at < MODEL_TTL_MS) return cached.model
+  let model = tier.model || MODEL_FALLBACK[tier.name] || null
+  try {
+    const key = workKeyOf(tier)
+    if (key) {
+      const url = tier.base.replace(/\/+$/, '') + '/v1/models'
+      const r = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+        },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (r.ok) {
+        const j = await r.json()
+        const ids = (j.data || j.models || []).map((m) => m.id || m.name).filter(Boolean)
+        const picked = pickBestModel(tier.name, ids)
+        if (picked) {
+          if (picked !== model) console.log(`[model] ${tier.name}: auto-sincronizat pe „${picked}"`)
+          model = picked
+        }
+      }
+    }
+  } catch {
+    /* interogare picată — păstrăm fallback-ul, nu blocăm munca */
+  }
+  MODEL_CACHE[tier.name] = { model, at: Date.now() }
+  return model
+}
+
 // Claude in mod streaming: fiecare eveniment (tool_use) ajunge la onEvent PE
 // MASURA ce se intampla; rezultatul final (textul cu SUMAR:) se intoarce la final.
 function runClaudeLive(prompt, onEvent, timeoutMs) {
   return new Promise((resolve) => {
+    void (async () => {
     // Treapta de LUCRU curentă (Kimi → GLM). null = nicio cheie pe disc →
     // avarie pe Max, anunțată tare (o singură dată pe pornire ar fi ideal,
     // dar mai bine zgomotos decât pe furiș).
     const tier = workTier()
     if (!tier) console.log('[munca] AVARIE: nicio cheie de lucru pe disc — muncesc pe Max (pune cheile prin vps-keys).')
     reportEngine(tier ? tier.name : 'max')
+    const model = (await resolveTierModel(tier)) ?? 'claude-fable-5'
     const c = spawn('claude', [
       '-p', prompt,
-      '--model', tier?.model ?? 'claude-fable-5',
+      '--model', model,
       '--allowedTools', 'Read,Edit,Write,Bash',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env: workEnv(tier) })
@@ -232,6 +297,7 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
       resolve({ code, out: finalText })
     })
     c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
+    })()
   })
 }
 
@@ -367,15 +433,20 @@ function glmEnv() {
 
 function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
   return new Promise((resolve) => {
+    void (async () => {
     const env = glmEnv()
     if (!env) {
       resolve({ code: -1, out: 'LIPSA_CHEIE_GLM: /root/kelion/glm-key.txt nu există sau e gol' })
       return
     }
     say('🔬 Verificator independent pornit pe GLM')
+    // Model AUTO-SINCRONIZAT de pe endpoint-ul GLM (nu hardcodat) — `glm-4.6` e
+    // doar fallback dacă interogarea /v1/models pică.
+    const glmTier = WORK_TIERS.find((t) => t.name === 'glm')
+    const model = (await resolveTierModel(glmTier)) || GLM_MODEL
     const c = spawn('claude', [
       '-p', prompt,
-      '--model', 'claude-fable-5',
+      '--model', model,
       '--allowedTools', 'Read,Bash',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env })
@@ -400,6 +471,7 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
     c.stderr.on('data', (d) => (errText += d))
     c.on('close', (code) => { clearTimeout(t); resolve({ code, out: finalText || errText }) })
     c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
+    })()
   })
 }
 
