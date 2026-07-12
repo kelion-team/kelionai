@@ -83,7 +83,10 @@ const TIERS = [
     model: 'kimi-for-coding',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: null },
+  // GLM cere modelul lui NATIV — `model: null` cădea pe modelul claude cerut
+  // (claude-fable-5), respins de z.ai cu „400 Unknown Model" (12 iul). `glm-4.6`
+  // e fallback-ul sigur; failover-ul pe GLM la chat e rar (cere Max+Kimi golite).
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
 ]
 const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
 const tierDownUntil = Object.create(null)
