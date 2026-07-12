@@ -84,10 +84,78 @@ const TIERS = [
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
   // GLM cere modelul lui NATIV — `model: null` cădea pe modelul claude cerut
-  // (claude-fable-5), respins de z.ai cu „400 Unknown Model" (12 iul). `glm-4.6`
-  // e fallback-ul sigur; failover-ul pe GLM la chat e rar (cere Max+Kimi golite).
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
+  // (claude-fable-5), respins de z.ai cu „400 Unknown Model" (12 iul). Folosim
+  // modelul de bază `glm-4` din lista de modele GLM cunoscute; failover-ul pe GLM
+  // la chat e rar (cere Max+Kimi golite).
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4' },
 ]
+// Modele GLM probabile pentru endpoint-ul Anthropic (z.ai/api/anthropic).
+// Preferăm în ordine cele mai capabile; auto-sincronizarea alege primul
+// disponibil, iar nu cel cu numărul de versiune cel mai mare — evită modele noi
+// care nu au încă suport pe planul Coding (cauza „Unknown Model").
+const GLM_KNOWN_MODELS = ['glm-4', 'glm-4-plus', 'glm-4-air', 'glm-4-airx', 'glm-4-flash']
+const GLM_FALLBACK_MODEL = 'glm-4'
+const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
+const MODEL_TTL_MS = 6 * 60 * 60 * 1000
+function verNum(id) {
+  const m = String(id).match(/(\d+(?:\.\d+)?)/)
+  return m ? parseFloat(m[1]) : 0
+}
+function pickBestGlmModel(ids) {
+  const set = new Set(ids.map((id) => String(id).toLowerCase()))
+  const picked = GLM_KNOWN_MODELS.find((m) => set.has(m.toLowerCase()))
+  if (picked) return picked
+  // Fallback: cel mai nou glm-X.Y (format numeric explicit).
+  const glms = ids.filter((id) => /^glm-\d+(\.\d+)?/i.test(id)).sort((a, b) => verNum(b) - verNum(a))
+  return glms[0] || null
+}
+async function resolveTierModel(tier) {
+  if (!tier || !tier.base) return null // Max → modelul cerut, nu se atinge
+  const cached = MODEL_CACHE[tier.name]
+  if (cached && Date.now() - cached.at < MODEL_TTL_MS) return cached.model
+  let model = tier.model || GLM_FALLBACK_MODEL
+  try {
+    const key = tierKeyOf(tier)
+    if (key) {
+      const url = tier.base.replace(/\/+$/, '') + '/v1/models'
+      const r = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+        },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (r.ok) {
+        const j = await r.json()
+        const ids = (j.data || j.models || []).map((m) => m.id || m.name).filter(Boolean)
+        const picked = tier.name === 'glm' ? pickBestGlmModel(ids) : null
+        if (picked) {
+          if (picked !== model) log(`[model] ${tier.name}: auto-sincronizat pe „${picked}"`)
+          model = picked
+        }
+      }
+    }
+  } catch {
+    /* interogare picată — păstrăm fallback-ul, nu blocăm chatul */
+  }
+  MODEL_CACHE[tier.name] = { model, at: Date.now() }
+  return model
+}
+function invalidateTierModel(tierName) {
+  delete MODEL_CACHE[tierName]
+}
+function isUnknownModelError(text) {
+  return /unknown model|please check the model code/i.test(String(text || ''))
+}
+// Reîmprospătare periodică în fundal, fără să blocheze vreun mesaj.
+function refreshTierModels() {
+  for (const t of TIERS) {
+    if (t.base) void resolveTierModel(t).catch(() => {})
+  }
+}
+refreshTierModels()
+setInterval(refreshTierModels, MODEL_TTL_MS / 2)
 const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
 const tierDownUntil = Object.create(null)
 function tierKeyOf(t) {
@@ -291,8 +359,18 @@ function tierSpawnEnv(tier) {
 const spawnOpts = (pub, tier = currentTier()) =>
   pub ? { env: tierSpawnEnv(tier), cwd: '/tmp' } : { env: tierSpawnEnv(tier) }
 // Modelul efectiv al unei trepte: rezervele își impun modelul lor (ex. Kimi
-// cere fix `kimi-for-coding`); pe „max" rămâne modelul cerut (Fable/Opus).
-const tierModel = (tier, model) => (tier.model !== undefined && tier.model !== null ? tier.model : model)
+// cere fix `kimi-for-coding`); pe „max" rămâne modelul cerut (Fable/Opus). Pentru
+// GLM folosim cache-ul auto-sincronizat (fallback `glm-4` până se rezolvă).
+const tierModel = (tier, model) => {
+  if (!tier) return model
+  if (tier.name === 'glm') {
+    const cached = MODEL_CACHE['glm']
+    if (cached) return cached.model
+    return GLM_FALLBACK_MODEL
+  }
+  if (tier.model !== undefined && tier.model !== null) return tier.model
+  return model
+}
 
 // ── PROCESE DE GARDĂ PUBLICE (#7 latență, Adrian 10 iul) ─────────────────────
 // Jobul public rulează într-un proces `claude` PROASPĂT (izolare: un proces = UN
@@ -331,6 +409,22 @@ function fillStandby() {
     if (!e) break
     pubStandby.push(e)
   }
+}
+// Omoară standby-urile care nu mai corespund modelului curent (ex. după
+// invalidarea cache-ului GLM când auto-sincronizarea alege alt model).
+function killStaleStandbys() {
+  const t = currentTier()
+  for (const e of [...pubStandby]) {
+    if (e.dead) continue
+    if (e.model !== tierModel(t, brainModel()) || e.tier !== t.name) {
+      try {
+        e.child.kill()
+      } catch {}
+      const i = pubStandby.indexOf(e)
+      if (i !== -1) pubStandby.splice(i, 1)
+    }
+  }
+  fillStandby()
 }
 // Ia un proces cald potrivit (modelul curent, nu prea bătrân); nepotrivitele se
 // aruncă. Locul golit se umple imediat pentru vizitatorul următor.
@@ -501,6 +595,12 @@ function startWarm(model, pub = false) {
   child.on('close', () => {
     s.alive = false
     quotaHit(tier.name, warmErr)
+    // Eroare „Unknown Model" pe GLM → ștergem cache-ul ca sesiunea următoare să
+    // reia auto-sincronizarea, nu să repete modelul mort.
+    if (isUnknownModelError(warmErr)) {
+      log(`[model] Unknown Model detectat în sesiunea caldă (${s.model}) — invalidez cache GLM`)
+      invalidateTierModel('glm')
+    }
     endTurn(null)
   })
   child.on('error', () => {
@@ -668,6 +768,13 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
         // text din cascada askClaude, în ACEEAȘI tură) pornește pe următoarea.
         quotaHit(tier.name, err)
       }
+      // Eroare „Unknown Model" pe GLM → ștergem cache-ul și omorâm standby-urile
+      // cu modelul mort, ca următorul spawn să reia auto-sincronizarea.
+      if (isUnknownModelError(finalText) || isUnknownModelError(err)) {
+        log(`[model] Unknown Model detectat în stream (${tierModel(tier, model)}) — invalidez cache GLM și reciclez standby-urile`)
+        invalidateTierModel('glm')
+        killStaleStandbys()
+      }
       resolve(full || null)
     })
     child.stdin.write(prompt)
@@ -694,11 +801,19 @@ function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel } = {})
     child.stderr.on('data', (d) => (err += d))
     child.on('close', () => {
       clearTimeout(killer)
-      if (out.trim()) resolve(out.trim())
-      else {
+      if (out.trim()) {
+        resolve(out.trim())
+      } else {
         if (err.trim()) {
           log(`claude stderr: ${err.trim().slice(0, 200)}`)
           quotaHit(tier.name, err)
+        }
+        // Eroare „Unknown Model" pe GLM → ștergem cache-ul și omorâm standby-urile
+        // cu modelul mort, ca următorul spawn să reia auto-sincronizarea.
+        if (isUnknownModelError(out) || isUnknownModelError(err)) {
+          log(`[model] Unknown Model detectat în mod text (${tierModel(tier, model)}) — invalidez cache GLM și reciclez standby-urile`)
+          invalidateTierModel('glm')
+          killStaleStandbys()
         }
         resolve(null)
       }

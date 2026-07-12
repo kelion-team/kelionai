@@ -51,11 +51,17 @@ const H = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 // lor oficial pentru Claude Code (api.kimi.com/coding/, model kimi-for-coding);
 // GLM: endpoint-ul z.ai NU mapează numele de model claude noi — trimiterea lui
 // `claude-fable-5` a dat „400 [1211] Unknown Model" (12 iul, cauza reală a
-// picării verificatorului). Se cere modelul NATIV al planului GLM Coding:
-// `glm-4.6`. Cheile: fișiere pe VPS, puse prin vps-keys.yml. AVARIE: fără NICIO
-// cheie pe disc, cade pe Max cu anunț tare în jurnal (mai bine reparații pe Max
-// decât reparații moarte) — dar cu cheile puse, Max nu e atins de muncă.
-const GLM_MODEL = 'glm-4.6'
+// picării verificatorului). Folosim modelul NATIV `glm-4` (primul din lista de
+// modele GLM cunoscute pentru planul Coding). Cheile: fișiere pe VPS, puse prin
+// vps-keys.yml. AVARIE: fără NICIO cheie pe disc, cade pe Max cu anunț tare în
+// jurnal (mai bine reparații pe Max decât reparații moarte) — dar cu cheile
+// puse, Max nu e atins de muncă.
+const GLM_MODEL = 'glm-4'
+// Modele GLM probabile pentru endpoint-ul Anthropic (z.ai/api/anthropic).
+// Preferăm în ordine cele mai capabile; auto-sincronizarea va alege primul
+// disponibil din listă, iar nu cel cu numărul de versiune cel mai mare — evită
+// modele noi care nu au încă suport pe planul Coding (cauza „Unknown Model").
+const GLM_KNOWN_MODELS = ['glm-4', 'glm-4-plus', 'glm-4-air', 'glm-4-airx', 'glm-4-flash']
 const WORK_TIERS = [
   {
     name: 'kimi',
@@ -193,20 +199,25 @@ function run(cmd, args, opts = {}) {
 // Un nume de model hardcodat se strică la fiecare update al furnizorului (exact
 // ce s-a întâmplat: `claude-fable-5` a devenit „400 Unknown Model" pe GLM). În
 // loc de asta, interogăm endpoint-ul standard `/v1/models` al fiecărei trepte
-// (cu cheia de pe disc) și alegem SINGURI modelul potrivit: cel mai nou glm-X.Y
-// pentru GLM, modelul de cod pentru Kimi. Cache 6h (nu batem endpoint-ul la
-// fiecare job) + fallback sigur dacă interogarea pică. Max (fără base) rămâne pe
-// modelul claude cerut.
+// (cu cheia de pe disc) și alegem SINGURI modelul potrivit: pentru GLM, primul
+// disponibil din `GLM_KNOWN_MODELS` (altfel cel mai nou glm-X.Y); pentru Kimi,
+// modelul de cod. Cache 6h (nu batem endpoint-ul la fiecare job) + fallback sigur
+// dacă interogarea pică; la eroare „Unknown Model" se șterge cache-ul și se
+// reîncearcă cu modelul următor. Max (fără base) rămâne pe modelul claude cerut.
 const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
 const MODEL_TTL_MS = 6 * 60 * 60 * 1000
-const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-for-coding' }
+const MODEL_FALLBACK = { glm: GLM_MODEL, kimi: 'kimi-for-coding' }
 function verNum(id) {
   const m = String(id).match(/(\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : 0
 }
 function pickBestModel(tierName, ids) {
   if (tierName === 'glm') {
-    const glms = ids.filter((id) => /^glm-/i.test(id)).sort((a, b) => verNum(b) - verNum(a))
+    const set = new Set(ids.map((id) => String(id).toLowerCase()))
+    const picked = GLM_KNOWN_MODELS.find((m) => set.has(m.toLowerCase()))
+    if (picked) return picked
+    // Fallback: cel mai nou glm-X.Y (format numeric explicit).
+    const glms = ids.filter((id) => /^glm-\d+(\.\d+)?/i.test(id)).sort((a, b) => verNum(b) - verNum(a))
     return glms[0] || null
   }
   if (tierName === 'kimi') {
@@ -288,12 +299,25 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
         } catch { /* linie partiala/non-JSON — ignorata */ }
       }
     })
-    c.stderr.on('data', (d) => (errText += d))
+    c.stderr.on('data', (d) => {
+      errText += d
+      // Eroare „Unknown Model" pe GLM → ștergem cache-ul ca următoarea încercare
+      // să reia auto-sincronizarea cu endpoint-ul, nu să repete modelul mort.
+      if (tier?.name === 'glm' && /unknown model|please check the model code/i.test(errText)) {
+        console.error(`[munca] model invalid detectat pe GLM (${model}) — șterg cache-ul pentru a reface auto-sincronizarea`)
+        invalidateTierModel('glm')
+      }
+    })
     c.on('close', (code) => {
       clearTimeout(t)
       // Treapta golită se marchează → următoarea încercare a supervizorului
       // (re-asignarea existentă) pornește deja pe treapta următoare.
       if (tier && errText) workQuotaHit(tier.name, errText)
+      // Detectare și pe textul final/stdout (unele CLI-uri returnează eroarea în result).
+      if (tier?.name === 'glm' && /unknown model|please check the model code/i.test(finalText || errText)) {
+        console.error(`[munca] model invalid detectat pe GLM (${model}) — șterg cache-ul pentru a reface auto-sincronizarea`)
+        invalidateTierModel('glm')
+      }
       resolve({ code, out: finalText })
     })
     c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
@@ -440,7 +464,7 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
       return
     }
     say('🔬 Verificator independent pornit pe GLM')
-    // Model AUTO-SINCRONIZAT de pe endpoint-ul GLM (nu hardcodat) — `glm-4.6` e
+    // Model AUTO-SINCRONIZAT de pe endpoint-ul GLM (nu hardcodat) — `glm-4` e
     // doar fallback dacă interogarea /v1/models pică.
     const glmTier = WORK_TIERS.find((t) => t.name === 'glm')
     const model = (await resolveTierModel(glmTier)) || GLM_MODEL
