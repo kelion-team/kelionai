@@ -26,17 +26,14 @@ export interface AvatarBox {
 export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
-  anthropicKeySet: boolean
   avatarBox?: AvatarBox | null
 } | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
     if (!res.ok) return null
-    // Serverul NU mai trimite cheia în clar — doar dacă e setată (anthropicKeySet).
     return (await res.json()) as {
       speechLang: string | null
       meserieActiva: number | null
-      anthropicKeySet: boolean
       avatarBox?: AvatarBox | null
     }
   } catch {
@@ -52,20 +49,6 @@ export async function saveAvatarBox(box: AvatarBox): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ avatarBox: box }),
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-export async function saveAnthropicKey(key: string | null): Promise<boolean> {
-  try {
-    const res = await fetch('/api/prefs', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ anthropicKey: key }),
     })
     return res.ok
   } catch {

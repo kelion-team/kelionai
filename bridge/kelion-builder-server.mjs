@@ -76,7 +76,9 @@ const workKeyOf = (t) => {
 // ordinea prestabilită automat"). „max" e virtual aici (workTier() → null
 // înseamnă „a căzut pe Max", avaria din comentariul de mai sus) — ordinea
 // preferată completă pentru calculul direcției e ['kimi','glm','max'].
-const WORK_ORDER = ['kimi', 'glm', 'max']
+// Anthropic/Max scos (Adrian, 12 iul): „oprit" = fără cheie de lucru (nu mai
+// există treaptă Anthropic sub Kimi/GLM).
+const WORK_ORDER = ['kimi', 'glm', 'oprit']
 let lastWorkTierReported = null
 let lastWorkQuotaReason = null
 function reportWorkTierChange(from, to) {
@@ -100,7 +102,7 @@ function workTier() {
       break
     }
   }
-  const name = picked ? picked.name : 'max'
+  const name = picked ? picked.name : 'oprit'
   if (name !== lastWorkTierReported) {
     const from = lastWorkTierReported
     lastWorkTierReported = name
@@ -260,16 +262,20 @@ async function resolveTierModel(tier) {
 function runClaudeLive(prompt, onEvent, timeoutMs) {
   return new Promise((resolve) => {
     void (async () => {
-    // Treapta de LUCRU curentă (Kimi → GLM). null = nicio cheie pe disc →
-    // avarie pe Max, anunțată tare (o singură dată pe pornire ar fi ideal,
-    // dar mai bine zgomotos decât pe furiș).
+    // Treapta de LUCRU curentă (Kimi → GLM). ANTHROPIC/MAX SCOS COMPLET (Adrian,
+    // 12 iul: „renunț la Anthropic, rămâne Kimi și GLM"): fără cheie de lucru NU
+    // mai cădem pe Max — ne oprim și anunțăm, ca să nu atingem niciodată Anthropic.
     const tier = workTier()
-    if (!tier) console.log('[munca] AVARIE: nicio cheie de lucru pe disc — muncesc pe Max (pune cheile prin vps-keys).')
-    reportEngine(tier ? tier.name : 'max')
-    // Fallback = modelul TREPTEI active, niciodata un model Claude hardcodat pe
-    // endpoint non-Max (Adrian: „modelul decis se schimba peste tot"). Pe Max
-    // (tier null) ramane modelul Claude cerut.
-    const model = (await resolveTierModel(tier)) ?? (tier ? (tier.model || MODEL_FALLBACK[tier.name]) : 'claude-fable-5')
+    if (!tier) {
+      console.log('[munca] OPRIT: nicio cheie de lucru (Kimi/GLM) pe disc — NU pornesc pe Anthropic (scos). Pune cheile prin vps-keys.')
+      reportEngine('oprit')
+      resolve({ code: -1, out: 'FĂRĂ CHEIE DE LUCRU (Kimi/GLM). Anthropic e scos — nu pornesc nimic. Pune cheile prin vps-keys.' })
+      return
+    }
+    reportEngine(tier.name)
+    // Modelul = al TREPTEI active (Kimi/GLM), auto-sincronizat de pe endpoint;
+    // niciodată un model Anthropic (scos).
+    const model = (await resolveTierModel(tier)) ?? tier.model ?? MODEL_FALLBACK[tier.name]
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,

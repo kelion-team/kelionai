@@ -21,14 +21,15 @@ export const config = {
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
-  // Optional so the app still boots before the key is added. The /api/chat
-  // route returns a clear error if it's missing.
-  // Trimmed: a stray space or newline pasted into the env var would otherwise be
-  // sent verbatim and rejected by Anthropic as a 401 (invalid key).
-  // SINGURA cheie a creierului — contul plătit de Adrian. Regula absolută
-  // (9 iul): fără cheie de rezervă, fără al doilea cont de facturare. Dacă
-  // această cheie pică, eroarea se arată cinstit — nu se comută pe nimic.
-  anthropicKey: (process.env.ANTHROPIC_API_KEY ?? '').trim(),
+  // CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max a fost SCOS COMPLET
+  // (ordinul lui Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM").
+  // Ambele endpoint-uri sunt compatibile Anthropic-API, deci folosim același SDK
+  // doar cu baseURL + cheie schimbate. Opțional la boot; /api/chat dă eroare
+  // clară dacă lipsesc. Trimmed: un spațiu/newline lipit ar fi respins ca 401.
+  // Cheile din Railway env: KIMI_API_KEY, GLM_API_KEY (acceptăm și numele scurte
+  // KIMI_KEY/GLM_KEY, ca pe VPS).
+  kimiKey: (process.env.KIMI_API_KEY ?? process.env.KIMI_KEY ?? '').trim(),
+  glmKey: (process.env.GLM_API_KEY ?? process.env.GLM_KEY ?? '').trim(),
   // Autonomie în lesă (Adrian, 9 iul): plafonul de acțiuni autonome (reparații
   // auto declanșate de supervizor / verificare live) pe o fereastră rulantă de
   // 24h. Peste el, autonomia ÎNGHEAȚĂ și Kelion cere OK — ca să nu macine la

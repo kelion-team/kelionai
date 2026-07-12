@@ -13,7 +13,7 @@ import { strings, resolveLang, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang } from '../lib/languages'
-import { loadLocalLang, loadServerPrefs, mirrorLang, saveAnthropicKey } from '../lib/prefs'
+import { loadLocalLang, loadServerPrefs, mirrorLang } from '../lib/prefs'
 import {
   openWorkspace,
   openWorkspaceCard,
@@ -136,11 +136,6 @@ export default function ChatPanel({
   // mai jos e singurul loc din care se poate înrola/reseta profilul.
   const [voiceCalState, setVoiceCalState] = useState<'idle' | 'listening' | 'ok' | 'fail'>('idle')
   const [hasVoicePrint, setHasVoicePrint] = useState(() => hasVoiceprint())
-  // Doar DACĂ e setată o cheie (serverul nu mai trimite valoarea în clar); textul
-  // introdus stă separat și pornește gol — nu preumplem niciodată un secret.
-  const [hasKey, setHasKey] = useState(false)
-  const [keyInput, setKeyInput] = useState('')
-  const [showKeyInput, setShowKeyInput] = useState(false)
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)
@@ -1040,7 +1035,6 @@ export default function ChatPanel({
     void loadServerPrefs().then((serverPrefs) => {
       if (!serverPrefs) return
       apply(serverPrefs.speechLang)
-      setHasKey(serverPrefs.anthropicKeySet)
       // Server is the cross-device source of truth: if the local mirror is stale
       // (e.g. left over from an earlier mis-detection), correct it.
       if (serverPrefs.speechLang && serverPrefs.speechLang !== local) mirrorLang(serverPrefs.speechLang)
@@ -1419,19 +1413,6 @@ export default function ChatPanel({
                     {t.calibrateVoiceReset}
                   </button>
                 )}
-                {!isAdmin && !isDemo && (
-                  <button
-                    type="button"
-                    className="fn-item"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      setShowKeyInput(true)
-                    }}
-                  >
-                    <span className="ico">🔑</span>
-                    {hasKey ? 'Modifică cheia Anthropic' : 'Adaugă cheie Anthropic'}
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -1496,45 +1477,6 @@ export default function ChatPanel({
           hidden
           onChange={onFilesPicked}
         />
-        {showKeyInput && (
-          <div className="scenario-overlay">
-            <div className="scenario-panel">
-              <h3>Configurare Anthropic</h3>
-              <p style={{ fontSize: '0.85rem', opacity: 0.8, marginBottom: '1rem' }}>
-                Introdu cheia ta API Anthropic pentru a folosi Kelion gratuit. Consumul va fi
-                debitat direct din contul tău Anthropic.
-              </p>
-              <input
-                type="password"
-                className="composer-input"
-                style={{ background: 'rgba(255,255,255,0.1)', marginBottom: '1rem' }}
-                placeholder={hasKey ? 'Cheie setată — scrie una nouă sau lasă gol ca s-o ștergi' : 'sk-ant-api03-...'}
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.target.value)}
-              />
-              <div className="scenario-btns">
-                <button
-                  className="scenario-btn cancel"
-                  onClick={() => setShowKeyInput(false)}
-                >
-                  Anulează
-                </button>
-                <button
-                  className="scenario-btn ok"
-                  onClick={async () => {
-                    const val = keyInput.trim()
-                    await saveAnthropicKey(val || null)
-                    setHasKey(!!val)
-                    setKeyInput('')
-                    setShowKeyInput(false)
-                  }}
-                >
-                  Salvează
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
