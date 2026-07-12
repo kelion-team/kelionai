@@ -1159,6 +1159,16 @@ export default function ChatPanel({
     clearVoiceprint()
     setHasVoicePrint(false)
   }
+  // AUTOMAT (Adrian, 12 iul: „ăla cu butonul se face automat"): recunoașterea
+  // vocii nu mai cere click. Când adminul intră și n-are încă amprentă, o
+  // calibrăm SINGURI (din primele secunde de vorbire); dacă nu prinde (liniște),
+  // reîncearcă până reușește. Butonul manual a fost scos.
+  useEffect(() => {
+    if (!isAdmin || hasVoicePrint || voiceCalState !== 'idle') return
+    const id = window.setTimeout(() => void calibrateVoice(), 1500)
+    return () => window.clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, hasVoicePrint, voiceCalState])
 
   // When the MONITOR shows content, the centre chat bubbles would cover it —
   // so Kelion's words move to a slim black bar just above the composer instead.
@@ -1401,23 +1411,8 @@ export default function ChatPanel({
                     {t.scenarioTitle}
                   </button>
                 )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className="fn-item"
-                    onClick={() => void calibrateVoice()}
-                    disabled={voiceCalState === 'listening'}
-                  >
-                    <span className="ico">🎙️</span>
-                    {voiceCalState === 'listening'
-                      ? t.calibrateVoiceListening
-                      : voiceCalState === 'ok'
-                        ? t.calibrateVoiceDone
-                        : voiceCalState === 'fail'
-                          ? t.calibrateVoiceFailed
-                          : t.calibrateVoiceTitle}
-                  </button>
-                )}
+                {/* Butonul „Recunoaște-mi vocea" a fost SCOS (Adrian, 12 iul):
+                    calibrarea e acum automată (vezi useEffect de mai sus). */}
                 {isAdmin && hasVoicePrint && voiceCalState === 'idle' && (
                   <button type="button" className="fn-item" onClick={resetVoicePrint}>
                     <span className="ico">♻️</span>
