@@ -1,0 +1,58 @@
+# INSTALARE LIVEKIT SELF-HOSTED — DIRECT PRIN SSH (deterministic, fără LLM).
+#
+# De ce (12 iul, Adrian): ordinele către constructor treceau printr-un agent LLM
+# care „interpreta" sarcina (edita AI-HANDOFF.md în loc să ruleze `apt-get
+# install docker.io`), deci docker nu s-a instalat niciodată. Aici rulăm exact
+# comenzile prin SSH, cu parola root din secret (VPS_ROOT_PASS, mascat automat):
+#   1) apt-get install docker.io + pornire docker
+#   2) node bridge/kelion-livekit (generează chei, pornește containerul pe
+#      7880/7881/7882, testează local, scrie LIVEKIT_URL/API_KEY/API_SECRET în
+#      Railway — RAILWAY_TOKEN e deja în /root/kelion/claude.env).
+# Cheile NU apar în log: scriptul kelion-livekit afișează doar primele 8 caractere
+# ale API key-ului și niciodată secretul.
+name: vps-livekit-install
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalează docker + LiveKit pe VPS (SSH, parolă mascată din secret)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<'EOS'
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          echo "=== 1) DOCKER ==="
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y docker.io
+          fi
+          systemctl enable --now docker || true
+          docker --version
+          echo "docker is-active: $(systemctl is-active docker)"
+
+          echo "=== 2) LIVEKIT (bridge/kelion-livekit) ==="
+          REPO=/root/kelion/repo
+          [ -d "$REPO" ] || REPO=/root/kelion
+          cd "$REPO"
+          git fetch origin master -q || true
+          git log --oneline -1 origin/master || true
+          node "$REPO/bridge/kelion-livekit"
+
+          echo "=== 3) STARE CONTAINER ==="
+          docker ps --filter name=kelion-livekit --format '{{.Names}} {{.Status}} {{.Ports}}' || true
+          EOS
