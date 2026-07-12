@@ -9,7 +9,7 @@ import { anthropic } from './anthropic.js'
 // — it recalls what Kelion knows about the user and, after each turn, learns +
 // saves new durable facts (cheap Haiku, off the response path).
 
-const HAIKU = 'claude-haiku-4-5-20251001'
+const MEMORY_MODEL = process.env.KELION_MEMORY_MODEL || 'claude-haiku-4-5-20251001'
 
 // ── Memory agent (recall) ─────────────────────────────────────────────────
 // Pull durable facts about the user into the system prompt so Kelion is
@@ -70,7 +70,7 @@ export async function learnFromTurn(
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
     const res = await anthropic.messages.create({
-      model: HAIKU,
+      model: MEMORY_MODEL,
       max_tokens: 400,
       system:
         'You maintain long-term memory about ONE user for a personal assistant. ' +
@@ -95,7 +95,7 @@ export async function learnFromTurn(
       ],
     })
     // Meter the Memory agent's real cost too (admin accounting completeness).
-    void recordCost(email, 'memory', claudeCost(HAIKU, res.usage.input_tokens, res.usage.output_tokens))
+    void recordCost(email, 'memory', claudeCost(MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)

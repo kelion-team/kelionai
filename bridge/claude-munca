@@ -35,7 +35,7 @@ if [ -n "$KIMI_KEY" ] && ! kimi_cooling; then
   # Model implicit doar dacă apelantul nu a dat unul.
   case " $* " in
     *" --model "*) : ;;
-    *) set -- --model kimi-for-coding "$@" ;;
+    *) set -- --model "${KELION_WORK_KIMI_MODEL:-kimi-for-coding}" "$@" ;;
   esac
   exec env -u CLAUDE_CODE_OAUTH_TOKEN \
     ANTHROPIC_BASE_URL="https://api.kimi.com/coding/" \

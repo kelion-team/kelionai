@@ -25,7 +25,7 @@ echo "[$(date -Is)] REPAIR START (baseline master $GOOD): $DESC"
 set -a; . /root/kelion/claude.env; set +a
 
 # 1. Autonomous fix, isolated to the working tree.
-claude -p --permission-mode acceptEdits --model claude-fable-5 \
+claude -p --permission-mode acceptEdits --model "${KELION_FAST_MODEL:-claude-fable-5}" \
   "Ești în repo-ul Kelionai (backend Node/Fastify TypeScript în backend/, frontend React/Vite în frontend/). Fă EXACT această reparație/modificare cerută de admin, corect și minimal, fără să strici altceva, apoi oprește-te. Nu face deploy, doar modifică codul. Cerere: $DESC" 2>&1 | tail -15
 
 # 2. Build gate — both must compile or we abort WITHOUT deploying.

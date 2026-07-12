@@ -55,8 +55,8 @@ function loadContext() {
   )
 }
 
-const MODEL = 'claude-fable-5'
-const RESERVE = 'claude-opus-4-8'
+const MODEL = process.env.KELION_FAST_MODEL || 'claude-fable-5'
+const RESERVE = process.env.KELION_TOP_MODEL || 'claude-opus-4-8'
 const REST_MS = 10 * 60_000
 let fableDownUntil = 0
 const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
@@ -80,13 +80,13 @@ const TIERS = [
     name: 'kimi',
     keyFile: '/root/kelion/kimi-key.txt',
     base: 'https://api.kimi.com/coding/',
-    model: 'kimi-for-coding',
+    model: process.env.KELION_WORK_KIMI_MODEL || 'kimi-for-coding',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
   // GLM cere modelul lui NATIV — `model: null` cădea pe modelul claude cerut
   // (claude-fable-5), respins de z.ai cu „400 Unknown Model" (12 iul). `glm-4.6`
   // e fallback-ul sigur; failover-ul pe GLM la chat e rar (cere Max+Kimi golite).
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: process.env.KELION_WORK_GLM_MODEL || 'glm-4.6' },
 ]
 const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
 const TIER_COOLDOWN_MAX_MS = 6 * 3600_000 // plafon backoff (o treaptă cronic goală)

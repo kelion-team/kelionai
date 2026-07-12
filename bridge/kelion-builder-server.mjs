@@ -55,16 +55,18 @@ const H = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 // `glm-4.6`. Cheile: fișiere pe VPS, puse prin vps-keys.yml. AVARIE: fără NICIO
 // cheie pe disc, cade pe Max cu anunț tare în jurnal (mai bine reparații pe Max
 // decât reparații moarte) — dar cu cheile puse, Max nu e atins de muncă.
-const GLM_MODEL = 'glm-4.6'
+const WORK_KIMI_MODEL = process.env.KELION_WORK_KIMI_MODEL || 'kimi-for-coding'
+const WORK_GLM_MODEL = process.env.KELION_WORK_GLM_MODEL || 'glm-4.6'
+const VERIFIER_MODEL = process.env.KELION_VERIFIER_MODEL || WORK_GLM_MODEL
 const WORK_TIERS = [
   {
     name: 'kimi',
     keyFile: '/root/kelion/kimi-key.txt',
     base: 'https://api.kimi.com/coding/',
-    model: 'kimi-for-coding',
+    model: WORK_KIMI_MODEL,
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: GLM_MODEL },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: WORK_GLM_MODEL },
 ]
 const WORK_COOLDOWN_MS = 30 * 60_000
 const workDownUntil = Object.create(null)
@@ -199,7 +201,7 @@ function run(cmd, args, opts = {}) {
 // modelul claude cerut.
 const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
 const MODEL_TTL_MS = 6 * 60 * 60 * 1000
-const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-for-coding' }
+const MODEL_FALLBACK = { glm: WORK_GLM_MODEL, kimi: WORK_KIMI_MODEL }
 function verNum(id) {
   const m = String(id).match(/(\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : 0
@@ -262,7 +264,8 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
     // Fallback = modelul TREPTEI active, niciodata un model Claude hardcodat pe
     // endpoint non-Max (Adrian: „modelul decis se schimba peste tot"). Pe Max
     // (tier null) ramane modelul Claude cerut.
-    const model = (await resolveTierModel(tier)) ?? (tier ? (tier.model || MODEL_FALLBACK[tier.name]) : 'claude-fable-5')
+    const WORK_MAX_FALLBACK_MODEL = process.env.KELION_FAST_MODEL || 'claude-fable-5'
+    const model = (await resolveTierModel(tier)) ?? (tier ? (tier.model || MODEL_FALLBACK[tier.name]) : WORK_MAX_FALLBACK_MODEL)
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,
@@ -452,7 +455,7 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
     // Model AUTO-SINCRONIZAT de pe endpoint-ul GLM (nu hardcodat) — `glm-4.6` e
     // doar fallback dacă interogarea /v1/models pică.
     const glmTier = WORK_TIERS.find((t) => t.name === 'glm')
-    const model = (await resolveTierModel(glmTier)) || GLM_MODEL
+    const model = (await resolveTierModel(glmTier)) || VERIFIER_MODEL
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,

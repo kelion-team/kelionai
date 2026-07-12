@@ -37,7 +37,10 @@ if (!SECRET) {
   console.error('BRIDGE_SECRET lipsă (nici în env, nici în bridge-secret.txt) — puntea nu poate porni')
   process.exit(1)
 }
-const MODELS = ['claude-fable-5', 'claude-opus-4-8']
+const MODELS = [
+  process.env.KELION_FAST_MODEL || 'claude-fable-5',
+  process.env.KELION_TOP_MODEL || 'claude-opus-4-8',
+]
 const JOBS_DIR = '/tmp/kelion-jobs'
 const MAX_PARALLEL = 3
 
