@@ -350,9 +350,24 @@ function toolFile(t) {
 // Rezultatul real (fișiere, exit code-uri, coada erorii) intră în release și
 // pleacă lui Adrian în chat — iar „Gata" se spune DOAR când dovada există;
 // altfel se spune cinstit ce a picat.
+// Asigură dependențele npm într-un director înainte de build. Pe medii curate
+// (worktree proaspăt, clonare nouă) `node_modules` poate lipsi → `tsc: not found`.
+// Nu reinstalăm dacă deja există, pentru viteză; `npm install` repară doar când
+// lipsește cu totul.
+async function ensureNodeModules(dir) {
+  if (existsSync(dir + '/node_modules')) return
+  say(`📦 Instalez dependențele în ${dir.replace(REPO, '.')}...`)
+  const r = await run('npm', ['install'], { cwd: dir, timeoutMs: 600_000 })
+  if (r.code !== 0) {
+    throw new Error(`npm install a eșuat în ${dir}: ${r.out.slice(-800)}`)
+  }
+}
+
 async function verifyWork() {
   const diff = (await run('git', ['diff', '--stat'])).out.trim()
   const summary = diff.split('\n').pop()?.trim() || '' // „3 files changed, 41 insertions(+)…"
+  await ensureNodeModules(REPO + '/backend')
+  await ensureNodeModules(REPO + '/frontend')
   const be = await run('npm', ['run', 'build'], { cwd: REPO + '/backend' })
   const fe = await run('npm', ['run', 'build'], { cwd: REPO + '/frontend' })
   const te = await run('npm', ['test'], { cwd: REPO + '/backend' })

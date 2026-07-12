@@ -5,7 +5,7 @@
 
 import { superviseDecision, escalationText, DEFAULT_SUPERVISE, SuperviseState } from './supervisor.js'
 
-const cfg = DEFAULT_SUPERVISE // stallMs=240000 nudgeMs=240000 activeMs=90000 maxAttempts=3
+const cfg = DEFAULT_SUPERVISE // stallMs=240000 nudgeMs=240000 activeMs=90000 maxAttempts=1
 const NOW = 1_000_000_000 // referință fixă
 
 type Case = { name: string; r: SuperviseState; now: number; lastBuildBeat: number; expected: string }
@@ -41,7 +41,7 @@ const cases: Case[] = [
   },
   {
     name: '5. impotmolit, mai are incercari -> reassign',
-    r: { status: 'lucreaza', at: NOW - cfg.stallMs - 1000, nudged: NOW - cfg.nudgeMs - 1000, attempts: 1 },
+    r: { status: 'lucreaza', at: NOW - cfg.stallMs - 1000, nudged: NOW - cfg.nudgeMs - 1000, attempts: 0 },
     now: NOW,
     lastBuildBeat: NOW - cfg.activeMs - 1000,
     expected: 'reassign',
