@@ -259,7 +259,10 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
     const tier = workTier()
     if (!tier) console.log('[munca] AVARIE: nicio cheie de lucru pe disc — muncesc pe Max (pune cheile prin vps-keys).')
     reportEngine(tier ? tier.name : 'max')
-    const model = (await resolveTierModel(tier)) ?? 'claude-fable-5'
+    // Fallback = modelul TREPTEI active, niciodata un model Claude hardcodat pe
+    // endpoint non-Max (Adrian: „modelul decis se schimba peste tot"). Pe Max
+    // (tier null) ramane modelul Claude cerut.
+    const model = (await resolveTierModel(tier)) ?? (tier ? (tier.model || MODEL_FALLBACK[tier.name]) : 'claude-fable-5')
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,
@@ -547,6 +550,21 @@ async function build(order) {
     `si ruleaza testele (npm test in backend) pana trec fara erori. ` +
     `NU face deploy, NU rula railway. La final scrie pe o singura linie, ` +
     `dupa "SUMAR:", ce ai schimbat.\n` +
+    // Problema centrala (Adrian, 12 iul: „Kelion spune ca face dar nu executa
+    // nimic" / „el nu-l face deloc"): constructorul iesea „fara fisiere
+    // modificate" — rationa/explora dar NU edita. Fortam executia reala.
+    `REGULA ZERO — TREBUIE SA EDITEZI: a rezolva o cerere inseamna sa MODIFICI ` +
+    `fisiere reale (Edit/Write). A termina cu ZERO fisiere modificate = ESEC, ` +
+    `NU „gata". Daca nu stii UNDE e codul, CAUTA intai (grep/glob) si editeaza ` +
+    `fisierul cel mai probabil — niciodata doar sa descrii, sa „raportezi blocaj" ` +
+    `sau sa inchizi fara editare. Un singur Edit real bate zece explicatii.\n` +
+    // Harta ca sa nu porneasca orb (cauza #1 a „fara fisiere").
+    `UNDE E CODUL (repere): comportamentul lui Kelion in chat (ton, reguli, ` +
+    `gesturi [GEST]) → backend/src/routes/chat.ts (promptul creierului) + ` +
+    `frontend/src/components/ChatPanel.tsx + frontend/src/components/AvatarModel.tsx; ` +
+    `vocea/transcriere (STT) → backend/src/routes/asr.ts + asr-stream.ts + ` +
+    `frontend/src/lib/audioIO.ts + micStream.ts; vocea rostita (TTS) → ` +
+    `backend/src/services/tts.ts. Daca nu e in lista, foloseste grep pe cuvinte-cheie.\n` +
     // Problema 1 (Adrian, 12 iul): NU „documenta blocajul" in loc sa lucrezi.
     `REGULI DE FIER: (1) Daca sarcina cere OPERATIUNI de sistem (instalare pachete, ` +
     `pornire/repornire servicii, docker, config VPS) si NU le poti rula EXACT si dovedit, ` +
@@ -561,7 +579,12 @@ async function build(order) {
     `cu o comanda reala (ex: curl -s -o /dev/null -w '%{http_code}' <url>). Daca NU se mai reproduce ` +
     `(endpoint-ul da 200, functia merge), NU repara nimic — un esec tranzitoriu (ex: in timpul unui redeploy) ` +
     `NU e un bug. Scrie "NU SE MAI REPRODUCE: <dovada>" si INCHIDE sarcina. Repari DOAR ce ai vazut ca e ` +
-    `chiar rupt acum. Un avertisment de browser (ceva „is deprecated") NU e o eroare — nu il repara niciodata.`
+    `chiar rupt acum. Un avertisment de browser (ceva „is deprecated") NU e o eroare — nu il repara niciodata. ` +
+    // Clarificare (12 iul): regula (4) e DOAR pentru bug-uri raportate.
+    `IMPORTANT: regula (4) se aplica DOAR cand sarcina spune ca ceva E STRICAT. ` +
+    `Pentru cereri de COMPORTAMENT sau feature („fa X sa se poarte asa", „adauga Y", ` +
+    `„schimba tonul/gesturile") NU cauti sa reproduci un bug — editezi direct codul ` +
+    `care guverneaza acel comportament (vezi harta de mai sus) si REGULA ZERO se aplica: TREBUIE sa editezi.`
   const short = order.text.replace(/\s+/g, ' ').slice(0, 70)
   say(`🔨 Am preluat ordinul și încep execuția: ${short}`)
   pushProgress(10, 'Execuție')
