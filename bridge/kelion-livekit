@@ -131,16 +131,21 @@ async function startLiveKit(apiKey, apiSecret) {
 
 async function waitForServer() {
   log('aștept ca serverul să răspundă...')
-  for (let i = 0; i < 30; i++) {
-    // Portul 7880 e mapat pe host; LiveKit răspunde 404 pe / când e viu.
+  for (let i = 0; i < 40; i++) {
+    // ORICE cod HTTP înseamnă că serverul ASCULTĂ (12 iul: fixarea pe „404" era
+    // greșită — versiunea asta de LiveKit răspunde cu alt cod pe „/", deci
+    // health-check-ul pica deși containerul era viu). „000"/gol = port închis.
     const r = await run('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '2', 'http://localhost:7880/'])
-    if (r.out.trim() === '404') {
-      log('server LiveKit răspunde pe portul 7880')
+    const code = r.out.trim()
+    if (code && code !== '000') {
+      log(`server LiveKit răspunde pe portul 7880 (HTTP ${code})`)
       return
     }
     await new Promise((res) => setTimeout(res, 1000))
   }
-  fail('serverul LiveKit nu a răspuns în 30s')
+  // Nu a răspuns — arată DE CE (logurile containerului) înainte de a muri.
+  const logs = await run('docker', ['logs', '--tail', '40', CONTAINER])
+  fail(`serverul LiveKit nu a răspuns în 40s. Loguri container:\n${logs.out}`)
 }
 
 // Test real: generăm un JWT și apelăm ListRooms prin API-ul Twirp al serverului.
