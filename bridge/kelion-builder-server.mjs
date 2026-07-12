@@ -456,7 +456,12 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
     const c = spawn('claude', [
       '-p', prompt,
       '--model', model,
-      '--allowedTools', 'Read,Bash',
+      // CAPACITATE MAXIMĂ ȘI LA VERIFICARE (Adrian, 12 iul: „ambele au atribut de
+      // edit și de verificare"): verificatorul nu mai e read-only — primește TOT
+      // setul de unelte, ca să poată nu doar citi/verifica, ci și edita/repara
+      // ce găsește. Ambele modele (Kimi + GLM) au acum ambele atribute: și
+      // editare (poarta de muncă), și verificare (poarta asta) — complet.
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
       '--output-format', 'stream-json', '--verbose',
     ], { cwd: REPO, env })
     let buf = ''
