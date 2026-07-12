@@ -1,0 +1,62 @@
+# DIAGNOSTIC DETERMINIST VPS — rezolvă Problema 2 (Adrian, 12 iul: „diagnostichează
+# din memorie, nu din dovezi"). La ORICE eșec, în loc de „presupun că...", rulează
+# ASTA: adună FAPTELE reale (starea serviciilor, ultimele loguri, containerele
+# docker, sănătatea endpoint-urilor, dacă procesul viu rulează codul din repo).
+# Determinist, fără LLM. Ieșirea e dovada pe care se ia decizia.
+name: vps-diag
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Adună faptele de pe VPS (SSH)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<'EOS'
+          set +e
+          echo "==================== SERVICII (systemctl is-active) ===================="
+          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer docker; do
+            printf '%-18s ' "$s"; systemctl is-active "$s" 2>/dev/null
+          done
+          echo
+          echo "==================== COD RULAT vs REPO (md5) ===================="
+          REPO=/root/kelion/repo; [ -d "$REPO" ] || REPO=/root/kelion
+          for pair in "kelion-builder:bridge/kelion-builder-server.mjs" "kelion-bridge:bridge/kelion-bridge-linux.mjs"; do
+            SVC="${pair%%:*}"; SRC="${pair##*:}"
+            EXEC=$(systemctl show "$SVC" -p ExecStart --value | grep -oE '/[^ ]*[.]mjs' | head -1)
+            if [ -n "$EXEC" ] && [ -f "$EXEC" ] && [ -f "$REPO/$SRC" ]; then
+              A=$(md5sum "$EXEC" | awk '{print $1}'); B=$(md5sum "$REPO/$SRC" | awk '{print $1}')
+              [ "$A" = "$B" ] && echo "$SVC: COD LA ZI" || echo "$SVC: COD VECHI (rulat != repo) -> ruleaza vps-auto-restart"
+            else echo "$SVC: nu pot compara ($EXEC)"; fi
+          done
+          echo
+          echo "==================== DOCKER (ps -a) ===================="
+          docker ps -a --format '{{.Names}}  {{.Status}}  {{.Ports}}' 2>/dev/null | head -20
+          echo
+          echo "==================== LOGURI kelion-livekit (docker, 15) ===================="
+          docker logs --tail 15 kelion-livekit 2>&1 | head -20
+          echo
+          echo "==================== journalctl kelion-builder (10) ===================="
+          journalctl -u kelion-builder -n 10 --no-pager 2>/dev/null | tail -10
+          echo
+          echo "==================== SĂNĂTATE ENDPOINT-URI ===================="
+          printf 'kelionai.app/api/version : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 https://kelionai.app/api/version
+          printf 'livekit local :7880      : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:7880/ 2>/dev/null || echo "port inchis"
+          echo
+          echo "==================== INCARCARE ===================="
+          uptime; echo "disc:"; df -h / | tail -1
+          EOS
