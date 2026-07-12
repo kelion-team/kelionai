@@ -697,50 +697,38 @@ async function build(order) {
       await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. Verificator independent GLM: TRECE (${verdict.reason}). E pregătit — aprobă în Admin → Release-uri.`)
       pushProgress(100, 'Gata — dovadă + verificare independentă, aștept aprobarea')
     } else {
-      // GARDĂ ANTI-BUCLĂ (12 iul, Adrian: coada s-a umplut cu „VERIFICATOR
-      // INDEPENDENT PICĂ pentru „VERIFICATOR INDEPENDENT PICĂ pentru..."
-      // cuibărit la infinit). Două cazuri distincte:
+      // MUNCA AJUNGE ÎNTOTDEAUNA LA ADRIAN (Adrian, 12 iul: „repară la Kelion să
+      // poată face cererile de reparații"). Cauza reală a „nu termină": pe un
+      // verdict GLM „PICĂ", munca se re-emitea în buclă și, la a doua picare, se
+      // oprea FĂRĂ să stageze nimic → branch orfan, `releases:0`, nimic la aprobat
+      // (dovedit live: 12 branch-uri builder, versiune blocată). Acum: orice build
+      // care a trecut build+test proprii se STAGEAZĂ ca release, cu verdictul GLM
+      // atașat ca notă. GLM rămâne verificator permanent — opinia lui (PICĂ +
+      // motive, sau „indisponibil") e scrisă în release — dar poarta finală e
+      // DECIZIA lui Adrian, nu o buclă de re-emitere care înghite munca. Nimic nu
+      // intră live fără aprobarea lui oricum.
       const verifierCrashed = /s-a terminat cu exit|nu am putut porni/i.test(verdict.reason || '')
-      const alreadyRequeued = /^VERIFICATOR INDEPENDENT PICĂ/.test(order.text)
-      if (verifierCrashed) {
-        // (a) Verificatorul ÎNSUȘI a crăpat (infra: cotă/cheie GLM, rețea) — NU
-        // e vina lucrării. Constructorul a trecut deja build+test, deci stagem
-        // release-ul cu o notă „neverificat-independent" (nimic nu intră live
-        // fără aprobarea lui Adrian oricum) în loc să buclăm munca reală.
-        let branch = ''
-        try {
-          branch = await prepareReleaseBranch(title)
-        } catch (e) {
-          say(`🔴 NU e gata — nu am putut pregăti branch-ul: ${e.message}`)
-          await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: nu am putut comite/push branch-ul (${e.message}).`)
-          pushProgress(100, 'Eșec pregătire branch')
-          return
-        }
-        const detail =
-          `Ordin: ${order.text}\n\n` +
-          `Verificator independent: INDISPONIBIL (${verdict.reason})\n` +
-          `Constructorul a trecut build+test proprii; publicarea rămâne la aprobarea lui Adrian.\n\n` +
-          `${v.detail}\n\n--- notele constructorului ---\n${res.out.slice(-2000)}`
-        await api('/api/bridge/stage-release', 'POST', { title, detail, branch })
-        say(`⚠️ Verificatorul independent n-a putut rula (${String(verdict.reason).slice(0, 60)}) — pus release cu build+test proprii, marcat neverificat-independent; aștept aprobarea`)
-        await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. NOTĂ: verificatorul independent GLM n-a putut rula (${String(verdict.reason).slice(0, 80)}) — de verificat cheia/cota GLM. Aprobă în Admin → Release-uri.`)
-        pushProgress(100, 'Gata (verificator indisponibil) — aștept aprobarea')
-      } else if (alreadyRequeued) {
-        // (b) Ordinul e DEJA o re-emisie de eșec-verificator care a picat iar —
-        // NU mai re-emitem, altfel se cuibărește la infinit.
-        say('🔴 Verificarea a picat din nou pe o re-emisie — NU mai re-emit (evit bucla). Detalii în Release-uri.')
-        await tellAdmin(`Ordinul „${order.text.slice(0, 80)}" a picat verificarea din nou — nu mai re-emit automat (evit bucla). Verifică manual.`)
-        pushProgress(100, 'Verificare picată repetat — oprit re-emiterea')
-      } else {
-        say(`🔴 NU e gata — verificatorul independent GLM a PICĂ: ${verdict.reason}`)
-        await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: verificatorul independent GLM a PICĂ (${verdict.reason}). Nu public nimic stricat; repar și retrimite.`)
-        pushProgress(100, 'Verificare independentă PICĂ — întors la reparat')
-        // Întoarce la reparat cu motivele verificatorului (o SINGURĂ dată — o
-        // re-emisie care pică iar cade pe ramura (b) și se oprește).
-        await api('/api/bridge/workorders', 'POST', {
-          text: `VERIFICATOR INDEPENDENT PICĂ pentru „${order.text.slice(0, 200)}": ${verdict.reason}. Repară problema și retrimite.`,
-        }).catch(() => {})
+      let branch = ''
+      try {
+        branch = await prepareReleaseBranch(title)
+      } catch (e) {
+        say(`🔴 NU e gata — nu am putut pregăti branch-ul: ${e.message}`)
+        await tellAdmin(`Ordinul „${order.text.slice(0, 100)}" NU e gata: nu am putut comite/push branch-ul (${e.message}).`)
+        pushProgress(100, 'Eșec pregătire branch')
+        return
       }
+      const glmLine = verifierCrashed
+        ? `Verificator independent GLM: INDISPONIBIL (${verdict.reason}) — de verificat cheia/cota GLM.`
+        : `Verificator independent GLM: PICĂ — ${verdict.reason}`
+      const detail =
+        `Ordin: ${order.text}\n\n` +
+        `${glmLine}\nConstructorul a trecut build+test proprii; DECIZIA de publicare e la tine.\n\n` +
+        `${v.detail}\n\n--- notele constructorului ---\n${res.out.slice(-2000)}`
+      await api('/api/bridge/stage-release', 'POST', { title, detail, branch })
+      const short = verifierCrashed ? 'verificator GLM indisponibil' : 'verificator GLM: PICĂ'
+      say(`⚠️ Pus release cu build+test proprii (${short}) — aștept decizia ta (Admin → Release-uri)`)
+      await tellAdmin(`Am terminat: ${title.slice(0, 120)}. Dovada: ${v.proof}. ${glmLine} Constructorul a trecut build+test proprii — decizi tu în Admin → Release-uri.`)
+      pushProgress(100, 'Gata — aștept decizia ta (notă GLM atașată)')
     }
   } else if (!v.changed) {
     say('⚠️ NU declar gata: niciun fișier modificat — nu am dovadă că s-a lucrat ceva (detaliile în Release-uri)')
