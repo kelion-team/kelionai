@@ -8,7 +8,7 @@
 # FARA `set -e`: fiecare pas ruleaza pana la capat chiar daca unul da o eroare
 # ne-fatala, ca sa nu mai ramana watchdog-ul neinstalat (bug-ul precedent).
 
-echo "=== 1/4 Repornire eterna (systemd override) ==="
+echo "=== 1/5 Repornire eterna (systemd override) ==="
 mkdir -p /etc/systemd/system/kelion-bridge.service.d
 cat > /etc/systemd/system/kelion-bridge.service.d/override.conf <<'OVR'
 [Unit]
@@ -24,7 +24,25 @@ systemctl restart kelion-bridge
 sleep 2
 echo -n "stare punte: "; systemctl is-active kelion-bridge
 
-echo "=== 2/4 Caine de paza (la fiecare minut) ==="
+echo "=== 2/5 Pool elastic de reparatori (service + restart) ==="
+POOL_SRC=/root/kelion/repo/bridge/kelion-repairer-pool.service
+POOL_DST=/etc/systemd/system/kelion-repairer-pool.service
+if [ -f "$POOL_SRC" ]; then
+  cp "$POOL_SRC" "$POOL_DST"
+  chmod 644 "$POOL_DST"
+  systemctl daemon-reload
+  systemctl enable kelion-repairer-pool >/dev/null 2>&1 || true
+  systemctl restart kelion-repairer-pool
+  sleep 1
+  echo -n "stare pool reparatori: "; systemctl is-active kelion-repairer-pool
+  # Builder-ul clasic se opreste: pool-ul preia ordinele.
+  systemctl stop kelion-builder >/dev/null 2>&1 || true
+  echo "oprit kelion-builder (pool activ)"
+else
+  echo "(fișier service pool negăsit — sar)"
+fi
+
+echo "=== 3/5 Caine de paza (la fiecare minut) ==="
 cat > /root/kelion/watchdog.sh <<'WD'
 #!/bin/bash
 # kelion-bridge nu are voie sa pice: repornita cand e moarta SAU vie-dar-blocata.
@@ -44,11 +62,11 @@ chmod +x /root/kelion/watchdog.sh
 ( crontab -l 2>/dev/null | grep -v watchdog.sh ; echo "* * * * * /root/kelion/watchdog.sh" ) | crontab -
 echo "caine de paza instalat: $(crontab -l | grep -c watchdog.sh) intrare"
 
-echo "=== 3/4 Cine trimite bataia generica 'Sesiune de lucru activa pe laptop' ==="
+echo "=== 4/5 Cine trimite bataia generica 'Sesiune de lucru activa pe laptop' ==="
 grep -rln "Sesiune de lucru" /root/kelion/ 2>/dev/null || echo "(nu e pe serverul asta)"
 
-echo "=== 4/4 Jurnal punte (ultimele 5 linii) ==="
+echo "=== 5/5 Jurnal punte (ultimele 5 linii) ==="
 journalctl -u kelion-bridge -n 5 --no-pager -o cat 2>/dev/null | tail -5 || true
 
 echo ""
-echo "GATA — puntea e blindata: repornire eterna + paznic la 1 minut + pornire la reboot."
+echo "GATA — puntea e blindata: repornire eterna + pool reparatori activ + paznic la 1 minut + pornire la reboot."

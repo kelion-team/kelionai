@@ -52,8 +52,23 @@ if [ -n "$EXEC" ] && [ "$EXEC" != "$SRC" ]; then
   say "cale reală diferită de repo — copiat codul corect peste $EXEC"
 fi
 
+# 2c. Pool-ul elastic de reparatori: asigură service file proaspăt și pornit.
+#     Adrian, 12 iul: „da drumul la toți reparatori acum" — pool-ul e activ,
+#     builder-ul clasic NU mai trage ordine (se oprește pentru a nu se bate pe coadă).
+POOL_SERVICE="kelion-repairer-pool"
+POOL_SRC="$REPO/bridge/kelion-repairer-pool.service"
+POOL_DST="/etc/systemd/system/$POOL_SERVICE.service"
+if [ -f "$POOL_SRC" ]; then
+  cp "$POOL_SRC" "$POOL_DST"
+  chmod 644 "$POOL_DST"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable "$POOL_SERVICE" >/dev/null 2>&1 || true
+  systemctl start "$POOL_SERVICE" || say "⚠️ nu am putut porni $POOL_SERVICE"
+fi
+
 # 3. Repornește DOAR serviciile Kelion care există pe mașina asta.
-for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
+#    Builder-ul clasic se OPREȘTE când pool-ul e activ (nu mai trage ordine).
+for svc in kelion-bridge kelion-paznic kelion-deployer; do
   if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && \
      systemctl list-unit-files "$svc.service" 2>/dev/null | grep -q "^$svc.service"; then
     systemctl restart "$svc" && say "restart $svc → $(systemctl is-active "$svc")"
@@ -61,6 +76,13 @@ for svc in kelion-bridge kelion-paznic kelion-builder kelion-deployer; do
     say "($svc nu există aici — sar peste)"
   fi
 done
+
+# 3b. Oprește builder-ul clasic dacă pool-ul e activ: ei se bat pe aceeași coadă.
+if systemctl list-unit-files kelion-builder.service >/dev/null 2>&1 && \
+   systemctl list-unit-files kelion-builder.service 2>/dev/null | grep -q "^kelion-builder.service"; then
+  systemctl stop kelion-builder || true
+  say "oprit kelion-builder (pool-ul de reparatori preia ordinele)"
+fi
 
 # 4. Verificare live (până la ~40s): puntea online + paznicul raportează.
 say "verific live pe $BASE …"
