@@ -770,6 +770,34 @@ export async function pullPendingWorkOrders(): Promise<WorkOrderRow[]> {
   return r.rows
 }
 
+// POOL ELASTIC DE REPARATORI (Adrian, 12 iul: „mai mulți reparatori sincronizați
+// care se opresc când termină și repornesc când cresc sarcinile"). Revendică UN
+// SINGUR ordin, atomic și sigur pentru mai mulți workeri în paralel: `FOR UPDATE
+// SKIP LOCKED` face ca doi workeri să ia MEREU ordine diferite (al doilea sare
+// peste rândul blocat de primul), fără dublă-revendicare. Întoarce ordinul luat
+// sau null (coadă goală → workerul iese, nu consumă).
+export async function claimOneWorkOrder(): Promise<WorkOrderRow | null> {
+  if (!dbEnabled()) return null
+  const r = await getPool().query<WorkOrderRow>(
+    `UPDATE work_orders SET status='delivered', delivered_at=now()
+     WHERE id = (
+       SELECT id FROM work_orders WHERE status='pending'
+       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+     )
+     RETURNING id, text, status, created_at, delivered_at`,
+  )
+  return r.rows[0] ?? null
+}
+
+// Câte ordine așteaptă (pentru supervizor: câți workeri să pornească).
+export async function countPendingWorkOrders(): Promise<number> {
+  if (!dbEnabled()) return 0
+  const r = await getPool().query<{ n: string }>(
+    `SELECT count(*)::int AS n FROM work_orders WHERE status='pending'`,
+  )
+  return Number(r.rows[0]?.n ?? 0)
+}
+
 export async function listWorkOrders(n = 50): Promise<WorkOrderRow[]> {
   if (!dbEnabled()) return []
   const r = await getPool().query<WorkOrderRow>(
