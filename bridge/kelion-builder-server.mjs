@@ -64,7 +64,11 @@ const WORK_TIERS = [
     model: 'kimi-for-coding',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: GLM_MODEL },
+  // PARITATE COMPLETĂ (Adrian, 13 iul: „ambii trebuie să poată face aceleași
+  // facilități"): GLM primește ACELEAȘI facilități ca Kimi — inclusiv fereastra
+  // mare de context (fără ea, auto-compactarea pe fereastra implicită mică
+  // rupea firul editării la GLM → agentul „modifica" dar nu lăsa diff).
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: GLM_MODEL, extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' } },
 ]
 const WORK_COOLDOWN_MS = 30 * 60_000
 const workDownUntil = Object.create(null)
