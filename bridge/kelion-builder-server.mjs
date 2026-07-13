@@ -285,7 +285,7 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
       // o gaură reală: promptul îi spune modelului „caută cu grep/glob" înainte
       // să editeze, dar acele unelte NU erau permise → blocate în headless →
       // constructorul ieșea „fără fișiere". Acum are ce-i trebuie ca să editeze.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch',
       // DREPT EFECTIV DE EDITARE (Adrian: „nu au drepturi de editare, dă-le ce
       // ți-am cerut"): a permite uneltele în listă NU e același lucru cu dreptul
       // de a scrie pe disc. În headless, poarta de permisiuni blochează Edit/
@@ -488,7 +488,7 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
       // setul de unelte, ca să poată nu doar citi/verifica, ci și edita/repara
       // ce găsește. Ambele modele (Kimi + GLM) au acum ambele atribute: și
       // editare (poarta de muncă), și verificare (poarta asta) — complet.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS',
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch',
       // DREPT EFECTIV DE EDITARE și la verificare — acceptEdits, ca verificatorul
       // să poată repara ce găsește, nu doar să raporteze.
       '--permission-mode', 'acceptEdits',
@@ -605,6 +605,18 @@ async function build(order) {
     `PAS 3 — EXECUTA. Editeaza fisierele REALE care produc rezultatul (REGULA ZERO de mai jos). Doar minimul care indeplineste ACCEPTAREA.\n` +
     `PAS 4 — VERIFICA REZULTATUL, nu doar build-ul. Dupa editare: (a) build+test trec; (b) RE-CITESTE diff-ul si confirma, criteriu cu criteriu, ca OBIECTIVUL cerut e chiar ATINS (nu doar ca „a compilat"). Daca un criteriu NU e atins, reia PAS 2-3 cu ALT unghi — NU declara gata.\n` +
     `La final, pe linii separate: "SUMAR: <ce ai schimbat>" si "ACCEPTARE: <fiecare criteriu -> INDEPLINIT sau NU, cu dovada>".\n` +
+    // CRITERIU DE DECIZIE PER UNEALTA (Adrian, 13 iul: „se adauga doar cu
+    // criteriu de decizie cand si unde se aplica") — o unealta fara regula de
+    // folosire duce la folosire aiurea (cauza flailing-ului). Fiecare unealta e
+    // legata de un PAS si de o conditie clara.
+    `UNELTE — CAND SI UNDE le folosesti (nu la intamplare):\n` +
+    `- Grep/Glob/LS: la PAS 2 (localizare), ca sa gasesti fisierul EXACT — INTOTDEAUNA inainte sa editezi ceva ce nu stii sigur unde e.\n` +
+    `- Read: inainte de orice Edit pe un fisier — citesti ce schimbi, nu editezi orb.\n` +
+    `- Edit/MultiEdit/Write: la PAS 3, DOAR pe fisierul real identificat la PAS 2; niciodata pe *.test.ts/config/infra daca cererea nu e despre ele.\n` +
+    `- Bash: pentru DOVADA — build/test, \`curl\` (reproducere bug), \`git diff\`, loguri. Nu afirma nimic fara sa fi rulat.\n` +
+    `- TodoWrite: DOAR daca sarcina are mai multi pasi/sub-schimbari — la PAS 1 transformi criteriile de ACCEPTARE intr-o lista bifabila si le bifezi pe masura. Pentru o schimbare simpla (un fisier, un criteriu) NU o folosi, e balast.\n` +
+    `- WebFetch: DOAR cand ai o ADRESA concreta de citit (pagina de documentatie, referinta de eroare, API de librarie) si ai nevoie de continutul ei — nu pentru navigare la intamplare.\n` +
+    `- WebSearch: DOAR cand dai de o eroare/necunoscuta si NU stii adresa (cauti mesajul de eroare sau „cum se face X"). Daca pe treapta curenta nu e disponibila, cazi pe Bash+curl sau pe ce stii — NU bloca munca pentru asta.\n` +
     // Problema centrala (Adrian, 12 iul: „Kelion spune ca face dar nu executa
     // nimic" / „el nu-l face deloc"): constructorul iesea „fara fisiere
     // modificate" — rationa/explora dar NU edita. Fortam executia reala.
