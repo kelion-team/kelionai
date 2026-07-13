@@ -12,7 +12,7 @@
 // model mai nou/mai puternic — acum sau în viitor — setezi variabila și intră
 // INSTANT, fără deploy. Pentru mai multe trepte, extinzi MODEL_LADDER.
 
-// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
+// CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider scos complet (Adrian, 12
 // iul). Configurabile din Railway (KELION_FAST_MODEL / KELION_TOP_MODEL) dacă
 // furnizorii schimbă numele; implicit modelele native ale planurilor.
 // Adrian, 13 iul: „vreau Kimi 2.7" — modelul K2 Thinking (id API `kimi-k2-thinking`,

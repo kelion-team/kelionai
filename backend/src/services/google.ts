@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
 
-// Google skills exposed to Claude as tools. Claude decides when to call them;
+// Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
 // and returns the result. Add a new skill = add a tool def + a case in
 // runGoogleTool (generic framework — cheap to extend to Drive, Maps, etc.).
@@ -274,7 +274,7 @@ export async function refreshGoogleAccessToken(
   }
 }
 
-// Best-effort reverse geocode (device GPS → human place name) so Claude knows
+// Best-effort reverse geocode (device GPS → human place name) so the brain knows
 // where "here" is. Keyless OpenStreetMap Nominatim; short timeout, never throws.
 // Cached by ~100 m (3 decimals); failures are negative-cached briefly so an
 // outage can't cause a lookup storm.

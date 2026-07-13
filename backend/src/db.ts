@@ -223,7 +223,7 @@ export async function initDb(): Promise<void> {
       received_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_inbound_recent ON inbound_emails (received_at DESC);
-    -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH Claudes —
+    -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH sides —
     -- the laptop builder and the always-on server bridge. Either writes an entry;
     -- both read the latest entries. This is how "write here, appears there; write
     -- there, appears here" works: one store, two readers/writers.
@@ -363,7 +363,7 @@ export async function initDb(): Promise<void> {
     -- SISTEM DE URMĂRIRE A TREPTELOR DE ABONAMENT (12 iul, ordinul lui Adrian:
     -- „sistem de urmărit când sunt repuse valorile noi, interogare când se
     -- alocă prin cheie, revenire la ordinea prestabilită automat"). Fiecare
-    -- comutare (max→kimi/glm la cotă golită) SAU revenire automată (înapoi la
+    -- comutare (kimi→glm la cotă golită) SAU revenire automată (înapoi la
     -- treapta de sus, după cooldown) e un rând aici — worker-ul o scrie chiar
     -- în clipa tranziției, nu doar în jurnalul systemd care se pierde.
     CREATE TABLE IF NOT EXISTS tier_events (
@@ -1005,7 +1005,7 @@ export async function getDownloadStats(): Promise<{
   return { counts: counts.rows, recent: recent.rows }
 }
 
-// ── Shared memory: the common notebook both Claudes read + write ──
+// ── Shared memory: the common notebook both sides read + write ──
 
 export async function appendSharedMemory(source: string, content: string): Promise<void> {
   if (!dbEnabled()) return
@@ -1632,7 +1632,7 @@ export interface CostSummary {
 
 // Costul de AZI, pe motoare (Adrian, 11 iul, aprobat: „6 da" — raportul zilnic
 // de bani): doar evenimentele zilei curente, grupate pe fel, cele mai scumpe
-// primele. Abonamentele fixe (Max/Kimi/GLM) nu trec pe aici — doar API-urile
+// primele. Abonamentele fixe (Kimi/GLM) nu trec pe aici — doar API-urile
 // plătite la consum (tts/asr/memory/chat-API/căutare/imagini).
 export async function getCostToday(): Promise<{ kind: string; sum: number }[]> {
   if (!dbEnabled()) return []

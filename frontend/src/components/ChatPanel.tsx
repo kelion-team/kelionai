@@ -85,7 +85,7 @@ const GESTURE_TO_CLIP: Record<string, string> = {
 // browser REQUIRES one real click to pick the screen); STOP ends the take.
 // Kelion confirms both in chat.
 // NB: no \b before "î" — JS word boundaries are ASCII-only, so \bî never
-// matches and the spoken "înregistrează" would sail through to Claude.
+// matches and the spoken "înregistrează" would sail through to the brain.
 const REC_STOP =
   /\b(opre[șs]te|opreste|stop|termin[ăa]|gata)\b.{0,12}([îi]nregistr|record|rec\b)/i
 const REC_START =
@@ -164,11 +164,11 @@ export default function ChatPanel({
   const [cameraOn, setCameraOn] = useState(true)
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
-  // Attached images (ChatGPT-style composer). Sent to Claude's vision on send.
+  // Attached images (ChatGPT-style composer). Sent to the brain's vision on send.
   // Attachments are images (url = data URL, used for vision), documents
   // (text = the Markdown extracted by MarkItDown, prepended to the message),
   // or — for the ADMIN — ANY raw file (url = data URL, type set): photos,
-  // texts, archives, video, everything rides the bridge to Claude.
+  // texts, archives, video, everything rides the bridge to the developer.
   const [attachments, setAttachments] = useState<
     { id: string; url: string; name: string; text?: string; type?: string }[]
   >([])
@@ -365,9 +365,9 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Claude can WALK IN first (admin only): messages Claude leaves through the
+  // The developer can WALK IN first (admin only): messages the developer leaves through the
   // bridge are picked up here and shown in chat — already persisted to history
-  // by the server. The owner's rule: "când intri, mă strigi" — Claude calls
+  // by the server. The owner's rule: "când intri, mă strigi" — the developer calls
   // him, not only answers.
   useEffect(() => {
     if (!isAdmin) return
@@ -497,7 +497,7 @@ export default function ChatPanel({
   // Documents (PDF / Word / Excel / PowerPoint / …) are converted to Markdown by
   // the backend (MarkItDown) and attached as text so Kelion can read them. For
   // the ADMIN, a file that can't be converted (archive, video, audio, anything)
-  // is kept RAW — it rides the bridge to Claude as-is.
+  // is kept RAW — it rides the bridge to the developer as-is.
   // The REAL pipe maximum: Cloudflare hard-caps a request at 100MB — one file
   // may fill nearly the whole pipe (~70MB real content as base64).
   const MAX_RAW_FILE = 90_000_000
@@ -616,7 +616,7 @@ export default function ChatPanel({
     const msg = text.trim()
     const atts = attachments
     if (!msg && atts.length === 0) return
-    // Admin recorder commands — handled locally, never sent to Claude.
+    // Admin recorder commands — handled locally, never sent to the brain.
     if (msg && isAdmin) {
       const ro = speechLangRef.current.toLowerCase().startsWith('ro')
       // Mid-take cut: something changed — stop everything; the rec-stopped

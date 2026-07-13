@@ -471,7 +471,7 @@ export default function AdminPanel({
                 void fetchWorkOrders().then(setOrders)
               }}
             >
-              Jurnal Claude
+              Jurnal lucru
             </button>
             <button
               type="button"
@@ -653,7 +653,7 @@ export default function AdminPanel({
           <section className="admin-finance">
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
-                Release-uri — modificări construite de Claude, în așteptarea aprobării tale. Nimic nu
+                Release-uri — modificări construite de dezvoltator, în așteptarea aprobării tale. Nimic nu
                 intră live până nu apeși „Aprobă și publică".
               </div>
               {releases.filter((r) => r.status === 'pending').length === 0 && (
@@ -997,11 +997,11 @@ export default function AdminPanel({
             </div>
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
-                Jurnal Claude — istoricul complet al lucrului (monitorul arată doar lucrul curent)
+                Jurnal lucru — istoricul complet al lucrului (monitorul arată doar lucrul curent)
               </div>
               {devLog.length === 0 && (
                 <div className="chat-hint">
-                  Jurnalul e gol — se umple cât timp Claude lucrează (de la ultima repornire a
+                  Jurnalul e gol — se umple cât timp dezvoltatorul lucrează (de la ultima repornire a
                   serverului).
                 </div>
               )}

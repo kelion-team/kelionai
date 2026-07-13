@@ -1,6 +1,6 @@
 // Real-cost metering. Computes the actual provider cost (USD) of each AI call so
 // the admin can see live spend and Kelion can report its real cost. Token-based
-// where we have exact usage (Claude, Gemini); per-unit estimates for Chirp
+// where we have exact usage (Kimi/GLM, Gemini); per-unit estimates for Chirp
 // TTS/STT. Prices are USD per token/char/call — update if provider pricing
 // changes. These are ADMIN-ONLY figures (the true money underneath), separate
 // from any user-facing credit.
@@ -13,7 +13,7 @@ interface ModelPrice {
 const PRICES: Record<string, ModelPrice> = {
   // CREIERUL e pe Kimi/GLM (planuri cu abonament FLAT, nu per-token) → costul
   // marginal per apel e ~0; le ținem la 0 ca să nu inventăm cifre false în
-  // contabilitatea adminului. Anthropic scos complet (Adrian, 12 iul).
+  // contabilitatea adminului. Vechiul provider scos complet (Adrian, 12 iul).
   'kimi-for-coding': { input: 0, output: 0 },
   'kimi-k2-thinking': { input: 0, output: 0 },
   'kimi-k2-thinking-turbo': { input: 0, output: 0 },

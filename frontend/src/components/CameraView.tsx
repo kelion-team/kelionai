@@ -10,7 +10,7 @@ import {
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
-// grabbed via `captureRef` and sent to Claude (permanent vision). The element
+// grabbed via `captureRef` and sent to the brain (permanent vision). The element
 // stays off-screen (not display:none) so the browser keeps decoding frames.
 // Frames are downscaled to keep the payload small.
 export default function CameraView({

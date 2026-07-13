@@ -68,11 +68,11 @@ export default function Stage({ user }: { user: User }) {
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
-  // Lit ORANGE when the laptop Claude Code session is actively writing code, so
-  // the owner sees when Claude is working on his behalf (admin only). The live
+  // Lit ORANGE when the laptop developer session is actively writing code, so
+  // the owner sees when the builder is working on his behalf (admin only). The live
   // work steps are shown on the monitor while active.
   const [claudeActive, setClaudeActive] = useState(false)
-  // TWO LIGHTS, one per link in the chain. "Bridge" = Claude's bridge worker
+  // TWO LIGHTS, one per link in the chain. "Bridge" = the developer's bridge worker
   // (lit = reachable, pulsing = writing code, OFF = down — the watchdog
   // restarts it and the light re-lights by itself). "Server" = kelionai.app
   // itself (poll failing = OFF; Railway auto-restarts it, light comes back).
@@ -359,7 +359,7 @@ export default function Stage({ user }: { user: User }) {
     return () => window.removeEventListener('kelion:rec', onRec)
   }, [recording])
 
-  // Poll whether the laptop Claude Code session is actively writing code.
+  // Poll whether the laptop developer session is actively writing code.
   useEffect(() => {
     if (user.role !== 'admin') return
     const check = (): void => {
@@ -525,7 +525,7 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [])
-  // Claude's live work shows on Kelion's MONITOR (the workspace surface) ONLY
+  // The builder's live work shows on Kelion's MONITOR (the workspace surface) ONLY
   // when the owner opens it (click on the ● Bridge light) and code is being
   // written: the avatar shrinks to its corner and the monitor lists every work
   // item with its live 0→100% bar. A real task (map, page, doc) always wins
@@ -1040,8 +1040,8 @@ export default function Stage({ user }: { user: User }) {
               title={
                 claudeBridge
                   ? claudeActive
-                    ? 'Claude is writing code — click to show/hide the live work monitor'
-                    : 'Bridge up — Claude is reachable in chat'
+                    ? 'The builder is writing code — click to show/hide the live work monitor'
+                    : 'Bridge up — the builder is reachable in chat'
                   : 'BRIDGE DOWN — auto-restarting (watchdog), light returns by itself'
               }
             >
@@ -1105,7 +1105,7 @@ export default function Stage({ user }: { user: User }) {
         }}
       />
 
-      {/* FULL-MONITOR live work feed (admin only): every step Claude executes on
+      {/* FULL-MONITOR live work feed (admin only): every step the builder executes on
           the laptop is mirrored here in real time. Floats over the whole monitor
           but never blocks clicks (pointer-events: none), so the owner keeps
           talking to Kelion while WATCHING the work happen. */}

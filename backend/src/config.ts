@@ -21,9 +21,9 @@ export const config = {
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
-  // CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max a fost SCOS COMPLET
-  // (ordinul lui Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM").
-  // Ambele endpoint-uri sunt compatibile Anthropic-API, deci folosim același SDK
+  // CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider a fost SCOS COMPLET
+  // (ordinul lui Adrian, 12 iul: „rămâne doar Kimi și GLM").
+  // Ambele endpoint-uri sunt compatibile cu SDK-ul de transport, deci folosim același SDK
   // doar cu baseURL + cheie schimbate. Opțional la boot; /api/chat dă eroare
   // clară dacă lipsesc. Trimmed: un spațiu/newline lipit ar fi respins ca 401.
   // Cheile din Railway env: KIMI_API_KEY, GLM_API_KEY (acceptăm și numele scurte
@@ -50,7 +50,7 @@ export const config = {
   // traffic); otherwise we fall back to our own Leaflet/OSM route map.
   googleMapsKey: process.env.GOOGLE_MAPS_KEY ?? '',
   // Gemini (Google Generative Language API) — used ONLY to clean up low-confidence
-  // speech transcripts before they reach Claude (hearing-level correction, not
+  // speech transcripts before they reach the brain (hearing-level correction, not
   // reasoning). Optional: when unset, transcripts pass through uncorrected.
   geminiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
@@ -106,8 +106,8 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
-  // Admin bridge: routes the ADMIN's Kelion chat to the owner's local Claude
-  // Code (his subscription) instead of the paid API. Shared secret between this
+  // Admin bridge: routes the ADMIN's Kelion chat to the owner's local developer
+  // (his own tooling) instead of the paid API. Shared secret between this
   // server and the local worker on the owner's PC. Optional — unset = bridge off.
   bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
   // LiveKit self-hosted on the VPS (full-duplex voice). Generated automatically

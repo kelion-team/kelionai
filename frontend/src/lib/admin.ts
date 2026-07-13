@@ -392,7 +392,7 @@ export async function decideRelease(id: string, decision: 'approve' | 'reject'):
   }
 }
 
-// Claude's full work journal (admin only) — the history the live monitor
+// The builder's full work journal (admin only) — the history the live monitor
 // deliberately does not carry around.
 export async function fetchDevLog(): Promise<string[]> {
   try {
@@ -488,7 +488,7 @@ export async function resolveGap(id: number, resolved = true): Promise<void> {
   }
 }
 
-// Escalate a gap to the developer (Claude Code) via the bridge. Returns whether
+// Escalate a gap to the developer via the bridge. Returns whether
 // it was actually sent (online) so the UI can tell the admin to start the bridge.
 export async function escalateGap(id: number): Promise<{ escalated: boolean; online: boolean }> {
   try {

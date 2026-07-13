@@ -84,7 +84,7 @@ import type { VoiceFeatures } from './audioIO.js'
 const CTRL = String.fromCharCode(31)
 
 // POST the conversation to the backend and yield streamed text chunks.
-// `image` (base64 JPEG data URL) is the latest camera frame for Claude's vision.
+// `image` (base64 JPEG data URL) is the latest camera frame for the brain's vision.
 // `coords` is the live device GPS so location-dependent skills work.
 // `onControl` receives any control frames Kelion emits (e.g. open the monitor).
 // A snapshot of the monitor tabs currently open, sent with each turn so Kelion
@@ -102,7 +102,7 @@ export async function* streamChat(
   coords?: Coords,
   onControl?: (c: ChatControl) => void,
   screen?: ScreenTask[],
-  // ADMIN only: raw attachments (any file type) that ride the bridge to Claude.
+  // ADMIN only: raw attachments (any file type) that ride the bridge to the developer.
   files?: { name: string; type: string; data: string }[],
   // STOP: semnal de abandon — „stop" scris/vorbit taie tura PE LOC (nu în coadă).
   signal?: AbortSignal,

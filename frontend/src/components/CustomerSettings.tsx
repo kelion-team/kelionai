@@ -15,7 +15,7 @@ import { LANGS } from '../lib/languages'
 //   1. Preferințe de bază  — limba în care Kelion îl ascultă și îi vorbește.
 //   2. Credit / portofel   — soldul, reîncărcare, ȘI mențiunea 25% către platformă.
 //   3. Cont                — email, delogare, ștergere cont (GDPR).
-// BYOK-Anthropic a fost SCOS complet (Adrian, 12 iul: „renunț la Anthropic") —
+// BYOK-provider a fost SCOS complet (Adrian, 12 iul: „scoatem vechiul provider") —
 // creierul e pe Kimi/GLM, toți userii trec prin creditul de mai sus.
 // Backend-ul (prefs + billing + me/delete) e deja verificat live. NU dublează
 // cod: folosește exact aceleași rute pe care le folosește restul aplicației.

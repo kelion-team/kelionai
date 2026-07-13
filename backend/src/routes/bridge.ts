@@ -36,16 +36,16 @@ import {
   listTierEvents,
 } from '../db.js'
 
-// Admin bridge — the owner's Kelion chat answered by HIS OWN local Claude Code
+// Admin bridge — the owner's Kelion chat answered by HIS OWN local developer tooling
 // (subscription) instead of the paid API. Flow: the chat route enqueues the
 // admin's prompt with bridgeAsk() and awaits; the worker on the owner's PC
-// long-polls /api/bridge/pull, runs Claude locally, and posts the answer to
+// long-polls /api/bridge/pull, runs the developer tooling locally, and posts the answer to
 // /api/bridge/reply. The web service is single-instance, so an in-memory queue
 // is enough. If the worker is offline or slow, bridgeAsk resolves null and the
 // chat route falls back to the normal brain — admin chat never hangs.
 
 // Any file the admin attaches rides the bridge: photo, text, archive, video —
-// base64 payload + name/type; the worker writes it to disk and lets Claude
+// base64 payload + name/type; the worker writes it to disk and lets the developer
 // read it. Voice arrives as TEXT already (Kelion's ear transcribes first).
 export interface BridgeFile {
   name: string
@@ -55,15 +55,15 @@ export interface BridgeFile {
 
 interface PendingJob {
   id: string
-  // 'chat' — answer the admin's message with local Claude (blocks the turn,
-  // awaits a reply). 'repair' — a fix task handed to local Claude Code in the
+  // 'chat' — answer the admin's message with the local developer (blocks the turn,
+  // awaits a reply). 'repair' — a fix task handed to the local developer in the
   // project repo (fire-and-forget; the turn doesn't wait for the fix to finish).
   kind: 'chat' | 'repair'
   prompt: string
   files?: BridgeFile[]
   // THREAD MEMORY (urgența 2, Adrian 4 iul): the small per-turn packet (fresh
   // context + the NEW message only). When present and the worker holds a live
-  // claude session, it resumes it (--resume) — real conversational memory
+  // developer session, it resumes it (--resume) — real conversational memory
   // instead of a fresh process fed 15 truncated messages.
   turn?: string
   // PUBLIC (ordin direct Adrian, 10 iul: „peste tot abonamentul mare"): jobul
@@ -159,15 +159,15 @@ void loadKv('last_worker_seen')
 
 // AUTO-WAKE: the moment the app sees an ADMIN user it fires a wake request here.
 // A tiny always-running laptop agent polls wakePending() and, when true, launches
-// the builder (Claude Code) — so opening the app activates the builder itself,
+// the builder — so opening the app activates the builder itself,
 // no manual switch. Held for 2 minutes so a just-launched agent still catches it.
 let wakeRequestedAt = 0
 export function wakePending(): boolean {
   return Date.now() - wakeRequestedAt < 120_000
 }
 
-// Dev-presence: the laptop Claude Code session sends a heartbeat while it is
-// actively writing code. The admin UI lights the "Claude" indicator ORANGE so
+// Dev-presence: the laptop developer session sends a heartbeat while it is
+// actively writing code. The admin UI lights the "developer" indicator ORANGE so
 // the owner can SEE when code is being written on his behalf. The heartbeat also
 // carries a short "activity" line (which file, build, deploy…) so the owner can
 // watch the work steps live on the monitor.
@@ -544,7 +544,7 @@ let devActivity: string[] = []
 let lastRichFeed = 0
 // FULL work journal — every activity line ever received, in order. The MONITOR
 // shows only the current work; the history lives HERE and is read in the admin
-// panel ("Jurnal Claude"). In-memory, capped; survives until the next deploy.
+// panel ("Jurnal lucru"). In-memory, capped; survives until the next deploy.
 const devLog: string[] = []
 const devLogSeen = new Set<string>()
 // FĂRĂ AMNEZIE LA RESTART (Adrian, 6 iul): jurnalul era doar în RAM și dispărea
@@ -590,7 +590,7 @@ function stampHM(): string {
     minute: '2-digit',
   })
 }
-// Words Claude wants to say FIRST in the admin's chat (delivered by poll).
+// Words the developer wants to say FIRST in the admin's chat (delivered by poll).
 const sayQueue: string[] = []
 // FĂRĂ AMNEZIE LA RESTART (Adrian, 5 iul): un mesaj gata de livrat („gata!"/
 // verdict) care nu apucă să fie pollat înainte de restart-ul provocat chiar de
@@ -633,7 +633,7 @@ void loadKv('release_alerts')
     }
   })
   .catch(() => {})
-// TOTAL chat access for laptop-Claude: the admin's latest attachments (photos,
+// TOTAL chat access for the developer: the admin's latest attachments (photos,
 // pasted screenshots, archives, video…) are stashed here so the builder can
 // fetch them while executing a work order. Newest first, memory-capped.
 const adminFiles: { name: string; type: string; at: string; data: string }[] = []
@@ -648,8 +648,8 @@ export function stashAdminFiles(files: BridgeFile[]): void {
     }
   }
 }
-// Today's work, for the bridge prompt: the Claude answering in chat gets the
-// live journal so he KNOWS what laptop-Claude did and what's in progress.
+// Today's work, for the bridge prompt: the brain answering in chat gets the
+// live journal so it KNOWS what the developer did and what's in progress.
 export function recentDevLog(n = 15): string[] {
   return devLog.slice(-n)
 }
@@ -863,7 +863,7 @@ export function bridgeAskStream(
   })
 }
 
-// WORK ORDERS for laptop-Claude (the builder): build/fix/change tasks decided
+// WORK ORDERS for the developer (the builder): build/fix/change tasks decided
 // by the chat brain (or escalated from the admin panel) land here; the laptop
 // session polls them (secret-protected), executes, and reports back in chat +
 // on the monitor. Fire-and-forget — the chat turn never waits for a build.
@@ -970,7 +970,7 @@ export function noteBrainActivity(line: string): void {
 
 // Adrian's rule (4 iul): EACH new command starts with an EMPTY monitor — the
 // live execution feed is wiped so he sees ONLY the current command's flow. The
-// full history is untouched (it lives in devLog / "Jurnal Claude") and the
+// full history is untouched (it lives in devLog / "Jurnal lucru") and the
 // server-load bars keep pulsing (they're ambient telemetry, not command output).
 // Set whenever a BUILDER/agent posts a live step (via /api/bridge/activity). If a
 // build is actively streaming its code-writing, a new chat command must NOT wipe
@@ -1095,7 +1095,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     socket.close(4410, 'ws-retired: puntea merge exclusiv pe long-poll HTTP')
   })
 
-  // Laptop Claude Code → server: "I'm actively writing code right now", plus an
+  // Laptop developer → server: "I'm actively writing code right now", plus an
   // optional short activity line (which file / build / deploy). Sent every ~15s
   // while a dev work session is engaged (secret-protected).
   app.post<{ Body: { activity?: string[] } }>('/api/dev/heartbeat', async (req, reply) => {
@@ -1209,7 +1209,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // Full work journal for the ADMIN PANEL ("Jurnal Claude") — the history the
+  // Full work journal for the ADMIN PANEL ("Jurnal lucru") — the history the
   // monitor deliberately does NOT carry around.
   app.get('/api/admin/devlog', async (req, reply) => {
     const user = getSessionUser(req)
@@ -1217,9 +1217,9 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { log: devLog.slice(-400) }
   })
 
-  // Claude WALKS INTO the admin's chat: a message posted here (bridge secret)
+  // The developer WALKS INTO the admin's chat: a message posted here (bridge secret)
   // is delivered to the admin's open ChatPanel (poll below), spoken aloud and
-  // persisted to his chat history — so Claude can call the owner first, not
+  // persisted to his chat history — so the developer can call the owner first, not
   // only answer him ("când intri, mă strigi").
   app.post<{ Body: { text?: string } }>('/api/bridge/say', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
@@ -1231,7 +1231,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true }
   })
 
-  // The admin's ChatPanel polls this — Claude's waiting words, delivered once.
+  // The admin's ChatPanel polls this — the developer's waiting words, delivered once.
   app.get('/api/chat/incoming', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -1240,7 +1240,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { messages }
   })
 
-  // Laptop-Claude picks up its WORK ORDERS here (secret-protected, delivered
+  // The developer picks up its WORK ORDERS here (secret-protected, delivered
   // once): the build/fix tasks the chat decided are for the builder. Pulling
   // marks them 'delivered' in Postgres — never deletes, so the admin can always
   // SEE what was sent and when it was picked up.
@@ -1393,7 +1393,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           noteBrainActivity(`🛑 „${r.summary}" — aceeași eroare de două ori, opresc reparația automată`)
           // ÎNVĂȚARE DIN GREȘELI (Adrian, 11 iul, aprobat: „1 da"): eșecul
           // terminal devine LECȚIE durabilă în caietul comun — Kelion o
-          // recitește la fiecare tură, iar veghea îl trezește pe Claude.
+          // recitește la fiecare tură, iar veghea îl trezește pe dezvoltator.
           void appendSharedMemory(
             'lecție-eșec',
             `LECȚIE (aceeași eroare de 2 ori): „${r.summary.slice(0, 180)}" — ${detail?.slice(0, 300) || 'fără detaliu'}. Nu repeta același drum: alt unghi sau decizia lui Adrian.`,
@@ -1589,7 +1589,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // e produsul bug-ului de recursivitate descris mai sus (titlul începe cu
   // „RELEASE APROBAT DE ADRIAN:" — nu e o lucrare reală, e un commit
   // administrativ trivial reambalat). Gard secret, folosit o singură dată de
-  // Claude ca să golească coada de zgomot, apoi bug-ul rămâne imposibil (garda
+  // dezvoltatorul ca să golească coada de zgomot, apoi bug-ul rămâne imposibil (garda
   // de mai sus îl oprește la sursă).
   app.post('/api/bridge/releases/purge-phantom', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
@@ -1696,7 +1696,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // The app fires this the moment it sees an ADMIN user (admin session) — the
-  // automatic "activate Claude" command. No manual step.
+  // automatic "activate developer" command. No manual step.
   app.post('/api/bridge/request-wake', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -1712,7 +1712,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // OGLINDA VEGHERII (Adrian, 11 iul: „implementează și lui Kelion sistemul —
   // să se uite dacă a primit de la tine ceva"): veghea de pe VPS (timer, 1 min)
-  // găsește în caiet note NOI de la Claude (claude-cloud) și le aduce aici, iar
+  // găsește în caiet note NOI de la dezvoltator (sursa `claude-cloud`) și le aduce aici, iar
   // creierul e RE-CHEMAT cu ele — Kelion le primește în sesiune în același
   // minut, nu abia când se întâmplă să scrie Adrian. Răspunsul lui intră în
   // chatul adminului (același drum ca reportToAdmin). Plătit DOAR la eveniment
@@ -1724,7 +1724,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     if (!notes) return reply.code(400).send({ error: 'bad_request' })
     if (!bridgeOnline()) return { ok: false }
     void bridgeAsk(
-      'VEGHEA CAIETULUI (automată, la 1 minut): Claude ți-a lăsat în caietul comun notele de mai jos ' +
+      'VEGHEA CAIETULUI (automată, la 1 minut): dezvoltatorul ți-a lăsat în caietul comun notele de mai jos ' +
         'și nu le-ai citit încă. Citește-le ACUM și execută ce îți cer (sau notează durabil regula). ' +
         'Răspunde-i lui Adrian SCURT cu ce ai făcut. NU scrie în caiet doar ca să confirmi — ' +
         'confirmarea e răspunsul tău din chat.\n\n' +
@@ -1738,12 +1738,12 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       .catch(() => {
         // Creierul n-a răspuns la timp: nota NU se pierde — rămâne în caiet
         // (o vede la următoarea tură), iar Adrian află că livrarea a șchiopătat.
-        sayToAdmin(`📓 Notă nouă de la Claude în caiet (creierul n-a răspuns la veghe): ${notes.slice(0, 300)}`)
+        sayToAdmin(`📓 Notă nouă de la dezvoltator în caiet (creierul n-a răspuns la veghe): ${notes.slice(0, 300)}`)
       })
     return { ok: true }
   })
 
-  // TOTAL ACCESS for laptop-Claude (secret): the admin's recent chat exactly
+  // TOTAL ACCESS for the developer (secret): the admin's recent chat exactly
   // as saved — voice arrives transcribed, copy-paste lands in the text…
   app.get('/api/bridge/chat-history', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
@@ -1759,7 +1759,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // SHARED MEMORY ("caietul comun"): the laptop builder reads it at session
   // start (so it knows what happened in Kelion chat) and writes to it after
   // notable work (so the server brain knows what was built). One notebook,
-  // both Claudes. Secret-protected.
+  // both sides. Secret-protected.
   app.get('/api/bridge/memory', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     return { memory: await getSharedMemory(60) }
@@ -1775,7 +1775,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // Frontend polls this. The "Claude" LIGHT means THE BRIDGE: lit = Claude is
+  // Frontend polls this. The "developer" LIGHT means THE BRIDGE: lit = the developer is
   // reachable on the bridge, OFF = bridge down (the owner sees it instantly),
   // pulsing = code is being written right now (dev heartbeat active).
   // REAL Linux server load (the paznic on the VPS posts it every minute) —
@@ -2186,7 +2186,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     // ANULARE LA ABANDON (Adrian, 10 iul: „se blochează"): `gone` îi spune
     // workerului că NIMENI nu mai ascultă tura asta (nici sink de stream, nici
     // waiter de răspuns final — serverul a renunțat la 75s/240s). Workerul taie
-    // pe loc procesul claude și eliberează banda, în loc să macine minute în șir
+    // pe loc procesul dezvoltatorului și eliberează banda, în loc să macine minute în șir
     // pe un job mort care ținea mesajul următor al lui Adrian la coadă.
     return { accepted: !!sink, gone: !!body.id && !sink && !waiters.has(body.id) }
   })
