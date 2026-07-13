@@ -472,6 +472,51 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* BECURILE CREDIT KIMI/GLM (Adrian, 13 iul): verde fix = are credit; verde
+   pâlpâind = motor ACTIV acum; roșu pâlpâind = fără credit. Click → alimentare. */
+.brain-pill {
+  margin: 0 8px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid rgba(53, 208, 127, 0.45);
+  color: #7fe0a0;
+}
+.brain-pill .pdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #35d07f;
+  box-shadow: 0 0 6px #35d07f;
+}
+.brain-pill.active {
+  border-color: rgba(53, 208, 127, 0.85);
+  color: #9dffc0;
+  animation: brainBlinkGreen 1.1s ease-in-out infinite;
+}
+.brain-pill.no-credit {
+  border-color: rgba(255, 80, 80, 0.85);
+  color: #ff8f8f;
+  animation: brainBlinkRed 0.8s ease-in-out infinite;
+}
+.brain-pill.no-credit .pdot {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+}
+@keyframes brainBlinkGreen {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes brainBlinkRed {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
 /* „Coada" textului care CURGE: containerul e RTL (ancorat la dreapta), textul
    dinăuntru rămâne LTR — pe măsură ce răspunsul vine, se vede mereu SFÂRȘITUL
    lui, pe un singur rând, fără nicio animație care s-ar reporni la fiecare
