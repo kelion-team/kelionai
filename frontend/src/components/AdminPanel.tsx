@@ -151,6 +151,13 @@ export default function AdminPanel({
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
   const [gestSaved, setGestSaved] = useState(false)
+  // La preview, panoul devine transparent ~3.5s ca să vezi avatarul din spate.
+  const [peek, setPeek] = useState(false)
+  const previewAndPeek = (clip: string): void => {
+    previewGesture(clip)
+    setPeek(true)
+    window.setTimeout(() => setPeek(false), 3500)
+  }
   // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
@@ -389,7 +396,7 @@ export default function AdminPanel({
   }, [selected])
 
   return (
-    <div className="admin-overlay">
+    <div className={`admin-overlay ${peek ? 'peek' : ''}`}>
       <div className="admin-panel">
         <header className="admin-head">
           <div className="admin-tabs">
@@ -1077,7 +1084,7 @@ export default function AdminPanel({
                           <input type="checkbox" checked={on} onChange={() => toggleGesture(g.clip)} />
                           <span style={{ opacity: on ? 1 : 0.5 }}>{g.label}</span>
                         </label>
-                        <button type="button" className="ghost" onClick={() => previewGesture(g.clip)}>
+                        <button type="button" className="ghost" onClick={() => previewAndPeek(g.clip)}>
                           ▶ Arată
                         </button>
                       </div>

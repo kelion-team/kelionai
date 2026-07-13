@@ -2044,6 +2044,17 @@ body {
   background: rgba(0, 0, 0, 0.55);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
+  transition: opacity 0.35s ease;
+}
+/* PREVIEW GEST (Adrian, 13 iul: „cum văd pe Kelion gestul?"): la „▶ Arată"
+   panoul se face aproape transparent + click-through ~3.5s, ca să vezi avatarul
+   din spate făcând gestul, apoi revine singur. */
+.admin-overlay.peek {
+  opacity: 0.06;
+  pointer-events: none;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .admin-panel {
   width: min(94vw, 900px);
