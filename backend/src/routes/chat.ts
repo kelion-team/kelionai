@@ -1428,10 +1428,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           }
         }
         if (files.length === 0) {
-          // Fără atașamente: cadrele camerei (toate 4, vederea continuă) sau,
-          // pe clienți vechi, cadrul singular.
-          if (camFrames.length > 0) camFrames.forEach((d, i) => addFile(`cadru-${i + 1}.jpg`, 'image/jpeg', d))
-          else if (image) addFile('captura.jpg', 'image/jpeg', image)
+          // VEDERE DOAR LA CERERE (Adrian, 13 iul: „nu-mi descrie ce vede decât
+          // dacă îl întreb"): cadrele AMBIENTALE ale camerei se trimit pe punte
+          // DOAR când adminul chiar întreabă despre ce se vede (VISION_INTENT)
+          // sau când poza e atașată explicit. Altfel Kelion le primea la fiecare
+          // tură și le comenta nesolicitat (ex. le descria în rapoarte).
+          const wantsVision = imageIsAttachment || VISION_INTENT.test(lastIncomingText || '')
+          if (wantsVision) {
+            if (camFrames.length > 0) camFrames.forEach((d, i) => addFile(`cadru-${i + 1}.jpg`, 'image/jpeg', d))
+            else if (image) addFile('captura.jpg', 'image/jpeg', image)
+          }
         }
         // TOTAL ACCESS: everything the admin drops in chat (photos, pasted
         // screenshots, archives, video) is stashed for laptop-Claude too, so
