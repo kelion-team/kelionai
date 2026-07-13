@@ -2188,6 +2188,15 @@ body {
   background: color-mix(in srgb, var(--accent, #6c8cff) 22%, transparent);
   border-color: var(--accent, #6c8cff);
 }
+/* Joburi/Ordine — evidențiat când sunt ordine active (pending / în lucru). */
+.admin-tab.has-jobs {
+  opacity: 1;
+  border-color: var(--warn, #ff9f43);
+  color: var(--warn, #ff9f43);
+}
+.admin-tab.has-jobs:hover {
+  background: color-mix(in srgb, var(--warn, #ff9f43) 12%, transparent);
+}
 .admin-gaps {
   flex: 1;
   overflow-y: auto;

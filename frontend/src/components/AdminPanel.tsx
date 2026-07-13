@@ -368,6 +368,7 @@ export default function AdminPanel({
         .filter(([, v]) => v > 0)
         .sort((a, b) => b[1] - a[1])
     : []
+  const activeJobCount = orders.filter((o) => !JOB_DONE.has(o.status)).length
 
   async function markResolved(id: number): Promise<void> {
     await resolveGap(id, true)
@@ -406,6 +407,16 @@ export default function AdminPanel({
               onClick={() => setTab('finance')}
             >
               Bani
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''} ${activeJobCount > 0 ? 'has-jobs' : ''}`}
+              onClick={() => {
+                setTab('joburi')
+                void fetchWorkOrders().then(setOrders)
+              }}
+            >
+              Joburi/Ordine{activeJobCount > 0 ? ` (${activeJobCount})` : ''}
             </button>
             <button
               type="button"
@@ -451,16 +462,6 @@ export default function AdminPanel({
               onClick={() => setTab('gaps')}
             >
               Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('joburi')
-                void fetchWorkOrders().then(setOrders)
-              }}
-            >
-              Joburi{orders.length > 0 ? ` (${orders.length})` : ''}
             </button>
             <button
               type="button"
