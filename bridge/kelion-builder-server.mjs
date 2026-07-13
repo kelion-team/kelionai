@@ -604,6 +604,12 @@ async function build(order) {
     `PAS 2 — ABORDEAZA (localizeaza + planifica). Gaseste fisierul EXACT care guverneaza comportamentul cerut (harta de mai jos + grep pe cuvintele-cheie din OBIECTIV). NU atinge fisiere de test (*.test.ts), config sau infrastructura daca cererea NU e despre ele. Planifica cea mai mica schimbare care satisface ACCEPTAREA.\n` +
     `PAS 3 — EXECUTA. Editeaza fisierele REALE care produc rezultatul (REGULA ZERO de mai jos). Doar minimul care indeplineste ACCEPTAREA.\n` +
     `PAS 4 — VERIFICA REZULTATUL, nu doar build-ul. Dupa editare: (a) build+test trec; (b) RE-CITESTE diff-ul si confirma, criteriu cu criteriu, ca OBIECTIVUL cerut e chiar ATINS (nu doar ca „a compilat"). Daca un criteriu NU e atins, reia PAS 2-3 cu ALT unghi — NU declara gata.\n` +
+    // VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul"): pentru
+    // rezultate care se VĂD (gesturi, UI, layout, culori), build-ul care trece
+    // NU dovedeste ca arata corect. Constructorul are OCHI prin endpoint-ul nou.
+    `(c) DACA rezultatul e VIZUAL (gesturi, UI, layout, ceva ce se vede pe ecran), VERIFICA-L CU OCHII prin visual-check — Gemini se uita la app si-ti spune daca se vede rezultatul cerut: ` +
+    `curl -s -X POST https://kelionai.app/api/bridge/visual-check -H "x-bridge-secret: $(cat /root/kelion/bridge-secret.txt)" -H "content-type: application/json" -d '{"url":"https://kelionai.app","criteria":"<ce trebuie sa se vada, concret>"}' ` +
+    `→ verdict "VIZUAL: DA/NU". Verifica starea LIVE; pentru o schimbare inca nepublicata, verificarea vizuala definitiva e DUPA publicare (noteaza in ACCEPTARE ca ramane de confirmat vizual live). Un „VIZUAL: NU" inseamna ca rezultatul nu s-a obtinut — reia.\n` +
     `La final, pe linii separate: "SUMAR: <ce ai schimbat>" si "ACCEPTARE: <fiecare criteriu -> INDEPLINIT sau NU, cu dovada>".\n` +
     // CRITERIU DE DECIZIE PER UNEALTA (Adrian, 13 iul: „se adauga doar cu
     // criteriu de decizie cand si unde se aplica") — o unealta fara regula de

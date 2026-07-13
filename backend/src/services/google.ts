@@ -452,6 +452,40 @@ async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult 
   return { text, sources }
 }
 
+// VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — Gemini
+// se uită la un screenshot și răspunde la o întrebare despre ce se vede. Folosit
+// de verificarea vizuală: constructorul confirmă că rezultatul cerut chiar apare
+// pe ecran (gesturi, UI, layout), nu doar că „build trece".
+export async function geminiVision(jpegBase64: string, question: string): Promise<string | null> {
+  if (!config.geminiKey) return null
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  let res: Response
+  try {
+    res = await tfetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: question },
+              { inline_data: { mime_type: 'image/jpeg', data: jpegBase64 } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+      }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  const text = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  return text || null
+}
+
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)

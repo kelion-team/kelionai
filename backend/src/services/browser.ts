@@ -212,6 +212,41 @@ async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
   }
 }
 
+// ── VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul randat") ────
+// Screenshot al unei pagini publice, pentru ca Kelion să-și verifice VIZUAL
+// rezultatele (constructorul trimite imaginea la Gemini să judece dacă
+// rezultatul cerut chiar se vede). Context izolat, închis imediat — nu atinge
+// sesiunile de browsing ale userilor.
+export async function screenshotUrl(
+  rawUrl: string,
+  opts: { width?: number; height?: number; fullPage?: boolean; waitMs?: number } = {},
+): Promise<{ jpegBase64: string } | { error: string }> {
+  let u: URL
+  try {
+    u = await assertPublicUrl(rawUrl)
+  } catch {
+    return { error: 'blocked_url' }
+  }
+  let context: BrowserContext | null = null
+  let page: Page | null = null
+  try {
+    const browser = await getBrowser()
+    context = await browser.newContext({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } })
+    page = await context.newPage()
+    await page
+      .goto(u.toString(), { waitUntil: 'networkidle', timeout: 30_000 })
+      .catch(() => page!.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+    await page.waitForTimeout(opts.waitMs ?? 1800)
+    const buf = await page.screenshot({ type: 'jpeg', quality: 70, fullPage: opts.fullPage ?? false })
+    return { jpegBase64: Buffer.from(buf).toString('base64') }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message.slice(0, 200) : 'screenshot_failed' }
+  } finally {
+    try { await page?.close() } catch { /* ignore */ }
+    try { await context?.close() } catch { /* ignore */ }
+  }
+}
+
 // ── public actions ───────────────────────────────────────────────────────
 export async function browserOpen(
   email: string,

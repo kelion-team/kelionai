@@ -6,6 +6,8 @@ import { superviseDecision, escalationText, DEFAULT_SUPERVISE } from '../service
 import { buildBrainReport, fallbackLine, type AgentOutcome } from '../services/feedback.js'
 import { decideDeployFailure, isDuplicateOrder, composeOrdersReport } from '../services/orders.js'
 import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy.js'
+import { screenshotUrl } from '../services/browser.js'
+import { geminiVision } from '../services/google.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -1110,6 +1112,31 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     }
     return { ok: true }
   })
+
+  // VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul randat"): screenshot
+  // al unei pagini publice + Gemini (vedere) judecă dacă rezultatul cerut CHIAR
+  // se vede. Dă lui Kelion OCHI ca să-și confirme rezultatele vizuale (gesturi,
+  // UI, layout), nu doar „build trece". Constructorul îl cheamă la verificare.
+  app.post<{ Body: { url?: string; criteria?: string; fullPage?: boolean } }>(
+    '/api/bridge/visual-check',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const url = String(req.body?.url ?? '').trim()
+      const criteria = String(req.body?.criteria ?? '').trim()
+      if (!url || !criteria) return reply.code(400).send({ error: 'bad_request', note: 'url + criteria required' })
+      const shot = await screenshotUrl(url, { fullPage: req.body?.fullPage === true })
+      if ('error' in shot) return reply.send({ ok: false, verdict: 'necunoscut', note: `screenshot: ${shot.error}` })
+      const question =
+        `Verifici VIZUAL un screenshot al aplicației web kelionai.app. Rezultatul cerut era: "${criteria}". ` +
+        `Uită-te atent la imagine și răspunde STRICT: pe prima linie "VIZUAL: DA" dacă rezultatul cerut se vede clar, ` +
+        `sau "VIZUAL: NU" dacă nu se vede / arată altfel. Apoi o singură propoziție cu ce vezi de fapt. Fii sincer și concret.`
+      const answer = await geminiVision(shot.jpegBase64, question)
+      if (!answer) return reply.send({ ok: false, verdict: 'necunoscut', note: 'gemini_vision_indisponibil (verifică GEMINI_API_KEY)' })
+      const m = answer.match(/VIZUAL:\s*(DA|NU)/i)
+      const verdict = m ? (m[1].toUpperCase() === 'DA' ? 'DA' : 'NU') : 'necunoscut'
+      return { ok: true, verdict, detail: answer.slice(0, 800) }
+    },
+  )
 
   // Full work journal for the ADMIN PANEL ("Jurnal Claude") — the history the
   // monitor deliberately does NOT carry around.

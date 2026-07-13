@@ -179,7 +179,7 @@ const AVATAR_GESTURES = [
 const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
   name: 'play_avatar_gesture',
   description:
-    "Play a one-time avatar gesture that fits your reply's emotion/context — like a GENTLEMAN, calm and measured, never a gym pose. Pick the one that matches the moment: salut (greeting/goodbye), arata-inainte (point ahead/to the monitor), uimire (amazement), dezamagire (mild disappointment), nedumerire (puzzlement), victorie (victory), multumire (thanks), surpriza (surprise), stai-putin (ask to wait), ganditor (thinking), aprobare (approval), entuziasm (enthusiasm), acord-discret (subtle agreement/nod), plecaciune (theatrical bow), dans (dance — ONLY when the user explicitly asks). Use sparingly and naturally; it plays once and blends back to a calm idle.",
+    "Play a one-time avatar gesture — but ONLY when the situation/emotion genuinely calls for it. A gentleman is composed and does NOT gesticulate: by DEFAULT play NO gesture. Trigger one RARELY (about 1 in 4-5 replies at most) and ONLY when the feeling is clear AND matches the gesture exactly; NEVER on a neutral/informative reply, NEVER two replies in a row. Every gesture is bound to context: salut (greeting/goodbye), arata-inainte (point ahead/to the monitor), uimire (amazement), dezamagire (mild disappointment), nedumerire (puzzlement), victorie (victory), multumire (thanks), surpriza (surprise), stai-putin (ask to wait), ganditor (thinking), aprobare (approval), entuziasm (enthusiasm), acord-discret (subtle agreement/nod), plecaciune (theatrical bow), dans (dance — ONLY when the user explicitly asks). Plays once, then blends back to a calm idle.",
   input_schema: {
     type: 'object',
     properties: {
