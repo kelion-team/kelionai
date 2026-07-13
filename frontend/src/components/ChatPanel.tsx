@@ -34,7 +34,6 @@ import {
   isVoicePlaying,
   calibrateVoiceprint,
   hasVoiceprint,
-  clearVoiceprint,
   getPendingVoiceFeatures,
   clearPendingVoiceFeatures,
   type MicHandle,
@@ -43,10 +42,9 @@ import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
-import { LiveDuplexToggle } from './LiveDuplexToggle'
 import { WakeWordToggle } from './WakeWordToggle'
 
-// Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3" al
+// Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
 // constructorului) traduse în clipurile REALE din biblioteca RPM — scheletul
 // se mișcă doar din clipuri (regula #125), deci eticheta devine numele
 // clipului echivalent și pleacă pe același canal 'kelion-gesture'.
@@ -75,7 +73,7 @@ const GESTURE_TO_CLIP: Record<string, string> = {
 }
 
 // FĂRĂ plafon de durată la înregistrări (Adrian, 11 iul seara: „nu trebuie să
-// aibă setări de timp sau limitări") — scenariul se termină când i se termină
+// aibă setări de timp sau limitări”) — scenariul se termină când i se termină
 // pașii sau când spune el stop, nu când expiră un cronometru arbitrar.
 
 // Camera + monitor-tab commands ("închide harta", "camera spate", "switch to
@@ -124,7 +122,7 @@ export default function ChatPanel({
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front".
+  // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front”.
   const [listening, setListening] = useState(false)
   // DICTARE LIVE: fraza curentă, cuvânt cu cuvânt, cu efect cinematografic pe
   // bandă cât vorbește Adrian; se golește când fraza pleacă la creier.
@@ -137,7 +135,7 @@ export default function ChatPanel({
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
   // SINTEZĂ RAPIDĂ (Adrian, 10 iul: „dacă pauza e mai mare de gândire, să nu
   // rămână gol în dreptul creierului — sinteză de câteva cuvinte, ține-o până
-  // la următorul"). Extrasă INSTANT din {heard} (cererea deja confirmată de
+  // la următorul”). Extrasă INSTANT din {heard} (cererea deja confirmată de
   // server ca predată creierului) — zero latență, nu așteaptă modelul.
   const synthesize = (s: string, maxWords = 8): string => {
     const words = s.trim().split(/\s+/).filter(Boolean)
@@ -161,7 +159,7 @@ export default function ChatPanel({
   const [delivered, setDelivered] = useState(false)
   // Mesaje scrise în timpul unei ture active — vizibile, nu pierdute în coadă.
   const [queued, setQueued] = useState<string[]>([])
-  // Adrian, 11 iul: „camera nu a pornit [după restart] — e greșit" → camera
+  // Adrian, 11 iul: „camera nu a pornit [după restart] — e greșit” → camera
   // pornește IMPLICIT la fiecare încărcare; butonul rămâne pentru oprire.
   const [cameraOn, setCameraOn] = useState(true)
   const [facing, setFacing] = useState<Facing>('user')
@@ -176,7 +174,7 @@ export default function ChatPanel({
   >([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Câmpul de scris: un singur click oriunde în bară îl focalizează (zona reală a
-  // inputului e îngustă, iar un click „lângă" text nu prindea focus — trebuiau
+  // inputului e îngustă, iar un click „lângă” text nu prindea focus — trebuiau
   // mai multe click-uri). Ref-ul e țintit de handlerul de pe rândul composer.
   const composerInputRef = useRef<HTMLInputElement>(null)
   // Admin promo-scenario recorder: type steps, hit Record, Kelion runs them while
@@ -191,14 +189,14 @@ export default function ChatPanel({
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
-  // Ultimele 4 cadre (Adrian, 11 iul: „camera nu captează 4 cadre pe secundă"
+  // Ultimele 4 cadre (Adrian, 11 iul: „camera nu captează 4 cadre pe secundă”
   // + auditul lui Kelion: „trimite un singur cadru în loc de patru — vederea
-  // nu e continuă"). Tampon circular; la fiecare tură pleacă TOATE 4.
+  // nu e continuă”). Tampon circular; la fiecare tură pleacă TOATE 4.
   const frameBufRef = useRef<string[]>([])
   const coordsRef = useRef<Coords | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
-  // Controlerul de abandon al turei în curs — „stop" îl abortează pe loc.
+  // Controlerul de abandon al turei în curs — „stop” îl abortează pe loc.
   const abortRef = useRef<AbortController | null>(null)
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
@@ -241,7 +239,7 @@ export default function ChatPanel({
       return
     }
     // GEST LA COMANDĂ (Adrian, 11 iul: „mișcări comandate la tot ce vreau să
-    // facă"): creierul a pus [GEST nume] în răspuns → serverul l-a transformat
+    // facă”): creierul a pus [GEST nume] în răspuns → serverul l-a transformat
     // în cadrul {gest} → regia de mișcare (AvatarModel) execută clipul o dată.
     if (c.gest) {
       window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: c.gest }))
@@ -324,10 +322,10 @@ export default function ChatPanel({
   }
 
   // Micro-expresia feței, în stil GENTLEMAN (Adrian, 12 iul: „mimică de golan,
-  // nu gentleman"). Un domn e COMPUS: fața rămâne neutră IMPLICIT; o expresie
+  // nu gentleman”). Un domn e COMPUS: fața rămâne neutră IMPLICIT; o expresie
   // apare RAR și DOAR la un sentiment real și clar — niciodată reactiv la
-  // fiecare semn de punctuație (mirare la fiecare „!", sprânceană la fiecare
-  // „?" — asta arăta agitat). Fără expresie implicită: tăcerea feței e demnă.
+  // fiecare semn de punctuație (mirare la fiecare „!”, sprânceană la fiecare
+  // „?” — asta arăta agitat). Fără expresie implicită: tăcerea feței e demnă.
   function suggestFacial(text: string): void {
     const s = text.trim()
     if (!s) return
@@ -441,7 +439,7 @@ export default function ChatPanel({
           () =>
             ack(
               ro
-                ? 'Dubla s-a oprit și clipul s-a salvat. Spune „reluăm" pentru încă o dublă cu același scenariu.'
+                ? 'Dubla s-a oprit și clipul s-a salvat. Spune „reluăm” pentru încă o dublă cu același scenariu.'
                 : 'Take stopped and the clip was saved. Say "retake" to do the same take again.',
             ),
           600,
@@ -640,7 +638,7 @@ export default function ChatPanel({
           lastPromoRef.current = null
           ack(
             ro
-              ? `Scenariul salvat era în altă limbă. Spune-mi din nou „fă un clip despre ${saved.subject}" și îl refac în limba curentă.`
+              ? `Scenariul salvat era în altă limbă. Spune-mi din nou „fă un clip despre ${saved.subject}” și îl refac în limba curentă.`
               : `The saved script was in another language. Say "make a clip about ${saved.subject}" again and I'll redo it in your language.`,
           )
           setInput('')
@@ -677,10 +675,10 @@ export default function ChatPanel({
       }
     }
     // OPRIRE IMEDIATĂ (Adrian, 10 iul: „îi spun stop și mă ignoră, nu primește
-    // imediat comanda"). „stop" scris sau vorbit NU se pune în coadă — taie vocea
+    // imediat comanda”). „stop” scris sau vorbit NU se pune în coadă — taie vocea
     // și tura curentă PE LOC, golește coada și închide cererea pe server. Softul
     // NU se rupe: backendul își termină singur tura în fundal; eu doar nu mai
-    // aștept și nu mai vorbesc. Se verifică ÎNAINTE de garda „ocupat".
+    // aștept și nu mai vorbesc. Se verifică ÎNAINTE de garda „ocupat”.
     const STOP_CMD =
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (msg && STOP_CMD.test(msg)) {
@@ -769,7 +767,7 @@ export default function ChatPanel({
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
     setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
     setChatImage(null) // a new turn clears any previously shown image
-    // Controlerul de abandon al ACESTEI ture — „stop" îl abortează pe loc.
+    // Controlerul de abandon al ACESTEI ture — „stop” îl abortează pe loc.
     const ac = new AbortController()
     abortRef.current = ac
     setBusy(true)
@@ -871,8 +869,8 @@ export default function ChatPanel({
     micStartingRef.current = true
 
     // Adrian, 11 iul: „la restart butonul microfon se blochează / se
-    // dezactivează". Cauza: dacă pornirea arunca o excepție, flagul „pornesc
-    // acum" rămânea agățat pe true pentru totdeauna → fiecare apăsare cădea pe
+    // dezactivează”. Cauza: dacă pornirea arunca o excepție, flagul „pornesc
+    // acum” rămânea agățat pe true pentru totdeauna → fiecare apăsare cădea pe
     // ramura de OPRIRE (nimic de oprit) și butonul părea mort. try/finally
     // garantează eliberarea flagului pe ORICE drum de ieșire.
     try {
@@ -934,7 +932,7 @@ export default function ChatPanel({
           stopVoice()
           micRef.current?.setMuted(false)
         },
-        // „doar vocea mea sau scrisul meu, nu se acceptă alta" — adminul e singurul
+        // „doar vocea mea sau scrisul meu, nu se acceptă alta” — adminul e singurul
         // rol restrâns la vocea proprie calibrată; demo (vizitatori) rămâne neschimbat.
         isAdmin,
       )
@@ -960,7 +958,7 @@ export default function ChatPanel({
   ensureMicRef.current = ensureMic
 
   function toggleMic(): void {
-    // Adrian, 11 iul: „butonul microfon nu funcționează corect". Cauza: pornirea
+    // Adrian, 11 iul: „butonul microfon nu funcționează corect”. Cauza: pornirea
     // e asincronă (~0,5–2s); o apăsare în fereastra aia nu găsea încă micRef
     // și cădea pe ramura de PORNIRE — adică oprirea era imposibil de exprimat
     // cât timp boot-ul era în zbor, iar dublu-click lăsa microfonul mereu
@@ -1002,7 +1000,7 @@ export default function ChatPanel({
   }, [])
 
   // Cât ascultă, ecranul nu adoarme — un telefon cu ecranul stins își taie
-  // microfonul, iar „permanent on" ar muri la primul screen-off.
+  // microfonul, iar „permanent on” ar muri la primul screen-off.
   useEffect(() => {
     keepScreenOn(listening)
     return () => keepScreenOn(false)
@@ -1169,11 +1167,7 @@ export default function ChatPanel({
     setVoiceCalState(ok ? 'ok' : 'fail')
     window.setTimeout(() => setVoiceCalState('idle'), 2000)
   }
-  function resetVoicePrint(): void {
-    clearVoiceprint()
-    setHasVoicePrint(false)
-  }
-  // AUTOMAT (Adrian, 12 iul: „ăla cu butonul se face automat"): recunoașterea
+  // AUTOMAT (Adrian, 12 iul: „ăla cu butonul se face automat”): recunoașterea
   // vocii nu mai cere click. Când adminul intră și n-are încă amprentă, o
   // calibrăm SINGURI (din primele secunde de vorbire); dacă nu prinde (liniște),
   // reîncearcă până reușește. Butonul manual a fost scos.
@@ -1216,7 +1210,7 @@ export default function ChatPanel({
       />
       {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
           spațiul unde apare semnul de creier... nu se mai afișează în afara
-          spațiului de acolo răspunsurile de chat"). Bulele care pluteau peste
+          spațiului de acolo răspunsurile de chat”). Bulele care pluteau peste
           monitor au fost SCOASE — schimbul de replici trăiește exclusiv în
           benzile de lângă composer (👤 tu / K Kelion, teletext). În centru
           rămân doar îndemnul de start și imaginile generate. */}
@@ -1266,7 +1260,7 @@ export default function ChatPanel({
             ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
             clipește; la pauză > 3s pleacă la creier și banda se golește. */}
         {/* REGULĂ FIXĂ (Adrian, 10 iul: „nu vreau să văd pe interfață ceva ce
-            acoperă pagina — textul curge ca teletextul, pe o singură linie"):
+            acoperă pagina — textul curge ca teletextul, pe o singură linie”):
             ORICE bandă live e o linie fixă, text pe o singură linie, care
             derulează (teletext) dacă nu încape — NICIODATĂ nu crește pe
             verticală, niciodată nu acoperă pagina. */}
@@ -1287,10 +1281,10 @@ export default function ChatPanel({
         )}
         {/* O SINGURĂ BANDĂ, AMBELE SENSURI (Adrian, 11 iul seara: „aici
             trebuiesc baleiate dinspre creier și înspre creier — în afară de
-            asta nu se mai afișează chat scris"). Aceeași bandă de la creier
+            asta nu se mai afișează chat scris”). Aceeași bandă de la creier
             își schimbă semnul după faza turei: 👤 = mesajul tău pleacă
             ÎNSPRE creier (dispare la preluare — „după ce ai baleiat ce am
-            scris, nu se mai afișează"); 🧠 = creierul l-a primit și gândește
+            scris, nu se mai afișează”); 🧠 = creierul l-a primit și gândește
             (arată ce a auzit efectiv — confirmat de server, nu ecou local);
             K = răspunsul curge DINSPRE creier (coada textului cât streamează,
             teletext când e terminat). Un rând, mereu, nimic în afara ei. */}
@@ -1316,7 +1310,7 @@ export default function ChatPanel({
                 key={heard || '…'}
                 style={{ '--ticker-dur': tickerDur(heard || '…') } as CSSProperties}
               >
-                {heard ? `„${heard}"` : '…'}
+                {heard ? `„${heard}”` : '…'}
               </span>
             </span>
           </div>
@@ -1343,7 +1337,7 @@ export default function ChatPanel({
           </div>
         ) : null}
         {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
-            că e greșită" + „microfon cu autovox, instant"): microfonul nu mai
+            că e greșită” + „microfon cu autovox, instant”): microfonul nu mai
             stă mut până la calibrare — amprenta se învață AUTOMAT din primele
             fraze (audioIO.ts, auto-înrolare), deci indiciul era fals. */}
         {attachments.length > 0 && (
@@ -1409,13 +1403,12 @@ export default function ChatPanel({
                     {cameraOn && <span className="dot" />}
                   </button>
                 )}
-                {/* Mod full-duplex (mâini-libere): microfon deschis permanent +
-                    vocea agentului LiveKit. Izolat de vocea HTTP (push-to-talk). */}
-                <div className="fn-item fn-duplex">
-                  <span className="ico">🗣️</span>
-                  <LiveDuplexToggle />
-                </div>
-                {/* Cuvânt de trezire: spui „Kelion" și pornește singur microfonul. */}
+                {/* Full-duplex mâini-libere: NU mai există buton — microfonul se
+                    deschide SINGUR la montarea chatului (vezi useEffect „Permanent
+                    hearing”), cu VOX + barge-in. Butonul LiveKit a fost scos (ordin
+                    Adrian, 13 iul): era un dublet mort (serverul LiveKit nici nu e
+                    pornit), full-duplexul real merge pe calea vocală automată. */}
+                {/* Cuvânt de trezire: spui „Kelion” și pornește singur microfonul. */}
                 <WakeWordToggle
                   lang={speechLang}
                   onWake={() => {
@@ -1438,14 +1431,10 @@ export default function ChatPanel({
                     {t.scenarioTitle}
                   </button>
                 )}
-                {/* Butonul „Recunoaște-mi vocea" a fost SCOS (Adrian, 12 iul):
-                    calibrarea e acum automată (vezi useEffect de mai sus). */}
-                {isAdmin && hasVoicePrint && voiceCalState === 'idle' && (
-                  <button type="button" className="fn-item" onClick={resetVoicePrint}>
-                    <span className="ico">♻️</span>
-                    {t.calibrateVoiceReset}
-                  </button>
-                )}
+                {/* Butoanele „Recunoaște-mi vocea” ȘI „Resetează vocea” au fost
+                    SCOASE (Adrian, 13 iul): calibrarea vocală e complet automată
+                    (vezi useEffect-ul de calibrare de mai sus); nu mai e nimic de
+                    apăsat manual. */}
               </div>
             )}
           </div>
