@@ -57,7 +57,7 @@ async function draftReply(from: string, subject: string, body: string): Promise<
   return draft && draft.trim() ? draft.trim() : null
 }
 
-async function processOne(client: ImapFlow, uid: number, source: Buffer): Promise<void> {
+async function processOne(client: ImapFlow, uid: number, source: Buffer, alreadySeen = false): Promise<void> {
   const parsed = await simpleParser(source)
   const fromAddr = parsed.from?.value?.[0]?.address ?? ''
   const fromName = parsed.from?.value?.[0]?.name ?? ''
@@ -118,8 +118,11 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer): Promis
     text: `De la: ${fromName} <${fromAddr}>\nSubiect: ${subject}\n\n${body}\n\n---\n${draft ?? '(fără răspuns automat)'}`,
   })
 
-  // Mark seen so it isn't picked up again.
-  await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true })
+  // Mark seen so it isn't picked up again, but only if it wasn't already seen
+  // by another client (e.g. Outlook). Otherwise we leave the mailbox state alone.
+  if (!alreadySeen) {
+    await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true })
+  }
 }
 
 async function poll(): Promise<void> {
@@ -136,13 +139,23 @@ async function poll(): Promise<void> {
     await client.connect()
     const lock = await client.getMailboxLock('INBOX')
     try {
-      const uids = await client.search({ seen: false }, { uid: true })
-      for (const uid of (uids || []).slice(0, 20)) {
-        try {
-          const msg = await client.fetchOne(String(uid), { source: true }, { uid: true })
-          if (msg && msg.source) await processOne(client, uid, msg.source)
-        } catch (e) {
-          console.error('[mailbox] one failed:', (e as Error).message)
+      // ROW 19 fix: the old code only searched UNSEEN messages. If a human client
+      // (Outlook, phone, webmail) read the message first, it became SEEN and the
+      // poller never saw it again — so it was never saved, forwarded, or answered.
+      // We now scan the last 100 messages regardless of Seen status and dedupe by
+      // IMAP UID. Already-seen messages are left untouched (no flag change).
+      const mb = client.mailbox
+      const total = mb ? mb.exists : 0
+      if (total > 0) {
+        const start = Math.max(1, total - 99)
+        for await (const msg of client.fetch(`${start}:*`, { source: true, flags: true }, { uid: true })) {
+          try {
+            if (msg && msg.source) {
+              await processOne(client, msg.uid, msg.source, msg.flags?.has('\\Seen') ?? false)
+            }
+          } catch (e) {
+            console.error('[mailbox] one failed:', (e as Error).message)
+          }
         }
       }
     } finally {
@@ -160,9 +173,9 @@ async function poll(): Promise<void> {
   }
 }
 
-// INBOX LIVE (Adrian, 10 iul: „văd Inbox gol deși cutia are 493 mesaje"). Cauza:
-// poller-ul de mai sus ia DOAR mailul NECITIT și-l marchează citit; mailul deja
-// citit (în Outlook) nu apare nicăieri. Asta citește cutia REALĂ prin IMAP —
+// INBOX LIVE (Adrian, 10 iul: "văd Inbox gol deși cutia are 493 mesaje"). Cauza
+// istorică: poller-ul (row 19) citea DOAR mailul NECITIT și-l marca citit; mailul
+// deja citit (în Outlook) nu apărea nicăieri. Asta citește cutia REALĂ prin IMAP —
 // ultimele `limit` mesaje, indiferent de citit/necitit — DOAR pentru afișare în
 // admin. NU marchează nimic citit (aduce doar envelope + flags, nu corpul) și NU
 // răspunde la nimic. Deschide o conexiune scurtă, la cerere.
