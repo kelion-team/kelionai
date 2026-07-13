@@ -58,7 +58,12 @@ function loadContext() {
 // CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max scos complet (Adrian,
 // 12 iul: „renunț la Anthropic, rămâne Kimi și GLM"). Numele efectiv al modelului
 // îl impune treapta (tierModel); astea rămân doar ca implicit ne-Anthropic.
-const MODEL = 'kimi-for-coding'
+// CHAT/VOCE = viteză (Adrian, 13 iul): folosim `kimi-for-coding-highspeed`, varianta
+// RAPIDĂ a modelului de cod Kimi (primul cuvânt mai devreme, țintă <1s). Munca grea
+// (constructorul) rămâne pe `kimi-for-coding` normal (thinking mai profund). Ambele
+// expuse de endpoint (verificat live pe /v1/models). Selecție automată după
+// dificultate: aici e traseul rapid, deci highspeed.
+const MODEL = 'kimi-for-coding-highspeed'
 const RESERVE = 'glm-4.6'
 const REST_MS = 10 * 60_000
 let fableDownUntil = 0
@@ -85,7 +90,9 @@ const TIERS = [
     name: 'kimi',
     keyFile: '/root/kelion/kimi-key.txt',
     base: 'https://api.kimi.com/coding/',
-    model: 'kimi-for-coding',
+    // CHAT/VOCE → varianta RAPIDĂ (highspeed). Constructorul (munca grea) folosește
+    // `kimi-for-coding` normal, în kelion-builder-server.mjs.
+    model: 'kimi-for-coding-highspeed',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
   // GLM cere modelul lui NATIV — `model: null` cădea pe modelul claude cerut
