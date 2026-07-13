@@ -48,7 +48,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       const email = s.metadata?.email ?? s.customer_details?.email ?? ''
       const amount = (s.amount_total ?? 0) / 100
       if (email && amount > 0) {
-        // 75% becomes the user's spendable credit, 25% is our profit.
+        // 70% becomes the user's spendable credit, 30% is the platform's cut
+        // (Adrian, 13 iul). Split-ul efectiv = config.stripe.userShare.
         await topUpUser(email, amount, s.currency ?? config.stripe.currency, s.id ?? '')
       }
     }
