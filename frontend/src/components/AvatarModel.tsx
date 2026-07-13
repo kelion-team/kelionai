@@ -5,7 +5,8 @@ import { LoopOnce, LoopRepeat } from 'three'
 import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
-import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
+import { useFacialQueue, pushFacial, type FacialLabel } from '../lib/facialQueue'
+import { getScenario, isScenario } from '../lib/scenarioCatalog'
 
 // ── EXPRESII FACIALE (ARKit blendshapes) — păstrate din release-ul „avatar
 // v2.3" al constructorului (partea lui bună: fața pe morph-uri, permisă), în
@@ -199,6 +200,8 @@ export default function AvatarModel() {
   const lazyClips = useRef<Record<string, AnimationClip>>({})
   // Micro-expresia facială curentă (comandată din chat prin facialQueue).
   const face = useRef<{ label: FacialLabel; t: number } | null>(null)
+  // Scenariu de gesturi în desfășurare (secvență ordonată de clipuri).
+  const scenarioRef = useRef<{ name: string; priority: number; stepIndex: number; timers: number[] } | null>(null)
   useFacialQueue((label) => {
     face.current = { label, t: 0 }
   })
@@ -217,6 +220,56 @@ export default function AvatarModel() {
     next.fadeIn(fade).play()
     current.current?.fadeOut(fade)
     current.current = next
+  }
+
+  // ── SCENARII DE GESTURI ───────────────────────────────────────────────────
+  // Un scenariu e o secvență ordonată de clipuri cu timpi și expresii faciale.
+  // Poate fi întrerupt de un scenariu cu prioritate mai mare; gesturile simple
+  // (clip unic) opresc scenariul curent.
+  const clearScenario = (): void => {
+    const s = scenarioRef.current
+    if (s) {
+      for (const id of s.timers) window.clearTimeout(id)
+    }
+    scenarioRef.current = null
+  }
+
+  const runScenarioStep = (): void => {
+    const run = scenarioRef.current
+    if (!run) return
+    const scenario = getScenario(run.name)
+    if (!scenario) {
+      clearScenario()
+      return
+    }
+    const step = scenario.steps[run.stepIndex]
+    if (!step) {
+      // Secvența s-a terminat — revine la repaus.
+      clearScenario()
+      state.current = 'idle'
+      play('idle')
+      window.dispatchEvent(new Event('kelion-gesture-done'))
+      return
+    }
+    const loaded = actions[step.clip] ?? lazyClips.current[step.clip]
+    if (loaded) {
+      state.current = 'gesture'
+      play(step.clip, true)
+    }
+    if (step.expression) pushFacial(step.expression)
+    run.stepIndex++
+    const timer = window.setTimeout(runScenarioStep, step.durationMs)
+    run.timers.push(timer)
+  }
+
+  const startScenario = (name: string): void => {
+    const scenario = getScenario(name)
+    if (!scenario) return
+    const active = scenarioRef.current
+    if (active && active.priority >= scenario.priority) return
+    clearScenario()
+    scenarioRef.current = { name: scenario.name, priority: scenario.priority, stepIndex: 0, timers: [] }
+    runScenarioStep()
   }
 
   useLayoutEffect(() => {
@@ -249,8 +302,10 @@ export default function AvatarModel() {
 
   useEffect(() => {
     play('idle')
-    // La finalul unui clip „once" (variație/gest), înapoi lin la repaus.
+    // La finalul unui clip „once" (variație/gest), înapoi lin la repaus —
+    // dar NU în timpul unui scenariu, căci scenariul își gestionează el finalul.
     const onFinished = (): void => {
+      if (scenarioRef.current) return
       state.current = 'idle'
       current.current = null
       play('idle')
@@ -259,10 +314,15 @@ export default function AvatarModel() {
       window.dispatchEvent(new Event('kelion-gesture-done'))
     }
     mixer.addEventListener('finished', onFinished)
-    // CANALUL DE COMANDĂ: orice parte a aplicației (în viitor: creierul, prin
-    // punte) poate cere un gest pe nume — rulează o dată, apoi revine singur.
+    // CANALUL DE COMANDĂ: [GEST nume] poate fi un scenariu (secvență) sau un
+    // clip simplu. Scenariile au prioritate; un gest simplu oprește scenariul.
     const onGesture = (e: Event): void => {
       const name = String((e as CustomEvent).detail ?? '')
+      if (isScenario(name)) {
+        startScenario(name)
+        return
+      }
+      clearScenario()
       if (actions[name] || lazyClips.current[name]) {
         state.current = 'gesture'
         play(name, true)
@@ -272,6 +332,7 @@ export default function AvatarModel() {
     return () => {
       mixer.removeEventListener('finished', onFinished)
       window.removeEventListener('kelion-gesture', onGesture)
+      clearScenario()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions, mixer])
