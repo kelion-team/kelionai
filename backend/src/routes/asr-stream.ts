@@ -131,6 +131,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       })
       stream.on('end', () => {
         gStream = null
+        started = false // permite repornirea pe același socket dacă Google închide fluxul
       })
 
       // PRIMA cerere = DOAR config (fără audio); apoi doar cadre {audio}.

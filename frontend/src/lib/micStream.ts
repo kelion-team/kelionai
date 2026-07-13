@@ -223,29 +223,39 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       }
     }
     ws.onmessage = (ev) => {
-      gotAnyMsg = true
-      if (silentTimer) {
-        clearTimeout(silentTimer)
-        silentTimer = null
-      }
-      let m: { type?: string; transcript?: string }
+      let m: { type?: string; transcript?: string; error?: string }
       try {
         m = JSON.parse(String(ev.data))
       } catch {
         return
       }
+      // Doar transcript real dovedește că STT funcționează. SPEECH_ACTIVITY_BEGIN
+      // confirmă doar că serverul aude voce, NU și că transcrie — dacă l-am lăsa
+      // să dezarmeze plasa, Kelion ar rămâne mut (aude voce, dar nu livrează text).
       if (m.type === 'partial' && typeof m.transcript === 'string') {
+        gotAnyMsg = true
+        if (silentTimer) {
+          clearTimeout(silentTimer)
+          silentTimer = null
+        }
         // LIVE: finaluri validate + parțialul care crește acum
         lastPartial = m.transcript
         const live = `${phraseFinal} ${m.transcript}`.trim()
         opts.onLive(live)
         armPhraseTimer()
       } else if (m.type === 'final' && typeof m.transcript === 'string') {
+        gotAnyMsg = true
+        if (silentTimer) {
+          clearTimeout(silentTimer)
+          silentTimer = null
+        }
         phraseFinal = `${phraseFinal} ${m.transcript}`.trim()
         opts.onLive(phraseFinal)
         armPhraseTimer()
       } else if (m.type === 'speech_begin') {
         if (muted) opts.onBargeIn?.()
+      } else if (m.type === 'error' && !closed) {
+        opts.onError('silent')
       }
     }
     ws.onerror = () => {
