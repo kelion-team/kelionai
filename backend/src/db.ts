@@ -915,6 +915,24 @@ export async function loadKv(key: string): Promise<string | null> {
   return r.rows[0]?.value ?? null
 }
 
+// ── GESTURI: ce gesturi are voie Kelion să folosească CONTEXTUAL (Adrian, 13
+// iul: panou admin cu casetă per gest). Stocăm DOAR lista dezactivată (default:
+// toate active). Creierul citește lista și evită gesturile bifate ca OFF.
+export async function getDisabledGestures(): Promise<string[]> {
+  const raw = await loadKv('gesture_disabled')
+  if (!raw) return []
+  try {
+    const a: unknown = JSON.parse(raw)
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+export async function setDisabledGestures(list: string[]): Promise<void> {
+  const clean = [...new Set(list.filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)))].slice(0, 200)
+  await saveKv('gesture_disabled', JSON.stringify(clean))
+}
+
 // ── App installers: MASTER on the Linux server, DELIVERED here ──────────────
 // The Linux builder pushes the freshest .exe/.apk into this table; /dl/<file>
 // serves it (no-store, over HTTPS+Cloudflare). Survives redeploys → the QR

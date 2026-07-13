@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
+import { fetchDisabledGestures } from '../lib/gestures'
 
 // ── EXPRESII FACIALE (ARKit blendshapes) — păstrate din release-ul „avatar
 // v2.3" al constructorului (partea lui bună: fața pe morph-uri, permisă), în
@@ -198,6 +199,9 @@ export default function AvatarModel() {
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
   const talkHold = useRef(0) // vocea „ține" starea de vorbit peste micro-pauze
   const nextVar = useRef(22 + Math.random() * 15) // când urmează o variație domoală
+  // GESTURI DEZACTIVATE (Adrian, 13 iul): ce Adrian debifează în Admin → Gesturi
+  // NU se joacă deloc — nici automat, nici comandat. Reîmprospătat periodic.
+  const disabledG = useRef<Set<string>>(new Set())
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
@@ -254,6 +258,15 @@ export default function AvatarModel() {
     }
   }, [scene])
 
+  // Ce gesturi a scos Adrian din Admin → Gesturi (public /api/gestures/state).
+  // Reîncărcat la 30s, ca schimbările din panou să prindă fără reload.
+  useEffect(() => {
+    const load = (): void => void fetchDisabledGestures().then((l) => (disabledG.current = new Set(l)))
+    load()
+    const id = window.setInterval(load, 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+
   useEffect(() => {
     play('idle')
     // La finalul unui clip „once" (variație/gest), înapoi lin la repaus.
@@ -268,17 +281,24 @@ export default function AvatarModel() {
     mixer.addEventListener('finished', onFinished)
     // CANALUL DE COMANDĂ: orice parte a aplicației (în viitor: creierul, prin
     // punte) poate cere un gest pe nume — rulează o dată, apoi revine singur.
-    const onGesture = (e: Event): void => {
-      const name = String((e as CustomEvent).detail ?? '')
+    const runGesture = (name: string, allowDisabled: boolean): void => {
+      if (!allowDisabled && disabledG.current.has(name)) return // debifat → nu se joacă
       if (actions[name] || lazyClips.current[name]) {
         state.current = 'gesture'
         play(name, true)
       }
     }
+    // Canal normal (creier/comandă): refuză gesturile debifate de Adrian.
+    const onGesture = (e: Event): void => runGesture(String((e as CustomEvent).detail ?? ''), false)
+    // Canal de PREVIEW (Admin → Gesturi „▶ Arată"): joacă ORICE, ca adminul să
+    // vadă gestul înainte să-l bifeze.
+    const onPreview = (e: Event): void => runGesture(String((e as CustomEvent).detail ?? ''), true)
     window.addEventListener('kelion-gesture', onGesture)
+    window.addEventListener('kelion-gesture-preview', onPreview)
     return () => {
       mixer.removeEventListener('finished', onFinished)
       window.removeEventListener('kelion-gesture', onGesture)
+      window.removeEventListener('kelion-gesture-preview', onPreview)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions, mixer])
@@ -339,7 +359,7 @@ export default function AvatarModel() {
         play('idle')
         nextVar.current = t + 20 + Math.random() * 20
       } else if (!talking && state.current === 'idle' && t > nextVar.current) {
-        const pool = CHAT_IDLE_CALM.filter((n) => actions[n] || lazyClips.current[n])
+        const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
         if (pool.length) {
           state.current = 'gesture'
           play(pool[Math.floor(Math.random() * pool.length)], true)

@@ -21,6 +21,7 @@ import {
   getSpeechLang,
   setSpeechLangPref,
   getMeserieActiva,
+  getDisabledGestures,
   saveNote,
   listNotes,
   deleteNote,
@@ -176,6 +177,15 @@ const AVATAR_GESTURES = [
   // Legacy — comenzi vocale deterministe încă emit astea.
   'salute', 'raiseRightHand', 'pointMonitor',
 ] as const
+// Semantic → clip RPM (oglinda lui GESTURE_TO_CLIP din frontend). Cheia canonică
+// a unui gest peste tot (panou admin, [GEST], dezactivare) e NUMELE CLIPULUI.
+const GESTURE_SEMANTIC_CLIP: Record<string, string> = {
+  salut: 'expresie-1', 'arata-inainte': 'expresie-2', uimire: 'expresie-3', dezamagire: 'expresie-4',
+  nedumerire: 'expresie-5', victorie: 'expresie-6', multumire: 'expresie-7', surpriza: 'expresie-8',
+  'stai-putin': 'expresie-9', ganditor: 'expresie-10', aprobare: 'expresie-11', entuziasm: 'expresie-12',
+  'acord-discret': 'expresie-13', plecaciune: 'expresie-14', dans: 'dans',
+  salute: 'expresie-1', raiseRightHand: 'expresie-13', pointMonitor: 'expresie-2',
+}
 const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
   name: 'play_avatar_gesture',
   description:
@@ -827,7 +837,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // total, fără cârpeli"): creierul e Kimi→GLM; nu mai există cheie de client.
     // Toți userii trec prin paywall-ul normal (creditul din portofel).
     const lastForRecall = messages.at(-1)
-    const [storedPref, meserieId, memRecall, lastSavedRow] = await Promise.all([
+    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures] = await Promise.all([
       getSpeechLang(user.email),
       getMeserieActiva(user.email),
       // Memory agent (recall): DB pur (fără model, fără credite) — faptele
@@ -836,7 +846,39 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Continuitate între sesiuni (#20): momentul ultimului mesaj salvat — DB
       // pur, în paralel cu restul (zero latență adăugată).
       getRecentHistory(user.email, 1).catch(() => []),
+      // GESTURI dezactivate de Adrian din panoul admin — ce NU e bifat NU apare
+      // deloc (Adrian, 13 iul): filtrăm tool-ul + promptul cu lista asta.
+      getDisabledGestures().catch(() => [] as string[]),
     ])
+    const gestureOff = new Set(disabledGestures)
+    // Tool-ul de gesturi, filtrat: gesturile dezactivate NU mai sunt oferite
+    // modelului (nu le poate nici alege). Dacă TOATE sunt scoase, tool-ul iese
+    // din listă cu totul.
+    const enabledGestures = (AVATAR_GESTURES as readonly string[]).filter(
+      (g) => !gestureOff.has(GESTURE_SEMANTIC_CLIP[g] ?? g),
+    )
+    const gestureTool: Anthropic.Tool | null =
+      enabledGestures.length > 0
+        ? {
+            ...PLAY_AVATAR_GESTURE_TOOL,
+            input_schema: {
+              ...PLAY_AVATAR_GESTURE_TOOL.input_schema,
+              properties: {
+                gesture: {
+                  type: 'string',
+                  enum: enabledGestures,
+                  description: 'Which gesture fits the emotion/context of your reply.',
+                },
+              },
+              required: ['gesture'],
+            },
+          }
+        : null
+    // Regulă tare pentru prompt: gesturile DEZACTIVATE nu se folosesc NICIODATĂ,
+    // pe nicio cale (tool sau [GEST]). „Ce nu e bifat nu apare în aplicație."
+    const gestureOffRule = disabledGestures.length
+      ? `\nGESTURI DEZACTIVATE de Adrian — NU le folosi NICIODATĂ, sub nicio formă (nici prin [GEST], nici altfel): ${disabledGestures.join(', ')}.\n`
+      : ''
 
     // DEVICE COMMANDS + SPEECH LANGUAGE — both interpreted on the SERVER now
     // (moved out of the browser; owner's order: as much of the app as possible
@@ -964,7 +1006,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // (weather, maps, "near me", "where am I") actually work. The frontend sends
     // the live coordinates; we resolve a human place name (cached) so Claude can
     // pass it to the name-based skills.
-    let systemPrompt = SYSTEM_PROMPT
+    let systemPrompt = SYSTEM_PROMPT + gestureOffRule
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
@@ -1785,7 +1827,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const memBlock = memRecall.trim()
           ? `\nMEMORIE DESPRE ADRIAN (ce știi deja despre el — când te întreabă ceva de aici, RĂSPUNDE DIRECT cu faptul; dacă NU găsești nicăieri, întreabă-l și ține minte răspunsul):\n${memRecall.trim().slice(0, 2500)}\n`
           : ''
-        const bridgePrompt = decision + ctxBlock + sharedBlock + memBlock + langLock + journalBlock + convo
+        const bridgePrompt = decision + ctxBlock + sharedBlock + memBlock + gestureOffRule + langLock + journalBlock + convo
         // PACHET TURĂ SUBȚIRE (Adrian, 10 iul: „chat live gândit; dacă e nevoie
         // de ceva, DOAR atunci se caută în istoric"). Sesiunea caldă din worker e
         // DEJA amorsată cu TOT contextul (bridgePrompt) la începutul sesiunii, deci
@@ -2164,8 +2206,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // developer bridge is actually online — no point otherwise.
     const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
     const tools: Anthropic.Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
+      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.

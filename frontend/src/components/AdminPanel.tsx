@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
+  GESTURE_CATALOG,
+  GESTURE_CATEGORIES,
+  previewGesture,
+  fetchDisabledGestures,
+  saveDisabledGestures,
+} from '../lib/gestures'
+import {
   fetchUsers,
   fetchHistory,
   translateToRo,
@@ -139,8 +146,11 @@ export default function AdminPanel({
   readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi'
   >(initialTab ?? 'finance')
+  // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
+  const [gestOff, setGestOff] = useState<string[]>([])
+  const [gestSaved, setGestSaved] = useState(false)
   // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
@@ -326,6 +336,25 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
+  // Tab „Gesturi" deschis → încarcă lista dezactivată.
+  useEffect(() => {
+    if (tab !== 'gesturi') return
+    void fetchDisabledGestures().then(setGestOff)
+  }, [tab])
+
+  // Bifează/debifează un gest → salvează pe server. Bifat = activ (NU în lista
+  // dezactivată). Ce nu e bifat NU se folosește deloc în aplicație.
+  const toggleGesture = (clip: string): void => {
+    const next = gestOff.includes(clip) ? gestOff.filter((c) => c !== clip) : [...gestOff, clip]
+    setGestOff(next)
+    void saveDisabledGestures(next).then((ok) => {
+      if (ok) {
+        setGestSaved(true)
+        window.setTimeout(() => setGestSaved(false), 1500)
+      }
+    })
+  }
+
   const sym = finance?.currency === 'usd' ? '$' : '£'
   const aiParts = finance
     ? Object.entries(finance.byKind)
@@ -482,6 +511,13 @@ export default function AdminPanel({
               onClick={() => setTab('voiceprints')}
             >
               Amprente vocale{voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'gesturi' ? 'sel' : ''}`}
+              onClick={() => setTab('gesturi')}
+            >
+              Gesturi
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -1015,6 +1051,38 @@ export default function AdminPanel({
                       șterge
                     </button>
                   </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {tab === 'gesturi' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Gesturile lui Kelion — apasă „▶ Arată" ca să-l vezi făcând gestul; bifează ce are voie
+                să folosească pe logică/context. Ce NU e bifat NU se folosește deloc în aplicație.
+                {gestSaved ? ' · salvat ✓' : ''}
+              </div>
+              {GESTURE_CATEGORIES.map((cat) => (
+                <div key={cat}>
+                  <div className="fin-breakdown-head" style={{ opacity: 0.7, marginTop: 12 }}>
+                    {cat}
+                  </div>
+                  {GESTURE_CATALOG.filter((g) => g.category === cat).map((g) => {
+                    const on = !gestOff.includes(g.clip)
+                    return (
+                      <div className="fin-row" key={g.clip}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={on} onChange={() => toggleGesture(g.clip)} />
+                          <span style={{ opacity: on ? 1 : 0.5 }}>{g.label}</span>
+                        </label>
+                        <button type="button" className="ghost" onClick={() => previewGesture(g.clip)}>
+                          ▶ Arată
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               ))}
             </div>

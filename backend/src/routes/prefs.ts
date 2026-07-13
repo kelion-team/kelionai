@@ -5,6 +5,7 @@ import {
   setSpeechLangPref,
   getMeserieActiva,
   setMeserieActivaPref,
+  getDisabledGestures,
   saveKv,
   loadKv,
 } from '../db.js'
@@ -41,6 +42,12 @@ function validAvatarBox(b: unknown): b is AvatarBox {
 // exists. Auth-gated to the session user — each user only ever reads/writes
 // their own.
 export async function prefsRoutes(app: FastifyInstance): Promise<void> {
+  // Starea gesturilor (lista dezactivată) — PUBLIC, ca avatarul ORICĂRUI user să
+  // nu joace gesturile scoase de Adrian. Nu e sensibil (comportament cosmetic).
+  app.get('/api/gestures/state', async (_req, reply) => {
+    return reply.send({ disabled: await getDisabledGestures() })
+  })
+
   app.get('/api/prefs', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })

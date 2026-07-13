@@ -25,8 +25,12 @@ import {
   getDownloadStats,
   listInboundEmails,
   markGapEscalated,
+  getDisabledGestures,
+  setDisabledGestures,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
+import { screenshotUrl } from '../services/browser.js'
+import { geminiVision } from '../services/google.js'
 import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
@@ -285,6 +289,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
   })
+
+  // GESTURI (Adrian, 13 iul): panoul admin citește/scrie ce gesturi are voie
+  // Kelion să folosească contextual. Doar admin (403 altfel). Stocăm lista
+  // DEZACTIVATĂ (default: toate active).
+  app.get('/api/admin/gestures', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ disabled: await getDisabledGestures() })
+  })
+  app.post<{ Body: { disabled?: string[] } }>('/api/admin/gestures', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
+    await setDisabledGestures(list)
+    return reply.send({ ok: true, disabled: await getDisabledGestures() })
+  })
+
+  // VERIFICARE VIZUALĂ din ADMIN (Adrian, 13 iul: „nu se dă la admin dacă nu e
+  // 200"): admin-ul poate rula visual-check prin SESIUNE (nu prin secretul VPS)
+  // — screenshot + Gemini judecă dacă rezultatul cerut se vede. 403 dacă nu-i admin.
+  app.post<{ Body: { url?: string; criteria?: string; fullPage?: boolean } }>(
+    '/api/admin/visual-check',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const url = String(req.body?.url ?? 'https://kelionai.app').trim()
+      const criteria = String(req.body?.criteria ?? '').trim()
+      if (!criteria) return reply.code(400).send({ error: 'bad_request', note: 'criteria required' })
+      const shot = await screenshotUrl(url, { fullPage: req.body?.fullPage === true })
+      if ('error' in shot) return reply.send({ ok: false, verdict: 'necunoscut', note: `screenshot: ${shot.error}` })
+      const question =
+        `Verifici VIZUAL un screenshot al aplicației web kelionai.app. Rezultatul cerut: "${criteria}". ` +
+        `Răspunde STRICT: prima linie "VIZUAL: DA" dacă se vede clar, sau "VIZUAL: NU" dacă nu. Apoi o propoziție cu ce vezi.`
+      const answer = await geminiVision(shot.jpegBase64, question)
+      if (!answer) return reply.send({ ok: false, verdict: 'necunoscut', note: 'gemini_vision_indisponibil' })
+      const m = answer.match(/VIZUAL:\s*(DA|NU)/i)
+      return reply.send({ ok: true, verdict: m ? (m[1].toUpperCase() === 'DA' ? 'DA' : 'NU') : 'necunoscut', detail: answer.slice(0, 800) })
+    },
+  )
 
   // Record money the owner ADDS to or WITHDRAWS from the provider-credit pool
   // (admin only). direction 'withdraw' takes money out; anything else adds.
