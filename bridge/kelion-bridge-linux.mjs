@@ -956,6 +956,10 @@ function runClaudeBare(prompt, timeoutMs = 60_000, pub = false, cancel) {
   })
 }
 
+// LIVENESS pentru watchdog: momentul ultimei ATINGERI reușite a backendului
+// (orice răspuns HTTP de la /api/bridge/pull = puntea e vie și conectată).
+let lastReach = Date.now()
+
 async function pull(lane = 'chat') {
   // Timeout obligatoriu: fără el, un sughiț de rețea lăsa fetch-ul agățat pe
   // veci și bucla murea „vie" — puntea părea căzută (4 iul). Long-poll = 25s.
@@ -967,6 +971,7 @@ async function pull(lane = 'chat') {
     body: JSON.stringify({ caps: ['persona'], lane }),
     signal: AbortSignal.timeout(40_000),
   })
+  lastReach = Date.now() // am atins backendul (chiar și un 4xx/5xx = conexiune vie)
   if (res.status === 401) throw new Error('Secret respins de server')
   if (!res.ok) throw new Error(`pull HTTP ${res.status}`)
   const j = await res.json()
@@ -1320,6 +1325,22 @@ async function workLoop() {
     }
   }
 }
+
+// WATCHDOG DE AUTO-RECONECTARE (Adrian, 13 iul: „repară să nu mai cadă chatul la
+// deploy"). La redeploy Railway backendul se schimbă; în cazuri rare long-poll-ul
+// rămâne wedged / sesiunea intră în stare moartă → puntea pare „vie" dar e
+// deconectată și cerea repornire MANUALĂ. Acum: dacă nu mai atinge backendul
+// WATCHDOG_MS (3+ cicluri de long-poll ratate), ieșim intenționat; systemd
+// (Restart=always, verificat pe VPS) respawnează procesul curat, care se
+// reconectează din prima. Auto-vindecare, zero intervenție manuală.
+const WATCHDOG_MS = 90_000
+setInterval(() => {
+  const gap = Date.now() - lastReach
+  if (gap > WATCHDOG_MS) {
+    log(`WATCHDOG: fără contact cu backendul de ${Math.round(gap / 1000)}s — ies, systemd mă repornește curat.`)
+    process.exit(1)
+  }
+}, 15_000).unref?.()
 
 chatLoop()
 workLoop()
