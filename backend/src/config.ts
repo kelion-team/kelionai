@@ -61,10 +61,13 @@ export const config = {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
     currency: (process.env.STRIPE_CURRENCY ?? 'gbp').toLowerCase(),
-    // Credit model: on top-up the user KEEPS `userShare` (75%) as spendable
-    // credit and `1 - userShare` (25%) is our profit — taken up front, not on
-    // consumption. The user then spends their credit at REAL provider cost (1:1).
-    userShare: Number(process.env.USER_SHARE ?? 0.75),
+    // Credit model (Adrian, 13 iul: „va fi 30% platformă"): on top-up the user
+    // KEEPS `userShare` (70%) as spendable credit and `1 - userShare` (30%) is
+    // the platform's cut — taken up front, not on consumption. The user then
+    // spends their credit at REAL provider cost (1:1) din pacul comun Kimi/GLM.
+    // NOTĂ: dacă USER_SHARE e setat în Railway (era 0.75), trebuie pus 0.70 sau
+    // șters, altfel env-ul câștigă peste acest implicit.
+    userShare: Number(process.env.USER_SHARE ?? 0.7),
     // The user's wallet is shown in CREDITS; 1 credit = this much display currency.
     creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
     // USD→display-currency conversion (provider costs are USD; wallet is GBP).
