@@ -2025,6 +2025,41 @@ body {
   width: 20px;
   text-align: center;
 }
+/* Mod full-duplex: butonul stă în meniul de funcții ca un fn-item, dar e propriul
+   buton (pornire/oprire sesiune LiveKit). Nu schimbă traseul de voce HTTP. */
+.fn-duplex {
+  cursor: default;
+}
+.fn-duplex:hover {
+  background: transparent;
+}
+.duplex-btn {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.duplex-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.duplex-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.duplex-btn.live {
+  border-color: #35c46a;
+  color: #35c46a;
+  box-shadow: 0 0 0 1px rgba(53, 196, 106, 0.4) inset;
+}
+.duplex-btn.err {
+  border-color: #d9534f;
+  color: #e88;
+}
 .fn-item .dot {
   margin-left: auto;
   width: 8px;
