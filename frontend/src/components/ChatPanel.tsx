@@ -40,9 +40,9 @@ import {
 } from '../lib/audioIO'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
+import { startLiveVoice, type LiveVoiceHandle } from '../lib/liveVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
-import { WakeWordToggle } from './WakeWordToggle'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
 // constructorului) traduse în clipurile REALE din biblioteca RPM — scheletul
@@ -999,6 +999,50 @@ export default function ChatPanel({
     }
   }, [])
 
+  // FULL-DUPLEX INSTANT STREAMING (Adrian, 13 iul: „chat full duplex instant
+  // streaming", automat, fără buton). Pentru adminul logat, intrăm SINGURI în
+  // camera LiveKit: microfon deschis permanent + vocea agentului lui Kelion, cu
+  // barge-in — asta e ce făcea butonul scos, dar automat. Cât e LIVE, suspendăm
+  // calea de voce HTTP (push-to-talk) ca aceeași vorbă să NU fie procesată de
+  // două ori. Dacă LiveKit nu e disponibil (token 401/503, conexiune picată),
+  // cade GRAȚIOS pe calea HTTP care merge deja — nimic nu se strică.
+  useEffect(() => {
+    if (!isAdmin) return
+    let handle: LiveVoiceHandle | null = null
+    let cancelled = false
+    void (async () => {
+      try {
+        handle = await startLiveVoice({
+          onState: (s) => {
+            if (s === 'live') {
+              // full-duplex activ → o SINGURĂ cale de voce: oprim microfonul HTTP
+              micManualOffRef.current = true
+              micRef.current?.stop()
+              micRef.current = null
+            } else if (s === 'error' || s === 'closed') {
+              // full-duplex indisponibil → revenim pe calea HTTP care funcționează
+              micManualOffRef.current = false
+              void ensureMicRef.current()
+            }
+          },
+        })
+        if (cancelled) {
+          void handle?.stop()
+          handle = null
+        }
+      } catch {
+        // token/conexiune eșuată → rămâne calea HTTP (deja pornită), fără crash
+        micManualOffRef.current = false
+      }
+    })()
+    return () => {
+      cancelled = true
+      void handle?.stop()
+      handle = null
+      micManualOffRef.current = false
+    }
+  }, [isAdmin])
+
   // Cât ascultă, ecranul nu adoarme — un telefon cu ecranul stins își taie
   // microfonul, iar „permanent on” ar muri la primul screen-off.
   useEffect(() => {
@@ -1408,13 +1452,11 @@ export default function ChatPanel({
                     hearing”), cu VOX + barge-in. Butonul LiveKit a fost scos (ordin
                     Adrian, 13 iul): era un dublet mort (serverul LiveKit nici nu e
                     pornit), full-duplexul real merge pe calea vocală automată. */}
-                {/* Cuvânt de trezire: spui „Kelion” și pornește singur microfonul. */}
-                <WakeWordToggle
-                  lang={speechLang}
-                  onWake={() => {
-                    if (!micRef.current && !micStartingRef.current) toggleMic()
-                  }}
-                />
+                {/* Butonul „Trezire Kelion” a fost SCOS (Adrian, 13 iul): trezirea e
+                    AUTOMATĂ — microfonul e deja mereu pornit (useEffect „Permanent
+                    hearing”), deci Kelion se trezește la PRIMUL SUNET auzit; iar la
+                    scris se trezește la PRIMA LITERĂ tastată (câmpul e mereu activ).
+                    Nu mai e nimic de apăsat. */}
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
                     his own (show_on_screen), and the camera is switched by text
                     command ("switch camera", "comută camera", "camera spate"). */}
