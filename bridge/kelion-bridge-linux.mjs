@@ -93,8 +93,8 @@ const TIERS = [
   // e fallback-ul sigur; failover-ul pe GLM la chat e rar (cere Max+Kimi golite).
   { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
 ]
-const TIER_COOLDOWN_MS = 30 * 60_000 // treaptă golită → reîncercată după 30 min
-const TIER_COOLDOWN_MAX_MS = 6 * 3600_000 // plafon backoff (o treaptă cronic goală)
+const TIER_COOLDOWN_MS = 5 * 60_000 // Adrian, 13 iul: „5 minute automat" (era 30)
+const TIER_COOLDOWN_MAX_MS = 5 * 60_000 // FIX 5 min (fără backoff crescător) — Kimi revine automat rapid
 const tierDownUntil = Object.create(null)
 // PERSISTENȚA STĂRII TREPTELOR (Adrian, 12 iul: „să nu mai revină la următorul
 // deploy"). tierDownUntil era DOAR în memorie → la fiecare restart/deploy chatul
