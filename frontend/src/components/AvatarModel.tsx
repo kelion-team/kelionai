@@ -149,6 +149,12 @@ const LAZY_CLIP_FILES: Record<string, string> = {
   'dans-10': '/anim/M_Dances_011.glb',
 }
 
+// TAXONOMIA GESTURILOR (Adrian, 13 iul) — repaus DOMOL permis în chat vs
+// „dezmorțiri" ample INTERZISE în chat. Rotația automată din repaus alege DOAR
+// din setul domol (gentleman); dezmorțirile rămân disponibile doar la comandă.
+const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
+// (interzise în rotația din chat: variatie-3, variatie-7, variatie-9, variatie-10)
+
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const idle = useGLTF(CLIP_FILES.idle)
@@ -191,6 +197,7 @@ export default function AvatarModel() {
   const current = useRef<AnimationAction | null>(null)
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
   const talkHold = useRef(0) // vocea „ține" starea de vorbit peste micro-pauze
+  const nextVar = useRef(22 + Math.random() * 15) // când urmează o variație domoală
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
@@ -316,10 +323,11 @@ export default function AvatarModel() {
     const level = getVoiceLevel()
 
     // ── Regia: alege mișcarea după ce face Kelion acum ──
-    // ȚINUTĂ DE DOMN (Adrian, 11 iul: „astea sunt gesturi de gym, nu e bine"):
-    // în repaus NU se mai rulează automat nicio variație — doar respirația
-    // demnă din clipul de bază. Orice alt gest vine EXCLUSIV la comandă
-    // ([GEST nume] de la creier), legat de context/sentiment, cu măsură.
+    // ȚINUTĂ DE DOMN (Adrian, 11 iul: „gesturi de gym, nu e bine" → 13 iul:
+    // taxonomia domoală): în repaus se rulează RAR o variație DOMOALĂ din setul
+    // permis (CHAT_IDLE_CALM) — gentleman, nu gym. „Dezmorțirile" ample
+    // (variatie-3/-7/-9/-10) NU intră în rotația din chat; expresiile mari și
+    // dansurile vin EXCLUSIV la comandă de la creier.
     if (level > 0.05) talkHold.current = t + 0.7
     const talking = t < talkHold.current
     if (state.current !== 'gesture') {
@@ -329,6 +337,14 @@ export default function AvatarModel() {
       } else if (!talking && state.current === 'talking') {
         state.current = 'idle'
         play('idle')
+        nextVar.current = t + 20 + Math.random() * 20
+      } else if (!talking && state.current === 'idle' && t > nextVar.current) {
+        const pool = CHAT_IDLE_CALM.filter((n) => actions[n] || lazyClips.current[n])
+        if (pool.length) {
+          state.current = 'gesture'
+          play(pool[Math.floor(Math.random() * pool.length)], true)
+        }
+        nextVar.current = t + 22 + Math.random() * 22
       }
     }
 

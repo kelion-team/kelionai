@@ -166,17 +166,27 @@ const LOG_GAP_TOOL: Anthropic.Tool = {
 
 // Let Kelion trigger a one-time avatar gesture on the user's screen. Use when
 // the user asks for a gesture or when a gesture adds natural expression.
+// Vocabularul de gesturi al avatarului (Adrian, 13 iul) — legate de sentiment/
+// context, gentleman, nu de gym. Numele semantice se traduc în clipuri RPM în
+// frontend (GESTURE_TO_CLIP). Emitem valoarea aleasă ca frame {gesture}.
+const AVATAR_GESTURES = [
+  'salut', 'arata-inainte', 'uimire', 'dezamagire', 'nedumerire', 'victorie',
+  'multumire', 'surpriza', 'stai-putin', 'ganditor', 'aprobare', 'entuziasm',
+  'acord-discret', 'plecaciune', 'dans',
+  // Legacy — comenzi vocale deterministe încă emit astea.
+  'salute', 'raiseRightHand', 'pointMonitor',
+] as const
 const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
   name: 'play_avatar_gesture',
   description:
-    "Trigger a one-time avatar gesture on the user's screen. Use when the user asks for a gesture (wave, raise hand, point at the monitor) or when a gesture adds natural expression to your reply. The gesture plays once and blends smoothly back to idle.",
+    "Play a one-time avatar gesture that fits your reply's emotion/context — like a GENTLEMAN, calm and measured, never a gym pose. Pick the one that matches the moment: salut (greeting/goodbye), arata-inainte (point ahead/to the monitor), uimire (amazement), dezamagire (mild disappointment), nedumerire (puzzlement), victorie (victory), multumire (thanks), surpriza (surprise), stai-putin (ask to wait), ganditor (thinking), aprobare (approval), entuziasm (enthusiasm), acord-discret (subtle agreement/nod), plecaciune (theatrical bow), dans (dance — ONLY when the user explicitly asks). Use sparingly and naturally; it plays once and blends back to a calm idle.",
   input_schema: {
     type: 'object',
     properties: {
       gesture: {
         type: 'string',
-        enum: ['raiseRightHand', 'salute', 'pointMonitor'],
-        description: 'Which gesture to play.',
+        enum: [...AVATAR_GESTURES],
+        description: 'Which gesture fits the emotion/context of your reply.',
       },
     },
     required: ['gesture'],
@@ -2809,10 +2819,8 @@ async function runTool(
   }
   if (block.name === 'play_avatar_gesture') {
     const inp = (block.input ?? {}) as { gesture?: string }
-    const label: GestureLabel | undefined =
-      inp.gesture === 'raiseRightHand' || inp.gesture === 'salute' || inp.gesture === 'pointMonitor'
-        ? inp.gesture
-        : undefined
+    const label =
+      inp.gesture && (AVATAR_GESTURES as readonly string[]).includes(inp.gesture) ? inp.gesture : undefined
     if (!label) return JSON.stringify({ error: 'unknown_gesture' })
     reply.raw.write(`${CTRL}${JSON.stringify({ gesture: label })}${CTRL}`)
     return JSON.stringify({ played: true, gesture: label })
