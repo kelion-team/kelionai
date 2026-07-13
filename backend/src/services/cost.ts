@@ -15,6 +15,8 @@ const PRICES: Record<string, ModelPrice> = {
   // marginal per apel e ~0; le ținem la 0 ca să nu inventăm cifre false în
   // contabilitatea adminului. Anthropic scos complet (Adrian, 12 iul).
   'kimi-for-coding': { input: 0, output: 0 },
+  'kimi-k2-thinking': { input: 0, output: 0 },
+  'kimi-k2-thinking-turbo': { input: 0, output: 0 },
   'glm-4.6': { input: 0, output: 0 },
   'gemini-2.5-flash': { input: 0.3 / 1e6, output: 2.5 / 1e6 },
 }

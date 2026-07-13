@@ -15,7 +15,10 @@
 // CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
 // iul). Configurabile din Railway (KELION_FAST_MODEL / KELION_TOP_MODEL) dacă
 // furnizorii schimbă numele; implicit modelele native ale planurilor.
-export const MODEL_FAST = process.env.KELION_FAST_MODEL || 'kimi-for-coding'
+// Adrian, 13 iul: „vreau Kimi 2.7" — modelul K2 Thinking (id API `kimi-k2-thinking`,
+// verificat live că endpointul îl acceptă). Era `kimi-for-coding`. Configurabil din
+// Railway prin KELION_FAST_MODEL dacă vrei alt snapshot (ex. kimi-k2-0905-preview).
+export const MODEL_FAST = process.env.KELION_FAST_MODEL || 'kimi-k2-thinking'
 export const MODEL_TOP = process.env.KELION_TOP_MODEL || 'glm-4.6'
 
 export interface ModelRung {

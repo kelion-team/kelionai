@@ -61,7 +61,10 @@ const WORK_TIERS = [
     name: 'kimi',
     keyFile: '/root/kelion/kimi-key.txt',
     base: 'https://api.kimi.com/coding/',
-    model: 'kimi-for-coding',
+    // Kimi 2.7 = K2 Thinking (Adrian, 13 iul). `pinModel` = id FIX; resolveTierModel
+    // NU-l mai suprascrie din /v1/models (care listează doar `kimi-for-coding`).
+    model: 'kimi-k2-thinking',
+    pinModel: 'kimi-k2-thinking',
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '262144' },
   },
   // PARITATE COMPLETĂ (Adrian, 13 iul: „ambii trebuie să poată face aceleași
@@ -212,7 +215,7 @@ function run(cmd, args, opts = {}) {
 // modelul claude cerut.
 const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
 const MODEL_TTL_MS = 6 * 60 * 60 * 1000
-const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-for-coding' }
+const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-k2-thinking' }
 function verNum(id) {
   const m = String(id).match(/(\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : 0
@@ -238,6 +241,11 @@ function pickBestModel(tierName, ids) {
 }
 async function resolveTierModel(tier) {
   if (!tier || !tier.base) return null // Max → modelul claude cerut, nu se atinge
+  // PIN (Adrian, 13 iul: „vreau Kimi 2.7"): dacă treapta cere un model FIX, îl
+  // folosim ca atare — NU-l suprascriem din /v1/models (endpointul de coding
+  // listează doar `kimi-for-coding`, deși ACCEPTĂ id-uri K2 versionate ca
+  // `kimi-k2-thinking`). Fără pin, auto-sync-ul ar readuce `kimi-for-coding`.
+  if (tier.pinModel) return tier.pinModel
   const cached = MODEL_CACHE[tier.name]
   if (cached && Date.now() - cached.at < MODEL_TTL_MS) return cached.model
   let model = tier.model || MODEL_FALLBACK[tier.name] || null
