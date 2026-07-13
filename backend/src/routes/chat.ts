@@ -983,20 +983,60 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
-    // A device command (camera / monitor tabs): answer instantly — {device}
-    // control frame the client executes verbatim, plus a short ack — with NO
-    // model call. Same stream shape as a normal turn ({turn} receipt first) so
-    // the delivery check mark and the resume path still work.
+    // A device command (camera / monitor tabs / YouTube open): answer instantly —
+    // {device} control frame the client executes verbatim, plus a short ack —
+    // with NO model call. YouTube opens need an async real search; the {monitor}
+    // frame follows once resolved. Same stream shape as a normal turn ({turn}
+    // receipt first) so the delivery check mark and the resume path still work.
     if (deviceCmd) {
+      const cmdTurnId = randomUUID()
       reply.hijack()
       reply.raw.writeHead(200, {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
-      const cmdTurnId = randomUUID()
       startTurn(cmdTurnId)
       const ack = deviceAck(deviceCmd, ro)
+
+      // YouTube requests need a real search (Serper/Gemini), so the {device}
+      // frame only signals intent; the {monitor} frame follows once resolved.
+      if (deviceCmd.youtube) {
+        const q = deviceCmd.youtube.query
+        noteBrainActivity(`Caut pe YouTube: ${q}`)
+        const initial =
+          `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
+          `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
+          ack
+        appendTurn(cmdTurnId, initial)
+        reply.raw.write(initial)
+        if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
+        if (ack) void saveMessage(user.email, 'assistant', ack)
+
+        try {
+          const v = await youtubeFirstEmbed(q)
+          if (v) {
+            const monitorPayload = `${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`
+            appendTurn(cmdTurnId, monitorPayload)
+            reply.raw.write(monitorPayload)
+          } else {
+            const fail = ro
+              ? `N-am găsit un clip de ${q} pe YouTube.`
+              : `No ${q} video found on YouTube.`
+            appendTurn(cmdTurnId, fail)
+            reply.raw.write(fail)
+            if (fail) void saveMessage(user.email, 'assistant', fail)
+          }
+        } catch (e) {
+          const err = ro ? 'Eroare la căutarea pe YouTube.' : 'YouTube search error.'
+          appendTurn(cmdTurnId, err)
+          reply.raw.write(err)
+        }
+        finishTurn(cmdTurnId)
+        reply.raw.end()
+        return
+      }
+
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
@@ -1485,7 +1525,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           'REGISTRU ACADEMIC (Adrian, 10 iul): vorbește ca un academician — vocabular îngrijit și precis, termenul corect și propriu pentru fiecare lucru, propoziții complete și gramaticale, termenii tehnici numiți exact. FĂRĂ argou, fără prescurtări colocviale, fără umplutură. Păstrezi rigoarea academică rămânând TOTUȘI concis — academic înseamnă precis și corect, niciodată lung sau pompos.\n\n' +
           'UNELTELE TALE (le comanzi direct, serverul le execută și taie eticheta din text):\n' +
           '- Afișezi ceva pe monitorul lui: [SHOW https://adresa | titlu scurt]. Pentru hartă https://embed.waze.com/iframe?zoom=12&lat=LAT&lon=LON, pentru alte site-uri adresa normală (se deschide în browserul live).\n' +
-          '- Pui un clip pe YouTube: [YT ce vrei să pornească] (ex: [YT Coldplay Yellow live]). NU inventa NICIODATĂ un link/ID de YouTube — scrie doar ce vrei, serverul găsește clipul real și îl pornește pe monitor.\n' +
+          '- Pui un clip pe YouTube: [YT ce vrei să pornească] (ex: [YT Coldplay Yellow live]). Când Adrian spune „vreau pe youtube", „pune un clip de dans" sau orice variantă asemănătoare, identifică imediat un videoclip de dans și folosește [YT dans] (sau subiectul cerut) pentru a-l porni pe monitor. NU inventa NICIODATĂ un link/ID de YouTube — scrie doar ce vrei, serverul găsește clipul real și îl pornește.\n' +
           '- Generezi o imagine pe monitor: [IMG descriere detaliată în engleză].\n' +
           '- Salvezi o notiță pentru Adrian: [NOTE textul notiței].\n' +
           '- Îi arăți notițele salvate: [NOTES] (le citește serverul, cu numărul lor). Ștergi una: [DELNOTE număr] (ex: [DELNOTE 12]).\n' +

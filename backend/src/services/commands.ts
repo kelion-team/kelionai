@@ -13,10 +13,13 @@ export interface ScreenTab {
   active: boolean
 }
 
-// What the client executes verbatim: a camera op, or a monitor-tab op.
+// What the client executes verbatim: a camera op, a monitor-tab op, or a
+// server-resolved YouTube open (the server picks a real video and emits the
+// {monitor} frame separately).
 export interface DeviceCommand {
   camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
   screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
+  youtube?: { query: string }
 }
 
 // NB: Unicode lookbehind, not \b — JS \b is ASCII-only and never matches
@@ -44,6 +47,26 @@ function taskKindFromText(msg: string): string | null {
   if (/\b(document\w*|documentul|text\w*|textul|email\w*|emailul|scrisoare\w*|nota|notă)\b/i.test(msg))
     return 'doc'
   return null
+}
+
+// YouTube/dance/video intent — deterministic, zero model cost. When Adrian says
+// "vreau pe youtube", "pune un clip de dans" etc., the server resolves a real
+// video (via youtubeFirstEmbed in chat.ts) and shows it on the monitor.
+function youtubeOp(raw: string): { query: string } | null {
+  const m = (raw ?? '').trim()
+  if (!m) return null
+  const intentRe =
+    /(?<![\p{L}\p{N}])(vreau(?:\s+(?:să\s+)?(?:văd|ascult|pun))?|pune(?:-?(?:mi|ți|ti|m|t|i))?|deschide|porne[sșț]te|porneste|arat[ăa](?:-mi)?|arata-mi|red[ăa]|comut[ăa]|treci|las[ăa]|lasa|ascult[ăa]|asculta|d[ăa](?:-mi)?)\s+(?:pe\s+)?(?:youtube|un\s+(?:clip|videoclip|video)|muzic[ăa])(?![\p{L}\p{N}])/iu
+  // Also catch "<topic> pe youtube" when a concrete style is named.
+  const styleYoutubeRe =
+    /\b(dans|dance|hip[- ]?hop|rock|pop|clasic[ăa]|electro(?:nic[ăa])?|house|techno|trap|ballet|salsa|tango|breakdance|manele?)\s+(?:pe\s+)?youtube\b/iu
+  if (!intentRe.test(m) && !styleYoutubeRe.test(m)) return null
+  // Prefer a concrete dance/music style if named; otherwise default to "dans"
+  // because the owner's explicit request is "a dance video on YouTube".
+  const topicRe =
+    /\b(dans|dance|hip[- ]?hop|rock|pop|clasic[ăa]|electro(?:nic[ăa])?|house|techno|trap|ballet|salsa|tango|breakdance|manele?)\b/i
+  const topic = topicRe.exec(m)
+  return { query: topic ? topic[1] : 'dans' }
 }
 
 // Camera control needs both the word "camera" and an action verb, so normal
@@ -77,6 +100,9 @@ export function interpretDeviceCommand(
   const camera = cameraOp(msg)
   if (camera) return { camera }
 
+  const youtube = youtubeOp(msg)
+  if (youtube) return { youtube }
+
   const open = Array.isArray(tabs) ? tabs : []
   if (open.length === 0) return null
 
@@ -103,6 +129,11 @@ export function interpretDeviceCommand(
 // itself is the feedback — exactly the behaviour the browser had). ro/en are
 // the two ack languages the UI ever had.
 export function deviceAck(cmd: DeviceCommand, ro: boolean): string {
+  if (cmd.youtube) {
+    return ro
+      ? `Caut un clip de ${cmd.youtube.query} pe YouTube.`
+      : `Searching YouTube for ${cmd.youtube.query}.`
+  }
   switch (cmd.camera) {
     case 'off':
       return ro ? 'Am închis camera.' : 'Camera is off.'
