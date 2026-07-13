@@ -403,6 +403,51 @@ export async function browserScroll(
   return snapshot(session.page, baseUrl)
 }
 
+// COMPUTER-USE COMPLET (Adrian, 13 iul): pe lângă click/type/scroll pe elemente
+// indexate, Kelion poate apăsa TASTE (Tab/Escape/săgeți/Enter/combinații) și
+// poate da click pe COORDONATE (x,y) — pentru widget-uri care nu sunt în DOM-ul
+// indexabil (canvas, hărți, meniuri custom). Astea închid golul față de
+// „computer use" real, păstrând aceeași sesiune/screenshot.
+
+// Apasă o tastă sau o combinație pe pagina curentă. Formatul Playwright:
+// 'Enter', 'Tab', 'Escape', 'ArrowDown', 'Control+A', 'Shift+Tab' etc.
+export async function browserKey(email: string, baseUrl: string, key: string): Promise<BrowserResult> {
+  const session = sessions.get(email)
+  if (!session) return { error: 'no_session' }
+  session.lastUsed = Date.now()
+  // Bariera de siguranță: doar taste/combinații cu forma așteptată (nume de
+  // taste + modificatori), nu text arbitrar injectat.
+  if (!/^([A-Za-z0-9]+|(Control|Shift|Alt|Meta)(\+(Control|Shift|Alt|Meta))*\+[A-Za-z0-9]+|Enter|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Arrow(Up|Down|Left|Right)|Space)$/.test(key)) {
+    return { error: 'bad_key' }
+  }
+  try {
+    await session.page.keyboard.press(key)
+  } catch {
+    return { error: 'key_failed' }
+  }
+  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+  await session.page.waitForTimeout(250)
+  return snapshot(session.page, baseUrl)
+}
+
+// Click pe coordonate (x,y) în viewport (1280×800). Pentru elemente pe care
+// selectorul indexat nu le prinde (canvas, hărți, UI custom).
+export async function browserClickAt(email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> {
+  const session = sessions.get(email)
+  if (!session) return { error: 'no_session' }
+  session.lastUsed = Date.now()
+  const cx = Math.max(0, Math.min(1280, Math.round(x)))
+  const cy = Math.max(0, Math.min(800, Math.round(y)))
+  try {
+    await session.page.mouse.click(cx, cy)
+  } catch {
+    return { error: 'click_failed' }
+  }
+  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+  await session.page.waitForTimeout(300)
+  return snapshot(session.page, baseUrl)
+}
+
 export async function browserClose(email: string): Promise<void> {
   await closeSession(email)
 }
