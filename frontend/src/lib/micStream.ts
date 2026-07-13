@@ -26,6 +26,7 @@ const VOICE_RMS = 0.02 // prag ABSOLUT de voce (ridicat de la 0.012 — scoate z
 const DOMINANCE = 2.2 // vocea apropiată trebuie să domine podeaua de zgomot de-atâtea ori
 const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim (un poc = 1 cadru, se ignoră)
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
+const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre vocale nu mai sunt pierdute
 
 export interface MicStreamHandle {
   stop(): void
@@ -116,6 +117,35 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let sentAudio = false
   let gotAnyMsg = false
   let silentTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Inel de pre-roll: păstrează ultimele ~400 ms de audio CHIAR ȘI când VAD-ul
+  // încă n-a declarat „voce". Când declanșează, trimitem mai întâi bufferul,
+  // apoi fluxul curent — rezolvă pierderea primelor silabe (până acum primele
+  // 2-3 cadre ajungeau la Google doar după ce VAD-ul acumula cadre consecutive).
+  const preRoll: { frame: Float32Array }[] = []
+  const pushPreRoll = (frame: Float32Array): void => {
+    preRoll.push({ frame: frame.slice() })
+    const frameMs = (frame.length / ctx.sampleRate) * 1000
+    const maxFrames = Math.max(1, Math.ceil(PRE_ROLL_MS / frameMs))
+    while (preRoll.length > maxFrames) preRoll.shift()
+  }
+  const flushPreRoll = (): void => {
+    for (const { frame } of preRoll) {
+      const ds = downsample(frame, ctx.sampleRate)
+      try {
+        ws?.send(floatToPcm16(ds))
+        if (!sentAudio) {
+          sentAudio = true
+          silentTimer = setTimeout(() => {
+            if (!gotAnyMsg && !closed) opts.onError('silent')
+          }, 15000)
+        }
+      } catch {
+        /* o bucată pierdută nu oprește fluxul */
+      }
+    }
+    preRoll.length = 0
+  }
 
   // Buffer-e pentru features vocale ale frazei curente.
   const phraseF0: number[] = []
@@ -268,9 +298,26 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // orice zgomot de fond > 0.012 curgea la Google (transcrieri fantomă).
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
     if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
+
+    // Pre-roll: păstrăm mereu ultimele cadre audio, chiar și înainte ca VAD-ul
+    // să declare „voce". Când declanșează, le trimitem înaintea fluxului curent.
+    pushPreRoll(input)
+
     // Un poc scurt (1 cadru) nu deschide fluxul — cerem câteva cadre consecutive.
     voicedRun = voiced ? voicedRun + 1 : 0
-    if (voicedRun >= VOICED_FRAMES_TO_OPEN) lastVoiceAt = now
+    const inSpeech = lastVoiceAt > 0 && now - lastVoiceAt <= TAIL_MS
+    const becameVoiced = voicedRun >= VOICED_FRAMES_TO_OPEN
+    const isOnset = becameVoiced && !inSpeech
+
+    if (isOnset) {
+      // Prima voce REALĂ detectată (sau reluare după o pauză mai mare decât coada):
+      // trimitem mai întâi pre-roll-ul, ca primele silabe să nu se piardă.
+      lastVoiceAt = now
+      flushPreRoll()
+      // Cadrul curent este deja în pre-roll și a fost trimis — nu-l retrimite.
+      return
+    }
+    if (becameVoiced || inSpeech) lastVoiceAt = now
     // trimite DOAR cât e voce sau în coada de 3.2s de după — fără tăcere la Google
     if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
     collectFrame()

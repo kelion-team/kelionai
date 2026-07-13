@@ -97,7 +97,10 @@ const F0_MAX_HZ = 400 // supra-limita vocii umane utile (bărbați + femei)
 // 2048 sample-uri poate greși de octavă sau poate fi păcălită de zgomot tranzitoriu —
 // o singură eroare izolată nu mai trebuie să blocheze pornirea întregii fraze. Ținem
 // ultimele MATCH_WINDOW_FRAMES evaluări și e suficientă o majoritate simplă potrivită.
-const MATCH_WINDOW_FRAMES = 12 // ~190ms de evaluări la ~16ms/tick
+// Redus de la 12 la 6 (iul 2026): fereastra veche tăia ~190 ms de la începutul
+// cuvântului când profilul vocal era activ; 6 cadre (~95 ms) păstrează filtrul
+// anti-eroare izolată dar reduce pierderea primelor silabe.
+const MATCH_WINDOW_FRAMES = 6 // ~95 ms de evaluări la ~16 ms/tick
 const MATCH_WINDOW_RATIO = 0.5 // majoritate simplă — o eroare izolată nu mai decide singură
 
 export function hasVoiceprint(): boolean {
@@ -706,7 +709,10 @@ export async function startMic(
       }
       if (silenceMs >= SILENCE_MS || uttMs >= MAX_UTTER_MS) stopRec()
     } else if (isVoice && matchesForStart()) {
-      voicedMs = 0
+      // Cadrul care a declanșat înregistrarea ESTE voce — îi dăm credit, altfel
+      // cuvinte scurte (1-2 silabe) puteau cădea sub MIN_VOICED_MS din cauza
+      // tic-ului pierdut între decizie și primul cadru înregistrat.
+      voicedMs = dt
       silenceMs = 0
       startRec()
     }
