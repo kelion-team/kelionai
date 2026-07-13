@@ -68,27 +68,26 @@ export default function ReleaseAlertBanner({
     }
   }, [isAdmin, dismissedIds])
 
-  const dismiss = (id: string): void => {
+  const dismissAll = (): void => {
+    const ids = alerts.map((a) => a.id)
+    if (ids.length === 0) return
     setDismissedIds((prev) => {
       const next = new Set(prev)
-      next.add(id)
+      for (const id of ids) next.add(id)
       saveDismissed(next)
       return next
     })
-    setAlerts((cur) => cur.filter((a) => a.id !== id))
-    void fetch('/api/admin/release-alerts/dismiss', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ id }),
-    }).catch(() => {
-      // ignore
-    })
-  }
-
-  const openAndDismiss = (id: string): void => {
-    dismiss(id)
-    onOpenReleases()
+    setAlerts([])
+    for (const id of ids) {
+      void fetch('/api/admin/release-alerts/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ id }),
+      }).catch(() => {
+        // ignore
+      })
+    }
   }
 
   if (!isAdmin || alerts.length === 0) return null
@@ -103,7 +102,7 @@ export default function ReleaseAlertBanner({
       <button
         type="button"
         className="release-alert-close"
-        onClick={() => dismiss(alerts[0].id)}
+        onClick={() => dismissAll()}
         aria-label="Închide"
         title="Închide"
       >
@@ -118,14 +117,17 @@ export default function ReleaseAlertBanner({
           <button
             type="button"
             className="release-alert-btn primary"
-            onClick={() => openAndDismiss(alerts[0].id)}
+            onClick={() => {
+              dismissAll()
+              onOpenReleases()
+            }}
           >
             Deschide Release-uri
           </button>
           <button
             type="button"
             className="release-alert-btn"
-            onClick={() => void dismiss(alerts[0].id)}
+            onClick={() => void dismissAll()}
           >
             Am văzut
           </button>
