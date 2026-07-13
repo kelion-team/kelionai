@@ -88,10 +88,9 @@ const ARM_REST: Record<string, { x: number; y: number; z: number }> = {
 const CLIP_FILES: Record<string, string> = {
   idle: '/anim/M_Standing_Idle_001.glb',
   variatie: '/anim/M_Standing_Idle_Variations_002.glb',
-  // UN SINGUR clip de vorbit, cel reținut (Adrian: „gesturile actuale
-  // nepotrivite pentru gentleman") — gesticulația amplă a fost scoasă
-  // din rotația automată; expresiile mari rămân DOAR la comandă.
-  talk: '/anim/M_Talking_Variations_004.glb',
+  // NU mai există clip de vorbit activat automat: gesticulația mâinilor a fost
+  // considerată prea multă (Adrian: „mișcarea mâinilor tot"). În timpul vorbirii
+  // rămâne clipul idle calm; lip-sync și expresiile faciale rămân pe morph-uri.
   'expresie-1': '/anim/M_Standing_Expressions_001.glb',
   'expresie-2': '/anim/M_Standing_Expressions_002.glb',
   'expresie-3': '/anim/M_Standing_Expressions_008.glb',
@@ -128,7 +127,9 @@ const LAZY_CLIP_FILES: Record<string, string> = {
   'expresie-12': '/anim/M_Standing_Expressions_013.glb',
   'expresie-13': '/anim/M_Standing_Expressions_014.glb',
   'expresie-14': '/anim/M_Standing_Expressions_015.glb',
-  // Gesturi de conversație (M_Talking_Variations; 004 e clipul auto „talk").
+  // Gesturi de conversație (M_Talking_Variations) — disponibile DOAR la comandă
+  // explicită ([GEST vorbeste-*]); în vorbirea automată nu se mai folosesc, ca
+  // să nu agite mâinile.
   'vorbit-1': '/anim/M_Talking_Variations_001.glb',
   'vorbit-2': '/anim/M_Talking_Variations_002.glb',
   'vorbit-3': '/anim/M_Talking_Variations_003.glb',
@@ -153,7 +154,6 @@ export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
   const idle = useGLTF(CLIP_FILES.idle)
   const variatie = useGLTF(CLIP_FILES.variatie)
-  const talk = useGLTF(CLIP_FILES.talk)
   const expr1 = useGLTF(CLIP_FILES['expresie-1'])
   const expr2 = useGLTF(CLIP_FILES['expresie-2'])
   const expr3 = useGLTF(CLIP_FILES['expresie-3'])
@@ -176,7 +176,6 @@ export default function AvatarModel() {
     }
     add(idle, 'idle')
     add(variatie, 'variatie')
-    add(talk, 'talk')
     add(expr1, 'expresie-1')
     add(expr2, 'expresie-2')
     add(expr3, 'expresie-3')
@@ -185,7 +184,7 @@ export default function AvatarModel() {
     add(variatie2, 'variatie-2')
     add(variatie3, 'variatie-3')
     return out
-  }, [idle, variatie, talk, expr1, expr2, expr3, expr4, dans, variatie2, variatie3])
+  }, [idle, variatie, expr1, expr2, expr3, expr4, dans, variatie2, variatie3])
 
   const { actions, mixer } = useAnimations(clips, root)
   const current = useRef<AnimationAction | null>(null)
@@ -316,16 +315,16 @@ export default function AvatarModel() {
     const level = getVoiceLevel()
 
     // ── Regia: alege mișcarea după ce face Kelion acum ──
-    // ȚINUTĂ DE DOMN (Adrian, 11 iul: „astea sunt gesturi de gym, nu e bine"):
-    // în repaus NU se mai rulează automat nicio variație — doar respirația
-    // demnă din clipul de bază. Orice alt gest vine EXCLUSIV la comandă
-    // ([GEST nume] de la creier), legat de context/sentiment, cu măsură.
+    // ȚINUTĂ DE DOMN, v2.4 (Adrian, 13 iul: „mișcarea mâinilor tot"):
+    // în repaus și în timpul vorbirii rulează DOAR clipul idle calm — fără
+    // gesticulație activă a mâinilor. Expresiile faciale și lip-sync-ul rămân
+    // pe morph-uri; gesturile mari vin EXCLUSIV la comandă ([GEST nume]).
     if (level > 0.05) talkHold.current = t + 0.7
     const talking = t < talkHold.current
     if (state.current !== 'gesture') {
       if (talking && state.current !== 'talking') {
         state.current = 'talking'
-        play('talk')
+        play('idle')
       } else if (!talking && state.current === 'talking') {
         state.current = 'idle'
         play('idle')
