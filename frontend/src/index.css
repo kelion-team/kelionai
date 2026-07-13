@@ -988,7 +988,11 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: 56px 16px 16px;
+  /* Degajare JOS pentru composer-ul fix (Adrian, 13 iul: „nu pot scrola" —
+     caseta de scris acoperea textul raportului). ~150px = înălțimea composer-
+     ului cu tot; acum documentul se termină DEASUPRA lui și se scrolează
+     complet, nimic nu mai rămâne ascuns în spatele casetei. */
+  padding: 56px 16px 150px;
 }
 .workspace-head {
   display: flex;

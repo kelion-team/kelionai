@@ -49,6 +49,24 @@ import { pushFacial } from '../lib/facialQueue'
 // se mișcă doar din clipuri (regula #125), deci eticheta devine numele
 // clipului echivalent și pleacă pe același canal 'kelion-gesture'.
 const GESTURE_TO_CLIP: Record<string, string> = {
+  // Vocabular semantic (Adrian, 13 iul) — creierul cere gestul pe ÎNȚELES, aici
+  // se traduce în clipul RPM. Fiecare e legat de un sentiment/context.
+  salut: 'expresie-1', // salut / rămas-bun
+  'arata-inainte': 'expresie-2', // arată înainte
+  uimire: 'expresie-3', // uimire
+  dezamagire: 'expresie-4', // dezamăgire ușoară
+  nedumerire: 'expresie-5', // nedumerire
+  victorie: 'expresie-6', // victorie
+  multumire: 'expresie-7', // mulțumire
+  surpriza: 'expresie-8', // surpriză
+  'stai-putin': 'expresie-9', // stai puțin
+  ganditor: 'expresie-10', // gânditor
+  aprobare: 'expresie-11', // aprobare
+  entuziasm: 'expresie-12', // entuziasm
+  'acord-discret': 'expresie-13', // acord discret
+  plecaciune: 'expresie-14', // plecăciune teatrală
+  dans: 'dans', // dans (doar la cerere)
+  // Legacy — comenzile vocale deterministe din backend încă emit astea.
   salute: 'expresie-1',
   raiseRightHand: 'expresie-13',
   pointMonitor: 'expresie-2',
