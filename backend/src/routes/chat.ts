@@ -108,6 +108,23 @@ function brainClientFor(model: string): Anthropic {
   return model === MODEL_RESERVE ? glm : anthropic
 }
 
+// POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
+// Regula de prompt e „moale" — modelul poate exagera. Poarta asta e DETERMINISTĂ:
+// un gest AUTONOM (tool play_avatar_gesture sau [GEST]) trece DOAR dacă nu e
+// același ca ultimul ȘI a trecut un răgaz de la ultimul gest. Per-user. Comenzile
+// DIRECTE ale lui Adrian („salută", „dansează") NU trec pe aici — execută mereu.
+const GESTURE_COOLDOWN_MS = 25_000
+const gestureGates = new Map<string, { last: string; at: number }>()
+function allowAutoGesture(email: string, name: string): boolean {
+  if (!name) return false
+  const now = Date.now()
+  const g = gestureGates.get(email) ?? { last: '', at: 0 }
+  if (name === g.last) return false // fără repetiție obsesivă a aceluiași gest
+  if (now - g.at < GESTURE_COOLDOWN_MS) return false // rar, discret — un răgaz între gesturi
+  gestureGates.set(email, { last: name, at: now })
+  return true
+}
+
 // Admin-only tool so Kelion can report its own real running cost when asked.
 const COST_TOOL: Anthropic.Tool = {
   name: 'get_real_cost',
@@ -1582,7 +1599,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // avatar execută clipul o dată și revine singură la repaus.
           const gestTag = /\[GEST\s+([a-z0-9-]+)\s*\]/i.exec(line)
           if (gestTag) {
-            reply.raw.write(`${CTRL}${JSON.stringify({ gest: gestTag[1].toLowerCase() })}${CTRL}`)
+            const gname = gestTag[1].toLowerCase()
+            // Poartă deterministă: discret, fără repetiție obsesivă. Dacă e prea
+            // curând sau același ca ultimul, SE IGNORĂ (textul curge normal).
+            if (allowAutoGesture(user.email, gname)) {
+              reply.raw.write(`${CTRL}${JSON.stringify({ gest: gname })}${CTRL}`)
+            }
           }
           if (noteTag) {
             noteBrainActivity(`Salvez notița: ${noteTag[1].trim().slice(0, 80)}`)
@@ -2870,6 +2892,11 @@ async function runTool(
     const label =
       inp.gesture && (AVATAR_GESTURES as readonly string[]).includes(inp.gesture) ? inp.gesture : undefined
     if (!label) return JSON.stringify({ error: 'unknown_gesture' })
+    // Poartă deterministă: discret, fără repetiție obsesivă. Prea curând sau
+    // același ca ultimul → NU se joacă (dar nu e o eroare, ca modelul să nu insiste).
+    if (!allowAutoGesture(email, label)) {
+      return JSON.stringify({ played: false, note: 'suppressed_for_discretion' })
+    }
     reply.raw.write(`${CTRL}${JSON.stringify({ gesture: label })}${CTRL}`)
     return JSON.stringify({ played: true, gesture: label })
   }
