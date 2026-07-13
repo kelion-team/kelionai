@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+// paritate-verificata-13iul
 import cookie from '@fastify/cookie'
 import websocket from '@fastify/websocket'
 import cors from '@fastify/cors'
