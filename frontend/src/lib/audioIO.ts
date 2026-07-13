@@ -823,9 +823,15 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
 // audibilă neschimbată. Întoarce o funcție de oprire (curăță RAF + rutare).
 let extAnalyser: AnalyserNode | null = null
 let extBuf: Uint8Array<ArrayBuffer> | null = null
-let extLevelSource: MediaElementAudioSourceNode | null = null
+let extLevelSource: MediaStreamAudioSourceNode | null = null
 let extLevelRaf = 0
-export function driveVoiceLevelFrom(audio: HTMLAudioElement): () => void {
+// IMPORTANT (bug „audio nu merge", 13 iul): analizăm FLUXUL (MediaStream), NU
+// elementul <audio>. `createMediaElementSource` PREIA ieșirea elementului în
+// graful Web Audio — dacă AudioContext-ul e suspendat (politica de autoplay),
+// sunetul dispare complet. `createMediaStreamSource` doar ASCULTĂ fluxul în
+// paralel: elementul <audio> al pistei LiveKit redă neatins, iar noi măsurăm
+// amplitudinea separat pentru gura avatarului. Nu conectăm la destination.
+export function driveVoiceLevelFrom(stream: MediaStream): () => void {
   const noop = (): void => {}
   try {
     const AC =
@@ -843,12 +849,8 @@ export function driveVoiceLevelFrom(audio: HTMLAudioElement): () => void {
     const analyser = extAnalyser
     const buf = extBuf
     if (!buf) return noop
-    // createMediaElementSource poate fi apelat O SINGURĂ dată per element —
-    // elementul LiveKit e mereu nou, deci e sigur; rutăm prin analizor ȘI spre
-    // destinație ca sunetul să rămână audibil.
-    extLevelSource = levelCtx.createMediaElementSource(audio)
-    extLevelSource.connect(analyser)
-    extLevelSource.connect(levelCtx.destination)
+    extLevelSource = levelCtx.createMediaStreamSource(stream)
+    extLevelSource.connect(analyser) // DOAR spre analizor — NU spre destination
     const step = (): void => {
       analyser.getByteTimeDomainData(buf)
       let sum = 0
