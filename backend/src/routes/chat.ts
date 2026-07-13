@@ -1537,6 +1537,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // trimite CONTEXTUL (ultimele replici = propunerea creierului + „da"-ul),
         // ca să înțeleagă ce s-a cerut de fapt.
         const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?)[\s.!]*$/i
+        // Aprobări care POARTĂ context (ex: „Am spus da.", „Da, bineînțeles",
+        // „Sigur, da") — nu sunt simple cuvinte goale, dar tot NU descriu o
+        // sarcină nouă; trimit contextul conversației, nu fragmentul literal.
+        const contextualAffirm =
+          /^\s*(am\s+(spus|zis|aprobat|acceptat)\s+da[\s.!]*$|da[\s,]+(bine[îi]?n[țt]eles|sigur|mergi|f[aă](-o)?|ok(ay)?|continu[aă]?|trimite|public[aă]?|preia)[\s.!]*$|bine[\s,]+da[\s.!]*$|sigur[\s,]+da[\s.!]*$|ok[\s,]+da[\s.!]*$)/i
         // „Reia"/„termină"-style (5 iul, ordinul „reia terminat cu această
         // comandă."): un mesaj scurt făcut DOAR din verbe de reluare + umplutură
         // referă sarcina anterioară, nu descrie una nouă. Trimis verbatim,
@@ -1551,7 +1556,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (words.length === 0 || !resumeVerb.test(words[0])) return false
           return words.every((w) => resumeVerb.test(w) || resumeFiller.test(w))
         }
-        const refersToContext = bareAffirm.test(lastUserText.trim()) || resumeRef(lastUserText.trim())
+        const refersToContext =
+          bareAffirm.test(lastUserText.trim()) ||
+          contextualAffirm.test(lastUserText.trim()) ||
+          resumeRef(lastUserText.trim())
         const dispatchTask = refersToContext
           ? `SARCINA (mesajul lui Adrian „${lastUserText.trim()}" doar aprobă sau cere reluarea; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde la fragment):\n${past.slice(-8).join('\n')}`
           : lastUserText
