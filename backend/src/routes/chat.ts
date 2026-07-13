@@ -102,7 +102,7 @@ function brainModel(): string {
 function restFable(): void {
   fableDownUntil = Date.now() + FABLE_REST_MS
 }
-// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
+// CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider scos complet (Adrian, 12
 // iul). Kimi și GLM sunt provideri DIFERIȚI (baseURL + cheie diferite), deci
 // failover-ul trebuie să schimbe CLIENTUL, nu doar numele modelului: modelul
 // rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
@@ -370,11 +370,11 @@ const BROWSER_CLICK_AT_TOOL: Anthropic.Tool = {
 
 // ADMIN ONLY. When the owner asks to FIX, CHANGE or ADD something in the
 // Kelionai APP ITSELF (a bug, a feature, the code/site) — not an ordinary task —
-// hand the request to the owner's developer (Claude Code) through the bridge.
+// hand the request to the owner's developer through the bridge.
 const REPAIR_TOOL: Anthropic.Tool = {
   name: 'request_repair',
   description:
-    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer (Claude Code) who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, in his own words plus any detail he gave.",
+    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, in his own words plus any detail he gave.",
   input_schema: {
     type: 'object',
     properties: {
@@ -515,7 +515,7 @@ const PROMO_TOOL: Anthropic.Tool = {
   },
 }
 
-// THE SANDBOX — Anthropic's server-side code execution: an isolated container
+// THE SANDBOX — the transport SDK's server-side code execution: an isolated container
 // (Python 3.11 + bash + files, no internet) where Kelion WRITES software and
 // actually RUNS/TESTS it. Verified live on both brains. Server-side: we only
 // declare it; execution happens inside the API call itself.
@@ -721,7 +721,7 @@ claim something is on screen when it is not. For routes, maps_directions also
 returns "directions" (real turn-by-turn steps) — give the user those when
 guiding them, never invented ones.`
 
-// Human language names for the language lock — Claude obeys an explicit language
+// Human language names for the language lock — the brain obeys an explicit language
 // name far more reliably than a bare locale code.
 const LANG_NAMES: Record<string, string> = {
   ro: 'Romanian',
@@ -753,7 +753,7 @@ interface Coords {
   lon: number
 }
 
-// Anthropic rejects empty-content messages and non-alternating roles, and the
+// The brain API rejects empty-content messages and non-alternating roles, and the
 // first message must be a user turn. The client can produce all three: a
 // monitor-only / tool-only reply leaves an empty assistant turn, and a local
 // camera "ack" injects an assistant turn with no matching user turn (two
@@ -827,7 +827,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       now?: string
       tz?: string
       // Raw attachments for the ADMIN bridge: photos, archives, video — any
-      // file rides the bridge to Claude (saved server-side by the worker).
+      // file rides the bridge to the developer (saved server-side by the worker).
       files?: { name?: string; type?: string; data?: string }[]
       // Features vocale extrase 100% client-side pentru identificare speaker + gen.
       voiceFeatures?: VoiceFeatures
@@ -846,8 +846,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // CREIERUL e pe Kimi (primar) → GLM (rezervă). Anthropic/Max scos complet
-    // (Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM"). Dacă lipsesc
+    // CREIERUL e pe Kimi (primar) → GLM (rezervă). Vechiul provider scos complet
+    // (Adrian, 12 iul: „rămâne doar Kimi și GLM"). Dacă lipsesc
     // ambele chei, plasa de siguranță din streaming dă o eroare clară în limba
     // userului — de aceea nu mai există aici un gard 503 „brain_not_configured".
     const rawMessages = req.body?.messages
@@ -862,7 +862,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
     let messages = sanitizeHistory(rawMessages)
-    // Cap the history sent to Claude. A long conversation (this user already has
+    // Cap the history sent to the brain. A long conversation (this user already has
     // hundreds of messages) would blow the token limit and make EVERY turn fail
     // with a "connection error" — especially when a big pasted page is added.
     // Long-term continuity comes from the memory agent, not the raw transcript.
@@ -884,7 +884,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // UN SINGUR drum spre bază în loc de patru la rând (Adrian, 10 iul: „chat
     // live instant"): citirile independente pleacă ÎMPREUNĂ — fiecare await
     // separat mai punea o tură de DB înaintea primului cuvânt.
-    // BYOK-ANTHROPIC SCOS COMPLET (Adrian, 12 iul: „renunț la Anthropic, scoți
+    // BYOK-PROVIDER SCOS COMPLET (Adrian, 12 iul: „scoți vechiul provider
     // total, fără cârpeli"): creierul e Kimi→GLM; nu mai există cheie de client.
     // Toți userii trec prin paywall-ul normal (creditul din portofel).
     const lastForRecall = messages.at(-1)
@@ -1053,9 +1053,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Wire the device GPS into Claude's context so location-dependent skills
+    // Wire the device GPS into the brain's context so location-dependent skills
     // (weather, maps, "near me", "where am I") actually work. The frontend sends
-    // the live coordinates; we resolve a human place name (cached) so Claude can
+    // the live coordinates; we resolve a human place name (cached) so the brain can
     // pass it to the name-based skills.
     let systemPrompt = SYSTEM_PROMPT + gestureOffRule
     // Active "meserie" (role/persona), if the user has one enabled via
@@ -1224,8 +1224,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       role: m.role,
       content: m.content,
     }))
-    // Vision ONLY on demand: give Claude the camera frame solely when the user is
-    // actually asking about what's visible. If we attached it every turn, Claude
+    // Vision ONLY on demand: give the brain the camera frame solely when the user is
+    // actually asking about what's visible. If we attached it every turn, the brain
     // would keep volunteering observations about what he sees — which the user
     // explicitly does NOT want. No frame attached = nothing to comment on.
     // Extended for BLIND users (their daily reality): describe surroundings,
@@ -1234,7 +1234,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const VISION_INTENT =
       /(\bsee\b|\blook\b|\bwatch\b|show me what|what('?s| is) this|what am i|what do you see|\bcamera\b|\bpicture\b|\bphoto\b|\bimage\b|colou?r|read this|\bscan\b|describe|in front of|ahead of me|obstacle|traffic light|cross(ing)? the (street|road)|\bsign\b|\blabel\b|\bdanger\b)|vezi|vede|uit[aăâ]|uite|prive[sșş]te|ce (e|este|am|[țt]in|ai[ -])|camer[aă]|imagin|poz[aă]|culoar|cite[sșş]te|scanea|descrie|[îi]n fa[țt][aă]|ce se afl[aă]|obstacol|pericol|semafor|trec(e|i)? strada|indicator|etichet[aă]|panou|u[șs][aă]|sc[aă]ri|trotuar|bordur[aă]/i
     // VEDEREA CONTINUĂ și pe calea API (clienți): toate cadrele primite (max 4),
-    // nu doar unul — Claude acceptă mai multe blocuri de imagine per mesaj.
+    // nu doar unul — creierul acceptă mai multe blocuri de imagine per mesaj.
     const apiCam = camFrames.length > 0 ? camFrames : image ? [image] : []
     if (apiCam.length > 0 && params.length > 0) {
       const lastIdx = params.length - 1
@@ -1258,7 +1258,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Stream Claude's reply back as plain UTF-8 text chunks.
+    // Stream the brain's reply back as plain UTF-8 text chunks.
     reply.hijack()
     reply.raw.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -1400,7 +1400,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       let reanalyzePrompt = ''
       // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
       // feed so this command starts clean and shows ONLY its own flow. History
-      // is kept (Jurnal Claude) and the telemetry bars keep running.
+      // is kept (Jurnal lucru) and the telemetry bars keep running.
       resetBrainActivity()
       if (bridgeOnline()) {
         // The conversation comes from the DATABASE, not from the page: the
@@ -1456,21 +1456,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const langLock = langName
           ? `RĂSPUNDE EXCLUSIV în ${langName} — fiecare cuvânt în ${langName}, indiferent de limba în care e scris acest context.\n\n`
           : ''
-        // The Claude answering in chat gets the LIVE work journal, so he knows
-        // exactly what laptop-Claude built today and what's in progress — no
+        // The brain answering in chat gets the LIVE work journal, so it knows
+        // exactly what the developer built today and what's in progress — no
         // more "the chat doesn't know what's happening here".
         const journal = recentDevLog(15)
         const journalBlock =
           journal.length > 0
-            ? `JURNALUL LUCRULUI DE AZI (Claude pe laptop, live):\n${journal.join('\n')}\n\n`
+            ? `JURNALUL LUCRULUI DE AZI (dezvoltatorul pe laptop, live):\n${journal.join('\n')}\n\n`
             : ''
-        // SHARED MEMORY ("caietul comun"): everything either Claude wrote — the
+        // SHARED MEMORY ("caietul comun"): everything either side wrote — the
         // laptop builder and this server brain read the SAME notebook, so what
         // was learned/done in one place is known in the other. (Citit mai sus,
         // în paralel cu istoricul.)
         const sharedBlock =
           shared.length > 0
-            ? 'MEMORIA COMUNĂ (caietul pe care-l împărțiți tu și Claude-constructorul de pe laptop):\n' +
+            ? 'MEMORIA COMUNĂ (caietul pe care-l împărțiți tu și constructorul de pe laptop):\n' +
               shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n') +
               '\n\n'
             : ''
@@ -1505,7 +1505,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '  • secretary — redactează emailuri/mesaje (accesul la Gmail-ul real cere contul conectat)\n' +
           'Când Adrian cere ceva din aceste domenii (mai ales căutare/informații actuale, scris serios, cod), FOLOSEȘTE [AGENT …] — nu inventa răspunsul.\n' +
           'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[DOC],[CLEAR],[GEST],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
-        // ANY attachment rides the bridge to Claude: photos, texts, archives,
+        // ANY attachment rides the bridge to the developer: photos, texts, archives,
         // video (voice arrives already transcribed as text). Base64 payloads —
         // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
         const files: BridgeFile[] = []
@@ -1534,7 +1534,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           }
         }
         // TOTAL ACCESS: everything the admin drops in chat (photos, pasted
-        // screenshots, archives, video) is stashed for laptop-Claude too, so
+        // screenshots, archives, video) is stashed for the developer too, so
         // the builder sees exactly what the voice saw.
         if (files.length > 0) stashAdminFiles(files)
         // ── STREAMING (viteza sunetului): chunks flow straight to the client;
@@ -2019,7 +2019,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // + DEMO/gratuiți răspund prin PUNTE (abonament, persona:'public', fără
     // contextul privat al proprietarului); clienții LOGAȚI care plătesc singuri
     // — credit cumpărat (paywall-ul de mai sus a garantat credit > 0) sau cheia
-    // lor Anthropic — merg pe drumul DIRECT prin API de mai jos: instant, cu
+    // lor de brain — merg pe drumul DIRECT prin API de mai jos: instant, cu
     // toate uneltele, debitat din creditele lor (debitWallet la finalul turei).
     // Fără Stripe configurat (aplicație liberă) totul rămâne pe abonament.
     // KELION_API_CHAT=1 pe Railway forțează pe API tot ce nu e admin (urgență).
@@ -2276,7 +2276,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     let inTokens = 0
     let outTokens = 0
     let usageUsd = 0 // running provider cost this turn (for wallet debit)
-    // Provider cost incurred by delegated specialist agents (their own Claude
+    // Provider cost incurred by delegated specialist agents (their own brain
     // calls + tool costs), accumulated so it's billed to the same wallet.
     const usage = { usd: 0 }
     // Plasa de siguranță a creierului: Kimi (primar) → GLM (rezervă). Dacă o
@@ -2293,7 +2293,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // so the reply is NEVER withheld or silent.
     const guardTag = speechPref && langName ? speechPref : null
     try {
-      // Tool-use loop: stream text each round; if Claude requests tools, run them
+      // Tool-use loop: stream text each round; if the brain requests tools, run them
       // and feed the results back, then continue, until it's done.
       for (let round = 0; round < 5; round++) {
         let roundText = ''
@@ -2448,7 +2448,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // off the response path so it never adds latency.
       if (lastUserText.trim() || assistantText.trim())
         void learnFromTurn(user.email, lastUserText, assistantText)
-      // Record the real Claude cost for this turn (vision frames are already in
+      // Record the real brain cost for this turn (vision frames are already in
       // the input-token count, so token-based cost covers them).
       const chatUsd = claudeCost(model, inTokens, outTokens)
       usageUsd += chatUsd
@@ -2934,7 +2934,7 @@ async function runTool(
     if (!desc) return JSON.stringify({ error: 'empty_description' })
     const jobId = bridgeRepair(desc)
     return jobId
-      ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer (Claude Code). It will be worked on now.' })
+      ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer. It will be worked on now.' })
       : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
   }
   if (block.name === 'play_avatar_gesture') {

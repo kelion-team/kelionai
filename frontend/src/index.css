@@ -1588,8 +1588,8 @@ body {
   margin: 0 0 6px;
   animation: rec 1.2s ease-in-out infinite;
 }
-/* "Claude" indicator in the admin top bar: dim when idle, ORANGE + pulsing
-   while the laptop Claude Code session is actively writing code. */
+/* "developer" indicator in the admin top bar: dim when idle, ORANGE + pulsing
+   while the laptop developer session is actively writing code. */
 .claude-ind {
   font-size: 13px;
   font-weight: 500;
@@ -1599,7 +1599,7 @@ body {
   color: rgba(255, 255, 255, 0.4);
   white-space: nowrap;
 }
-/* THE LIGHT = THE BRIDGE: lit steady = Claude reachable; OFF (grey) = bridge
+/* THE LIGHT = THE BRIDGE: lit steady = the developer reachable; OFF (grey) = bridge
    down; pulsing = writing code right now. Clicking the Bridge light opens or
    hides the live-work monitor (it is never shown permanently). */
 .claude-ind.clickable {
@@ -1614,11 +1614,11 @@ body {
 .claude-ind.on.work {
   animation: rec 1.2s ease-in-out infinite;
 }
-/* Claude's live work ON KELION'S MONITOR (the workspace surface — Kelion goes
+/* The builder's live work ON KELION'S MONITOR (the workspace surface — Kelion goes
    to his corner exactly like in presentations). Each work item is one row:
    text on the left, a 0→100% BARGRAPH neatly aligned on the right. Finished
    items stay listed, ticked and dimmed. History is NOT carried here — it lives
-   in the admin panel ("Jurnal Claude"). */
+   in the admin panel ("Jurnal lucru"). */
 .claude-console {
   display: flex;
   flex-direction: column;
@@ -1943,7 +1943,7 @@ body {
   gap: 10px;
   margin-top: 10px;
 }
-/* Admin → Jurnal Claude: the full work history, newest first. */
+/* Admin → Jurnal lucru: the full work history, newest first. */
 .devlog-line {
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12.5px;

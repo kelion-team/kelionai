@@ -4,7 +4,7 @@
 // keep as much of the app as possible on the server, the interpretation lives
 // here now. /api/chat runs it on each incoming message BEFORE the brain: a
 // match is answered instantly with a {device} control frame + a short ack (no
-// model call), anything else flows on to Claude unchanged — so the move adds
+// model call), anything else flows on to the brain unchanged — so the move adds
 // no latency; a matched command actually gets FASTER than a model turn.
 
 export interface ScreenTab {
@@ -47,7 +47,7 @@ function taskKindFromText(msg: string): string | null {
 }
 
 // Camera control needs both the word "camera" and an action verb, so normal
-// questions like "ce vezi pe cameră?" still reach Claude.
+// questions like "ce vezi pe cameră?" still reach the brain.
 function cameraOp(raw: string): DeviceCommand['camera'] | null {
   const m = raw.toLowerCase()
   if (!/\bcamer/.test(m) && !/\bwebcam/.test(m)) return null

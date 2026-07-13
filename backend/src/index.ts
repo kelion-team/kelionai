@@ -53,7 +53,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
 // payloads — covers audio buffers, documents and camera frames. The ONE route
 // that legitimately needs big bodies (the admin bridge carrying photos/archives/
-// video to Claude) raises its own limit to 100MB per-route (see chat.ts).
+// video to the developer) raises its own limit to 100MB per-route (see chat.ts).
 const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă

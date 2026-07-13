@@ -5,9 +5,9 @@ import { recordCost } from '../db.js'
 import { geminiCost } from '../services/cost.js'
 
 // Transcript validation/correction ("audio equalization in Kelion's ear"). A
-// speech-to-text transcript can contain mishearings; before it reaches Claude
+// speech-to-text transcript can contain mishearings; before it reaches the brain
 // we clean it with Gemini (a Google engine — keeps hearing-level language
-// understanding on Google, reasoning on Claude). The frontend calls this ONLY
+// understanding on Google, reasoning on the brain). The frontend calls this ONLY
 // when the recognizer's confidence is low (high-confidence text passes straight
 // through, for latency). Returns the cleaned text, or the original on any error.
 

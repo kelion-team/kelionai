@@ -10,7 +10,7 @@ import { MODEL_FAST } from './modelRouter.js'
 // Kelion knows about the user and, after each turn, learns + saves new durable
 // facts (off the response path).
 
-// Agentul de memorie rulează pe creierul primar (Kimi) — Anthropic scos complet
+// Agentul de memorie rulează pe creierul primar (Kimi) — vechiul provider scos complet
 // (Adrian, 12 iul). E off-path (fire-and-forget), deci nu afectează latența.
 const MEMORY_MODEL = MODEL_FAST
 

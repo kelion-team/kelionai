@@ -1,22 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
 
-// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic/Max a fost SCOS complet
-// (ordinul lui Adrian, 12 iul: „renunț la Anthropic, rămâne Kimi și GLM").
-// Ambele endpoint-uri sunt compatibile Anthropic-API, deci refolosim SDK-ul
-// oficial doar cu `baseURL` + cheie schimbate — niciun apel nu mai pleacă spre
-// api.anthropic.com. Numele fișierului rămâne `anthropic.ts` doar pentru a nu
+// CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider a fost SCOS complet
+// (ordinul lui Adrian, 12 iul: „rămâne doar Kimi și GLM").
+// Ambele endpoint-uri sunt compatibile cu SDK-ul de transport, deci îl refolosim
+// doar cu `baseURL` + cheie schimbate — niciun apel nu mai pleacă spre vechiul
+// endpoint. Numele fișierului rămâne `anthropic.ts` doar pentru a nu
 // atinge zecile de importuri din restul codului.
 export const KIMI_BASE = 'https://api.kimi.com/coding/'
 export const GLM_BASE = 'https://api.z.ai/api/anthropic'
 
 // Kimi: primar. GLM: rezervă (folosit la eșecul lui Kimi — vezi failover-ul din
 // routes/chat.ts). Fără cheie, clientul respectiv dă eroare la primul apel, care
-// e raportată cinstit (nu se comută pe nimic Anthropic — nu mai există).
+// e raportată cinstit (nu se comută pe nimic din vechiul provider — nu mai există).
 export const kimi = new Anthropic({ apiKey: config.kimiKey, baseURL: KIMI_BASE })
 export const glm = new Anthropic({ apiKey: config.glmKey, baseURL: GLM_BASE })
 // Clientul implicit al creierului = Kimi (primar). Restul codului importă
-// `anthropic` — acum e Kimi, nu Anthropic.
+// `anthropic` — acum e Kimi (doar numele bindingului a rămas).
 export const anthropic = kimi
 
 // Ping the brain tiers on their real endpoints: does Kimi serve, and does GLM

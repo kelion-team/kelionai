@@ -158,8 +158,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Escalate a gap to the owner's developer (Claude Code) through the bridge —
-  // the "Escaladează către Claude" button. Forwards the request text as a
+  // Escalate a gap to the owner's developer through the bridge —
+  // the "Trimite la creier" button. Forwards the request text as a
   // build/repair task and marks the gap resolved. If the bridge isn't running,
   // nothing is sent and the gap stays open (the UI tells the admin to start it).
   app.post<{ Body: { id?: number } }>('/api/admin/gaps/escalate', async (req, reply) => {
@@ -275,7 +275,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Which brain models actually serve right now (admin only): live ping of
-  // Kimi (primar) și GLM (rezervă). Anthropic scos complet (Adrian, 12 iul).
+  // Kimi (primar) și GLM (rezervă). Vechiul provider scos complet (Adrian, 12 iul).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
