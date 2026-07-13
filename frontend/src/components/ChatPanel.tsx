@@ -708,15 +708,16 @@ export default function ChatPanel({
     // tabs on every turn and answers instantly with a {device} frame, no model
     // call) — nothing to intercept here anymore.
     if (busyRef.current || inFlightRef.current) {
-      // A turn is already streaming (it can take minutes). NEVER drop the text
-      // silently — queue it; the finally block sends everything queued as the
-      // next turn the moment this one ends. Attachment-only sends still wait.
-      if (msg) {
-        pendingSendsRef.current.push(msg)
-        setQueued((cur) => [...cur, msg])
-        setInput('')
-      }
-      return
+      // FULL-DUPLEX REAL (Adrian, 13 iul: „când lucrează nu aude microfonul / nu-i
+      // ajunge textul"): input nou (scris SAU vorbit) cât Kelion lucrează =
+      // BARGE-IN — anulăm tura curentă și pornim IMEDIAT tura nouă. NU mai punem
+      // în coadă: coada BLOCA full-duplex-ul (al doilea mesaj nu ajungea la creier
+      // până nu se termina primul). Backendul + workerul acceptă deja ture
+      // concurente. Fără text (doar atașament) → lăsăm tura curentă, n-o tăiem.
+      if (!msg) return
+      stopVoice() // taie vocea rămasă din tura veche, să nu vorbească peste
+      abortRef.current?.abort() // tura veche devine „superseded"; finally-ul ei nu mai resetează
+      // NU return — cădem mai jos și pornim tura nouă chiar acum.
     }
     inFlightRef.current = true
     setInput('')
@@ -825,12 +826,19 @@ export default function ChatPanel({
         }
       }
     } finally {
-      if (abortRef.current === ac) abortRef.current = null
-      inFlightRef.current = false
-      setBusy(false)
-      // Anything written during this turn was queued, not lost — combine it and
-      // start the next turn with it (a beat later, so this one fully unwinds).
-      if (pendingSendsRef.current.length > 0) {
+      // BARGE-IN (full-duplex): dacă tura asta a fost ÎNLOCUITĂ de una nouă,
+      // `abortRef` arată deja spre tura nouă — NU-i reseta flag-urile „lucrez"
+      // (i le-ar clobber-a). Doar tura ÎNCĂ curentă se curăță pe sine.
+      const stillCurrent = abortRef.current === ac
+      if (stillCurrent) {
+        abortRef.current = null
+        inFlightRef.current = false
+        setBusy(false)
+      }
+      // Compat: dacă a rămas ceva într-o coadă veche (nu se mai umple în mod
+      // normal — full-duplex trimite direct), o trimitem, dar doar dacă nu tocmai
+      // am fost înlocuiți de o tură nouă.
+      if (stillCurrent && pendingSendsRef.current.length > 0) {
         const combined = pendingSendsRef.current.join('\n')
         pendingSendsRef.current = []
         setQueued([])
