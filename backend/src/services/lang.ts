@@ -18,6 +18,18 @@ const STOPWORDS: Record<string, string[]> = {
   de: ['der', 'die', 'das', 'und', 'für', 'mit', 'nicht', 'sie', 'danke', 'hallo', 'jetzt', 'hier', 'kann', 'ich', 'guten'],
 }
 
+// Strong single-word language signals. When a short utterance contains one of
+// these, we commit immediately instead of waiting for a full sentence.
+const CLEAR_KEYWORDS: Record<string, string[]> = {
+  ro: ['bună', 'salut', 'mulțumesc', 'noroc', 'salutare', 'ție', 'poți', 'ești', 'așa', 'către'],
+  es: ['hola', 'gracias', 'claro', 'buenos', 'días', 'está', 'puedo', 'listo', 'tarea'],
+  pt: ['olá', 'obrigado', 'bom', 'dia', 'boa', 'noite', 'você', 'então', 'coisa'],
+  fr: ['bonjour', 'merci', 'suis', 'nous', 'maintenant', 'bonsoir', 'salut'],
+  it: ['ciao', 'grazie', 'buongiorno', 'sono', 'posso', 'cosa', 'adesso'],
+  en: ['hello', 'thanks', 'morning', 'developer', 'done', 'task', 'good'],
+  de: ['hallo', 'danke', 'guten', 'kann', 'ich', 'jetzt'],
+}
+
 // Characters that strongly indicate a specific language (cheap tie-breakers).
 const SCRIPT_HINTS: { re: RegExp; lang: string; w: number }[] = [
   { re: /[țțşșăîâ]/gi, lang: 'ro', w: 2 },
@@ -37,17 +49,44 @@ export function primaryLang(tag: string | undefined | null): string | null {
 /**
  * Best-guess language of `text`, or null when not confident. Returns a 2-letter
  * code. Needs a real amount of text and a clear winner to commit.
+ *
+ * `previousLang` is used as a fallback for very short or ambiguous utterances
+ * ("da", "ok", "thanks") so the conversation does not lose its established
+ * language. It is NOT used to override strong new-language signals.
  */
-export function detectLang(text: string): string | null {
+export function detectLang(text: string, previousLang?: string | null): string | null {
   const clean = text
     .toLowerCase()
     .replace(/[^\p{L}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  if (clean.length < 8) return null // too little to judge
+  if (!clean) return null
 
   const tokens = clean.split(' ')
   const set = new Set(tokens)
+
+  // Heuristic 1: short, clear keywords (e.g. "bună", "hola", "danke").
+  // Commit immediately when exactly one language has a clear keyword hit.
+  let keywordHit: string | null = null
+  for (const [lang, words] of Object.entries(CLEAR_KEYWORDS)) {
+    if (words.some((w) => set.has(w))) {
+      if (keywordHit) {
+        keywordHit = null // ambiguous keyword mix → fall through to scoring
+        break
+      }
+      keywordHit = lang
+    }
+  }
+  if (keywordHit) return keywordHit
+
+  // Heuristic 2: very short/ambiguous utterances inherit the previous language.
+  const shortThreshold = 8
+  if (clean.length < shortThreshold) {
+    const fallback = primaryLang(previousLang)
+    if (fallback && STOPWORDS[fallback]) return fallback
+    return null
+  }
+
   const scores: Record<string, number> = {}
   for (const [lang, words] of Object.entries(STOPWORDS)) {
     let s = 0
@@ -65,6 +104,11 @@ export function detectLang(text: string): string | null {
   // Commit only on a clear, non-trivial win (guards against false positives on
   // proper nouns, code, or mixed short text).
   if (topScore >= 2 && topScore >= second + 2) return topLang
+
+  // Heuristic 3: ambiguous longer text also falls back to the previous language
+  // when available, so a drifting middle sentence does not reset the conversation.
+  const fallback = primaryLang(previousLang)
+  if (fallback && STOPWORDS[fallback]) return fallback
   return null
 }
 
@@ -99,11 +143,11 @@ const SCRIPT_LANGS: { re: RegExp; code: string }[] = [
 ]
 
 /** Best-guess SPEECH language (BCP-47) of a message, or null when unsure. */
-export function detectSpeechLang(text: string): string | null {
+export function detectSpeechLang(text: string, previousLang?: string | null): string | null {
   const clean = (text ?? '').trim()
-  if (clean.length < 8) return null // too short to be reliable
+  if (!clean) return null
   for (const s of SCRIPT_LANGS) if (s.re.test(clean)) return s.code
-  const two = detectLang(clean)
+  const two = detectLang(clean, previousLang)
   return two ? (BCP47[two] ?? null) : null
 }
 
@@ -122,7 +166,7 @@ export function trackSpeechLang(
   text: string,
   current: string | null | undefined,
 ): string | null {
-  const seed = detectSpeechLang(text)
+  const seed = detectSpeechLang(text, current)
   if (!seed) return null
   const base = (c: string): string => c.toLowerCase().split('-')[0]
   if (current && base(seed) === base(current)) {

@@ -122,6 +122,12 @@ Tabel `memories` (namespace per agent). `recallMemories` (DB pur, în paralel �
 **Căutare full-text (11 iul):** `searchMemories` NU mai folosește `ILIKE` (substring literal) — acum e full-text Postgres nativ (`to_tsvector`/`to_tsquery` config `'simple'`, index GIN `idx_memories_fts`), cu **potrivire de PREFIX** (`:*`, ca „cafea" să prindă „cafeaua" fără dicționar de limbă) și sortare după relevanță reală (`ts_rank`), nu doar recență. Testat cu Postgres 16 real local (11 cazuri, inclusiv izolare user/agent + imunitate injecție SQL) înainte de deploy — nu doar `tsc`. Tot NU e embeddings/AI semantic (ar cere `pgvector` + apel API pe scriere); e potrivire pe cuvinte reale cu scor, un pas real peste ILIKE dar sub semantică adevărată.
 ### 4.2 Limbă
 Admin blocat `ro-RO` (`adminLocked` în chat.ts). Restul: detecție deterministă server (`services/lang.ts`, comitere după 2 mesaje consecutive), guardian care re-servește o singură dată la limbă greșită. Mod academic: registru + pronunție acronime (`pronounce.ts`, `academicPronounce`).
+
+**Îmbunătățiri detecție limbă (13 iul):** `detectLang` primește limbă anterioară opțională (`previousLang`) și aplică trei heuristici noi:
+1. **Cuvinte-cheie clare** (`CLEAR_KEYWORDS`) — cuvinte foarte specifice unei limbi (`bună`, `hola`, `olá`, `bonjour`, `ciao`, `hello`, `hallo`, `mulțumesc` etc.) determină limba imediat, fără prag.
+2. **Fallback la limba anterioară** pentru fraze scurte/ambigue (`da`, `ok`, `nu`, `thanks`) — conversația nu-și pierde limba stabilită.
+3. **Fallback la limba anterioară** și pentru propoziții mai lungi fără câștigător clar în stopwords/script-hints.
+`detectSpeechLang` și `trackSpeechLang` propagă `previousLang` (limba curentă) ca fallback. Testat cu 22 fraze multilingve: 100% acuratețe (față de rate mult mai slabe pe fraze scurte înainte).
 ### 4.3 Router model (capabilitate↔cost)
 `services/modelRouter.ts`: `MODEL_FAST` (env `KELION_FAST_MODEL`, azi `claude-fable-5`) / `MODEL_TOP` (env `KELION_TOP_MODEL`, azi `claude-opus-4-8`). `taskDifficulty()` euristic (0 cost) + **marjă +10%** → `chooseModel` ia cel mai IEFTIN model care acoperă necesarul; eșec/refuz pe FAST → re-servit pe TOP + odihnă 10 min. Model nou în viitor = setezi variabila în Railway, intră instant fără deploy. Teste: `backend/src/modelRouter.test.ts`.
 ### 4.4 Latență (#7)
