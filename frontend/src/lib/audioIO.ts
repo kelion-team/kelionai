@@ -403,22 +403,28 @@ export async function startMic(
   // nu „orice voce"). false = rolul demo (vizitatori publici) — comportamentul
   // rămâne exact cel de azi: fără profil, acceptă orice voce peste prag.
   restrictToOwnerVoice = false,
+  // stream pre-încălzit de la apăsarea butonului "mic on" pentru activare instant.
+  preWarmedStream?: MediaStream,
 ): Promise<MicHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     onError('unsupported')
     return null
   }
   let stream: MediaStream
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    })
-  } catch (e) {
-    // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
-    // eșecul trecător (dispozitiv ocupat, căști scoase) da.
-    const name = (e as { name?: string })?.name
-    onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
-    return null
+  if (preWarmedStream && preWarmedStream.getAudioTracks().length > 0) {
+    stream = preWarmedStream
+  } else {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+    } catch (e) {
+      // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
+      // eșecul trecător (dispozitiv ocupat, căști scoase) da.
+      const name = (e as { name?: string })?.name
+      onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
+      return null
+    }
   }
 
   const AC =

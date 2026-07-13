@@ -42,6 +42,9 @@ export interface MicStreamOpts {
   getLang: () => string
   // s-a auzit voce cât Kelion vorbea → barge-in (taie vocea lui Kelion)
   onBargeIn?: () => void
+  // stream pre-încălzit: la apăsarea butonului "mic on" apelăm getUserMedia
+  // înainte de startMicStream, ca activarea să fie aproape instant.
+  preWarmedStream?: MediaStream
 }
 
 function floatToPcm16(input: Float32Array): ArrayBuffer {
@@ -69,14 +72,18 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     return null
   }
   let stream: MediaStream
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    })
-  } catch (e) {
-    const name = (e as { name?: string })?.name
-    opts.onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
-    return null
+  if (opts.preWarmedStream && opts.preWarmedStream.getAudioTracks().length > 0) {
+    stream = opts.preWarmedStream
+  } else {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+    } catch (e) {
+      const name = (e as { name?: string })?.name
+      opts.onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
+      return null
+    }
   }
 
   const AC =

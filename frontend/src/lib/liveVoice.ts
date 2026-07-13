@@ -84,7 +84,19 @@ export async function startLiveVoice(opts: StartOpts = {}): Promise<LiveVoiceHan
       // (elementul <audio>); lip-sync-ul se ia din amplitudinea LUI, tolerant la
       // eșec. Prioritatea e vocea curată — regula de aur: dacă lip-sync pică,
       // sunetul rămâne neatins.
-      lipStops.push(driveVoiceLevelFromElement(el))
+      //
+      // IMPORTANT: `captureStream()` pe elementul audio trebuie apelat DUPĂ ce
+      // redarea a început efectiv; altfel poate returna un MediaStream fără
+      // piste audio, iar gura avatarului rămâne nemișcată. Așteptăm evenimentul
+      // `play` (cu fallback la 400ms) înainte să pornim analiza.
+      let lipStarted = false
+      const startLip = (): void => {
+        if (lipStarted) return
+        lipStarted = true
+        lipStops.push(driveVoiceLevelFromElement(el))
+      }
+      el.addEventListener('play', startLip, { once: true })
+      window.setTimeout(startLip, 400)
     }
   })
   room.on(RoomEvent.Disconnected, () => onState?.('closed'))
