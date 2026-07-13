@@ -162,7 +162,7 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     // Same email on the analytics row AND the session — the link that lets the
     // owner click a trial and read its conversation.
     const sessionEmail = makeDemoEmail()
-    const res = await tryStartDemo(fp, ip, config.demo.capPerDay, visit, sessionEmail)
+    const res = await tryStartDemo(fp, ip, visit, sessionEmail)
     if (!res.ok) {
       return reply.code(429).send({ error: res.reason === 'cap' ? 'cap_reached' : 'already_used' })
     }

@@ -1229,21 +1229,16 @@ const EMPTY_VISIT: DemoVisit = {
 export async function tryStartDemo(
   fingerprint: string,
   ip: string,
-  capPerDay: number,
   visit: DemoVisit = EMPTY_VISIT,
   sessionEmail = '',
 ): Promise<{ ok: boolean; reason?: 'cap' | 'used' }> {
   if (!dbEnabled()) return { ok: true }
   try {
     const pool = getPool()
-    const today = Number(
-      (
-        await pool.query<{ n: string }>(
-          "SELECT COUNT(*) AS n FROM demo_uses WHERE started_at >= date_trunc('day', now())",
-        )
-      ).rows[0]?.n ?? 0,
-    )
-    if (today >= capPerDay) return { ok: false, reason: 'cap' }
+    // FĂRĂ plafon global pe număr de probe (Adrian, 13 iul: „10 minute pe
+    // utilizator, nu există limită la câți testează"). Limita reală e per
+    // sesiune (10 min, DEMO_SECONDS) — nu pe câți vizitatori intră într-o zi.
+    // Rămâne DOAR garda anti-reabuz per amprentă/IP de mai jos.
     if (fingerprint || ip) {
       const used = Number(
         (
