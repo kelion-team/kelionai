@@ -186,6 +186,25 @@ export default function ChatPanel({
   scenarioRunningRef.current = scenarioRunning
   const scenarioRecRef = useRef<RecordingHandle | null>(null)
 
+  // Bibliotecă de scenarii presetate, apelabilă direct din soft. Selectarea
+  // unuia populează textarea cu pașii; apoi înregistrare + rulare ca înainte.
+  type ScenarioPreset = { name: string; steps: string }
+  const SCENARIO_LIBRARY: ScenarioPreset[] = [
+    {
+      name: 'Quick greet',
+      steps: 'Spune "Bună, sunt Kelion!"\nSpune "Cu ce te pot ajuta azi?"',
+    },
+    {
+      name: 'Product demo',
+      steps: 'Spune "Iată cum funcționează Kelionai."\nArată monitorul\nSpune "Pot vorbi, vedea și crea pentru tine."',
+    },
+    {
+      name: 'FAQ',
+      steps: 'Spune "Cele mai comune întrebări:"\nSpune "Cât costă?"\nSpune "Cum mă înscriu?"',
+    },
+  ]
+  const [selectedScenario, setSelectedScenario] = useState('')
+
   const menuRef = useRef<HTMLDivElement>(null)
   const captureRef = useRef<(() => string | null) | null>(null)
   const latestFrameRef = useRef<string | null>(null)
@@ -1235,10 +1254,28 @@ export default function ChatPanel({
               ✕
             </button>
           </div>
+          <select
+            className="scenario-select"
+            value={selectedScenario}
+            onChange={(e) => {
+              const name = e.target.value
+              setSelectedScenario(name)
+              const preset = SCENARIO_LIBRARY.find((s) => s.name === name)
+              if (preset) setScenarioText(preset.steps)
+            }}
+          >
+            <option value="">{t.scenarioPick}</option>
+            {SCENARIO_LIBRARY.map((s) => (
+              <option key={s.name} value={s.name}>{s.name}</option>
+            ))}
+          </select>
           <textarea
             className="scenario-text"
             value={scenarioText}
-            onChange={(e) => setScenarioText(e.target.value)}
+            onChange={(e) => {
+              setScenarioText(e.target.value)
+              if (selectedScenario) setSelectedScenario('')
+            }}
             placeholder={t.scenarioHint}
             rows={4}
           />

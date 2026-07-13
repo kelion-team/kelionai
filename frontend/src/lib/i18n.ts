@@ -30,6 +30,7 @@ export interface Strings {
   scenarioRecord: string
   scenarioStop: string
   scenarioRecording: string
+  scenarioPick: string
   monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
@@ -112,6 +113,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Record',
     scenarioStop: 'Stop',
     scenarioRecording: 'Recording scenario…',
+    scenarioPick: 'Load a scenario…',
     monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
@@ -206,6 +208,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Înregistrează',
     scenarioStop: 'Stop',
     scenarioRecording: 'Înregistrez scenariul…',
+    scenarioPick: 'Încarcă un scenariu…',
     monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
@@ -300,6 +303,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Grabar',
     scenarioStop: 'Detener',
     scenarioRecording: 'Grabando guion…',
+    scenarioPick: 'Cargar un guion…',
     monitorTitle: 'Modo monitor',
     disconnectCamTitle: 'Desconectar cámara',
     connectCamTitle: 'Conectar cámara',
@@ -394,6 +398,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Enregistrer',
     scenarioStop: 'Arrêter',
     scenarioRecording: 'Enregistrement du scénario…',
+    scenarioPick: 'Charger un scénario…',
     monitorTitle: 'Mode moniteur',
     disconnectCamTitle: 'Déconnecter la caméra',
     connectCamTitle: 'Connecter la caméra',
@@ -488,6 +493,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Aufnehmen',
     scenarioStop: 'Stopp',
     scenarioRecording: 'Szenario wird aufgenommen…',
+    scenarioPick: 'Szenario laden…',
     monitorTitle: 'Monitor-Modus',
     disconnectCamTitle: 'Kamera trennen',
     connectCamTitle: 'Kamera verbinden',
@@ -582,6 +588,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Registra',
     scenarioStop: 'Ferma',
     scenarioRecording: 'Registrazione dello scenario…',
+    scenarioPick: 'Carica uno scenario…',
     monitorTitle: 'Modalità monitor',
     disconnectCamTitle: 'Scollega fotocamera',
     connectCamTitle: 'Collega fotocamera',
@@ -676,6 +683,7 @@ const dict: Record<Lang, Strings> = {
     scenarioRecord: 'Gravar',
     scenarioStop: 'Parar',
     scenarioRecording: 'Gravando roteiro…',
+    scenarioPick: 'Carregar um roteiro…',
     monitorTitle: 'Modo monitor',
     disconnectCamTitle: 'Desconectar câmera',
     connectCamTitle: 'Conectar câmera',
