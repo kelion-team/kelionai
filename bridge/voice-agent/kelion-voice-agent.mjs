@@ -139,7 +139,7 @@ async function runConnectionTest(roomName) {
 const SAMPLE_RATE = 48000
 const CHANNELS = 1
 // Praguri VAD (energie RMS pe Int16). Se reglează pe testele cu microfonul.
-const RMS_SPEECH = 600 // peste = vorbire; sub = liniște/zgomot de fond
+const RMS_SPEECH = 380 // peste = vorbire; sub = liniște/zgomot de fond (reglat 13 iul: 600 prindea prea puțin)
 const SILENCE_MS = 800 // liniște după vorbire → sfârșit de frază (endpoint)
 const MIN_SPEECH_MS = 300 // sub atât = pocnet/tuse, se ignoră
 const MAX_UTTERANCE_MS = 15000 // plasă de siguranță: golește oricum
@@ -221,12 +221,19 @@ async function handleUtterance(state, myTurn, pcm) {
   log(`user: „${(res.transcript || '').slice(0, 120)}"`)
   log(`kelion: „${(res.reply || '').slice(0, 120)}"`)
   if (!res.wav) {
-    if (res.ttsError) log('TTS a eșuat:', res.ttsError)
+    log('TTS a eșuat sau gol:', res.ttsError || '(fără wav)')
     state.speaking = false
     return
   }
-  const pcmOut = pcmFromWav(Buffer.from(res.wav, 'base64'))
-  await playPcm(state, myTurn, pcmOut)
+  const wavBuf = Buffer.from(res.wav, 'base64')
+  const pcmOut = pcmFromWav(wavBuf)
+  log(`redau: wav ${wavBuf.length}o → ${pcmOut.length} sample-uri @${res.sampleRate || SAMPLE_RATE}Hz`)
+  try {
+    await playPcm(state, myTurn, pcmOut)
+    log('redare terminată')
+  } catch (e) {
+    log('redare a eșuat:', String(e).slice(0, 150))
+  }
   if (state.turn === myTurn) state.speaking = false
 }
 

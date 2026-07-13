@@ -29,6 +29,9 @@ function attachAudio(track: RemoteTrack): HTMLAudioElement {
   el.autoplay = true
   el.style.display = 'none'
   document.body.appendChild(el)
+  // Autoplay-ul poate fi blocat dacă elementul e creat după fereastra gestului —
+  // forțăm play() explicit (butonul a fost un gest de utilizator). Best-effort.
+  void el.play?.().catch(() => {})
   return el
 }
 
@@ -74,8 +77,15 @@ export async function startLiveVoice(opts: StartOpts = {}): Promise<LiveVoiceHan
       const el = attachAudio(track)
       audioEls.push(el)
       // GURA avatarului pe vocea agentului (pasul 4): conduce voiceLevel din
-      // amplitudinea acestei piste. Bonus vizual — dacă pică, sunetul rămâne.
-      lipStops.push(driveVoiceLevelFrom(el))
+      // amplitudinea pistei. Analizăm FLUXUL (MediaStream), nu elementul <audio>,
+      // ca să NU preluăm redarea (altfel un AudioContext suspendat înghite
+      // sunetul — bugul „audio nu merge"). Bonus vizual — dacă pică, sunetul rămâne.
+      try {
+        const mst = track.mediaStreamTrack
+        if (mst) lipStops.push(driveVoiceLevelFrom(new MediaStream([mst])))
+      } catch {
+        /* fără lip-sync — vocea rămâne audibilă */
+      }
     }
   })
   room.on(RoomEvent.Disconnected, () => onState?.('closed'))
