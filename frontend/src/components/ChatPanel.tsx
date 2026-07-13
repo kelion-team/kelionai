@@ -43,6 +43,7 @@ import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
+import { LiveDuplexToggle } from './LiveDuplexToggle'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3" al
 // constructorului) traduse în clipurile REALE din biblioteca RPM — scheletul
@@ -1407,6 +1408,12 @@ export default function ChatPanel({
                     {cameraOn && <span className="dot" />}
                   </button>
                 )}
+                {/* Mod full-duplex (mâini-libere): microfon deschis permanent +
+                    vocea agentului LiveKit. Izolat de vocea HTTP (push-to-talk). */}
+                <div className="fn-item fn-duplex">
+                  <span className="ico">🗣️</span>
+                  <LiveDuplexToggle />
+                </div>
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
                     his own (show_on_screen), and the camera is switched by text
                     command ("switch camera", "comută camera", "camera spate"). */}

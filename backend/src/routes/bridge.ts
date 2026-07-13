@@ -8,6 +8,8 @@ import { decideDeployFailure, isDuplicateOrder, composeOrdersReport } from '../s
 import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
+import { transcribe } from '../services/asr.js'
+import { synthesize } from '../services/tts.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -1135,6 +1137,75 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       const m = answer.match(/VIZUAL:\s*(DA|NU)/i)
       const verdict = m ? (m[1].toUpperCase() === 'DA' ? 'DA' : 'NU') : 'necunoscut'
       return { ok: true, verdict, detail: answer.slice(0, 800) }
+    },
+  )
+
+  // ── VOCEA FULL-DUPLEX (Adrian, 12 iul: „chatul full duplex") ────────────────
+  // O tură completă de voce, într-un singur apel, pentru agentul de voce de pe
+  // VPS (bridge/voice-agent). Agentul capturează PCM brut din LiveKit → aici:
+  //   STT (Chirp, PCM LINEAR16) → creierul-punte (Kimi/GLM, persona publică,
+  //   ton vorbit scurt) → TTS (Chirp, LINEAR16 la ACELAȘI sample rate) →
+  // întoarce transcrierea + răspunsul text + WAV base64 pe care agentul îl
+  // împinge înapoi în cameră. Secret-gated (numai agentul de pe VPS îl atinge).
+  // REUTILIZEAZĂ vocea existentă (services/asr, services/tts) și creierul-punte —
+  // nu reinventează nimic.
+  app.post<{ Body: { pcm?: string; sampleRate?: number; lang?: string; visitor?: string } }>(
+    '/api/bridge/voice-turn',
+    async (req, reply) => {
+      if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+      const pcm = String(req.body?.pcm ?? '').trim()
+      const sampleRate = Number(req.body?.sampleRate) || 48000
+      const langHint = String(req.body?.lang ?? '').trim()
+      const visitor = String(req.body?.visitor ?? '').trim()
+      if (!pcm) return reply.code(400).send({ error: 'bad_request', note: 'pcm (base64 LINEAR16) required' })
+
+      // 1) STT — PCM brut LINEAR16 (nu container) → decodare explicită.
+      const stt = await transcribe(pcm, { langHint, pcm: { sampleRateHertz: sampleRate, channels: 1 } })
+      if (!stt.ok) return reply.send({ ok: false, stage: 'stt', error: stt.error })
+      const transcript = stt.transcript.trim()
+      const lang = stt.lang || langHint || ''
+      // Liniște / zgomot → nimic de spus. Agentul sare peste (fără să răspundă).
+      if (!transcript) return reply.send({ ok: true, transcript: '', reply: '', skip: true })
+
+      // 2) CREIERUL — persona PUBLICĂ (neutru Kelion, fără context privat), ton
+      // vorbit scurt. bridgeAskStream ne dă calea de chat (Kimi/GLM prin punte);
+      // acumulăm bucățile și luăm textul final. Fără worker → linie scurtă de
+      // rezervă ca vocea să nu moară în tăcere.
+      const voicePrompt =
+        `[VOCE] Utilizatorul ți-a spus prin microfon: "${transcript}". ` +
+        `Răspunde ca Kelion, NATURAL și SCURT, ca într-o conversație vorbită (1–3 propoziții, fără liste, ` +
+        `fără markdown, fără emoji). Răspunde în limba în care ți-a vorbit.`
+      let acc = ''
+      const brain = await bridgeAskStream(
+        voicePrompt,
+        [],
+        (t) => {
+          acc += t
+        },
+        60_000,
+        30_000,
+        '',
+        'public',
+        visitor,
+        'chat',
+      )
+      const reply2 = (brain && brain !== BRIDGE_STALL ? brain : acc).trim()
+      const spoken = reply2 || 'Te ascult.'
+
+      // 3) TTS — LINEAR16 la ACELAȘI sample rate ca LiveKit-ul agentului, ca
+      // sample-urile să intre 1:1 în AudioSource (fără reeșantionare pe agent).
+      const tts = await synthesize(spoken, lang || undefined, { encoding: 'LINEAR16', sampleRateHertz: sampleRate })
+      if (!tts.ok) return reply.send({ ok: true, transcript, reply: spoken, lang, wav: '', ttsError: tts.error })
+      return reply.send({
+        ok: true,
+        transcript,
+        reply: spoken,
+        lang,
+        sampleRate,
+        // WAV (RIFF) base64 — agentul sare peste antetul de 44 de octeți și
+        // împinge PCM-ul în cameră.
+        wav: tts.audio.toString('base64'),
+      })
     },
   )
 

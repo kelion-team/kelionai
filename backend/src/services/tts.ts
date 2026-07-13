@@ -49,12 +49,25 @@ export type TtsResult =
   | { ok: true; audio: Buffer }
   | { ok: false; status: number; error: string }
 
+export interface SynthOpts {
+  // Output encoding. Default MP3 (browser <audio>). The full-duplex voice agent
+  // asks for LINEAR16 raw PCM at a fixed sample rate so it can push samples
+  // straight into a LiveKit AudioSource — no client-side MP3 decoder needed.
+  encoding?: 'MP3' | 'LINEAR16'
+  sampleRateHertz?: number
+}
+
 /**
- * Synthesise `text` in `langRaw` to an MP3 buffer via Chirp 3 HD. Returns a
- * typed result so callers can map failures to the right HTTP status. No auth,
- * no cost accounting here — that stays in the route.
+ * Synthesise `text` in `langRaw` via Chirp 3 HD. Returns a typed result so
+ * callers can map failures to the right HTTP status. No auth, no cost
+ * accounting here — that stays in the route. Default output is MP3; pass
+ * `{ encoding: 'LINEAR16', sampleRateHertz }` for raw PCM (voice agent).
  */
-export async function synthesize(text: string, langRaw: string | undefined): Promise<TtsResult> {
+export async function synthesize(
+  text: string,
+  langRaw: string | undefined,
+  opts: SynthOpts = {},
+): Promise<TtsResult> {
   if (!ttsConfigured()) return { ok: false, status: 503, error: 'tts_not_configured' }
   const clean = text.trim()
   if (!clean) return { ok: false, status: 400, error: 'bad_request' }
@@ -80,13 +93,19 @@ export async function synthesize(text: string, langRaw: string | undefined): Pro
     url = `${TTS_URL}?key=${config.googleTtsKey}`
   }
 
+  const encoding = opts.encoding ?? 'MP3'
+  const audioConfig: Record<string, unknown> = { audioEncoding: encoding }
+  // LINEAR16 must declare its sample rate — the voice agent pushes these samples
+  // into a LiveKit AudioSource created at the SAME rate, so they line up 1:1.
+  if (encoding === 'LINEAR16') audioConfig.sampleRateHertz = opts.sampleRateHertz ?? 24000
+
   const res = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       input: { text: spoken },
       voice: { languageCode: lang, name: voiceName },
-      audioConfig: { audioEncoding: 'MP3' },
+      audioConfig,
     }),
   })
   if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }

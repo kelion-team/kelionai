@@ -1,0 +1,102 @@
+# AGENT DE VOCE — MILESTONE 2: instalează bucla full-duplex ca serviciu systemd
+# PERSISTENT pe VPS (kelion-voice). Fără --room: workerul urmărește SINGUR
+# camerele „voice-*" și intră în ele când un user deschide microfonul pe
+# kelionai.app → STT (Chirp) → creierul-punte (Kimi/GLM) → TTS (Chirp) cu barge-in.
+#
+# Cheile LiveKit + BRIDGE_SECRET le ia agentul singur din Railway (RAILWAY_TOKEN
+# din claude.env) — nu apar în log. Determinist, fără LLM. Izolat de kelion-bridge:
+# dacă pică, chatul HTTP care merge acum NU e afectat.
+name: vps-voice-agent-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ce face'
+        type: choice
+        default: install
+        options: [install, restart, stop, status, logs]
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalează/gestionează serviciul de voce pe VPS (SSH, parolă mascată)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" ACTION="${ACTION:-install}" 'bash -s' <<'EOS'
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          REPO=/root/kelion/repo
+          [ -d "$REPO" ] || REPO=/root/kelion
+          AGENT="$REPO/bridge/voice-agent"
+
+          case "${ACTION:-install}" in
+            stop)
+              systemctl stop kelion-voice || true
+              echo "kelion-voice: $(systemctl is-active kelion-voice || true)"; exit 0 ;;
+            status)
+              systemctl status kelion-voice --no-pager -l | head -30 || true; exit 0 ;;
+            logs)
+              journalctl -u kelion-voice --no-pager -n 60 || true; exit 0 ;;
+            restart)
+              systemctl restart kelion-voice
+              sleep 2; systemctl is-active kelion-voice
+              journalctl -u kelion-voice --no-pager -n 20 || true; exit 0 ;;
+          esac
+
+          # install: cod proaspăt din master + deps + unit systemd + pornire.
+          cd "$REPO"
+          git fetch origin master -q || true
+          git reset --hard origin/master -q || true
+          git log --oneline -1 || true
+
+          echo "=== deps agent (@livekit/rtc-node — nativ) ==="
+          cd "$AGENT"
+          npm install --no-audit --no-fund 2>&1 | tail -6
+          node -e "require('@livekit/rtc-node'); require('livekit-server-sdk'); console.log('module OK')"
+
+          echo "=== unit systemd kelion-voice ==="
+          cat > /etc/systemd/system/kelion-voice.service <<UNIT
+          [Unit]
+          Description=Kelion: agent de voce full-duplex (STT->creier->TTS, barge-in). Izolat de kelion-bridge.
+          After=network-online.target docker.service
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=$AGENT
+          Environment=LIVEKIT_URL=ws://localhost:7880
+          Environment=BACKEND_URL=https://kelionai.app
+          ExecStart=/usr/bin/node $AGENT/kelion-voice-agent.mjs
+          Restart=always
+          RestartSec=5
+          # Nu doborî serverul dacă agentul o ia razna:
+          MemoryMax=800M
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          systemctl daemon-reload
+          systemctl enable kelion-voice
+          systemctl restart kelion-voice
+          sleep 3
+          echo "=== stare ==="
+          systemctl is-active kelion-voice || true
+          journalctl -u kelion-voice --no-pager -n 25 || true
+          echo "=== camere active (server LiveKit) ==="
+          docker ps --filter name=kelion-livekit --format '{{.Names}} {{.Status}}' || true
+          EOS
