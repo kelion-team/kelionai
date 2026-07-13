@@ -191,16 +191,19 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
       const mb = client.mailbox
       const total = mb ? mb.exists : 0
       if (total > 0) {
-        const start = Math.max(1, total - limit + 1)
-        // envelope + flags DOAR → nu atingem corpul, deci nu marchează citit.
-        for await (const msg of client.fetch(`${start}:*`, { envelope: true, flags: true })) {
+        // UID FETCH pe toată cutia, apoi păstrăm ultimele `limit` mesaje.
+        // Fără `uid: true` în query serverul NU returnează UID, deci toate
+        // cheile React din admin ar fi duplicate (undefined) și am pierde
+        // identitatea stabilă a mesajelor.
+        for await (const msg of client.fetch('1:*', { uid: true, envelope: true, flags: true })) {
           const f = msg.envelope?.from?.[0]
+          const d = msg.envelope?.date
           out.push({
-            uid: msg.uid,
+            uid: msg.uid ?? 0,
             from: f?.address ?? '',
             fromName: f?.name ?? '',
             subject: msg.envelope?.subject ?? '(fără subiect)',
-            date: (msg.envelope?.date ?? new Date()).toISOString(),
+            date: (d && !Number.isNaN(d.getTime()) ? d : new Date()).toISOString(),
             seen: msg.flags?.has('\\Seen') ?? false,
           })
         }
@@ -217,7 +220,7 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
       /* ignore */
     }
   }
-  return out.reverse().slice(0, limit) // cele mai noi primele
+  return out.slice(-limit).reverse() // cele mai noi primele
 }
 
 // Start the mailbox poller. Off entirely until MAIL_PASS is set (mailEnabled()).
