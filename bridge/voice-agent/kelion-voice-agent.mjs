@@ -223,9 +223,12 @@ async function voiceTurn(pcmBase64, visitor) {
 }
 
 // Publică pista de voce a agentului (AudioSource permanent) în cameră.
+// Queue mărită la 5000 (default 1000) pentru a evita "failed to capture frame" /
+// pierderi de cadre când bucla de redare are mici fluctuații — streaming-ul
+// full-duplex să nu pară „greu" / sacadat din cauza unei cozi înguste.
 async function publishAgentTrack(room) {
   const { AudioSource, LocalAudioTrack, TrackPublishOptions, TrackSource } = rtc
-  const source = new AudioSource(SAMPLE_RATE, CHANNELS)
+  const source = new AudioSource(SAMPLE_RATE, CHANNELS, 5000)
   const track = LocalAudioTrack.createAudioTrack('kelion-voice', source)
   const opts = new TrackPublishOptions()
   opts.source = TrackSource.SOURCE_MICROPHONE
@@ -234,8 +237,9 @@ async function publishAgentTrack(room) {
   return source
 }
 
-// Redă PCM în cameră, cadru cu cadru (10 ms). Se oprește imediat dacă tura a
-// fost înlocuită (barge-in): captureFrame-urile rămase nu se mai trimit.
+// Redă PCM în cameră, cadru cu cadru (10 ms — SDK-ul @livekit/rtc-node cere
+// cadre EXACT de 10 ms). Se oprește imediat dacă tura a fost înlocuită
+// (barge-in): captureFrame-urile rămase nu se mai trimit.
 async function playPcm(state, myTurn, pcm) {
   const frameSamples = Math.floor(SAMPLE_RATE / 100) // 10 ms
   for (let o = 0; o < pcm.length; o += frameSamples) {
@@ -252,7 +256,9 @@ async function playPcm(state, myTurn, pcm) {
 // timp (barge-in), abandonează fără să vorbească peste user.
 async function handleUtterance(state, myTurn, pcm) {
   const buf = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)
+  const t0 = Date.now()
   const res = await voiceTurn(buf.toString('base64'), state.visitor)
+  log(`voice-turn total: ${Date.now() - t0}ms`)
   if (state.turn !== myTurn) return // userul a luat cuvântul între timp
   if (!res || res.skip) {
     if (res?.skip) log('(liniște / fără transcriere — sar peste)')

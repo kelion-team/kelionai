@@ -14,6 +14,7 @@ on:
     paths:
       - 'bridge/kelion-builder-server.mjs'
       - 'bridge/kelion-bridge-linux.mjs'
+      - 'bridge/voice-agent/kelion-voice-agent.mjs'
   workflow_dispatch: {}
 
 jobs:
@@ -52,9 +53,10 @@ jobs:
           }
           refresh kelion-builder bridge/kelion-builder-server.mjs
           refresh kelion-bridge   bridge/kelion-bridge-linux.mjs
+          refresh kelion-voice    bridge/voice-agent/kelion-voice-agent.mjs
           sleep 2
           echo "=== is-active ==="
-          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer; do
+          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer kelion-voice; do
             printf '%s: ' "$s"; systemctl is-active "$s" 2>/dev/null || true
           done
           EOS

@@ -29,13 +29,13 @@ jobs:
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<'EOS'
           set +e
           echo "==================== SERVICII (systemctl is-active) ===================="
-          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer docker; do
+          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer kelion-voice docker; do
             printf '%-18s ' "$s"; systemctl is-active "$s" 2>/dev/null
           done
           echo
           echo "==================== COD RULAT vs REPO (md5) ===================="
           REPO=/root/kelion/repo; [ -d "$REPO" ] || REPO=/root/kelion
-          for pair in "kelion-builder:bridge/kelion-builder-server.mjs" "kelion-bridge:bridge/kelion-bridge-linux.mjs"; do
+          for pair in "kelion-builder:bridge/kelion-builder-server.mjs" "kelion-bridge:bridge/kelion-bridge-linux.mjs" "kelion-voice:bridge/voice-agent/kelion-voice-agent.mjs"; do
             SVC="${pair%%:*}"; SRC="${pair##*:}"
             EXEC=$(systemctl show "$SVC" -p ExecStart --value | grep -oE '/[^ ]*[.]mjs' | head -1)
             if [ -n "$EXEC" ] && [ -f "$EXEC" ] && [ -f "$REPO/$SRC" ]; then
