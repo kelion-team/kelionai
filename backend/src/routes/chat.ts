@@ -1304,7 +1304,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // OK → DEPLOY: PRIMUL, înaintea oricărui filtru (bug 5 iul: filtrul de
       // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
       // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
-      const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
+      const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]?|deploy|hai|bun|merge|gata|am\s+(spus|zis|dat)\s+da|am\s+aprobat|am\s+dat\s+drumul)([\s.!,;:?-]+\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]?|deploy|hai|bun|merge|gata))*\s*[.!?]*\s*$/i
       if (getReadyDeploy() && affirm.test(lastUserText)) {
         const t = triggerDeploy()
         const msg = t
@@ -1553,7 +1553,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // timezone aiurea). Regula: dacă mesajul e o simplă afirmație, dispecerul
         // trimite CONTEXTUL (ultimele replici = propunerea creierului + „da"-ul),
         // ca să înțeleagă ce s-a cerut de fapt.
-        const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?)[\s.!]*$/i
+        const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?|am\s+(spus|zis|dat)\s+da|am\s+aprobat|am\s+dat\s+drumul)([\s.!,;:?-]+\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?))*\s*[.!?]*\s*$/i
         // „Reia"/„termină"-style (5 iul, ordinul „reia terminat cu această
         // comandă."): un mesaj scurt făcut DOAR din verbe de reluare + umplutură
         // referă sarcina anterioară, nu descrie una nouă. Trimis verbatim,
