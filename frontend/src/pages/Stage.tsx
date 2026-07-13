@@ -108,6 +108,27 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [user.role])
+  // CREDIT USER pe CERCUL-logo (Adrian, 13 iul): clientul își dă seama din cerc
+  // — verde = are credit, ROȘU PULSÂND = i s-a terminat creditul. Doar clienți.
+  const [userCreditOut, setUserCreditOut] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (user.role !== 'customer') return
+    let alive = true
+    const load = (): void => {
+      fetch('/api/billing/balance', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (alive && j && typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
+        })
+        .catch(() => {})
+    }
+    load()
+    const id = window.setInterval(load, 30_000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [user.role])
   // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
   const [relPending, setRelPending] = useState(0)
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
@@ -885,7 +906,26 @@ export default function Stage({ user }: { user: User }) {
 
       <header className="topbar">
         <span className="brand">
-          <img src="/kelion-logo.png" className="brand-logo" alt="" />
+          <img
+            src="/kelion-logo.png"
+            className={`brand-logo${
+              user.role === 'customer' && userCreditOut === true
+                ? ' credit-out'
+                : user.role === 'customer' && userCreditOut === false
+                  ? ' credit-ok'
+                  : ''
+            }`}
+            title={
+              user.role === 'customer'
+                ? userCreditOut
+                  ? 'Credit epuizat — reîncarcă pentru a continua'
+                  : userCreditOut === false
+                    ? 'Ai credit'
+                    : ''
+                : ''
+            }
+            alt=""
+          />
           Kelionai
         </span>
         {/* Adrian's ALWAYS-ON status (admin, top-left): shows what's being worked
