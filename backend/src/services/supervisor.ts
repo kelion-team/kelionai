@@ -27,9 +27,12 @@ export const DEFAULT_SUPERVISE: SuperviseCfg = {
   stallMs: 4 * 60_000,
   nudgeMs: 4 * 60_000,
   activeMs: 90_000,
-  // Adrian: O SINGURĂ re-asignare automată, nu 3 — după ea, raportează și
-  // lasă decizia lui Adrian. Fără buclă lungă de agenți pe aceeași cerință.
-  maxAttempts: 1,
+  // Adrian (13 iul: „trebuie să se poată repara sau rezolva"): o cerință blocată
+  // se REÎNCEARCĂ cu unghiuri DIFERITE (escalationText are 3 strategii: bucăți
+  // mici → strict minimul → ultima încercare) înainte de a-l anunța pe Adrian —
+  // ca Kelion să REZOLVE singur, nu să renunțe după un pas. Bounded la 3 (nu la
+  // infinit) ca să nu macine credite pe o cerință cu adevărat imposibilă.
+  maxAttempts: 3,
 }
 
 export function superviseDecision(

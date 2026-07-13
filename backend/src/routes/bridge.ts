@@ -509,9 +509,13 @@ setInterval(() => {
     sayQueue.push(msg)
     persistSay()
     void saveMessage(config.adminEmail, 'assistant', msg)
-    noteBrainActivity(`🛑 Supervizor: „${r.summary}" blocată după ${max} încercări — la decizia lui Adrian`)
-    r.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată până se schimbă ceva
-    persistOwned()
+    noteBrainActivity(`🛑 Supervizor: „${r.summary}" blocată după ${max} încercări (unghiuri diferite) — la decizia lui Adrian`)
+    // ELIBERARE (Adrian, 13 iul: „trebuie să se poată repara sau rezolva"): după
+    // cele 3 reîncercări cu unghiuri diferite, dacă tot e blocată NU o mai ținem
+    // „deținută" (îngheța pipeline-ul și rămânea BLOCAT ghost în /api/dev/status).
+    // E înregistrată ca `failed` + Adrian anunțat cu opțiunile; o ELIBERĂM ca
+    // Kelion să treacă la următoarea cerință. Adrian o reemite dacă vrea alt drum.
+    resolveRequirement()
   })()
 }, 60_000).unref()
 
@@ -1323,8 +1327,11 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
             'lecție-eșec',
             `LECȚIE (blocat după ${attempts} încercări): „${r.summary.slice(0, 180)}" — ultimul motiv: ${detail?.slice(0, 300) || 'fără detaliu'}. Specificație neclară sau drum greșit — nu se reîncearcă automat; cere reformulare/alt unghi.`,
           )
-          ownedReq.nudged = Date.now() + 24 * 3600_000 // oprește re-verificarea automată (watchdog) până se schimbă ceva
-          persistOwned()
+          // ELIBERARE (Adrian, 13 iul): după cele 3 unghiuri, blocajul se
+          // înregistrează (failed + lecție + anunț) și se ELIBEREAZĂ — nu mai
+          // îngheață pipeline-ul. Adrian o reemite dacă vrea alt drum.
+          if (ownedReq.orderId) void setWorkOrderStatus(ownedReq.orderId, 'failed')
+          resolveRequirement()
         } else {
           updateRequirement('FAIL la tester — trimisă automat la reparat')
           noteBrainActivity('🔴 fără 200 — cerința a picat la tester → reparat automat')
