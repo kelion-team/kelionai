@@ -891,6 +891,26 @@ async function deployApproved(r) {
     return
   }
 
+  // Asigurăm că scriptul kelion-github e accesibil și executabil.
+  const githubScript = REPO + '/bridge/kelion-github'
+  if (!existsSync(githubScript)) {
+    say(`🔴 Deploy blocat: nu găsesc ${githubScript}`)
+    await tellAdmin(`Publicarea „${title.slice(0, 100)}" e blocată: lipsește kelion-github în repo.`)
+    pushProgress(100, 'Lipsește kelion-github')
+    return
+  }
+
+  // Verificăm că branch-ul există pe origin înainte de a deschide PR/merge.
+  // Dacă nu e acolo, poate constructorul l-a creat local dar push-ul a eșuat.
+  say(`🔎 Verific branch-ul ${branch} pe origin…`)
+  const lsRemote = await run('git', ['ls-remote', '--heads', 'origin', branch])
+  if (lsRemote.code !== 0 || !lsRemote.out.trim()) {
+    say(`🔴 Deploy blocat: branch-ul ${branch} nu există pe origin.`)
+    await tellAdmin(`Publicarea „${title.slice(0, 100)}" e blocată: branch-ul ${branch} nu e pe origin (poate push-ul a eșuat).`)
+    pushProgress(100, 'Branch absent pe origin')
+    return
+  }
+
   // PUBLICARE COMPLETĂ CAP-COADĂ (Adrian, 12 iul: „Kelion trebuie să ducă o
   // reparație completă"): o SINGURĂ comandă atomică `publish` duce branch→master
   // →deploy, fără să se mai blocheze pe dreptul de a deschide PR (403-ul din 11
@@ -899,7 +919,7 @@ async function deployApproved(r) {
   say('📤 Public branch→master→deploy (o singură cale, fără blocaj de token)')
   const pubRes = await run(
     'bash',
-    [REPO + '/bridge/kelion-github', 'publish', branch, `builder: ${title}`, String(r.detail || '').slice(0, 4000)],
+    [githubScript, 'publish', branch, `builder: ${title}`, String(r.detail || '').slice(0, 4000)],
     { timeoutMs: 900000 },
   )
   // `publish` face exec la `deploy`, care întoarce 0 DOAR după ce versiunea live
