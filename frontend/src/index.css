@@ -3420,6 +3420,29 @@ a.card-item:hover {
   gap: 8px;
   flex-shrink: 0;
 }
+.release-alert-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 210, 150, 0.85);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.release-alert-close:hover {
+  background: rgba(255, 159, 67, 0.18);
+  color: #fff;
+}
 .release-alert-btn {
   background: transparent;
   color: #ffcc88;
