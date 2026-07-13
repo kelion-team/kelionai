@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+// audit paritate Kimi 2.7 — Kelion duce cerinta cap-coada.
 import cookie from '@fastify/cookie'
 import websocket from '@fastify/websocket'
 import cors from '@fastify/cors'
