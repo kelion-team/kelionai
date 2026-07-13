@@ -50,8 +50,8 @@ jobs:
           echo "==================== LOGURI kelion-livekit (docker, 15) ===================="
           docker logs --tail 15 kelion-livekit 2>&1 | head -20
           echo
-          echo "==================== journalctl kelion-builder (10) ===================="
-          journalctl -u kelion-builder -n 10 --no-pager 2>/dev/null | tail -10
+          echo "==================== journalctl kelion-builder (90) ===================="
+          journalctl -u kelion-builder -n 90 --no-pager 2>/dev/null | tail -90
           echo
           echo "==================== journalctl kelion-bridge (40) — CHAT ===================="
           journalctl -u kelion-bridge -n 40 --no-pager 2>/dev/null | tail -40
