@@ -1772,11 +1772,15 @@ export interface UserSummary {
 
 export async function listUsers(): Promise<UserSummary[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<UserSummary>(
-    `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
-     FROM messages GROUP BY user_email ORDER BY last DESC`,
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<UserSummary>(
+      `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
+       FROM messages GROUP BY user_email ORDER BY last DESC`,
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 export interface HistoryRow {
@@ -1787,26 +1791,34 @@ export interface HistoryRow {
 
 export async function getHistory(email: string, limit = 1000): Promise<HistoryRow[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<HistoryRow>(
-    `SELECT role, content, created_at FROM messages
-     WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
-    [email, limit],
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<HistoryRow>(
+      `SELECT role, content, created_at FROM messages
+       WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
+      [email, limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // The LAST n messages (chronological) — what the chat panel reloads at start
 // so a page refresh never "loses" the conversation on screen again.
 export async function getRecentHistory(email: string, n = 60): Promise<HistoryRow[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<HistoryRow>(
-    `SELECT role, content, created_at FROM (
-       SELECT role, content, created_at FROM messages
-       WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2
-     ) AS x ORDER BY created_at ASC`,
-    [email, n],
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<HistoryRow>(
+      `SELECT role, content, created_at FROM (
+         SELECT role, content, created_at FROM messages
+         WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2
+       ) AS x ORDER BY created_at ASC`,
+      [email, n],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // ── Cross-session memory (the Memory agent's store) ──

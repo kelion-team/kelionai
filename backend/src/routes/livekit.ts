@@ -60,7 +60,7 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true, url, identity, room, token: jwt }
     } catch (err) {
       app.log.warn({ err }, 'LiveKit token generation failed')
-      return reply.code(500).send({ error: (err as Error).message })
+      return reply.code(502).send({ error: (err as Error).message })
     }
   })
 
@@ -94,7 +94,7 @@ export async function livekitRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true, url, identity, room, token: jwt }
     } catch (err) {
       app.log.warn({ err }, 'LiveKit user token generation failed')
-      return reply.code(500).send({ error: (err as Error).message })
+      return reply.code(502).send({ error: (err as Error).message })
     }
   })
 }

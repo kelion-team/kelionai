@@ -122,7 +122,7 @@ export default function Landing({ error }: { error?: string | null }) {
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
-        <Canvas shadows camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
+        <Canvas shadows="percentage" camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
           <color attach="background" args={['#0b0d12']} />
           {/* Self-contained lighting (no remote HDR): a third-party CDN failure
               must never leave the marketing hero black. Key + fill + cool rim. */}
