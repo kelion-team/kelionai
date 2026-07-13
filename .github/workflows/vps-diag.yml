@@ -74,6 +74,13 @@ jobs:
             echo "GLM   body: $(head -c 260 /tmp/glm.out 2>/dev/null)"
           else echo "GLM: LIPSA CHEIE (/root/kelion/glm-key.txt)"; fi
           echo
+          echo "==================== MODELE DISPONIBILE (Kimi /v1/models) ===================="
+          if [ -n "$KIMI_KEY" ]; then
+            curl -s --max-time 20 https://api.kimi.com/coding/v1/models \
+              -H "Authorization: Bearer $KIMI_KEY" -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' \
+              | head -c 800; echo
+          fi
+          echo
           echo "==================== SĂNĂTATE ENDPOINT-URI ===================="
           printf 'kelionai.app/api/version : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 https://kelionai.app/api/version
           printf 'livekit local :7880      : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:7880/ 2>/dev/null || echo "port inchis"
