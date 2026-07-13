@@ -42,7 +42,6 @@ import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
-import { WakeWordToggle } from './WakeWordToggle'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
 // constructorului) traduse în clipurile REALE din biblioteca RPM — scheletul
@@ -1408,13 +1407,11 @@ export default function ChatPanel({
                     hearing”), cu VOX + barge-in. Butonul LiveKit a fost scos (ordin
                     Adrian, 13 iul): era un dublet mort (serverul LiveKit nici nu e
                     pornit), full-duplexul real merge pe calea vocală automată. */}
-                {/* Cuvânt de trezire: spui „Kelion” și pornește singur microfonul. */}
-                <WakeWordToggle
-                  lang={speechLang}
-                  onWake={() => {
-                    if (!micRef.current && !micStartingRef.current) toggleMic()
-                  }}
-                />
+                {/* Butonul „Trezire Kelion” a fost SCOS (Adrian, 13 iul): trezirea e
+                    AUTOMATĂ — microfonul e deja mereu pornit (useEffect „Permanent
+                    hearing”), deci Kelion se trezește la PRIMUL SUNET auzit; iar la
+                    scris se trezește la PRIMA LITERĂ tastată (câmpul e mereu activ).
+                    Nu mai e nimic de apăsat. */}
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
                     his own (show_on_screen), and the camera is switched by text
                     command ("switch camera", "comută camera", "camera spate"). */}
