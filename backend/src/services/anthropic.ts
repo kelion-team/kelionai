@@ -37,7 +37,7 @@ export async function verifyModels(): Promise<Record<string, string>> {
     }
   }
   return {
-    'kimi-for-coding': await ping(kimi, 'kimi-for-coding'),
+    'kimi-k2-thinking': await ping(kimi, 'kimi-k2-thinking'),
     'glm-4.6': await ping(glm, 'glm-4.6'),
   }
 }
@@ -63,7 +63,7 @@ export async function verifyKeys(): Promise<{
       return status ? `fail_${status}` : 'fail'
     }
   }
-  const primary = config.kimiKey ? await ping(kimi, 'kimi-for-coding') : 'not_configured'
+  const primary = config.kimiKey ? await ping(kimi, 'kimi-k2-thinking') : 'not_configured'
   const reserve = config.glmKey ? await ping(glm, 'glm-4.6') : 'not_configured'
   // Non-secret diagnostics to pinpoint a bad key without exposing its value:
   // length + whether the raw env value carried surrounding whitespace.
