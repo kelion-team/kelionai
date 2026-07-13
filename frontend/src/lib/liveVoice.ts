@@ -11,7 +11,7 @@
 // clară și nu atinge nimic din calea care merge acum.
 
 import type { RemoteTrack, RemoteTrackPublication, RemoteParticipant } from 'livekit-client'
-import { driveVoiceLevelFrom } from './audioIO'
+import { driveVoiceLevelFromElement } from './audioIO'
 
 export type LiveVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
@@ -76,16 +76,15 @@ export async function startLiveVoice(opts: StartOpts = {}): Promise<LiveVoiceHan
     if (track.kind === Track.Kind.Audio) {
       const el = attachAudio(track)
       audioEls.push(el)
-      // GURA avatarului pe vocea agentului (pasul 4): conduce voiceLevel din
-      // amplitudinea pistei. Analizăm FLUXUL (MediaStream), nu elementul <audio>,
-      // ca să NU preluăm redarea (altfel un AudioContext suspendat înghite
-      // sunetul — bugul „audio nu merge"). Bonus vizual — dacă pică, sunetul rămâne.
-      try {
-        const mst = track.mediaStreamTrack
-        if (mst) lipStops.push(driveVoiceLevelFrom(new MediaStream([mst])))
-      } catch {
-        /* fără lip-sync — vocea rămâne audibilă */
-      }
+      // GURA avatarului: o conducem din elementul <audio> (nu dintr-un al DOILEA
+      // consumator al pistei WebRTC). Cauza brumului (13 iul): pista agentului era
+      // consumată SIMULTAN de `track.attach()` ȘI de un `createMediaStreamSource`
+      // pe același `mediaStreamTrack` — dublul consumator al aceleiași piste
+      // WebRTC în Chrome produce o dronă/brum peste voce. Acum un singur consumator
+      // (elementul <audio>); lip-sync-ul se ia din amplitudinea LUI, tolerant la
+      // eșec. Prioritatea e vocea curată — regula de aur: dacă lip-sync pică,
+      // sunetul rămâne neatins.
+      lipStops.push(driveVoiceLevelFromElement(el))
     }
   })
   room.on(RoomEvent.Disconnected, () => onState?.('closed'))

@@ -831,6 +831,27 @@ let extLevelRaf = 0
 // sunetul dispare complet. `createMediaStreamSource` doar ASCULTĂ fluxul în
 // paralel: elementul <audio> al pistei LiveKit redă neatins, iar noi măsurăm
 // amplitudinea separat pentru gura avatarului. Nu conectăm la destination.
+// Lip-sync pentru pista LiveKit din ELEMENTUL <audio> care o redă, NU din pista
+// WebRTC brută. `captureStream()` dă un flux SEPARAT al ieșirii deja decodate a
+// elementului — elementul continuă să redea neatins (spre deosebire de
+// `createMediaElementSource`, care i-ar fura ieșirea și ar tăcea într-un context
+// suspendat) și fără al doilea consumator pe pista brută (cauza brumului, 13 iul).
+// Tolerant la eșec: fără captureStream → fără gură, dar vocea rămâne curată.
+export function driveVoiceLevelFromElement(el: HTMLAudioElement): () => void {
+  const noop = (): void => {}
+  try {
+    const cap =
+      (el as HTMLAudioElement & { captureStream?: () => MediaStream }).captureStream ??
+      (el as HTMLAudioElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream
+    if (!cap) return noop
+    const stream = cap.call(el)
+    if (!stream || stream.getAudioTracks().length === 0) return noop
+    return driveVoiceLevelFrom(stream)
+  } catch {
+    return noop
+  }
+}
+
 export function driveVoiceLevelFrom(stream: MediaStream): () => void {
   const noop = (): void => {}
   try {
