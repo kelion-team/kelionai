@@ -891,6 +891,16 @@ async function deployApproved(r) {
     return
   }
 
+  // PROTECȚIE: branch-ul trebuie să existe pe origin. Dacă constructorul a
+  // creat branch-ul local dar push-ul a eșuat, publicarea ar da eroare obscură.
+  const branchCheck = await run('git', ['ls-remote', '--heads', 'origin', branch])
+  if (branchCheck.code !== 0 || !branchCheck.out.includes(branch)) {
+    say(`🔴 Deploy blocat: branch-ul ${branch} nu există pe origin — nu pot publica.`)
+    await tellAdmin(`Publicarea „${title.slice(0, 100)}" e blocată: branch-ul ${branch} nu e pe origin. Verifică push-ul constructorului.`)
+    pushProgress(100, 'Deploy blocat — branch absent pe origin')
+    return
+  }
+
   // PUBLICARE COMPLETĂ CAP-COADĂ (Adrian, 12 iul: „Kelion trebuie să ducă o
   // reparație completă"): o SINGURĂ comandă atomică `publish` duce branch→master
   // →deploy, fără să se mai blocheze pe dreptul de a deschide PR (403-ul din 11

@@ -677,6 +677,7 @@ export interface StagedRelease {
   id: string
   title: string
   detail: string
+  branch: string
   status: 'pending' | 'approved' | 'rejected' | 'deployed'
   at: string
 }
@@ -1560,16 +1561,25 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // la sursa cozii — singurul loc pe care repo-ul îl garantează.
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    // ROBINET ÎNCHIS DEFINITIV (11 iul, seara — după DOUĂ deploy-uri fantomă
-    // în aceeași zi: 20:40 și 21:44, ambele au publicat prin `railway up` cod
-    // mai vechi decât master și au șters de pe live munca zilei). Regula de
-    // fier nr. 3 a lui Adrian: NIMIC nu publică cod mai vechi decât master.
-    // Deployer-ul de pe VPS nu mai primește NICIODATĂ release-uri de publicat
-    // direct — drumul unui release aprobat e acum automat prin pipeline-ul
-    // verificat: vezi /api/admin/releases/decide (ordin de merge+deploy).
-    // Gardul stă AICI, în server — singurul loc garantat de repo, indiferent
-    // ce cod vechi rulează pe VPS.
-    return { releases: [] }
+    // PIPELINE DETERMINIST (13 iul): robinetul vechi e redeschis, dar doar
+    // pentru release-uri aprobate care au branch, nu sunt fantomă și nu au
+    // expirat. Deployerul actual folosește `kelion-github publish` → merge
+    // în master → `deploy.yml` cu verificare anti-fantomă. Gardul anti-fantomă
+    // rămâne aici: orice release care zace nepublicat >6 ore e marcat failed.
+    const SIX_HOURS = 6 * 60 * 60 * 1000
+    const all = await listStagedReleases(50)
+    const fresh: StagedRelease[] = []
+    for (const r of all) {
+      if (r.status !== 'approved') continue
+      if (!r.branch || /^RELEASE APROBAT DE ADRIAN:/.test(r.title)) continue
+      const age = Date.now() - new Date(r.at).getTime()
+      if (age > SIX_HOURS) {
+        await setReleaseStatus(r.id, 'failed')
+        continue
+      }
+      fresh.push({ id: r.id, title: r.title, detail: r.detail, branch: r.branch, status: 'approved', at: r.at })
+    }
+    return { releases: fresh }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
@@ -1635,23 +1645,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           config.adminEmail,
           `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
         )
-        // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
-        // /api/bridge/approved-releases): „da"-ul lui Adrian pornește ordinul
-        // de publicare pe pipeline-ul verificat, nu o publicare directă.
-        // GARDĂ ANTI-RECURSIVITATE (12 iul, Adrian: „ultimele 10 relesuri cel
-        // puțin nu au existat — e un bug"): ordinul de publicare trecea prin
-        // ACELAȘI build() al constructorului, care — dacă face doar un mic
-        // commit administrativ (ex. AI-HANDOFF.md) și nu produce SUMAR: —
-        // restagea titlul ORDINULUI ÎNSUȘI ca release nou de aprobat, cu
-        // „RELEASE APROBAT DE ADRIAN:" încă o dată în față. Fiecare aprobare
-        // genera altă „aprobare" fantomă. NU mai retrimitem un ordin de
-        // publicare pentru un release al cărui titlu e deja produsul unui
-        // astfel de ordin — se oprește lanțul chiar aici.
-        if (r.status === 'approved' && !/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
-          bridgeRepair(
-            `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
-          )
-        }
+        // PIPELINE DETERMINIST (13 iul): aprobarea NU mai trimite un ordin LLM
+        // de publicare prin build() — acesta era fragil și lăsa branch-uri
+        // aprobate ne-merge-uite. Release-ul aprobat rămâne în tabel cu status
+        // `approved` și e servit de /api/bridge/approved-releases; deployerul
+        // (DEPLOY_ONLY=1) îl ia de acolo și execută `kelion-github publish`
+        // (merge în master + deploy.yml + verificare anti-fantomă), fără a
+        // trece prin constructorul-LLM și fără railway up direct.
       }
       return { ok: true, status: r.status }
     },
