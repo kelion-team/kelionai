@@ -86,6 +86,28 @@ export default function Stage({ user }: { user: User }) {
   const [srvLoad, setSrvLoad] = useState('')
   // Motorul de lucru activ al constructorului (max/kimi/glm) — afișat permanent.
   const [workEngine, setWorkEngine] = useState('')
+  // Credit creier Kimi/GLM (Adrian, 13 iul): două becuri în header — verde fix =
+  // are credit; verde pâlpâind = motorul ACTIV acum; roșu pâlpâind = fără credit.
+  type BrainOne = { ok: boolean; reason: string; topup: string }
+  const [brainCredit, setBrainCredit] = useState<{ active: string | null; kimi: BrainOne; glm: BrainOne } | null>(null)
+  useEffect(() => {
+    if (user.role !== 'admin') return
+    let alive = true
+    const load = (): void => {
+      fetch('/api/admin/brain-credit', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (alive && j && j.kimi && j.glm) setBrainCredit(j)
+        })
+        .catch(() => {})
+    }
+    load()
+    const id = window.setInterval(load, 30_000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [user.role])
   // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
   const [relPending, setRelPending] = useState(0)
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
@@ -871,14 +893,63 @@ export default function Stage({ user }: { user: User }) {
             server status + current task never vanish (they used to hide when the
             work console closed). */}
         {user.role === 'admin' && (
-          <span
-            className={`work-ticker ${claudeActivity.length > 0 ? 'busy' : ''}`}
-            title={claudeActivity.length > 0 ? claudeActivity.join('\n') : `Serverul Linux — ${srvLoad || 'se conectează…'}`}
-          >
-            {claudeActivity.length > 0
-              ? claudeActivity[claudeActivity.length - 1]
-              : `🟢 Linux ${srvLoad || '…'} · liniște`}
-          </span>
+          <>
+            {/* Bec CREDIT KIMI (stânga): verde fix = are credit; verde pâlpâind =
+                motor activ acum; roșu pâlpâind = fără credit. Click → alimentare. */}
+            {brainCredit &&
+              (() => {
+                const s = brainCredit.kimi
+                const state = !s.ok ? 'no-credit' : brainCredit.active === 'kimi' ? 'active' : 'ok'
+                return (
+                  <button
+                    type="button"
+                    className={`brain-pill ${state}`}
+                    title={
+                      !s.ok
+                        ? `Kimi — FĂRĂ CREDIT. ${s.reason || 'quota golită'} · click ca să alimentezi`
+                        : brainCredit.active === 'kimi'
+                          ? 'Kimi — motor ACTIV acum (are credit)'
+                          : 'Kimi — are credit'
+                    }
+                    onClick={() => window.open(s.topup, '_blank', 'noopener')}
+                  >
+                    <span className="pdot" />
+                    Kimi
+                  </button>
+                )
+              })()}
+            <span
+              className={`work-ticker ${claudeActivity.length > 0 ? 'busy' : ''}`}
+              title={claudeActivity.length > 0 ? claudeActivity.join('\n') : `Serverul Linux — ${srvLoad || 'se conectează…'}`}
+            >
+              {claudeActivity.length > 0
+                ? claudeActivity[claudeActivity.length - 1]
+                : `🟢 Linux ${srvLoad || '…'} · liniște`}
+            </span>
+            {/* Bec CREDIT GLM (dreapta), aceleași reguli. */}
+            {brainCredit &&
+              (() => {
+                const s = brainCredit.glm
+                const state = !s.ok ? 'no-credit' : brainCredit.active === 'glm' ? 'active' : 'ok'
+                return (
+                  <button
+                    type="button"
+                    className={`brain-pill ${state}`}
+                    title={
+                      !s.ok
+                        ? `GLM — FĂRĂ CREDIT. ${s.reason || 'quota golită'} · click ca să alimentezi`
+                        : brainCredit.active === 'glm'
+                          ? 'GLM — motor ACTIV acum (are credit)'
+                          : 'GLM — are credit'
+                    }
+                    onClick={() => window.open(s.topup, '_blank', 'noopener')}
+                  >
+                    <span className="pdot" />
+                    GLM
+                  </button>
+                )
+              })()}
+          </>
         )}
         {user.role === 'customer' && <WalletButton />}
         {user.role === 'customer' && (

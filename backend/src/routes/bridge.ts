@@ -1903,6 +1903,45 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { events: await listTierEvents(50) }
   })
 
+  // ── INDICATOARE CREDIT CREIER (Adrian, 13 iul) ────────────────────────────
+  // Două „becuri" în header-ul admin, lângă statusul Linux: Kimi (stânga) +
+  // GLM (dreapta). Verde = are credit; roșu pâlpâind = fără credit (quota
+  // golită). Starea vine din tier-events reale (un „usage limit" 403 produce
+  // exact un eveniment de comutare cu motivul respectiv) + motorul activ acum.
+  // Click pe bec → pagina de alimentare a furnizorului.
+  const BRAIN_QUOTA_RE = /usage limit|usage credits|credit balance|quota|429|golit[ăa]?/i
+  const TOPUP = {
+    kimi: 'https://www.kimi.com/membership/subscription?tab=quota',
+    glm: 'https://z.ai/manage-apikey/apikey-list',
+  } as const
+  app.get('/api/admin/brain-credit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const events = await listTierEvents(40) // cele mai noi întâi
+    const statusOf = (name: 'kimi' | 'glm'): { ok: boolean; reason: string } => {
+      // Motorul folosit ACUM are garantat credit.
+      if (workEngine === name) return { ok: true, reason: '' }
+      // Altfel, primul eveniment (cel mai nou) care menționează treapta decide:
+      // dacă a PLECAT de pe ea cu motiv de quota → fără credit; dacă a AJUNS pe
+      // ea → are credit.
+      for (const e of events) {
+        if (e.to_tier === name) return { ok: true, reason: '' }
+        if (e.from_tier === name) {
+          const quota = BRAIN_QUOTA_RE.test(e.reason || '')
+          return { ok: !quota, reason: quota ? (e.reason || '').slice(0, 160) : '' }
+        }
+      }
+      return { ok: true, reason: '' } // fără istoric → presupunem OK
+    }
+    const kimi = statusOf('kimi')
+    const glm = statusOf('glm')
+    return {
+      active: workEngine || null,
+      kimi: { ok: kimi.ok, reason: kimi.reason, topup: TOPUP.kimi },
+      glm: { ok: glm.ok, reason: glm.reason, topup: TOPUP.glm },
+    }
+  })
+
   // BECUL DE RELEASE-URI (Adrian, 11 iul: „când sunt release-uri trebuie să
   // apară pe interfață un bec care pâlpâie, să știu să verific"). Numărul
   // deciziilor care ÎL așteaptă: release-uri pregătite (aprobarea din tab) +
