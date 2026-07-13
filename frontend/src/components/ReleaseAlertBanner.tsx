@@ -7,6 +7,25 @@ interface ReleaseAlert {
   at: string
 }
 
+const DISMISSED_KEY = 'kelion:dismissed-release-alerts'
+
+function loadDismissed(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(DISMISSED_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDismissed(ids: Set<string>): void {
+  try {
+    sessionStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(ids)))
+  } catch {
+    // ignore
+  }
+}
+
 export default function ReleaseAlertBanner({
   user,
   onOpenReleases,
@@ -15,6 +34,7 @@ export default function ReleaseAlertBanner({
   readonly onOpenReleases: () => void
 }) {
   const [alerts, setAlerts] = useState<ReleaseAlert[]>([])
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(loadDismissed)
   const spokenRef = useRef<Set<string>>(new Set())
   const isAdmin = user.role === 'admin'
 
@@ -28,7 +48,7 @@ export default function ReleaseAlertBanner({
         if (!r.ok) return
         const j = (await r.json()) as { alerts?: ReleaseAlert[] }
         if (!alive) return
-        const arr = j.alerts ?? []
+        const arr = (j.alerts ?? []).filter((a) => !dismissedIds.has(a.id))
         setAlerts(arr)
         // FĂRĂ VOCE la release-uri (Adrian, 11 iul seara: „scoate vocea când
         // se fac release-uri") — anunțul rămâne vizual: bannerul de aici +
@@ -46,24 +66,28 @@ export default function ReleaseAlertBanner({
       alive = false
       window.clearInterval(id)
     }
-  }, [isAdmin])
+  }, [isAdmin, dismissedIds])
 
-  const dismiss = async (id: string): Promise<void> => {
-    try {
-      await fetch('/api/admin/release-alerts/dismiss', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ id }),
-      })
-    } catch {
-      // ignore
-    }
+  const dismiss = (id: string): void => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      saveDismissed(next)
+      return next
+    })
     setAlerts((cur) => cur.filter((a) => a.id !== id))
+    void fetch('/api/admin/release-alerts/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ id }),
+    }).catch(() => {
+      // ignore
+    })
   }
 
   const openAndDismiss = (id: string): void => {
-    void dismiss(id)
+    dismiss(id)
     onOpenReleases()
   }
 
@@ -76,6 +100,15 @@ export default function ReleaseAlertBanner({
 
   return (
     <div className="release-alert-banner" role="alert" aria-live="assertive">
+      <button
+        type="button"
+        className="release-alert-close"
+        onClick={() => dismiss(alerts[0].id)}
+        aria-label="Închide"
+        title="Închide"
+      >
+        ×
+      </button>
       <div className="release-alert-content">
         <span className="release-alert-icon" aria-hidden="true">
           🔔
@@ -101,4 +134,3 @@ export default function ReleaseAlertBanner({
     </div>
   )
 }
-
