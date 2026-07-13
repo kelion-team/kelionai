@@ -56,6 +56,31 @@ jobs:
           echo "==================== journalctl kelion-bridge (40) — CHAT ===================="
           journalctl -u kelion-bridge -n 40 --no-pager 2>/dev/null | tail -40
           echo
+          echo "==================== CREIER LIVE — COTA REALA (Kimi/GLM, cod HTTP acum) ===================="
+          KIMI_KEY=$(cat /root/kelion/kimi-key.txt 2>/dev/null | tr -d '\r\n' || true)
+          GLM_KEY=$(cat /root/kelion/glm-key.txt 2>/dev/null | tr -d '\r\n' || true)
+          if [ -n "$KIMI_KEY" ]; then
+            printf 'Kimi  HTTP: '
+            curl -s -o /tmp/kimi.out -w '%{http_code}\n' --max-time 20 -X POST https://api.kimi.com/coding/v1/messages \
+              -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -d '{"model":"kimi-for-coding","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
+            echo "Kimi  body: $(head -c 260 /tmp/kimi.out 2>/dev/null)"
+          else echo "Kimi: LIPSA CHEIE (/root/kelion/kimi-key.txt)"; fi
+          if [ -n "$GLM_KEY" ]; then
+            printf 'GLM   HTTP: '
+            curl -s -o /tmp/glm.out -w '%{http_code}\n' --max-time 20 -X POST https://api.z.ai/api/anthropic/v1/messages \
+              -H "x-api-key: $GLM_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -d '{"model":"glm-4.6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
+            echo "GLM   body: $(head -c 260 /tmp/glm.out 2>/dev/null)"
+          else echo "GLM: LIPSA CHEIE (/root/kelion/glm-key.txt)"; fi
+          echo
+          echo "==================== MODELE DISPONIBILE (Kimi /v1/models) ===================="
+          if [ -n "$KIMI_KEY" ]; then
+            curl -s --max-time 20 https://api.kimi.com/coding/v1/models \
+              -H "Authorization: Bearer $KIMI_KEY" -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' \
+              | head -c 800; echo
+          fi
+          echo
           echo "==================== SĂNĂTATE ENDPOINT-URI ===================="
           printf 'kelionai.app/api/version : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 https://kelionai.app/api/version
           printf 'livekit local :7880      : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:7880/ 2>/dev/null || echo "port inchis"
