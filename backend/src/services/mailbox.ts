@@ -20,12 +20,29 @@ function esc(s: string): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// Minimal HTML→plain-text fallback for HTML-only emails, so the body stored in
+// inbound_emails and shown in the admin Inbox is never empty just because the
+// sender used HTML without a plain-text part.
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim()
+}
+
 // LOOP GUARD — the one thing an auto-replying mailbox must get right. We NEVER
 // reply to ourselves or to a machine (bounces, out-of-office, mailing lists,
 // no-reply addresses), otherwise Kelion's royal letter provokes another auto
 // message and the two servers ping-pong forever. Detect it from the sender
 // address and the standard auto-response headers.
-function isAutomated(headers: Map<string, unknown>, fromAddr: string): boolean {
+export function isAutomated(headers: Map<string, unknown>, fromAddr: string): boolean {
   const f = fromAddr.toLowerCase()
   if (f === config.mail.user.toLowerCase()) return true // our own address
   if (/(^|[.@+])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|notifications?)([.@+]|$)/.test(f)) {
@@ -36,9 +53,13 @@ function isAutomated(headers: Map<string, unknown>, fromAddr: string): boolean {
   const prec = String(headers.get('precedence') ?? '').toLowerCase()
   if (prec === 'bulk' || prec === 'auto_reply' || prec === 'list' || prec === 'junk') return true
   if (headers.has('list-id') || headers.has('list-unsubscribe')) return true // mailing list
-  if (headers.has('x-autoreply') || headers.has('x-autorespond') || headers.has('x-auto-response-suppress')) {
+  if (headers.has('x-autoreply') || headers.has('x-autorespond')) {
     return true
   }
+  // NOTE: X-Auto-Response-Suppress is set by the SENDER (e.g. Exchange) to tell
+  // recipients NOT to auto-reply; it does NOT mean this incoming message is
+  // automated. Treating it as machine mail silently dropped legitimate customer
+  // emails, so we deliberately do NOT check it here.
   return false
 }
 
@@ -62,7 +83,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   const fromAddr = parsed.from?.value?.[0]?.address ?? ''
   const fromName = parsed.from?.value?.[0]?.name ?? ''
   const subject = parsed.subject ?? '(fără subiect)'
-  const body = (parsed.text ?? parsed.html ?? '').toString().slice(0, 20000)
+  const body = (parsed.text || (parsed.html ? htmlToText(parsed.html.toString()) : '') || '').slice(0, 20000)
   if (!fromAddr) return
 
   // Loop guard: mark machine mail (bounces, auto-replies, lists, our own) seen
@@ -96,14 +117,16 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
       salutation: salutation || 'Dear correspondent,',
       body: letterBody,
     })
-    await sendMail({
+    const replySent = await sendMail({
       to: fromAddr,
       subject: `Re: ${subject}`,
       html,
       text: `${salutation}\n\n${letterBody}\n\n— Kelionai, Office of Correspondence`,
       replyTo: config.mail.user,
     })
-    await setInboundReplied(String(uid), draft, lang)
+    if (replySent) {
+      await setInboundReplied(String(uid), draft, lang)
+    }
   }
 
   // Forward the original (and our reply, if any) to the admin so he always sees
