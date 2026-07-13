@@ -863,6 +863,60 @@ export function bridgeAskStream(
   })
 }
 
+// DIAGNOSTIC SPRINT — Adrian, 13 iul: „Pornește agenți în paralel pentru diagnostic
+// rapid". Trei sub-agenți specializați pe puntea de lucru investighează în paralel
+// și aduc fiecare dovada reală în maxim 2 minute. Rezultatele se reunesc într-un
+// raport unificat pe care creierul îl poate prezenta adminului.
+export interface DiagnosticReport {
+  researcher: string | null
+  tester: string | null
+  developer: string | null
+  elapsedMs: number
+}
+export async function runDiagnosticSprint(): Promise<DiagnosticReport> {
+  const started = Date.now()
+  const timeout = 120_000 // 2 minute, cerința lui Adrian
+  const systemPrefix =
+    `Ești un agent specializat într-un SPRINT de diagnostic pentru kelionai.app. ` +
+    `Misiunea ta e să aduci CAUZA REALĂ, cu DOVEZI concrete (comenzi rulate, output, status code). ` +
+    `Raportează strict: 1) ce ai verificat, 2) ce ai găsit (fapte, nu presupuneri), 3) concluzia. ` +
+    `Ai acces la uneltele din punte: Bash, Read, Grep, Glob, WebFetch, curl. Nu inventa.\n\n`
+
+  const researcherPrompt =
+    systemPrefix +
+    `ROL: researcher. Investiguează ULTIMELE deploy-uri eșuate. ` +
+    `Citește jurnalele Railway/GitHub Actions. Folosește scriptul "/root/kelion/repo/bridge/kelion-github runs" ` +
+    `pentru a lista ultimele workflow runs și identifică eșecurile. Dacă ai acces, folosește și "/root/kelion/repo/bridge/kelion-github api repos/kelion-team/kelionai/actions/runs?per_page=10". ` +
+    `Pentru Railway, folosește workflow-ul "railway-deploy-status" dacă e disponibil, sau curl către Railway API cu RAILWAY_TOKEN. ` +
+    `Raportează: numele workflow-ului/run-ului, statusul, cauza erorii (linii cheie din log), link/commit. `
+
+  const testerPrompt =
+    systemPrefix +
+    `ROL: tester. Verifică LIVE pe kelionai.app. ` +
+    `1) curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://kelionai.app/api/version și notează răspunsul. ` +
+    `2) Verifică full-duplex voice: endpoint /api/livekit/token (admin) returnează token? curl -s -o /dev/null -w '%{http_code}' cu header x-bridge-secret. ` +
+    `3) Verifică animația gurii: folosește visual-check (POST /api/bridge/visual-check) cu criteria "butonul Full-duplex este vizibil si avatarul are gura care se misca" sau, alternativ, deschide https://kelionai.app într-un browser real și raportează ce vezi. ` +
+    `Raportează status code-uri, output scurt, concluzie despre full-duplex și animație.`
+
+  const developerPrompt =
+    systemPrefix +
+    `ROL: developer. Inspectează VPS-ul 164.68.120.87 (rulezi deja pe el). ` +
+    `1) systemctl is-active pentru: kelion-bridge, kelion-builder, kelion-paznic, kelion-deployer, kelion-voice, docker. ` +
+    `2) Compară codul RULAT vs repo: pentru kelion-bridge și kelion-builder, ia calea din "systemctl show <svc> -p ExecStart", ` +
+    `apoi md5sum între fișierul rulat și /root/kelion/repo/bridge/kelion-bridge-linux.mjs / kelion-builder-server.mjs. ` +
+    `3) Verifică LiveKit: docker ps -a | grep livekit și curl -s http://localhost:7880/. ` +
+    `4) Verifică kelion-voice: systemctl is-active kelion-voice și ultimele 15 linii din journalctl -u kelion-voice. ` +
+    `Raportează output real, concluzie.`
+
+  const [researcher, tester, developer] = await Promise.all([
+    bridgeAsk(researcherPrompt, [], timeout, 'work').catch(() => null),
+    bridgeAsk(testerPrompt, [], timeout, 'work').catch(() => null),
+    bridgeAsk(developerPrompt, [], timeout, 'work').catch(() => null),
+  ])
+
+  return { researcher, tester, developer, elapsedMs: Date.now() - started }
+}
+
 // WORK ORDERS for laptop-Claude (the builder): build/fix/change tasks decided
 // by the chat brain (or escalated from the admin panel) land here; the laptop
 // session polls them (secret-protected), executes, and reports back in chat +
@@ -1139,6 +1193,14 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true, verdict, detail: answer.slice(0, 800) }
     },
   )
+
+  // DIAGNOSTIC SPRINT — Adrian, 13 iul: pornește 3 agenți în paralel pentru diagnostic rapid.
+  // Returnează raportul unificat; fiecare agent are maxim 2 minute să aducă dovezi concrete.
+  app.post('/api/bridge/diagnostic-sprint', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    const report = await runDiagnosticSprint()
+    return reply.send({ ok: true, ...report })
+  })
 
   // ── VOCEA FULL-DUPLEX (Adrian, 12 iul: „chatul full duplex") ────────────────
   // O tură completă de voce, într-un singur apel, pentru agentul de voce de pe

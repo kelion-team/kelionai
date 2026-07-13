@@ -79,6 +79,7 @@ import {
   updateRequirement,
   resolveRequirement,
   ownedRequirement,
+  runDiagnosticSprint,
   type BridgeFile,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
@@ -385,6 +386,16 @@ const REPAIR_TOOL: Anthropic.Tool = {
     },
     required: ['description'],
   },
+}
+
+// ADMIN ONLY — pornește 3 agenți în paralel pentru diagnostic rapid (Adrian, 13 iul):
+// researcher citește jurnalele deploy, tester verifică live pe kelionai.app,
+// developer inspectează VPS-ul. Toți raportează cu dovezi concrete în maxim 2 minute.
+const DIAGNOSTIC_SPRINT_TOOL: Anthropic.Tool = {
+  name: 'run_diagnostic_sprint',
+  description:
+    "ADMIN ONLY. Use when Adrian asks you to run a FAST parallel diagnostic — e.g. 'pornește agenții', 'diagnostic rapid', 'ce s-a stricat', 'verifică deploy-ul'. Launches three specialist agents in parallel: researcher (Railway/GitHub Actions logs of recent failed deploys), tester (live check of kelionai.app: full-duplex voice and mouth animation), developer (VPS status: services, running code vs repo, LiveKit, kelion-voice). Returns a unified evidence report.",
+  input_schema: { type: 'object', properties: {} },
 }
 
 // ── Kelion's team of specialist agents ──────────────────────────────────────
@@ -2263,9 +2274,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // request_repair is offered ONLY to the admin AND only when his local
     // developer bridge is actually online — no point otherwise.
     const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
+    const DIAGNOSTIC_TOOLS = isAdmin ? [DIAGNOSTIC_SPRINT_TOOL] : []
     const tools: Anthropic.Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS, ...DIAGNOSTIC_TOOLS]
+      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -2935,6 +2947,18 @@ async function runTool(
     return jobId
       ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer (Claude Code). It will be worked on now.' })
       : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+  }
+  if (block.name === 'run_diagnostic_sprint') {
+    if (!isAdmin) return JSON.stringify({ error: 'forbidden' })
+    const report = await runDiagnosticSprint()
+    return JSON.stringify({
+      ok: true,
+      elapsed_seconds: (report.elapsedMs / 1000).toFixed(1),
+      researcher: report.researcher ?? '(fără răspuns în 2 minute)',
+      tester: report.tester ?? '(fără răspuns în 2 minute)',
+      developer: report.developer ?? '(fără răspuns în 2 minute)',
+      note: 'Cei trei agenți au fost porniți în paralel pe puntea de lucru. Raportul de mai sus conține dovezile aduse.',
+    })
   }
   if (block.name === 'play_avatar_gesture') {
     const inp = (block.input ?? {}) as { gesture?: string }
