@@ -813,6 +813,70 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
   }
 }
 
+// ── LIP-SYNC pentru pista LiveKit (full-duplex, pasul 4) ────────────────────
+// Vocea agentului în modul full-duplex NU vine prin `curVoice` (redarea HTTP),
+// ci printr-un <audio> separat atașat pistei LiveKit (lib/liveVoice.ts). Ca
+// GURA avatarului să se miște și acolo, măsurăm amplitudinea acelui element cu
+// propriul analizor și scriem în ACELAȘI `voiceLevel` pe care îl citește
+// avatarul. Mutual exclusiv în timp cu calea HTTP (când una redă, cealaltă e
+// oprită), deci nu se calcă. Bonus pur vizual: dacă eșuează, vocea rămâne
+// audibilă neschimbată. Întoarce o funcție de oprire (curăță RAF + rutare).
+let extAnalyser: AnalyserNode | null = null
+let extBuf: Uint8Array<ArrayBuffer> | null = null
+let extLevelSource: MediaElementAudioSourceNode | null = null
+let extLevelRaf = 0
+export function driveVoiceLevelFrom(audio: HTMLAudioElement): () => void {
+  const noop = (): void => {}
+  try {
+    const AC =
+      globalThis.AudioContext ??
+      (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return noop
+    if (!levelCtx) levelCtx = new AC()
+    if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
+    if (!extAnalyser) {
+      extAnalyser = levelCtx.createAnalyser()
+      extAnalyser.fftSize = 256
+      extAnalyser.smoothingTimeConstant = 0.5
+      extBuf = new Uint8Array(extAnalyser.frequencyBinCount)
+    }
+    const analyser = extAnalyser
+    const buf = extBuf
+    if (!buf) return noop
+    // createMediaElementSource poate fi apelat O SINGURĂ dată per element —
+    // elementul LiveKit e mereu nou, deci e sigur; rutăm prin analizor ȘI spre
+    // destinație ca sunetul să rămână audibil.
+    extLevelSource = levelCtx.createMediaElementSource(audio)
+    extLevelSource.connect(analyser)
+    extLevelSource.connect(levelCtx.destination)
+    const step = (): void => {
+      analyser.getByteTimeDomainData(buf)
+      let sum = 0
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128
+        sum += v * v
+      }
+      voiceLevel = Math.min(1, Math.sqrt(sum / buf.length) * 6)
+      extLevelRaf = requestAnimationFrame(step)
+    }
+    extLevelRaf = requestAnimationFrame(step)
+    return () => {
+      if (extLevelRaf) cancelAnimationFrame(extLevelRaf)
+      extLevelRaf = 0
+      voiceLevel = 0
+      try {
+        extLevelSource?.disconnect()
+      } catch {
+        /* deja deconectat */
+      }
+      extLevelSource = null
+    }
+  } catch {
+    // analiza a eșuat — vocea LiveKit rămâne audibilă, doar gura nu se mișcă
+    return noop
+  }
+}
+
 // Coadă de redare: creierul acum trimite vocea PE BUCĂȚI (frază cu frază, vezi
 // streamVoice/backend chat.ts) ca sinteza să nu mai aștepte tot răspunsul.
 // Bucata 2 poate sosi cât încă redă bucata 1 — aici NU se taie una pe alta, se

@@ -11,6 +11,7 @@
 // clară și nu atinge nimic din calea care merge acum.
 
 import type { RemoteTrack, RemoteTrackPublication, RemoteParticipant } from 'livekit-client'
+import { driveVoiceLevelFrom } from './audioIO'
 
 export type LiveVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
@@ -65,9 +66,17 @@ export async function startLiveVoice(opts: StartOpts = {}): Promise<LiveVoiceHan
 
   const room = new Room({ adaptiveStream: true, dynacast: true })
   const audioEls: HTMLAudioElement[] = []
+  // Opritorii de lip-sync (unul per pistă audio a agentului) — curățați la stop.
+  const lipStops: Array<() => void> = []
 
   room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, _p: RemoteParticipant) => {
-    if (track.kind === Track.Kind.Audio) audioEls.push(attachAudio(track))
+    if (track.kind === Track.Kind.Audio) {
+      const el = attachAudio(track)
+      audioEls.push(el)
+      // GURA avatarului pe vocea agentului (pasul 4): conduce voiceLevel din
+      // amplitudinea acestei piste. Bonus vizual — dacă pică, sunetul rămâne.
+      lipStops.push(driveVoiceLevelFrom(el))
+    }
   })
   room.on(RoomEvent.Disconnected, () => onState?.('closed'))
 
@@ -91,6 +100,14 @@ export async function startLiveVoice(opts: StartOpts = {}): Promise<LiveVoiceHan
 
   return {
     async stop() {
+      for (const s of lipStops) {
+        try {
+          s()
+        } catch {
+          /* best-effort */
+        }
+      }
+      lipStops.length = 0
       for (const el of audioEls) {
         try {
           el.pause()
