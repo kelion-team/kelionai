@@ -19,6 +19,7 @@ import {
   setPendingVoiceFeatures,
   type VoiceFeatures,
 } from './audioIO.js'
+import { reportAudioDiagnostic } from './errorReporting.js'
 
 const TARGET_RATE = 16000
 const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza (ordinul lui Adrian)
@@ -256,6 +257,42 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     }
   }
 
+  // RAPORTARE DIAGNOSTIC AUDIO — streaming (Adrian, 13 iul): trimite la backend
+  // nivel semnal, VOX threshold, filtru de zgomot și starea fluxului spre Google.
+  let lastAudioReport = 0
+  let lastAudioReportKey = ''
+  const sendAudioReport = (rms: number, voicedNow: boolean): void => {
+    const nowMs = Date.now()
+    if (nowMs - lastAudioReport < 500) return
+    featAnalyser.getFloatTimeDomainData(featTimeBuf)
+    const f0 = estimateF0(featTimeBuf, ctx.sampleRate)
+    featAnalyser.getFloatFrequencyData(featFreqBuf)
+    const centroid = estimateCentroid(featFreqBuf, ctx.sampleRate, featAnalyser.fftSize)
+    const key = `${rms.toFixed(4)}:${voicedNow}:${f0.toFixed(0)}`
+    if (key === lastAudioReportKey && !voicedNow) return
+    lastAudioReportKey = key
+    lastAudioReport = nowMs
+    reportAudioDiagnostic({
+      source: 'micStream',
+      rms,
+      noiseFloor,
+      voiceRms: VOICE_RMS,
+      dominanceThreshold: noiseFloor * DOMINANCE,
+      voxThreshold: Math.max(VOICE_RMS, noiseFloor * DOMINANCE),
+      isVoice: voicedNow,
+      voicedRun,
+      sendingAudio: lastVoiceAt > 0 && nowMs - lastVoiceAt <= TAIL_MS,
+      sentAudio,
+      gotAnyMsg,
+      f0: f0 > 0 ? f0 : null,
+      centroid: centroid > 0 ? centroid : null,
+      filterEcho: true,
+      filterNoise: true,
+      filterGain: true,
+      ts: nowMs,
+    })
+  }
+
   proc.onaudioprocess = (e: AudioProcessingEvent): void => {
     if (closed || muted || !ws || !wsReady || ws.readyState !== WebSocket.OPEN) return
     const input = e.inputBuffer.getChannelData(0)
@@ -267,6 +304,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     // reală = peste pragul absolut ȘI dominând podeaua de-atâtea ori. Fără asta
     // orice zgomot de fond > 0.012 curgea la Google (transcrieri fantomă).
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
+    sendAudioReport(rms, voiced)
     if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
     // Un poc scurt (1 cadru) nu deschide fluxul — cerem câteva cadre consecutive.
     voicedRun = voiced ? voicedRun + 1 : 0

@@ -108,6 +108,32 @@ export function reportError(type: ClientErrorReport['type'], message: string, st
   send(report)
 }
 
+const DIAG_URL = '/api/bridge/audio-diagnostic'
+const audioDiagQueue: Record<string, unknown>[] = []
+let audioDiagTimer: number | null = null
+let lastAudioDiag = 0
+
+export function reportAudioDiagnostic(payload: Record<string, unknown>): void {
+  audioDiagQueue.push(payload)
+  if (audioDiagTimer !== null) return
+  audioDiagTimer = window.setTimeout(() => {
+    audioDiagTimer = null
+    const now = Date.now()
+    if (now - lastAudioDiag < 500) return // max ~2 rapoarte/secundă per fereastră
+    const batch = audioDiagQueue.splice(0, audioDiagQueue.length)
+    if (batch.length === 0) return
+    // trimite ultimul raport din coadă (cel mai recent); restul sunt istoric redundat
+    const report = batch[batch.length - 1]
+    lastAudioDiag = now
+    void fetch(DIAG_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(report),
+      keepalive: true,
+    }).catch(() => {})
+  }, 250)
+}
+
 export function initErrorReporting(): void {
   if (typeof window === 'undefined') return
 

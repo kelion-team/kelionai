@@ -1784,6 +1784,55 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { errors: await listClientErrors(100) }
   })
 
+  // DIAGNOSTIC AUDIO MICROFON → VOICEPRINT (Adrian, 13 iul: „identifica de ce nu ma aude").
+  // Clientul trimite probe structurate din calea audio (nivel semnal, VOX threshold,
+  // voiceprint match, filtru de zgomot); backend le loghează ca dovadă reală în
+  // jurnalele Railway, unde pot fi citite la diagnostic live.
+  const audioDiagBuckets = new Map<string, number[]>()
+  function audioDiagRateLimited(ip: string): boolean {
+    const now = Date.now()
+    const windowMs = 60_000
+    const max = 60 // un raport pe secundă în medie e suficient
+    const bucket = audioDiagBuckets.get(ip) ?? []
+    const fresh = bucket.filter((t) => now - t < windowMs)
+    audioDiagBuckets.set(ip, fresh)
+    if (fresh.length >= max) return true
+    fresh.push(now)
+    return false
+  }
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/bridge/audio-diagnostic',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const ip = String(req.ip ?? 'unknown')
+      if (audioDiagRateLimited(ip)) return reply.code(429).send({ error: 'rate_limited' })
+      const b = req.body ?? {}
+      app.log.info(
+        {
+          user: user.email,
+          source: typeof b.source === 'string' ? b.source : 'unknown',
+          rms: typeof b.rms === 'number' ? Number(b.rms.toFixed(5)) : null,
+          noiseFloor: typeof b.noiseFloor === 'number' ? Number(b.noiseFloor.toFixed(5)) : null,
+          voxThreshold: typeof b.voxThreshold === 'number' ? Number(b.voxThreshold.toFixed(5)) : null,
+          isVoice: b.isVoice === true,
+          voicedRun: typeof b.voicedRun === 'number' ? b.voicedRun : null,
+          hasVoiceprint: b.hasVoiceprint === true,
+          voiceprintMatch: b.voiceprintMatch === true,
+          matchRatio: typeof b.matchRatio === 'number' ? Number(b.matchRatio.toFixed(2)) : null,
+          f0: typeof b.f0 === 'number' ? Number(b.f0.toFixed(1)) : null,
+          centroid: typeof b.centroid === 'number' ? Number(b.centroid.toFixed(1)) : null,
+          filterEcho: b.filterEcho === true,
+          filterNoise: b.filterNoise === true,
+          filterGain: b.filterGain === true,
+          ts: typeof b.ts === 'number' ? b.ts : Date.now(),
+        },
+        'audio-diagnostic: microfon → voiceprint',
+      )
+      return { ok: true }
+    },
+  )
+
   // TREPTELE DE ABONAMENT — SISTEM DE URMĂRIRE (12 iul, ordinul lui Adrian:
   // „sistem de urmărit când sunt repuse valorile noi, interogare când se
   // alocă prin cheie, revenire la ordinea prestabilită automat"). Worker-ii

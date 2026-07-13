@@ -1,4 +1,4 @@
-// AUDIO I/O — poarta către creier (Adrian, 4 iul). Aplicația NU sintetizează și
+import { reportAudioDiagnostic } from './errorReporting.js'
 // NU recunoaște nimic local: microfonul captează → trimite la server (STT), iar
 // vocea creierului vine gata sintetizată de pe server (Chirp 3) ca un cadru
 // {audio} pe punte și aici DOAR se decodează + se redă. Zero „voce în front".
@@ -577,13 +577,19 @@ export async function startMic(
   // blochează pornirea/oprirea. Start-recording și barge-in au ferestre separate
   // (context diferit: una decide dacă începe fraza, alta dacă se taie vocea lui
   // Kelion), ca istoricul uneia să nu contamineze decizia celeilalte.
-  const makeMatcher = (): (() => boolean) => {
+  const makeMatcher = (): { decide: () => boolean; ratio: () => number } => {
     const history: boolean[] = []
-    return () => {
-      history.push(matchesVoiceprintRaw())
-      if (history.length > MATCH_WINDOW_FRAMES) history.shift()
-      const matched = history.reduce((n, v) => n + (v ? 1 : 0), 0)
-      return matched / history.length >= MATCH_WINDOW_RATIO
+    return {
+      decide: () => {
+        history.push(matchesVoiceprintRaw())
+        if (history.length > MATCH_WINDOW_FRAMES) history.shift()
+        const matched = history.reduce((n, v) => n + (v ? 1 : 0), 0)
+        return matched / history.length >= MATCH_WINDOW_RATIO
+      },
+      ratio: () => {
+        if (history.length === 0) return 0
+        return history.reduce((n, v) => n + (v ? 1 : 0), 0) / history.length
+      },
     }
   }
   const matchesForStart = makeMatcher()
@@ -666,6 +672,47 @@ export async function startMic(
     })
   })
 
+  // RAPORTARE DIAGNOSTIC AUDIO (Adrian, 13 iul): trimite la backend nivel semnal,
+  // VOX threshold, voiceprint match și starea filtrelor de zgomot. Trimitem doar
+  // când se schimbă ceva semnificativ sau la maxim 2 rapoarte/secundă.
+  let lastAudioReport = 0
+  let lastAudioReportKey = ''
+  const sendAudioReport = (rms: number, isVoice: boolean, recordingNow: boolean, mutedNow: boolean): void => {
+    const now = Date.now()
+    if (now - lastAudioReport < 500) return
+    pitchAnalyser.getFloatTimeDomainData(pitchBuf)
+    const f0 = estimateF0(pitchBuf, ctx.sampleRate)
+    pitchAnalyser.getFloatFrequencyData(freqBuf)
+    const centroid = estimateCentroid(freqBuf, ctx.sampleRate, pitchAnalyser.fftSize)
+    const matchRatio = matchesForStart.ratio()
+    const key = `${rms.toFixed(4)}:${isVoice}:${recordingNow}:${mutedNow}:${matchRatio.toFixed(2)}:${f0.toFixed(0)}`
+    // sar peste cadre identice liniștite, dar păstrează cadrele cu voce ca să vedem
+    // tranziția exactă la pornirea înregistrării.
+    if (key === lastAudioReportKey && !isVoice) return
+    lastAudioReportKey = key
+    lastAudioReport = now
+    reportAudioDiagnostic({
+      source: 'audioIO',
+      rms,
+      noiseFloor,
+      startRms: START_RMS,
+      dominanceThreshold: noiseFloor * DOMINANCE,
+      voxThreshold: Math.max(START_RMS, noiseFloor * DOMINANCE),
+      isVoice,
+      recording: recordingNow,
+      muted: mutedNow,
+      hasVoiceprint: !!voiceprint,
+      voiceprintMatch: matchRatio >= MATCH_WINDOW_RATIO,
+      matchRatio,
+      f0: f0 > 0 ? f0 : null,
+      centroid: centroid > 0 ? centroid : null,
+      filterEcho: true,
+      filterNoise: true,
+      filterGain: true,
+      ts: now,
+    })
+  }
+
   const tick = (): void => {
     if (stopped) return
     analyser.getFloatTimeDomainData(buf)
@@ -684,7 +731,7 @@ export async function startMic(
     // preajmă (TV, alt om) ar putea întrerupe vocea lui Kelion, nu doar a lui Adrian.
     if (muted) {
       const pastGuard = performance.now() - mutedAt >= BARGE_GUARD_MS
-      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE && matchesForBargeIn()) {
+      if (pastGuard && rms > BARGE_RMS && rms > noiseFloor * DOMINANCE && matchesForBargeIn.decide()) {
         bargeMs += dt
         if (bargeMs >= BARGE_HOLD_MS) {
           bargeMs = 0
@@ -705,11 +752,12 @@ export async function startMic(
         silenceMs += dt
       }
       if (silenceMs >= SILENCE_MS || uttMs >= MAX_UTTER_MS) stopRec()
-    } else if (isVoice && matchesForStart()) {
+    } else if (isVoice && matchesForStart.decide()) {
       voicedMs = 0
       silenceMs = 0
       startRec()
     }
+    sendAudioReport(rms, isVoice, recording, muted)
     raf = requestAnimationFrame(tick)
   }
   raf = requestAnimationFrame(tick)
