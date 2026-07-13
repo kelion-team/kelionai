@@ -223,7 +223,16 @@ function pickBestModel(tierName, ids) {
     return glms[0] || null
   }
   if (tierName === 'kimi') {
-    return ids.find((id) => /coding/i.test(id)) || ids.find((id) => /^kimi/i.test(id)) || null
+    // MUNCA GREA = gândire profundă (Adrian, 13 iul): preferăm `kimi-for-coding`
+    // NORMAL, nu varianta `-highspeed` (aia e pentru chat/voce rapidă, în bridge).
+    // Deci alegem un model de cod care NU e highspeed; abia dacă nu există, cădem
+    // pe orice model de cod / orice kimi.
+    return (
+      ids.find((id) => /coding/i.test(id) && !/highspeed/i.test(id)) ||
+      ids.find((id) => /coding/i.test(id)) ||
+      ids.find((id) => /^kimi/i.test(id)) ||
+      null
+    )
   }
   return null
 }
