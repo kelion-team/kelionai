@@ -269,9 +269,16 @@ function saveJobFiles(job, isPublic = false) {
   }
   if (!paths.length) return ''
   log(`${paths.length} fisier(e) atasat(e) scrise pentru creier${isPublic ? ' (public)' : ''}.`)
-  return isPublic
-    ? `\n\nIMAGE ATTACHED — the visitor's camera frame. LOOK at it with your Read tool BEFORE answering:\n${paths.map((p) => `- ${p}`).join('\n')}\n`
-    : `\n\nFIȘIERE ATAȘATE de Adrian (citește-le/privește-le cu uneltele tale — Read — ÎNAINTE să răspunzi):\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+  // CAMERA = DOAR LA CREIER, niciodată narată (ordin Adrian, 13 iul: „ce vede
+  // merge la creier doar, nu iese în chat"). Cadrele sunt CONTEXT INTERN TĂCUT:
+  // creierul le citește în liniște, NU narează că se uită, NU scrie „Văd
+  // cadrele" sau „[READ] cale". Vorbește despre ce vede DOAR dacă (a) mesajul
+  // cere explicit vederea, ori (b) detectează o ALERTĂ reală (pericol/urgență)
+  // în cadre — atunci o anunță scurt. Altfel, cadrele rămân fundal tăcut.
+  const rule = isPublic
+    ? `\n\nCAMERA CONTEXT (silent — your eyes only): the frames below are the visitor's live camera. Read them SILENTLY with your Read tool to understand the scene, but NEVER narrate that you are looking, NEVER write "I see the frames", "looking at the frames", or "[READ] <path>". Answer the visitor's actual message. Mention what you see ONLY IF their message explicitly asks about it, OR IF you detect a genuine ALERT (danger, fall, emergency) in the frames — then state it briefly. Otherwise treat the frames as silent background and do not mention them.\nFRAMES:\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+    : `\n\nCONTEXT CAMERĂ/FIȘIERE (TĂCUT — doar pentru tine): cadrele/fișierele de mai jos sunt context intern. Citește-le ÎN LINIȘTE cu unealta Read ca să înțelegi scena — dar NICIODATĂ nu narra că te uiți, NU scrie „Văd cadrele", „mă uit la cadre" sau „[READ] cale". Răspunde la MESAJUL lui Adrian. Vorbește despre ce vezi DOAR dacă (a) mesajul lui cere explicit să te uiți/citești, ori (b) detectezi o ALERTĂ reală (pericol, cădere, urgență) în cadre — atunci anunț-o scurt. Altfel, tratează cadrele ca fundal tăcut și NU le pomeni.\nCADRE/FIȘIERE:\n${paths.map((p) => `- ${p}`).join('\n')}\n`
+  return rule
 }
 
 // ── ANULARE LA ABANDON ──────────────────────────────────────────────────────

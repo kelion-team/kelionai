@@ -1,5 +1,5 @@
 // FULL AUDIT of everything Kelion has. Run: railway run node scripts/audit.mjs
-// Tests every external dependency + Google API + Claude + voice. Google
+// Tests every external dependency + Google API + brain (Kimi/GLM) + voice. Google
 // user-data skills are tested at the API-enablement level (the live 200 needs
 // the user's own login, which a server probe can't hold).
 import { GoogleAuth } from 'google-auth-library'
@@ -34,8 +34,14 @@ await http('wikipedia_lookup', 'https://en.wikipedia.org/w/rest.php/v1/search/pa
 await http('convert_currency (er-api)', 'https://open.er-api.com/v6/latest/USD')
 await http('translate_text / search-fallback (Gemini text)', `https://generativelanguage.googleapis.com/v1beta/models/${GM}:generateContent`,
   { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GK }, body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }] }) })
-await http('brain (Claude / Anthropic)', 'https://api.anthropic.com/v1/messages',
-  { method: 'POST', headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'claude-opus-4-8', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }) })
+// CREIERUL = Kimi (primar) → GLM (rezerva). Furnizorul vechi a fost scos complet
+// (ordin Adrian). Endpoint-urile Kimi/GLM au acelasi format (x-api-key +
+// /v1/messages), deci verificam EXACT aceeasi functie (creierul raspunde) pe
+// furnizorul nou.
+await http('brain (Kimi — primar)', 'https://api.kimi.com/coding/v1/messages',
+  { method: 'POST', headers: { 'x-api-key': process.env.KIMI_API_KEY ?? process.env.KIMI_KEY ?? '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'kimi-for-coding', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }) })
+await http('brain (GLM — rezerva)', 'https://api.z.ai/api/anthropic/v1/messages',
+  { method: 'POST', headers: { 'x-api-key': process.env.GLM_API_KEY ?? process.env.GLM_KEY ?? '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'glm-4.6', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }) })
 try { const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Bucharest', hour: '2-digit', minute: '2-digit' }).format(new Date()); add('get_time (local Intl)', true, 'OK ' + t) }
 catch (e) { add('get_time', false, String(e).slice(0, 60)) }
 await http('/health (app)', 'https://kelionai.app/health')

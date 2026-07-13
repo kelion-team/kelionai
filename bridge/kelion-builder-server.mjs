@@ -705,6 +705,47 @@ async function build(order) {
     pushProgress(100, 'Spec neclar — aștept lămuriri')
     return
   }
+  // POARTĂ „DIFF REAL" (Adrian, 13 iul — audit „de ce nu execută"): dacă agentul
+  // de lucru N-A produs NICIO modificare de fișier pe un ordin de feature/fix,
+  // NU mai intra orbește în stagierea unui release inexistent — aia crăpa la
+  // commit cu „nothing to commit, working tree clean" și dădea „Commit eșuat"
+  // confuz (exact ce a picat la ordinul camerei). În loc de asta: reîncearcă O
+  // DATĂ cu instrucțiune strictă; dacă tot zero, escaladează CINSTIT la Adrian.
+  const isPublishOrderEarly = /^RELEASE APROBAT DE ADRIAN:/.test(order.text)
+  if (!v.changed && !isPublishOrderEarly) {
+    say('🟠 Agentul nu a produs nicio modificare (git diff gol) — reîncerc O DATĂ, strict.')
+    pushProgress(60, 'Reîncercare — zero diff')
+    const strictPrompt =
+      prompt +
+      '\n\nATENȚIE — încercarea anterioară a produs ZERO modificări de fișier (git diff gol). Ăsta e un EȘEC. ' +
+      'De data asta TREBUIE să folosești unealta Edit/MultiEdit și să modifici REAL fișierul cerut, ca `git diff --stat` ' +
+      'să fie NENUL. NU descrie schimbarea, NU spune că ai făcut-o — APLIC-O efectiv pe disc. La final verifică singur ' +
+      'cu `git diff --stat` că există modificări; dacă nu, mai încearcă până apar.'
+    let steps2 = 0
+    const res2 = await runClaudeLive(strictPrompt, (ev) => {
+      if (ev.type !== 'assistant') return
+      const blocks = ev.message?.content
+      if (!Array.isArray(blocks)) return
+      for (const b of blocks) {
+        if (b.type !== 'tool_use') continue
+        steps2++
+        say(toolLine(b))
+        pushProgress(Math.min(84, 62 + steps2 * 2), 'Reîncercare', toolFile(b) || '')
+      }
+    }, 86400000)
+    const v2 = await verifyWork()
+    if (!v2.changed) {
+      say('🛑 Nici la reîncercare agentul n-a modificat nimic — NU forțez un release gol (asta dădea „Commit eșuat").')
+      await tellAdmin(
+        `Ordinul „${order.text.replace(/\s+/g, ' ').slice(0, 90)}" NU s-a putut executa: treapta de lucru (Kimi/GLM) nu reușește să aplice editarea — ZERO diff după 2 încercări. Probabil e prea complex pentru model. Reformulează-l în pași mai mici și mai preciși, sau spune-mi să-l preiau eu direct.`,
+      )
+      pushProgress(100, 'Eșec onest: zero diff (agentul nu a editat)')
+      return
+    }
+    // Reîncercarea a produs modificări reale — continuăm cu ele.
+    say('✅ Reîncercarea a produs modificări reale — continui verificarea.')
+    Object.assign(v, v2)
+  }
   const sumMatch = res.out.match(/SUMAR:\s*(.+)/)
   const title = (sumMatch ? sumMatch[1] : order.text).slice(0, 180)
   // Verdictul pleacă lui Adrian CU dovada atașată — niciodată „gata" gol.
