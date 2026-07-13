@@ -35,7 +35,7 @@ export function asrConfigured(): boolean {
 }
 
 export type TranscribeResult =
-  | { ok: true; lang: string | null; transcript: string }
+  | { ok: true; lang: string | null; transcript: string; confidence: number | null }
   | { ok: false; status: number; error: string }
 
 export interface TranscribeOpts {
@@ -96,10 +96,19 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       return { ok: false, status: 502, error: `asr_failed:${res.status}` }
     }
     const j = (await res.json()) as {
-      results?: { languageCode?: string; alternatives?: { transcript?: string }[] }[]
+      results?: {
+        languageCode?: string
+        alternatives?: { transcript?: string; confidence?: number }[]
+      }[]
     }
     const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
-    return { ok: true, lang: r0?.languageCode ?? null, transcript: r0?.alternatives?.[0]?.transcript ?? '' }
+    const alt = r0?.alternatives?.[0]
+    return {
+      ok: true,
+      lang: r0?.languageCode ?? null,
+      transcript: alt?.transcript ?? '',
+      confidence: typeof alt?.confidence === 'number' ? alt.confidence : null,
+    }
   } catch {
     return { ok: false, status: 502, error: 'asr_failed' }
   }
