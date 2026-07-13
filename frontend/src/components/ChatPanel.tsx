@@ -752,13 +752,15 @@ export default function ChatPanel({
     const base = msg || (docBlock ? 'Am atașat un document — citește-l și spune-mi ce conține.' : t.imagePrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
     // ADMIN: every raw attachment (photo, arhivă, video, orice) rides the
-    // bridge to Claude alongside the text.
-    // + VEDEREA CONTINUĂ (Adrian, 11 iul): cu camera pornită, pleacă ULTIMELE
-    // 4 CADRE (≈ultima secundă la 4 fps), nu unul singur — Kelion vede
-    // mișcarea, nu o clipă înghețată. Pentru TOȚI userii (regula nr. 9):
-    // adminului îi merg pe punte ca files, publicului ca `images` (serverul
-    // le face fișiere de job în cutia publică).
-    const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-4) : []
+    // bridge to the brain alongside the text.
+    // + VEDEREA CONTINUĂ (Adrian, 11 iul → 13 iul: „să folosească tot din Kimi
+    // 2.7"): cu camera pornită pleacă ULTIMELE 8 CADRE (≈2s de mișcare la 4 fps),
+    // nu unul singur — creierul K2 (256k context, vedere multi-cadru) vede
+    // MIȘCAREA, nu o clipă înghețată. 8 e echilibrul cadre/latență; modelul ar
+    // duce zeci, dar mai multe cadre = mai multă latență pe tura de chat. Pentru
+    // TOȚI userii (regula nr. 9): adminului îi merg pe punte ca files, publicului
+    // ca `images` (serverul le face fișiere de job în cutia publică).
+    const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-8) : []
     const adminFiles = isAdmin
       ? [
           ...atts
@@ -1211,7 +1213,9 @@ export default function ChatPanel({
         latestFrameRef.current = f
         const b = frameBufRef.current
         b.push(f)
-        if (b.length > 4) b.shift()
+        // Reținem ULTIMELE 8 cadre (≈2s la 4 fps) — creierul K2 vede mișcarea pe
+        // o fereastră mai lungă (Adrian, 13 iul). Trimiterea ia `slice(-8)`.
+        if (b.length > 8) b.shift()
       }
     }
     const arm = (): void => {
