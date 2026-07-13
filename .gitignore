@@ -8,3 +8,4 @@ build/
 backend/dist/
 frontend/dist/
 desktop/src-tauri/target/
+*.tsbuildinfo
