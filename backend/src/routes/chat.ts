@@ -1288,7 +1288,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
       // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
       const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]|public|deploy|hai|bun|merge|gata)[\s.!]*$/i
-      if (getReadyDeploy() && affirm.test(lastUserText)) {
+      // Fraze complete de aprobare (ex. „Am spus da.") — nu doar cuvântul izolat.
+      const saidYes = /^\s*(?:eu\s+)?(?:(?:am\s+(?:spus|zis))|(?:spuneam|ziceam))\s+(ok(ay)?|da)\s*[.!]*\s*$/i
+      if (getReadyDeploy() && (affirm.test(lastUserText) || saidYes.test(lastUserText))) {
         const t = triggerDeploy()
         const msg = t
           ? 'Am zis să se publice — serverul dă drumul acum. Îți spun când e live.'
