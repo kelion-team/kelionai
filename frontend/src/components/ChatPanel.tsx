@@ -465,8 +465,8 @@ export default function ChatPanel({
     const daypart = h >= 5 && h < 12 ? 'Good morning' : h >= 12 && h < 18 ? 'Good afternoon' : 'Good evening'
     const id = window.setTimeout(() => {
       ack(
-        `${daypart}, and welcome — I'm Kelion, your personal assistant. ` +
-          `You have three free minutes with me: ask me anything, in any language.`,
+        `${daypart}. I'm Kelion, your personal assistant. ` +
+          `You have a few free minutes to ask me anything, in any language — take your time.`,
       )
     }, 1500)
     return () => window.clearTimeout(id)

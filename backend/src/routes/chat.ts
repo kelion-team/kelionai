@@ -1124,7 +1124,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           : gapMin >= 120
             ? `${Math.floor(gapMin / 60)} ore`
             : `${gapMin} minute`
-      systemPrompt += `\n\nSESSION CONTINUITY: your previous conversation with this user ended about ${gapText} ago (this is a REUNION, not a continuous thread). Greet/respond with natural continuity — you remember them and what you discussed — without reciting your memory unprompted.`
+      systemPrompt += `\n\nSESSION CONTINUITY: your previous conversation with this user ended about ${gapText} ago (this is a REUNION, not a continuous thread). Greet/respond with natural continuity — you remember them and what you discussed — without reciting your memory unprompted. In this resting/reunion context, keep the greeting gentle and warm: no energetic gym-style hello, no exclamation marks, no bright emoji. Use subtle variations and a calm, collected expression — like a gentleman quietly welcoming someone back.`
     }
 
     const params: Anthropic.MessageParam[] = messages.map((m) => ({
