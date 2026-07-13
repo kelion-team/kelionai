@@ -540,8 +540,9 @@ async function runIndependentVerifier(orderText, builderSummary, verificationRes
     `Misiunea ta:\n` +
     `1. Citește diff-ul complet (\`git diff\`) și fișierele modificate relevante.\n` +
     `2. Rulează încă o dată \`npm run build\` în backend/ și frontend/ și \`npm test\` în backend/ (confirmă sau infirmă rezultatele constructorului).\n` +
-    `3. Gândește-te la cazuri-limită: input-uri goale/null, erori, securitate, regresii, race conditions, side-effects.\n` +
-    `4. Dă un verdict structurat EXACT în formatul:\n\n` +
+    `3. VERIFICĂ REZULTATUL CERUT, nu doar că build trece (Adrian, 13 iul: „verificarea dacă s-au obținut rezultatele cerute"): extrage din sarcină OBIECTIVUL real cerut și, criteriu cu criteriu, confirmă că diff-ul îl ATINGE efectiv. „Build trece" NU e suficient — dacă schimbarea compilează dar NU produce rezultatul cerut (sau atinge alt fișier decât cel care guvernează comportamentul, ex. un fișier de test în loc de codul real), verdictul e PICĂ. Dacă diff-ul e gol sau irelevant față de obiectiv → PICĂ.\n` +
+    `4. Gândește-te la cazuri-limită: input-uri goale/null, erori, securitate, regresii, race conditions, side-effects.\n` +
+    `5. Dă un verdict structurat EXACT în formatul:\n\n` +
     `VERDICT: TRECE\n` +
     `sau\n` +
     `VERDICT: PICĂ\n\n` +
@@ -589,8 +590,21 @@ async function build(order) {
     `Esti constructorul Kelionai. Sarcina de la Adrian: "${order.text}". ` +
     `Editeaza codul in acest repo ca sa o rezolvi. Compileaza (npm run build in backend SI frontend) ` +
     `si ruleaza testele (npm test in backend) pana trec fara erori. ` +
-    `NU face deploy, NU rula railway. La final scrie pe o singura linie, ` +
-    `dupa "SUMAR:", ce ai schimbat.\n` +
+    `NU face deploy, NU rula railway.\n` +
+    // MODELUL DE ABORDARE SI EXECUTIE (Adrian, 13 iul: „ii trebuie un model
+    // performant de abordare si executie"): cei 4 pasi OBLIGATORII, in ordine.
+    // Fara ei, pe un ordin vag constructorul flaileaza (ex: bucla pe db.test.ts,
+    // 84% la infinit) — cauza reala vazuta live pe monitor.
+    `MODEL DE ABORDARE — 4 PASI OBLIGATORII, IN ORDINE:\n` +
+    `PAS 1 — CONSTRUIESTE SOLICITAREA (spec + criterii de acceptare). Inainte de ORICE editare, scrie pe scurt: ` +
+    `OBIECTIV = rezultatul concret si OBSERVABIL cerut (o propozitie). ` +
+    `ACCEPTARE = 1-3 conditii VERIFICABILE care dovedesc ca e gata (ex: „clipul de vorbit din AvatarModel.tsx e inlocuit cu unul calm, de gentleman"; „build backend+frontend trece"). ` +
+    `Din ordin extrage DOAR cererea reala — IGNORA balastul de context (rapoarte, conversatii, statusuri lipite in ordin). ` +
+    `Daca ordinul e vag/incoerent/administrativ si NU poti formula un OBIECTIV concret editabil, scrie pe o linie "SPEC_NECLAR: <ce lipseste ca sa pot lucra>" si OPRESTE-TE — NU edita fisiere la intamplare, mai ales NU fisiere de test/config/infrastructura.\n` +
+    `PAS 2 — ABORDEAZA (localizeaza + planifica). Gaseste fisierul EXACT care guverneaza comportamentul cerut (harta de mai jos + grep pe cuvintele-cheie din OBIECTIV). NU atinge fisiere de test (*.test.ts), config sau infrastructura daca cererea NU e despre ele. Planifica cea mai mica schimbare care satisface ACCEPTAREA.\n` +
+    `PAS 3 — EXECUTA. Editeaza fisierele REALE care produc rezultatul (REGULA ZERO de mai jos). Doar minimul care indeplineste ACCEPTAREA.\n` +
+    `PAS 4 — VERIFICA REZULTATUL, nu doar build-ul. Dupa editare: (a) build+test trec; (b) RE-CITESTE diff-ul si confirma, criteriu cu criteriu, ca OBIECTIVUL cerut e chiar ATINS (nu doar ca „a compilat"). Daca un criteriu NU e atins, reia PAS 2-3 cu ALT unghi — NU declara gata.\n` +
+    `La final, pe linii separate: "SUMAR: <ce ai schimbat>" si "ACCEPTARE: <fiecare criteriu -> INDEPLINIT sau NU, cu dovada>".\n` +
     // Problema centrala (Adrian, 12 iul: „Kelion spune ca face dar nu executa
     // nimic" / „el nu-l face deloc"): constructorul iesea „fara fisiere
     // modificate" — rationa/explora dar NU edita. Fortam executia reala.
@@ -660,6 +674,17 @@ async function build(order) {
   else say('🧪 Execuția s-a încheiat — verific EU dovada (diff + build-uri), nu cred pe cuvânt')
   pushProgress(88, 'Verificare cu dovadă')
   const v = await verifyWork()
+  // SPEC NECLAR (Adrian, 13 iul, PAS 1 din modelul de abordare): dacă ordinul
+  // a fost prea vag/administrativ ca să dea un obiectiv concret, constructorul
+  // scrie "SPEC_NECLAR: ..." și NU editează la întâmplare (asta oprește bucla
+  // pe db.test.ts). Îl ducem la Adrian ca CERERE DE LĂMURIRE, nu ca eșec de cod.
+  const specUnclear = res.out.match(/SPEC_NECLAR:\s*(.+)/)
+  if (specUnclear && !v.changed) {
+    say('🟡 Ordin neclar — cer lămuriri (nu editez la întâmplare)')
+    await tellAdmin(`Ordinul „${order.text.replace(/\s+/g, ' ').slice(0, 90)}" e prea vag ca să-l execut sigur. Ca să-l duc cap-coadă, am nevoie de: ${specUnclear[1].slice(0, 240)}`)
+    pushProgress(100, 'Spec neclar — aștept lămuriri')
+    return
+  }
   const sumMatch = res.out.match(/SUMAR:\s*(.+)/)
   const title = (sumMatch ? sumMatch[1] : order.text).slice(0, 180)
   // Verdictul pleacă lui Adrian CU dovada atașată — niciodată „gata" gol.
