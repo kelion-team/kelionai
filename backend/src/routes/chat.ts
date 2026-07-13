@@ -50,6 +50,8 @@ import {
   browserRead,
   browserBack,
   browserScroll,
+  browserKey,
+  browserClickAt,
   browserClose,
   crawlSite,
 } from '../services/browser.js'
@@ -336,6 +338,34 @@ const BROWSER_CLOSE_TOOL: Anthropic.Tool = {
   name: 'browser_close',
   description: 'Close the live browser and clear it from the monitor, when done browsing.',
   input_schema: { type: 'object', properties: {} },
+}
+const BROWSER_KEY_TOOL: Anthropic.Tool = {
+  name: 'browser_key',
+  description:
+    'Press a keyboard key or combo on the currently open browser page — for interactions a click/type cannot do: Tab/Shift+Tab to move between fields, Escape to close a popup, ArrowDown/ArrowUp to pick from a dropdown/autocomplete, Enter to submit, Control+A to select all. Use it when the page needs a real keystroke, not text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      key: {
+        type: 'string',
+        description: 'Playwright key name or combo, e.g. "Enter", "Tab", "Escape", "ArrowDown", "Control+A", "Shift+Tab".',
+      },
+    },
+    required: ['key'],
+  },
+}
+const BROWSER_CLICK_AT_TOOL: Anthropic.Tool = {
+  name: 'browser_click_at',
+  description:
+    'Click at pixel coordinates (x,y) in the browser viewport (1280×800), for elements the numbered list does not capture — a spot on a map, a canvas, a custom widget. Read the page screenshot first to judge where to click. Prefer browser_click by index when the target is in the numbered list.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      x: { type: 'number', description: 'X pixel (0–1280).' },
+      y: { type: 'number', description: 'Y pixel (0–800).' },
+    },
+    required: ['x', 'y'],
+  },
 }
 
 // ADMIN ONLY. When the owner asks to FIX, CHANGE or ADD something in the
@@ -660,7 +690,11 @@ an entire site page by page when asked to browse or survey/summarize it
 click into each relevant link, read again. Use browser_type(index, text, submit)
 to fill a search box or form field. Use browser_read to re-read the current page
 without navigating, browser_back to go back, browser_scroll to see more of a
-long page, and browser_close when you are done browsing. Prefer browser_open
+long page. For interactions a click/type can't do, use browser_key(key) to press
+a keystroke (Tab between fields, Escape to close a popup, ArrowDown to pick from
+an autocomplete, Enter to submit) and browser_click_at(x,y) to click a spot the
+numbered list didn't capture (a point on a map, a canvas) — look at the page
+screenshot first to judge where. Use browser_close when done browsing. Prefer browser_open
 over show_on_screen whenever the user wants to actually browse, read inside,
 search within, or click through a real website — show_on_screen only displays a
 static page and cannot click, type or read it back to you.
@@ -2222,6 +2256,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_READ_TOOL,
       BROWSER_BACK_TOOL,
       BROWSER_SCROLL_TOOL,
+      BROWSER_KEY_TOOL,
+      BROWSER_CLICK_AT_TOOL,
       BROWSER_CLOSE_TOOL,
     ]
     // request_repair is offered ONLY to the admin AND only when his local
@@ -2871,6 +2907,19 @@ async function runTool(
     const inp = (block.input ?? {}) as { direction?: string }
     const direction = inp.direction === 'up' ? 'up' : 'down'
     return browserToolResult(reply, await browserScroll(email, baseUrl, direction))
+  }
+  if (block.name === 'browser_key') {
+    const inp = (block.input ?? {}) as { key?: string }
+    const key = typeof inp.key === 'string' ? inp.key.trim() : ''
+    if (!key) return JSON.stringify({ error: 'empty_key' })
+    return browserToolResult(reply, await browserKey(email, baseUrl, key))
+  }
+  if (block.name === 'browser_click_at') {
+    const inp = (block.input ?? {}) as { x?: number; y?: number }
+    const x = Number(inp.x)
+    const y = Number(inp.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return JSON.stringify({ error: 'bad_coords' })
+    return browserToolResult(reply, await browserClickAt(email, baseUrl, x, y))
   }
   if (block.name === 'browser_close') {
     await browserClose(email)

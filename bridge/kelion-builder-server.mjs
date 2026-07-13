@@ -285,7 +285,7 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
       // o gaură reală: promptul îi spune modelului „caută cu grep/glob" înainte
       // să editeze, dar acele unelte NU erau permise → blocate în headless →
       // constructorul ieșea „fără fișiere". Acum are ce-i trebuie ca să editeze.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch',
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch,Task',
       // DREPT EFECTIV DE EDITARE (Adrian: „nu au drepturi de editare, dă-le ce
       // ți-am cerut"): a permite uneltele în listă NU e același lucru cu dreptul
       // de a scrie pe disc. În headless, poarta de permisiuni blochează Edit/
@@ -342,6 +342,7 @@ function toolLine(t) {
     case 'Bash': return `💻 Rulez: ${String(i.description || i.command || '').replace(/\s+/g, ' ').slice(0, 70)}`
     case 'Grep':
     case 'Glob': return `🔍 Caut în cod: ${String(i.pattern || '').slice(0, 50)}`
+    case 'Task': return `👥 Sub-agent paralel: ${String(i.description || i.prompt || '').replace(/\s+/g, ' ').slice(0, 60)}`
     default: return `🛠️ ${t.name}`
   }
 }
@@ -488,7 +489,7 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
       // setul de unelte, ca să poată nu doar citi/verifica, ci și edita/repara
       // ce găsește. Ambele modele (Kimi + GLM) au acum ambele atribute: și
       // editare (poarta de muncă), și verificare (poarta asta) — complet.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch',
+      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch,Task',
       // DREPT EFECTIV DE EDITARE și la verificare — acceptEdits, ca verificatorul
       // să poată repara ce găsește, nu doar să raporteze.
       '--permission-mode', 'acceptEdits',
@@ -623,6 +624,7 @@ async function build(order) {
     `- TodoWrite: DOAR daca sarcina are mai multi pasi/sub-schimbari — la PAS 1 transformi criteriile de ACCEPTARE intr-o lista bifabila si le bifezi pe masura. Pentru o schimbare simpla (un fisier, un criteriu) NU o folosi, e balast.\n` +
     `- WebFetch: DOAR cand ai o ADRESA concreta de citit (pagina de documentatie, referinta de eroare, API de librarie) si ai nevoie de continutul ei — nu pentru navigare la intamplare.\n` +
     `- WebSearch: DOAR cand dai de o eroare/necunoscuta si NU stii adresa (cauti mesajul de eroare sau „cum se face X"). Daca pe treapta curenta nu e disponibila, cazi pe Bash+curl sau pe ce stii — NU bloca munca pentru asta.\n` +
+    `- Task (sub-agenti PARALELI): DOAR cand ai mai multe bucati de munca INDEPENDENTE care nu depind una de alta si le poti da in acelasi timp — ex. cauti aceeasi problema in 3 module diferite, sau verifici acelasi lucru din 2 unghiuri. Le pornesti PE TOATE intr-un singur mesaj (mai multe Task-uri) ca sa ruleze concomitent, apoi aduni rezultatele. NU o folosi pentru pasi care depind secvential (localizezi -> editezi -> verifici acelasi fisier) — acolo lucrezi tu direct. NU o folosi pentru o schimbare simpla intr-un singur fisier, e balast.\n` +
     // Problema centrala (Adrian, 12 iul: „Kelion spune ca face dar nu executa
     // nimic" / „el nu-l face deloc"): constructorul iesea „fara fisiere
     // modificate" — rationa/explora dar NU edita. Fortam executia reala.

@@ -2060,6 +2060,10 @@ body {
   border-color: #d9534f;
   color: #e88;
 }
+/* Cuvânt de trezire armat: verde discret + punctul care pulsează (ca la cameră). */
+.fn-item.wake-armed {
+  color: #35c46a;
+}
 .fn-item .dot {
   margin-left: auto;
   width: 8px;
