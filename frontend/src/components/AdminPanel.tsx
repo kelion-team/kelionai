@@ -175,6 +175,7 @@ export default function AdminPanel({
   const [stores, setStores] = useState<StoresData | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [finalizing, setFinalizing] = useState(false)
+  const [finalizeNotice, setFinalizeNotice] = useState<string | null>(null)
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
@@ -188,11 +189,15 @@ export default function AdminPanel({
   async function handleFinalizeAll(): Promise<void> {
     if (finalizing) return
     setFinalizing(true)
+    setFinalizeNotice(null)
     const count = await finalizeAllWorkOrders()
     setFinalizing(false)
-    if (count > 0) {
-      void fetchWorkOrders().then(setOrders)
-    }
+    void fetchWorkOrders().then(setOrders)
+    setFinalizeNotice(
+      count > 0
+        ? `✓ ${count} joburi închise administrativ.`
+        : 'Niciun job de închis — toate sunt deja terminale sau lista e goală.',
+    )
   }
   // The conversation of a clicked TRIAL visitor — what interested them, and in
   // what language they wrote / Kelion answered.
@@ -894,6 +899,7 @@ export default function AdminPanel({
                 >
                   {finalizing ? 'Se finalizează…' : 'Finalizează toate'}
                 </button>
+                {finalizeNotice && <span className="chat-hint">{finalizeNotice}</span>}
               </div>
               {orders.filter((o) => !JOB_DONE.has(o.status)).length === 0 && (
                 <div className="chat-hint">Niciun job în lucru acum.</div>

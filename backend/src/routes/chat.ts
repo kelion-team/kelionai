@@ -32,6 +32,7 @@ import {
   getVoiceprint,
   saveVoiceprint,
   vectorDistance,
+  finalizeAllWorkOrders,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { claudeCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -315,6 +316,25 @@ const REPAIR_TOOL: Anthropic.Tool = {
       },
     },
     required: ['description'],
+  },
+}
+
+// ADMIN ONLY. Closes all open work orders administratively in one action when
+// the owner asks to finalize every job (e.g. "scoateți să finalizeze toate
+// joburile"). Nothing is deleted; non-terminal orders are marked finalized.
+const FINALIZE_ALL_JOBS_TOOL: Anthropic.Tool = {
+  name: 'finalize_all_jobs',
+  description:
+    "ADMIN ONLY. Use ONLY when Adrian (the owner) asks to finalize/close all open work orders at once, e.g. phrases like 'scoateți să finalizeze toate joburile', 'închide toate joburile', 'finalizează tot'. Marks every non-terminal work order as finalized administratively; no work order is deleted. Report the count of closed jobs to the user.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        description: "Optional short reason for the administrative close (defaults to 'owner request').",
+      },
+    },
+    required: [],
   },
 }
 
@@ -2138,11 +2158,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_SCROLL_TOOL,
       BROWSER_CLOSE_TOOL,
     ]
-    // request_repair is offered ONLY to the admin AND only when his local
-    // developer bridge is actually online — no point otherwise.
-    const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
+    // request_repair and finalize_all_jobs are offered ONLY to the admin AND only
+    // when his local developer bridge is actually online — no point otherwise.
+    const ADMIN_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL, FINALIZE_ALL_JOBS_TOOL] : []
     const tools: Anthropic.Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...ADMIN_TOOLS]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, PLAY_AVATAR_GESTURE_TOOL, DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -2800,6 +2820,14 @@ async function runTool(
     return jobId
       ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer (Claude Code). It will be worked on now.' })
       : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+  }
+  if (block.name === 'finalize_all_jobs') {
+    if (!isAdmin) return JSON.stringify({ error: 'forbidden' })
+    const count = await finalizeAllWorkOrders()
+    return JSON.stringify({
+      finalized: count,
+      note: count === 0 ? 'Niciun job de închis — toate sunt deja terminale sau lista e goală.' : `${count} joburi închise administrativ.`,
+    })
   }
   if (block.name === 'play_avatar_gesture') {
     const inp = (block.input ?? {}) as { gesture?: string }
