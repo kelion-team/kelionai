@@ -37,7 +37,7 @@ export interface MicStreamOpts {
   // fraza curentă, LIVE (finaluri validate + parțialul în curs) — pentru bandă
   onLive: (text: string) => void
   // fraza întreagă, la pauză > 3s → se trimite creierului
-  onPhrase: (text: string) => void
+  onPhrase: (text: string, confidence?: number) => void
   onError: (reason: string) => void
   getLang: () => string
   // s-a auzit voce cât Kelion vorbea → barge-in (taie vocea lui Kelion)
@@ -193,9 +193,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       clearTimeout(phraseTimer)
       phraseTimer = null
     }
-    // Dacă Google n-a dat „final" în 3s, folosește ultimul parțial — altfel o
-    // frază scurtă/de coadă se pierdea complet (bug audit 10 iul).
-    const text = (phraseFinal || lastPartial).trim()
+    // Fallback: dacă Google n-a dat niciun „final", folosește ultimul parțial —
+    // altfel o frază scurtă/de coadă se pierdea complet (bug audit 10 iul).
+    // Finalurile validate au plecat deja spre coalescer pe parcurs.
+    const text = phraseFinal ? '' : lastPartial.trim()
     phraseFinal = ''
     lastPartial = ''
     opts.onLive('') // golește MEREU banda la sfârșit de frază (nu rămâne agățat)
@@ -228,7 +229,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
         clearTimeout(silentTimer)
         silentTimer = null
       }
-      let m: { type?: string; transcript?: string }
+      let m: { type?: string; transcript?: string; confidence?: number }
       try {
         m = JSON.parse(String(ev.data))
       } catch {
@@ -243,6 +244,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       } else if (m.type === 'final' && typeof m.transcript === 'string') {
         phraseFinal = `${phraseFinal} ${m.transcript}`.trim()
         opts.onLive(phraseFinal)
+        // Trimitem fiecare bucată finalizată spre coalescer, nu așteptăm pauza
+        // de 3s — astfel pauzele de respirație/gândire nu mai taie fraza în
+        // bucăți disparate trimise separat creierului.
+        opts.onPhrase(m.transcript, typeof m.confidence === 'number' ? m.confidence : undefined)
         armPhraseTimer()
       } else if (m.type === 'speech_begin') {
         if (muted) opts.onBargeIn?.()

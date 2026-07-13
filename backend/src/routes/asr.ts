@@ -29,6 +29,6 @@ export async function asrRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(r.status).send({ error: r.error.split(':')[0] })
     }
     void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
-    return reply.send({ lang: r.lang, transcript: r.transcript })
+    return reply.send({ lang: r.lang, transcript: r.transcript, confidence: r.confidence })
   })
 }

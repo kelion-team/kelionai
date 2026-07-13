@@ -392,7 +392,7 @@ export async function calibrateVoiceprint(ms = 3000): Promise<boolean> {
 }
 
 export async function startMic(
-  onTranscript: (text: string) => void,
+  onTranscript: (text: string, confidence?: number) => void,
   onError: (reason: string) => void,
   getLang: () => string,
   // chemat când se aude vocea lui Adrian CÂT microfonul e mut (Kelion vorbește):
@@ -480,9 +480,9 @@ export async function startMic(
         body: JSON.stringify({ audio: b64, lang: getLang() }),
       })
       if (!r.ok) return
-      const j = (await r.json()) as { transcript?: string }
+      const j = (await r.json()) as { transcript?: string; confidence?: number }
       const text = (j.transcript ?? '').trim()
-      if (text) onTranscript(text)
+      if (text) onTranscript(text, typeof j.confidence === 'number' ? j.confidence : undefined)
     } catch {
       /* o frază pierdută nu oprește microfonul */
     }

@@ -1,7 +1,8 @@
 // COALESCER INTELIGENT DE FRAZĂ — leagă bucățile transcrise de voce într-un
 // singur gând, fără să trimită la creier fragmente ciuntite, scurte sau fără sens.
 //
-// Folosit în două căi: streaming WS (micStream.ts) și batch (audioIO.ts).
+// Folosit de front în două căi: streaming WS (micStream.ts) și batch (audioIO.ts).
+// Logica pură (fără timer) e exportată pentru teste.
 
 export interface UtteranceFragment {
   text: string
@@ -171,11 +172,11 @@ export function createUtteranceCoalescer(
   } = options
 
   let buffer: UtteranceFragment[] = []
-  let timer: number | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
 
   const clearTimer = (): void => {
     if (timer !== null) {
-      window.clearTimeout(timer)
+      clearTimeout(timer)
       timer = null
     }
   }
@@ -202,7 +203,7 @@ export function createUtteranceCoalescer(
       if (!shouldAcceptFragment(parsed, minConfidence, minWords, minChars)) return
       buffer.push(parsed)
       clearTimer()
-      timer = window.setTimeout(flush, windowMs)
+      timer = setTimeout(flush, windowMs)
     },
     flushNow() {
       flush()

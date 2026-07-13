@@ -41,7 +41,11 @@ import {
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startLiveVoice, type LiveVoiceHandle } from '../lib/liveVoice'
-import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
+import {
+  createUtteranceCoalescer,
+  type UtteranceCoalescer,
+  type CoalescedUtterance,
+} from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
@@ -146,8 +150,9 @@ export default function ChatPanel({
   const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
-  // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
-  // (re)pornire a microfonului — vezi ensureMic mai jos.
+  // într-un singur gând, înainte de a-l trimite creierului. Filtru de confidență,
+  // respinge fragmente scurte/fără sens, și fallback de confirmare la ambiguitate.
+  // Refăcut la fiecare (re)pornire a microfonului — vezi ensureMic mai jos.
   const coalescerRef = useRef<UtteranceCoalescer | null>(null)
   // Amprenta vocală (voiceprint) — restrânge microfonul permanent la vocea lui
   // Adrian. Fără punct de UI, hasVoiceprint() rămâne mereu false: butonul de
@@ -225,6 +230,9 @@ export default function ChatPanel({
   // the browser regains connectivity. retryTextRef holds the message to re-send.
   const offlineRef = useRef(false)
   const retryTextRef = useRef<string | null>(null)
+  // Pending voice confirmation: when the coalescer is unsure, it asks the user
+  // to confirm the heard text; the next spoken reply is interpreted as yes/no.
+  const pendingConfirmationRef = useRef<string | null>(null)
   const cameraOnRef = useRef(cameraOn)
   cameraOnRef.current = cameraOn
   const speechLangRef = useRef(speechLang)
@@ -868,6 +876,42 @@ export default function ChatPanel({
     micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
   }
 
+  // Fallback de confirmare: când mesajul e ambiguu, Kelion întreabă înainte
+  // să-l trimită creierului. Răspunsul următor (da/nu) e interpretat local.
+  function handleYesNo(text: string): void {
+    const ro = speechLangRef.current.toLowerCase().startsWith('ro')
+    const lower = text.toLowerCase().trim()
+    const yes = /^\s*(da|yes|yep|yeah|bine|corect|așa e|asa e|exact|perfect|ok)\b/i.test(lower)
+    const no = /^\s*(nu|no|nope|greșit|gresit|altceva|anulează|anuleaza)\b/i.test(lower)
+    const pending = pendingConfirmationRef.current
+    pendingConfirmationRef.current = null
+    if (!pending) return
+    if (no) {
+      ack(ro ? 'Am anulat.' : 'Cancelled.')
+    } else if (yes) {
+      void sendRef.current(pending)
+    } else {
+      // Răspuns neclar: anulăm confirmarea și trimitem ce-a spus ca mesaj nou.
+      void sendRef.current(text)
+    }
+  }
+
+  function handleCoalesced(result: CoalescedUtterance): void {
+    setLiveVoice('')
+    const ro = speechLangRef.current.toLowerCase().startsWith('ro')
+    if (pendingConfirmationRef.current) {
+      // Suntem în mijlocul unei confirmări: interpretăm direct răspunsul.
+      handleYesNo(result.text)
+      return
+    }
+    if (result.needsConfirmation) {
+      pendingConfirmationRef.current = result.text
+      ack(ro ? `Am auzit: „${result.text}”. Așa este?` : `I heard: "${result.text}". Is that right?`)
+      return
+    }
+    void sendRef.current(result.text)
+  }
+
   async function ensureMic(): Promise<void> {
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
     if (micRetryRef.current) {
@@ -886,12 +930,16 @@ export default function ChatPanel({
       // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
       // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
       // pe calea batch dovedită — vocea nu se rupe niciodată.
+      coalescerRef.current = createUtteranceCoalescer(handleCoalesced, { windowMs: 1500 })
       if (streamModeRef.current) {
         const sh = await startMicStream({
           onLive: (t) => setLiveVoice(t),
-          onPhrase: (t) => {
-            setLiveVoice('')
-            void sendRef.current(t)
+          onPhrase: (t, confidence) => {
+            if (pendingConfirmationRef.current) {
+              handleYesNo(t)
+              return
+            }
+            coalescerRef.current?.push({ text: t, confidence })
           },
           onError: (reason) => {
             if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
@@ -929,9 +977,15 @@ export default function ChatPanel({
       }
 
       // ── BATCH (dovedit): înregistrează fraza, o transcrie la /api/asr. ──
-      coalescerRef.current = createUtteranceCoalescer((text) => void sendRef.current(text))
+      coalescerRef.current = createUtteranceCoalescer(handleCoalesced, { windowMs: 1500 })
       const h = await startMic(
-        (text) => coalescerRef.current?.push(text),
+        (text, confidence) => {
+          if (pendingConfirmationRef.current) {
+            handleYesNo(text)
+            return
+          }
+          coalescerRef.current?.push({ text, confidence })
+        },
         onMicErr,
         () => speechLangRef.current,
         // BARGE-IN (ordinul lui Adrian): când i se aude vocea peste Kelion,

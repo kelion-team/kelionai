@@ -115,7 +115,8 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
           const transcript = r.alternatives?.[0]?.transcript ?? ''
           if (!transcript) continue
           if (r.isFinal) {
-            send({ type: 'final', transcript, lang: r.languageCode ?? null })
+            const confidence = typeof r.alternatives?.[0]?.confidence === 'number' ? r.alternatives[0].confidence : undefined
+            send({ type: 'final', transcript, confidence, lang: r.languageCode ?? null })
             void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
           } else {
             send({ type: 'partial', transcript })
