@@ -151,15 +151,56 @@ function rms(int16) {
   return Math.sqrt(s / Math.max(1, int16.length))
 }
 
-// TTS LINEAR16 vine ca WAV (antet RIFF). Sărim peste antet până la sub-chunk-ul
-// „data" și întoarcem PCM-ul brut ca Int16Array (LE, cum îl vrea AudioFrame).
+// TTS LINEAR16 vine ca WAV (antet RIFF). Citim sample-rate-ul și canalele REALE
+// din antet (nu presupunem 48k), apoi întoarcem PCM-ul brut ca Int16Array. Dacă
+// Google întoarce alt rate decât am cerut (ex. 24k), asta îl prinde — altfel l-am
+// reda la 48k și ar suna accelerat/distorsionat („sunet ciudat" la vorbire).
 function pcmFromWav(buf) {
-  let off = 44 // antet WAV standard
+  // Antet WAV: `fmt ` @12, canale @22 (u16 LE), sampleRate @24 (u32 LE).
+  let rate = SAMPLE_RATE
+  let channels = CHANNELS
+  const fmt = buf.indexOf('fmt ', 12, 'ascii')
+  if (fmt !== -1 && fmt + 16 <= buf.length) {
+    channels = buf.readUInt16LE(fmt + 10) || CHANNELS
+    rate = buf.readUInt32LE(fmt + 12) || SAMPLE_RATE
+  }
+  let off = 44 // implicit dacă nu găsim sub-chunk-ul „data"
   const idx = buf.indexOf('data', 12, 'ascii')
   if (idx !== -1) off = idx + 8
-  if (off % 2) off++ // aliniere Int16
   const len = (buf.length - off) >> 1
-  return new Int16Array(buf.buffer, buf.byteOffset + off, len)
+  // Copiem într-un Int16Array PROPRIU (aliniat) — buf.byteOffset poate fi impar
+  // (Buffer.from din pool), ceea ce ar arunca RangeError la view direct.
+  const pcm = new Int16Array(len)
+  for (let i = 0; i < len; i++) pcm[i] = buf.readInt16LE(off + i * 2)
+  return { pcm, rate, channels }
+}
+
+// Aduce PCM-ul la 48k mono (rata + canalele AudioSource-ului permanent). Downmix
+// stereo→mono prin medie, apoi reeșantionare liniară. No-op dacă e deja 48k mono.
+function toMono48k(pcm, rate, channels) {
+  let mono = pcm
+  if (channels > 1) {
+    const frames = Math.floor(pcm.length / channels)
+    mono = new Int16Array(frames)
+    for (let i = 0; i < frames; i++) {
+      let s = 0
+      for (let c = 0; c < channels; c++) s += pcm[i * channels + c]
+      mono[i] = (s / channels) | 0
+    }
+  }
+  if (rate === SAMPLE_RATE) return mono
+  const ratio = SAMPLE_RATE / rate
+  const outLen = Math.floor(mono.length * ratio)
+  const out = new Int16Array(outLen)
+  for (let i = 0; i < outLen; i++) {
+    const src = i / ratio
+    const j = Math.floor(src)
+    const frac = src - j
+    const a = mono[j] ?? 0
+    const b = mono[j + 1] ?? a
+    out[i] = (a + (b - a) * frac) | 0
+  }
+  return out
 }
 
 // O tură completă la backend: PCM brut → { transcript, reply, wav }.
@@ -226,8 +267,9 @@ async function handleUtterance(state, myTurn, pcm) {
     return
   }
   const wavBuf = Buffer.from(res.wav, 'base64')
-  const pcmOut = pcmFromWav(wavBuf)
-  log(`redau: wav ${wavBuf.length}o → ${pcmOut.length} sample-uri @${res.sampleRate || SAMPLE_RATE}Hz`)
+  const wav = pcmFromWav(wavBuf)
+  const pcmOut = toMono48k(wav.pcm, wav.rate, wav.channels)
+  log(`redau: wav ${wavBuf.length}o @${wav.rate}Hz×${wav.channels}c → ${pcmOut.length} sample-uri @${SAMPLE_RATE}Hz`)
   try {
     await playPcm(state, myTurn, pcmOut)
     log('redare terminată')

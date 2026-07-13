@@ -1008,22 +1008,29 @@ export default function ChatPanel({
   // cade GRAȚIOS pe calea HTTP care merge deja — nimic nu se strică.
   useEffect(() => {
     if (!isAdmin) return
+    // CANALE SEPARATE (Adrian, 13 iul: „să meargă pe canale diferite"). BUG-ul
+    // bâzâitului: „Permanent hearing" pornea microfonul HTTP, iar LiveKit apuca
+    // ACELAȘI device în fereastra de conectare → DOUĂ capturi + ecoul vocii
+    // agentului = bâzâit continuu. Fix: oprim calea HTTP ÎNAINTE ca LiveKit să
+    // apuce microfonul — full-duplex = UN SINGUR canal curat. `micManualOffRef`
+    // pus SINCRON aici oprește și un ensureMic pornit de „Permanent hearing"
+    // (verifică flag-ul după await și nu mai instalează).
+    micManualOffRef.current = true
+    micRef.current?.stop()
+    micRef.current = null
     let handle: LiveVoiceHandle | null = null
     let cancelled = false
+    const backToHttp = (): void => {
+      micManualOffRef.current = false
+      void ensureMicRef.current()
+    }
     void (async () => {
       try {
         handle = await startLiveVoice({
           onState: (s) => {
-            if (s === 'live') {
-              // full-duplex activ → o SINGURĂ cale de voce: oprim microfonul HTTP
-              micManualOffRef.current = true
-              micRef.current?.stop()
-              micRef.current = null
-            } else if (s === 'error' || s === 'closed') {
-              // full-duplex indisponibil → revenim pe calea HTTP care funcționează
-              micManualOffRef.current = false
-              void ensureMicRef.current()
-            }
+            // HTTP e deja oprit dinainte; pe 'live' nu mai atingem nimic.
+            // Doar dacă LiveKit pică revenim GRAȚIOS pe calea HTTP.
+            if (s === 'error' || s === 'closed') backToHttp()
           },
         })
         if (cancelled) {
@@ -1031,15 +1038,15 @@ export default function ChatPanel({
           handle = null
         }
       } catch {
-        // token/conexiune eșuată → rămâne calea HTTP (deja pornită), fără crash
-        micManualOffRef.current = false
+        // token/conexiune eșuată → revenim pe calea HTTP care merge
+        backToHttp()
       }
     })()
     return () => {
       cancelled = true
       void handle?.stop()
       handle = null
-      micManualOffRef.current = false
+      backToHttp() // la demontare, revine microfonul HTTP
     }
   }, [isAdmin])
 
