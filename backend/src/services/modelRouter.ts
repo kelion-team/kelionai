@@ -18,8 +18,14 @@
 // Adrian, 13 iul: „vreau Kimi 2.7" — modelul K2 Thinking (id API `kimi-k2-thinking`,
 // verificat live că endpointul îl acceptă). Era `kimi-for-coding`. Configurabil din
 // Railway prin KELION_FAST_MODEL dacă vrei alt snapshot (ex. kimi-k2-0905-preview).
-export const MODEL_FAST = process.env.KELION_FAST_MODEL || 'kimi-k2-thinking'
-export const MODEL_TOP = process.env.KELION_TOP_MODEL || 'glm-4.6'
+// FORȚAT Kimi 2.7 (Adrian, 14 iul: „creierul trebuie forțat kimi2.7"). Hardcodat —
+// FĂRĂ env override (un `KELION_FAST_MODEL` vechi în Railway l-ar fi putut coborî pe
+// tăcute). Verificat LIVE că endpointul Kimi servește `kimi-k2-thinking` (200,
+// echo „model":"kimi-k2-thinking"), chiar dacă /v1/models listează doar kimi-for-coding.
+export const MODEL_FAST = 'kimi-k2-thinking'
+// GLM rezervă = TOPUL (Adrian: „la GLM tot cel mai performant e necesar adminului").
+// glm-5.2 = cel mai nou din /v1/models (verificat LIVE 200, „model":"glm-5.2", 14 iul).
+export const MODEL_TOP = 'glm-5.2'
 
 export interface ModelRung {
   id: string

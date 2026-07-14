@@ -87,7 +87,7 @@ async function blockReleasesForBadToken() {
 // `glm-4.6`. Cheile: fișiere pe VPS, puse prin vps-keys.yml. AVARIE: fără NICIO
 // cheie pe disc, cade pe Max cu anunț tare în jurnal (mai bine reparații pe Max
 // decât reparații moarte) — dar cu cheile puse, Max nu e atins de muncă.
-const GLM_MODEL = 'glm-4.6'
+const GLM_MODEL = 'glm-5.2' // TOPUL GLM (verificat live 200, 14 iul); resolveTierModel poate urca mai sus automat
 const WORK_TIERS = [
   {
     name: 'kimi',
@@ -247,7 +247,7 @@ function run(cmd, args, opts = {}) {
 // modelul claude cerut.
 const MODEL_CACHE = Object.create(null) // tierName -> { model, at }
 const MODEL_TTL_MS = 6 * 60 * 60 * 1000
-const MODEL_FALLBACK = { glm: 'glm-4.6', kimi: 'kimi-k2-thinking' }
+const MODEL_FALLBACK = { glm: 'glm-5.2', kimi: 'kimi-k2-thinking' }
 function verNum(id) {
   const m = String(id).match(/(\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : 0
