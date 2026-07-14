@@ -83,6 +83,38 @@ const checks = [
     if (!c.text || c.text.trim().length < 1) return fail('chatul a răspuns GOL (creierul nu produce text)')
     return ok(`răspuns ${c.text.trim().length} car.`)
   } },
+  { name: 'face-models', desc: 'modelele de recunoaștere facială se servesc din /models (fața e chiar deployată)', run: async () => {
+    // FUNCȚIONAL, nu doar reachability: dacă un deploy pierde modelele, fața nu
+    // poate rula deloc — ăsta e semnalul „funcție lipsă" pe care altfel nimeni nu-l vede.
+    const m = await http('/models/tiny_face_detector_model-weights_manifest.json')
+    if (m.status !== 200) return fail(`/models manifest → HTTP ${m.status} (recunoașterea facială NU e servită)`)
+    const r = await http('/models/face_recognition_model.bin', { method: 'HEAD', timeoutMs: 25_000 })
+    if (r.status !== 200) return fail(`/models weights → HTTP ${r.status}`)
+    return ok('modele face-api servite (manifest + weights 200)')
+  } },
+  { name: 'biometrie-contract', desc: 'calea voce+față din chat nu crapă (200, nu 500) cu payload biometric', run: async () => {
+    // COMPORTAMENT, nu reachability: trimite un payload cu voiceFeatures +
+    // faceDescriptor și cere ca traseul biometric (Promise.all + save
+    // fire-and-forget + injectare în prompt) să răspundă 200 ne-gol, nu 500.
+    // Prinde regresii de logică care lasă 200-ul „sănătos" pe alte căi dar sparg asta.
+    const d = await http('/api/demo/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', timeoutMs: 20_000 })
+    if (d.status === 429 || d.status === 403) return ok(`demo plafonat (${d.status}) — sar peste, nu e eșec de app`)
+    if (d.status !== 200) return fail(`/api/demo/start → HTTP ${d.status}`)
+    const cookie = sessionCookie(d.setCookie)
+    if (!cookie) return ok('demo/start fără cookie vizibil — sar (posibil plafon)')
+    const voiceFeatures = { vector: Array.from({ length: 24 }, (_, i) => (i % 5) * 0.1), meta: { pitchMean: 120, pitchStd: 10, pitchMin: 90, pitchMax: 160, centroid: 1500, rolloff: 3000, zcr: 0.1, energy: 0.2, jitter: 0.01, shimmer: 0.02 } }
+    const faceDescriptor = Array.from({ length: 128 }, (_, i) => Math.sin(i) * 0.1)
+    const c = await http('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Salut, spune un cuvânt.' }], voiceFeatures, faceDescriptor, now: new Date().toISOString(), tz: 'Europe/London' }),
+      timeoutMs: 55_000,
+    })
+    if (c.status === 500) return fail(`/api/chat cu biometrie → HTTP 500 (traseul voce/față crapă): ${c.text.slice(0, 140)}`)
+    if (c.status !== 200) return fail(`/api/chat cu biometrie → HTTP ${c.status}: ${c.text.slice(0, 120)}`)
+    if (!c.text || c.text.trim().length < 1) return fail('chatul cu biometrie a răspuns GOL')
+    return ok(`biometrie acceptată, răspuns ${c.text.trim().length} car.`)
+  } },
   { name: 'landing-render', desc: 'pagina publică se randează în browser real', run: async () => {
     return await browserCheck()
   } },
