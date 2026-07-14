@@ -8,6 +8,7 @@
 #   kelion-github merge <numar-pr>                    → squash-merge
 #   kelion-github publish <branch> "titlu" ["desc"]   → PUBLICARE COMPLETĂ cap-coadă
 #   kelion-github deploy                              → deploy.yml + verificare anti-fantomă
+#   kelion-github doctor                              → DIAGNOZĂ cheie: formă + drepturi reale (PR/Contents/Actions)
 #   kelion-github runs [workflow.yml]                 → ultimele rulări (stare+concluzie)
 #   kelion-github api <cale>                          → ORICE citire GitHub, cu tokenul
 #
@@ -116,13 +117,64 @@ case "$cmd" in
     if [ -n "$wf" ]; then url="$API/actions/workflows/$wf/runs?per_page=5"; else url="$API/actions/runs?per_page=5"; fi
     gh_api "$url" | jq -r '.workflow_runs[] | "\(.created_at)  \(.name)  \(.status)/\(.conclusion // "-")  \(.html_url)"'
     ;;
+  doctor)
+    # DIAGNOZĂ CHEIE GitHub — pentru Kelion (Adrian, 14 iul: „verificator cu
+    # diagnoză și lui Kelion să poată folosi"). Prinde DIN TIMP o cheie
+    # stricată/sub-scopată — ÎNAINTE de o publicare, nu în mijlocul unei bucle.
+    # NU expune valoarea cheii. NU declanșează niciun deploy real.
+    echo "== Forma cheii (nu se afișează valoarea) =="
+    TRIM=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+    echo "  lungime: ${#TOKEN} car. | fără spații/enter: ${#TRIM} car."
+    [ "${#TOKEN}" != "${#TRIM}" ] && echo "  ⚠️ cheia conține spații/enter → strică header-ul (401). Rescrie-o curat prin vps-keys."
+    if printf '%s' "$TRIM" | grep -q '^github_pat_'; then
+      echo "  prefix github_pat_: DA (token fine-grained)"
+    else
+      echo "  ⚠️ prefix github_pat_: NU — valoarea nu e un token fine-grained (alt text/token vechi?)."
+    fi
+
+    echo "== Acces repo =="
+    rc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' "$API")
+    case "$rc" in
+      200) echo "  GET repo → 200 ✅" ;;
+      401) echo "  → 401 ❌ Bad credentials — cheia e invalidă/expirată. Reînnoiește prin vps-keys." ;;
+      *)   echo "  → HTTP $rc ⚠️: $(jq -r '.message // empty' /tmp/kg_doc.json 2>/dev/null)" ;;
+    esac
+
+    echo "== Pull requests: write (poate deschide PR?) =="
+    pc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' -X POST "$API/pulls" -d '{"title":"__doctor__","head":"master","base":"master"}')
+    case "$pc" in
+      422) echo "  → 422 ✅ ARE dreptul de PR (publish folosește calea cu PR, cu audit-trail)." ;;
+      403) echo "  → 403 ❌ FĂRĂ Pull requests:write → publish cade pe /merges (merge direct, merge oricum)." ;;
+      401) echo "  → 401 ❌ cheie invalidă." ;;
+      *)   echo "  → HTTP $pc neconcludent: $(jq -c '{message}' /tmp/kg_doc.json 2>/dev/null)" ;;
+    esac
+
+    echo "== Contents: write (fallback-ul /merges al lui publish) =="
+    mc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' -X POST "$API/merges" -d '{"base":"master","head":"master"}')
+    case "$mc" in
+      204|409|422) echo "  → $mc ✅ ARE Contents:write (push/merge)." ;;
+      403) echo "  → 403 ❌ FĂRĂ Contents:write — nici fallback-ul /merges nu merge. DĂ-i Contents: Read and write." ;;
+      401) echo "  → 401 ❌ cheie invalidă." ;;
+      *)   echo "  → HTTP $mc neconcludent: $(jq -c '{message}' /tmp/kg_doc.json 2>/dev/null)" ;;
+    esac
+
+    echo "== Actions: dispatch deploy.yml (verific citirea, NU declanșez deploy) =="
+    ac=$(gh_api -o /dev/null -w '%{http_code}' "$API/actions/workflows/deploy.yml")
+    case "$ac" in
+      200) echo "  → citire workflow 200 (Actions:read OK). Dispatch-ul real se dovedește la 'deploy'." ;;
+      401) echo "  → 401 ❌ cheie invalidă." ;;
+      403|404) echo "  → HTTP $ac ⚠️ probabil fără permisiune Actions. Dacă 'deploy' dă 403 la dispatch, dă-i Actions: Read and write." ;;
+      *)   echo "  → HTTP $ac neconcludent" ;;
+    esac
+    echo "== gata — niciun secret afișat, niciun deploy declanșat. =="
+    ;;
   api)
     # Citire GitHub „la liber", cu tokenul — înlocuiește complet browserul.
     p=${1:?cale API, ex: /pulls/106 sau /commits/master sau "/actions/runs?per_page=3"}
     gh_api "$API$p" | jq . 2>/dev/null || gh_api "$API$p"
     ;;
   *)
-    echo "folosire: kelion-github pr|merge|deploy|runs|api (vezi comentariile din script)"
+    echo "folosire: kelion-github pr|merge|publish|deploy|doctor|runs|api (vezi comentariile din script)"
     exit 1
     ;;
 esac

@@ -137,8 +137,13 @@ Iar cauza-rădăcină aici — scope-ul unei chei — Kelion NU o poate repara s
 3. **Ce ține de o credențială e ÎNTOTDEAUNA la Adrian.** Kelion nu-și emite/rescopează
    propria cheie GitHub. Treaba lui = un diagnostic corect + O cerere clară, nu insistență.
 4. **Verifică LIVE, nu din memorie.** „Publicarea merge de obicei" nu e dovadă — o
-   dependență de cheie e fragilă și se re-verifică (vezi `kelion-github publish`, care acum
-   numește 403-ul de PR și 401/403-ul de merge cu pasul exact de reparare).
+   dependență de cheie e fragilă și se re-verifică. Ai o unealtă dedicată:
+   **`kelion-github doctor`** — dă diagnoza cheii FĂRĂ să expună valoarea și FĂRĂ să
+   declanșeze deploy: forma (lungime, spații/enter, prefix `github_pat_`) + drepturile
+   reale (Acces repo, Pull requests:write, Contents:write, Actions). Rulează `doctor`
+   ÎNAINTE de o publicare sau când ceva pică pe GitHub — prinzi cheia stricată din timp,
+   nu în mijlocul unei bucle. „Secretul există" ≠ „secretul e valid": 401 „Bad
+   credentials" = valoarea din cheie nu e tokenul bun (lungime/prefix greșit sau spații).
 
 **Unde e prins acum în cod (ca să nu depindă doar de bunăvoința creierului):**
 `deployApproved()` din `kelion-builder-server.mjs` are contor de eșecuri
