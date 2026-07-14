@@ -49,6 +49,11 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_voiceprints_admin ON voiceprints (is_admin, updated_at DESC);
+    -- CLIP AUDIO (Adrian, 14 iul: „trebuie să am buton play să aud vocea"): pe
+    -- lângă vectorul de identificare ținem și o mostră audio scurtă (data-URL
+    -- webm/opus, câteva secunde) a ultimei fraze, ca adminul s-o poată ASCULTA
+    -- din panou. Doar admin o citește; nu iese niciodată în chat.
+    ALTER TABLE voiceprints ADD COLUMN IF NOT EXISTS audio_clip TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS faceprints (
       user_email TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
@@ -2225,6 +2230,7 @@ export interface VoiceprintRow {
   isAdmin: boolean
   features: number[]
   featureMeta: VoiceFeatureMeta
+  hasAudio: boolean
   createdAt: string
   updatedAt: string
 }
@@ -2236,6 +2242,7 @@ interface VoiceprintDbRow {
   is_admin: boolean
   features: number[]
   feature_meta: VoiceFeatureMeta
+  has_audio?: boolean
   created_at: string
   updated_at: string
 }
@@ -2248,6 +2255,7 @@ function rowToVoiceprint(r: VoiceprintDbRow): VoiceprintRow {
     isAdmin: r.is_admin,
     features: r.features || [],
     featureMeta: r.feature_meta || ({} as VoiceFeatureMeta),
+    hasAudio: !!r.has_audio,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -2260,21 +2268,43 @@ export async function saveVoiceprint(v: {
   isAdmin: boolean
   features: number[]
   featureMeta: VoiceFeatureMeta
+  audioClip?: string
 }): Promise<void> {
   if (!dbEnabled() || !v.email) return
   try {
     const vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    // Mostra audio: o păstrăm doar dacă e rezonabilă ca mărime (≤ ~600KB base64,
+    // câteva secunde webm/opus). Prea mare → n-o stocăm, dar identificarea merge.
+    const clip = typeof v.audioClip === 'string' && v.audioClip.length <= 600_000 ? v.audioClip : ''
     await getPool().query(
       `INSERT INTO voiceprints
-         (user_email, name, gender, is_admin, features, feature_meta, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+         (user_email, name, gender, is_admin, features, feature_meta, audio_clip, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (user_email) DO UPDATE
          SET name = $2, gender = $3, is_admin = $4, features = $5,
-             feature_meta = $6, updated_at = now()`,
-      [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta)],
+             feature_meta = $6,
+             -- clip nou doar dacă a venit unul; altfel păstrăm mostra veche.
+             audio_clip = CASE WHEN $7 <> '' THEN $7 ELSE voiceprints.audio_clip END,
+             updated_at = now()`,
+      [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta), clip],
     )
   } catch {
     // Never break the chat because voiceprint persistence failed.
+  }
+}
+
+// Mostra audio a unei amprente (data-URL) — doar pentru butonul „play" din admin.
+export async function getVoiceprintAudio(email: string): Promise<string | null> {
+  if (!dbEnabled() || !email) return null
+  try {
+    const r = await getPool().query<{ audio_clip: string }>(
+      'SELECT audio_clip FROM voiceprints WHERE user_email = $1',
+      [email.toLowerCase()],
+    )
+    const clip = r.rows[0]?.audio_clip
+    return clip ? clip : null
+  } catch {
+    return null
   }
 }
 
@@ -2308,7 +2338,7 @@ export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   try {
     const r = await getPool().query<VoiceprintDbRow>(
       `SELECT user_email, name, gender, is_admin, features, feature_meta,
-              created_at, updated_at
+              (audio_clip <> '') AS has_audio, created_at, updated_at
        FROM voiceprints ORDER BY updated_at DESC LIMIT $1`,
       [limit],
     )

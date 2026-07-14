@@ -4,6 +4,7 @@ import { config } from '../config.js'
 import {
   saveVoiceprint,
   getVoiceprint,
+  getVoiceprintAudio,
   identifyVoiceprint,
   listVoiceprints,
   deleteVoiceprint,
@@ -20,6 +21,8 @@ export interface VoiceFeatures {
   vector: number[]
   /** Metadate interpretabile (Hz, proporții etc.). */
   meta: VoiceFeatureMeta
+  /** Mostră audio scurtă (data-URL webm/opus) a frazei — pentru butonul „play" din admin. */
+  clip?: string
 }
 
 const IDENTIFY_THRESHOLD = 0.38 // distanță euclidiană normalizată sub care e considerat match
@@ -45,6 +48,7 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
         isAdmin,
         features: features.vector,
         featureMeta: features.meta,
+        audioClip: typeof features.clip === 'string' ? features.clip : '',
       })
       return reply.send({ ok: true, gender, isAdmin })
     },
@@ -88,6 +92,18 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const rows = await listVoiceprints(200)
     return reply.send({ rows })
+  })
+
+  // Mostra audio a unei amprente — doar admin. Întoarce data-URL-ul salvat ca să
+  // poată fi redat cu butonul „play" din panou (Adrian, 14 iul).
+  app.get<{ Querystring: { email?: string } }>('/api/voiceprint/audio', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const email = (req.query?.email ?? '').toLowerCase()
+    if (!email) return reply.code(400).send({ error: 'bad_request' })
+    const clip = await getVoiceprintAudio(email)
+    if (!clip) return reply.code(404).send({ error: 'no_audio' })
+    return reply.send({ clip })
   })
 
   // Șterge amprenta vocală a userului logat (sau a altui user, doar pentru admin).

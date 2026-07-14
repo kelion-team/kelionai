@@ -101,6 +101,20 @@ export async function fetchWorkOrders(): Promise<WorkOrder[]> {
   }
 }
 
+// Arhivează un ordin (îl scoate din lista „în lucru" → arhiva apelabilă de Kelion).
+// NU șterge nimic din bază: registrul rămâne permanent, Kelion îl vede oricând.
+export async function archiveWorkOrder(id: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/admin/workorders/${encodeURIComponent(id)}/archive`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.
@@ -550,6 +564,7 @@ export interface VoiceprintRow {
   name: string
   gender: 'male' | 'female' | 'unknown'
   isAdmin: boolean
+  hasAudio: boolean
   updatedAt: string
 }
 
@@ -565,11 +580,26 @@ export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
         name: String(r.name ?? ''),
         gender: String(r.gender ?? 'unknown') as VoiceprintRow['gender'],
         isAdmin: Boolean(r.isAdmin ?? r.is_admin),
+        hasAudio: Boolean(r.hasAudio ?? r.has_audio),
         updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
       }
     })
   } catch {
     return []
+  }
+}
+
+// Mostra audio a unei amprente (data-URL) — pentru butonul „play" din panou.
+export async function fetchVoiceprintAudio(email: string): Promise<string | null> {
+  try {
+    const r = await fetch(`/api/voiceprint/audio?email=${encodeURIComponent(email)}`, {
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { clip?: string }
+    return typeof j.clip === 'string' && j.clip ? j.clip : null
+  } catch {
+    return null
   }
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   GESTURE_CATALOG,
   GESTURE_CATEGORIES,
@@ -44,6 +44,7 @@ import {
   fetchStores,
   type StoresData,
   fetchWorkOrders,
+  archiveWorkOrder,
   type WorkOrder,
   fetchInbound,
   fetchMailboxLive,
@@ -52,6 +53,7 @@ import {
   fetchContactMessages,
   type ContactMessage,
   fetchVoiceprints,
+  fetchVoiceprintAudio,
   deleteVoiceprint,
   type VoiceprintRow,
   fetchTokenChecks,
@@ -78,13 +80,19 @@ function jobStageLabel(status: string): string {
       return '🟢 publicat pe live'
     case 'failed':
       return '🔴 a picat'
+    case 'dismissed':
+      return '🗄️ arhivat (scos din față)'
     case 'delivered':
       return '🔧 preluat de constructor'
     default:
       return '⏳ în așteptare'
   }
 }
-const JOB_DONE = new Set(['certified', 'finalized'])
+// TERMINAT = iese din lista „în lucru" și intră în arhiva apelabilă de Kelion.
+// Auto-arhivare (Adrian, 14 iul „dacă e gata, autoarhivare"): pe lângă cele
+// certificate/finalizate, includem și stadiile TERMINALE onest — publicat pe
+// live, picat, sau arhivat manual — ca lista de sus să arate DOAR ce chiar lucră.
+const JOB_DONE = new Set(['certified', 'finalized', 'published', 'failed', 'dismissed'])
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
 // text). flagcdn serves every ISO country; on any failure we fall back to a dot.
@@ -201,6 +209,36 @@ export default function AdminPanel({
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
+  // acum ca să arătăm ⏸ și să nu pornim două deodată.
+  const [playingVp, setPlayingVp] = useState<string | null>(null)
+  const vpAudioRef = useRef<HTMLAudioElement | null>(null)
+  const playVoiceprint = async (email: string): Promise<void> => {
+    // Al doilea click pe același rând oprește redarea.
+    if (vpAudioRef.current) {
+      vpAudioRef.current.pause()
+      vpAudioRef.current = null
+    }
+    if (playingVp === email) {
+      setPlayingVp(null)
+      return
+    }
+    const clip = await fetchVoiceprintAudio(email)
+    if (!clip) {
+      setPlayingVp(null)
+      return
+    }
+    const audio = new Audio(clip)
+    vpAudioRef.current = audio
+    audio.onended = () => setPlayingVp(null)
+    audio.onerror = () => setPlayingVp(null)
+    setPlayingVp(email)
+    try {
+      await audio.play()
+    } catch {
+      setPlayingVp(null)
+    }
+  }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
@@ -1014,6 +1052,19 @@ export default function AdminPanel({
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
+                      {' · '}
+                      <button
+                        type="button"
+                        className="ghost"
+                        title="Scoate-l din lista «în lucru» → arhiva apelabilă de Kelion (nu se șterge nimic)"
+                        onClick={() =>
+                          void archiveWorkOrder(o.id).then((ok) => {
+                            if (ok) void fetchWorkOrders().then(setOrders)
+                          })
+                        }
+                      >
+                        arhivează
+                      </button>
                     </span>
                   </div>
                 ))}
@@ -1124,6 +1175,21 @@ export default function AdminPanel({
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
+                    {' · '}
+                    {v.hasAudio ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        title="Ascultă mostra vocii"
+                        onClick={() => void playVoiceprint(v.email)}
+                      >
+                        {playingVp === v.email ? '⏸ oprește' : '▶ ascultă'}
+                      </button>
+                    ) : (
+                      <span className="muted" title="Încă nu s-a captat o mostră audio">
+                        fără audio
+                      </span>
+                    )}
                     {' · '}
                     <button
                       type="button"

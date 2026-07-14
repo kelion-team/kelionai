@@ -67,6 +67,9 @@ export interface VoiceFeatureMeta {
 export interface VoiceFeatures {
   vector: number[]
   meta: VoiceFeatureMeta
+  // Mostră audio scurtă (data-URL webm/opus) a frazei tocmai vorbite — trimisă
+  // odată cu features ca adminul s-o poată ASCULTA din panou (buton „play").
+  clip?: string
 }
 
 let pendingVoiceFeatures: VoiceFeatures | null = null
@@ -508,11 +511,29 @@ export async function startMic(
       recording = false
       uttMs = 0
       voicedMs = 0
-      void finalizeVoiceFeatures()
+      const feats = finalizeVoiceFeatures()
       // sub minim = zgomot scurt, nu-l trimitem. Cerem ȘI destulă VOCE efectivă
       // (nu doar durată totală) ca un poc + tăcere să nu mai producă transcriere
       // fantomă („Nu.", „Sim, mă simt") — bug 10 iul.
-      if (took >= MIN_UTTER_MS && voiced >= MIN_VOICED_MS && blob.size > 0) void send(blob)
+      if (took >= MIN_UTTER_MS && voiced >= MIN_VOICED_MS && blob.size > 0) {
+        // MOSTRĂ AUDIO pentru butonul „play" din admin (Adrian, 14 iul): atașăm o
+        // copie a frazei la features, ca s-o poată ASCULTA. Doar clipuri mici (o
+        // frază, nu un monolog); conversia base64 e gata mult înainte ca ASR-ul să
+        // răspundă, deci `clip` e pus la timp pe obiectul citit de ChatPanel.
+        if (feats && blob.size <= 500_000) {
+          const fr = new FileReader()
+          fr.onload = () => {
+            const url = String(fr.result || '')
+            if (url.startsWith('data:')) feats.clip = url
+          }
+          try {
+            fr.readAsDataURL(blob)
+          } catch {
+            /* fără mostră — identificarea merge oricum */
+          }
+        }
+        void send(blob)
+      }
     }
     rec.start()
     recording = true

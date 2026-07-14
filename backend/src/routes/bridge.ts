@@ -1522,6 +1522,21 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { orders: await listWorkOrders(50) }
   })
 
+  // ARHIVARE ORDIN (Adrian, 14 iul: „buton ștergere sau, dacă e gata, autoarhivare
+  // — Kelion trebuie să vadă permanent tot"). NU ștergem nimic din bază (regula
+  // veche: registrul e permanent, Kelion îl citește oricând). Butonul doar închide
+  // stadiul într-un TERMINAL — `dismissed` — care iese din lista „în lucru" și
+  // intră în arhiva apelabilă de Kelion. Pentru un job blocat la `delivered`, e
+  // felul curat de a-l scoate din față fără a-l pierde din evidență.
+  app.post<{ Params: { id: string } }>('/api/admin/workorders/:id/archive', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = req.params?.id
+    if (!id) return reply.code(400).send({ error: 'bad_request' })
+    await setWorkOrderStatus(id, 'dismissed')
+    return { ok: true }
+  })
+
   // ── APPROVAL GATE ──
   // Builder → stage a finished-but-unpublished release for the owner to review.
   app.post<{ Body: { title?: string; detail?: string; branch?: string } }>(

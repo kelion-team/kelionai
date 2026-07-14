@@ -1208,6 +1208,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             isAdmin: isOwnerByEmail,
             features: vf.vector,
             featureMeta: vf.meta,
+            audioClip: typeof vf.clip === 'string' ? vf.clip : '',
           })
         }
         const genderLabel =
