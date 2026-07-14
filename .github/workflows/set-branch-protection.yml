@@ -1,0 +1,32 @@
+# PROTECȚIE MASTER — blochează force-push + ștergere, FĂRĂ cerință de PR/review
+# (Adrian, 14 iul: „repară tot ce e cu problema" — anti-force-push pe master).
+# Rulează cu secretul VPS_GITHUB_TOKEN (tokenul kelion-vps, care are Administration).
+# Nu cere PR/checks → Kelion publică în continuare direct; doar rescrierea e blocată.
+name: set-branch-protection
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  protect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pune protecția pe master (block force-push + deletions)
+        env:
+          TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+        run: |
+          set -u
+          [ -z "${TOKEN:-}" ] && { echo "::error::Lipsește secretul VPS_GITHUB_TOKEN."; exit 1; }
+          API="https://api.github.com/repos/kelion-team/kelionai"
+          code=$(curl -sS -o /tmp/p.json -w '%{http_code}' -X PUT \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
+            "$API/branches/master/protection" \
+            -d '{"required_status_checks":null,"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}')
+          echo "PUT /branches/master/protection -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::HTTP $code: $(jq -r '.message // empty' /tmp/p.json 2>/dev/null)"; cat /tmp/p.json; exit 1
+          fi
+          echo "== CONFIRMARE (starea protecției acum) =="
+          curl -sS -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "$API/branches/master/protection" \
+            | jq '{force_push_permis:.allow_force_pushes.enabled, stergere_permisa:.allow_deletions.enabled, cerinta_PR:.required_pull_request_reviews, cerinta_checks:.required_status_checks}'
