@@ -86,6 +86,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import { MODEL_FAST, MODEL_TOP, chooseModel } from '../services/modelRouter.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
+import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 
 // STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
 // modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
@@ -1282,6 +1283,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           '\n\nMEMORIA COMUNĂ (caietul pe care-l împărțiți tu și constructorul de pe laptop):\n' +
           shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n')
       }
+      // PANOU ADMIN — STARE LIVE (Adrian, 14 iul: „Kelion trebuie să vadă permanent
+      // tot ce e în fiecare buton admin"). Rezumat compact, cache 30s, admin-only —
+      // Kelion e mereu conștient de joburi/cereri/release-uri/amprente/useri fără să
+      // încetinească chatul. Nu-l recită nesolicitat (e context, nu replică).
+      const panel = await buildAdminSnapshot()
+      if (panel) systemPrompt += `\n\n${panel}`
     }
 
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
