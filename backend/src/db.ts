@@ -49,6 +49,16 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_voiceprints_admin ON voiceprints (is_admin, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS faceprints (
+      user_email TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      is_admin BOOLEAN NOT NULL DEFAULT false,
+      descriptor DOUBLE PRECISION[] NOT NULL DEFAULT '{}',
+      photo TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_faceprints_admin ON faceprints (is_admin, updated_at DESC);
     CREATE TABLE IF NOT EXISTS cost_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -2338,5 +2348,120 @@ export async function identifyVoiceprint(
     return best
   } catch {
     return null
+  }
+}
+
+// ── Face identification by faceprint (128-d descriptor de la face-api) ───────
+// Camera pornită + voce = Kelion prinde automat fața vorbitorului, o compară cu
+// referința titularului contului și îi zice creierului „titular / altcineva".
+// NICIUN buton — declanșat de voce, ca la voiceprint.
+
+export interface FaceprintRow {
+  email: string
+  name: string
+  isAdmin: boolean
+  descriptor: number[]
+  photo: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface FaceprintDbRow {
+  user_email: string
+  name: string
+  is_admin: boolean
+  descriptor: number[]
+  photo: string
+  created_at: string
+  updated_at: string
+}
+
+function rowToFaceprint(r: FaceprintDbRow): FaceprintRow {
+  return {
+    email: r.user_email,
+    name: r.name,
+    isAdmin: r.is_admin,
+    descriptor: r.descriptor || [],
+    photo: r.photo || '',
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+/** Distanță euclidiană BRUTĂ (nu normalizată) — convenția face-api, prag ~0.6. */
+export function faceDistance(a: number[], b: number[]): number {
+  const len = Math.min(a.length, b.length)
+  if (len === 0) return Infinity
+  let sum = 0
+  for (let i = 0; i < len; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0)
+    sum += d * d
+  }
+  return Math.sqrt(sum)
+}
+
+export async function saveFaceprint(f: {
+  email: string
+  name: string
+  isAdmin: boolean
+  descriptor: number[]
+  photo?: string
+}): Promise<void> {
+  if (!dbEnabled() || !f.email) return
+  try {
+    const vec = f.descriptor.filter((x) => Number.isFinite(x)).slice(0, 128)
+    if (vec.length === 0) return
+    // Miniatura o păstrăm mică (evită umflarea DB); dacă lipsește, nu suprascriem.
+    const photo = (f.photo || '').slice(0, 200_000)
+    await getPool().query(
+      `INSERT INTO faceprints
+         (user_email, name, is_admin, descriptor, photo, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (user_email) DO UPDATE
+         SET name = $2, is_admin = $3, descriptor = $4,
+             photo = CASE WHEN $5 = '' THEN faceprints.photo ELSE $5 END,
+             updated_at = now()`,
+      [f.email.toLowerCase(), f.name, f.isAdmin, vec, photo],
+    )
+  } catch {
+    // Never break the chat because faceprint persistence failed.
+  }
+}
+
+export async function getFaceprint(email: string): Promise<FaceprintRow | null> {
+  if (!dbEnabled() || !email) return null
+  try {
+    const r = await getPool().query<FaceprintDbRow>(
+      `SELECT user_email, name, is_admin, descriptor, photo, created_at, updated_at
+       FROM faceprints WHERE user_email = $1`,
+      [email.toLowerCase()],
+    )
+    return r.rows[0] ? rowToFaceprint(r.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
+export async function deleteFaceprint(email: string): Promise<boolean> {
+  if (!dbEnabled() || !email) return false
+  try {
+    await getPool().query('DELETE FROM faceprints WHERE user_email = $1', [email.toLowerCase()])
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function listFaceprints(limit = 200): Promise<FaceprintRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<FaceprintDbRow>(
+      `SELECT user_email, name, is_admin, descriptor, photo, created_at, updated_at
+       FROM faceprints ORDER BY updated_at DESC LIMIT $1`,
+      [limit],
+    )
+    return r.rows.map(rowToFaceprint)
+  } catch {
+    return []
   }
 }

@@ -115,6 +115,10 @@ export async function* streamChat(
   images?: string[],
   // Features vocale extrase client-side pentru identificare speaker + gen.
   voiceFeatures?: VoiceFeatures,
+  // Descriptor facial 128-d (face-api) + miniatură, extrase în fundal când camera
+  // e pornită. Declanșat de voce, fără buton, off-hot-path.
+  faceDescriptor?: number[],
+  facePhoto?: string,
 ): AsyncGenerator<string> {
   let res: Response
   try {
@@ -132,6 +136,8 @@ export async function* streamChat(
         screen,
         files,
         voiceFeatures,
+        faceDescriptor,
+        facePhoto,
         // Kelion's built-in sense of "now": the client's real local time + zone,
         // sent every turn so he always knows today's date and the current time.
         now: new Date().toISOString(),
