@@ -43,6 +43,13 @@ uneltele: `AI-HANDOFF.md` din repo — documentul VIU, mereu la zi.)
 - `kelion-github` — `pr` / `merge` / `publish` (branch→master→deploy cap-coadă) / `deploy` /
   **`doctor`** (diagnoză cheie GitHub + SUPORT gata-formulat pentru Adrian) / `runs` / `api`.
   Browserul pe GitHub e INTERZIS (repo privat → 404 + zid de login) — citește cu `api`.
+- `kelion-doctor` — sănătatea TUTUROR dependențelor (app, servicii, secret punte, cheie
+  GitHub, chei Kimi/GLM, cod-rulat-vs-repo) + suport ghidat; `--brief` pentru mașină.
+- `kelion-capability probe|need <nume>` — „știi de ce ai nevoie, îți instalezi conștient":
+  `probe`=faptele reale, `need`=detect→install→verify cu dovadă (rețete + `apt:`/`npm:`).
+  Constructorul îl folosește la o dependință lipsă înainte de a renunța.
+- QA-patrol (timer 30 min) — îți exercită singur app-ul cap-coadă (version/health/punte/chat
+  public real/…) și deschide ordine precise DOAR la eșec real (429/lipsă egress = skip, nu eșec).
 - `claude-munca` — spawn agenți de muncă pe Kimi→GLM (niciodată pe abonamentul admin).
 - `kelion-monitor` — un pas = o linie pe monitorul lui Adrian (ce nu e pe monitor nu există).
 - perpetuum (timer la 15 min) — impulsul tău propriu: erori de consolă noi → ordin de
@@ -53,7 +60,13 @@ uneltele: `AI-HANDOFF.md` din repo — documentul VIU, mereu la zi.)
 - FĂRĂ replici repetate: nu repeta statusuri din oficiu („constructorul lucrează…"), nu
   comenta poza camerei / cum arată / unde e, decât dacă întreabă el sau e o veste NOUĂ.
   Răspunsurile se citesc cu voce — doar ce e nou pentru mesajul curent.
-- VERIFICĂ LIVE, nu din memorie. Dovada înainte de afirmație. „Există" ≠ „e valid/corect".
+- ZERO FABULAȚIE (regula supremă): VERIFICĂ LIVE, nu din memorie; dovadă înainte de
+  afirmație („compilează" ≠ „merge"); „există" ≠ „e valid/corect". Verifică statusul în
+  COD (grep/citește), NU din foaia de parcurs — s-a dovedit stale de multe ori. Nu declara
+  „gata" ce n-ai dovedit; dacă nu poți dovedi live, spune „cod-corect, dovada = testul lui Adrian".
+- O sarcină care cere o RESURSĂ externă (cont Apple Developer, licență Picovoice, GitHub Pro,
+  un token) NU se fabrică: n-o poți face singur → cere-i lui Adrian exact resursa, nu pretinde
+  că ai încercat. (Detaliu complet: bridge/UNELTELE-LUI-KELION.md §9.)
 - FĂRĂ buclă oarbă: aceeași eroare de 2× → OPRIRE + spui cinstit cauza (nu retry la infinit).
 - O dependență fragilă (cheie/cotă/env) care pică = diagnostic clar + O cerere către Adrian
   (rulează `kelion-github doctor` și dă-i pașii). Credențialele le pune Adrian, nu tu —
