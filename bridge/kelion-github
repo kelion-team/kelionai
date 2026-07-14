@@ -52,9 +52,9 @@ case "$cmd" in
     echo "▶ Publicare completă pentru branch: $branch"
     merged=""
     # 1) Preferat: PR + squash-merge (păstrează audit-trail-ul), DACĂ tokenul poate.
-    pr_resp=$(gh_api -X POST "$API/pulls" -d "$(jq -nc --arg h "$branch" --arg t "$title" --arg b "$body" \
+    pr_code=$(gh_api -o /tmp/kg_pr.json -w '%{http_code}' -X POST "$API/pulls" -d "$(jq -nc --arg h "$branch" --arg t "$title" --arg b "$body" \
       '{title:$t, head:$h, base:"master", body:$b}')")
-    pr_num=$(echo "$pr_resp" | jq -r '.number // empty')
+    pr_num=$(jq -r '.number // empty' /tmp/kg_pr.json 2>/dev/null)
     if [ -n "$pr_num" ]; then
       echo "  PR #$pr_num deschis — squash-merge"
       m_resp=$(gh_api -X PUT "$API/pulls/$pr_num/merge" -d '{"merge_method":"squash"}')
@@ -64,7 +64,14 @@ case "$cmd" in
         echo "  ⚠️ merge PR eșuat: $(echo "$m_resp" | jq -r '.message // "necunoscut"')"
       fi
     else
-      echo "  ℹ️ PR indisponibil ($(echo "$pr_resp" | jq -r '.message // "necunoscut"')) — cad pe merge direct branch→master"
+      pr_msg=$(jq -r '.message // "necunoscut"' /tmp/kg_pr.json 2>/dev/null)
+      if [ "$pr_code" = "403" ]; then
+        echo "  🔑 CHEIE GITHUB fără drept de PR: tokenul fin-granulat NU are 'Pull requests: write' (HTTP 403: $pr_msg). PR-urile NU se pot deschide cu cheia asta — cad pe merge direct branch→master. Ca să se deschidă PR-uri, dă tokenului scope-ul 'Pull requests: Read and write' prin vps-keys."
+      elif [ "$pr_code" = "401" ]; then
+        echo "  🔑 CHEIE GITHUB INVALIDĂ/EXPIRATĂ (HTTP 401 la deschiderea PR: $pr_msg). Reînnoiește tokenul prin vps-keys — /root/kelion/github-token.txt."
+      else
+        echo "  ℹ️ PR indisponibil (HTTP $pr_code: $pr_msg) — cad pe merge direct branch→master"
+      fi
     fi
     # 2) Fallback robust: merge direct branch→master pe GitHub (doar contents:write,
     #    pe care tokenul îl are — de vreme ce poate face push). Ocolește 403-ul de PR.
@@ -76,6 +83,10 @@ case "$cmd" in
         201) merged="merge direct (commit nou pe master)" ;;
         204) merged="master deja la zi (nimic de făcut)" ;;
         409) echo "  ❌ CONFLICT branch→master — publicare oprită (necesită rezolvare manuală)"; exit 1 ;;
+        401|403)
+          # Cheia nu poate NICI măcar merge direct → e expirată/revocată/sub-scopată.
+          # Fără asta NIMIC nu se publică — de-aici blocajul „din cauza unei chei".
+          echo "  🔑 CHEIE GITHUB INEFICIENTĂ (HTTP $code la merge direct: $(jq -r '.message // empty' /tmp/kg_merge.json 2>/dev/null)). Tokenul nu are nici 'Contents: write' valid → NIMIC nu se poate publica. Reînnoiește/re-scopează tokenul prin vps-keys (/root/kelion/github-token.txt)."; exit 1 ;;
         *)   echo "  ❌ merge branch→master eșuat → HTTP $code: $(jq -r '.message // empty' /tmp/kg_merge.json 2>/dev/null)"; exit 1 ;;
       esac
     fi

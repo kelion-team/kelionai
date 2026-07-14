@@ -880,6 +880,36 @@ async function generateAndUploadQRs() {
   }
 }
 
+// ── LESA ANTI-BUCLĂ PE DEPLOY (Adrian, 14 iul: „Kelion e blocat într-o buclă
+// din cauza unei chei — de ce nu se pot publica PR-urile făcute").
+// Cauza: un release aprobat care NU se poate publica (tipic: tokenul GitHub nu
+// are `pull_requests:write` → 403 la POST /pulls, iar dacă și cheia e
+// expirată/sub-scopată cade și merge-ul direct) rămânea `approved` și era
+// reîncercat de bucla constructorului la FIECARE 20s până la expirarea de 6h —
+// buclă oarbă care ardea abonamentul + declanșa deploy.yml în lanț.
+// Fix (regula #11 — autonomie „în lesă": aceeași eroare de 2 ori → oprire):
+// numărăm eșecurile per release; la al 2-lea eșec OPRIM definitiv release-ul
+// (îl marcăm `failed` pe server → iese pe loc din coada `approved`) și anunțăm
+// adminul O SINGURĂ DATĂ cu motivul concret. Condițiile clar PERMANENTE (fără
+// branch, branch absent pe origin, script lipsă) se blochează din prima.
+const deployFailCounts = new Map() // release id → număr de eșecuri consecutive
+const DEPLOY_MAX_ATTEMPTS = 2
+
+// Oprește definitiv un release: marchează `failed` pe server (iese din coada
+// `approved`) + anunță adminul o singură dată. Întoarce true = tratat, nu relua.
+async function blockRelease(r, reason) {
+  deployFailCounts.delete(r.id)
+  const title = String(r.title || r.id).slice(0, 100)
+  try {
+    await api('/api/bridge/release-failed', 'POST', { id: r.id })
+  } catch (e) {
+    console.error('release-failed:', e.message)
+  }
+  say(`🛑 Publicare OPRITĂ (nu mai reîncerc): ${reason}`)
+  await tellAdmin(`Publicarea „${title}" a fost OPRITĂ definitiv (nu o mai reiau în buclă): ${reason}`)
+  pushProgress(100, 'Publicare oprită')
+}
+
 async function deployApproved(r) {
   const title = String(r.title || r.id).slice(0, 80)
   say(`🚀 Aprobat — public pe producție: ${title}`)
@@ -887,16 +917,15 @@ async function deployApproved(r) {
 
   const branch = String(r.branch || '').trim()
   if (!branch) {
-    say('🔴 Deploy blocat: release-ul nu are branch atașat — nu pot publica.')
+    // Condiție permanentă → oprire din prima (altfel buclă la 20s).
+    await blockRelease(r, 'release-ul nu are branch atașat — nu pot publica.')
     return
   }
 
   // Asigurăm că scriptul kelion-github e accesibil și executabil.
   const githubScript = REPO + '/bridge/kelion-github'
   if (!existsSync(githubScript)) {
-    say(`🔴 Deploy blocat: nu găsesc ${githubScript}`)
-    await tellAdmin(`Publicarea „${title.slice(0, 100)}" e blocată: lipsește kelion-github în repo.`)
-    pushProgress(100, 'Lipsește kelion-github')
+    await blockRelease(r, `lipsește ${githubScript} în repo.`)
     return
   }
 
@@ -905,9 +934,7 @@ async function deployApproved(r) {
   say(`🔎 Verific branch-ul ${branch} pe origin…`)
   const lsRemote = await run('git', ['ls-remote', '--heads', 'origin', branch])
   if (lsRemote.code !== 0 || !lsRemote.out.trim()) {
-    say(`🔴 Deploy blocat: branch-ul ${branch} nu există pe origin.`)
-    await tellAdmin(`Publicarea „${title.slice(0, 100)}" e blocată: branch-ul ${branch} nu e pe origin (poate push-ul a eșuat).`)
-    pushProgress(100, 'Branch absent pe origin')
+    await blockRelease(r, `branch-ul ${branch} nu există pe origin (poate push-ul a eșuat).`)
     return
   }
 
@@ -927,11 +954,19 @@ async function deployApproved(r) {
   if (pubRes.code !== 0) {
     console.error('Publicare eșuată:', pubRes.out.slice(-800))
     const tail = pubRes.out.split('\n').filter(Boolean).pop() || 'detalii în jurnalul serverului'
-    say(`🔴 Publicare eșuată — nimic nu s-a publicat: ${tail.slice(0, 160)}`)
-    await tellAdmin(`Publicarea „${title.slice(0, 100)}" a eșuat: ${tail.slice(0, 200)}. Nimic nu a ajuns live.`)
-    pushProgress(100, 'Publicare eșuată')
+    const n = (deployFailCounts.get(r.id) || 0) + 1
+    deployFailCounts.set(r.id, n)
+    // Un eșec poate fi tranzitoriu (redeploy în curs); DOUĂ la rând = problemă
+    // reală (tipic cheia GitHub) → oprim bucla, nu mai reîncercăm la infinit.
+    if (n >= DEPLOY_MAX_ATTEMPTS) {
+      await blockRelease(r, `publicarea a eșuat de ${n} ori la rând: ${tail.slice(0, 180)}`)
+      return
+    }
+    say(`🔴 Publicare eșuată (încercarea ${n}/${DEPLOY_MAX_ATTEMPTS}) — reîncerc o dată: ${tail.slice(0, 140)}`)
+    pushProgress(100, `Publicare eșuată (${n}/${DEPLOY_MAX_ATTEMPTS})`)
     return
   }
+  deployFailCounts.delete(r.id)
   say('🔀 branch→master + deploy verificat anti-fantomă: OK')
   pushProgress(96, 'Publicat în master + deploy')
 

@@ -677,7 +677,7 @@ export interface StagedRelease {
   id: string
   title: string
   detail: string
-  status: 'pending' | 'approved' | 'rejected' | 'deployed'
+  status: 'pending' | 'approved' | 'rejected' | 'deployed' | 'failed'
   at: string
 }
 
@@ -1562,6 +1562,21 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
     if (req.body?.id) await setReleaseStatus(req.body.id, 'deployed')
+    return { ok: true }
+  })
+  // Builder → mark an approved release as PERMANENTLY FAILED, so it leaves the
+  // `approved` queue IMMEDIATELY and is never re-served.
+  // BUCLA-CHEIE (Adrian, 14 iul): dacă publicarea pică (ex. tokenul GitHub nu
+  // are dreptul `pull_requests:write` → 403 la deschiderea PR-ului, sau cheia e
+  // expirată/sub-scopată și cade și merge-ul direct), release-ul rămânea
+  // `approved` și era reîncercat de constructor la FIECARE 20s până la expirarea
+  // de 6h — o buclă oarbă care ardea abonamentul și declanșa deploy.yml în lanț.
+  // Regula #11 (autonomie „în lesă"): aceeași eroare de 2 ori → OPRIRE, nu retry
+  // orb. Constructorul apelează asta după 2 eșecuri; statusul `failed` iese din
+  // filtrul de la /api/bridge/approved-releases (care cere `approved`) → gata bucla.
+  app.post<{ Body: { id?: string } }>('/api/bridge/release-failed', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    if (req.body?.id) await setReleaseStatus(req.body.id, 'failed')
     return { ok: true }
   })
   // Admin → see all releases (pending first) in the "Releases" tab.
