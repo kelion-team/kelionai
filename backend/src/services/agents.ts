@@ -1,34 +1,17 @@
 import type { TextBlock } from './brain-types.js'
 import { config } from '../config.js'
 import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
-import { claudeCost } from './cost.js'
+import { brainCost } from './cost.js'
 import { anthropic } from './anthropic.js'
 import { MODEL_FAST } from './modelRouter.js'
 
-// Kelion's brain: the Conversation + Skills (tool-use) agents run in the chat
-// route's streaming loop; this module hosts the Memory agent — it recalls what
-// Kelion knows about the user and, after each turn, learns + saves new durable
-// facts (off the response path).
-
-// Agentul de memorie rulează pe creierul primar (Kimi) — vechiul provider scos complet
-// (Adrian, 12 iul). E off-path (fire-and-forget), deci nu afectează latența.
 const MEMORY_MODEL = MODEL_FAST
 
-// ── Memory agent (recall) ─────────────────────────────────────────────────
-// Pull durable facts about the user into the system prompt so Kelion is
-// continuous across sessions instead of amnesiac every time.
-// RECENT + RELEVANT: the latest facts, PLUS any older fact matching the words
-// of the current question — so "what's my cat called?" still finds a fact
-// learned hundreds of turns ago (recency alone pushed old facts out).
 export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
   const recent = await getMemories(email, 40, agent)
   let mems = recent
   if (hint.trim()) {
     const words = [...new Set(hint.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])]
-    // DUBLU RECALL (12 iul, foaia de parcurs #5): după CUVINTE (full-text, ca
-    // până acum) + după SENS (embeddings, semanticMemories) — în paralel, ca
-    // să nu adauge latență. „Ce mașină am?" găsește „conduce un BMW" chiar
-    // fără niciun cuvânt comun; fără cheie Gemini, ramura semantică tace.
     const [relevant, semantic] = await Promise.all([
       searchMemories(email, agent, words, 12),
       semanticMemories(email, agent, hint, 8),
@@ -52,10 +35,6 @@ export async function recallMemories(email: string, agent = 'kelion', hint = '')
   )
 }
 
-// ── Memory agent (learn) ──────────────────────────────────────────────────
-// After a turn, the memory model (Kimi) distils any NEW durable facts about the
-// user and saves them. Runs off the response path (fire-and-forget) so it never
-// adds latency.
 export async function learnFromTurn(
   email: string,
   userMsg: string,
@@ -63,9 +42,6 @@ export async function learnFromTurn(
   agent = 'kelion',
 ): Promise<void> {
   if ((!config.kimiKey && !config.glmKey) || (!userMsg.trim() && !assistantMsg.trim())) return
-  // An EXPLICIT "remember this" is a guarantee, not a judgement call — store the
-  // user's own words deterministically (upsert refreshes recency if repeated).
-  // The memory model below still distils implicit facts; this path can never be skipped.
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )
@@ -98,8 +74,7 @@ export async function learnFromTurn(
         },
       ],
     })
-    // Meter the Memory agent's real cost too (admin accounting completeness).
-    void recordCost(email, 'memory', claudeCost(MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens))
+    void recordCost(email, 'memory', brainCost(MEMORY_MODEL, res.usage.input_tokens, res.usage.output_tokens))
     const text = res.content
       .filter((b): b is TextBlock => b.type === 'text')
       .map((b) => b.text)
