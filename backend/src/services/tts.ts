@@ -77,10 +77,15 @@ export async function synthesize(
   // ca să fie rostite corect (API → „a pe i"), nu stâlcite. Strat pur pe text,
   // nu atinge microfonul. Vezi services/pronounce.ts.
   const spoken = academicPronounce(clean, lang.split('-')[0])
-  // A valid Chirp 3 HD style is a single capitalised name (e.g. Charon). Guard
-  // against legacy/invalid values that would make Google reject the voice.
-  const style = /^[A-Z][a-z]+$/.test(config.ttsVoiceStyle) ? config.ttsVoiceStyle : 'Charon'
-  const voiceName = `${lang}-Chirp3-HD-${style}`
+  // Forțăm mereu Chirp 3 HD: stilul din env poate fi fie un nume complet de
+  // voce (ex. "ro-RO-Chirp3-HD-Charon"), fie doar stilul (ex. "Charon").
+  // Orice altceva / non-Chirp cade pe Charon — nu permitem sinteză non-Chirp.
+  const configured = config.ttsVoiceStyle.trim()
+  const voiceName = /Chirp3-HD/i.test(configured)
+    ? configured
+    : /^[A-Z][a-z]+$/.test(configured)
+      ? `${lang}-Chirp3-HD-${configured}`
+      : `${lang}-Chirp3-HD-Charon`
 
   const a = getAuth()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
