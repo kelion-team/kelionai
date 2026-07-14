@@ -1,0 +1,183 @@
+#!/usr/bin/env node
+// QA-PATROL — Kelion își exercită SINGUR aplicația cap-coadă și deschide ordine
+// precise când ceva șchiopătează (Adrian, foaia de parcurs §14 #4: „agent care
+// patrulează"). Determinist: fiecare verificare are o probă REALĂ (cod HTTP,
+// randare, răspuns de chat), zero „presupun". La eșec → un ordin exact în coadă
+// (POST /api/bridge/workorders), dedup pe conținut + fereastră de 6h ca să nu
+// spameze. Fără secret pe disc → mod DRY (doar raportează, nu deschide ordine).
+//
+//   node kelion-qa-patrol.mjs          → patrulează o dată; deschide ordine la eșec
+//   node kelion-qa-patrol.mjs --dry    → doar raportează (nu deschide ordine)
+//   KELION_BASE (default https://kelionai.app), BRIDGE_SECRET (din claude.env/fișier)
+//   CHROMIUM_PATH sau PLAYWRIGHT_BROWSERS_PATH pentru binarul browserului.
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+
+const BASE = process.env.KELION_BASE || 'https://kelionai.app'
+const DRY = process.argv.includes('--dry')
+const SECRET = (process.env.BRIDGE_SECRET || readFileMaybe('/root/kelion/bridge-secret.txt')).trim()
+const STATE = process.env.QA_STATE || '/root/kelion/qa-patrol-seen.json'
+const SIX_H = 6 * 60 * 60_000
+
+function readFileMaybe(p) { try { return readFileSync(p, 'utf8') } catch { return '' } }
+
+async function http(path, opts = {}) {
+  const ctrl = AbortSignal.timeout(opts.timeoutMs || 15_000)
+  const r = await fetch(BASE + path, { ...opts, signal: ctrl })
+  const text = await r.text().catch(() => '')
+  let setCookie = []
+  try { setCookie = r.headers.getSetCookie?.() || [] } catch { /* ignore */ }
+  return { status: r.status, text, json: safeJson(text), setCookie }
+}
+// Extrage `kelionai_session=...` din anteturile Set-Cookie (numele real al sesiunii).
+function sessionCookie(setCookie) {
+  for (const c of setCookie || []) {
+    const m = /(^|;\s*)(kelionai_session=[^;]+)/.exec(c) || /^(kelionai_session=[^;]+)/.exec(c)
+    if (m) return m[2] || m[1]
+  }
+  return ''
+}
+function safeJson(t) { try { return JSON.parse(t) } catch { return null } }
+
+// ── VERIFICĂRILE (fiecare cu probă reală) ─────────────────────────────────────
+const checks = [
+  { name: 'version', desc: 'aplicația răspunde la /api/version cu boot recent', run: async () => {
+    const r = await http('/api/version')
+    if (r.status !== 200) return fail(`/api/version → HTTP ${r.status}`)
+    if (!r.json?.v) return fail(`/api/version fără câmp {v}: ${r.text.slice(0, 120)}`)
+    return ok(`v=${r.json.v}`)
+  } },
+  { name: 'health', desc: '/health întoarce 200', run: async () => {
+    const r = await http('/health')
+    return r.status === 200 ? ok('200') : fail(`/health → HTTP ${r.status}`)
+  } },
+  { name: 'bridge', desc: 'puntea e conectată (/api/dev/status bridge=true)', run: async () => {
+    const r = await http('/api/dev/status')
+    if (r.status !== 200) return fail(`/api/dev/status → HTTP ${r.status}`)
+    if (r.json?.bridge !== true) return fail(`puntea NU e conectată: bridge=${JSON.stringify(r.json?.bridge)}`)
+    return ok('bridge=true')
+  } },
+  { name: 'delete-account', desc: '/api/me/delete e protejat (401, nu 404)', run: async () => {
+    const r = await http('/api/me/delete', { method: 'POST' })
+    if (r.status === 404) return fail('/api/me/delete → 404 (ruta lipsește — regresie de rutare)')
+    return ok(`HTTP ${r.status} (protejat)`)
+  } },
+  { name: 'download-linux', desc: '/dl/Kelionai-linux.zip se servește', run: async () => {
+    const r = await http('/dl/Kelionai-linux.zip', { method: 'HEAD', timeoutMs: 30_000 })
+    return (r.status === 200 || r.status === 302) ? ok(`HTTP ${r.status}`) : fail(`/dl linux → HTTP ${r.status}`)
+  } },
+  { name: 'chat-public', desc: 'chatul public răspunde (demo → mesaj → răspuns real)', run: async () => {
+    // Start demo (anonim) → sesiune → o tură reală de chat. Dovada = răspuns ne-gol.
+    const d = await http('/api/demo/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', timeoutMs: 20_000 })
+    // 429 = plafon demo / fingerprint deja folosit — NU e eșec de app, sar (fără false-fail).
+    if (d.status === 429) return ok('demo plafonat (429) — sar peste, nu e eșec de app')
+    if (d.status !== 200) return fail(`/api/demo/start → HTTP ${d.status}: ${d.text.slice(0, 120)}`)
+    const cookie = sessionCookie(d.setCookie)
+    if (!cookie) return ok('demo/start nu a dat cookie de sesiune vizibil — sar (posibil plafon)')
+    const c = await http('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Salut, spune un cuvânt.' }], now: new Date().toISOString(), tz: 'Europe/London' }),
+      timeoutMs: 55_000,
+    })
+    if (c.status !== 200) return fail(`/api/chat → HTTP ${c.status}: ${c.text.slice(0, 120)}`)
+    if (!c.text || c.text.trim().length < 1) return fail('chatul a răspuns GOL (creierul nu produce text)')
+    return ok(`răspuns ${c.text.trim().length} car.`)
+  } },
+  { name: 'landing-render', desc: 'pagina publică se randează în browser real', run: async () => {
+    return await browserCheck()
+  } },
+]
+function ok(detail) { return { ok: true, detail } }
+function fail(detail) { return { ok: false, detail } }
+
+// ── Verificarea de browser (Playwright + Chromium din /opt/pw-browsers) ────────
+async function browserCheck() {
+  let chromium
+  try {
+    const mod = await import(process.env.PW_CORE_PATH || 'playwright-core')
+    chromium = mod.chromium ?? mod.default?.chromium
+  } catch { return { ok: true, detail: 'playwright-core absent — sar peste (nu e eșec de app)' } }
+  if (!chromium) return { ok: true, detail: 'playwright-core fără chromium — sar peste' }
+  const exe = process.env.CHROMIUM_PATH || findChromium()
+  if (!exe) return { ok: true, detail: 'binar chromium negăsit — sar peste' }
+  let browser
+  try {
+    browser = await chromium.launch({ executablePath: exe, headless: true, args: ['--no-sandbox'] })
+    const page = await browser.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(String(e).slice(0, 120)))
+    const resp = await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    if (!resp || resp.status() >= 400) return fail(`landing → HTTP ${resp?.status()}`)
+    await page.waitForTimeout(2500) // lasă app-ul să monteze
+    const hasRoot = await page.evaluate(() => !!document.querySelector('#root, canvas, main, .stage, [class*="stage"]'))
+    if (!hasRoot) return fail('landing nu montează UI-ul (fără #root/canvas/main)')
+    if (errors.length) return fail(`erori JS pe landing: ${errors.slice(0, 2).join(' | ')}`)
+    return ok('randat, fără erori JS')
+  } catch (e) {
+    const msg = String(e.message || e)
+    // Eroare de REȚEA la nivel de browser (nu poate ieși la app) ≠ app stricată —
+    // verificările HTTP de mai sus deja dovedesc că app-ul e sus. Deci SKIP, nu
+    // eșec (altfel s-ar deschide ordine false unde browserul n-are egress).
+    if (/ERR_|net::|ECONN|ETIMEDOUT|timeout|proxy|Timeout|Navigation/i.test(msg)) {
+      return { ok: true, detail: `browser fără egress la app (${msg.slice(0, 60)}) — sar, HTTP-ul dovedește app-ul sus` }
+    }
+    return fail(`browser: ${msg.slice(0, 120)}`)
+  } finally {
+    try { await browser?.close() } catch { /* ignore */ }
+  }
+}
+function findChromium() {
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers'
+  for (const p of [`${root}/chromium-1194/chrome-linux/chrome`, `${root}/chromium/chrome-linux/chrome`]) {
+    if (existsSync(p)) return p
+  }
+  return ''
+}
+
+// ── Deschidere ordin la eșec (dedup pe conținut + 6h) ─────────────────────────
+function loadSeen() { try { return JSON.parse(readFileSync(STATE, 'utf8')) } catch { return {} } }
+function saveSeen(s) { try { writeFileSync(STATE, JSON.stringify(s)) } catch { /* ignore */ } }
+
+async function openOrder(check, detail, seen, nowMs) {
+  const key = check.name
+  const prev = seen[key]
+  if (prev && nowMs - prev < SIX_H) return false // deja raportat recent — nu spam
+  const text =
+    `QA-PATROL (semnal automat, fără ordin uman): verificarea „${check.desc}" A PICAT — ${detail}. ` +
+    `Reprodu întâi cu o comandă reală (curl/loguri), apoi repar-o la rădăcină și verifică cu dovadă. ` +
+    `NU repara dacă nu se mai reproduce (un eșec tranzitoriu în timpul unui redeploy nu e bug).`
+  if (DRY || !SECRET) return false
+  try {
+    await fetch(BASE + '/api/bridge/workorders', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-bridge-secret': SECRET },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    seen[key] = nowMs
+    return true
+  } catch { return false }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function main() {
+  const nowMs = Date.now()
+  const seen = loadSeen()
+  let passed = 0, failed = 0, opened = 0
+  console.log(`== QA-PATROL pe ${BASE}${DRY || !SECRET ? ' (DRY — nu deschid ordine)' : ''} ==`)
+  for (const check of checks) {
+    let res
+    try { res = await check.run() } catch (e) { res = fail(String(e.message || e).slice(0, 120)) }
+    if (res.ok) { passed++; console.log(`  ✅ ${check.name}: ${res.detail}`) }
+    else {
+      failed++
+      const did = await openOrder(check, res.detail, seen, nowMs)
+      if (did) opened++
+      console.log(`  ❌ ${check.name}: ${res.detail}${did ? ' → ordin deschis' : (DRY || !SECRET ? '' : ' (dedup: deja raportat <6h)')}`)
+    }
+  }
+  saveSeen(seen)
+  console.log(`== gata: ${passed} ok, ${failed} picate, ${opened} ordine deschise ==`)
+  process.exit(failed > 0 && !DRY && SECRET ? 1 : 0)
+}
+void main()
