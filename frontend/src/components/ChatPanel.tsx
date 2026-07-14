@@ -42,7 +42,6 @@ import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
-import { startLiveVoice, type LiveVoiceHandle } from '../lib/liveVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
@@ -1055,56 +1054,16 @@ export default function ChatPanel({
     }
   }, [])
 
-  // FULL-DUPLEX INSTANT STREAMING (Adrian, 13 iul: „chat full duplex instant
-  // streaming", automat, fără buton). Pentru adminul logat, intrăm SINGURI în
-  // camera LiveKit: microfon deschis permanent + vocea agentului lui Kelion, cu
-  // barge-in — asta e ce făcea butonul scos, dar automat. Cât e LIVE, suspendăm
-  // calea de voce HTTP (push-to-talk) ca aceeași vorbă să NU fie procesată de
-  // două ori. Dacă LiveKit nu e disponibil (token 401/503, conexiune picată),
-  // cade GRAȚIOS pe calea HTTP care merge deja — nimic nu se strică.
-  useEffect(() => {
-    if (!isAdmin) return
-    // CANALE SEPARATE (Adrian, 13 iul: „să meargă pe canale diferite"). BUG-ul
-    // bâzâitului: „Permanent hearing" pornea microfonul HTTP, iar LiveKit apuca
-    // ACELAȘI device în fereastra de conectare → DOUĂ capturi + ecoul vocii
-    // agentului = bâzâit continuu. Fix: oprim calea HTTP ÎNAINTE ca LiveKit să
-    // apuce microfonul — full-duplex = UN SINGUR canal curat. `micManualOffRef`
-    // pus SINCRON aici oprește și un ensureMic pornit de „Permanent hearing"
-    // (verifică flag-ul după await și nu mai instalează).
-    micManualOffRef.current = true
-    micRef.current?.stop()
-    micRef.current = null
-    let handle: LiveVoiceHandle | null = null
-    let cancelled = false
-    const backToHttp = (): void => {
-      micManualOffRef.current = false
-      void ensureMicRef.current()
-    }
-    void (async () => {
-      try {
-        handle = await startLiveVoice({
-          onState: (s) => {
-            // HTTP e deja oprit dinainte; pe 'live' nu mai atingem nimic.
-            // Doar dacă LiveKit pică revenim GRAȚIOS pe calea HTTP.
-            if (s === 'error' || s === 'closed') backToHttp()
-          },
-        })
-        if (cancelled) {
-          void handle?.stop()
-          handle = null
-        }
-      } catch {
-        // token/conexiune eșuată → revenim pe calea HTTP care merge
-        backToHttp()
-      }
-    })()
-    return () => {
-      cancelled = true
-      void handle?.stop()
-      handle = null
-      backToHttp() // la demontare, revine microfonul HTTP
-    }
-  }, [isAdmin])
+  // FULL-DUPLEX STREAMING ULTRA-RAPID PENTRU TOȚI, LA FEL (Adrian, 14 iul: „audio
+  // full duplex streaming ultra rapid pentru toți, acum; toți la fel de rapid").
+  // SCOS ocolul LiveKit doar-pentru-admin: intra SINGUR în camera LiveKit și oprea
+  // microfonul HTTP, dar când agentul de voce de pe VPS NU procesa audio, starea
+  // rămânea `live` (fallback DOAR pe `error`/`closed`) → adminul „pleca dar nu
+  // auzea", altă experiență (surdă) decât clienții. ACUM admin ȘI clienți folosesc
+  // EXACT aceeași cale: streaming instant (`micStream` → /api/asr-stream Google STT,
+  // VOX + barge-in, primul cuvânt rapid), pornită default-on din „Permanent hearing"
+  // de mai sus — dovedită că merge (amprentele reale se creează pe ea). Zero canal
+  // separat de admin, zero dependență de agentul LiveKit.
 
   // Cât ascultă, ecranul nu adoarme — un telefon cu ecranul stins își taie
   // microfonul, iar „permanent on” ar muri la primul screen-off.
