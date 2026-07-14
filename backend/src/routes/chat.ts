@@ -2344,12 +2344,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // rezerva la eșec, ridicată automat de brainModel() după o „odihnă".
     const chosen = chooseModel(lastUserText)
     let model = chosen === MODEL_FAST ? brainModel() : chosen
-    // LANGUAGE GUARDIAN: for an ESTABLISHED language, the reply's opening is held
-    // back until we confirm it's in that language; on a confident mismatch we
-    // discard (nothing was sent) and re-serve the round ONCE, corrected. It is
-    // fail-open — any doubt streams normally, and the correction is never gated,
-    // so the reply is NEVER withheld or silent.
-    const guardTag = speechPref && langName ? speechPref : null
+    // LANGUAGE GUARDIAN — SCOS (Adrian, 14 iul: „procedura de identificare limbă e
+    // inutilă aici; modelul comută nativ pe limba auzită; Chirp 3 e suficient").
+    // Guardian-ul reținea primul cuvânt până se aduna o propoziție întreagă ca să
+    // verifice limba — latență pură pe primul cuvânt, redundant cu regula din prompt
+    // („Always reply in the user's language") + cu Chirp (STT aude limba, TTS o
+    // vorbește). Dezactivat → primul cuvânt curge INSTANT. `guardTag=null` face
+    // `released` mereu true; logica de re-servire nu se mai declanșează.
+    const guardTag = null
     try {
       // Tool-use loop: stream text each round; if the brain requests tools, run them
       // and feed the results back, then continue, until it's done.
