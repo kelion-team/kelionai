@@ -3,7 +3,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { config } from '../config.js'
 import { mailEnabled, sendMail, royalLetterHtml, makeRef, letterDate } from './mail.js'
-import { bridgeAsk } from '../routes/bridge.js'
+import { brainComplete } from './anthropic.js'
 import { saveInboundEmail, setInboundReplied } from '../db.js'
 import { detectLang } from './lang.js'
 
@@ -63,9 +63,10 @@ export function isAutomated(headers: Map<string, unknown>, fromAddr: string): bo
   return false
 }
 
-// Ask the Secretary (subscription) to draft the reply body. First line = the
-// salutation ("Dear John," / "Stimate Ion,"), the rest = paragraphs. Returns
-// null if the bridge is offline — the caller then just forwards to the admin.
+// Ask the Secretary (the brain, DIRECT — Kimi/GLM) to draft the reply body. First
+// line = the salutation ("Dear John," / "Stimate Ion,"), the rest = paragraphs.
+// Returns null if the brain is unreachable — the caller then just forwards to the
+// admin. (Trecut de pe punte/`claude` pe creierul direct: 0 Anthropic, fără VPS.)
 async function draftReply(from: string, subject: string, body: string): Promise<string | null> {
   const prompt =
     'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +
@@ -74,7 +75,7 @@ async function draftReply(from: string, subject: string, body: string): Promise<
     'Apoi 1–3 paragrafe scurte, la obiect. NU adăuga antet, semnătură sau „Kelionai" — se pun automat. ' +
     'Nu inventa promisiuni pe care nu le putem ține.\n\n' +
     `De la: ${from}\nSubiect: ${subject}\n\nMesaj:\n${body.slice(0, 4000)}`
-  const draft = await bridgeAsk(prompt, [], 120_000)
+  const draft = await brainComplete(prompt, 1024)
   return draft && draft.trim() ? draft.trim() : null
 }
 

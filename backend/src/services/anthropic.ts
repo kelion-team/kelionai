@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { MODEL_FAST, MODEL_TOP } from './modelRouter.js'
 import type {
   Message,
   MessageCreateParams,
@@ -241,6 +242,30 @@ export const glm = new BrainClient(config.glmKey, GLM_BASE)
 // Clientul implicit al creierului = Kimi (primar). Restul codului importă
 // `anthropic` — acum e Kimi (doar numele bindingului a rămas).
 export const anthropic = kimi
+
+// GENERARE SINGLE-SHOT DIRECTĂ (Kimi→GLM failover), pentru funcțiile de backend
+// care NU sunt chat interactiv: draft email (mailbox), triaj cereri (admin). Astea
+// treceau prin `bridgeAsk` → puntea VPS → binarul `claude` (ultimul loc viu care
+// mai pornea `claude`). Acum lovesc creierul DIRECT — 0 Anthropic, fără drumul prin
+// VPS, mai rapid. Fără stream: e un răspuns întreg, nu curge în chat.
+export async function brainComplete(prompt: string, maxTokens = 1024): Promise<string> {
+  const extract = (m: Message): string =>
+    (m.content || [])
+      .filter((b) => (b as { type?: string }).type === 'text')
+      .map((b) => (b as unknown as { text: string }).text)
+      .join('')
+      .trim()
+  const params = { max_tokens: maxTokens, messages: [{ role: 'user' as const, content: prompt }] }
+  try {
+    return extract(await kimi.messages.create({ model: MODEL_FAST, ...params }))
+  } catch {
+    try {
+      return extract(await glm.messages.create({ model: MODEL_TOP, ...params }))
+    } catch {
+      return ''
+    }
+  }
+}
 
 // Ping the brain tiers on their real endpoints: does Kimi serve, and does GLM
 // (the reserve)? Real 200s, not assumptions — this is how "what model is the
