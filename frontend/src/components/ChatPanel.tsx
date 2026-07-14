@@ -38,6 +38,7 @@ import {
   clearPendingVoiceFeatures,
   type MicHandle,
 } from '../lib/audioIO'
+import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startLiveVoice, type LiveVoiceHandle } from '../lib/liveVoice'
@@ -766,6 +767,9 @@ export default function ChatPanel({
     // Features vocale colectate de la ultima frază vorbită (dictare live sau batch).
     const voiceFeatures = getPendingVoiceFeatures() ?? undefined
     clearPendingVoiceFeatures()
+    // Descriptorul facial GATA din fundal (dacă e camera pornită și-a prins o
+    // față). Instant — nu așteaptă nicio inferență, nu încetinește trimiterea.
+    const face = getPendingFaceDescriptor()
 
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
     setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
@@ -793,6 +797,8 @@ export default function ChatPanel({
         // Adminul le trimite deja ca files pe punte — nu le dublăm în corp.
         !isAdmin && camFrames.length > 0 ? camFrames : undefined,
         voiceFeatures,
+        face?.descriptor,
+        face?.photo,
       )) {
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])

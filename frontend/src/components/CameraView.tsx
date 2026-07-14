@@ -7,6 +7,7 @@ import {
   getCameraErrorCode,
   type Facing,
 } from '../lib/camera'
+import { startFaceSampling } from '../lib/faceprint'
 
 // Device camera capture — NOT shown on screen. The feed is for Kelion's vision
 // only: the <video> element is kept playing but visually hidden, and frames are
@@ -26,6 +27,7 @@ export default function CameraView({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const faceStopRef = useRef<(() => void) | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
 
   // Start/stop the camera stream. Camera access is serialised inside camera.ts,
@@ -33,6 +35,8 @@ export default function CameraView({
   // sensor before the previous stop has released it.
   useEffect(() => {
     if (!active) {
+      faceStopRef.current?.()
+      faceStopRef.current = null
       stopStream(streamRef.current)
       streamRef.current = null
       return
@@ -54,6 +58,15 @@ export default function CameraView({
         // Lift exposure/gain after the stream is alive — the browser may have
         // started conservatively in dim light.
         await boostLowLight(stream).catch(() => undefined)
+        // Eșantionarea feței în FUNDAL (recunoaștere titular vs. altcineva).
+        // Pornește doar acum (camera vie), rulează decuplat de chat, se oprește
+        // la cleanup. Nu blochează nimic din calea de răspuns.
+        if (videoRef.current && !faceStopRef.current) {
+          faceStopRef.current = startFaceSampling(
+            videoRef.current,
+            () => captureRef?.current?.() ?? null,
+          )
+        }
       } catch (err) {
         // If our own cleanup aborted the request, this is not a real error.
         if (controller.signal.aborted) return
@@ -68,6 +81,8 @@ export default function CameraView({
 
     return () => {
       controller.abort()
+      faceStopRef.current?.()
+      faceStopRef.current = null
       stopStream(streamRef.current)
       streamRef.current = null
     }
