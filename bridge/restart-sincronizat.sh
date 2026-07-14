@@ -101,6 +101,20 @@ refresh_one() {
   if [ -n "$src" ] && [ -f "$REPO/$src" ] && [ -n "$exec_path" ]; then
     cp -a "$REPO/$src" "$exec_path"
     say "$svc: copiat $src → $exec_path"
+    # DEPENDINȚE SURORI (module importate relativ de builder). Fișierul rulat e
+    # copiat pe o cale PLATĂ (ex. /root/kelion/…​.mjs), deci un `import
+    # './kelion-native-coder.mjs'` caută dependința în ACELAȘI director — nu în
+    # repo/bridge. Fără copierea ei → ERR_MODULE_NOT_FOUND → serviciul nu pornește
+    # (crash loop). Le copiem lângă exec_path pentru builder/deployer.
+    if [ "$svc" = "kelion-builder" ] || [ "$svc" = "kelion-deployer" ]; then
+      local exec_dir; exec_dir=$(dirname "$exec_path")
+      for dep in kelion-native-coder.mjs; do
+        if [ -f "$REPO/bridge/$dep" ]; then
+          cp -a "$REPO/bridge/$dep" "$exec_dir/$dep"
+          say "$svc: dependință $dep → $exec_dir/$dep"
+        fi
+      done
+    fi
   elif [ -n "$src" ] && [ ! -f "$REPO/$src" ]; then
     warn "$svc: sursa $src nu există în repo"
   fi
