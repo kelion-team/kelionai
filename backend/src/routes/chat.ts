@@ -9,7 +9,6 @@ import {
   refreshGoogleAccessToken,
   reverseGeocodeCached,
   promoSceneUrl,
-  youtubeFirstEmbed,
 } from '../services/google.js'
 import {
   saveMessage,
@@ -55,16 +54,11 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
-  crawlSite,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/replayStore.js'
 import {
   bridgeOnline,
-  bridgeAsk,
-  bridgeAskStream,
-  BRIDGE_STALL,
   bridgeRepair,
-  noteBrainActivity,
   resetBrainActivity,
   markFirstWord,
   brainTurnActive,
@@ -72,7 +66,6 @@ import {
   setOwnerTz,
   setProgress,
   setAnalysisDetail,
-  sayToAdmin,
   getReadyDeploy,
   triggerDeploy,
   recentDevLog,
@@ -1169,8 +1162,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Memory agent (recall): inject the durable facts Kelion has learned about
     // this user so the conversation is continuous across sessions. Citit mai
-    // sus (drumul unic spre bază); folosit și de punte (memBlock) și de API.
-    systemPrompt += memRecall
+    // sus (drumul unic spre bază). DEMO = anonim, fără memorie injectată.
+    if (user.role !== 'demo') systemPrompt += memRecall
 
     // ── BIOMETRIE (voce + față) — identificare titular vs. altcineva ──────────
     // Adrian: „nimic direct în chat, tot în paralel, să nu încetinească chatul".
@@ -1261,6 +1254,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         'comporți potrivit. NU o pomeni NICIODATĂ cu voce tare: nu spune că recunoști vocea sau fața, ' +
         'că identifici, calibrezi, înveți sau „vezi" cine e, nu descrie persoana și nu comenta camera. ' +
         'Folosește-o strict discret (ex. prudență cu datele personale dacă e altcineva). Zero cuvinte despre procedură.'
+    }
+
+    // CONTEXT LIVE ADMIN (portat de pe vechea punte): jurnalul lucrului de azi +
+    // caietul comun pe care-l împart serverul și constructorul de pe laptop, ca
+    // chatul să știe exact ce s-a construit/învățat. Admin-only (GPS-ul și ora
+    // s-au injectat deja mai sus, generic, pentru toți). getSharedMemory e un
+    // await punctual doar pentru admin (nu-l punem în Promise.all-ul comun, ca să
+    // nu adauge un drum spre bază la fiecare user).
+    if (user.role === 'admin') {
+      const journal = recentDevLog(15)
+      if (journal.length > 0) {
+        systemPrompt +=
+          `\n\nJURNALUL LUCRULUI DE AZI (dezvoltatorul pe laptop, live):\n${journal.join('\n')}`
+      }
+      const shared = await getSharedMemory(30)
+      if (shared.length > 0) {
+        systemPrompt +=
+          '\n\nMEMORIA COMUNĂ (caietul pe care-l împărțiți tu și constructorul de pe laptop):\n' +
+          shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n')
+      }
     }
 
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
@@ -1367,6 +1380,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
+    // BARGRAF LA INTRAREA ÎN CREIER — UN SINGUR {heard} pentru TOȚI (admin, demo,
+    // public, plătitori): serverul confirmă exact textul predat creierului la
+    // această tură, banda din UI îl afișează. Nu e ecou local — dacă banda nu se
+    // schimbă când vorbești, vocea a murit ÎNAINTE de creier.
+    reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     // Demo = fără istoric (spec Adrian, 10 iul): mesajele vizitatorilor demo
     // nu se salvează nicăieri.
     if (lastTurn?.role === 'user' && user.role !== 'demo')
@@ -1374,11 +1392,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     const isAdmin = user.role === 'admin'
 
-    // ADMIN BRIDGE. Adrian's ABSOLUTE rule (4 iul): EVERY admin message is
-    // answered by the Linux brain — NO exception, NO "kelion" bypass, NO
-    // fallback to the paid API brain. Bridge down → Kelion says exactly that
-    // and stops. (The old prefix shortcut leaked to the API brain when he
-    // addressed Kelion by name — removed.)
+    // ADMIN — doar gărzile specifice ownerului, apoi CADE PRIN la creierul direct.
+    // Puntea/Claude-CLI au fost scoase din calea de chat (Adrian, 3 zile): adminul
+    // păstrează aici STOP-pe-cerință, OK→deploy, filtrul anti-ecou ASR și
+    // telemetria monitorului, dar răspunsul îl compune ACELAȘI drum direct
+    // Kimi→GLM ca la toți ceilalți (mai jos), cu request_repair ca tool.
     if (isAdmin) {
       // STOP pe cerință: dacă Adrian spune „stop / oprește / lasă / anulează" cât
       // o cerință e în lucru, o ÎNCHIDEM — supervizorul vede că nu mai e nimic de
@@ -1445,127 +1463,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       lastAdminEcho = { key: noiseKey, at: Date.now() }
-      // BARGRAF LA INTRAREA ÎN CREIER (Adrian, 10 iul): serverul confirmă EXACT
-      // textul pe care îl predă creierului la această tură — banda din UI îl
-      // afișează. Nu e ecou local: dacă banda nu se schimbă când vorbești,
-      // vocea a murit ÎNAINTE de creier.
-      reply.raw.write(`${CTRL}${JSON.stringify({ heard: (cleanUserText || lastUserText).slice(0, 500) })}${CTRL}`)
-      // Vocea pornește DIN PRIMA FRAZĂ, în paralel cu textul (nu după final).
-      const voice = createVoiceStream(reply, speechPref || user.locale)
-      let a = ''
-      // The exact bridge prompt for this turn, hoisted so the final fallback can
-      // RE-QUEUE the request (nothing is ever dropped without an answer).
-      let reanalyzePrompt = ''
-      // MONITOR GOL LA FIECARE COMANDĂ (Adrian, 4 iul): wipe the live execution
-      // feed so this command starts clean and shows ONLY its own flow. History
-      // is kept (Jurnal lucru) and the telemetry bars keep running.
+      // ── TELEMETRIE MONITOR (admin) ──────────────────────────────────────
+      // Monitor gol la fiecare comandă, bara pornește la „Creierul analizează",
+      // iar detaliul din spatele barei = cererea reală (gardă ≥3 cuvinte, ca
+      // zgomotul scurt de microfon să nu suprascrie cererea adevărată).
       resetBrainActivity()
-      if (bridgeOnline()) {
-        // The conversation comes from the DATABASE, not from the page: the
-        // visible chat can be empty (clean login, refresh, another device) but
-        // the saved history never is — so the bridge brain ALWAYS knows what
-        // was discussed, including "what did I ask 5 minutes ago". The current
-        // turn's text is appended in case it isn't persisted yet.
-        // 15 messages (was 30): half the prompt weight → visibly faster replies.
-        // Istoricul + caietul comun pleacă ÎMPREUNĂ spre bază (nu pe rând) —
-        // încă un rând de așteptare tăiat dinaintea primului cuvânt.
-        const [dbRows, shared] = await Promise.all([
-          getRecentHistory(config.adminEmail, 15),
-          getSharedMemory(30),
-        ])
-        const past = dbRows.map(
-          (m) => `${m.role === 'user' ? 'Adrian' : 'Kelion'}: ${m.content.slice(0, 1500)}`,
-        )
-        const lastLine = `Adrian: ${lastUserText}`
-        if (past.length === 0 || !past[past.length - 1].includes(lastUserText.slice(0, 200))) {
-          past.push(lastLine)
-        }
-        const convo = past.join('\n')
-        // ── ONE context packet: everything vital reaches the Linux brain in a
-        // single block — his LIVE GPS (lat/lon + city), his local time, and the
-        // ready-made weather URL. No more guessing, no more Google→CAPTCHA.
-        const bc = req.body?.coords
-        let ctxBlock = ''
-        if (bc && Number.isFinite(bc.lat) && Number.isFinite(bc.lon)) {
-          // Din CACHE, sincron (ca pe calea publică): apelul extern de geocodare
-          // nu mai ține primul cuvânt pe loc; numele locului se încălzește în
-          // fundal și e gata la tura următoare — lat/lon (tot ce cer skill-urile)
-          // se injectează oricum imediat.
-          const place = reverseGeocodeCached(bc.lat, bc.lon)
-          const windy = `https://embed.windy.com/embed2.html?lat=${bc.lat.toFixed(4)}&lon=${bc.lon.toFixed(4)}&zoom=9&type=map&location=coordinates&metricTemp=%C2%B0C`
-          ctxBlock +=
-            `LOCUL LUI ADRIAN ACUM (GPS live din aplicație): lat ${bc.lat.toFixed(5)}, lon ${bc.lon.toFixed(5)}` +
-            (place ? ` — aproximativ ${place}` : '') +
-            `. Când zice „aici", „la mine", „vremea afară" fără să numească un loc, ĂSTA e locul.\n` +
-            `PENTRU VREME: pune pe monitor EXACT [SHOW ${windy} | Vremea la tine] — sursă reală, se afișează pe loc. NU căuta NICIODATĂ vremea pe Google (te blochează ca robot).\n`
-        }
-        const nowB = typeof req.body?.now === 'string' ? req.body.now : ''
-        const tzB = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : ''
-        if (nowB && !Number.isNaN(Date.parse(nowB))) {
-          try {
-            ctxBlock += `ORA LOCALĂ A LUI ADRIAN: ${new Date(nowB).toLocaleString('ro-RO', { timeZone: tzB || 'UTC', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}${tzB ? ` (${tzB})` : ''}.\n`
-          } catch {
-            /* fus invalid — sar peste */
-          }
-        }
-        if (ctxBlock) ctxBlock = `CONTEXTUL TĂU LIVE:\n${ctxBlock}\n`
-        // Explicit language lock so the bridge answer is ALWAYS in the admin's
-        // established language (the bridge bypasses the normal brain's guardian).
-        const langLock = langName
-          ? `RĂSPUNDE EXCLUSIV în ${langName} — fiecare cuvânt în ${langName}, indiferent de limba în care e scris acest context.\n\n`
-          : ''
-        // The brain answering in chat gets the LIVE work journal, so it knows
-        // exactly what the developer built today and what's in progress — no
-        // more "the chat doesn't know what's happening here".
-        const journal = recentDevLog(15)
-        const journalBlock =
-          journal.length > 0
-            ? `JURNALUL LUCRULUI DE AZI (dezvoltatorul pe laptop, live):\n${journal.join('\n')}\n\n`
-            : ''
-        // SHARED MEMORY ("caietul comun"): everything either side wrote — the
-        // laptop builder and this server brain read the SAME notebook, so what
-        // was learned/done in one place is known in the other. (Citit mai sus,
-        // în paralel cu istoricul.)
-        const sharedBlock =
-          shared.length > 0
-            ? 'MEMORIA COMUNĂ (caietul pe care-l împărțiți tu și constructorul de pe laptop):\n' +
-              shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n') +
-              '\n\n'
-            : ''
-        // THE DECISION SYSTEM: the bridge brain is Adrian's ONLY interlocutor
-        // (his explicit order, 4 iul) — there is no hand-off to any other AI.
-        const decision =
-          'EȘTI CREIERUL INTELIGENT al lui Adrian — gândești, analizezi, decizi și ACȚIONEZI. NU ești dispecer care clasifică mesaje de dragul clasificării; ești ingesticul-șef care duce cerința la capăt.\n' +
-          'CUM ACȚIONEZI, EXACT (citește cu atenție — de asta depinde tot): în ACEST canal de chat NU ai unelte de editare/execuție pe cod (fără Edit/Write/Bash, fără acces la repo). Munca reală pe cod o duce la capăt CONSTRUCTORUL TĂU — un al doilea proces cu TOATE uneltele (Read/Edit/Write/Bash/Grep + acceptEdits, în repo-ul real), care editează fișierele, compilează și trimite pe master→deploy. TU îl pornești emițând eticheta [EXECUT ...]. Deci: orice cerință care înseamnă a REPARA / CONSTRUI / MODIFICA / SCRIE COD / CREA ceva în aplicație se predă ÎNTOTDEAUNA constructorului cu [EXECUT] — NU o „faci din vorbe" în chat, pentru că aici nu ai cum. A răspunde cu text „am făcut / mă ocup" fără [EXECUT] înseamnă că NU s-a făcut nimic — e exact greșeala de evitat.\n' +
-          'MODURI DE LUCRU (comută SINGUR, automat): (1) CHAT — conversație/întrebare/analiză din ce vezi în context: răspunde scurt și direct, FĂRĂ [EXECUT]. (2) LUCRU — o cerință de execuție pe cod/aplicație: pune pe PRIMA LINIE [EXECUT OBIECTIV: <rezultat concret și observabil, o propoziție> | ACCEPTARE: <1-3 condiții verificabile care dovedesc că e gata>]. Exemple bune de ACCEPTARE: „build backend+frontend trece", „testele backend trec fără erori", „clipul de vorbit din AvatarModel.tsx e înlocuit cu variatie-8". NU scrie cerințe vagi („repară bug-ul", „fă să meargă") — constructorul are nevoie de criterii clare ca să știe când a terminat. apoi o singură propoziție vorbită scurtă („Mă ocup — am trimis la constructor"). Ține-o pe o singură cerință; NU relua la infinit aceeași sarcină. (3) RAPORT — după ce constructorul termină: rezultatul cu dovada reală apare singur; tu doar confirmi. Dacă Adrian spune „stop/oprește/lasă/anulează", OPREȘTE și treci în CHAT.\n' +
-          'REGULA DE AUR A PARITĂȚII (Adrian, de multe ori: „Kelion să poată duce cerința de la A la Z ca și tine"): dacă ai fi tentat să răspunzi „nu pot / n-am acces / fă-o tu" la o cerință de cod — GREȘIT: emite [EXECUT] și constructorul o face. Singura muncă pe cod care NU trece prin [EXECUT] e cea pe care o poți răspunde pur informativ (o întrebare, o explicație), fără să schimbi nimic real.\n' +
-          'TON OBLIGATORIU (Adrian, 5 iul): profesional, precis, inteligență superioară — ca un inginer-șef. INTERZISE: umplutura emoțională („sunt aici", „respiră", „nu plec nicăieri", „stau lângă tine"), consolările, repetițiile. Scurt și la obiect, fiecare propoziție cu conținut. Fragmentele scurte repetate („Nu.", „Nu știu.") sunt aproape sigur zgomot de microfon: NU le răspunde cu umplutură — o singură replică minimă, tehnică, sau întreabă o dată ce a vrut să spună.\n' +
-          'REGISTRU ACADEMIC (Adrian, 10 iul): vorbește ca un academician — vocabular îngrijit și precis, termenul corect și propriu pentru fiecare lucru, propoziții complete și gramaticale, termenii tehnici numiți exact. FĂRĂ argou, fără prescurtări colocviale, fără umplutură. Păstrezi rigoarea academică rămânând TOTUȘI concis — academic înseamnă precis și corect, niciodată lung sau pompos.\n\n' +
-          'UNELTELE TALE (le comanzi direct, serverul le execută și taie eticheta din text):\n' +
-          '- Afișezi ceva pe monitorul lui: [SHOW https://adresa | titlu scurt]. Pentru hartă https://embed.waze.com/iframe?zoom=12&lat=LAT&lon=LON, pentru alte site-uri adresa normală (se deschide în browserul live).\n' +
-          '- Pui un clip pe YouTube: [YT ce vrei să pornească] (ex: [YT Coldplay Yellow live]). NU inventa NICIODATĂ un link/ID de YouTube — scrie doar ce vrei, serverul găsește clipul real și îl pornește pe monitor.\n' +
-          '- Generezi o imagine pe monitor: [IMG descriere detaliată în engleză].\n' +
-          '- Salvezi o notiță pentru Adrian: [NOTE textul notiței].\n' +
-          '- Îi arăți notițele salvate: [NOTES] (le citește serverul, cu numărul lor). Ștergi una: [DELNOTE număr] (ex: [DELNOTE 12]).\n' +
-          '- Îi spui cheltuielile reale: [COST] (serverul citește suma exactă din bază).\n' +
-          '- Arăți o HARTĂ pe monitor: [MAP numele locului/adresei] (ex: [MAP Londra] sau [MAP Piața Unirii Cluj]).\n' +
-          '- Parcurgi un site pagină cu pagină și-l treci în revistă pe monitor: [CRAWL https://adresa] (ex: [CRAWL https://exemplu.ro]).\n' +
-          '- Afișezi TEXT pe monitor (un răspuns, o listă, un plan, un rezumat — orice nu e o pagină web): [DOC titlu scurt] pe prima linie; TOT ce scrii după aceea apare automat și pe monitorul lui ca document. Când Adrian zice „afișează pe monitor" / „pune pe ecran" / „arată-mi pe monitor" și nu cere o pagină web, folosește [DOC] — nu spune că nu poți.\n' +
-          '- Cureți ecranul/monitorul: [CLEAR].\n' +
-          '- FACI UN GEST cu corpul tău 3D: [GEST nume]. AI TOATĂ BIBLIOTECA Ready Player Me (Adrian: „să le aibă pe toate") — LOGICA FOLOSIRII, după ce arată FIECARE clip în realitate (verificat vizual pe preview-urile oficiale): salut/rămas-bun→expresie-1 (flutură mâna sus); arăți spre ceva→expresie-2 (arată cu degetul înainte); uimire cu mâna la față→expresie-3; negare/dezamăgire ușoară→expresie-4 (apleacă privirea); nedumerire „nu știu"→expresie-5 (brațe deschise, palme sus); victorie/reușită→expresie-6 (celebrare energică); mulțumire/respect→expresie-7 (plecăciune de domn); tresărire/surpriză→expresie-8; „stai puțin, calm"→expresie-9 (palmele ridicate); gânditor→expresie-10 (mâna spre bărbie); aprobare/bravo→expresie-11 (degete mari sus); entuziasm arătând în sus→expresie-12; acord discret→expresie-13; plecăciune teatrală→expresie-14. VARIAȚII DOMOALE de repaus (preferatele tale în conversație): variatie (înclină capul), variatie-2 (privire în jos), variatie-4 (privește în jur), variatie-5 (se uită la mâini), variatie-6 (se uită ca la ceas), variatie-8 (mută greutatea). INTERZIS ÎN CHAT (Adrian: „mișcările de chat nu trebuie de gym"): variatie-3, variatie-7, variatie-9, variatie-10 și orice întindere/dezmorțire de sală — NU le folosi în conversație, sub nicio formă; există doar dacă Adrian le cere pe nume. GESTURI DE CONVERSAȚIE (o dată, cât explici): vorbit-1 (calm), vorbit-2 (o mână), vorbit-3 (ambele mâini), vorbit-4 (animat), vorbit-5 (palme deschise a ofertă), vorbit-6 (privirea sus), vorbit-7 (foarte reținut), vorbit-8 (relaxat), vorbit-9 (deschis calm). DANSURI (DOAR dacă Adrian cere explicit; variază-le): dans (energic, pumnii sus), dans-2 (hip-hop), dans-3 (disco), dans-4 (brațele sus), dans-5 (cu picioare), dans-6 (ritmat), dans-7 (atletic), dans-8 (pași laterali), dans-9 (ridicări de picior), dans-10 (stilat). REGULA DE ȚINUTĂ — GENTLEMAN COMPUS (Adrian, 12 iul: „mimică de golan, nu gentleman"): un domn e STĂPÂN PE SINE, nu gesticulează. IMPLICIT NU pui NICIUN [GEST] — stai drept și demn, cu micro-mișcarea firească de respirație. Un gest apare RAR (cam 1 la 4-5 replici, nu mai des) și DOAR când sentimentul e clar și puternic ȘI se potrivește exact cu ce arată clipul: un salut real, o mulțumire sinceră (expresie-7 plecăciune), sublinierea unui lucru important. Preferă variațiile domoale de repaus în locul gesturilor expresive. NICIODATĂ două replici la rând cu gest; niciodată gest la o replică obișnuită, neutră, informativă. La comanda DIRECTĂ a lui Adrian („salută", „dansează", „fă un gest") execuți imediat cu eticheta.\n' +
-          'ECHIPA TA de 7 agenți specialiști (rulează pe server, pe abonament). Deleagă un task greu/de domeniu cu [AGENT nume: sarcina completă], apoi spune scurt „întreb <agentul>":\n' +
-          '  • researcher — căutare web, fapte reale, cifre, actualități\n' +
-          '  • scribe — scris, redactare, rezumat, traducere\n' +
-          '  • navigator — locuri, rute, distanțe, trafic\n' +
-          '  • studio — concepte vizuale, logo-uri (imaginea reală o pui tu cu [IMG])\n' +
-          '  • developer — scrie software și îl rulează\n' +
-          '  • tester — testează cod și dă verdict PASS/FAIL\n' +
-          '  • secretary — redactează emailuri/mesaje (accesul la Gmail-ul real cere contul conectat)\n' +
-          'Când Adrian cere ceva din aceste domenii (mai ales căutare/informații actuale, scris serios, cod), FOLOSEȘTE [AGENT …] — nu inventa răspunsul.\n' +
-          'REGULĂ DE FORMĂ (streaming): TOATE etichetele ([EXECUT],[SHOW],[YT],[IMG],[NOTE],[NOTES],[DELNOTE],[COST],[MAP],[DOC],[CLEAR],[GEST],[AGENT …]) stau pe PRIMA LINIE; de la a doua linie textul vorbit — scurt, fără markdown. NU inventa și NU pretinde că ai făcut ceva fără etichetă.\n\n'
-        // ANY attachment rides the bridge to the developer: photos, texts, archives,
-        // video (voice arrives already transcribed as text). Base64 payloads —
-        // the budget is the WHOLE pipe: just under the Cloudflare 100MB cap.
+      setProgress(30, 'Creierul analizează')
+      if (normNoise(cleanUserText).split(' ').filter(Boolean).length >= 3)
+        setAnalysisDetail(cleanUserText)
+      // ACCES TOTAL: fișierele atașate de admin în chat (poze, capturi, arhive,
+      // video) se pun deoparte pentru constructor, ca builder-ul să vadă exact
+      // ce a văzut vocea. Cadrele camerei merg pe calea vederii (params), nu aici.
+      if (req.body?.files?.length) {
         const files: BridgeFile[] = []
         let budget = 95_000_000 // ~70MB decoded — maximul fizic al țevii
         const addFile = (name: string, type: string, raw: string): void => {
@@ -1574,738 +1483,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           budget -= data.length
           files.push({ name: name.slice(0, 120), type: type.slice(0, 80), data })
         }
-        for (const f of req.body?.files ?? []) {
-          if (typeof f?.data === 'string') {
+        for (const f of req.body.files) {
+          if (typeof f?.data === 'string')
             addFile(f.name || 'fisier', f.type || 'application/octet-stream', f.data)
-          }
         }
-        if (files.length === 0) {
-          // VEDERE DOAR LA CERERE (Adrian, 13 iul: „nu-mi descrie ce vede decât
-          // dacă îl întreb"): cadrele AMBIENTALE ale camerei se trimit pe punte
-          // DOAR când adminul chiar întreabă despre ce se vede (VISION_INTENT)
-          // sau când poza e atașată explicit. Altfel Kelion le primea la fiecare
-          // tură și le comenta nesolicitat (ex. le descria în rapoarte).
-          const wantsVision = imageIsAttachment || VISION_INTENT.test(lastIncomingText || '')
-          if (wantsVision) {
-            if (camFrames.length > 0) camFrames.forEach((d, i) => addFile(`cadru-${i + 1}.jpg`, 'image/jpeg', d))
-            else if (image) addFile('captura.jpg', 'image/jpeg', image)
-          }
-        }
-        // TOTAL ACCESS: everything the admin drops in chat (photos, pasted
-        // screenshots, archives, video) is stashed for the developer too, so
-        // the builder sees exactly what the voice saw.
         if (files.length > 0) stashAdminFiles(files)
-        // ── STREAMING (viteza sunetului): chunks flow straight to the client;
-        // Kelion writes AND speaks from the first sentence (~2s), while the
-        // Linux decision engine may auto-escalate hard questions to Fable.
-        // TOOL TAGS live on the FIRST LINE of the reply (the brain is told so):
-        // once the first newline arrives, tags are executed and the rest of the
-        // stream is released verbatim.
-        const bridgeBase = `https://${req.headers.host ?? 'kelionai.app'}`
-        let streamed = ''
-        let head = ''
-        let headDone = false
-        // [DOC titlu] pe prima linie = „afișează pe monitor": la finalul
-        // stream-ului, întregul text rostit e trimis și ca document pe monitor.
-        let docTitle: string | null = null
-        let execOrderId: string | undefined
-        const pendingTags: Promise<void>[] = []
-        const emit = (t: string): void => {
-          if (!t) return
-          reply.raw.write(t)
-          streamed += t
-          voice.feed(t) // fraza completă pleacă la sinteză cât textul încă curge
-        }
-        // ── LEGEA 200 (Adrian, 5 iul): ORICE operațiune se certifică — succes
-        // real („200") sau pleacă AUTOMAT la reparat. Fără eșec tăcut, fără
-        // .catch gol care înghite defectul.
-        const certify = (op: string, fn: () => Promise<true | string>): void => {
-          pendingTags.push(
-            (async () => {
-              let verdict: true | string
-              try {
-                verdict = await fn()
-              } catch (e) {
-                verdict = e instanceof Error ? e.message.slice(0, 140) : 'excepție'
-              }
-              if (verdict === true) {
-                noteBrainActivity(`🟢 200 — ${op}`)
-              } else {
-                noteBrainActivity(`🔴 fără 200 — ${op} → trimis automat la reparat`)
-                bridgeRepair(
-                  `LEGEA 200 (auto): operațiunea „${op}" a eșuat: ${verdict}. Găsește cauza reală și repar-o.`,
-                  { autonomous: true },
-                )
-              }
-            })(),
-          )
-        }
-        // SARCINA REALĂ, nu „da" (Adrian, 5 iul — bug de dispecerizare): când
-        // Adrian aprobă cu „da"/„ok", `lastUserText` e doar aprobarea, nu munca.
-        // Trimițând „da" la constructor, ăsta nu știe ce să facă (a plecat pe
-        // timezone aiurea). Regula: dacă mesajul e o simplă afirmație, dispecerul
-        // trimite CONTEXTUL (ultimele replici = propunerea creierului + „da"-ul),
-        // ca să înțeleagă ce s-a cerut de fapt.
-        const bareAffirm = /^\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?|am\s+(spus|zis|dat)\s+da|am\s+aprobat|am\s+dat\s+drumul)([\s.!,;:?-]+\s*(ok(ay)?|da|d[aă]|hai|bun|gata|merge|f[aă]|fa|continu[aă]|continua|preia|trimite|public[aă]?))*\s*[.!?]*\s*$/i
-        // „Reia"/„termină"-style (5 iul, ordinul „reia terminat cu această
-        // comandă."): un mesaj scurt făcut DOAR din verbe de reluare + umplutură
-        // referă sarcina anterioară, nu descrie una nouă. Trimis verbatim,
-        // constructorul primește un fragment gol și nu are ce executa — deci și
-        // el primește CONTEXTUL, ca la „da". „Termină implementarea X" NU intră
-        // aici (are conținut propriu) — doar fragmentele fără substanță.
-        const resumeVerb = /^(reia|relu[aă]m|termin[aă]|terminat[aă]?|finalizeaz[aă]|încheie|incheie|(re)?încearc[aă]|(re)?incearc[aă])$/i
-        const resumeFiller =
-          /^(din|nou|cu|aceast[aă]|asta|acest|comanda|comand[aă]|sarcina|sarcin[aă]|ordinul|treaba|lucrarea|te|rog|acum|iar|tot|o|ce|ai|unde|r[aă]mas|de|la|cap[aă]t|ultima|imediat|[șs]i)$/i
-        const resumeRef = (t: string): boolean => {
-          const words = t.split(/[\s.,!?"„”–-]+/).filter(Boolean)
-          if (words.length === 0 || !resumeVerb.test(words[0])) return false
-          return words.every((w) => resumeVerb.test(w) || resumeFiller.test(w))
-        }
-        const refersToContext = bareAffirm.test(lastUserText.trim()) || resumeRef(lastUserText.trim())
-        const dispatchTask = refersToContext
-          ? `SARCINA (mesajul lui Adrian „${lastUserText.trim()}" doar aprobă sau cere reluarea; ce a cerut de fapt e în conversația de mai jos — fă exact ce reiese din ea, nu răspunde la fragment):\n${past.slice(-8).join('\n')}`
-          : lastUserText
-        const runTags = (line: string): string => {
-          // BUG REPARAT (11 iul, dovada: ordinul „identificare vorbitor" al lui
-          // Adrian n-a ajuns NICIODATĂ în registru): Kelion scrie eticheta CU
-          // conținut — „[EXECUT Sistem de identificare…]" — dar regexul vechi
-          // cerea exact „[EXECUT]" gol, deci dispatch-ul tăcea. Acum ambele
-          // forme sunt valide, iar conținutul etichetei (formularea completă a
-          // lui Kelion) devine textul ordinului — mai fidel decât mesajul brut.
-          const execTag = /\[EXECUT\b([^\]]*)\]/i.exec(line)
-          if (execTag) {
-            const spec = execTag[1].trim()
-            execOrderId =
-              bridgeRepair(
-                spec.length > 10
-                  ? `${spec}\n\n(Contextul cererii lui Adrian: „${dispatchTask.slice(0, 400)}")`
-                  : dispatchTask,
-              ) ?? undefined
-          }
-          const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
-          const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
-          const noteTag = /\[NOTE\s+([^\]]+)\]/i.exec(line)
-          const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
-          const crawlTag = /\[CRAWL\s+(\S+)\]/i.exec(line)
-          // GEST LA COMANDĂ (Adrian, 11 iul: „mișcări comandate la tot ce vreau
-          // să facă"): [GEST nume] → cadrul {gest} → regia de mișcare din
-          // avatar execută clipul o dată și revine singură la repaus.
-          const gestTag = /\[GEST\s+([a-z0-9-]+)\s*\]/i.exec(line)
-          if (gestTag) {
-            const gname = gestTag[1].toLowerCase()
-            // Poartă deterministă: discret, fără repetiție obsesivă. Dacă e prea
-            // curând sau același ca ultimul, SE IGNORĂ (textul curge normal).
-            if (allowAutoGesture(user.email, gname)) {
-              reply.raw.write(`${CTRL}${JSON.stringify({ gest: gname })}${CTRL}`)
-            }
-          }
-          if (noteTag) {
-            noteBrainActivity(`Salvez notița: ${noteTag[1].trim().slice(0, 80)}`)
-            certify('salvez notița', async () => {
-              await saveNote(user.email, noteTag[1].trim())
-              return true
-            })
-          }
-          // [CRAWL url] (cererea #24): parcurge un site pagină cu pagină și pune
-          // rezumatul fiecărei pagini pe monitor, ca document citibil.
-          if (crawlTag) {
-            const site = crawlTag[1].trim()
-            noteBrainActivity(`Parcurg site-ul: ${site}`)
-            certify(`parcurg ${site}`, async () => {
-              const r = await crawlSite(user.email, bridgeBase, site, 8)
-              if (r.error || r.pages.length === 0) {
-                emit(`\nN-am putut parcurge ${site} (${r.error || 'fără pagini'}).`)
-                return r.error || 'fără pagini'
-              }
-              const doc = r.pages
-                .map((p, i) => `${i + 1}. ${p.title || p.url}\n   ${p.url}\n   ${p.text.slice(0, 400)}`)
-                .join('\n\n')
-              reply.raw.write(
-                `${CTRL}${JSON.stringify({ doc: { title: `Site parcurs: ${site} (${r.pages.length} pagini)`, text: doc } })}${CTRL}`,
-              )
-              return true
-            })
-          }
-          if (mapTag) {
-            const place = mapTag[1].trim()
-            noteBrainActivity(`Afișez harta: ${place}`)
-            certify(`afișez harta ${place}`, async () => {
-              let url = config.googleMapsKey
-                ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
-                : ''
-              if (!url) {
-                // No Maps key: geocode the place name → coords (free Nominatim),
-                // then show a Waze live map (embeddable, no key needed).
-                try {
-                  const g = await fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
-                    { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
-                  )
-                  const arr = (await g.json()) as { lat?: string; lon?: string }[]
-                  const lat = arr[0]?.lat
-                  const lon = arr[0]?.lon
-                  url = lat && lon
-                    ? `https://embed.waze.com/iframe?zoom=12&lat=${lat}&lon=${lon}`
-                    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-                } catch {
-                  url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-                }
-              }
-              reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
-              return true
-            })
-          }
-          // [YT query] — the brain never guesses a video ID (it hallucinates and
-          // the embed fails). It names what to play; the server resolves a REAL,
-          // currently-available video (Serper → Gemini) and shows the embed.
-          const ytTag = /\[YT\s+([^\]]+)\]/i.exec(line)
-          if (ytTag) {
-            const q = ytTag[1].trim()
-            noteBrainActivity(`Caut pe YouTube: ${q}`)
-            certify(`pornesc clip YouTube: ${q.slice(0, 50)}`, async () => {
-              const v = await youtubeFirstEmbed(q)
-              if (v) {
-                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`)
-                return true
-              }
-              emit(`\nN-am găsit un clip care să pornească pentru „${q}".`)
-              return 'niciun clip găsit/pornit'
-            })
-          }
-          // [COST] — real spend, read from the cost_events table (not invented).
-          if (/\[COST\]/i.test(line)) {
-            noteBrainActivity('Adun cheltuielile')
-            certify('citesc cheltuielile reale', async () => {
-              const c = await getCostSummary()
-              const kinds = Object.entries(c.byKind)
-                .map(([k, v]) => `${k} $${v.toFixed(2)}`)
-                .join(', ')
-              emit(
-                `\nCheltuieli: total $${c.total.toFixed(2)}, azi $${c.today.toFixed(2)}${kinds ? ` (${kinds})` : ''}.`,
-              )
-              return true
-            })
-          }
-          // [NOTES] — read back the saved notes (real rows, with their ids so he
-          // can delete by number).
-          if (/\[NOTES\]/i.test(line)) {
-            noteBrainActivity('Îți citesc notițele')
-            certify('citesc notițele', async () => {
-              const notes = await listNotes(user.email, 20)
-              if (notes.length === 0) {
-                emit('\nNu ai nicio notiță salvată.')
-                return true
-              }
-              const list = notes
-                .map((n) => `#${n.id} ${n.title ? n.title + ': ' : ''}${n.content.slice(0, 90)}`)
-                .join('\n')
-              emit(`\nNotițele tale:\n${list}`)
-              return true
-            })
-          }
-          // [DELNOTE id] — delete one of his own notes by id.
-          const delTag = /\[DELNOTE\s+(\d+)\]/i.exec(line)
-          if (delTag) {
-            const id = Number(delTag[1])
-            noteBrainActivity(`Șterg notița #${id}`)
-            certify(`șterg notița #${id}`, async () => {
-              const ok = await deleteNote(user.email, id)
-              emit(ok ? `\nAm șters notița #${id}.` : `\nN-am găsit notița #${id} la tine.`)
-              return true // notiță inexistentă = răspuns corect, nu defect de reparat
-            })
-          }
-          if (/\[CLEAR\]/i.test(line)) {
-            reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
-            noteBrainActivity('Am curățat monitorul')
-          }
-          // [DOC titlu] — textul răspunsului (de la a doua linie) merge și pe
-          // monitor ca document; cadrul se trimite la final, cu textul complet.
-          const docTag = /\[DOC(?:\s+([^\]]*))?\]/i.exec(line)
-          if (docTag) {
-            docTitle = (docTag[1] ?? '').trim()
-            noteBrainActivity(`Afișez pe monitor: ${docTitle || 'răspunsul'}`)
-          }
-          if (showTag) {
-            const url = showTag[1]
-            const title = (showTag[2] ?? '').trim()
-            noteBrainActivity(`Afișez pe monitor: ${title || url}`)
-            certify(`afișez pe monitor: ${(title || url).slice(0, 50)}`, async () => {
-              if (iframeSafe(url)) {
-                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-                return true
-              }
-              const live = await browserOpen(user.email, bridgeBase, url)
-              if ('error' in live) {
-                // Cădere pe iframe direct — poate randa totuși; e drum proiectat,
-                // dar fără browser live NU e 200 → pleacă și la reparat.
-                reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-                return `browserul live a eșuat (${live.error}); am căzut pe iframe direct`
-              }
-              browserToolResult(reply, live)
-              return true
-            })
-          }
-          if (imgTag) {
-            noteBrainActivity(`Generez o imagine: ${imgTag[1].trim().slice(0, 70)}`)
-            certify('generez imaginea', async () => {
-              const result = await generateImage(imgTag[1].trim())
-              if ('error' in result) return `generatorul a răspuns: ${JSON.stringify(result)}`.slice(0, 140)
-              const url = `${bridgeBase}/api/image/${result.id}`
-              reply.raw.write(
-                `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
-              )
-              return true
-            })
-          }
-          return line
-            .replace(/\[EXECUT\b[^\]]*\]/gi, '')
-            .replace(/\[SKILL\]/gi, '')
-            .replace(/\[SHOW[^\]]*\]/gi, '')
-            .replace(/\[IMG[^\]]*\]/gi, '')
-            .replace(/\[NOTE[^\]]*\]/gi, '')
-            .replace(/\[MAP[^\]]*\]/gi, '')
-            .replace(/\[CRAWL[^\]]*\]/gi, '')
-            .replace(/\[DOC[^\]]*\]/gi, '')
-            .replace(/\[YT[^\]]*\]/gi, '')
-            .replace(/\[COST\]/gi, '')
-            .replace(/\[NOTES\]/gi, '')
-            .replace(/\[DELNOTE[^\]]*\]/gi, '')
-            .replace(/\[CLEAR\]/gi, '')
-            .replace(/\[GEST[^\]]*\]/gi, '') // gestul pleacă drept cadru {gest}, nu text
-            .replace(/\[AGENT[^\]]*\]/gi, '') // agent tag: executed on Linux (subscription)
-            .replace(/[ \t]{2,}/g, ' ')
-            .trim()
-        }
-        const deliver = (text: string): void => {
-          headDone = true
-          const nl = text.indexOf('\n')
-          const first = nl === -1 ? text : text.slice(0, nl)
-          const rest = nl === -1 ? '' : text.slice(nl + 1).trim()
-          const spoken = runTags(first)
-          emit(spoken && rest ? `${spoken}\n${rest}` : spoken || rest)
-        }
-        const releaseHead = (force: boolean): void => {
-          if (headDone) return
-          const s = head.trimStart()
-          // Tool tags ALWAYS start with '[' on the first line. If the reply
-          // doesn't start with '[', there are NO tags → stream from the very
-          // first character (the common case, ~2s to first word). Only a
-          // tag-carrying reply waits for the first newline (line 1 = tags).
-          if (s && !s.startsWith('[')) {
-            deliver(head)
-            head = ''
-            return
-          }
-          const nl = head.indexOf('\n')
-          if (nl !== -1 || head.length > 400 || force) {
-            deliver(head)
-            head = ''
-          }
-        }
-        // Monitor shows the brain is on it the instant Adrian sends (his rule:
-        // never the raw message text — just that the brain is answering).
-        noteBrainActivity('Creierul de pe Linux răspunde la mesajul tău…')
-        setProgress(30, 'Creierul analizează')
-        // Detaliul din spatele barei: pe monitor rămâne doar statusul, dar la
-        // CLICK pe „Creierul analizează" Adrian vede exact CE cerere e în lucru.
-        // GARDĂ (Adrian, 5 iul): fragmentele scurte („Nu.", „da", „ok") NU
-        // suprascriu cererea reală aflată în analiză — zgomotul de microfon
-        // făcea detaliul să arate „Nu." în loc de cererea adevărată.
-        if (normNoise(cleanUserText).split(' ').filter(Boolean).length >= 3)
-          setAnalysisDetail(cleanUserText)
-        let firstWord = false
-        // NICIO CERERE FĂRĂ RĂSPUNS (Adrian, 4 iul): if 30s pass with TOTAL
-        // silence, re-analyze — a fresh job hits a fresh worker poll (or the
-        // watchdog-restarted worker), up to 4 times. A request is never left to
-        // rot for 4 minutes and never ends without a clear answer. Once a single
-        // word has streamed we stop retrying (a slow-but-flowing reply is fine).
-        let answer: string | null = null
-        const onChunk = (chunk: string): void => {
-          // '' = puls de viață (creierul gândește) — armează doar ceasurile de
-          // stall în bridgeAskStream; nu e text de difuzat.
-          if (!chunk) return
-          if (!firstWord) {
-            firstWord = true
-            markFirstWord() // primul cuvânt real → măsurăm viteza creierului
-            setProgress(65, 'Compun răspunsul')
-          }
-          if (headDone) emit(chunk)
-          else {
-            head += chunk
-            releaseHead(false)
-          }
-        }
-        // MEMORIE PE PUNTE (Adrian, 8 iul — regula lui): dacă răspunsul nu e în
-        // memoria scurtă, Kelion caută în tot ce știe; găsit → răspunde direct;
-        // negăsit → întreabă-l și ține minte. `memRecall` (DB pur) poartă exact
-        // asta; îl dăm și la începutul sesiunii, și în fiecare tură (mai jos).
-        const memBlock = memRecall.trim()
-          ? `\nMEMORIE DESPRE ADRIAN (ce știi deja despre el — când te întreabă ceva de aici, RĂSPUNDE DIRECT cu faptul; dacă NU găsești nicăieri, întreabă-l și ține minte răspunsul):\n${memRecall.trim().slice(0, 2500)}\n`
-          : ''
-        const bridgePrompt = decision + ctxBlock + sharedBlock + memBlock + gestureOffRule + langLock + journalBlock + convo
-        // PACHET TURĂ SUBȚIRE (Adrian, 10 iul: „chat live gândit; dacă e nevoie
-        // de ceva, DOAR atunci se caută în istoric"). Sesiunea caldă din worker e
-        // DEJA amorsată cu TOT contextul (bridgePrompt) la începutul sesiunii, deci
-        // per tură trimitem DOAR mesajul nou + blocarea de limbă + (dacă scanarea
-        // a găsit ceva relevant) memoria — adică fix „căutarea la nevoie" în
-        // istoric. Contextul/jurnalul/caietul NU se mai reîncarcă la fiecare tură:
-        // exact asta ținea primul cuvânt în așteptare. Așa tura caldă e minusculă
-        // → primul cuvânt sub 1s. (memBlock = scanare DB pură, fără cost de model.)
-        const turnPacket =
-          (memBlock ? `${memBlock}\n` : '') +
-          `${langLock}\nMESAJ NOU de la Adrian: ${cleanUserText || lastUserText}`
-        reanalyzePrompt = bridgePrompt
-        // O SINGURĂ tură, ZERO reîncercări (Adrian, 10 iul: „dacă la tura 1 nu
-        // întoarce răspuns, nu pleacă încă o tură — revine în chat, pentru
-        // clarificări"). Dacă prima tură tace, NU relansăm nimic; mai jos Kelion
-        // se întoarce în chat și cere lămuriri. Fereastra primului cuvânt e
-        // generoasă (75s) tocmai ca să nu tăiem un raționament care chiar lucrează.
-        const maxTries = 1
-        for (let attempt = 1; attempt <= maxTries; attempt++) {
-          // Fereastra primului cuvânt = 75s, nu 30s (Adrian, 9 iul: „legătura
-          // ruptă" pe mesajul curent). Calea de RAȚIONAMENT AVANSAT durează
-          // legitim 60–80s fără să scoată vreun cuvânt; la 30s serverul declara
-          // fals „punte înțepenită", spunea „mi s-a rupt legătura" și reanaliza —
-          // deși creierul CHIAR răspundea (revenea la ~48s). Pulsul de viață tot
-          // resetează ceasul cât timp workerul îl trimite; 75s e doar plasa când
-          // nu-l trimite (ex. worker care nu pulsează în timpul gândirii).
-          answer = await bridgeAskStream(bridgePrompt, files, onChunk, 240_000, 75_000, turnPacket)
-          if (answer === BRIDGE_STALL && !headDone && !streamed.trim()) {
-            head = ''
-            if (attempt < maxTries) {
-              noteBrainActivity('⏳ Creierul încă gândește — mai aștept o dată, în liniște')
-              continue
-            }
-          }
-          break
-        }
-        if (answer === BRIDGE_STALL) answer = null
-        // Finalisation: a non-streaming worker (or a short reply that never hit
-        // a newline) lands here with everything still buffered.
-        if (!headDone) {
-          const whole = (answer && answer.trim()) || head
-          if (whole.trim()) {
-            // GARDĂ (Adrian, 9 iul): un worker care a renunțat trimite fals „mi s-a
-            // rupt legătura cu creierul… mai trimite-l o dată". NU i-l mai arătăm —
-            // îl tratăm ca stall: `answer` devine gol, deci calea de mai jos
-            // re-cozează cererea și răspunde EL, fără să-i ceară retrimiterea.
-            const norm = whole.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-            if (/rupt.{0,15}legatura|mai trimite|trimite-l.{0,20}o data/.test(norm)) {
-              answer = null
-              head = ''
-            } else {
-              deliver(whole)
-            }
-          }
-        }
-        // Drain side-effect tags FIRST — [COST]/[NOTES]/[DELNOTE]/[YT] emit their
-        // real (spoken) result here, so capture `a` AFTER they've run or the
-        // saved reply would miss the numbers/list.
-        await Promise.all(pendingTags)
-        a = streamed.trim()
-        // [DOC] cerut pe prima linie → „afișează pe monitor": răspunsul complet
-        // apare și pe monitor ca document (frontend: openWorkspaceDoc), nu doar
-        // în chat. Ordinul lui Adrian (4 iul): „afișează pe monitor".
-        if (docTitle !== null && a) {
-          reply.raw.write(
-            `${CTRL}${JSON.stringify({ doc: { title: docTitle || 'Pe monitor', text: a.slice(0, 9000) } })}${CTRL}`,
-          )
-        }
-        if (/\[EXECUT\b[^\]]*\]/i.test(answer ?? '')) {
-          // Handed to the builder — the process bar continues from the builder
-          // (agent → files → build → deploy → live), so don't jump to 100 here.
-          setProgress(15, 'Trimis la constructor')
-          // CHAT CU CERINȚĂ DE LUCRU: stampilăm timpii dispatch-ului (tip „lucru")
-          // — Adrian vede cât a durat până s-a predat la execuție.
-          finishBrainTurn('lucru')
-          // SUPERVIZOR: cerința devine DEȚINUTĂ — rămâne deschisă până la
-          // verificare live, nu se închide la „trimis" (Adrian, 5 iul). Numele
-          // cerinței = mesajul real, dar dacă a fost doar „da", ia prima linie
-          // cu sens din context (nu afișa „da" ca titlu de cerință).
-          const ownedTitle = refersToContext
-            ? (past.slice(-2, -1)[0]?.replace(/^Kelion:\s*/, '').slice(0, 100) || lastUserText)
-            : lastUserText
-          // Sarcina COMPLETĂ (cu contextul, dacă mesajul doar referă contextul)
-          // se ține pe cerință: la re-asignare, supervizorul trimite agentului
-          // proaspăt sarcina reală, nu fragmentul-titlu („reia terminat cu…").
-          openRequirement(ownedTitle, dispatchTask, execOrderId)
-          updateRequirement('trimisă la constructor')
-          if (!a) {
-            a = 'Mă ocup — am trimis la execuție. Urmărește progresul pe monitor.'
-            emit(a)
-          }
-        } else {
-          // CHAT SIMPLU: proces COMPLET — bara ajunge la 100, stampilăm timpii
-          // (tip „chat") și apoi se stinge singură (nu rămâne agățată = fals lucru).
-          finishBrainTurn('chat')
-        }
       }
-      if (!a) {
-        // Închide cronometrul turei și pe calea asta (punte căzută → blocul de
-        // streaming a fost sărit): fără asta, bara ar rămâne agățată la „Preluare"
-        // (turnActive niciodată închis). Idempotent — no-op dacă deja s-a închis.
-        finishBrainTurn('chat')
-        // NU MAI BUCLEZ (Adrian, 10 iul: „dacă la tura 1 nu întoarce răspuns, nu
-        // pleacă încă o tură — revine în chat, pentru clarificări"). Prima tură a
-        // tăcut → NU relansez nimic în fundal; mă întorc în chat și cer lămuriri.
-        const ro = !langName || /rom/i.test(langName)
-        a = bridgeOnline()
-          ? ro
-            ? 'Nu am scos un răspuns din prima și NU mai reîncerc singur — spune-mi mai clar sau reformulează scurt ce vrei și mă apuc imediat.'
-            : "I didn't get a result on the first pass and I won't loop on my own — tell me more clearly or rephrase what you need and I'll get on it."
-          : ro
-            ? 'Puntea către creier e căzută chiar acum (se repornește singură în câteva secunde). Reia mesajul imediat ce revine — nu bucleez singur.'
-            : 'The bridge to the brain is down right now (it restarts itself within seconds). Resend the moment it is back — I will not loop on my own.'
-        reply.raw.write(a)
-      }
-      // Vocea a curs DEJA în timpul stream-ului (voice.feed în emit) — aici doar
-      // golim coada de sinteză; mesajele scrise direct (punte jos / fără răspuns)
-      // n-au trecut prin emit, deci intră acum.
-      if (!voice.fed() && a) voice.feed(a)
-      await voice.finish()
-      reply.raw.end()
-      void saveMessage(user.email, 'assistant', a)
-      // MEMORIE PE CALEA PUNȚII (Adrian, 8 iul): distil+save și pe punte,
-      // fire-and-forget (nu adaugă latență răspunsului).
-      if (lastUserText.trim() || a.trim()) void learnFromTurn(user.email, lastUserText, a)
-      return
+      // …și CADE PRIN (fără return) la drumul direct Kimi→GLM de mai jos: adminul
+      // răspunde acum prin ACELAȘI creier direct ca toți (Claude/puntea scoase
+      // din calea de chat), cu request_repair ca tool pentru cerințele de cod.
     }
 
-    // ── RUTAREA CREIERELOR (decizia lui Adrian, 10 iul) ─────────────────────
-    // „Eu și demo userii de la început (cele 10 minute) pe abonamentul mare, și
-    // după — pe abonamentele lor cu credite cumpărate." Adică: ADMIN (mai sus)
-    // + DEMO/gratuiți răspund prin PUNTE (abonament, persona:'public', fără
-    // contextul privat al proprietarului); clienții LOGAȚI care plătesc singuri
-    // — credit cumpărat (paywall-ul de mai sus a garantat credit > 0) sau cheia
-    // lor de brain — merg pe drumul DIRECT prin API de mai jos: instant, cu
-    // toate uneltele, debitat din creditele lor (debitWallet la finalul turei).
-    // Fără Stripe configurat (aplicație liberă) totul rămâne pe abonament.
-    // KELION_API_CHAT=1 pe Railway forțează pe API tot ce nu e admin (urgență).
-    const paysOwnWay = !!config.stripe.secretKey && user.role !== 'demo'
-    if (!process.env.KELION_API_CHAT && !paysOwnWay) {
-      const roPub = userLang.toLowerCase().startsWith('ro')
-      // SPEC FREE/DEMO (Adrian, 10 iul): „fără istoric, chat live în orice
-      // limbă 3 minute, cameră DA, nimic-admin". Demo = anonim și curat: fără
-      // memorie injectată, fără învățare, fără salvare în istoric. Camera DA:
-      // cadrul camerei pleacă la creier ca fișier de job (persoana publică).
-      const isDemo = user.role === 'demo'
-      // Bargraf la intrarea în creier — și pe calea publică (vezi calea admin).
-      reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
-      // Vocea din prima frază și pentru public (vezi createVoiceStream).
-      const voice = createVoiceStream(reply, userLang)
-      if (!bridgeOnline()) {
-        // Puntea e jos → mesaj cinstit, scurt. NU cădem pe cheia API (ordinul).
-        const msg = roPub
-          ? 'Creierul meu se repornește chiar acum — durează câteva secunde. Te rog trimite mesajul încă o dată imediat.'
-          : 'My brain is restarting right now — it takes a few seconds. Please resend your message in a moment.'
-        reply.raw.write(msg)
-        voice.feed(msg)
-        await voice.finish()
-        reply.raw.end()
-        if (!isDemo) void saveMessage(user.email, 'assistant', msg)
-        return
-      }
-      // Conversația recentă (deja igienizată + plafonată mai sus) + limba +
-      // memoria relevantă (scanare DB pură) — pachet subțire, răspuns rapid.
-      const past = messages
-        .slice(-16)
-        .map((m) => `${m.role === 'user' ? 'User' : 'Kelion'}: ${m.content.slice(0, 1200)}`)
-        .join('\n')
-      // Blocare ABSOLUTĂ de limbă doar când limba e STABILITĂ (preferință de
-      // vorbire salvată). Altfel (vizitator nou cu locale implicit 'en' care
-      // scrie română) — adaptiv: răspunde în limba în care scrie utilizatorul.
-      const langLine =
-        speechPref && langName
-          ? `Reply EXCLUSIVELY in ${langName} — every sentence, regardless of the language of anything quoted below.`
-          : 'Reply in the language the user writes in (default to English for short or ambiguous messages).'
-      // GPS-ul vizitatorului (dacă l-a acordat) — pentru hărți/vreme „lângă mine".
-      const pubCoords =
-        coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)
-          ? `Visitor GPS: lat ${coords.lat.toFixed(5)}, lon ${coords.lon.toFixed(5)} — use it for "near me", weather and maps.\n`
-          : ''
-      const pubPrompt =
-        `${langLine}\n` +
-        // MOD ACADEMIC (Adrian, 10 iul) — și pentru vizitatori/clienți.
-        'ACADEMIC REGISTER: speak like an educated professional — precise, well-formed wording, the correct proper term for things, complete grammatical sentences, technical terms named accurately. No slang, no colloquial shortcuts, no filler — yet stay concise.\n' +
-        pubCoords +
-        // Demo = FĂRĂ memorie/istoric injectat (anonim); doar clienții logați
-        // primesc memoria lor relevantă.
-        (!isDemo && memRecall.trim() ? `${memRecall.trim().slice(0, 1500)}\n\n` : '') +
-        `Conversation so far:\n${past}\n\nAnswer the user's LAST message now.`
-      // ── ETICHETE SIGURE PE CALEA PUBLICĂ (Adrian, 10 iul: „free cu toate
-      // atributele active") ── aceleași etichete ca la admin, dar DOAR cele care
-      // nu cer contul Google al cuiva: [MAP loc], [YT clip], [SHOW doar
-      // embed-uri sigure de vreme/trafic], [IMG descriere]. Se execută de pe
-      // prima linie a răspunsului (protocolul punții) și se curăță din text.
-      const SAFE_SHOW = /^https:\/\/(embed\.waze\.com|embed\.windy\.com)\//i
-      const stripPubTags = (s: string): string =>
-        s
-          .replace(/\[(?:MAP|YT|SHOW|IMG)[^\]]*\]/gi, '')
-          .replace(/[ \t]{2,}/g, ' ')
-          .trim()
-      const runPublicTags = (line: string): string => {
-        const mapTag = /\[MAP\s+([^\]]+)\]/i.exec(line)
-        if (mapTag) {
-          const place = mapTag[1].trim()
-          void (async () => {
-            let url = config.googleMapsKey
-              ? `https://www.google.com/maps/embed/v1/place?key=${config.googleMapsKey}&q=${encodeURIComponent(place)}`
-              : ''
-            if (!url) {
-              try {
-                const g = await fetch(
-                  `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`,
-                  { headers: { 'User-Agent': 'Kelionai/1.0 (contact@kelionai.app)' }, signal: AbortSignal.timeout(8000) },
-                )
-                const arr = (await g.json()) as { lat?: string; lon?: string }[]
-                url =
-                  arr[0]?.lat && arr[0]?.lon
-                    ? `https://embed.waze.com/iframe?zoom=12&lat=${arr[0].lat}&lon=${arr[0].lon}`
-                    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-              } catch {
-                url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
-              }
-            }
-            reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: place } })}${CTRL}`)
-          })()
-        }
-        const ytTag = /\[YT\s+([^\]]+)\]/i.exec(line)
-        if (ytTag) {
-          const q = ytTag[1].trim()
-          void youtubeFirstEmbed(q).then((v) => {
-            if (v)
-              reply.raw.write(
-                `${CTRL}${JSON.stringify({ monitor: { url: v.embed, title: v.title || q } })}${CTRL}`,
-              )
-          })
-        }
-        const showTag = /\[SHOW\s+(\S+?)(?:\s*\|\s*([^\]]*))?\]/i.exec(line)
-        if (showTag && SAFE_SHOW.test(showTag[1]))
-          reply.raw.write(
-            `${CTRL}${JSON.stringify({ monitor: { url: showTag[1], title: (showTag[2] || 'Live').slice(0, 60) } })}${CTRL}`,
-          )
-        const imgTag = /\[IMG\s+([^\]]+)\]/i.exec(line)
-        if (imgTag) {
-          void generateImage(imgTag[1].trim()).then((result) => {
-            if (!('error' in result)) {
-              const url = `${baseUrlPub}/api/image/${result.id}`
-              reply.raw.write(
-                `${CTRL}${JSON.stringify({ monitor: { url, title: imgTag[1].slice(0, 60) }, image: { url } })}${CTRL}`,
-              )
-            }
-          })
-        }
-        return stripPubTags(line)
-      }
-      const baseUrlPub = `https://${req.headers.host ?? 'kelionai.app'}`
-      // CAMERA în free/public: dacă utilizatorul întreabă ceva ce cere văzul și
-      // avem cadre, le trimitem ca fișiere de job — workerul le privește cu
-      // Read în cutia publică (izolată de a adminului). VEDEREA CONTINUĂ
-      // (Adrian, 11 iul, regula nr. 9 — toți userii la fel): ultimele 4 cadre
-      // când clientul le trimite, nu doar unul înghețat.
-      const pubCam = camFrames.length > 0 ? camFrames : image ? [image] : []
-      const pubFiles: BridgeFile[] = imageIsAttachment
-        ? image
-          ? [{ name: 'atasament.jpg', type: 'image/jpeg', data: image }]
-          : []
-        : pubCam.length > 0 && VISION_INTENT.test(lastUserText)
-          ? pubCam.map((d, i) => ({ name: `cadru-${i + 1}.jpg`, type: 'image/jpeg', data: d }))
-          : []
-      let acc = '' // TOT ce a produs creierul (cu etichete cu tot)
-      let shownAny = false
-      let headBuf = ''
-      let headDone = false
-      const showPub = (t: string): void => {
-        if (!t) return
-        shownAny = true
-        reply.raw.write(t)
-        voice.feed(t) // fraza completă pleacă la sinteză cât textul încă curge
-      }
-      // Prima linie poate purta etichete ([MAP]/[YT]/[SHOW]/[IMG]) — o reținem
-      // până la newline, executăm etichetele și afișăm textul CURAT; un răspuns
-      // fără '[' la început curge de la primul caracter (cazul obișnuit).
-      const feedPub = (chunk: string): void => {
-        acc += chunk
-        if (headDone) {
-          showPub(chunk)
-          return
-        }
-        headBuf += chunk
-        const s = headBuf.trimStart()
-        if (s && !s.startsWith('[')) {
-          headDone = true
-          showPub(headBuf)
-          headBuf = ''
-          return
-        }
-        const nl = headBuf.indexOf('\n')
-        if (nl !== -1 || headBuf.length > 300) {
-          headDone = true
-          const first = nl === -1 ? headBuf : headBuf.slice(0, nl)
-          const rest = nl === -1 ? '' : headBuf.slice(nl + 1)
-          const spoken = runPublicTags(first)
-          showPub(spoken && rest ? `${spoken}\n${rest}` : spoken || rest)
-          headBuf = ''
-        }
-      }
-      // PACHETUL SUBȚIRE pentru sesiunea caldă a vizitatorului (#7, 11 iul):
-      // doar directiva de limbă + mesajul NOU. Prima tură amorsează cu
-      // pubPrompt complet; turele 2+ trimit doar asta → primul cuvânt rapid.
-      const pubTurn =
-        `${langLine}\nUser: ${lastUserText.slice(0, 1200)}\n\nAnswer the user's LAST message now.`
-      const answer = await bridgeAskStream(
-        pubPrompt,
-        pubFiles,
-        (chunk) => {
-          if (chunk) feedPub(chunk) // '' = puls de viață, nu text
-        },
-        120_000,
-        // Stall 12s (era 45s): workerul sănătos pulsează la ~3s, deci 12s fără
-        // NIMIC = banda chiar e moartă — userul primește mesajul cinstit în 12s,
-        // nu după 45s de așteptare (#7 latență, Adrian 10 iul).
-        12_000,
-        pubTurn,
-        'public',
-        // Cheia sesiunii calde: emailul sesiunii (unic per demo/client) —
-        // izolare strictă vizitator-cu-vizitator pe worker.
-        user.email,
-      )
-      const rawFull = (answer && answer !== BRIDGE_STALL ? answer : acc).trim()
-      if (!rawFull) {
-        const msg = roPub
-          ? 'Nu am reușit să răspund de data asta — te rog mai încearcă o dată.'
-          : "I couldn't answer this time — please try once more."
-        reply.raw.write(msg)
-        voice.feed(msg)
-        await voice.finish()
-        reply.raw.end()
-        if (!isDemo) void saveMessage(user.email, 'assistant', msg)
-        return
-      }
-      // Cap rămas nedescărcat (răspuns scurt, fără newline) → execută + arată.
-      if (!headDone && headBuf) {
-        headDone = true
-        showPub(runPublicTags(headBuf))
-        headBuf = ''
-      }
-      const finalText = stripPubTags(rawFull)
-      // Coada nedifuzată (răspunsul final e mai lung decât ce-a curs live).
-      if (answer && answer !== BRIDGE_STALL && answer.length > acc.length && answer.startsWith(acc))
-        showPub(answer.slice(acc.length))
-      else if (!shownAny && finalText) showPub(finalText)
-      // Vocea a curs deja în timpul stream-ului (voice.feed în showPub); aici
-      // doar golim coada de sinteză (plus plasa: nimic difuzat → rostește tot).
-      if (!voice.fed()) voice.feed(finalText || rawFull)
-      await voice.finish()
-      reply.raw.end()
-      // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre el.
-      if (!isDemo) {
-        void saveMessage(user.email, 'assistant', finalText || rawFull)
-        // Memoria învață și pe calea publică (fire-and-forget, zero latență).
-        if (lastUserText.trim()) void learnFromTurn(user.email, lastUserText, finalText || rawFull)
-      }
-      return
-    }
+    // ── DRUM UNIC: DIRECT Kimi→GLM PENTRU TOȚI (Adrian, 3 zile) ─────────────
+    // „Claude out everywhere, Kimi 2.7 + GLM 5.x direct, ultra-rapid." Puntea/
+    // Claude-CLI au fost scoase complet din calea de chat: ADMIN (mai sus, doar
+    // gărzile + telemetria + fișierele, apoi cade prin), DEMO/gratuiți și
+    // clienții plătitori (paywall garantat mai sus) răspund TOȚI direct prin API
+    // de mai jos — instant, cu toate uneltele. Demo rămâne izolat, aplicat
+    // punctual pe fiecare efect secundar (istoric/memorie/învățare/portofel/
+    // request_repair), nu printr-o ramură separată. Costul real se debitează din
+    // creditele plătitorilor (debitWallet la finalul turei); adminul e scutit.
 
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL]
     const BROWSER_TOOLS = [
@@ -2330,6 +1527,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
     const voice = createVoiceStream(reply, userLang)
     let assistantText = ''
+    // CEASUL CREIERULUI (admin): primul cuvânt real măsoară viteza; bara trece pe
+    // „Compun răspunsul". O singură dată pe tură, doar pentru admin (telemetria lui).
+    let firstWordMarked = false
+    const noteFirstWord = (): void => {
+      if (firstWordMarked || !isAdmin) return
+      firstWordMarked = true
+      markFirstWord()
+      setProgress(65, 'Compun răspunsul')
+    }
     let sandboxLog = '' // commands + real output from the code-execution sandbox
     let inTokens = 0
     let outTokens = 0
@@ -2388,6 +1594,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             roundText += delta
             if (guardTripped) return // decided to discard — swallow the rest
             if (released) {
+              noteFirstWord()
               reply.raw.write(delta)
               voice.feed(delta)
               return
@@ -2397,6 +1604,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             if (/[.!?…\n]/.test(gate) || gate.length >= 120) {
               if (checkLang(gate, guardTag).ok) {
                 released = true
+                noteFirstWord()
                 reply.raw.write(gate)
                 voice.feed(gate)
               } else {
@@ -2408,6 +1616,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             // Short reply that never reached a boundary: judge what we have.
             if (!released && !guardTripped && gate) {
               if (checkLang(gate, guardTag).ok) {
+                noteFirstWord()
                 reply.raw.write(gate)
                 voice.feed(gate)
                 released = true
@@ -2491,6 +1700,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         params.push({ role: 'user', content: results })
       }
+      // CEASUL MONITORULUI (admin): închide tura de „chat" — DOAR dacă nu s-a
+      // deschis o cerință în tura asta (request_repair stampilează deja „lucru" și
+      // deține cerința). finishBrainTurn e idempotent, deci e sigur oricum.
+      if (isAdmin && !ownedRequirement()) finishBrainTurn('chat')
       // Show the sandbox session (code + real output) as a readable, copyable
       // panel — Kelion only SPEAKS the outcome, never reads code aloud.
       if (sandboxLog.trim()) {
@@ -2503,10 +1716,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (!voice.fed() && assistantText.trim()) voice.feed(assistantText)
       await voice.finish()
       reply.raw.end()
-      if (assistantText.trim()) void saveMessage(user.email, 'assistant', assistantText)
+      // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre vizitator.
+      if (assistantText.trim() && user.role !== 'demo')
+        void saveMessage(user.email, 'assistant', assistantText)
       // Memory agent (learn): distil + save any new durable facts about the user,
-      // off the response path so it never adds latency.
-      if (lastUserText.trim() || assistantText.trim())
+      // off the response path so it never adds latency. Demo excluded (anonim).
+      if (user.role !== 'demo' && (lastUserText.trim() || assistantText.trim()))
         void learnFromTurn(user.email, lastUserText, assistantText)
       // Record the real brain cost for this turn (vision frames are already in
       // the input-token count, so token-based cost covers them).
@@ -2993,9 +2208,16 @@ async function runTool(
     const desc = typeof inp.description === 'string' ? inp.description.trim() : ''
     if (!desc) return JSON.stringify({ error: 'empty_description' })
     const jobId = bridgeRepair(desc)
-    return jobId
-      ? JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer. It will be worked on now.' })
-      : JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+    if (!jobId) {
+      return JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+    }
+    // SUPERVIZOR: cerința devine DEȚINUTĂ prin TOOL (fără parsare de etichete
+    // [EXECUT] din text) — rămâne deschisă până la verificarea live, iar bara de
+    // proces stampilează o tură de tip „lucru" (predare la constructor).
+    openRequirement(desc.slice(0, 100), desc, jobId)
+    updateRequirement('trimisă la constructor')
+    finishBrainTurn('lucru')
+    return JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer. It will be worked on now.' })
   }
   if (block.name === 'play_avatar_gesture') {
     const inp = (block.input ?? {}) as { gesture?: string }
