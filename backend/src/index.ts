@@ -97,6 +97,14 @@ await app.register(rateLimit, {
   allowList: (req) => {
     const u = (req.url || '').split('?')[0]
     return (
+      // FIȘIERE STATICE (avatar .glb, modele face-api, bundle JS/CSS, imagini):
+      // NICIODATĂ rate-limited. Cauza „microfonul pleacă dar nu aude" (14 iul):
+      // o singură încărcare de pagină cere ZECI de /anim/*.glb + /models/* deodată,
+      // depășea 120/min și dădea 429 pe TOT — inclusiv WebSocket-ul microfonului.
+      // Orice cale non-/api/ = fișier static → exceptată; API-ul îți păstrează capul.
+      !u.startsWith('/api/') ||
+      // MICROFONUL (voce): WebSocket-ul de STT — calea critică, nu poate fi throttled.
+      u === '/api/asr-stream' ||
       u === '/health' ||
       u === '/api/version' || // sondat la 45s de fiecare client pentru rutina de update
       u === '/api/dev/status' ||
