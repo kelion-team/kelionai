@@ -409,6 +409,19 @@ export default function AdminPanel({
             </button>
             <button
               type="button"
+              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('joburi')
+                void fetchWorkOrders().then(setOrders)
+              }}
+            >
+              Joburi/Ordine
+              {orders.filter((o) => !JOB_DONE.has(o.status)).length > 0
+                ? ` (${orders.filter((o) => !JOB_DONE.has(o.status)).length})`
+                : ''}
+            </button>
+            <button
+              type="button"
               className={`admin-tab ${tab === 'users' ? 'sel' : ''}`}
               onClick={() => setTab('users')}
             >
@@ -451,16 +464,6 @@ export default function AdminPanel({
               onClick={() => setTab('gaps')}
             >
               Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('joburi')
-                void fetchWorkOrders().then(setOrders)
-              }}
-            >
-              Joburi{orders.length > 0 ? ` (${orders.length})` : ''}
             </button>
             <button
               type="button"
