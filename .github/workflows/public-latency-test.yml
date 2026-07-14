@@ -81,4 +81,4 @@ jobs:
           LQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){deploymentLogs(deploymentId:$d,limit:500){message}}",variables:{d:$d}}')
           echo "=== linii relevante (bridge/public/stall/eroare) ==="
           gql "$LQ" | jq -r '.data.deploymentLogs[]?.message // empty' \
-            | grep -iE "bridge|public|stall|error|punte|banda|fara raspuns|reply" | tail -60 || echo "(nimic relevant)"
+            | grep -iE "asr|Recognize|chirp|streaming|InvalidArgument|PermissionDenied|NOT_FOUND|Unauthenticated|bridge|stall|error|eroare" | tail -80 || echo "(nimic relevant)"

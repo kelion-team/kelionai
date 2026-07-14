@@ -123,9 +123,13 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         }
       })
       stream.on('error', (e: unknown) => {
-        // dovada EXACTĂ a cauzei în Railway: model refuzat? config invalid? auth?
-        app.log.error({ err: e }, 'asr-stream: eroare Google streamingRecognize')
-        send({ type: 'error', error: 'asr_failed' })
+        // DIAGNOSTIC (Adrian, 14 iul): scoatem mesajul REAL Google la suprafață —
+        // codul de dinainte trimitea doar „asr_failed" generic, iar loggerul {err}
+        // nu apărea în jurnalul Railway. Acum mesajul intră ȘI în log (string) ȘI
+        // în răspunsul WS (`detail`), ca să vedem EXACT de ce respinge Google.
+        const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
+        app.log.error('asr-stream: eroare Google streamingRecognize: ' + detail)
+        send({ type: 'error', error: 'asr_failed', detail })
         gStream = null
         started = false // permite repornirea la următorul cadru — altfel ASR rămâne mut
       })
