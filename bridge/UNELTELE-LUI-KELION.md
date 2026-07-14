@@ -110,3 +110,43 @@ plus preambulul lui completat cu secțiunea UNELTELE TALE PROPRII:
 - gardurile de la pct. 3 scrise în preambul, cuvânt cu cuvânt
 
 *Scris ca dovadă la cererea lui Adrian: „scrie exact sa ramina dovada ce primeste".*
+
+---
+
+## 8. LECȚIA BUCLEI-CHEIE (Adrian, 14 iul: „învață-l ce trebuie și de ce, să nu mai greșească")
+
+**Ce a greșit Kelion (dovada reală).** Un release aprobat nu s-a putut publica pentru că
+tokenul GitHub nu avea dreptul `Pull requests: write` (403 la deschiderea PR-ului).
+În loc să OPREASCĂ și să spună clar de ce, constructorul a reîncercat publicarea la
+FIECARE 20s, ore în șir — a ars din abonament și a declanșat `deploy.yml` în lanț.
+Regula „NU buclă pe «ok»" (§2) exista, dar DOAR pentru conflicte de merge; calea de
+publicare nu avea lesă deloc.
+
+**De ce e greșeală (nu doar un bug).** O buclă oarbă e mai rea decât un eșec cinstit:
+consumă resurse, ascunde cauza reală și nu-l lasă pe Adrian să vadă ce trebuie făcut.
+Iar cauza-rădăcină aici — scope-ul unei chei — Kelion NU o poate repara singur; a insista
+în buclă e muncă inutilă pe o problemă care oricum se termină la „cere-i lui Adrian".
+
+**Regula permanentă (generalizează §2 la ORICE cale, nu doar merge):**
+1. **Aceeași eroare de 2× → OPRIRE, nu retry orb.** Orice buclă (publicare, deploy,
+   reparație, verificator) numără eșecurile; la al 2-lea eșec pe același lucru se oprește
+   definitiv și marchează starea (ex. release → `failed` prin `POST /api/bridge/release-failed`).
+2. **La un blocaj de CHEIE/permisiune, dă DIAGNOSTIC clar, nu buclă.** Spune exact ce
+   lipsește și cum se repară: „tokenul nu are `Pull requests: write` — dă-i-l în
+   github.com/settings/tokens?type=beta și repune-l prin vps-keys". O singură dată, clar.
+3. **Ce ține de o credențială e ÎNTOTDEAUNA la Adrian.** Kelion nu-și emite/rescopează
+   propria cheie GitHub. Treaba lui = un diagnostic corect + O cerere clară, nu insistență.
+4. **Verifică LIVE, nu din memorie.** „Publicarea merge de obicei" nu e dovadă — o
+   dependență de cheie e fragilă și se re-verifică. Ai o unealtă dedicată:
+   **`kelion-github doctor`** — dă diagnoza cheii FĂRĂ să expună valoarea și FĂRĂ să
+   declanșeze deploy: forma (lungime, spații/enter, prefix `github_pat_`) + drepturile
+   reale (Acces repo, Pull requests:write, Contents:write, Actions). Rulează `doctor`
+   ÎNAINTE de o publicare sau când ceva pică pe GitHub — prinzi cheia stricată din timp,
+   nu în mijlocul unei bucle. „Secretul există" ≠ „secretul e valid": 401 „Bad
+   credentials" = valoarea din cheie nu e tokenul bun (lungime/prefix greșit sau spații).
+
+**Unde e prins acum în cod (ca să nu depindă doar de bunăvoința creierului):**
+`deployApproved()` din `kelion-builder-server.mjs` are contor de eșecuri
+(`DEPLOY_MAX_ATTEMPTS=2`) + `blockRelease()`; backendul are `POST /api/bridge/release-failed`.
+Deterministul oprește bucla; regula de aici îl învață pe creier DE CE, ca să reacționeze
+la fel oriunde apare un tipar nou, înainte să existe cod pentru el.

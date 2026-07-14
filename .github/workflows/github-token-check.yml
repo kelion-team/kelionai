@@ -31,6 +31,19 @@ jobs:
               -X "$1" -H "Authorization: Bearer $TOKEN" \
               -H "Accept: application/vnd.github+json" "$API$2" ${3:+-d "$3"}
           }
+          echo "== Forma valorii din secret (NU expune secretul — doar lungime/formă) =="
+          TRIM=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+          echo "  lungime valoare secret: ${#TOKEN} caractere (tokenul corect = 93)"
+          echo "  lungime fără spații/enter: ${#TRIM} caractere"
+          if [ "${#TOKEN}" != "${#TRIM}" ]; then
+            echo "  ⚠️ SECRETUL CONȚINE SPAȚII/ENTER — ăsta strică header-ul → 401. Re-lipește fără spațiu/enter la capăt."
+          fi
+          if printf '%s' "$TRIM" | grep -q '^github_pat_'; then
+            echo "  prefix github_pat_: DA"
+          else
+            echo "  ⚠️ prefix github_pat_: NU — valoarea din secret nu e un token fine-grained (alt text lipit?)."
+          fi
+
           echo "== Repo vizibil cu tokenul =="
           RC=$(probe GET ""); echo "  GET repo -> HTTP $RC $([ "$RC" = 200 ] && echo OK || echo PROBLEMA)"
 
@@ -46,8 +59,10 @@ jobs:
           # /merges cu base==head==master e invalid -> 204/409 dacă are drept, 403 dacă nu.
           MC=$(probe POST "/merges" '{"base":"master","head":"master"}')
           case "$MC" in
+            204|409|422) echo "  -> HTTP $MC => ✅ ARE Contents:write (push/merge). Fallback-ul /merges funcționează." ;;
             403) echo "  -> HTTP 403 => ❌ NU are Contents:write. Fallback-ul /merges NU ar merge — DĂ-i Contents: Read and write." ;;
-            *)   echo "  -> HTTP $MC => ✅ ARE Contents:write (push/merge). Fallback-ul /merges funcționează." ;;
+            401) echo "  -> HTTP 401 => ❌ TOKEN INVALID (Bad credentials) — secretul VPS_GITHUB_TOKEN nu e tokenul nou." ;;
+            *)   echo "  -> HTTP $MC => neconcludent. Corp: $(jq -c '{message}' /tmp/body.json 2>/dev/null || cat /tmp/body.json)" ;;
           esac
 
           echo "== Actions: dispatch workflow (deploy.yml) =="
