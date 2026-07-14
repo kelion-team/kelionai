@@ -36,7 +36,8 @@ import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
-import { bridgeRepair, bridgeAsk, bridgeOnline } from './bridge.js'
+import { bridgeRepair, bridgeOnline } from './bridge.js'
+import { brainComplete } from '../services/anthropic.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -205,7 +206,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'Pentru FIECARE capacitate cerută mai jos, decide dacă e DEJA implementată în aplicația de acum. ' +
       'Răspunde STRICT o linie pe cerere, exact în formatul: `<id> DONE` sau `<id> TODO` (fără altceva pe linie).\n\n' +
       open.map((g) => `${g.id}: ${g.request}`).join('\n')
-    const verdict = (await bridgeAsk(prompt, [], 120_000)) || ''
+    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`claude` (0 Anthropic).
+    const verdict = (await brainComplete(prompt, 1024)) || ''
 
     let done = 0
     let sent = 0
