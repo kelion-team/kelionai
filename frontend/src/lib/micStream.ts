@@ -57,46 +57,6 @@ function floatToPcm16(input: Float32Array): ArrayBuffer {
   return out.buffer
 }
 
-// MOSTRA AUDIO pentru butonul „play" din admin (Adrian, 14 iul: „trebuie să am buton
-// play să aud vocea"). Împachetăm PCM16 16kHz (exact ce trimitem la Google) ca WAV
-// mono → data-URL. SINCRON, deci clipul e gata pe obiectul de features înainte de
-// trimitere (fără race, spre deosebire de MediaRecorder-ul asincron din calea batch).
-function pcm16ToWavDataUrl(chunks: Float32Array[], sampleRate: number): string {
-  let total = 0
-  for (const c of chunks) total += c.length
-  if (total === 0) return ''
-  const buf = new ArrayBuffer(44 + total * 2)
-  const view = new DataView(buf)
-  const wr = (off: number, s: string): void => {
-    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i))
-  }
-  wr(0, 'RIFF')
-  view.setUint32(4, 36 + total * 2, true)
-  wr(8, 'WAVE')
-  wr(12, 'fmt ')
-  view.setUint32(16, 16, true) // sub-chunk size
-  view.setUint16(20, 1, true) // PCM
-  view.setUint16(22, 1, true) // mono
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * 2, true) // byte rate
-  view.setUint16(32, 2, true) // block align
-  view.setUint16(34, 16, true) // bits/sample
-  wr(36, 'data')
-  view.setUint32(40, total * 2, true)
-  let off = 44
-  for (const c of chunks) {
-    for (let i = 0; i < c.length; i++) {
-      const s = Math.max(-1, Math.min(1, c[i]))
-      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-      off += 2
-    }
-  }
-  const bytes = new Uint8Array(buf)
-  let bin = ''
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return `data:audio/wav;base64,${btoa(bin)}`
-}
-
 // reducere de rată liniară (ctx.sampleRate → 16kHz) — suficient pentru voce
 function downsample(input: Float32Array, inRate: number): Float32Array {
   if (inRate === TARGET_RATE) return input
@@ -179,7 +139,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   const flushPreRoll = (): void => {
     for (const { frame } of preRoll) {
       const ds = downsample(frame, ctx.sampleRate)
-      addClipAudio(ds)
       try {
         ws?.send(floatToPcm16(ds))
         if (!sentAudio) {
@@ -204,16 +163,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let phraseZcrSum = 0
   let phraseEnergySum = 0
   let phraseFrames = 0
-
-  // MOSTRA AUDIO a frazei (PCM16 16kHz acumulat) — pentru butonul „play" din admin.
-  const phrasePcm: Float32Array[] = []
-  let phrasePcmLen = 0
-  const MAX_CLIP_SAMPLES = TARGET_RATE * 8 // ~8s — destul cât să auzi vocea, mic ca mărime
-  const addClipAudio = (ds: Float32Array): void => {
-    if (phrasePcmLen >= MAX_CLIP_SAMPLES) return
-    phrasePcm.push(ds.slice())
-    phrasePcmLen += ds.length
-  }
 
   const collectFrame = (): void => {
     featAnalyser.getFloatTimeDomainData(featTimeBuf)
@@ -255,8 +204,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     phraseZcrSum = 0
     phraseEnergySum = 0
     phraseFrames = 0
-    phrasePcm.length = 0
-    phrasePcmLen = 0
   }
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -291,13 +238,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     opts.onLive('') // golește MEREU banda la sfârșit de frază (nu rămâne agățat)
     if (text) {
       const features = finalizeFeatures()
-      if (features) {
-        // Atașăm mostra audio SINCRON (WAV din PCM-ul acumulat) — e gata pe obiect
-        // înainte ca fraza să plece la creier, deci ajunge la salvarea amprentei.
-        const clip = pcm16ToWavDataUrl(phrasePcm, TARGET_RATE)
-        if (clip && clip.length <= 600_000) features.clip = clip
-        setPendingVoiceFeatures(features)
-      }
+      if (features) setPendingVoiceFeatures(features)
       opts.onPhrase(text)
     }
     resetFeatures()
@@ -398,7 +339,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
     collectFrame()
     const ds = downsample(input, ctx.sampleRate)
-    addClipAudio(ds)
     try {
       ws.send(floatToPcm16(ds))
       if (!sentAudio) {
