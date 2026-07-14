@@ -27,6 +27,9 @@
 // RAILWAY_TOKEN (pentru deploy). Repo la /root/kelion/app (clona proiectului).
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+// CODER NATIV (fără binarul `claude`, fără Anthropic — ordinul lui Adrian „0
+// Anthropic"): bucla agentică rulează direct pe API-ul Messages al Kimi/GLM.
+import { runNativeCoder } from './kelion-native-coder.mjs'
 
 const BASE = process.env.KELION_BASE || 'https://kelionai.app'
 // Clona reală de pe VPS e /root/kelion/repo (dovedit în jurnalul bridge-deploy);
@@ -329,55 +332,35 @@ function runClaudeLive(prompt, onEvent, timeoutMs) {
     // Modelul = al TREPTEI active (Kimi/GLM), auto-sincronizat de pe endpoint;
     // niciodată un model Anthropic (scos).
     const model = (await resolveTierModel(tier)) ?? tier.model ?? MODEL_FALLBACK[tier.name]
-    const c = spawn('claude', [
-      '-p', prompt,
-      '--model', model,
-      // CAPACITATE MAXIMĂ (Adrian, 12 iul: „cele 2 modele la capacitate maximă"):
-      // ambele trepte de lucru (Kimi + GLM, același spawn) primesc TOT setul de
-      // unelte de editare + căutare + execuție. Lipsa lui Grep/Glob/MultiEdit era
-      // o gaură reală: promptul îi spune modelului „caută cu grep/glob" înainte
-      // să editeze, dar acele unelte NU erau permise → blocate în headless →
-      // constructorul ieșea „fără fișiere". Acum are ce-i trebuie ca să editeze.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch,Task',
-      // DREPT EFECTIV DE EDITARE (Adrian: „nu au drepturi de editare, dă-le ce
-      // ți-am cerut"): a permite uneltele în listă NU e același lucru cu dreptul
-      // de a scrie pe disc. În headless, poarta de permisiuni blochează Edit/
-      // Write dacă modul nu le acceptă explicit. `acceptEdits` = auto-accept la
-      // toate editările → modelul chiar poate modifica fișiere, nu doar „cere".
-      '--permission-mode', 'acceptEdits',
-      '--output-format', 'stream-json', '--verbose',
-    ], { cwd: REPO, env: workEnv(tier) })
-    let buf = ''
+    // CODER NATIV (fără binarul `claude`, fără Anthropic): bucla agentică
+    // rulează direct pe API-ul Messages al treptei (Kimi/GLM) prin fetch. Are
+    // ACELEAȘI capacități ca înainte — TOT setul de unelte de editare/căutare/
+    // execuție (read/write/edit/multi_edit/bash/glob/grep/ls) și aplică editările
+    // automat (echivalentul lui `acceptEdits`). Cheia RAW + baza vin din treaptă
+    // (workKeyOf face exact ce făcea workEnv, dar aici avem nevoie de cheia goală).
+    const apiKey = workKeyOf(tier)
     let finalText = ''
-    let errText = ''
-    const t = setTimeout(() => c.kill('SIGKILL'), timeoutMs)
-    c.stdout.on('data', (d) => {
-      buf += d
-      let i
-      while ((i = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, i).trim()
-        buf = buf.slice(i + 1)
-        if (!line) continue
-        try {
-          const ev = JSON.parse(line)
-          if (ev.type === 'result' && typeof ev.result === 'string') {
-            // Cotă golită → doar pe eroare reală (is_error), nu pe text normal.
-            if (ev.is_error && tier) workQuotaHit(tier.name, ev.result)
-            finalText = ev.result
-          }
-          onEvent(ev)
-        } catch { /* linie partiala/non-JSON — ignorata */ }
+    // Ambalăm onEvent ca să: (a) captăm textul final; (b) marcăm cota golită pe
+    // eroare reală — EXACT contractul vechi (stdout-ul CLI făcea la fel).
+    const wrapped = (ev) => {
+      if (ev && ev.type === 'result' && typeof ev.result === 'string') {
+        if (ev.is_error && tier) workQuotaHit(tier.name, ev.result)
+        finalText = ev.result
       }
+      onEvent(ev)
+    }
+    const res = await runNativeCoder(prompt, {
+      model,
+      base: tier.base,
+      apiKey,
+      cwd: REPO,
+      onEvent: wrapped,
+      timeoutMs,
     })
-    c.stderr.on('data', (d) => (errText += d))
-    c.on('close', (code) => {
-      clearTimeout(t)
-      // Treapta golită se marchează → următoarea încercare a supervizorului
-      // (re-asignarea existentă) pornește deja pe treapta următoare.
-      if (tier && errText) workQuotaHit(tier.name, errText)
-      resolve({ code, out: finalText })
-    })
-    c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
+    // Plasă suplimentară: dacă a picat cu semnătură de cotă, marcăm treapta (la
+    // fel ca vechea ramură „errText" de la close).
+    if (tier && res.code !== 0 && res.out) workQuotaHit(tier.name, res.out)
+    resolve({ code: res.code, out: res.out || finalText })
     })()
   })
 }
@@ -534,41 +517,26 @@ function runClaudeGLMVerifier(prompt, onEvent, timeoutMs) {
     // doar fallback dacă interogarea /v1/models pică.
     const glmTier = WORK_TIERS.find((t) => t.name === 'glm')
     const model = (await resolveTierModel(glmTier)) || GLM_MODEL
-    const c = spawn('claude', [
-      '-p', prompt,
-      '--model', model,
-      // CAPACITATE MAXIMĂ ȘI LA VERIFICARE (Adrian, 12 iul: „ambele au atribut de
-      // edit și de verificare"): verificatorul nu mai e read-only — primește TOT
-      // setul de unelte, ca să poată nu doar citi/verifica, ci și edita/repara
-      // ce găsește. Ambele modele (Kimi + GLM) au acum ambele atribute: și
-      // editare (poarta de muncă), și verificare (poarta asta) — complet.
-      '--allowedTools', 'Read,Edit,Write,MultiEdit,NotebookEdit,Bash,Glob,Grep,LS,TodoWrite,WebFetch,WebSearch,Task',
-      // DREPT EFECTIV DE EDITARE și la verificare — acceptEdits, ca verificatorul
-      // să poată repara ce găsește, nu doar să raporteze.
-      '--permission-mode', 'acceptEdits',
-      '--output-format', 'stream-json', '--verbose',
-    ], { cwd: REPO, env })
-    let buf = ''
+    // CODER NATIV și la verificare (fără binarul `claude`, fără Anthropic):
+    // aceeași buclă agentică, pe treapta GLM. Cheia RAW o citim din fișier (la
+    // fel ca glmEnv, care ne-a garantat deja că există — altfel am fi ieșit mai
+    // sus). Verificatorul păstrează TOT setul de unelte (poate edita/repara).
+    let glmKey
+    try { glmKey = readFileSync('/root/kelion/glm-key.txt', 'utf8').trim() || null } catch { glmKey = null }
     let finalText = ''
-    let errText = ''
-    const t = setTimeout(() => c.kill('SIGKILL'), timeoutMs)
-    c.stdout.on('data', (d) => {
-      buf += d
-      let i
-      while ((i = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, i).trim()
-        buf = buf.slice(i + 1)
-        if (!line) continue
-        try {
-          const ev = JSON.parse(line)
-          if (ev.type === 'result' && typeof ev.result === 'string') finalText = ev.result
-          onEvent(ev)
-        } catch { /* linie parțială/non-JSON — ignorată */ }
-      }
+    const wrapped = (ev) => {
+      if (ev && ev.type === 'result' && typeof ev.result === 'string') finalText = ev.result
+      onEvent(ev)
+    }
+    const res = await runNativeCoder(prompt, {
+      model,
+      base: glmTier?.base || 'https://api.z.ai/api/anthropic',
+      apiKey: glmKey,
+      cwd: REPO,
+      onEvent: wrapped,
+      timeoutMs,
     })
-    c.stderr.on('data', (d) => (errText += d))
-    c.on('close', (code) => { clearTimeout(t); resolve({ code, out: finalText || errText }) })
-    c.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: String(e) }) })
+    resolve({ code: res.code, out: res.out || finalText })
     })()
   })
 }
