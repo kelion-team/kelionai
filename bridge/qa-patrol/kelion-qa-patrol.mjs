@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// QA-PATROL — Kelion își exercită SINGUR aplicația cap-coadă și deschide ordine
-// precise când ceva șchiopătează (Adrian, foaia de parcurs §14 #4: „agent care
-// patrulează"). Determinist: fiecare verificare are o probă REALĂ (cod HTTP,
-// randare, răspuns de chat), zero „presupun". La eșec → un ordin exact în coadă
-// (POST /api/bridge/workorders), dedup pe conținut + fereastră de 6h ca să nu
-// spameze. Fără secret pe disc → mod DRY (doar raportează, nu deschide ordine).
+// QA-PATROL — Kelion își exercită SINGUR aplicația cap-coadă și, când ceva NU e
+// 200, INFORMEAZĂ creierul (Adrian, 14 iul: „QA nu blochează, doar informează
+// creierul de probleme; creierul decide real ce se face și cine, aplică, și tot
+// el verifică până când reparația e 200"). Determinist: fiecare verificare are o
+// probă REALĂ (cod HTTP, randare, răspuns de chat), zero „presupun". La problemă →
+// o notă în CAIET (POST /api/bridge/memory) pe care creierul o citește și DECIDE
+// singur (reparație / suport / ignoră fals-pozitiv); dedup 6h ca să nu spameze.
+// NU BLOCHEAZĂ NIMIC (exit 0 mereu). Fără secret → mod DRY (doar raportează local).
 //
-//   node kelion-qa-patrol.mjs          → patrulează o dată; deschide ordine la eșec
-//   node kelion-qa-patrol.mjs --dry    → doar raportează (nu deschide ordine)
+//   node kelion-qa-patrol.mjs          → patrulează o dată; informează creierul la problemă
+//   node kelion-qa-patrol.mjs --dry    → doar raportează local (nu scrie în caiet)
 //   KELION_BASE (default https://kelionai.app), BRIDGE_SECRET (din claude.env/fișier)
 //   CHROMIUM_PATH sau PLAYWRIGHT_BROWSERS_PATH pentru binarul browserului.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -166,24 +168,34 @@ function findChromium() {
   return ''
 }
 
-// ── Deschidere ordin la eșec (dedup pe conținut + 6h) ─────────────────────────
+// ── INFORMEAZĂ CREIERUL (nu blochează, nu comandă — creierul decide) ──────────
+// Adrian, 14 iul: „QA nu trebuie să blocheze, doar să INFORMEZE creierul de
+// probleme; creierul decide real ce se face și CINE face, aplică, și tot el
+// VERIFICĂ până când reparația e 200." De aceea NU mai deschidem ordin direct la
+// constructor (ar fi „QA comandă"). Scriem în CAIET (shared_memory) — canalul pe
+// care creierul îl citește la fiecare mesaj (+ caiet-watcher îl trezește). Așa
+// creierul e informat și DECIDE singur: reparație (EXECUT către constructor),
+// suport către Adrian, sau ignoră un fals-pozitiv. Dedup 6h ca să nu spameze.
 function loadSeen() { try { return JSON.parse(readFileSync(STATE, 'utf8')) } catch { return {} } }
 function saveSeen(s) { try { writeFileSync(STATE, JSON.stringify(s)) } catch { /* ignore */ } }
 
-async function openOrder(check, detail, seen, nowMs) {
+async function informBrain(check, detail, seen, nowMs) {
   const key = check.name
   const prev = seen[key]
-  if (prev && nowMs - prev < SIX_H) return false // deja raportat recent — nu spam
-  const text =
-    `QA-PATROL (semnal automat, fără ordin uman): verificarea „${check.desc}" A PICAT — ${detail}. ` +
-    `Reprodu întâi cu o comandă reală (curl/loguri), apoi repar-o la rădăcină și verifică cu dovadă. ` +
-    `NU repara dacă nu se mai reproduce (un eșec tranzitoriu în timpul unui redeploy nu e bug).`
+  if (prev && nowMs - prev < SIX_H) return false // deja informat recent — nu spam
+  const content =
+    `QA-PATROL (semnal automat): verificarea „${check.desc}" NU e 200 — ${detail}. ` +
+    `Tu (creierul) DECIZI ce se face și CINE face: dacă e bug de cod → predă [EXECUT] la ` +
+    `constructor; dacă e resursă/credențial → suport ghidat lui Adrian; dacă e tranzitoriu ` +
+    `(429/redeploy) → confirmă că nu se mai reproduce și lasă-l. Reprodu întâi cu o comandă ` +
+    `reală (curl/loguri). VERIFICĂ singur până când e 200 — nu declara „gata" fără dovadă. ` +
+    `NU bloca nimic: ăsta e doar un semnal informativ.`
   if (DRY || !SECRET) return false
   try {
-    await fetch(BASE + '/api/bridge/workorders', {
+    await fetch(BASE + '/api/bridge/memory', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-bridge-secret': SECRET },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ source: 'qa-patrol', content }),
       signal: AbortSignal.timeout(15_000),
     })
     seen[key] = nowMs
@@ -195,21 +207,23 @@ async function openOrder(check, detail, seen, nowMs) {
 async function main() {
   const nowMs = Date.now()
   const seen = loadSeen()
-  let passed = 0, failed = 0, opened = 0
-  console.log(`== QA-PATROL pe ${BASE}${DRY || !SECRET ? ' (DRY — nu deschid ordine)' : ''} ==`)
+  let passed = 0, failed = 0, informed = 0
+  console.log(`== QA-PATROL pe ${BASE}${DRY || !SECRET ? ' (DRY — nu informez creierul)' : ''} ==`)
   for (const check of checks) {
     let res
     try { res = await check.run() } catch (e) { res = fail(String(e.message || e).slice(0, 120)) }
     if (res.ok) { passed++; console.log(`  ✅ ${check.name}: ${res.detail}`) }
     else {
       failed++
-      const did = await openOrder(check, res.detail, seen, nowMs)
-      if (did) opened++
-      console.log(`  ❌ ${check.name}: ${res.detail}${did ? ' → ordin deschis' : (DRY || !SECRET ? '' : ' (dedup: deja raportat <6h)')}`)
+      const did = await informBrain(check, res.detail, seen, nowMs)
+      if (did) informed++
+      console.log(`  ❌ ${check.name}: ${res.detail}${did ? ' → am informat creierul (caiet)' : (DRY || !SECRET ? '' : ' (dedup: deja informat <6h)')}`)
     }
   }
   saveSeen(seen)
-  console.log(`== gata: ${passed} ok, ${failed} picate, ${opened} ordine deschise ==`)
-  process.exit(failed > 0 && !DRY && SECRET ? 1 : 0)
+  console.log(`== gata: ${passed} ok, ${failed} nu-s 200, ${informed} semnale către creier ==`)
+  // NU blochează NIMIC (Adrian): patrula doar informează → exit 0 mereu, chiar și
+  // când găsește probleme. Creierul e cel care decide și verifică până e 200.
+  process.exit(0)
 }
 void main()
