@@ -300,7 +300,7 @@ export interface StagedRelease {
   title: string
   detail: string
   branch?: string
-  status: 'pending' | 'approved' | 'rejected' | 'deployed'
+  status: 'pending' | 'approved' | 'rejected' | 'deployed' | 'blocked'
   at: string
 }
 
@@ -389,6 +389,33 @@ export async function decideRelease(id: string, decision: 'approve' | 'reject'):
     })
   } catch {
     /* non-fatal */
+  }
+}
+
+export interface GithubTokenStatus {
+  ok: boolean
+  since: string | null
+}
+
+export async function fetchGithubTokenStatus(): Promise<GithubTokenStatus | null> {
+  try {
+    const r = await fetch('/api/admin/github-token-status', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as GithubTokenStatus
+  } catch {
+    return null
+  }
+}
+
+export async function resetGithubToken(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/github-token-reset', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return r.ok
+  } catch {
+    return false
   }
 }
 
