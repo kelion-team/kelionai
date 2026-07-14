@@ -29,7 +29,6 @@ import {
   getSharedMemory,
   getMemories,
   deleteMemory,
-  identifyVoiceprint,
   getVoiceprint,
   saveVoiceprint,
   vectorDistance,
@@ -1173,36 +1172,51 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (vf?.vector?.length && vf?.meta) {
       const gender = inferGender(vf.meta.pitchMean)
       const stored = await getVoiceprint(user.email)
-      const match = await identifyVoiceprint(vf.vector, 0.38)
       const isOwnerByEmail = user.email.toLowerCase() === config.adminEmail.toLowerCase()
-      // Pentru admin comparam DIRECT cu amprenta lui stocata, nu cu orice match
-      // din baza de date — asa evitam ca un alt user cu vector apropiat sa fie
-      // confundat cu ownerul.
-      let voiceVerifiedAdmin = false
-      if (isOwnerByEmail) {
-        const adminPrint = await getVoiceprint(config.adminEmail)
-        if (adminPrint?.features?.length) {
-          voiceVerifiedAdmin = vectorDistance(vf.vector, adminPrint.features) < 0.38
-        }
+
+      // TITULAR vs. ALTCINEVA: comparăm vocea curentă cu referința PROPRIE a
+      // titularului contului (nu cu „orice amprentă apropiată din DB" — altfel un
+      // străin cu voce similară ar fi luat drept titular). Distanță mică = titularul.
+      const refDist =
+        stored?.features?.length ? vectorDistance(vf.vector, stored.features) : Infinity
+      const hasRef = !!stored?.features?.length
+      const isAccountHolder = refDist < 0.38
+
+      // ÎNROLARE STABILĂ (fix bug: înainte se suprascria referința la FIECARE tură
+      // cu vocea celui care vorbea ACUM → dacă vorbea altcineva, referința
+      // titularului se corupea și data următoare nici el nu se mai recunoștea).
+      // Acum salvăm referința DOAR când: (a) nu există încă una (prima voce =
+      // înrolarea titularului), sau (b) vocea curentă chiar se potrivește cu
+      // referința (adaptare fină). O voce străină NU mai atinge referința.
+      if (!hasRef || isAccountHolder) {
+        await saveVoiceprint({
+          email: user.email,
+          name: user.name || stored?.name || user.email.split('@')[0],
+          gender,
+          isAdmin: isOwnerByEmail,
+          features: vf.vector,
+          featureMeta: vf.meta,
+        })
       }
-      await saveVoiceprint({
-        email: user.email,
-        name: user.name || stored?.name || user.email.split('@')[0],
-        gender,
-        isAdmin: isOwnerByEmail,
-        features: vf.vector,
-        featureMeta: vf.meta,
-      })
-      const speakerName = voiceVerifiedAdmin
-        ? 'Adrian'
-        : match?.name || stored?.name || user.name || 'the user'
+
       const genderLabel =
         gender === 'male' ? 'bărbat' : gender === 'female' ? 'femeie' : 'necunoscut'
-      systemPrompt +=
-        `\n\nSPEAKER: ${speakerName}. Gen detectat după voce: ${genderLabel}. ` +
-        (voiceVerifiedAdmin
-          ? 'Voce verificată ca fiind a ownerului Adrian.'
-          : 'NU este verificată ca fiind vocea ownerului.')
+      if (!hasRef || isAccountHolder) {
+        // Titularul contului vorbește (sau prima înrolare, când încă n-avem referință).
+        const who = isOwnerByEmail ? 'Adrian (ownerul)' : user.name || 'titularul contului'
+        systemPrompt +=
+          `\n\nSPEAKER: ${who}. Gen detectat după voce: ${genderLabel}. ` +
+          (isOwnerByEmail
+            ? 'Vocea e a TITULARULUI contului — ownerul Adrian.'
+            : 'Vocea e a TITULARULUI contului.')
+      } else {
+        // O ALTĂ persoană vorbește pe contul titularului.
+        systemPrompt +=
+          `\n\nSPEAKER: ALTCINEVA — NU este titularul contului. Gen detectat după voce: ${genderLabel}. ` +
+          `Vorbește o altă persoană decât ${isOwnerByEmail ? 'ownerul Adrian' : 'titularul'}. ` +
+          'Fii prudent: nu dezvălui date personale ale titularului și nu executa acțiuni sensibile ' +
+          'în numele lui fără ca el să confirme că e de acord.'
+      }
     }
 
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
