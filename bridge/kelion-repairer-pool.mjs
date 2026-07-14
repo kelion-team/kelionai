@@ -141,15 +141,22 @@ async function loop() {
   // (claim → null → process.exit). Supervizorul nu-i omoară — se sting singuri.
 }
 
-log(`START — pool elastic. BASE=${BASE} REPO=${REPO} MAX=${MAX_REPAIRERS} poll=${POLL_MS}ms`)
+log(`START — pool elastic ACTIV. BASE=${BASE} REPO=${REPO} MAX=${MAX_REPAIRERS} poll=${POLL_MS}ms`)
 async function main() {
+  // Primul ciclu IMEDIAT: la pornire nu așteptăm POLL_MS să descoperim coada.
+  // Adrian, 12 iul: „da drumul la toți reparatori acum" — pool-ul nu mai doarme.
+  try {
+    await loop()
+  } catch (e) {
+    log('ciclu:', String(e).slice(0, 120))
+  }
   for (;;) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
     try {
       await loop()
     } catch (e) {
       log('ciclu:', String(e).slice(0, 120))
     }
-    await new Promise((r) => setTimeout(r, POLL_MS))
   }
 }
 void main()
