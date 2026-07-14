@@ -189,6 +189,21 @@ void loadKv('work_engine')
 // Codul scris de constructor, bucată cu bucată — arătat SUB bara de progres
 // la click (Adrian, 11 iul). Plafonat la ultimele 120 de editări.
 const workCode: { ts: number; file: string; text: string }[] = []
+// GARD ANTI-PUBLICARE CU TOKEN GITHUB INVALID (Adrian, 14 iul): când constructorul
+// detectează 401 de la GitHub, oprește publicările, golește coada de pending și
+// afișează pe monitor cauza. Resetabil manual când Adrian înlocuiește tokenul.
+let githubTokenInvalid = false
+let githubTokenInvalidAt = 0
+void (async () => {
+  try {
+    const v = await loadKv('github_token_invalid')
+    if (v === '1') {
+      githubTokenInvalid = true
+      const t = await loadKv('github_token_invalid_at')
+      githubTokenInvalidAt = Number(t) || 0
+    }
+  } catch { /* ignore */ }
+})()
 // THE PROCESS PROGRESS BAR (Adrian's real requirement, 4 iul): the current job,
 // 0→100%, from intake to finish — NOT server resources. chat/builder/deployer
 // push the percentage as the process moves through its stages.
@@ -1887,6 +1902,81 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { events: await listTierEvents(50) }
   })
 
+  // BLOCARE PUBLICĂRI LA TOKEN GITHUB INVALID (Adrian, 14 iul): constructorul
+  // apelează acest endpoint când detectează 401 de la GitHub. Serverul marchează
+  // toate release-urile pending ca blocked, setează flagul vizibil în admin și
+  // îl anunță pe Adrian în chat / jurnal. Publicările rămân oprite până la reset.
+  async function blockPendingReleases(): Promise<number> {
+    const all = await listStagedReleases(200)
+    let blocked = 0
+    for (const r of all) {
+      if (r.status === 'pending') {
+        await setReleaseStatus(r.id, 'blocked')
+        const ai = releaseAlerts.findIndex((a) => a.id === r.id)
+        if (ai !== -1) releaseAlerts.splice(ai, 1)
+        blocked++
+      }
+    }
+    if (blocked > 0) persistReleaseAlerts()
+    return blocked
+  }
+
+  app.post('/api/bridge/github-token-invalid', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    githubTokenInvalid = true
+    githubTokenInvalidAt = Date.now()
+    await saveKv('github_token_invalid', '1').catch(() => {})
+    await saveKv('github_token_invalid_at', String(githubTokenInvalidAt)).catch(() => {})
+    const blocked = await blockPendingReleases()
+    const msg = `🛑 Constructorul este OPRIT: tokenul GitHub de pe VPS este invalid (401). ${blocked} release-uri pending au fost blocate. Înlocuiește tokenul în /root/kelion/github-token.txt, apoi apasă „Token GitHub înlocuit" în Admin → Release-uri.`
+    console.log('[bridge]', msg)
+    sayToAdmin(msg)
+    noteBrainActivity(msg)
+    devLog.push(`TOKEN GITHUB INVALID — ${blocked} release-uri blocate`)
+    return { ok: true, blocked, msg }
+  })
+
+  app.post('/api/bridge/github-token-reset', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    githubTokenInvalid = false
+    githubTokenInvalidAt = 0
+    await saveKv('github_token_invalid', '').catch(() => {})
+    await saveKv('github_token_invalid_at', '').catch(() => {})
+    const msg = '✅ Tokenul GitHub a fost resetat — constructorul poate reîncerca publicările.'
+    console.log('[bridge]', msg)
+    sayToAdmin(msg)
+    noteBrainActivity(msg)
+    devLog.push('TOKEN GITHUB RESETAT — publicările pot relua')
+    return { ok: true, msg }
+  })
+
+  app.get('/api/bridge/github-token-status', async (req, reply) => {
+    if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
+    return { ok: !githubTokenInvalid, since: githubTokenInvalidAt || null }
+  })
+
+  // Admin poate reseta flagul după ce înlocuiește tokenul GitHub pe VPS.
+  app.post('/api/admin/github-token-reset', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    githubTokenInvalid = false
+    githubTokenInvalidAt = 0
+    await saveKv('github_token_invalid', '').catch(() => {})
+    await saveKv('github_token_invalid_at', '').catch(() => {})
+    const msg = '✅ Tokenul GitHub a fost resetat — constructorul poate reîncerca publicările.'
+    console.log('[bridge]', msg)
+    sayToAdmin(msg)
+    noteBrainActivity(msg)
+    devLog.push('TOKEN GITHUB RESETAT — publicările pot relua')
+    return { ok: true, msg }
+  })
+
+  app.get('/api/admin/github-token-status', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return { ok: !githubTokenInvalid, since: githubTokenInvalidAt || null }
+  })
+
   // ── INDICATOARE CREDIT CREIER (Adrian, 13 iul) ────────────────────────────
   // Două „becuri" în header-ul admin, lângă statusul Linux: Kimi (stânga) +
   // GLM (dreapta). Verde = are credit; roșu pâlpâind = fără credit (quota
@@ -1970,6 +2060,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
       // Motorul de lucru activ (max/kimi/glm) — permanent, ultima valoare.
       workEngine,
+      // Starea tokenului GitHub de pe VPS: false = invalid/blocked → constructor oprit.
+      githubTokenOk: !githubTokenInvalid,
       // Becul: câte decizii (release-uri) îl așteaptă pe Adrian chiar acum.
       releases: await pendingDecisions(),
       // VITEZA REALĂ a creierului Linux: timpii ultimei ture (tip + total +
