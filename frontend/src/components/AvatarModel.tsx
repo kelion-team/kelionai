@@ -153,7 +153,9 @@ const LAZY_CLIP_FILES: Record<string, string> = {
 // TAXONOMIA GESTURILOR (Adrian, 13 iul) — repaus DOMOL permis în chat vs
 // „dezmorțiri" ample INTERZISE în chat. Rotația automată din repaus alege DOAR
 // din setul domol (gentleman); dezmorțirile rămân disponibile doar la comandă.
-const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
+// OPRIT: animația procedurală a mâinilor este dezactivată complet — setul nu mai
+// este folosit.
+// const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
 // (interzise în rotația din chat: variatie-3, variatie-7, variatie-9, variatie-10)
 
 export default function AvatarModel() {
@@ -197,8 +199,9 @@ export default function AvatarModel() {
   const { actions, mixer } = useAnimations(clips, root)
   const current = useRef<AnimationAction | null>(null)
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
-  const talkHold = useRef(0) // vocea „ține" starea de vorbit peste micro-pauze
-  const nextVar = useRef(22 + Math.random() * 15) // când urmează o variație domoală
+  // Oasele brațelor/antebrațelor descoperite în scenă, pentru blocarea lor în
+  // repaus în fiecare cadru (Adrian, 13 iul: oprire completă a gesturilor ample).
+  const armBones = useRef<Record<string, Bone | null>>({})
   // GESTURI DEZACTIVATE (Adrian, 13 iul): ce Adrian debifează în Admin → Gesturi
   // NU se joacă deloc — nici automat, nici comandat. Reîmprospătat periodic.
   const disabledG = useRef<Set<string>>(new Set())
@@ -246,12 +249,14 @@ export default function AvatarModel() {
     })
     morphs.current = m
     // Brațele jos înainte de primul cadru — clipul preia din prima actualizare.
+    // Salvăm și oasele pentru a le bloca la repaus în fiecare cadru.
     for (const key of Object.keys(ARM_REST)) {
       const target = ARM_REST[key]
       for (const name of ARM_NAMES[key]) {
         const bone = b[name]
         if (bone) {
           bone.rotation.set(target.x, target.y, target.z)
+          armBones.current[key] = bone
           break
         }
       }
@@ -268,12 +273,14 @@ export default function AvatarModel() {
   }, [])
 
   useEffect(() => {
-    play('idle')
+    // Oprire completă a animației procedurale a mâinilor (Adrian, 13 iul):
+    // nu mai pornim idle-ul automat; mâinile rămân în repaus static.
+    // play('idle')
     // La finalul unui clip „once" (variație/gest), înapoi lin la repaus.
     const onFinished = (): void => {
       state.current = 'idle'
       current.current = null
-      play('idle')
+      // play('idle')
       // Scena (Stage) află că gestul s-a terminat — de ex. revine din poziția
       // de dans înapoi în colțul lui Adrian.
       window.dispatchEvent(new Event('kelion-gesture-done'))
@@ -338,33 +345,39 @@ export default function AvatarModel() {
     }
   }, [])
 
-  useFrame((state3, delta) => {
-    const t = state3.clock.elapsedTime
+  useFrame((_state3, delta) => {
     const level = getVoiceLevel()
 
     // ── Regia: alege mișcarea după ce face Kelion acum ──
-    // ȚINUTĂ DE DOMN (Adrian, 11 iul: „gesturi de gym, nu e bine" → 13 iul:
-    // taxonomia domoală): în repaus se rulează RAR o variație DOMOALĂ din setul
-    // permis (CHAT_IDLE_CALM) — gentleman, nu gym. „Dezmorțirile" ample
-    // (variatie-3/-7/-9/-10) NU intră în rotația din chat; expresiile mari și
-    // dansurile vin EXCLUSIV la comandă de la creier.
-    if (level > 0.05) talkHold.current = t + 0.7
-    const talking = t < talkHold.current
+    // OPRITĂ COMPLET (Adrian, 13 iul): animația procedurală a mâinilor este
+    // dezactivată — mâinile rămân în repaus static. Gesturile comandate
+    // explicit (state === 'gesture') sunt lăsate să ruleze.
+    // if (level > 0.05) talkHold.current = t + 0.7
+    // const talking = t < talkHold.current
+    // if (state.current !== 'gesture') {
+    //   if (talking && state.current !== 'talking') {
+    //     state.current = 'talking'
+    //     play('talk')
+    //   } else if (!talking && state.current === 'talking') {
+    //     state.current = 'idle'
+    //     play('idle')
+    //     nextVar.current = t + 20 + Math.random() * 20
+    //   } else if (!talking && state.current === 'idle' && t > nextVar.current) {
+    //     const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
+    //     if (pool.length) {
+    //       state.current = 'gesture'
+    //       play(pool[Math.floor(Math.random() * pool.length)], true)
+    //     }
+    //     nextVar.current = t + 22 + Math.random() * 22
+    //   }
+    // }
+
+    // Blochează brațele/antebrațele în repaus static, exceptând gesturile comandate.
     if (state.current !== 'gesture') {
-      if (talking && state.current !== 'talking') {
-        state.current = 'talking'
-        play('talk')
-      } else if (!talking && state.current === 'talking') {
-        state.current = 'idle'
-        play('idle')
-        nextVar.current = t + 20 + Math.random() * 20
-      } else if (!talking && state.current === 'idle' && t > nextVar.current) {
-        const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
-        if (pool.length) {
-          state.current = 'gesture'
-          play(pool[Math.floor(Math.random() * pool.length)], true)
-        }
-        nextVar.current = t + 22 + Math.random() * 22
+      for (const key of Object.keys(ARM_REST)) {
+        const bone = armBones.current[key]
+        const target = ARM_REST[key]
+        if (bone) bone.rotation.set(target.x, target.y, target.z)
       }
     }
 
