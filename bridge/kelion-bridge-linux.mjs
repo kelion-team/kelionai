@@ -64,7 +64,7 @@ function loadContext() {
 // mai rapidă — păstrează ținta de latență <1s); munca grea (constructorul) folosește
 // `kimi-k2-thinking` plin. GLM rămâne rezerva.
 const MODEL = 'kimi-k2-thinking-turbo'
-const RESERVE = 'glm-4.6'
+const RESERVE = 'glm-5.2' // TOPUL GLM (Adrian 14 iul: adminul cere mereu cel mai performant; verificat live 200)
 const REST_MS = 10 * 60_000
 let fableDownUntil = 0
 const brainModel = () => (Date.now() < fableDownUntil ? RESERVE : MODEL)
@@ -98,7 +98,7 @@ const TIERS = [
   // GLM cere modelul lui NATIV — `model: null` cădea pe modelul claude cerut
   // (claude-fable-5), respins de z.ai cu „400 Unknown Model" (12 iul). `glm-4.6`
   // e fallback-ul sigur; failover-ul pe GLM la chat e rar (cere Max+Kimi golite).
-  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-4.6' },
+  { name: 'glm', keyFile: '/root/kelion/glm-key.txt', base: 'https://api.z.ai/api/anthropic', model: 'glm-5.2' },
 ]
 const TIER_COOLDOWN_MS = 5 * 60_000 // Adrian, 13 iul: „5 minute automat" (era 30)
 const TIER_COOLDOWN_MAX_MS = 5 * 60_000 // FIX 5 min (fără backoff crescător) — Kimi revine automat rapid
