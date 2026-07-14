@@ -65,6 +65,12 @@ jobs:
               -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
               -d '{"model":"kimi-for-coding","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
             echo "Kimi  body: $(head -c 260 /tmp/kimi.out 2>/dev/null)"
+            # PROBĂ: ce întoarce endpointul pentru model=kimi-k2-thinking (îl servește sau îl remapează?)
+            printf 'Kimi(k2-thinking) HTTP: '
+            curl -s -o /tmp/kimi_k2.out -w '%{http_code}\n' --max-time 20 -X POST https://api.kimi.com/coding/v1/messages \
+              -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+              -d '{"model":"kimi-k2-thinking","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
+            echo "Kimi(k2-thinking) body: $(head -c 260 /tmp/kimi_k2.out 2>/dev/null)"
           else echo "Kimi: LIPSA CHEIE (/root/kelion/kimi-key.txt)"; fi
           if [ -n "$GLM_KEY" ]; then
             printf 'GLM   HTTP: '
@@ -79,6 +85,14 @@ jobs:
             curl -s --max-time 20 https://api.kimi.com/coding/v1/models \
               -H "Authorization: Bearer $KIMI_KEY" -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' \
               | head -c 800; echo
+          fi
+          echo "==================== MODELE DISPONIBILE (GLM /v1/models) — care e topul? ===================="
+          if [ -n "$GLM_KEY" ]; then
+            curl -s --max-time 20 https://api.z.ai/api/anthropic/v1/models \
+              -H "Authorization: Bearer $GLM_KEY" -H "x-api-key: $GLM_KEY" -H 'anthropic-version: 2023-06-01' \
+              | head -c 1200; echo
+            echo "--- fallback (endpoint z.ai openai-style) ---"
+            curl -s --max-time 20 https://api.z.ai/api/paas/v4/models -H "Authorization: Bearer $GLM_KEY" | head -c 1200; echo
           fi
           echo
           echo "==================== SĂNĂTATE ENDPOINT-URI ===================="
