@@ -35,6 +35,41 @@ TOKEN=$(cat /root/kelion/github-token.txt 2>/dev/null || true)
 [ -z "$TOKEN" ] && { echo "EROARE: lipsește /root/kelion/github-token.txt (Adrian îl pune prin vps-keys)"; exit 1; }
 gh_api() { curl -sS --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
 
+# VERIFICARE TOKEN — oprește execuția imediat dacă tokenul GitHub e invalid/expirat,
+# astfel încât eroarea 401 „Bad credentials" să NU apară mascată într-un apel ulterior.
+check_token() {
+  local rc
+  rc=$(curl -sS -o /tmp/kg_check.json -w '%{http_code}' --max-time 25 \
+    -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+    "$API")
+  case "$rc" in
+    200)
+      echo "✅ Token GitHub valid (GET $API → HTTP 200)."
+      return 0
+      ;;
+    401)
+      echo "❌ TOKEN GITHUB INVALID/EXPIRAT — toate publicările sunt blocate."
+      echo "   GitHub răspunde: 401 Bad credentials"
+      echo "   Cauză: /root/kelion/github-token.txt conține un token revocat sau expirat."
+      echo "   Remediere:"
+      echo "     1. Generează un token nou: https://github.com/settings/tokens?type=beta"
+      echo "        (drepturi minimale: Contents:write, Actions:write, Pull requests:write)"
+      echo "     2. Pune-l pe VPS prin workflow .github/workflows/vps-keys.yml"
+      echo "        (secret VPS_GITHUB_TOKEN) SAU manual în /root/kelion/github-token.txt"
+      echo "     3. Reîncearcă publicarea."
+      return 1
+      ;;
+    *)
+      echo "⚠️ Verificare token neconcludentă (GET $API → HTTP $rc)."
+      echo "   Răspuns: $(jq -r '.message // empty' /tmp/kg_check.json 2>/dev/null || cat /tmp/kg_check.json)"
+      # Nu oprim: poate fi o eroare tranzitorie de rețea; lăsăm apelul real să decidă.
+      return 0
+      ;;
+  esac
+}
+
+check_token || exit 1
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   pr)
