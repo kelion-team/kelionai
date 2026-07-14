@@ -47,14 +47,14 @@ async function checkBrainKeys(): Promise<TokenCheck[]> {
         name: 'GLM API key',
         status: v.reserve === 'ok' ? 'ok' : (v.reserve === 'not_configured' ? 'not_configured' : (v.reserve.startsWith('fail_') ? (v.reserve as `fail_${number}`) : 'fail')),
         detail: v.reserve === 'ok' ? 'autentificare + credit OK' : v.reserve,
-        requiredScope: 'Mesaje API Anthropic-compatibil',
+        requiredScope: 'Mesaje API (format Messages)',
       },
     ]
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return [
       { name: 'Kimi API key', status: 'fail', detail: msg, requiredScope: 'Mesaje API (coding)' },
-      { name: 'GLM API key', status: 'fail', detail: msg, requiredScope: 'Mesaje API Anthropic-compatibil' },
+      { name: 'GLM API key', status: 'fail', detail: msg, requiredScope: 'Mesaje API (format Messages)' },
     ]
   }
 }

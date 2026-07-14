@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   GESTURE_CATALOG,
   GESTURE_CATEGORIES,
@@ -52,6 +52,7 @@ import {
   fetchContactMessages,
   type ContactMessage,
   fetchVoiceprints,
+  fetchVoiceprintAudio,
   deleteVoiceprint,
   type VoiceprintRow,
   fetchTokenChecks,
@@ -201,6 +202,36 @@ export default function AdminPanel({
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
+  // acum ca să arătăm ⏸ și să nu pornim două deodată.
+  const [playingVp, setPlayingVp] = useState<string | null>(null)
+  const vpAudioRef = useRef<HTMLAudioElement | null>(null)
+  const playVoiceprint = async (email: string): Promise<void> => {
+    // Al doilea click pe același rând oprește redarea.
+    if (vpAudioRef.current) {
+      vpAudioRef.current.pause()
+      vpAudioRef.current = null
+    }
+    if (playingVp === email) {
+      setPlayingVp(null)
+      return
+    }
+    const clip = await fetchVoiceprintAudio(email)
+    if (!clip) {
+      setPlayingVp(null)
+      return
+    }
+    const audio = new Audio(clip)
+    vpAudioRef.current = audio
+    audio.onended = () => setPlayingVp(null)
+    audio.onerror = () => setPlayingVp(null)
+    setPlayingVp(email)
+    try {
+      await audio.play()
+    } catch {
+      setPlayingVp(null)
+    }
+  }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
@@ -1124,6 +1155,21 @@ export default function AdminPanel({
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
+                    {' · '}
+                    {v.hasAudio ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        title="Ascultă mostra vocii"
+                        onClick={() => void playVoiceprint(v.email)}
+                      >
+                        {playingVp === v.email ? '⏸ oprește' : '▶ ascultă'}
+                      </button>
+                    ) : (
+                      <span className="muted" title="Încă nu s-a captat o mostră audio">
+                        fără audio
+                      </span>
+                    )}
                     {' · '}
                     <button
                       type="button"
