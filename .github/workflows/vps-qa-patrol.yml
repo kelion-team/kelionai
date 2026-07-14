@@ -1,0 +1,89 @@
+# QA-PATROL — instalează patrula lui Kelion ca timer systemd pe VPS (§14 #4).
+# Rulează periodic `bridge/qa-patrol/kelion-qa-patrol.mjs` care exercită app-ul
+# cap-coadă (version/health/punte/delete-account/dl/CHAT PUBLIC real/randare) și
+# deschide ordine precise la eșec (dedup 6h). Zero deps: doar Node built-ins
+# (browserul e opțional). BRIDGE_SECRET îl citește din /root/kelion/bridge-secret.txt.
+# Determinist, izolat: dacă pică patrula, nimic din app nu e afectat.
+name: vps-qa-patrol
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ce face'
+        type: choice
+        default: install
+        options: [install, run-now, status, logs, stop]
+
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalează/gestionează QA-patrol pe VPS (SSH, parolă mascată)
+        env:
+          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VPS_PASS" ]; then
+            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          fi
+          VPS_HOST=164.68.120.87
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$VPS_PASS"
+          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
+
+          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" ACTION="${ACTION:-install}" 'bash -s' <<'EOS'
+          set -e
+          REPO=/root/kelion/repo
+          [ -d "$REPO" ] || REPO=/root/kelion
+          SCRIPT="$REPO/bridge/qa-patrol/kelion-qa-patrol.mjs"
+          NODE=$(command -v node || echo /usr/bin/node)
+
+          case "${ACTION:-install}" in
+            stop)
+              systemctl stop kelion-qa-patrol.timer 2>/dev/null || true
+              systemctl disable kelion-qa-patrol.timer 2>/dev/null || true
+              echo "timer: $(systemctl is-active kelion-qa-patrol.timer 2>/dev/null || echo oprit)"; exit 0 ;;
+            status)
+              systemctl status kelion-qa-patrol.timer --no-pager 2>/dev/null | head -12 || echo "timer neinstalat"
+              echo "--- ultima rulare ---"
+              systemctl status kelion-qa-patrol.service --no-pager 2>/dev/null | head -12 || true
+              exit 0 ;;
+            logs)
+              journalctl -u kelion-qa-patrol.service -n 40 --no-pager 2>/dev/null || echo "fără loguri"; exit 0 ;;
+            run-now)
+              [ -f "$SCRIPT" ] || { echo "::error::lipsește $SCRIPT (rulează repo-sync)"; exit 1; }
+              echo "=== rulare manuală ==="; "$NODE" "$SCRIPT" || true; exit 0 ;;
+          esac
+
+          # install: scrie service (oneshot) + timer (la 30 min), pornește timer-ul.
+          [ -f "$SCRIPT" ] || { echo "::error::lipsește $SCRIPT — rulează repo-sync întâi"; exit 1; }
+          cat > /etc/systemd/system/kelion-qa-patrol.service <<UNIT
+          [Unit]
+          Description=Kelion QA-patrol (exercită app-ul cap-coadă, deschide ordine la eșec)
+          After=network-online.target
+          [Service]
+          Type=oneshot
+          WorkingDirectory=$REPO
+          ExecStart=$NODE $SCRIPT
+          # BRIDGE_SECRET e citit de script din /root/kelion/bridge-secret.txt
+          TimeoutStartSec=180
+          UNIT
+          cat > /etc/systemd/system/kelion-qa-patrol.timer <<'UNIT'
+          [Unit]
+          Description=Rulează QA-patrol la 30 de minute
+          [Timer]
+          OnBootSec=5min
+          OnUnitActiveSec=30min
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now kelion-qa-patrol.timer
+          echo "✅ QA-patrol instalat. Timer: $(systemctl is-active kelion-qa-patrol.timer)"
+          echo "=== o rulare de probă acum ==="
+          "$NODE" "$SCRIPT" || true
+          EOS
