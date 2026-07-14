@@ -101,6 +101,20 @@ export async function fetchWorkOrders(): Promise<WorkOrder[]> {
   }
 }
 
+// Arhivează un ordin (îl scoate din lista „în lucru" → arhiva apelabilă de Kelion).
+// NU șterge nimic din bază: registrul rămâne permanent, Kelion îl vede oricând.
+export async function archiveWorkOrder(id: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/admin/workorders/${encodeURIComponent(id)}/archive`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.
