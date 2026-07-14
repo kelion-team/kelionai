@@ -694,10 +694,16 @@ async function build(order) {
     `frontend/src/lib/audioIO.ts + micStream.ts; vocea rostita (TTS) → ` +
     `backend/src/services/tts.ts. Daca nu e in lista, foloseste grep pe cuvinte-cheie.\n` +
     // Problema 1 (Adrian, 12 iul): NU „documenta blocajul" in loc sa lucrezi.
-    `REGULI DE FIER: (1) Daca sarcina cere OPERATIUNI de sistem (instalare pachete, ` +
-    `pornire/repornire servicii, docker, config VPS) si NU le poti rula EXACT si dovedit, ` +
-    `NU edita AI-HANDOFF/documente ca substitut de lucru — scrie clar "OPS_NECESITA_RUNBOOK: <ce comanda exacta trebuie>" ` +
-    `si opreste-te, ca sa preia un workflow determinist (vps-*). ` +
+    `REGULI DE FIER: (1) Daca ai nevoie de o DEPENDINTA lipsa (o unealta/pachet ca sa duci sarcina), ` +
+    `NU renunta si NU o documenta ca substitut — FOLOSESTE UNEALTA DETERMINISTA DE CAPABILITATE (Adrian: ` +
+    `"sa stie de ce are nevoie, sa-si instaleze dependintele constient"): mai intai ` +
+    "`node bridge/kelion-capability.mjs probe`" + ` (vezi FAPTELE reale: ce binare/servicii/containere/disc exista, ` +
+    `nu din memorie), apoi ` + "`node bridge/kelion-capability.mjs need <nume>`" + ` care face detect->install->verify ` +
+    `si iese 0 DOAR cu dovada reala (accepta retetele din registru: docker, caddy, ffmpeg, python3, sshpass, SAU ` +
+    `generic apt:<pachet> / npm:<pachet>). Reteta noua invatata se adauga in bridge/kelion-capabilities.json. ` +
+    `DOAR daca nevoia e o OPERATIUNE pe care unealta NU o acopera (repornire de serviciu de productie, config VPS) ` +
+    `si NU o poti rula EXACT si dovedit, NU edita AI-HANDOFF/documente ca substitut — scrie clar ` +
+    `"OPS_NECESITA_RUNBOOK: <ce comanda exacta trebuie>" si opreste-te, ca sa preia un workflow determinist (vps-*). ` +
     `(2) DOVADA INAINTE DE AFIRMATIE: nu spune ca ceva merge fara sa fi VERIFICAT (curl/status/loguri reale), ` +
     `niciodata din presupunere. (3) La orice esec, citeste faptele (loguri, status) inainte de concluzie. ` +
     // Problema noua (Adrian, 12 iul: „reparara o fantoma — consuma credite, bani;
