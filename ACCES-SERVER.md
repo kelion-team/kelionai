@@ -137,7 +137,42 @@ Spune-mi exact care din ele le vrei și le fac, cu bariere clare (ex. doar comen
 
 ---
 
-## 7. VERIFICARE RAPIDĂ CĂ TOTUL E SUS (60s)
+## 7. CUM OBȚII VALORILE REALE (fiecare secret, din locul TĂU)
+
+> Valorile nu se scriu în repo (ar rămâne pe veci în istoricul git). Dar tu le
+> deții pe toate — iată cum scoți fiecare, direct de la sursă.
+
+### 7.a Toate secretele de pe VPS — o singură comandă
+Rulează asta de pe laptop (cu cheia ta SSH) și-ți afișează pe ecran tot ce e pe VPS:
+```bash
+ssh -i "C:\Users\adria\Kelionai-secrets\kelion-vps" root@164.68.120.87 ^
+  "for f in bridge-secret.txt kimi-key.txt glm-key.txt github-token.txt; do echo \"== $f ==\"; cat /root/kelion/$f; echo; done; echo \"== claude.env ==\"; cat /root/kelion/claude.env"
+```
+Îți dă: secretul punții, cheia Kimi, cheia GLM, tokenul GitHub și tot `claude.env` (auth CLI).
+
+### 7.b Valorile din Railway (DB, Google, Stripe, mail, LiveKit etc.)
+`railway.app` → proiectul **Kelionai** → serviciul **`web`** → tab **Variables**.
+Fiecare variabilă are valoarea vizibilă (click pe „reveal"/copy). Aici stau:
+`DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GEMINI_API_KEY`, `SERPER_API_KEY`,
+`STRIPE_SECRET_KEY`, `MAIL_PASS`, `SESSION_SECRET`, `BRIDGE_SECRET`,
+`LIVEKIT_API_KEY/SECRET` ș.a.m.d.
+- **Stringul bazei de date:** de acolo `DATABASE_URL`, sau Railway → serviciul **Postgres** → **Connect**.
+
+### 7.c GitHub Secrets — ATENȚIE
+`VPS_ROOT_PASS`, `KIMI_KEY`, `GLM_KEY`, `VPS_GITHUB_TOKEN`, `RAILWAY_TOKEN` **NU se pot
+citi înapoi** din GitHub (așa e proiectat GitHub — după ce salvezi un secret, nu-l mai
+arată niciodată; îl poți doar **suprascrie**). Dacă ai nevoie de valoarea lor:
+- **Parola root VPS:** nu-ți trebuie de fapt — ai deja acces root cu **cheia SSH** (`kelion-vps`). Dacă vrei totuși parola și n-o mai știi, o resetezi de la providerul VPS.
+- **Kimi/GLM/GitHub token:** valorile reale sunt pe VPS (7.a) — aceleași care sunt și în GitHub Secrets.
+- **`RAILWAY_TOKEN`:** îl regenerezi din `railway.app` → Account → Tokens.
+
+### 7.d Google Cloud (skill-uri Gmail/Calendar/Drive/TTS)
+Consola: `console.cloud.google.com`, proiect **`gen-lang-client-0460348646`**.
+Service account JSON = valoarea `GOOGLE_SERVICE_ACCOUNT_JSON` din Railway (7.b).
+
+---
+
+## 8. VERIFICARE RAPIDĂ CĂ TOTUL E SUS (60s)
 ```bash
 curl -s https://kelionai.app/api/version        # {v,at} cu boot recent
 curl -s https://kelionai.app/health             # 200
