@@ -870,7 +870,7 @@ export default function ChatPanel({
     micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
   }
 
-  async function ensureMic(): Promise<void> {
+  async function ensureMic(preWarmedStream?: MediaStream): Promise<void> {
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
     if (micRetryRef.current) {
       window.clearTimeout(micRetryRef.current)
@@ -890,6 +890,7 @@ export default function ChatPanel({
       // pe calea batch dovedită — vocea nu se rupe niciodată.
       if (streamModeRef.current) {
         const sh = await startMicStream({
+          preWarmedStream,
           onLive: (t) => setLiveVoice(t),
           onPhrase: (t) => {
             setLiveVoice('')
@@ -945,6 +946,7 @@ export default function ChatPanel({
         // „doar vocea mea sau scrisul meu, nu se acceptă alta” — adminul e singurul
         // rol restrâns la vocea proprie calibrată; demo (vizitatori) rămâne neschimbat.
         isAdmin,
+        preWarmedStream,
       )
       if (h) {
         // Apăsat OPRIT cât porneam, sau altă pornire a instalat deja un
@@ -988,6 +990,34 @@ export default function ChatPanel({
       return
     }
     micManualOffRef.current = false
+
+    // PRE-WARM: deschidem microfonul înainte de startMicStream, ca la apăsarea
+    // butonului "mic on" activarea să fie aproape instantă. Dacă userul apasă
+    // OPRIT în timpul warmup-ului, oprim stream-ul pre-încălzit și renunțăm.
+    if (navigator.mediaDevices?.getUserMedia) {
+      micStartingRef.current = true
+      void (async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          })
+          if (micManualOffRef.current || micRef.current) {
+            stream.getTracks().forEach((t) => t.stop())
+            micStartingRef.current = false
+            return
+          }
+          await ensureMicRef.current(stream)
+          if (!micRef.current) {
+            stream.getTracks().forEach((t) => t.stop())
+          }
+        } catch {
+          // Pre-warm eșuat → lăsăm calea normală să raporteze eroarea/corect.
+          micStartingRef.current = false
+          void ensureMicRef.current()
+        }
+      })()
+      return
+    }
     void ensureMicRef.current()
   }
 

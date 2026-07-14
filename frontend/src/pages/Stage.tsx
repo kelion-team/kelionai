@@ -873,7 +873,7 @@ export default function Stage({ user }: { user: User }) {
           tălpi (−1.65) trebuie aer real: camera centrată la y −0.25, distanța
           4.6 → cadrul acoperă −1.93…+1.43. Mărimea finală o decide Adrian cu
           dublu-click (modul de aranjare de mai jos). */}
-      <Canvas shadows camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
+      <Canvas shadows="percentage" camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
         {!monitorOn && <color attach="background" args={['#0b0d12']} />}

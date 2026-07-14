@@ -20,7 +20,7 @@ export async function ingestRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ markdown: markdown.slice(0, 120_000) })
     } catch (e) {
       return reply
-        .code(500)
+        .code(502)
         .send({ error: 'convert_failed', message: e instanceof Error ? e.message.slice(0, 200) : 'failed' })
     }
   })

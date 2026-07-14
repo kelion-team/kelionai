@@ -8,8 +8,7 @@ import { decideDeployFailure, isDuplicateOrder, composeOrdersReport } from '../s
 import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
-import { transcribe } from '../services/asr.js'
-import { synthesize } from '../services/tts.js'
+import { runVoiceTurn } from '../services/voiceTurn.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -24,6 +23,7 @@ import {
   finalizeStaleWorkOrders,
   saveStagedRelease,
   listStagedReleases,
+  setReleaseApproved,
   setReleaseStatus,
   addMemory,
   saveKv,
@@ -1153,59 +1153,27 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     '/api/bridge/voice-turn',
     async (req, reply) => {
       if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-      const pcm = String(req.body?.pcm ?? '').trim()
-      const sampleRate = Number(req.body?.sampleRate) || 48000
-      const langHint = String(req.body?.lang ?? '').trim()
-      const visitor = String(req.body?.visitor ?? '').trim()
-      if (!pcm) return reply.code(400).send({ error: 'bad_request', note: 'pcm (base64 LINEAR16) required' })
-
-      // 1) STT — PCM brut LINEAR16 (nu container) → decodare explicită.
-      const stt = await transcribe(pcm, { langHint, pcm: { sampleRateHertz: sampleRate, channels: 1 } })
-      if (!stt.ok) return reply.send({ ok: false, stage: 'stt', error: stt.error })
-      const transcript = stt.transcript.trim()
-      const lang = stt.lang || langHint || ''
-      // Liniște / zgomot → nimic de spus. Agentul sare peste (fără să răspundă).
-      if (!transcript) return reply.send({ ok: true, transcript: '', reply: '', skip: true })
-
-      // 2) CREIERUL — persona PUBLICĂ (neutru Kelion, fără context privat), ton
-      // vorbit scurt. bridgeAskStream ne dă calea de chat (Kimi/GLM prin punte);
-      // acumulăm bucățile și luăm textul final. Fără worker → linie scurtă de
-      // rezervă ca vocea să nu moară în tăcere.
-      const voicePrompt =
-        `[VOCE] Utilizatorul ți-a spus prin microfon: "${transcript}". ` +
-        `Răspunde ca Kelion, NATURAL și SCURT, ca într-o conversație vorbită (1–3 propoziții, fără liste, ` +
-        `fără markdown, fără emoji). Răspunde în limba în care ți-a vorbit.`
-      let acc = ''
-      const brain = await bridgeAskStream(
-        voicePrompt,
-        [],
-        (t) => {
-          acc += t
+      const result = await runVoiceTurn(
+        String(req.body?.pcm ?? ''),
+        Number(req.body?.sampleRate) || 48000,
+        String(req.body?.lang ?? ''),
+        String(req.body?.visitor ?? ''),
+        {
+          askBrain: (prompt, visitor, onChunk) =>
+            bridgeAskStream(
+              prompt,
+              [],
+              onChunk,
+              60_000,
+              30_000,
+              '',
+              'public',
+              visitor,
+              'chat',
+            ),
         },
-        60_000,
-        30_000,
-        '',
-        'public',
-        visitor,
-        'chat',
       )
-      const reply2 = (brain && brain !== BRIDGE_STALL ? brain : acc).trim()
-      const spoken = reply2 || 'Te ascult.'
-
-      // 3) TTS — LINEAR16 la ACELAȘI sample rate ca LiveKit-ul agentului, ca
-      // sample-urile să intre 1:1 în AudioSource (fără reeșantionare pe agent).
-      const tts = await synthesize(spoken, lang || undefined, { encoding: 'LINEAR16', sampleRateHertz: sampleRate })
-      if (!tts.ok) return reply.send({ ok: true, transcript, reply: spoken, lang, wav: '', ttsError: tts.error })
-      return reply.send({
-        ok: true,
-        transcript,
-        reply: spoken,
-        lang,
-        sampleRate,
-        // WAV (RIFF) base64 — agentul sare peste antetul de 44 de octeți și
-        // împinge PCM-ul în cameră.
-        wav: tts.audio.toString('base64'),
-      })
+      return reply.send(result)
     },
   )
 
@@ -1560,16 +1528,35 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // la sursa cozii — singurul loc pe care repo-ul îl garantează.
   app.get('/api/bridge/approved-releases', async (req, reply) => {
     if (!authed(req)) return reply.code(401).send({ error: 'unauthorized' })
-    // ROBINET ÎNCHIS DEFINITIV (11 iul, seara — după DOUĂ deploy-uri fantomă
-    // în aceeași zi: 20:40 și 21:44, ambele au publicat prin `railway up` cod
-    // mai vechi decât master și au șters de pe live munca zilei). Regula de
-    // fier nr. 3 a lui Adrian: NIMIC nu publică cod mai vechi decât master.
-    // Deployer-ul de pe VPS nu mai primește NICIODATĂ release-uri de publicat
-    // direct — drumul unui release aprobat e acum automat prin pipeline-ul
-    // verificat: vezi /api/admin/releases/decide (ordin de merge+deploy).
-    // Gardul stă AICI, în server — singurul loc garantat de repo, indiferent
-    // ce cod vechi rulează pe VPS.
-    return { releases: [] }
+    // GARD ANTI-COADĂ-MOARTĂ (Adrian, 11 iul): la 18:15, repornirea
+    // deployer-ului a drenat aprobări VECHI din 5–8 iulie și a încercat să le
+    // publice pe toate ("Deploy eșuat" în lanț pe monitor) — dacă vreo una
+    // reușea, publica pe producție cod mai vechi decât master (deploy fantomă).
+    // O aprobare are termen de valabilitate: peste 6 ore nepublicată = EXPIRATĂ
+    // (marcată failed, vizibilă în admin) — nu se mai servește NICIODATĂ
+    // deployer-ului, indiferent ce cod rulează pe VPS. Gardul stă în server,
+    // la sursa cozii — singurul loc pe care repo-ul îl garantează.
+    // ROBINET SELECTIV (13 iul): robinetul închis complet blocaea cele două
+    // release-uri aprobate de Adrian. Revenim la trimitere, DAR cu filtre stricte:
+    // doar approved, cu branch real, ne-expirate, și niciodată release-uri-fantomă
+    // generate de recursivitatea veche (titlu "RELEASE APROBAT DE ADRIAN:").
+    const all = await listStagedReleases(50)
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000
+    const releases = all.filter((r) => {
+      if (r.status !== 'approved') return false
+      if (!r.branch || r.branch.trim() === '') return false
+      if (/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) return false
+      // Legacy: release-uri aprobate înainte de introducerea approved_at nu au
+      // timestamp de aprobare; le lăsăm să treacă ca să deblocăm aprobările
+      // existente. De acum înainte, fiecare aprobare nouă primește approved_at
+      // și respectă regula de expirare la 6 ore (anti-fantomă).
+      if (r.approved_at) {
+        const t = new Date(r.approved_at).getTime()
+        if (Number.isNaN(t) || t < sixHoursAgo) return false
+      }
+      return true
+    })
+    return { releases }
   })
   // Builder → mark an approved release as actually deployed.
   app.post<{ Body: { id?: string } }>('/api/bridge/release-deployed', async (req, reply) => {
@@ -1618,8 +1605,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       const r = all.find((x) => x.id === req.body?.id)
       if (!r) return reply.code(404).send({ error: 'not_found' })
       if (r.status === 'pending') {
-        r.status = req.body?.decision === 'approve' ? 'approved' : 'rejected'
-        await setReleaseStatus(r.id, r.status)
+        if (req.body?.decision === 'approve') {
+          await setReleaseApproved(r.id)
+          r.status = 'approved'
+        } else {
+          await setReleaseStatus(r.id, 'rejected')
+          r.status = 'rejected'
+        }
         // Alerta „ai de aprobat" moare ODATĂ cu decizia (Adrian, 12 iul 00:02:
         // „relesuri goale" — bannerul/anunțul persistau după decizie, iar
         // panoul, corect, nu mai avea nimic).
@@ -1636,21 +1628,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
         )
         // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
-        // /api/bridge/approved-releases): „da"-ul lui Adrian pornește ordinul
-        // de publicare pe pipeline-ul verificat, nu o publicare directă.
-        // GARDĂ ANTI-RECURSIVITATE (12 iul, Adrian: „ultimele 10 relesuri cel
-        // puțin nu au existat — e un bug"): ordinul de publicare trecea prin
-        // ACELAȘI build() al constructorului, care — dacă face doar un mic
-        // commit administrativ (ex. AI-HANDOFF.md) și nu produce SUMAR: —
-        // restagea titlul ORDINULUI ÎNSUȘI ca release nou de aprobat, cu
-        // „RELEASE APROBAT DE ADRIAN:" încă o dată în față. Fiecare aprobare
-        // genera altă „aprobare" fantomă. NU mai retrimitem un ordin de
-        // publicare pentru un release al cărui titlu e deja produsul unui
-        // astfel de ordin — se oprește lanțul chiar aici.
-        if (r.status === 'approved' && !/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) {
-          bridgeRepair(
-            `RELEASE APROBAT DE ADRIAN: „${r.title.slice(0, 200)}". Publică-l pe DRUMUL VERIFICAT, nu cu railway up (interzis definitiv): 1) adu schimbările pe o ramură împinsă în GitHub (dacă nu sunt deja); 2) kelion-github pr + merge în master; 3) comanda deploy (dispatch deploy.yml + verificarea anti-fantomă că /api/version se schimbă). Raportează cu dovada versiunii noi.`,
-          )
+        // /api/bridge/approved-releases): „da"-ul lui Adrian face release-ul
+        // disponibil la /api/bridge/approved-releases; constructorul headless de
+        // pe VPS îl vede acolo și execută publicarea prin pipeline-ul verificat
+        // (PR → merge → deploy.yml + verificare anti-fantomă). Nu mai trimitem
+        // un ordin separat de publicare, ca să evităm dublarea și rapoarte false.
+        if (r.status === 'approved') {
+          noteBrainActivity(`🚀 Release aprobat — îl pun în coada de deploy verificat: ${r.title.slice(0, 80)}`)
         }
       }
       return { ok: true, status: r.status }

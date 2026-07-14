@@ -285,6 +285,7 @@ export async function initDb(): Promise<void> {
       detail TEXT NOT NULL DEFAULT '',
       branch TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'pending',
+      approved_at TIMESTAMPTZ,
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     -- DRIFT DE SCHEMĂ REAL (12 iul, prins de purge-phantom: eroare Postgres
@@ -293,6 +294,8 @@ export async function initDb(): Promise<void> {
     -- e un no-op pe un tabel deja existent — coloana rămăsese lipsă pe
     -- producție de la introducerea ei. Plasă de siguranță, ca la memories.
     ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '';
+    -- Când s-a aprobat release-ul — folosit la expirarea aprobărilor nepublicate.
+    ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_releases ON staged_releases (status, at DESC);
     -- Tiny key-value state that must survive restarts (e.g. the bridge worker's
     -- last-seen beat — a deploy must never blink the Bridge light).
@@ -855,6 +858,7 @@ export interface StagedReleaseRow {
   detail: string
   branch: string
   status: string
+  approved_at: string | null
   at: string
 }
 
@@ -877,12 +881,24 @@ export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<StagedReleaseRow>(
-      'SELECT id, title, detail, branch, status, at FROM staged_releases ORDER BY at DESC LIMIT $1',
+      'SELECT id, title, detail, branch, status, approved_at, at FROM staged_releases ORDER BY at DESC LIMIT $1',
       [n],
     )
     return r.rows
   } catch {
     return []
+  }
+}
+
+export async function setReleaseApproved(id: string): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      "UPDATE staged_releases SET status='approved', approved_at=now() WHERE id=$1",
+      [id],
+    )
+  } catch {
+    /* non-fatal */
   }
 }
 
@@ -1756,11 +1772,15 @@ export interface UserSummary {
 
 export async function listUsers(): Promise<UserSummary[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<UserSummary>(
-    `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
-     FROM messages GROUP BY user_email ORDER BY last DESC`,
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<UserSummary>(
+      `SELECT user_email AS email, COUNT(*)::int AS count, MAX(created_at) AS last
+       FROM messages GROUP BY user_email ORDER BY last DESC`,
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 export interface HistoryRow {
@@ -1771,26 +1791,34 @@ export interface HistoryRow {
 
 export async function getHistory(email: string, limit = 1000): Promise<HistoryRow[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<HistoryRow>(
-    `SELECT role, content, created_at FROM messages
-     WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
-    [email, limit],
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<HistoryRow>(
+      `SELECT role, content, created_at FROM messages
+       WHERE user_email = $1 ORDER BY created_at ASC LIMIT $2`,
+      [email, limit],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // The LAST n messages (chronological) — what the chat panel reloads at start
 // so a page refresh never "loses" the conversation on screen again.
 export async function getRecentHistory(email: string, n = 60): Promise<HistoryRow[]> {
   if (!dbEnabled()) return []
-  const r = await getPool().query<HistoryRow>(
-    `SELECT role, content, created_at FROM (
-       SELECT role, content, created_at FROM messages
-       WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2
-     ) AS x ORDER BY created_at ASC`,
-    [email, n],
-  )
-  return r.rows
+  try {
+    const r = await getPool().query<HistoryRow>(
+      `SELECT role, content, created_at FROM (
+         SELECT role, content, created_at FROM messages
+         WHERE user_email = $1 ORDER BY created_at DESC LIMIT $2
+       ) AS x ORDER BY created_at ASC`,
+      [email, n],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
 }
 
 // ── Cross-session memory (the Memory agent's store) ──
