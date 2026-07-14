@@ -16,10 +16,11 @@
 #      manuală — Adrian NU a autorizat repornire automată nesupravegheată).
 #   3. RELEASE care AȘTEAPTĂ APROBAREA de peste 30 min → îi amintește lui
 #      Adrian în chat (o dată pe oră, nu sâcâie) — nimic nu mai zace uitat.
-#   4. CHEIE GitHub stricată/sub-scopată (kelion-github doctor) → SUPORT către
-#      Adrian cu pașii EXACȚI. NU auto-fix: un token nu poate fi generat de un
-#      AI (login+2FA, browserul GitHub e interzis) — Kelion detectează din timp
-#      și ghidează, ca să nu se mai ajungă la bucla de publicare eșuată.
+#   4. SĂNĂTATEA DEPENDENȚELOR (kelion-doctor: app live, servicii, secret punte,
+#      cheie GitHub, chei creier Kimi/GLM, cod-rulat-vs-repo) → SUPORT către
+#      Adrian cu pașii EXACȚI. NU auto-fix credențiale (nu pot fi generate de un
+#      AI — login+2FA) — Kelion detectează din timp și ghidează, ca să nu se mai
+#      ajungă la un blocaj (bucla de publicare, munca moartă etc.).
 set -u
 [ -f /root/kelion/perpetuum-off ] && exit 0
 SECRET=$(cat /root/kelion/bridge-secret.txt 2>/dev/null) || exit 0
@@ -80,20 +81,21 @@ if echo "$LABEL" | grep -qi 'aprobarea'; then
   fi
 fi
 
-# ── 4. Cheie GitHub stricată/sub-scopată → SUPORT către Adrian (NU auto-fix:
-#      un token nu poate fi generat de Kelion — login+2FA, browserul GitHub e
-#      interzis. Kelion DOAR detectează din timp + îi dă pașii exacți). Dedup pe
-#      conținut și max o dată pe oră, ca să nu sâcâie când cheia e bună. ──
-GHTOOL=/root/kelion/repo/bridge/kelion-github
-if [ -f "$GHTOOL" ]; then
-  KOUT=$(bash "$GHTOOL" doctor --brief 2>/dev/null); KRC=$?
+# ── 4. Sănătatea dependențelor (kelion-doctor) → SUPORT către Adrian (NU auto-fix
+#      credențiale: nu pot fi generate de un AI — login+2FA. Kelion DOAR detectează
+#      din timp orice „blocaj din cauza unui X" — cheie GitHub, secret punte, chei
+#      creier, servicii, cod-rulat-vs-repo — și îi dă pașii exacți). Dedup pe
+#      conținut + max o dată pe oră, ca să nu sâcâie când e totul sănătos. ──
+DOCTOR=/root/kelion/repo/bridge/kelion-doctor
+if [ -f "$DOCTOR" ]; then
+  KOUT=$(bash "$DOCTOR" --brief 2>/dev/null); KRC=$?
   if [ "$KRC" != 0 ] && [ -n "$KOUT" ]; then
     LASTK=$(cat "$STATE_KEY" 2>/dev/null || true)
     NOWK=$(date +%s); LASTKT=$(cat "$STATE_KEY_AT" 2>/dev/null || echo 0)
     if [ "$KOUT" != "$LASTK" ] || [ $((NOWK - LASTKT)) -gt 3600 ]; then
       echo "$KOUT" > "$STATE_KEY"; echo "$NOWK" > "$STATE_KEY_AT"
-      SUP=${KOUT#KEY_PROBLEM: }
-      jq -nc --arg t "🔑 Perpetuum: cheia GitHub NU poate publica acum — o prind din timp ca să nu se mai blocheze publicarea. Nu o pot repara singur (un token cere login+2FA la tine). Ce trebuie făcut: $SUP" '{text:$t}' | \
+      SUP=${KOUT#DOCTOR_PROBLEM: }
+      jq -nc --arg t "🩺 Perpetuum: am găsit ceva ce blochează munca — îl prind din timp ca să nu se repete. Ce nu pot repara singur (credențiale = login la tine) ți-l dau ca pași exacți: $SUP" '{text:$t}' | \
         curl -sS --max-time 15 -X POST -H "$H" -H "Content-Type: application/json" \
           -d @- "$B/api/bridge/say" >/dev/null 2>&1
     fi
