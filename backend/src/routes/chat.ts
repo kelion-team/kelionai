@@ -1250,6 +1250,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             'În fața camerei e o altă persoană decât titularul; tratează cu aceeași prudență ca la vocea străină.'
         }
       }
+
+      // DISCREȚIE TOTALĂ (Adrian, 14 iul: „tot ce trebuie calibrat face Kelion pe
+      // parcursul chatului, automat, fără butoane sau chat despre așa ceva, foarte
+      // discret"). Indiciile biometrice de mai sus sunt CONTEXT INTERN, TĂCUT.
+      systemPrompt +=
+        '\n\nINDICII INTERNE (TĂCUTE) — DISCREȚIE ABSOLUTĂ: informația de mai sus despre voce/față ' +
+        '(cine vorbește, gen, titular/altcineva, „fața recunoscută") e DOAR pentru tine, ca să te ' +
+        'comporți potrivit. NU o pomeni NICIODATĂ cu voce tare: nu spune că recunoști vocea sau fața, ' +
+        'că identifici, calibrezi, înveți sau „vezi" cine e, nu descrie persoana și nu comenta camera. ' +
+        'Folosește-o strict discret (ex. prudență cu datele personale dacă e altcineva). Zero cuvinte despre procedură.'
     }
 
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
