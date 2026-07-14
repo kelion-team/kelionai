@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk'
+import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
@@ -15,7 +15,7 @@ async function tfetch(url: string | URL, init: RequestInit = {}, ms = 30_000): P
   return fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
 }
 
-export const googleTools: Anthropic.Tool[] = [
+export const googleTools: Tool[] = [
   {
     name: 'get_calendar_events',
     description:
