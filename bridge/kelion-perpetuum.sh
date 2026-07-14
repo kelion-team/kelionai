@@ -16,6 +16,10 @@
 #      manuală — Adrian NU a autorizat repornire automată nesupravegheată).
 #   3. RELEASE care AȘTEAPTĂ APROBAREA de peste 30 min → îi amintește lui
 #      Adrian în chat (o dată pe oră, nu sâcâie) — nimic nu mai zace uitat.
+#   4. CHEIE GitHub stricată/sub-scopată (kelion-github doctor) → SUPORT către
+#      Adrian cu pașii EXACȚI. NU auto-fix: un token nu poate fi generat de un
+#      AI (login+2FA, browserul GitHub e interzis) — Kelion detectează din timp
+#      și ghidează, ca să nu se mai ajungă la bucla de publicare eșuată.
 set -u
 [ -f /root/kelion/perpetuum-off ] && exit 0
 SECRET=$(cat /root/kelion/bridge-secret.txt 2>/dev/null) || exit 0
@@ -25,6 +29,8 @@ H="x-bridge-secret: $SECRET"
 STATE_ERR=/root/kelion/perpetuum-err-seen.txt
 STATE_DIV=/root/kelion/perpetuum-div-seen.txt
 STATE_NAG=/root/kelion/perpetuum-nag-at.txt
+STATE_KEY=/root/kelion/perpetuum-key-seen.txt
+STATE_KEY_AT=/root/kelion/perpetuum-key-at.txt
 
 enqueue() { # un singur ordin per bătaie; serverul face și el dedup pe text
   jq -nc --arg t "$1" '{text:$t}' | curl -sS --max-time 15 -X POST -H "$H" \
@@ -71,6 +77,26 @@ if echo "$LABEL" | grep -qi 'aprobarea'; then
     jq -nc '{text:"⏰ Perpetuum: există un release GATA care așteaptă aprobarea ta de ceva vreme — spune «da» în chat ca să-l public, sau «respinge» dacă nu-l vrei."}' | \
       curl -sS --max-time 15 -X POST -H "$H" -H "Content-Type: application/json" \
         -d @- "$B/api/bridge/say" >/dev/null 2>&1
+  fi
+fi
+
+# ── 4. Cheie GitHub stricată/sub-scopată → SUPORT către Adrian (NU auto-fix:
+#      un token nu poate fi generat de Kelion — login+2FA, browserul GitHub e
+#      interzis. Kelion DOAR detectează din timp + îi dă pașii exacți). Dedup pe
+#      conținut și max o dată pe oră, ca să nu sâcâie când cheia e bună. ──
+GHTOOL=/root/kelion/repo/bridge/kelion-github
+if [ -f "$GHTOOL" ]; then
+  KOUT=$(bash "$GHTOOL" doctor --brief 2>/dev/null); KRC=$?
+  if [ "$KRC" != 0 ] && [ -n "$KOUT" ]; then
+    LASTK=$(cat "$STATE_KEY" 2>/dev/null || true)
+    NOWK=$(date +%s); LASTKT=$(cat "$STATE_KEY_AT" 2>/dev/null || echo 0)
+    if [ "$KOUT" != "$LASTK" ] || [ $((NOWK - LASTKT)) -gt 3600 ]; then
+      echo "$KOUT" > "$STATE_KEY"; echo "$NOWK" > "$STATE_KEY_AT"
+      SUP=${KOUT#KEY_PROBLEM: }
+      jq -nc --arg t "🔑 Perpetuum: cheia GitHub NU poate publica acum — o prind din timp ca să nu se mai blocheze publicarea. Nu o pot repara singur (un token cere login+2FA la tine). Ce trebuie făcut: $SUP" '{text:$t}' | \
+        curl -sS --max-time 15 -X POST -H "$H" -H "Content-Type: application/json" \
+          -d @- "$B/api/bridge/say" >/dev/null 2>&1
+    fi
   fi
 fi
 exit 0

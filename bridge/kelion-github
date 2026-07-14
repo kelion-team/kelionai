@@ -119,54 +119,56 @@ case "$cmd" in
     ;;
   doctor)
     # DIAGNOZĂ CHEIE GitHub — pentru Kelion (Adrian, 14 iul: „verificator cu
-    # diagnoză și lui Kelion să poată folosi"). Prinde DIN TIMP o cheie
-    # stricată/sub-scopată — ÎNAINTE de o publicare, nu în mijlocul unei bucle.
-    # NU expune valoarea cheii. NU declanșează niciun deploy real.
-    echo "== Forma cheii (nu se afișează valoarea) =="
+    # diagnoză și lui Kelion să poată folosi" + „să le facă automat sau să-mi dea
+    # suport să fac eu"). Prinde DIN TIMP o cheie stricată/sub-scopată — ÎNAINTE
+    # de o publicare, nu în mijlocul unei bucle. NU expune valoarea cheii. NU
+    # declanșează niciun deploy real (proba de Actions e o CITIRE, nu dispatch).
+    #   kelion-github doctor           → raport uman complet
+    #   kelion-github doctor --brief   → o linie mașină (KEY_OK / KEY_PROBLEM: <suport>)
+    #                                    + exit code = numărul de probleme (0 = sănătos)
+    # SUPORT-UL e mesajul gata-formulat pentru Adrian: exact ce butoane să apese
+    # (un token NU poate fi generat de Kelion — login+2FA, browserul GitHub e
+    # interzis; deci Kelion detectează + ghidează, NU schimbă credențiale singur).
+    BRIEF=""; [ "${1:-}" = "--brief" ] && BRIEF=1
     TRIM=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
-    echo "  lungime: ${#TOKEN} car. | fără spații/enter: ${#TRIM} car."
-    [ "${#TOKEN}" != "${#TRIM}" ] && echo "  ⚠️ cheia conține spații/enter → strică header-ul (401). Rescrie-o curat prin vps-keys."
-    if printf '%s' "$TRIM" | grep -q '^github_pat_'; then
-      echo "  prefix github_pat_: DA (token fine-grained)"
+    PROB=0; SUPORT=""
+    addp() { PROB=$((PROB + 1)); SUPORT="${SUPORT}($PROB) $1  "; }
+
+    rc=$(gh_api -o /dev/null -w '%{http_code}' "$API")
+    pc=$(gh_api -o /dev/null -w '%{http_code}' -X POST "$API/pulls" -d '{"title":"__doctor__","head":"master","base":"master"}')
+    mc=$(gh_api -o /dev/null -w '%{http_code}' -X POST "$API/merges" -d '{"base":"master","head":"master"}')
+    ac=$(gh_api -o /dev/null -w '%{http_code}' "$API/actions/workflows/deploy.yml")
+    SHAPE_OK=1; printf '%s' "$TRIM" | grep -q '^github_pat_' || SHAPE_OK=0
+    [ "${#TOKEN}" != "${#TRIM}" ] && SHAPE_OK=0
+
+    # Evaluare → probleme + suport concret (pașii exacți pentru Adrian).
+    if [ "$rc" = 401 ] || [ "$SHAPE_OK" = 0 ]; then
+      addp "Cheia GitHub e invalidă/greșită. Generează una NOUĂ (fine-grained) la https://github.com/settings/personal-access-tokens/new — Resource owner: kelion-team, Only select repositories: kelionai, iar la Repository permissions pune Pull requests + Contents + Actions = Read and write. Apoi pune-o în secretul VPS_GITHUB_TOKEN (https://github.com/kelion-team/kelionai/settings/secrets/actions/VPS_GITHUB_TOKEN) și rulează workflow-ul vps-keys cu which=github."
     else
-      echo "  ⚠️ prefix github_pat_: NU — valoarea nu e un token fine-grained (alt text/token vechi?)."
+      [ "$pc" = 403 ] && addp "Tokenului îi lipsește «Pull requests: Read and write». Editează-l la https://github.com/settings/personal-access-tokens (nu-l regenera — la editare valoarea rămâne), pune Pull requests = Read and write, Update."
+      [ "$mc" = 403 ] && addp "Tokenului îi lipsește «Contents: Read and write». Același link, pune Contents = Read and write, Update."
+      { [ "$ac" = 403 ] || [ "$ac" = 404 ]; } && addp "Tokenului îi lipsește «Actions: Read and write». Același link, pune Actions = Read and write, Update."
     fi
 
-    echo "== Acces repo =="
-    rc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' "$API")
-    case "$rc" in
-      200) echo "  GET repo → 200 ✅" ;;
-      401) echo "  → 401 ❌ Bad credentials — cheia e invalidă/expirată. Reînnoiește prin vps-keys." ;;
-      *)   echo "  → HTTP $rc ⚠️: $(jq -r '.message // empty' /tmp/kg_doc.json 2>/dev/null)" ;;
-    esac
+    if [ -n "$BRIEF" ]; then
+      if [ "$PROB" = 0 ]; then echo "KEY_OK"; else echo "KEY_PROBLEM: $SUPORT"; fi
+      exit "$PROB"
+    fi
 
-    echo "== Pull requests: write (poate deschide PR?) =="
-    pc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' -X POST "$API/pulls" -d '{"title":"__doctor__","head":"master","base":"master"}')
-    case "$pc" in
-      422) echo "  → 422 ✅ ARE dreptul de PR (publish folosește calea cu PR, cu audit-trail)." ;;
-      403) echo "  → 403 ❌ FĂRĂ Pull requests:write → publish cade pe /merges (merge direct, merge oricum)." ;;
-      401) echo "  → 401 ❌ cheie invalidă." ;;
-      *)   echo "  → HTTP $pc neconcludent: $(jq -c '{message}' /tmp/kg_doc.json 2>/dev/null)" ;;
-    esac
-
-    echo "== Contents: write (fallback-ul /merges al lui publish) =="
-    mc=$(gh_api -o /tmp/kg_doc.json -w '%{http_code}' -X POST "$API/merges" -d '{"base":"master","head":"master"}')
-    case "$mc" in
-      204|409|422) echo "  → $mc ✅ ARE Contents:write (push/merge)." ;;
-      403) echo "  → 403 ❌ FĂRĂ Contents:write — nici fallback-ul /merges nu merge. DĂ-i Contents: Read and write." ;;
-      401) echo "  → 401 ❌ cheie invalidă." ;;
-      *)   echo "  → HTTP $mc neconcludent: $(jq -c '{message}' /tmp/kg_doc.json 2>/dev/null)" ;;
-    esac
-
-    echo "== Actions: dispatch deploy.yml (verific citirea, NU declanșez deploy) =="
-    ac=$(gh_api -o /dev/null -w '%{http_code}' "$API/actions/workflows/deploy.yml")
-    case "$ac" in
-      200) echo "  → citire workflow 200 (Actions:read OK). Dispatch-ul real se dovedește la 'deploy'." ;;
-      401) echo "  → 401 ❌ cheie invalidă." ;;
-      403|404) echo "  → HTTP $ac ⚠️ probabil fără permisiune Actions. Dacă 'deploy' dă 403 la dispatch, dă-i Actions: Read and write." ;;
-      *)   echo "  → HTTP $ac neconcludent" ;;
-    esac
-    echo "== gata — niciun secret afișat, niciun deploy declanșat. =="
+    # Raport uman complet.
+    echo "== Forma cheii (nu se afișează valoarea) =="
+    echo "  lungime ${#TOKEN} car. (fără spații ${#TRIM}) | github_pat_: $(printf '%s' "$TRIM" | grep -q '^github_pat_' && echo DA || echo NU)"
+    echo "== Drepturi reale =="
+    echo "  Acces repo (GET):        HTTP $rc  $([ "$rc" = 200 ] && echo ✅ || echo ❌)"
+    echo "  Pull requests: write:    HTTP $pc  $([ "$pc" = 422 ] && echo ✅ || echo ❌)"
+    echo "  Contents: write:         HTTP $mc  $({ [ "$mc" = 204 ] || [ "$mc" = 409 ] || [ "$mc" = 422 ]; } && echo ✅ || echo ❌)"
+    echo "  Actions (citire deploy): HTTP $ac  $([ "$ac" = 200 ] && echo ✅ || echo ❌)"
+    if [ "$PROB" = 0 ]; then
+      echo "✅ KEY_STATUS: OK — cheia poate publica complet (PR + merge + deploy). Niciun secret afișat, niciun deploy declanșat."
+    else
+      echo "❌ KEY_STATUS: $PROB problemă(e). SUPORT PENTRU ADRIAN: $SUPORT"
+    fi
+    exit "$PROB"
     ;;
   api)
     # Citire GitHub „la liber", cu tokenul — înlocuiește complet browserul.
