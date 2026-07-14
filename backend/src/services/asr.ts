@@ -29,11 +29,6 @@ function getAuth(): GoogleAuth | null {
   return auth
 }
 
-/** True when the Google service-account credential (with a project id) is set. */
-export function asrConfigured(): boolean {
-  return getAuth() !== null && !!projectId
-}
-
 export type TranscribeResult =
   | { ok: true; lang: string | null; transcript: string }
   | { ok: false; status: number; error: string }

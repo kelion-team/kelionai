@@ -108,14 +108,6 @@ export function hasVoiceprint(): boolean {
   }
 }
 
-export function clearVoiceprint(): void {
-  try {
-    localStorage.removeItem(VOICEPRINT_KEY)
-  } catch {
-    /* localStorage indisponibil — ignorăm */
-  }
-}
-
 function loadVoiceprint(): VoicePrint | null {
   try {
     const raw = localStorage.getItem(VOICEPRINT_KEY)

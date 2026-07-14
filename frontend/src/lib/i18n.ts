@@ -757,8 +757,3 @@ export function resolveLang(locale: string | undefined | null): Lang {
 export function strings(lang: Lang): Strings {
   return dict[lang]
 }
-
-// For the login page (before we know the user) — use the browser language.
-export function browserLang(): Lang {
-  return resolveLang(typeof navigator !== 'undefined' ? navigator.language : 'en')
-}

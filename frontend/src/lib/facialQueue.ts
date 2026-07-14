@@ -29,10 +29,6 @@ export function pushFacial(label: FacialLabel): void {
   bus.dispatchEvent(new CustomEvent('facial', { detail: { id: nextId, label } }))
 }
 
-export function isFacialLabel(value: unknown): value is FacialLabel {
-  return typeof value === 'string' && VALID_FACIAL.has(value as FacialLabel)
-}
-
 // Subscribe from a React component without causing re-renders.
 export function useFacialQueue(callback: (label: FacialLabel) => void): void {
   const cbRef = useRef(callback)
