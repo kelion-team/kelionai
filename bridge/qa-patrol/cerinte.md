@@ -9,7 +9,8 @@ să le raporteze într-o listă către Kelion.")
 ## Cum lucrează Kelion cu registrul ăsta
 - Îl **citește** când verifică sănătatea unei funcții (e în repo, lazy-load).
 - **QA-patrol** (`kelion-qa-patrol.mjs`) transformă criteriile MAȘINĂ-verificabile
-  de mai jos în probe reale; la eșec deschide ordin către constructor.
+  de mai jos în probe reale; când ceva NU e 200, **informează creierul** (notă în
+  caiet) — NU blochează și NU comandă. Creierul decide ce/cine și verifică până e 200.
 - Criteriile marcate **[live]** cer testul lui Adrian cu microfon/cameră reale —
   QA nu le poate sintetiza; Kelion i le cere lui Adrian, nu le declară „merg" singur.
 
