@@ -31,7 +31,9 @@
 set -u
 REPO="kelion-team/kelionai"
 API="https://api.github.com/repos/$REPO"
-TOKEN=$(cat /root/kelion/github-token.txt 2>/dev/null || true)
+# Token curățat de orice whitespace (spații/CRLF lipite la scriere pe VPS pot
+# corupe headerul Authorization și dau 401 "Bad credentials" deși tokenul e bun).
+TOKEN=$(tr -d '[:space:]' < /root/kelion/github-token.txt 2>/dev/null || true)
 [ -z "$TOKEN" ] && { echo "EROARE: lipsește /root/kelion/github-token.txt (Adrian îl pune prin vps-keys)"; exit 1; }
 gh_api() { curl -sS --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
 
@@ -108,7 +110,17 @@ case "$cmd" in
   api)
     # Citire GitHub „la liber", cu tokenul — înlocuiește complet browserul.
     p=${1:?cale API, ex: /pulls/106 sau /commits/master sau "/actions/runs?per_page=3"}
-    gh_api "$API$p" | jq . 2>/dev/null || gh_api "$API$p"
+    # Endpointuri globale (nu repo-specific): /user, /orgs, /search, /repos/..., etc.
+    # Fără asta, /user ajungea la /repos/kelion-team/kelionai/user → 404/401.
+    case "$p" in
+      /user*|/orgs/*|/search/*|/applications/*|/app/*|/installation/*|/installations/*|/gists/*|/notifications|/notifications/*|/teams/*|/users/*|/enterprise/*|/markdown|/markdown/*|/rate_limit|/meta|/zen|/octocat|/events|/feeds|/emojis|/codes_of_conduct|/codes_of_conduct/*|/gitignore/*|/licenses|/licenses/*|/repositories|/authorizations|/authorizations/*|/repos/*)
+        URL="https://api.github.com$p"
+        ;;
+      *)
+        URL="$API$p"
+        ;;
+    esac
+    gh_api "$URL" | jq . 2>/dev/null || gh_api "$URL"
     ;;
   *)
     echo "folosire: kelion-github pr|merge|deploy|runs|api (vezi comentariile din script)"
