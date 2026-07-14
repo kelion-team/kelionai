@@ -52,6 +52,8 @@ import {
   fetchVoiceprints,
   deleteVoiceprint,
   type VoiceprintRow,
+  fetchTokenChecks,
+  type TokenChecksResult,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -143,10 +145,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'tokenuri'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
   >(initialTab ?? 'finance')
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
@@ -192,6 +194,8 @@ export default function AdminPanel({
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
+  const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
   const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
   const [triaging, setTriaging] = useState(false)
@@ -528,6 +532,20 @@ export default function AdminPanel({
               onClick={() => setTab('gesturi')}
             >
               Gesturi
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('tokenuri')
+                setTokenChecksLoading(true)
+                void fetchTokenChecks().then((r) => {
+                  setTokenChecks(r)
+                  setTokenChecksLoading(false)
+                })
+              }}
+            >
+              Tokenuri
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -1095,6 +1113,51 @@ export default function AdminPanel({
                   })}
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+        {tab === 'tokenuri' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Tokenuri și chei API cu drepturi — verificare LIVE
+                <button
+                  type="button"
+                  className="ghost"
+                  style={{ marginLeft: 12 }}
+                  onClick={() => {
+                    setTokenChecksLoading(true)
+                    void fetchTokenChecks().then((r) => {
+                      setTokenChecks(r)
+                      setTokenChecksLoading(false)
+                    })
+                  }}
+                >
+                  Reîmprospătează
+                </button>
+              </div>
+              {tokenChecksLoading && <p className="chat-hint">Se verifică tokenurile…</p>}
+              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">Nu s-au putut încărca verificările.</p>}
+              {tokenChecks && (
+                <>
+                  <div className="fin-row" style={{ fontWeight: 600 }}>
+                    <span>✅ {tokenChecks.ok} OK</span>
+                    <span>⚪ {tokenChecks.notConfigured} neconfigurate</span>
+                    <span>🔴 {tokenChecks.failed} eșuate</span>
+                  </div>
+                  {tokenChecks.checks.map((c) => (
+                    <div className="fin-row" key={c.name}>
+                      <span>
+                        {c.status === 'ok' ? '✅' : c.status === 'not_configured' ? '⚪' : '🔴'} {c.name}
+                        {c.detail ? ` — ${c.detail}` : ''}
+                      </span>
+                      <span className="fin-sub" title={`Drepturi necesare: ${c.requiredScope ?? 'n/a'}`}>
+                        {c.requiredScope ?? ''}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </section>
         )}
