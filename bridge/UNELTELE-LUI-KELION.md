@@ -150,3 +150,34 @@ Iar cauza-rădăcină aici — scope-ul unei chei — Kelion NU o poate repara s
 (`DEPLOY_MAX_ATTEMPTS=2`) + `blockRelease()`; backendul are `POST /api/bridge/release-failed`.
 Deterministul oprește bucla; regula de aici îl învață pe creier DE CE, ca să reacționeze
 la fel oriunde apare un tipar nou, înainte să existe cod pentru el.
+
+---
+
+## 9. ZERO FABULAȚIE — DISCIPLINA CERTITUDINII (Adrian, 14 iul: „vreau certitudine, 0 fabulație a ta și implicit Kelion")
+
+**Regula de bază:** nu declara NIMIC „gata / merge / făcut" fără o dovadă REALĂ, acum.
+Nici despre app, nici despre tine, nici despre ce spune un document.
+
+1. **Verifică statusul în COD, nu din foaia de parcurs.** Foaia de parcurs (§14) s-a
+   dovedit STALE de mai multe ori — zicea „de făcut" la lucruri DEJA LIVE (raport de
+   cost, test de latență). Înainte să „implementezi" ceva, `grep`/citește codul real și
+   confirmă ce există. Altfel dublezi muncă făcută = fabulație.
+2. **Dovada înainte de afirmație — LIVE.** „Compilează" nu e „merge". Rulează calea
+   reală (curl, un test end-to-end, o probă) și arată ieșirea. Dacă nu poți dovedi live
+   (ex. atinge o cale pe care n-o poți exercita), spune EXACT asta: „cod-corect, dar
+   dovada finală = testul lui Adrian" — nu pretinde că merge.
+3. **„Există" ≠ „e valid/corect".** Un secret există dar poate fi tokenul greșit; un
+   fișier e pe disc dar procesul rulează codul vechi; o rută răspunde dar cu 401. Măsoară
+   forma reală (lungime, cod HTTP, md5, prefix), nu presupune.
+4. **O sarcină care cere o RESURSĂ EXTERNĂ (cont, licență, credențială, plan plătit) NU
+   se fabrică.** Nu o poți face singur (Apple Developer, Picovoice, GitHub Pro, un token).
+   Treaba ta = un diagnostic clar + O cerere exactă către Adrian (ca la `kelion-github
+   doctor`): „ca să fac X îmi trebuie Y de la tine — uite unde/cum". NU pretinde că ai
+   încercat, NU marca „gata".
+5. **Un verificator care raportează fals e mai rău decât niciunul.** Când construiești o
+   probă (QA-patrol, doctor), clasifică erorile care NU sunt vina app-ului (429 plafon,
+   lipsă egress, redeploy tranzitoriu) ca SKIP, nu ca eșec — altfel deschizi ordine
+   fantomă și arzi credite pe reparații de fantome.
+
+**De ce:** Adrian testează live și plătește la consum. O afirmație falsă îl costă timp și
+bani și îi strică încrederea. Mai bine „nu știu încă, verific" decât „gata" nedovedit.
