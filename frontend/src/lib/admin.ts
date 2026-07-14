@@ -560,3 +560,28 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
   }
 }
 
+// ── Verificare tokenuri cu drepturi (admin only) ───────────────────────────
+export interface TokenCheck {
+  name: string
+  status: 'ok' | 'not_configured' | 'fail' | `fail_${number}`
+  detail?: string
+  requiredScope?: string
+}
+
+export interface TokenChecksResult {
+  ok: number
+  notConfigured: number
+  failed: number
+  total: number
+  checks: TokenCheck[]
+}
+
+export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
+  try {
+    const r = await fetch('/api/admin/token-checks', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as TokenChecksResult
+  } catch {
+    return null
+  }
+}

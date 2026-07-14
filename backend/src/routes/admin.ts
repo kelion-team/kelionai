@@ -29,6 +29,7 @@ import {
   setDisabledGestures,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/anthropic.js'
+import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
 import { getStripeBalance } from '../services/stripe.js'
@@ -288,6 +289,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
+  })
+
+  // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
+  // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
+  // expună valori secrete. Include Kimi, GLM, Stripe, Google, Serper, Gemini,
+  // Mail (SMTP+IMAP), LiveKit, Railway, GitHub și SESSION_SECRET.
+  app.get('/api/admin/token-checks', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const checks = await runAllTokenChecks()
+    const ok = checks.filter((c) => c.status === 'ok').length
+    const notConfigured = checks.filter((c) => c.status === 'not_configured').length
+    const failed = checks.length - ok - notConfigured
+    return reply.send({ ok, notConfigured, failed, total: checks.length, checks })
   })
 
   // GESTURI (Adrian, 13 iul): panoul admin citește/scrie ce gesturi are voie
