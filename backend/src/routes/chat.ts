@@ -1,7 +1,14 @@
 import type { FastifyInstance } from 'fastify'
-import Anthropic from '@anthropic-ai/sdk'
 import { config } from '../config.js'
-import { anthropic, glm } from '../services/anthropic.js'
+import { anthropic, glm, type BrainClient } from '../services/anthropic.js'
+import type {
+  Tool,
+  Message,
+  MessageParam,
+  ToolResultBlockParam,
+  TextBlock,
+  ToolUseBlock,
+} from '../services/brain-types.js'
 import { getSessionUser, setSession, type SessionUser } from '../session.js'
 import {
   googleTools,
@@ -101,7 +108,7 @@ function restFable(): void {
 // iul). Kimi și GLM sunt provideri DIFERIȚI (baseURL + cheie diferite), deci
 // failover-ul trebuie să schimbe CLIENTUL, nu doar numele modelului: modelul
 // rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
-function brainClientFor(model: string): Anthropic {
+function brainClientFor(model: string): BrainClient {
   return model === MODEL_RESERVE ? glm : anthropic
 }
 
@@ -123,7 +130,7 @@ function allowAutoGesture(email: string, name: string): boolean {
 }
 
 // Admin-only tool so Kelion can report its own real running cost when asked.
-const COST_TOOL: Anthropic.Tool = {
+const COST_TOOL: Tool = {
   name: 'get_real_cost',
   description:
     "Get Kelion's REAL provider cost so far in USD (total, today, and a breakdown). Admin only. Use when the admin asks how much Kelion costs / has cost.",
@@ -133,7 +140,7 @@ const COST_TOOL: Anthropic.Tool = {
 // Lets Kelion put something on the user's screen on his own initiative — the
 // "monitor mode" surface (a web page in a sandboxed panel behind the avatar).
 // There is no manual button: Kelion decides when a visual helps and calls this.
-const SHOW_TOOL: Anthropic.Tool = {
+const SHOW_TOOL: Tool = {
   name: 'show_on_screen',
   description:
     'Display a web page on the user\'s monitor (the screen behind you). Use this on your OWN initiative whenever showing something visually helps — a map, a website, a YouTube video, a document, search results. The user does NOT press any button and does NOT have to ask you to "open the monitor"; you decide when a visual is useful and call this. Pass an empty url to clear the screen. NOTE: for a regular website this automatically opens the LIVE browser (most sites refuse iframes), so for actual browsing/reading/clicking prefer browser_open directly — it also returns the page text and clickable elements.',
@@ -149,7 +156,7 @@ const SHOW_TOOL: Anthropic.Tool = {
 
 // Lets Kelion create an image from a text description and put it straight on the
 // user's monitor. Used when the user asks to draw / generate / imagine a picture.
-const IMAGE_TOOL: Anthropic.Tool = {
+const IMAGE_TOOL: Tool = {
   name: 'generate_image',
   description:
     'Generate an image from a text description and show it on the user\'s monitor. Use when the user asks you to draw, create, generate, design or imagine a picture/logo/illustration. Write a rich, detailed English prompt describing the desired image.',
@@ -165,7 +172,7 @@ const IMAGE_TOOL: Anthropic.Tool = {
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
 // owner-only monitor, so the owner (Adrian) can see what to build next. This is
 // invisible to the user — it never replaces telling them honestly it can't do it.
-const LOG_GAP_TOOL: Anthropic.Tool = {
+const LOG_GAP_TOOL: Tool = {
   name: 'log_unsupported_request',
   description:
     "Silently record — for the owner only — something the user asked you to do that you genuinely CANNOT do yet because no tool or capability exists for it (e.g. 'book a taxi', 'send a WhatsApp', 'control my smart home', 'call someone'). Call this IN ADDITION to honestly telling the user you can't do it yet. Do NOT call it for things you CAN do, for things a user just phrased oddly, or for simple errors. The user never sees this.",
@@ -200,7 +207,7 @@ const GESTURE_SEMANTIC_CLIP: Record<string, string> = {
   'acord-discret': 'expresie-13', plecaciune: 'expresie-14', dans: 'dans',
   salute: 'expresie-1', raiseRightHand: 'expresie-13', pointMonitor: 'expresie-2',
 }
-const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
+const PLAY_AVATAR_GESTURE_TOOL: Tool = {
   name: 'play_avatar_gesture',
   description:
     "Play a one-time avatar gesture — but ONLY when the situation/emotion genuinely calls for it. A gentleman is composed and does NOT gesticulate: by DEFAULT play NO gesture. Trigger one RARELY (about 1 in 4-5 replies at most) and ONLY when the feeling is clear AND matches the gesture exactly; NEVER on a neutral/informative reply, NEVER two replies in a row. Every gesture is bound to context: salut (greeting/goodbye), arata-inainte (point ahead/to the monitor), uimire (amazement), dezamagire (mild disappointment), nedumerire (puzzlement), victorie (victory), multumire (thanks), surpriza (surprise), stai-putin (ask to wait), ganditor (thinking), aprobare (approval), entuziasm (enthusiasm), acord-discret (subtle agreement/nod), plecaciune (theatrical bow), dans (dance — ONLY when the user explicitly asks). Plays once, then blends back to a calm idle.",
@@ -220,7 +227,7 @@ const PLAY_AVATAR_GESTURE_TOOL: Anthropic.Tool = {
 // User-facing notes ("reține asta", "salvează-mi asta") — explicit, visible,
 // listable and deletable by the user themselves. Distinct from Kelion's silent
 // auto-learned long-term memory: a note only exists because the user asked for it.
-const SAVE_NOTE_TOOL: Anthropic.Tool = {
+const SAVE_NOTE_TOOL: Tool = {
   name: 'save_note',
   description:
     'Save a piece of text the user explicitly asked you to remember or save (e.g. "reține asta", "salvează-mi asta", "note this down", "keep this for me"). Use the user\'s own words/language for the content. Confirm briefly after saving. Do NOT use this for facts you learn incidentally — only when the user clearly asks you to save/remember something specific.',
@@ -233,13 +240,13 @@ const SAVE_NOTE_TOOL: Anthropic.Tool = {
     required: ['content'],
   },
 }
-const LIST_NOTES_TOOL: Anthropic.Tool = {
+const LIST_NOTES_TOOL: Tool = {
   name: 'list_notes',
   description:
     'List the user\'s saved notes (e.g. "ce am salvat?", "arată-mi notițele", "what did I save?"). Returns them most recent first with their id, so you can read them back or reference one for deletion.',
   input_schema: { type: 'object', properties: {} },
 }
-const DELETE_NOTE_TOOL: Anthropic.Tool = {
+const DELETE_NOTE_TOOL: Tool = {
   name: 'delete_note',
   description: 'Delete one of the user\'s saved notes by id (from a prior list_notes call), when they ask to remove/forget it.',
   input_schema: {
@@ -252,13 +259,13 @@ const DELETE_NOTE_TOOL: Anthropic.Tool = {
 // MEMORIA E A USERULUI (#20, Adrian 10 iul): pe lângă notițele explicite, userul
 // vede și controlează și memoria învățată automat — transparență + „uită asta".
 // Disponibile TUTUROR userilor (aceleași capabilități pentru toți).
-const LIST_MEMORIES_TOOL: Anthropic.Tool = {
+const LIST_MEMORIES_TOOL: Tool = {
   name: 'list_memories',
   description:
     'Show everything you (Kelion) remember about this user from earlier conversations — the auto-learned durable facts (distinct from their explicitly saved notes). Use when they ask "ce știi despre mine?", "ce ții minte despre mine?", "what do you remember about me?". Present it naturally in their language.',
   input_schema: { type: 'object', properties: {} },
 }
-const FORGET_MEMORY_TOOL: Anthropic.Tool = {
+const FORGET_MEMORY_TOOL: Tool = {
   name: 'forget_memory',
   description:
     'Permanently forget remembered facts about this user that match a text fragment, when they ask you to forget something (e.g. "uită că...", "șterge din memorie...", "forget that I..."). Pass the most specific fragment of the fact. Returns how many facts were deleted — confirm honestly (0 = nothing matched).',
@@ -275,7 +282,7 @@ const FORGET_MEMORY_TOOL: Anthropic.Tool = {
 // user's monitor. Unlike show_on_screen (a static iframe that many sites
 // refuse), this actually renders any page and lets Kelion read it and click
 // into it, so he can genuinely browse a site page by page, not just display one.
-const BROWSER_OPEN_TOOL: Anthropic.Tool = {
+const BROWSER_OPEN_TOOL: Tool = {
   name: 'browser_open',
   description:
     'Open a real web page in a live browser and show it, live, on the user\'s monitor — including sites that refuse to load in a simple embedded frame (Google, banks, social media). Returns the page title, its visible text, and a NUMBERED list of its links/buttons/inputs so you can navigate further with browser_click / browser_type. Prefer this over show_on_screen whenever the user wants to actually browse, read inside, search within, or interact with a real website.',
@@ -285,7 +292,7 @@ const BROWSER_OPEN_TOOL: Anthropic.Tool = {
     required: ['url'],
   },
 }
-const BROWSER_CLICK_TOOL: Anthropic.Tool = {
+const BROWSER_CLICK_TOOL: Tool = {
   name: 'browser_click',
   description:
     'Click a link, button or other element on the currently open browser page, by its number from the last browser_open/browser_read/browser_click/browser_type result. This is how you walk through an entire site page by page — e.g. to survey/summarize it ("conspectează site-ul"): open it, read it, click into each relevant link, read again.',
@@ -295,7 +302,7 @@ const BROWSER_CLICK_TOOL: Anthropic.Tool = {
     required: ['index'],
   },
 }
-const BROWSER_TYPE_TOOL: Anthropic.Tool = {
+const BROWSER_TYPE_TOOL: Tool = {
   name: 'browser_type',
   description:
     'Type text into an input/textarea/search box on the currently open browser page, by its number. Set submit=true to press Enter afterwards (e.g. to submit a search).',
@@ -309,18 +316,18 @@ const BROWSER_TYPE_TOOL: Anthropic.Tool = {
     required: ['index', 'text'],
   },
 }
-const BROWSER_READ_TOOL: Anthropic.Tool = {
+const BROWSER_READ_TOOL: Tool = {
   name: 'browser_read',
   description:
     'Re-read the currently open browser page — its visible text and numbered links/buttons — without navigating. Use to survey/summarize a page or refresh the list of clickable elements.',
   input_schema: { type: 'object', properties: {} },
 }
-const BROWSER_BACK_TOOL: Anthropic.Tool = {
+const BROWSER_BACK_TOOL: Tool = {
   name: 'browser_back',
   description: 'Go back to the previous page in the live browser.',
   input_schema: { type: 'object', properties: {} },
 }
-const BROWSER_SCROLL_TOOL: Anthropic.Tool = {
+const BROWSER_SCROLL_TOOL: Tool = {
   name: 'browser_scroll',
   description: 'Scroll the currently open browser page to see more content.',
   input_schema: {
@@ -329,12 +336,12 @@ const BROWSER_SCROLL_TOOL: Anthropic.Tool = {
     required: ['direction'],
   },
 }
-const BROWSER_CLOSE_TOOL: Anthropic.Tool = {
+const BROWSER_CLOSE_TOOL: Tool = {
   name: 'browser_close',
   description: 'Close the live browser and clear it from the monitor, when done browsing.',
   input_schema: { type: 'object', properties: {} },
 }
-const BROWSER_KEY_TOOL: Anthropic.Tool = {
+const BROWSER_KEY_TOOL: Tool = {
   name: 'browser_key',
   description:
     'Press a keyboard key or combo on the currently open browser page — for interactions a click/type cannot do: Tab/Shift+Tab to move between fields, Escape to close a popup, ArrowDown/ArrowUp to pick from a dropdown/autocomplete, Enter to submit, Control+A to select all. Use it when the page needs a real keystroke, not text.',
@@ -349,7 +356,7 @@ const BROWSER_KEY_TOOL: Anthropic.Tool = {
     required: ['key'],
   },
 }
-const BROWSER_CLICK_AT_TOOL: Anthropic.Tool = {
+const BROWSER_CLICK_AT_TOOL: Tool = {
   name: 'browser_click_at',
   description:
     'Click at pixel coordinates (x,y) in the browser viewport (1280×800), for elements the numbered list does not capture — a spot on a map, a canvas, a custom widget. Read the page screenshot first to judge where to click. Prefer browser_click by index when the target is in the numbered list.',
@@ -366,7 +373,7 @@ const BROWSER_CLICK_AT_TOOL: Anthropic.Tool = {
 // ADMIN ONLY. When the owner asks to FIX, CHANGE or ADD something in the
 // Kelionai APP ITSELF (a bug, a feature, the code/site) — not an ordinary task —
 // hand the request to the owner's developer through the bridge.
-const REPAIR_TOOL: Anthropic.Tool = {
+const REPAIR_TOOL: Tool = {
   name: 'request_repair',
   description:
     "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, in his own words plus any detail he gave.",
@@ -455,7 +462,7 @@ const AGENTS: Record<string, AgentSpec> = {
 // explicitly authorizes it calls this tool: the script goes on the monitor as a
 // readable panel, the screen recorder arms (one click picks the screen — browser
 // law), and when recording starts the approved script is spoken aloud verbatim.
-const PROMO_TOOL: Anthropic.Tool = {
+const PROMO_TOOL: Tool = {
   name: 'prepare_promo_clip',
   description:
     'ADMIN ONLY. Arm the screen recorder for a professional promo clip (TikTok/Instagram) with ' +
@@ -517,9 +524,9 @@ const PROMO_TOOL: Anthropic.Tool = {
 const CODE_EXEC_TOOL = {
   type: 'code_execution_20260521',
   name: 'code_execution',
-} as unknown as Anthropic.Tool
+} as unknown as Tool
 
-const DELEGATE_TOOL: Anthropic.Tool = {
+const DELEGATE_TOOL: Tool = {
   name: 'delegate',
   description:
     "Hand a task to one of your specialist agents — each an expert with a verified background of 25 years of professional experience in its domain and its OWN memory, who does the work and reports back to you. Agents: 'secretary' (Gmail, Calendar, Tasks, Drive, Contacts), 'navigator' (places, maps, routes, live traffic, driving copilot), 'researcher' (web search, YouTube, Wikipedia, weather, currency, time, current facts), 'studio' (creating/designing images, logos, illustrations, visual concepts), 'scribe' (writing, drafting, rewriting, summarising and translating text in any tone or language), 'developer' (writes SOFTWARE in the sandbox and runs it until it works), 'tester' (independently tests code written by others — separation of duties: pass the developer's full code in the task and it returns a PASS/FAIL verdict with real run evidence). For serious software requests use developer THEN tester. You then relay their result to the user in your OWN voice. For a single trivial lookup you may just use your own tools instead.",
@@ -908,7 +915,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const enabledGestures = (AVATAR_GESTURES as readonly string[]).filter(
       (g) => !gestureOff.has(GESTURE_SEMANTIC_CLIP[g] ?? g),
     )
-    const gestureTool: Anthropic.Tool | null =
+    const gestureTool: Tool | null =
       enabledGestures.length > 0
         ? {
             ...PLAY_AVATAR_GESTURE_TOOL,
@@ -1291,7 +1298,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       systemPrompt += `\n\nSESSION CONTINUITY: your previous conversation with this user ended about ${gapText} ago (this is a REUNION, not a continuous thread). Greet/respond with natural continuity — you remember them and what you discussed — without reciting your memory unprompted.`
     }
 
-    const params: Anthropic.MessageParam[] = messages.map((m) => ({
+    const params: MessageParam[] = messages.map((m) => ({
       role: m.role,
       content: m.content,
     }))
@@ -1519,7 +1526,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // request_repair is offered ONLY to the admin AND only when his local
     // developer bridge is actually online — no point otherwise.
     const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
-    const tools: Anthropic.Tool[] = isAdmin
+    const tools: Tool[] = isAdmin
       ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
@@ -1567,11 +1574,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // gateOn=true holds the opening for the language check; correct=true adds
         // the hard corrective and streams live (accept the result no matter what).
         const runRound = (
-          c: Anthropic,
+          c: BrainClient,
           m: string,
           correct = false,
           gateOn = true,
-        ): Promise<Anthropic.Message> => {
+        ): Promise<Message> => {
           roundText = ''
           guardTripped = false
           let gate = ''
@@ -1627,7 +1634,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             return msg
           })
         }
-        let final: Anthropic.Message
+        let final: Message
         try {
           final = await runRound(brainClientFor(model), model)
         } catch (e) {
@@ -1666,7 +1673,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (final.stop_reason !== 'tool_use') break
 
         params.push({ role: 'assistant', content: final.content })
-        const results: Anthropic.ToolResultBlockParam[] = []
+        const results: ToolResultBlockParam[] = []
         for (const block of final.content) {
           if (block.type === 'tool_use') {
             // A tool must NEVER crash the whole reply — always return a result so
@@ -1871,10 +1878,10 @@ async function runAgent(
         : '') +
       `${memory}`
     // Code agents (Developer/Tester) also get the real execution sandbox.
-    const agentTools: Anthropic.Tool[] = spec.code
+    const agentTools: Tool[] = spec.code
       ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, CODE_EXEC_TOOL]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL]
-    const params: Anthropic.MessageParam[] = [{ role: 'user', content: task }]
+    const params: MessageParam[] = [{ role: 'user', content: task }]
     let text = ''
     let agentSandbox = '' // the agent's real sandbox session (proof of execution)
     let inTok = 0
@@ -1883,7 +1890,7 @@ async function runAgent(
     for (let round = 0; round < 4; round++) {
       // Aceeași plasă ca la creier: Kimi → GLM la orice problemă de model (inclusiv
       // un refuz de siguranță) — client selectat după model (brainClientFor).
-      const make = (m: string): Promise<Anthropic.Message> =>
+      const make = (m: string): Promise<Message> =>
         brainClientFor(m).messages.create({
           model: m,
           // Code agents get room to write real programs; text agents stay tight.
@@ -1892,7 +1899,7 @@ async function runAgent(
           tools: agentTools,
           messages: params,
         })
-      let res: Anthropic.Message
+      let res: Message
       try {
         res = await make(agentModel)
       } catch (e) {
@@ -1908,7 +1915,7 @@ async function runAgent(
       inTok += res.usage.input_tokens
       outTok += res.usage.output_tokens
       const t = res.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .filter((b): b is TextBlock => b.type === 'text')
         .map((b) => b.text)
         .join('')
       if (t) text += (text ? '\n' : '') + t
@@ -1918,7 +1925,7 @@ async function runAgent(
       }
       if (res.stop_reason !== 'tool_use') break
       params.push({ role: 'assistant', content: res.content })
-      const results: Anthropic.ToolResultBlockParam[] = []
+      const results: ToolResultBlockParam[] = []
       for (const block of res.content) {
         if (block.type === 'tool_use') {
           let out: string
@@ -2014,7 +2021,7 @@ function browserToolResult(
 // Run one tool-use block and return the JSON string result. show_on_screen also
 // emits a control frame on the live stream so the frontend opens the monitor.
 async function runTool(
-  block: Anthropic.ToolUseBlock,
+  block: ToolUseBlock,
   isAdmin: boolean,
   token: string,
   reply: { raw: { write(chunk: string): void } },
