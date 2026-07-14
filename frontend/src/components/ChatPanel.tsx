@@ -39,6 +39,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
+import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startLiveVoice, type LiveVoiceHandle } from '../lib/liveVoice'
@@ -779,6 +780,10 @@ export default function ChatPanel({
     abortRef.current = ac
     setBusy(true)
     let acc = ''
+    // TIMP DE RĂSPUNS REAL (măsurat aici, în browser — ce simte userul): de la
+    // trimitere → primul cuvânt vizibil → răspuns complet. Se afișează pe contor.
+    const t0 = performance.now()
+    let firstAt = 0
     try {
       const wsNow = getWorkspace()
       const screen = wsNow.open
@@ -800,8 +805,13 @@ export default function ChatPanel({
         face?.descriptor,
         face?.photo,
       )) {
+        if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // primul cuvânt REAL
         acc += chunk
         setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
+      }
+      // Publică timpul REAL pe contor (doar dacă a venit text vizibil).
+      if (firstAt) {
+        setRealLatency({ firstMs: firstAt - t0, totalMs: performance.now() - t0, at: Date.now() })
       }
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).

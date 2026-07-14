@@ -23,6 +23,7 @@ import {
   isEmbeddable,
   setMonitorWorking,
 } from '../lib/workspace'
+import { getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
@@ -236,6 +237,8 @@ export default function Stage({ user }: { user: User }) {
     null,
   )
   const [elapsedMs, setElapsedMs] = useState(0)
+  // Timpul de răspuns REAL măsurat în browser (ChatPanel) — ce simte userul.
+  const realLatency = useSyncExternalStore(subscribeRealLatency, getRealLatency)
   const [owned, setOwned] = useState<{ summary: string; status: string; ageMs: number } | null>(
     null,
   )
@@ -574,10 +577,19 @@ export default function Stage({ user }: { user: User }) {
                 {claudeActive ? 'LIVE' : 'în așteptare'}
               </span>
               {/* VITEZA REALĂ a creierului Linux: cronometrul viu cât lucrează,
-                  altfel timpii ultimei ture (tip + total + primul cuvânt). */}
+                  altfel timpul de răspuns REAL măsurat în browser (ce simte
+                  userul), iar dacă lipsește — timpii ultimei ture de pe server. */}
               {elapsedMs > 0 ? (
                 <span className="speed-badge live" title="Cronometru — tura curentă">
                   ⏱ {(elapsedMs / 1000).toFixed(1)}s
+                </span>
+              ) : realLatency ? (
+                <span
+                  className="speed-badge"
+                  title={`Timp de răspuns REAL (măsurat în browser): ${(realLatency.totalMs / 1000).toFixed(1)}s total, primul cuvânt la ${(realLatency.firstMs / 1000).toFixed(1)}s`}
+                >
+                  ⏱ {(realLatency.totalMs / 1000).toFixed(1)}s
+                  {realLatency.firstMs ? ` (1ᵘˡ cuvânt ${(realLatency.firstMs / 1000).toFixed(1)}s)` : ''}
                 </span>
               ) : lastTurn ? (
                 <span
