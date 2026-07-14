@@ -2,7 +2,7 @@ import type { TextBlock } from './brain-types.js'
 import { config } from '../config.js'
 import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
 import { brainCost } from './cost.js'
-import { anthropic } from './anthropic.js'
+import { brain } from './brain.js'
 import { MODEL_FAST } from './modelRouter.js'
 
 const MEMORY_MODEL = MODEL_FAST
@@ -49,7 +49,7 @@ export async function learnFromTurn(
   try {
     const existing = await getMemories(email, 80, agent)
     const known = existing.map((m) => m.content).join('\n') || '(nothing yet)'
-    const res = await anthropic.messages.create({
+    const res = await brain.messages.create({
       model: MEMORY_MODEL,
       max_tokens: 400,
       system:
