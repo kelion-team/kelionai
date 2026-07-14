@@ -44,6 +44,38 @@ function readSecret() {
 if (!SECRET) { console.error('BRIDGE_SECRET lipsa'); process.exit(1) }
 const H = { 'content-type': 'application/json', 'x-bridge-secret': SECRET }
 
+// TOKEN GITHUB — verificare la pornire și înainte de fiecare publicare (Adrian,
+// 14 iul: „oprește toate publicările până când tokenul e înlocuit"). Tokenul e
+// pe VPS în /root/kelion/github-token.txt; dacă e invalid, constructorul nu
+// începe publicările, blochează pending release-uri și anunță pe monitor.
+const GITHUB_TOKEN_FILE = '/root/kelion/github-token.txt'
+const GITHUB_API = 'https://api.github.com'
+function readGithubToken() {
+  try { return readFileSync(GITHUB_TOKEN_FILE, 'utf8').trim() || null } catch { return null }
+}
+async function githubTokenOk() {
+  const token = readGithubToken()
+  if (!token) return { ok: false, reason: 'lipsește fișierul /root/kelion/github-token.txt' }
+  try {
+    const r = await fetch(`${GITHUB_API}/user`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (r.status === 401) return { ok: false, reason: '401 Bad credentials — tokenul GitHub e invalid sau expirat' }
+    if (!r.ok) return { ok: false, reason: `HTTP ${r.status} de la GitHub API` }
+    return { ok: true, reason: '' }
+  } catch (e) {
+    return { ok: false, reason: `nu pot contacta GitHub: ${String(e).slice(0, 120)}` }
+  }
+}
+async function blockReleasesForBadToken() {
+  try {
+    await api('/api/bridge/github-token-invalid', 'POST', {})
+  } catch (e) {
+    console.error('Nu am putut bloca release-urile:', e.message)
+  }
+}
+
 // ── MOTORUL DE LUCRU (ordinul lui Adrian, 11 iul): munca NU mai consumă
 // abonamentul Claude Max — ăla rămâne DOAR pentru chatul adminului și demo.
 // Constructorul lucrează pe Kimi (primar), apoi GLM (secundar), cu revenire
@@ -968,9 +1000,24 @@ async function deployApproved(r) {
   if (pubRes.code !== 0) {
     console.error('Publicare eșuată:', pubRes.out.slice(-800))
     const tail = pubRes.out.split('\n').filter(Boolean).pop() || 'detalii în jurnalul serverului'
-    // Un eșec poate fi tranzitoriu (redeploy în curs); DOUĂ la rând = problemă
-    // reală (tipic cheia GitHub) → întrerupătorul universal tripează, nu mai
-    // reîncercăm la infinit.
+    const fullOut = pubRes.out.toLowerCase()
+    // GARD ANTI-PUBLICARE CU TOKEN GITHUB INVALID (Adrian, 14 iul): token invalid =
+    // problemă GLOBALĂ (nu doar a acestui release). Dacă publicarea a eșuat cu
+    // 401/Bad credentials, oprim TOT constructorul, blocăm pending release-urile și
+    // anunțăm pe monitor — nu mai încercăm niciun deploy până la înlocuirea cheii.
+    if (/\b401\b|bad credentials|invalid token|not authenticated/i.test(fullOut)) {
+      const reason = tail.includes('401') ? `HTTP 401 (${tail.slice(0, 80)})` : 'token GitHub invalid'
+      const msg = `🛑 Constructorul este OPRIT: publicarea a eșuat cu ${reason}. Nu mai încerc deploy-uri până când înlocuiești tokenul.`
+      say(msg)
+      pushProgress(100, 'Token GitHub invalid — constructor oprit')
+      await blockReleasesForBadToken()
+      await tellAdmin(`${msg} Release-urile pending au fost blocate.`)
+      process.exit(1)
+    }
+    // Altă cauză (tranzitorie sau specifică ACESTUI release): întrerupătorul
+    // universal — un eșec poate fi tranzitoriu (redeploy în curs); DOUĂ la rând =
+    // problemă reală → tripează pe acest release (îl marchează `failed` + anunță
+    // adminul o dată), fără să oprească tot constructorul. Zero retry orb.
     const { n, tripped } = breakerTrip('deploy', r.id, DEPLOY_MAX_ATTEMPTS)
     if (tripped) {
       await blockRelease(r, `publicarea a eșuat de ${n} ori la rând: ${tail.slice(0, 180)}`)
@@ -1035,6 +1082,22 @@ async function main() {
   // lucru (altfel s-ar bate cu reparatorii pe revendicare).
   const deployOnly = process.env.DEPLOY_ONLY === '1'
   console.log(`Constructorul Kelion (headless${deployOnly ? ' — DOAR deploy' : ''}) pornit ->`, BASE, 'repo', REPO)
+
+  // GARD ANTI-PUBLICARE CU TOKEN GITHUB INVALID (Adrian, 14 iul): dacă tokenul
+  // de pe VPS e invalid, nu începem bucla de deploy — blocăm pending release-uri,
+  // anunțăm pe monitor și ieșim. Constructorul va fi repornit de systemd după ce
+  // Adrian înlocuiește tokenul.
+  const tokenCheck = await githubTokenOk()
+  if (!tokenCheck.ok) {
+    const msg = `🛑 Constructorul este OPRIT: tokenul GitHub e invalid — ${tokenCheck.reason}`
+    console.error(msg)
+    say(msg)
+    pushProgress(100, 'Token GitHub invalid — constructor oprit')
+    await blockReleasesForBadToken()
+    await tellAdmin(`${msg} Release-urile pending au fost blocate. Înlocuiește tokenul în ${GITHUB_TOKEN_FILE}, apoi repornește constructorul.`)
+    process.exit(1)
+  }
+
   for (;;) {
     try {
       if (!deployOnly) {

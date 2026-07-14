@@ -27,6 +27,8 @@ import {
   fetchDevLog,
   fetchReleases,
   decideRelease,
+  fetchGithubTokenStatus,
+  resetGithubToken,
   resolveGap,
   escalateGap,
   triageGaps,
@@ -52,6 +54,8 @@ import {
   fetchVoiceprints,
   deleteVoiceprint,
   type VoiceprintRow,
+  fetchTokenChecks,
+  type TokenChecksResult,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -143,10 +147,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'tokenuri'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
   >(initialTab ?? 'finance')
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
@@ -188,10 +192,17 @@ export default function AdminPanel({
   const [activity, setActivity] = useState<UserActivity | null>(null)
   const [devLog, setDevLog] = useState<string[]>([])
   const [releases, setReleases] = useState<StagedRelease[]>([])
+  const [tokenStatus, setTokenStatus] = useState<{ ok: boolean; since: string | null; loading: boolean }>({
+    ok: true,
+    since: null,
+    loading: false,
+  })
   const [stores, setStores] = useState<StoresData | null>(null)
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
+  const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
   // Gaps already sent to execution this session — shown marked, never hidden.
   const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
   const [triaging, setTriaging] = useState(false)
@@ -265,6 +276,9 @@ export default function AdminPanel({
     void fetchActivity().then(setActivity)
     void fetchDevLog().then(setDevLog)
     void fetchReleases().then(setReleases)
+    void fetchGithubTokenStatus().then((s) => {
+      if (s) setTokenStatus({ ok: s.ok, since: s.since, loading: false })
+    })
   }, [])
 
   // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
@@ -343,6 +357,17 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
+  // Monitorizare token GitHub — banner în admin când constructorul e oprit.
+  useEffect(() => {
+    const load = async (): Promise<void> => {
+      const s = await fetchGithubTokenStatus()
+      if (s) setTokenStatus({ ok: s.ok, since: s.since, loading: false })
+    }
+    void load()
+    const id = window.setInterval(() => void load(), 10_000)
+    return () => window.clearInterval(id)
+  }, [])
+
   // Tab „Gesturi" deschis → încarcă lista dezactivată.
   useEffect(() => {
     if (tab !== 'gesturi') return
@@ -398,6 +423,39 @@ export default function AdminPanel({
   return (
     <div className={`admin-overlay ${peek ? 'peek' : ''}`}>
       <div className="admin-panel">
+        {!tokenStatus.ok && (
+          <div className="admin-token-banner" role="alert">
+            <span className="admin-token-icon">🛑</span>
+            <div className="admin-token-text">
+              <strong>Constructorul este OPRIT</strong> — tokenul GitHub de pe VPS este invalid.
+              {' '}
+              {tokenStatus.since && (
+                <span className="admin-token-since">
+                  Din {new Date(tokenStatus.since).toLocaleString('ro-RO')}.
+                </span>
+              )}
+              {' '}Înlocuiește tokenul în <code>/root/kelion/github-token.txt</code>, apoi confirmă aici.
+            </div>
+            <button
+              type="button"
+              className="admin-token-btn"
+              disabled={tokenStatus.loading}
+              onClick={async () => {
+                setTokenStatus((c) => ({ ...c, loading: true }))
+                const ok = await resetGithubToken()
+                if (ok) {
+                  setTokenStatus({ ok: true, since: null, loading: false })
+                  void fetchReleases().then(setReleases)
+                } else {
+                  setTokenStatus((c) => ({ ...c, loading: false }))
+                  alert('Nu am putut reset. Încearcă din nou.')
+                }
+              }}
+            >
+              {tokenStatus.loading ? 'Se confirmă…' : 'Token GitHub înlocuit'}
+            </button>
+          </div>
+        )}
         <header className="admin-head">
           <div className="admin-tabs">
             <button
@@ -528,6 +586,20 @@ export default function AdminPanel({
               onClick={() => setTab('gesturi')}
             >
               Gesturi
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
+              onClick={() => {
+                setTab('tokenuri')
+                setTokenChecksLoading(true)
+                void fetchTokenChecks().then((r) => {
+                  setTokenChecks(r)
+                  setTokenChecksLoading(false)
+                })
+              }}
+            >
+              Tokenuri
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -679,7 +751,9 @@ export default function AdminPanel({
                           ? 'APROBAT'
                           : r.status === 'deployed'
                             ? 'PUBLICAT'
-                            : 'RESPINS'}
+                            : r.status === 'blocked'
+                              ? 'BLOCAT (token GitHub)'
+                              : 'RESPINS'}
                     </span>
                     <span className="release-time">
                       {new Date(r.at).toLocaleString('ro-RO', {
@@ -733,7 +807,9 @@ export default function AdminPanel({
                             ? '✅ aprobat'
                             : r.status === 'deployed'
                               ? '🟢 publicat'
-                              : '⛔ respins'}{' '}
+                              : r.status === 'blocked'
+                                ? '🛑 blocat (token GitHub)'
+                                : '⛔ respins'}{' '}
                           ·{' '}
                           {new Date(r.at).toLocaleString('ro-RO', {
                             day: 'numeric',
@@ -1095,6 +1171,51 @@ export default function AdminPanel({
                   })}
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+        {tab === 'tokenuri' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Tokenuri și chei API cu drepturi — verificare LIVE
+                <button
+                  type="button"
+                  className="ghost"
+                  style={{ marginLeft: 12 }}
+                  onClick={() => {
+                    setTokenChecksLoading(true)
+                    void fetchTokenChecks().then((r) => {
+                      setTokenChecks(r)
+                      setTokenChecksLoading(false)
+                    })
+                  }}
+                >
+                  Reîmprospătează
+                </button>
+              </div>
+              {tokenChecksLoading && <p className="chat-hint">Se verifică tokenurile…</p>}
+              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">Nu s-au putut încărca verificările.</p>}
+              {tokenChecks && (
+                <>
+                  <div className="fin-row" style={{ fontWeight: 600 }}>
+                    <span>✅ {tokenChecks.ok} OK</span>
+                    <span>⚪ {tokenChecks.notConfigured} neconfigurate</span>
+                    <span>🔴 {tokenChecks.failed} eșuate</span>
+                  </div>
+                  {tokenChecks.checks.map((c) => (
+                    <div className="fin-row" key={c.name}>
+                      <span>
+                        {c.status === 'ok' ? '✅' : c.status === 'not_configured' ? '⚪' : '🔴'} {c.name}
+                        {c.detail ? ` — ${c.detail}` : ''}
+                      </span>
+                      <span className="fin-sub" title={`Drepturi necesare: ${c.requiredScope ?? 'n/a'}`}>
+                        {c.requiredScope ?? ''}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </section>
         )}

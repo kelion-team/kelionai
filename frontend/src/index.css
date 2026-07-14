@@ -1923,6 +1923,18 @@ body {
   background: rgba(255, 93, 93, 0.14);
   border: 1px solid rgba(255, 93, 93, 0.35);
 }
+.release-badge.b-blocked {
+  color: #ffb4b4;
+  background: rgba(217, 48, 37, 0.18);
+  border: 1px solid rgba(217, 48, 37, 0.5);
+}
+.release-row.status-blocked .release-title {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.release-row.status-blocked .release-actions {
+  display: none;
+}
 .release-time {
   font-size: 12px;
   color: var(--muted);
@@ -2153,6 +2165,38 @@ body {
   border-radius: 16px;
   overflow: hidden;
 }
+.admin-token-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #3a1515;
+  border-bottom: 1px solid #8a2626;
+  color: #ffd1d1;
+  font-size: 13px;
+}
+.admin-token-icon { font-size: 18px; flex-shrink: 0; }
+.admin-token-text { flex: 1; line-height: 1.4; }
+.admin-token-text code {
+  background: rgba(255,255,255,0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.admin-token-since { opacity: 0.8; }
+.admin-token-btn {
+  flex-shrink: 0;
+  background: #d93025;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.admin-token-btn:hover:not(:disabled) { background: #b3261e; }
+.admin-token-btn:disabled { opacity: 0.6; cursor: wait; }
 .admin-head {
   display: flex;
   align-items: flex-start;

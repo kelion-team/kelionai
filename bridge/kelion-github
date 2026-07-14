@@ -37,6 +37,19 @@ TOKEN=$(cat /root/kelion/github-token.txt 2>/dev/null || true)
 [ -z "$TOKEN" ] && { echo "EROARE: lipsește /root/kelion/github-token.txt (Adrian îl pune prin vps-keys)"; exit 1; }
 gh_api() { curl -sS --max-time 30 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
 
+# VERIFICARE TOKEN (Adrian, 14 iul): refuzăm operațiunile imediat dacă tokenul e
+# invalid/expirat, ca să nu apară încercări de merge/deploy cu 401 în jurnal.
+check_token() {
+  local code body
+  code=$(gh_api -o /tmp/gh_token_check.json -w '%{http_code}' "https://api.github.com/user")
+  if [ "$code" != "200" ]; then
+    body=$(jq -r '.message // "token invalid"' /tmp/gh_token_check.json 2>/dev/null || echo "token invalid")
+    echo "EROARE: tokenul GitHub e invalid (HTTP $code: $body). Oprește tot și înlocuiește /root/kelion/github-token.txt." >&2
+    exit 1
+  fi
+}
+check_token
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   pr)
