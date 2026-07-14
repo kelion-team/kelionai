@@ -210,6 +210,13 @@ export interface InboxLiveItem {
   date: string
   seen: boolean
 }
+
+function isValidEnvelopeDate(d: unknown): d is string | Date {
+  if (d === null || d === undefined) return false
+  const ts = new Date(d as string | number | Date).getTime()
+  return !isNaN(ts)
+}
+
 export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
   if (!mailEnabled()) return []
   const client = new ImapFlow({
@@ -227,18 +234,35 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
       const mb = client.mailbox
       const total = mb ? mb.exists : 0
       if (total > 0) {
-        const start = Math.max(1, total - limit + 1)
-        // envelope + flags DOAR → nu atingem corpul, deci nu marchează citit.
-        for await (const msg of client.fetch(`${start}:*`, { envelope: true, flags: true })) {
-          const f = msg.envelope?.from?.[0]
-          out.push({
-            uid: msg.uid,
-            from: f?.address ?? '',
-            fromName: f?.name ?? '',
-            subject: msg.envelope?.subject ?? '(fără subiect)',
-            date: (msg.envelope?.date ?? new Date()).toISOString(),
-            seen: msg.flags?.has('\\Seen') ?? false,
-          })
+        // UID SEARCH + UID FETCH: ne dăm seama EXACT care sunt ultimele `limit`
+        // mesaje (UID-urile cele mai mari), apoi le aducem doar pe acelea.
+        // Așa evităm confuzia dintre număr secvență și UID și nu citim tot inboxul.
+        const uids = await client.search({ all: true }, { uid: true })
+        if (!uids || !Array.isArray(uids)) return out
+        uids.sort((a, b) => b - a)
+        const wantedUids = new Set(uids.slice(0, limit))
+        if (wantedUids.size > 0) {
+          const min = Math.min(...wantedUids)
+          const max = Math.max(...wantedUids)
+          // uid: true → query-ul este un UID range, nu număr secvență.
+          for await (const msg of client.fetch(`${min}:${max}`, { envelope: true, flags: true }, { uid: true })) {
+            // Fallback: unele servere pot trimite mesaje fără UID pe acest query;
+            // le sărim, nu putem procesa/dedupa fără UID stabil.
+            if (!msg.uid || !wantedUids.has(msg.uid)) continue
+            const f = msg.envelope?.from?.[0]
+            const rawDate = msg.envelope?.date
+            out.push({
+              uid: msg.uid,
+              from: f?.address ?? '',
+              fromName: f?.name ?? '',
+              subject: msg.envelope?.subject ?? '(fără subiect)',
+              // Validăm data envelope-ului; un string gol sau invalid ar da `Invalid Date`.
+              date: isValidEnvelopeDate(rawDate) ? new Date(rawDate).toISOString() : new Date().toISOString(),
+              seen: msg.flags?.has('\\Seen') ?? false,
+            })
+          }
+          // Sort descrescător după UID (cele mai noi primele) — slice corect.
+          out.sort((a, b) => b.uid - a.uid)
         }
       }
     } finally {
@@ -253,7 +277,7 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
       /* ignore */
     }
   }
-  return out.reverse().slice(0, limit) // cele mai noi primele
+  return out
 }
 
 // Start the mailbox poller. Off entirely until MAIL_PASS is set (mailEnabled()).
