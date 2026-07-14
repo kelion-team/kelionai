@@ -215,17 +215,6 @@ export async function boostLowLight(stream: MediaStream): Promise<void> {
   }
 }
 
-// Read the current auto-exposure / ISO / brightness settings for debugging.
-export function getCameraSettings(stream: MediaStream): Record<string, unknown> {
-  const track = stream.getVideoTracks()[0]
-  if (!track) return {}
-  try {
-    return track.getSettings() as Record<string, unknown>
-  } catch {
-    return {}
-  }
-}
-
 /**
  * Returns true for errors that will not be fixed by retrying immediately
  * (e.g. permanent permission denial, unsupported hardware). The UI can use
@@ -240,14 +229,4 @@ export function isFatalCameraError(err: unknown): boolean {
  */
 export function getCameraErrorCode(err: unknown): string {
   return classifyCameraError(err).code
-}
-
-/**
- * Force the next startCamera() to wait for the full sensor release delay.
- * Call this before a deliberate camera restart (e.g. switching front/back).
- */
-export function requestCameraRelease(): void {
-  releaseChain = releaseChain.then(async () => {
-    await new Promise((r) => setTimeout(r, CAMERA_RELEASE_MS))
-  })
 }
