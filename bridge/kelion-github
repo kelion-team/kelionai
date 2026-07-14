@@ -8,6 +8,7 @@
 #   kelion-github merge <numar-pr>                    → squash-merge
 #   kelion-github publish <branch> "titlu" ["desc"]   → PUBLICARE COMPLETĂ cap-coadă
 #   kelion-github deploy                              → deploy.yml + verificare anti-fantomă
+#   kelion-github rollback                            → revino la starea de dinaintea ultimului commit master + deploy
 #   kelion-github doctor                              → DIAGNOZĂ cheie: formă + drepturi reale (PR/Contents/Actions)
 #   kelion-github runs [workflow.yml]                 → ultimele rulări (stare+concluzie)
 #   kelion-github api <cale>                          → ORICE citire GitHub, cu tokenul
@@ -117,6 +118,30 @@ case "$cmd" in
     if [ -n "$wf" ]; then url="$API/actions/workflows/$wf/runs?per_page=5"; else url="$API/actions/runs?per_page=5"; fi
     gh_api "$url" | jq -r '.workflow_runs[] | "\(.created_at)  \(.name)  \(.status)/\(.conclusion // "-")  \(.html_url)"'
     ;;
+  rollback)
+    # ROLLBACK RAPID (Adrian, 14 iul: „revino la ultimul master bun + redeploy")
+    # dacă un deploy strică producția. PUR prin API — FĂRĂ git local, FĂRĂ
+    # force-push, FĂRĂ pierdere de istoric: creează un commit NOU al cărui arbore
+    # e starea de dinaintea ultimului commit de pe master (revert curat), mută
+    # master pe el (fast-forward), apoi deploy verificat anti-fantomă.
+    CTJ="-H Content-Type:application/json"
+    HEAD=$(gh_api "$API/commits/master" | jq -r '.sha // empty')
+    [ -z "$HEAD" ] && { echo "❌ nu pot citi master (verifică cheia: kelion-github doctor)"; exit 1; }
+    PARENT=$(gh_api "$API/commits/$HEAD" | jq -r '.parents[0].sha // empty')
+    [ -z "$PARENT" ] && { echo "❌ master ($HEAD) nu are părinte — nu pot face rollback"; exit 1; }
+    PTREE=$(gh_api "$API/git/commits/$PARENT" | jq -r '.tree.sha // empty')
+    [ -z "$PTREE" ] && { echo "❌ nu găsesc arborele părintelui $PARENT"; exit 1; }
+    echo "▶ Rollback: master $HEAD → revin la starea din $PARENT"
+    NEW=$(gh_api $CTJ -X POST "$API/git/commits" -d "$(jq -nc \
+      --arg m "rollback: revin la $PARENT (anulez $HEAD)" --arg t "$PTREE" --arg p "$HEAD" \
+      '{message:$m, tree:$t, parents:[$p]}')" | jq -r '.sha // empty')
+    [ -z "$NEW" ] && { echo "❌ nu am putut crea commit-ul de rollback (verifică Contents:write cu doctor)"; exit 1; }
+    code=$(gh_api $CTJ -o /tmp/kg_rb.json -w '%{http_code}' -X PATCH "$API/git/refs/heads/master" \
+      -d "$(jq -nc --arg s "$NEW" '{sha:$s, force:false}')")
+    [ "$code" != 200 ] && { echo "❌ nu am putut muta master pe rollback → HTTP $code: $(jq -r '.message // empty' /tmp/kg_rb.json 2>/dev/null)"; exit 1; }
+    echo "  ✅ master mutat pe $NEW (starea din $PARENT) — pornesc deploy verificat"
+    exec "$0" deploy
+    ;;
   doctor)
     # DIAGNOZĂ CHEIE GitHub — pentru Kelion (Adrian, 14 iul: „verificator cu
     # diagnoză și lui Kelion să poată folosi" + „să le facă automat sau să-mi dea
@@ -176,7 +201,7 @@ case "$cmd" in
     gh_api "$API$p" | jq . 2>/dev/null || gh_api "$API$p"
     ;;
   *)
-    echo "folosire: kelion-github pr|merge|publish|deploy|doctor|runs|api (vezi comentariile din script)"
+    echo "folosire: kelion-github pr|merge|publish|deploy|rollback|doctor|runs|api (vezi comentariile din script)"
     exit 1
     ;;
 esac

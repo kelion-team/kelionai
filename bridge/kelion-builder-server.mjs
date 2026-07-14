@@ -892,13 +892,27 @@ async function generateAndUploadQRs() {
 // (îl marcăm `failed` pe server → iese pe loc din coada `approved`) și anunțăm
 // adminul O SINGURĂ DATĂ cu motivul concret. Condițiile clar PERMANENTE (fără
 // branch, branch absent pe origin, script lipsă) se blochează din prima.
-const deployFailCounts = new Map() // release id → număr de eșecuri consecutive
+// ── ÎNTRERUPĂTOR UNIVERSAL (Adrian, 14 iul: „acum tot"). Un singur primitiv prin
+// care trece ORICE buclă care poate eșua: numără eșecurile per cheie și la al
+// N-lea TRIPEȘTE (regula #11 — aceeași eroare de 2× → oprire, nu retry orb). Așa
+// nicio buclă nouă nu mai reinventează (sau omite) oprirea → bucla-cheie nu se
+// repetă. Deploy-ul îl folosește mai jos. (Buclele de ORDINE sunt deja gardate
+// separat: status pending→published/failed + finalizeStaleWorkOrders/30min.)
+const breakers = new Map() // nume buclă → Map(cheie → nr. eșecuri consecutive)
+function breakerTrip(name, key, max) {
+  let m = breakers.get(name); if (!m) { m = new Map(); breakers.set(name, m) }
+  const n = (m.get(key) || 0) + 1; m.set(key, n)
+  return { n, tripped: n >= max }
+}
+function breakerReset(name, key) {
+  const m = breakers.get(name); if (m) m.delete(key)
+}
 const DEPLOY_MAX_ATTEMPTS = 2
 
 // Oprește definitiv un release: marchează `failed` pe server (iese din coada
 // `approved`) + anunță adminul o singură dată. Întoarce true = tratat, nu relua.
 async function blockRelease(r, reason) {
-  deployFailCounts.delete(r.id)
+  breakerReset('deploy', r.id)
   const title = String(r.title || r.id).slice(0, 100)
   try {
     await api('/api/bridge/release-failed', 'POST', { id: r.id })
@@ -954,11 +968,11 @@ async function deployApproved(r) {
   if (pubRes.code !== 0) {
     console.error('Publicare eșuată:', pubRes.out.slice(-800))
     const tail = pubRes.out.split('\n').filter(Boolean).pop() || 'detalii în jurnalul serverului'
-    const n = (deployFailCounts.get(r.id) || 0) + 1
-    deployFailCounts.set(r.id, n)
     // Un eșec poate fi tranzitoriu (redeploy în curs); DOUĂ la rând = problemă
-    // reală (tipic cheia GitHub) → oprim bucla, nu mai reîncercăm la infinit.
-    if (n >= DEPLOY_MAX_ATTEMPTS) {
+    // reală (tipic cheia GitHub) → întrerupătorul universal tripează, nu mai
+    // reîncercăm la infinit.
+    const { n, tripped } = breakerTrip('deploy', r.id, DEPLOY_MAX_ATTEMPTS)
+    if (tripped) {
       await blockRelease(r, `publicarea a eșuat de ${n} ori la rând: ${tail.slice(0, 180)}`)
       return
     }
@@ -966,7 +980,7 @@ async function deployApproved(r) {
     pushProgress(100, `Publicare eșuată (${n}/${DEPLOY_MAX_ATTEMPTS})`)
     return
   }
-  deployFailCounts.delete(r.id)
+  breakerReset('deploy', r.id)
   say('🔀 branch→master + deploy verificat anti-fantomă: OK')
   pushProgress(96, 'Publicat în master + deploy')
 
