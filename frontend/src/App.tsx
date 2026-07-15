@@ -17,8 +17,12 @@ export default function App() {
   // schimbe la ORICE publicare (ordinul lui Adrian, 10 iul), nu doar la build
   // de interfață. Eticheta se compune cu versionLabel (aceeași sursă ca sub QR).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const error = new URLSearchParams(window.location.search).get('error')
+  useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get('error')
+    if (err) setError(err)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -43,7 +47,7 @@ export default function App() {
 
   // FILIGRAN MEREU LA ZI (Adrian, 10 iul: „filigranul nou să apară automat la
   // orice update, în interiorul aplicațiilor" — e scris dar nu se reflecta:
-  // versiunea se citea o singură dată la pornire). Acum reîmprospătăm ștampila
+  // versiunea se citea o singură dată la pornire). Acum reîmprospătim ștampila
   // deploy-ului periodic + când tab-ul redevine vizibil, așa filigranul din
   // ORICE shell (PWA/TWA din magazine, demo, clienți) se schimbă singur la
   // fiecare publicare, fără reîncărcare. Aceeași sursă ca sub QR (fără dublare).
