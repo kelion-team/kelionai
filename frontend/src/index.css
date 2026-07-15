@@ -3519,3 +3519,42 @@ a.card-item:hover {
     flex: 1 1 100%;
   }
 }
+
+/* ── QUOTA BAR verticală (Adrian, 15 iul) ────────────────────────────── */
+.quota-bar-wrap {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  margin: 0 6px;
+  vertical-align: middle;
+}
+.quota-bar {
+  position: relative;
+  width: 6px;
+  height: 24px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+}
+.quota-bar-fill {
+  display: block;
+  width: 100%;
+  border-radius: 0 0 2px 2px;
+  transition: height 0.4s ease, background 0.4s ease;
+}
+.quota-bar-label {
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}

@@ -89,7 +89,7 @@ export default function Stage({ user }: { user: User }) {
   const [workEngine, setWorkEngine] = useState('')
   // Credit creier Kimi/GLM (Adrian, 13 iul): două becuri în header — verde fix =
   // are credit; verde pâlpâind = motorul ACTIV acum; roșu pâlpâind = fără credit.
-  type BrainOne = { ok: boolean; reason: string; topup: string }
+  type BrainOne = { ok: boolean; reason: string; topup: string; percent: number }
   const [brainCredit, setBrainCredit] = useState<{ active: string | null; kimi: BrainOne; glm: BrainOne } | null>(null)
   useEffect(() => {
     if (user.role !== 'admin') return
@@ -946,61 +946,33 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* Bec CREDIT KIMI (stânga): verde fix = are credit; verde pâlpâind =
-                motor activ acum; roșu pâlpâind = fără credit. Click → alimentare. */}
-            {brainCredit &&
-              (() => {
-                const s = brainCredit.kimi
-                const state = !s.ok ? 'no-credit' : brainCredit.active === 'kimi' ? 'active' : 'ok'
-                return (
-                  <button
-                    type="button"
-                    className={`brain-pill ${state}`}
-                    title={
-                      !s.ok
-                        ? `Kimi — FĂRĂ CREDIT. ${s.reason || 'quota golită'} · click ca să alimentezi`
-                        : brainCredit.active === 'kimi'
-                          ? 'Kimi — motor ACTIV acum (are credit)'
-                          : 'Kimi — are credit'
-                    }
-                    onClick={() => window.open(s.topup, '_blank', 'noopener')}
-                  >
-                    <span className="pdot" />
-                    Kimi
-                  </button>
-                )
-              })()}
-            <span
-              className={`work-ticker ${claudeActivity.length > 0 ? 'busy' : ''}`}
-              title={claudeActivity.length > 0 ? claudeActivity.join('\n') : `Serverul Linux — ${srvLoad || 'se conectează…'}`}
-            >
-              {claudeActivity.length > 0
-                ? claudeActivity[claudeActivity.length - 1]
-                : `🟢 Linux ${srvLoad || '…'} · liniște`}
-            </span>
-            {/* Bec CREDIT GLM (dreapta), aceleași reguli. */}
-            {brainCredit &&
-              (() => {
-                const s = brainCredit.glm
-                const state = !s.ok ? 'no-credit' : brainCredit.active === 'glm' ? 'active' : 'ok'
-                return (
-                  <button
-                    type="button"
-                    className={`brain-pill ${state}`}
-                    title={
-                      !s.ok
-                        ? `GLM — FĂRĂ CREDIT. ${s.reason || 'quota golită'} · click ca să alimentezi`
-                        : brainCredit.active === 'glm'
-                          ? 'GLM — motor ACTIV acum (are credit)'
-                          : 'GLM — are credit'
-                    }
-                    onClick={() => window.open(s.topup, '_blank', 'noopener')}
-                  >
-                    <span className="pdot" />
-                    GLM
-                  </button>
-                )
-              })()}
+            {/* Bara verticală QUOTA Kimi + GLM (Adrian, 15 iul).  Dreptunghi
+                subțire, fill de jos în sus, culoare după procent: 0-30 roșu,
+                30-70 galben, 70-100 verde. Click → alimentare.  */}
+            {brainCredit && (
+              <span className="quota-bar-wrap" title="Quota disponibil creier (Kimi stânga, GLM dreapta) — click pentru alimentare">
+                {(['kimi','glm'] as const).map((key) => {
+                  const s = brainCredit[key]
+                  const p = Math.max(0, Math.min(100, s.percent ?? 100))
+                  const color = p <= 30 ? '#ff4444' : p <= 70 ? '#ffaa00' : '#22c55e'
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className="quota-bar"
+                      onClick={() => window.open(s.topup, '_blank', 'noopener')}
+                      title={`${key.toUpperCase()} — ${p}% disponibil. ${!s.ok ? 'FĂRĂ CREDIT: ' + (s.reason || 'quota golită') : brainCredit.active === key ? 'Motor ACTIV' : 'Stand-by'} · click pentru alimentare`}
+                    >
+                      <span
+                        className="quota-bar-fill"
+                        style={{ height: `${p}%`, background: color }}
+                      />
+                      <span className="quota-bar-label">{key[0].toUpperCase()}</span>
+                    </button>
+                  )
+                })}
+              </span>
+            )}
           </>
         )}
         {user.role === 'customer' && <WalletButton />}

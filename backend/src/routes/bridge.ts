@@ -2007,7 +2007,33 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     return { ok: !githubTokenInvalid, since: githubTokenInvalidAt || null }
   })
 
-  // ── INDICATOARE CREDIT CREIER (Adrian, 13 iul) ────────────────────────────
+  
+// ── QUOTA TRACKER (Adrian, 15 iul): înregistrează fiecare apel la creier
+// (succes/eșec) și calculează procentul de disponibilitate în ultimele 10 min.
+// Folosit de bara verticală din admin.
+class QuotaTracker {
+  private events: { model: string; success: boolean; ts: number }[] = []
+  private readonly maxAge = 10 * 60 * 1000
+  private readonly maxSize = 2000
+  record(model: string, success: boolean): void {
+    const now = Date.now()
+    this.events.push({ model, success, ts: now })
+    const cutoff = now - this.maxAge
+    this.events = this.events.filter((e) => e.ts > cutoff)
+    if (this.events.length > this.maxSize) this.events = this.events.slice(-this.maxSize)
+  }
+  percent(model: string): number {
+    const now = Date.now()
+    const cutoff = now - this.maxAge
+    const recent = this.events.filter((e) => e.model === model && e.ts > cutoff)
+    if (recent.length === 0) return 100 // fără istoric → 100%
+    const successes = recent.filter((e) => e.success).length
+    return Math.round((successes / recent.length) * 100)
+  }
+}
+export const quotaTracker = new QuotaTracker()
+
+// ── INDICATOARE CREDIT CREIER (Adrian, 13 iul) ────────────────────────────
   // Două „becuri" în header-ul admin, lângă statusul Linux: Kimi (stânga) +
   // GLM (dreapta). Verde = are credit; roșu pâlpâind = fără credit (quota
   // golită). Starea vine din tier-events reale (un „usage limit" 403 produce
@@ -2041,8 +2067,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const glm = statusOf('glm')
     return {
       active: workEngine || null,
-      kimi: { ok: kimi.ok, reason: kimi.reason, topup: TOPUP.kimi },
-      glm: { ok: glm.ok, reason: glm.reason, topup: TOPUP.glm },
+      kimi: { ok: kimi.ok, reason: kimi.reason, topup: TOPUP.kimi, percent: quotaTracker.percent('kimi') },
+      glm: { ok: glm.ok, reason: glm.reason, topup: TOPUP.glm, percent: quotaTracker.percent('glm') },
     }
   })
 
