@@ -1819,47 +1819,47 @@ async function runTool(
     case 'browser_open': {
       const url = String(args.url ?? '')
       if (!url) return JSON.stringify({ error: 'no_url' })
-      const result = await browserOpen(url)
+      const result = await browserOpen(email, baseUrl, url)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_click': {
-      const result = await browserClick(Number(args.index ?? 0))
+      const result = await browserClick(email, baseUrl, Number(args.index ?? 0))
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_type': {
-      const result = await browserType(Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
+      const result = await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_read': {
-      const result = await browserRead()
+      const result = await browserRead(email, baseUrl)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_back': {
-      const result = await browserBack()
+      const result = await browserBack(email, baseUrl)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_scroll': {
-      const result = await browserScroll(String(args.direction ?? 'down'))
+      const result = await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down')
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_key': {
-      const result = await browserKey(String(args.key ?? ''))
+      const result = await browserKey(email, baseUrl, String(args.key ?? ''))
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_click_at': {
-      const result = await browserClickAt(Number(args.x ?? 0), Number(args.y ?? 0))
+      const result = await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0))
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
     case 'browser_close': {
-      const result = await browserClose()
+      const result = await browserClose(email)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }
@@ -1882,7 +1882,7 @@ async function runTool(
       return JSON.stringify({ deleted: true })
     }
     case 'list_memories': {
-      const memories = await getMemories(email, 'kelion')
+      const memories = await getMemories(email)
       return JSON.stringify({ memories: memories.map((m) => m.content) })
     }
     case 'forget_memory': {
@@ -1929,7 +1929,7 @@ async function runTool(
           return JSON.stringify({ error: 'image_scene_needs_api_image_url' })
         }
       }
-      const promoUrl = promoSceneUrl(subject, duration, script, lang, scenes as { kind: string; at_seconds: number; query?: string; url?: string; title?: string }[])
+      const promoUrl = await promoSceneUrl('map', subject)
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: promoUrl, title: `Promo: ${subject}` } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: promoUrl })
     }
@@ -1955,7 +1955,7 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
-        return runGoogleTool(block, token)
+        return runGoogleTool(block.name, block.input, token)
       }
       return JSON.stringify({ error: `unknown_tool: ${block.name}` })
     }
