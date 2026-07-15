@@ -102,9 +102,7 @@ const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
 const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
 const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
 let fableDownUntil = 0
-// Ultimul mesaj (normalizat) al adminului — pentru filtrul anti-ecou ASR:
-// un duplicat sosit în <45s nu mai pornește o tură (zgomot de microfon).
-let lastAdminEcho: { key: string; at: number } = { key: '', at: 0 }
+
 function brainModel(): string {
   return Date.now() < fableDownUntil ? MODEL_RESERVE : MODEL
 }
@@ -1474,28 +1472,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .join(' ')
         .trim()
       const noiseKey = normNoise(cleanUserText)
-      // DOAR cât timp o tură chiar RULEAZĂ (Adrian, 10 iul: „se blochează"):
-      // ecoul de microfon apare când Kelion vorbește/răspunde. Când e liniște,
-      // un mesaj identic retrimis e Adrian care insistă fiindcă n-a primit
-      // răspuns — pornește o tură reală, nu-l mai înghiți.
-      if (
-        noiseKey &&
-        noiseKey === lastAdminEcho.key &&
-        Date.now() - lastAdminEcho.at < 45_000 &&
-        brainTurnActive()
-      ) {
-        // AICI SE RUPEA ȘI FILTRUL (mesaje scrise „nu ajung", 4 iul): ceasul se
-        // reîmprospăta la FIECARE duplicat, deci Adrian care retrimitea același
-        // text (fiindcă nu primea răspuns) era înghițit la nesfârșit ca „ecou".
-        // Fereastra curge acum de la PRIMA apariție: a doua retrimitere după
-        // 45s pornește o tură reală. (Ecoul de microfon vine oricum în <45s.)
-        const echoMsg = 'Am auzit (același mesaj, probabil ecou) — lucrez în continuare; dacă e comandă nouă, mai adaugă un cuvânt.'
-        reply.raw.write(echoMsg)
-        reply.raw.end()
-        void saveMessage(user.email, 'assistant', echoMsg)
-        return
-      }
-      lastAdminEcho = { key: noiseKey, at: Date.now() }
+
       // ── TELEMETRIE MONITOR (admin) ──────────────────────────────────────
       // Monitor gol la fiecare comandă, bara pornește la „Creierul analizează",
       // iar detaliul din spatele barei = cererea reală (gardă ≥3 cuvinte, ca
