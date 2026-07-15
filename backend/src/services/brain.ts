@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import { MODEL_FAST, MODEL_TOP } from './modelRouter.js'
+import { MODEL_FAST, MODEL_TOP, pickBrain } from './modelRouter.js'
 import type {
   Message,
   MessageCreateParams,
@@ -220,13 +220,15 @@ export async function brainComplete(prompt: string, maxTokens = 1024): Promise<s
       .trim()
   const params = { max_tokens: maxTokens, messages: [{ role: 'user' as const, content: prompt }] }
   try {
-    return extract(await kimi.messages.create({ model: MODEL_FAST, ...params }))
+    return extract(
+      await pickBrain(
+        () => kimi.messages.create({ model: MODEL_FAST, ...params }),
+        () => glm.messages.create({ model: MODEL_TOP, ...params }),
+        (reason) => console.log(`[brainComplete] Kimi → GLM (${reason})`),
+      ),
+    )
   } catch {
-    try {
-      return extract(await glm.messages.create({ model: MODEL_TOP, ...params }))
-    } catch {
-      return ''
-    }
+    return ''
   }
 }
 

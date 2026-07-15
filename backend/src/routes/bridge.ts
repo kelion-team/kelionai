@@ -9,6 +9,7 @@ import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
 import { runVoiceTurn } from '../services/voiceTurn.js'
+import { quotaTracker } from '../services/cost.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -1101,30 +1102,8 @@ function authed(req: FastifyRequest): boolean {
 }
 
 
-// ── QUOTA TRACKER (Adrian, 15 iul): înregistrează fiecare apel la creier
-// (succes/eșec) și calculează procentul de disponibilitate în ultimele 10 min.
-// Folosit de bara verticală din admin.
-class QuotaTracker {
-  private events: { model: string; success: boolean; ts: number }[] = []
-  private readonly maxAge = 10 * 60 * 1000
-  private readonly maxSize = 2000
-  record(model: string, success: boolean): void {
-    const now = Date.now()
-    this.events.push({ model, success, ts: now })
-    const cutoff = now - this.maxAge
-    this.events = this.events.filter((e) => e.ts > cutoff)
-    if (this.events.length > this.maxSize) this.events = this.events.slice(-this.maxSize)
-  }
-  percent(model: string): number {
-    const now = Date.now()
-    const cutoff = now - this.maxAge
-    const recent = this.events.filter((e) => e.model === model && e.ts > cutoff)
-    if (recent.length === 0) return 100 // fără istoric → 100%
-    const successes = recent.filter((e) => e.success).length
-    return Math.round((successes / recent.length) * 100)
-  }
-}
-export const quotaTracker = new QuotaTracker()
+// ── QUOTA TRACKER a fost mutat în services/cost.ts (exportă quotaTracker
+// și getQuotaPercent()) ca să fie accesibil și din services și din routes.
 
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // ── CANALUL WEBSOCKET — PENSIONAT ──────────────────────────────────────────

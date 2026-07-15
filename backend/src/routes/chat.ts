@@ -43,7 +43,7 @@ import {
   faceDistance,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { brainCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
+import { brainCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, quotaTracker } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
@@ -82,21 +82,17 @@ import {
   resolveRequirement,
   ownedRequirement,
   type BridgeFile,
-  quotaTracker,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
-import { MODEL_FAST, MODEL_TOP, chooseModel } from '../services/modelRouter.js'
+import { MODEL_FAST, MODEL_TOP, chooseModel, isQuotaError } from '../services/modelRouter.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 
 // STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
 // modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
 // cost (services/modelRouter.ts), determinist și gratuit. Tier-urile stau acolo,
-// Detectare erori de quota (403/429 + mesaj specific)
-function isQuotaError(e: unknown): boolean {
-  const msg = String(e)
-  return /usage limit|usage credits|credit balance|quota|429|golit[ăa]?/i.test(msg)
-}
+// Detectare erori de quota (403/429 + cuvinte-cheie) — isQuotaError importat
+// din services/modelRouter.ts; folosit de failover Kimi → GLM.
 function logFailover(from: string, to: string, reason: string): void {
   console.log(`[FAILOVER] ${from} → ${to} (${reason})`)
 }

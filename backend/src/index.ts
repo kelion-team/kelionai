@@ -35,6 +35,7 @@ import { livekitRoutes } from './routes/livekit.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
+import { getQuotaPercent } from './services/cost.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -209,6 +210,9 @@ app.get('/api/version', async (_req, reply) => {
 
 // Test/verification endpoint for the SDK constructor
 app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
+
+// Quota live pentru bara verticală din frontend (Kimi/GLM).
+app.get('/api/quota', async () => getQuotaPercent())
 
 await app.register(authRoutes)
 await app.register(chatRoutes)
