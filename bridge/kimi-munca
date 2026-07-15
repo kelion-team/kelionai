@@ -1,0 +1,38 @@
+#!/bin/bash
+# LANSATORUL DE MUNCĂ — rescris pentru Kimi 2.7 (Adrian, 15 iul)
+# ORICE agent de lucru al lui Kelion pornește prin scriptul ăsta.
+#
+# Ce garantează:
+#  1. BANII: munca merge pe Kimi (primar) sau GLM (rezervă) — NICIODATĂ pe
+#     abonament Anthropic/Claude.
+#  2. PERFORMANȢA: modelul implicit e kimi-2.7.
+#  3. CUNOAȘTEREA: rulează din /root/kelion/repo → AI-HANDOFF.md încărcat.
+
+set -u
+
+KIMI_KEY=$(cat /root/kelion/kimi-key.txt 2>/dev/null || true)
+GLM_KEY=$(cat /root/kelion/glm-key.txt 2>/dev/null || true)
+
+kimi_cooling() {
+  local f=/root/kelion/kimi-down
+  [ -f "$f" ] || return 1
+  local age=$(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
+  [ "$age" -lt 1800 ]
+}
+
+cd /root/kelion/repo 2>/dev/null || cd /root/kelion
+
+if [ -n "$KIMI_KEY" ] && ! kimi_cooling; then
+  export KIMI_API_KEY="$KIMI_KEY"
+  export KIMI_MODEL="${KIMI_MODEL:-kimi-latest}"
+  exec kimi "$@"
+fi
+
+if [ -n "$GLM_KEY" ]; then
+  export GLM_API_KEY="$GLM_KEY"
+  export GLM_MODEL="${GLM_MODEL:-glm-4-flash}"
+  exec glm "$@"
+fi
+
+echo "[kimi-munca] OPRIT: nicio cheie Kimi/GLM pe disc. Pune cheile prin vps-keys." >&2
+exit 1
