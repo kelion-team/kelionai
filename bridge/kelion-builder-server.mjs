@@ -1054,7 +1054,15 @@ async function main() {
   // DOAR deploy: când pool-ul elastic e activ, reparatorii fac build-urile, iar
   // ACEST proces publică doar release-urile aprobate — nu mai trage ordine de
   // lucru (altfel s-ar bate cu reparatorii pe revendicare).
-  const deployOnly = process.env.DEPLOY_ONLY === '1'
+  // Auto-detectare defensivă: dacă binarul e rulat ca `kelion-deployer.mjs`,
+  // forțăm modul DOAR deploy pentru a evita ca deployerul să execute build-uri
+  // de cod în fundal (cauza reală a spike-urilor de CPU când service-ul
+  // systemd nu are setat explicit DEPLOY_ONLY=1).
+  const isDeployerBinary = /kelion-deployer/.test(process.argv[1] || '')
+  const deployOnly = process.env.DEPLOY_ONLY === '1' || isDeployerBinary
+  if (isDeployerBinary && process.env.DEPLOY_ONLY !== '1') {
+    console.log('[deployer] auto-detectat mod DOAR deploy (DEPLOY_ONLY=1)')
+  }
   console.log(`Constructorul Kelion (headless${deployOnly ? ' — DOAR deploy' : ''}) pornit ->`, BASE, 'repo', REPO)
 
   // GARD ANTI-PUBLICARE CU TOKEN GITHUB INVALID (Adrian, 14 iul): dacă tokenul
