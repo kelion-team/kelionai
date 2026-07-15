@@ -62,7 +62,7 @@ import {
   browserClickAt,
   browserClose,
 } from '../services/browser.js'
-import { startTurn, appendTurn, finishTurn, readTurnFrom } from '../services/replayStore.js'
+import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import {
   bridgeOnline,
   bridgeRepair,
@@ -785,25 +785,33 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
-  // client passes the turn id it got as the first frame and how many characters
-  // it already received; we replay the rest from the in-memory buffer. Unknown
-  // or expired turn → empty 200, and the client falls back to a normal retry.
+  // client reconnects with the Last-Event-ID it last saw and we replay the
+  // missing SSE events for the SAME turn from the in-memory ring buffer.
+  // Unknown / expired turn / buffer overflow → empty or DESYNC response, and
+  // the client falls back to a normal retry.
   app.get<{ Querystring: { turn?: string; from?: string } }>(
     '/api/chat/resume',
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
       const turn = (req.query.turn ?? '').trim()
-      const from = Number(req.query.from ?? 0) || 0
+      // Last-Event-ID is preferred; `from` is the legacy numeric offset kept
+      // as a fallback for old clients.
+      const legacyFrom = Number(req.query.from ?? 0) || 0
+      const lastEventId =
+        (req.headers['last-event-id'] as string | undefined)?.trim() ??
+        (req.headers['Last-Event-ID'] as string | undefined)?.trim() ??
+        (legacyFrom > 0 ? String(legacyFrom) : '')
+      const lastSeq = Number(lastEventId) || 0
       if (!turn) return reply.code(400).send({ error: 'bad_request' })
       reply.hijack()
       reply.raw.writeHead(200, {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
       try {
-        for await (const chunk of readTurnFrom(turn, from)) reply.raw.write(chunk)
+        for await (const chunk of readTurnFrom(user.email, turn, lastSeq)) reply.raw.write(chunk)
       } catch {
         /* buffer vanished mid-replay — just end cleanly */
       }
@@ -986,13 +994,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
-      reply.raw.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' })
-      reply.raw.write(
-        ro
-          ? 'Ai rămas fără credit. Te rog reîncarcă creditul ca să continuăm.'
-          : "You've run out of credit. Please top up to keep talking with me.",
-      )
-      reply.raw.write(`${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`)
+      reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' })
+      const paywallTurnId = randomUUID()
+      startTurn(user.email, paywallTurnId)
+      const paywallText = ro
+        ? 'Ai rămas fără credit. Te rog reîncarcă creditul ca să continuăm.'
+        : "You've run out of credit. Please top up to keep talking with me."
+      reply.raw.write(appendTurn(user.email, paywallTurnId, paywallText))
+      reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`))
+      finishTurn(user.email, paywallTurnId)
       reply.raw.end()
       return
     }
@@ -1004,20 +1014,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (deviceCmd) {
       reply.hijack()
       reply.raw.writeHead(200, {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
       const cmdTurnId = randomUUID()
-      startTurn(cmdTurnId)
+      startTurn(user.email, cmdTurnId)
       const ack = deviceAck(deviceCmd, ro)
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
         ack
-      appendTurn(cmdTurnId, payload)
-      finishTurn(cmdTurnId)
-      reply.raw.write(payload)
+      reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
+      finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
       reply.raw.end()
@@ -1029,20 +1038,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (gestureCmd) {
       reply.hijack()
       reply.raw.writeHead(200, {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
       const cmdTurnId = randomUUID()
-      startTurn(cmdTurnId)
+      startTurn(user.email, cmdTurnId)
       const ack = gestureAck(gestureCmd, ro)
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
         `${CTRL}${JSON.stringify({ gesture: gestureCmd })}${CTRL}` +
         ack
-      appendTurn(cmdTurnId, payload)
-      finishTurn(cmdTurnId)
-      reply.raw.write(payload)
+      reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
+      finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
       reply.raw.end()
@@ -1350,43 +1358,47 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Stream the brain's reply back as plain UTF-8 text chunks.
+    // Stream the brain's reply back as SSE events, each with a sequence id so
+    // the client can reconnect with Last-Event-ID and resume exactly where it left off.
     reply.hijack()
     reply.raw.writeHead(200, {
-      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
       'X-Accel-Buffering': 'no',
     })
 
-    // Resumable stream: mirror EVERY byte we send into a short-lived buffer keyed
-    // by this turn id, so if the mobile link drops mid-reply the client can
-    // reconnect to /api/chat/resume and get the rest — no lost words, no
-    // regeneration. Patching write/end here covers all downstream call sites
-    // (brain text, control frames, tools, agents) without touching each one.
+    // Resumable stream: mirror EVERY event we send into a per-conversation ring
+    // buffer (1024 events), so if the mobile link drops mid-reply the client can
+    // reconnect to /api/chat/resume with Last-Event-ID and get only the missing
+    // events — no lost words, no regeneration, no duplication. Patching write/end
+    // here covers all downstream call sites (brain text, control frames, tools,
+    // agents, voice audio) without touching each one.
     const turnId = randomUUID()
-    startTurn(turnId)
+    startTurn(user.email, turnId)
     const rawWrite = reply.raw.write.bind(reply.raw)
     const rawEnd = reply.raw.end.bind(reply.raw)
     // ÎNGHEȚUL DIN 10 IUL: cât gândește creierul (60–80s legitim), pe fir nu
     // pleca NICIUN octet — Cloudflare taie conexiunea tăcută (QUIC reset pe
     // /api/chat, 524 pe /resume după 100s), tura moare, iar aplicația așteaptă
     // la nesfârșit o tură moartă (chatul „ignoră"). Plasa: la fiecare 15s de
-    // tăcere trimitem un cadru de control {ping} — ține conexiunea vie prin
-    // Cloudflare și intră în bufferul de resume ca orice alt octet. Aplicația
-    // îl ignoră (câmp necunoscut), dar ceasul ei de gardă îl vede ca semn de viață.
+    // tăcere trimitem un heartbeat comentat SSE — ține conexiunea vie prin
+    // Cloudflare și nu se traduce în text sau cadre de control pe client.
     let lastByteAt = Date.now()
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
-      if (typeof chunk === 'string') appendTurn(turnId, chunk)
+      if (typeof chunk === 'string' && chunk.length > 0) {
+        const sse = appendTurn(user.email, turnId, chunk)
+        return (rawWrite as (...a: unknown[]) => boolean)(sse, ...rest)
+      }
       return (rawWrite as (...a: unknown[]) => boolean)(chunk, ...rest)
     }) as typeof reply.raw.write
     const pingTimer = setInterval(() => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return
-      if (Date.now() - lastByteAt >= 15_000) reply.raw.write(`${CTRL}{"ping":1}${CTRL}`)
+      if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
     }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
       clearInterval(pingTimer)
-      finishTurn(turnId)
+      finishTurn(user.email, turnId)
       return (rawEnd as (...a: unknown[]) => unknown)(...args)
     }) as typeof reply.raw.end
     // Client plecat (tab închis, net picat) fără end(): oprește pulsul oricum.

@@ -162,98 +162,173 @@ export async function* streamChat(
     throw new Error(code)
   }
 
-  let reader = res.body.getReader()
-  let decoder = new TextDecoder()
-  let buf = ''
-  // Resumable stream: the server sends a {turn} frame first; we remember it and
-  // count every raw character received, so if the mobile link drops mid-reply we
-  // reconnect to /api/chat/resume and continue from exactly where we left off —
-  // the "buffer + resume" behaviour of internet radio, no words lost.
+  // Deduplication set: a reconnect may re-send events we already processed.
+  const seenIds = new Set<string>()
+  let lastEventId = ''
   let turnId: string | null = null
-  let rawReceived = 0
   let resumeTries = 0
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  let decoder = new TextDecoder()
+  let sseBuf = '' // raw SSE text buffer, split on \n\n
+  let textBuf = '' // visible text + control frames buffer, split on CTRL
 
-  // Split the buffer into visible text (yielded) and control frames (parsed),
-  // holding back any partial frame until its closing separator arrives.
+  // Parse fully-delimited SSE events from the accumulated buffer. Returns the
+  // parsed events and the leftover incomplete text.
+  function parseSSE(chunk: string): { id?: string; data?: string }[] {
+    sseBuf += chunk
+    const events: { id?: string; data?: string }[] = []
+    for (;;) {
+      const end = sseBuf.indexOf('\n\n')
+      if (end === -1) break
+      const block = sseBuf.slice(0, end)
+      sseBuf = sseBuf.slice(end + 2)
+      let id: string | undefined
+      const dataLines: string[] = []
+      for (const line of block.split('\n')) {
+        if (line.startsWith('id:')) id = line.slice(3).trim()
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5))
+        // comment lines (heartbeat) and other fields are ignored
+      }
+      if (id !== undefined || dataLines.length > 0) {
+        events.push({ id, data: dataLines.join('\n') })
+      }
+    }
+    return events
+  }
+
+  // Split the accumulated text buffer into visible text (yielded) and control
+  // frames (parsed), holding back any partial frame until its closing separator.
   function drain(final: boolean): string {
     let out = ''
     for (;;) {
-      const i = buf.indexOf(CTRL)
+      const i = textBuf.indexOf(CTRL)
       if (i === -1) {
-        out += buf
-        buf = ''
+        out += textBuf
+        textBuf = ''
         break
       }
-      out += buf.slice(0, i)
-      const j = buf.indexOf(CTRL, i + 1)
+      out += textBuf.slice(0, i)
+      const j = textBuf.indexOf(CTRL, i + 1)
       if (j === -1) {
         // Incomplete frame. Keep it (unless this is the final flush — then drop).
-        buf = final ? '' : buf.slice(i)
+        textBuf = final ? '' : textBuf.slice(i)
         break
       }
-      const json = buf.slice(i + 1, j)
+      const json = textBuf.slice(i + 1, j)
       try {
-        const frame = JSON.parse(json) as ChatControl & { turn?: string }
+        const frame = JSON.parse(json) as ChatControl & { turn?: string; desync?: boolean }
         if (typeof frame.turn === 'string') {
-          turnId = frame.turn // internal — not a control
-          // The {turn} frame is the FIRST thing the server sends — so it doubles
-          // as proof of receipt: the message reached the server (delivery check).
+          turnId = frame.turn
+          // The {turn} frame is the FIRST thing the server sends — it doubles as
+          // proof of receipt: the message reached the server (delivery check).
           onControl?.({ receipt: true })
-        } else onControl?.(frame)
+        } else if (frame.desync) {
+          // Server ring buffer overflowed: we can no longer resume this turn.
+          turnId = null
+          throw new Error('desync')
+        } else {
+          onControl?.(frame)
+        }
       } catch {
         /* malformed control frame — ignore */
       }
-      buf = buf.slice(j + 1)
+      textBuf = textBuf.slice(j + 1)
     }
     return out
   }
 
-  // Reconnect to the resume endpoint after a drop; returns a fresh reader that
-  // continues the SAME reply from `rawReceived`, or null if it can't.
+  async function openStream(): Promise<void> {
+    let res: Response
+    try {
+      if (turnId && lastEventId) {
+        // Reconnect after a drop: resume the same turn from the last seen id.
+        res = await fetch(
+          `/api/chat/resume?turn=${encodeURIComponent(turnId)}`,
+          {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 'Last-Event-ID': lastEventId },
+            signal,
+          },
+        )
+      } else {
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          signal,
+          body: JSON.stringify({
+            messages,
+            image,
+            images,
+            imageIsAttachment,
+            coords,
+            screen,
+            files,
+            voiceFeatures,
+            faceDescriptor,
+            facePhoto,
+            now: new Date().toISOString(),
+            tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
+        })
+      }
+    } catch {
+      throw new Error('offline')
+    }
+
+    if (!res.ok || !res.body) {
+      let code = 'error'
+      try {
+        const j = (await res.json()) as { error?: string }
+        if (j.error === 'brain_not_configured') code = 'brain_not_configured'
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(code)
+    }
+
+    reader = res.body.getReader()
+    decoder = new TextDecoder()
+  }
+
+  // Reconnect to the resume endpoint after a drop; returns true if a fresh
+  // reader was opened. Uses Last-Event-ID so the server replays only missing events.
   async function resume(): Promise<boolean> {
-    if (!turnId || resumeTries >= 6) return false
+    if (!turnId || !lastEventId || resumeTries >= 6) return false
     resumeTries++
     await new Promise((r) => setTimeout(r, Math.min(4000, 400 * resumeTries)))
     try {
-      const rr = await fetch(
-        `/api/chat/resume?turn=${encodeURIComponent(turnId)}&from=${rawReceived}`,
-        { credentials: 'include' },
-      )
-      if (!rr.ok || !rr.body) return false
-      reader = rr.body.getReader()
-      decoder = new TextDecoder() // fresh — the dropped one may hold a partial byte
+      if (reader) await reader.cancel()
+    } catch {
+      /* reader already dead */
+    }
+    try {
+      await openStream()
       return true
     } catch {
       return false
     }
   }
 
-  // CEAS DE GARDĂ (înghețul din 10 iul): o conexiune moartă dar „deschisă" nu
-  // aruncă niciodată din read() — tura rămânea blocată la nesfârșit și chatul
-  // „ignora" tot ce scriai. Serverul pulsează {ping} la fiecare ≤15s de tăcere,
-  // deci 50s fără NICIUN octet = fir mort sigur → tratăm ca pe o cădere: resume,
-  // iar dacă nici asta nu merge, tura se închide ('offline') și chatul se
-  // deblochează (mesajele scrise între timp pornesc singure).
+  await openStream()
+
+  // CEAS DE GARDĂ: o conexiune moartă dar „deschisă" nu aruncă niciodată din
+  // read() — tura rămânea blocată la nesfârșit. Serverul pulsează heartbeat la
+  // ≤15s, deci 50s fără NICIUN octet = fir mort sigur → resume, iar dacă nici
+  // asta nu merge, tura se închide ('offline') și chatul se deblochează.
   const READ_SILENCE_MS = 50_000
   for (;;) {
     let chunk: ReadableStreamReadResult<Uint8Array>
     let watchdog: number | undefined
     try {
       chunk = await Promise.race([
-        reader.read(),
+        reader!.read(),
         new Promise<never>((_, rej) => {
           watchdog = window.setTimeout(() => rej(new Error('silent')), READ_SILENCE_MS)
         }),
       ])
     } catch {
-      // The stream dropped mid-reply (signal lost) OR went silent past the
-      // watchdog. Kill the old reader, try to resume where we left off; only
-      // if that fails do we surface 'offline' (partial answer stays).
-      try {
-        void reader.cancel()
-      } catch {
-        /* reader deja mort */
-      }
       if (await resume()) continue
       throw new Error('offline')
     } finally {
@@ -261,12 +336,30 @@ export async function* streamChat(
     }
     if (chunk.done) break
     const text = decoder.decode(chunk.value, { stream: true })
-    rawReceived += text.length
-    buf += text
-    const out = drain(false)
-    if (out) yield out
+    const events = parseSSE(text)
+    for (const ev of events) {
+      if (ev.id) {
+        if (seenIds.has(ev.id)) continue
+        seenIds.add(ev.id)
+        lastEventId = ev.id
+      }
+      if (ev.data !== undefined) {
+        textBuf += ev.data
+        const out = drain(false)
+        if (out) yield out
+      }
+    }
   }
-  buf += decoder.decode()
+  // Flush any partial SSE event and any trailing control frame.
+  const events = parseSSE('\n\n')
+  for (const ev of events) {
+    if (ev.id && !seenIds.has(ev.id)) {
+      seenIds.add(ev.id)
+      lastEventId = ev.id
+    }
+    if (ev.data !== undefined) textBuf += ev.data
+  }
+  textBuf += decoder.decode()
   const tail = drain(true)
   if (tail) yield tail
 }
