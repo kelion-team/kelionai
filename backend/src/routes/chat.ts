@@ -1776,7 +1776,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
     // multiple times for the same turn).
     if (user.role !== 'admin' && user.role !== 'demo') {
-      const cost = brainCost(inTokens, outTokens, model) + usage.usd
+      const cost = brainCost(model, inTokens, outTokens) + usage.usd
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
@@ -1810,8 +1810,8 @@ async function runTool(
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
       const result = await generateImage(prompt)
-      if (result.error) return JSON.stringify({ error: result.error })
-      const imageUrl = `${baseUrl}/api/image/${result.filename}`
+      if ('error' in result) return JSON.stringify({ error: result.error })
+      const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: imageUrl })
     }
@@ -1859,7 +1859,8 @@ async function runTool(
       return JSON.stringify(result)
     }
     case 'browser_close': {
-      const result = await browserClose(email)
+      await browserClose(email)
+      const result = { closed: true }
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
       return JSON.stringify(result)
     }

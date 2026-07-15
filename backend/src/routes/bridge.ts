@@ -1100,6 +1100,32 @@ function authed(req: FastifyRequest): boolean {
   return ok
 }
 
+
+// ── QUOTA TRACKER (Adrian, 15 iul): înregistrează fiecare apel la creier
+// (succes/eșec) și calculează procentul de disponibilitate în ultimele 10 min.
+// Folosit de bara verticală din admin.
+class QuotaTracker {
+  private events: { model: string; success: boolean; ts: number }[] = []
+  private readonly maxAge = 10 * 60 * 1000
+  private readonly maxSize = 2000
+  record(model: string, success: boolean): void {
+    const now = Date.now()
+    this.events.push({ model, success, ts: now })
+    const cutoff = now - this.maxAge
+    this.events = this.events.filter((e) => e.ts > cutoff)
+    if (this.events.length > this.maxSize) this.events = this.events.slice(-this.maxSize)
+  }
+  percent(model: string): number {
+    const now = Date.now()
+    const cutoff = now - this.maxAge
+    const recent = this.events.filter((e) => e.model === model && e.ts > cutoff)
+    if (recent.length === 0) return 100 // fără istoric → 100%
+    const successes = recent.filter((e) => e.success).length
+    return Math.round((successes / recent.length) * 100)
+  }
+}
+export const quotaTracker = new QuotaTracker()
+
 export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // ── CANALUL WEBSOCKET — PENSIONAT ──────────────────────────────────────────
   // Un proces vechi de pe VPS (din afara repo-ului) ținea 10 canale WS deschise,
@@ -2008,31 +2034,6 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   
-// ── QUOTA TRACKER (Adrian, 15 iul): înregistrează fiecare apel la creier
-// (succes/eșec) și calculează procentul de disponibilitate în ultimele 10 min.
-// Folosit de bara verticală din admin.
-class QuotaTracker {
-  private events: { model: string; success: boolean; ts: number }[] = []
-  private readonly maxAge = 10 * 60 * 1000
-  private readonly maxSize = 2000
-  record(model: string, success: boolean): void {
-    const now = Date.now()
-    this.events.push({ model, success, ts: now })
-    const cutoff = now - this.maxAge
-    this.events = this.events.filter((e) => e.ts > cutoff)
-    if (this.events.length > this.maxSize) this.events = this.events.slice(-this.maxSize)
-  }
-  percent(model: string): number {
-    const now = Date.now()
-    const cutoff = now - this.maxAge
-    const recent = this.events.filter((e) => e.model === model && e.ts > cutoff)
-    if (recent.length === 0) return 100 // fără istoric → 100%
-    const successes = recent.filter((e) => e.success).length
-    return Math.round((successes / recent.length) * 100)
-  }
-}
-export const quotaTracker = new QuotaTracker()
-
 // ── INDICATOARE CREDIT CREIER (Adrian, 13 iul) ────────────────────────────
   // Două „becuri" în header-ul admin, lângă statusul Linux: Kimi (stânga) +
   // GLM (dreapta). Verde = are credit; roșu pâlpâind = fără credit (quota
