@@ -86,3 +86,28 @@ export function chooseModel(text: string): string {
   for (const m of byCost) if (m.capability >= need) return m.id
   return byCost.reduce((best, m) => (m.capability > best.capability ? m : best)).id
 }
+
+// Detectare erori de quota pentru failover instant Kimi → GLM.
+export function isQuotaError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status
+  const msg = String(err ?? '').toLowerCase()
+  if (status === 403 || status === 429) return true
+  return ['quota', 'exhausted', 'insufficient_quota'].some((k) => msg.includes(k))
+}
+
+// Încearcă Kimi întâi; la eroare de quota trece instant pe GLM.
+export async function pickBrain<T>(
+  tryKimi: () => Promise<T>,
+  tryGLM: () => Promise<T>,
+  onFailover?: (reason: string) => void,
+): Promise<T> {
+  try {
+    return await tryKimi()
+  } catch (e) {
+    if (isQuotaError(e)) {
+      onFailover?.('quota')
+      return tryGLM()
+    }
+    throw e
+  }
+}
