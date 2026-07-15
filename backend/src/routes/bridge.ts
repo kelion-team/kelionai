@@ -175,7 +175,7 @@ let lastDevBeat = 0
 // Real Linux server load, posted by the VPS paznic every ~2s.
 let srvLoad = ''
 let srvLoadAt = 0
-// Motorul de lucru raportat de constructor (max/kimi/glm) — ultima valoare
+// Motorul de lucru raportat de constructor (kimi/glm) — ultima valoare
 // cunoscută, afișată permanent în admin. PERSISTENT peste restarturi (11 iul,
 // dovadă live: după deploy-ul din 19:17 indicatorul era gol, deși Adrian a
 // cerut „afișat permanent" — constructorul anunță doar SCHIMBĂRILE de treaptă,
@@ -1027,7 +1027,7 @@ export function sayToAdmin(text: string): void {
 // RAPORTUL ZILNIC DE BANI (Adrian, 11 iul, aprobat: „6 da"): o dată pe zi,
 // seara după ora 21 (ora lui Adrian), Kelion spune singur în chat cât a costat
 // ziua pe fiecare motor plătit la consum — Adrian știe mereu unde se duc banii
-// fără să întrebe. Abonamentele fixe (Max/Kimi/GLM) nu apar — nu variază.
+// fără să întrebe. Abonamentele fixe (Kimi/GLM) nu apar — nu variază.
 setInterval(() => {
   void (async () => {
     const h = Number(
@@ -1045,7 +1045,7 @@ setInterval(() => {
       .map((r) => `${r.kind} $${r.sum.toFixed(2)}`)
       .join(' · ')
     sayToAdmin(
-      `💰 Banii zilei (API la consum): $${total.toFixed(2)}${parts ? ` — ${parts}` : ' — nimic azi'}. Abonamentele (Max/Kimi/GLM) sunt fixe și nu intră aici.`,
+      `💰 Banii zilei (API la consum): $${total.toFixed(2)}${parts ? ` — ${parts}` : ' — nimic azi'}. Abonamentele (Kimi/GLM) sunt fixe și nu intră aici.`,
     )
   })()
 }, 10 * 60_000).unref()
@@ -1853,7 +1853,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // MOTORUL DE LUCRU ACTIV (Adrian, 11 iul: „să fie afișat permanent pe
   // interfața admin care constructor lucrează"). Constructorul de pe VPS
-  // raportează treapta la fiecare pornire de lucru (max/kimi/glm); ultima
+  // raportează treapta la fiecare pornire de lucru (kimi/glm); ultima
   // valoare rămâne afișată permanent — nu expiră.
   app.post<{ Body: { engine?: string } }>(
     '/api/bridge/work-engine',
@@ -1941,7 +1941,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   // „sistem de urmărit când sunt repuse valorile noi, interogare când se
   // alocă prin cheie, revenire la ordinea prestabilită automat"). Worker-ii
   // (chat + constructor) scriu aici DE FIECARE DATĂ când comută treapta
-  // (max→kimi/glm, cotă golită) sau revin automat la treapta de sus (după
+  // (kimi→glm, cotă golită) sau revin automat la treapta de sus (după
   // cooldown-ul de 30 min) — un rând per tranziție, cu motivul.
   app.post<{
     Body: { worker?: string; from?: string; to?: string; action?: string; reason?: string }
@@ -2115,7 +2115,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
       lanes: wsLaneCount(),
       activity: active ? devActivity : [],
       srv: Date.now() - srvLoadAt < 180_000 ? srvLoad : '',
-      // Motorul de lucru activ (max/kimi/glm) — permanent, ultima valoare.
+      // Motorul de lucru activ (kimi/glm) — permanent, ultima valoare.
       workEngine,
       // Starea tokenului GitHub de pe VPS: false = invalid/blocked → constructor oprit.
       githubTokenOk: !githubTokenInvalid,

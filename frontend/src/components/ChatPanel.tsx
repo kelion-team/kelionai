@@ -116,9 +116,11 @@ export default function ChatPanel({
   readonly isDemo?: boolean
 }) {
   const t = strings(lang)
-  // The user's established conversation language. Defaults to the browser
-  // locale; refined from what they actually type and persisted per user.
-  const [speechLang, setSpeechLang] = useState(() => defaultSpeechLang(lang))
+  // Fix hydration: start with the deterministic UI lang, then resolve the browser locale on the client.
+  const [speechLang, setSpeechLang] = useState(lang)
+  useEffect(() => {
+    setSpeechLang(defaultSpeechLang(lang))
+  }, [lang])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
@@ -154,7 +156,11 @@ export default function ChatPanel({
   // Adrian. Fără punct de UI, hasVoiceprint() rămâne mereu false: butonul de
   // mai jos e singurul loc din care se poate înrola/reseta profilul.
   const [voiceCalState, setVoiceCalState] = useState<'idle' | 'listening' | 'ok' | 'fail'>('idle')
-  const [hasVoicePrint, setHasVoicePrint] = useState(() => hasVoiceprint())
+  // Fix hydration: localStorage is client-only; read it after hydration.
+  const [hasVoicePrint, setHasVoicePrint] = useState(false)
+  useEffect(() => {
+    setHasVoicePrint(hasVoiceprint())
+  }, [])
   // Delivery receipt for the CURRENT turn: the server's first stream frame
   // ({turn}) sets it, so a small ✓ shows the message actually arrived.
   const [delivered, setDelivered] = useState(false)

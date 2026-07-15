@@ -428,7 +428,7 @@ body {
   word-break: break-word;
 }
 /* Live execution log line (brain steps on the monitor). */
-.claude-log-line {
+.builder-log-line {
   font-size: 13px;
   line-height: 1.5;
   color: #cdd3df;
@@ -1593,7 +1593,7 @@ body {
 }
 /* "developer" indicator in the admin top bar: dim when idle, ORANGE + pulsing
    while the laptop developer session is actively writing code. */
-.claude-ind {
+.builder-ind {
   font-size: 13px;
   font-weight: 500;
   padding: 4px 10px;
@@ -1605,16 +1605,16 @@ body {
 /* THE LIGHT = THE BRIDGE: lit steady = the developer reachable; OFF (grey) = bridge
    down; pulsing = writing code right now. Clicking the Bridge light opens or
    hides the live-work monitor (it is never shown permanently). */
-.claude-ind.clickable {
+.builder-ind.clickable {
   pointer-events: auto;
   cursor: pointer;
 }
-.claude-ind.on {
+.builder-ind.on {
   color: #ff9d2e;
   border-color: rgba(255, 157, 46, 0.7);
   background: rgba(255, 157, 46, 0.12);
 }
-.claude-ind.on.work {
+.builder-ind.on.work {
   animation: rec 1.2s ease-in-out infinite;
 }
 /* The builder's live work ON KELION'S MONITOR (the workspace surface — Kelion goes
@@ -1622,12 +1622,12 @@ body {
    text on the left, a 0→100% BARGRAPH neatly aligned on the right. Finished
    items stay listed, ticked and dimmed. History is NOT carried here — it lives
    in the admin panel ("Jurnal lucru"). */
-.claude-console {
+.builder-console {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.claude-console-head {
+.builder-console-head {
   color: #ff9d2e;
   font-size: 14px;
   font-weight: 700;
@@ -1818,7 +1818,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.claude-rows {
+.builder-rows {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1827,12 +1827,12 @@ body {
   padding: 12px 2px;
   overflow-y: auto;
 }
-.claude-row {
+.builder-row {
   display: flex;
   align-items: center;
   gap: 14px;
 }
-.claude-row-text {
+.builder-row-text {
   flex: 1;
   min-width: 0;
   font-family: 'Cascadia Code', Consolas, monospace;
@@ -1842,21 +1842,21 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.claude-row-bar {
+.builder-row-bar {
   flex: 0 0 220px;
   height: 8px;
   border-radius: 999px;
   background: rgba(255, 157, 46, 0.15);
   overflow: hidden;
 }
-.claude-row-fill {
+.builder-row-fill {
   display: block;
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
   transition: width 0.6s ease;
 }
-.claude-row-pct {
+.builder-row-pct {
   flex: 0 0 64px;
   text-align: right;
   font-family: 'Cascadia Code', Consolas, monospace;
@@ -1865,20 +1865,20 @@ body {
   white-space: nowrap;
 }
 /* Done: stays on the list, ticked off — crossed out and dimmed. */
-.claude-row.done {
+.builder-row.done {
   opacity: 0.5;
 }
-.claude-row.done .claude-row-text {
+.builder-row.done .builder-row-text {
   text-decoration: line-through;
 }
-.claude-row.done .claude-row-pct {
+.builder-row.done .builder-row-pct {
   color: #7fd18b;
 }
-.claude-status {
+.builder-status {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 8px 2px 2px;
 }
-.claude-status-line {
+.builder-status-line {
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12.5px;
   color: #93a5c0;
@@ -1970,7 +1970,7 @@ body {
   word-break: break-word;
 }
 @media (max-width: 900px) {
-  .claude-row-bar {
+  .builder-row-bar {
     flex-basis: 120px;
   }
 }
