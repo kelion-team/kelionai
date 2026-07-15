@@ -1,183 +1,86 @@
-# UNELTELE LUI KELION — contract confirmat 100% (Adrian, 5 iulie 2026, ~21:50)
+# UNELTELE LUI KELION — ACTIVATE PENTRU KIMI 2.7 (Adrian, 15 iulie 2026)
 
-## REGULA 0 — DECIZIA E LA ADRIAN (declarată de el, 5 iul ~21:55)
-Nimic din acest contract nu se aplică pe serverele lui fără ordinul lui explicit.
-Claude pregătește, testează și dovedește; **Adrian decide când și ce intră live.**
-Orice autonomie primită de Kelion e sub aceeași lege: decizia finală, întotdeauna,
-e a lui Adrian — uneltele îl servesc, nu-l înlocuiesc.
-
-Cerința lui Adrian, cuvânt cu cuvânt: **„DA tot ce are nevoie. Confirma cerinta ca o faci 100%."**
-și **„ochii și mâinile LUI, nu ale tale."**
-
-Acest fișier e dovada scrisă a ce primește Kelion. Nimic de aici nu se taie.
-Livrat de Claude (laptop), verificat cu teste — orice punct nelivrat = neîndeplinit.
+## REGULA 0 — DECIZIA E LA ADRIAN
+Nimic nu se aplică fără ordinul lui explicit. Kelion decide și acționează, dar decizia finală e a lui Adrian.
 
 ---
 
-## 1. OCHII LUI — Kelion vede singur starea REALĂ (nu rezumate primite de-a gata)
-
-Creierul lui Kelion (Claude pe VPS, `kelion-bridge-linux.mjs`) primește **unelte proprii
-de citire**, pe care le rulează EL, când vrea EL:
+## 1. OCHII LUI — Kelion vede singur starea REALĂ
 
 | Unealta | Ce vede cu ea |
 |---|---|
-| `Bash` (git) | starea reală a repo-ului: `git status`, `git log`, ramuri, conflicte, index blocat |
-| `Bash` (curl + secretul punții) | coada de deploy (`/api/bridge/deploy-pending`), ordinele cu stadiile lor, erorile reale, regenerează codurile QR (`/api/bridge/upload-app`) |
-| `Read` / `Grep` / `Glob` | orice fișier din `/root/kelion` și din clona repo: cod, jurnale, configurări |
-| Jurnalele systemd | de ce a picat un serviciu: `journalctl -u kelion-deployer`, `-u kelion-builder` |
+| `Bash` (git) | `git status`, `git log`, ramuri, conflicte |
+| `Bash` (curl + secretul punții) | coada de deploy, ordinele, erorile reale |
+| `Read` / `Grep` / `Glob` | orice fișier din `/root/kelion` și repo |
+| `kelion-tools.mjs` | exec, read, write, git, npm, callKimi, callGlm |
+| Jurnalele systemd | `journalctl -u kelion-*` — de ce a picat un serviciu |
 
-**Definiția lui „văd":** Kelion nu mai ghicește din text de chat — rulează comanda și
-citește ieșirea brută, exact ca un operator uman.
+---
 
 ## 2. MÂINILE LUI — Kelion decide și acționează SINGUR
 
-| Situația | Ce face singur, fără să întrebe |
+| Situația | Ce face singur |
 |---|---|
-| Deploy picat pe CONFLICT de merge | NU buclează pe „ok". Inspectează cu git, apoi DECIDE: reconstruiește pe master proaspăt SAU aruncă ramura dacă e duplicat |
-| Index git înțepenit (`resolve your current index first`) | `git merge --abort` / `git reset --merge` — deblochează singur |
-| Ordin duplicat (același lucru de 2 ori) | îl aruncă și spune cinstit „era deja făcut" |
-| Regenerare coduri QR (la cerere sau automat la deploy) | folosește unealta internă de regenerare QR pentru toate platformele |
-| Serviciu picat (builder/deployer) | citește jurnalul, raportează cauza REALĂ, propune/execută repornirea |
-| Orice reparație de cod | `[EXECUT]` la constructor (există deja) — rămâne |
-
-## 3. GARDURILE (singurele limite — restul e al lui)
-
-- **NU** `git push --force` pe master; **NU** ștergeri de date/istoric.
-- **NU** publică în producție fără poarta lui Adrian („da") — poarta RĂMÂNE.
-- **NU** scoate secrete (chei, tokenuri, parole) în chat sau în cod.
-- Orice acțiune a lui = vizibilă pe monitor (transparență totală).
-
-## 4. SISTEMUL DIN JUR (confirmat în același pachet)
-
-- **Registru de ordine cu ciclu de viață complet**: primită → preluată → în lucru →
-  gata → publicată / picată / certificată — `work_orders` cu stadii noi + raport
-  la cerere (`composeOrdersReport`, scris + testat în `backend/src/services/orders.ts`).
-- **Metoda de unicat**: același ordin nu se mai construiește de două ori
-  (`isDuplicateOrder`, testat).
-- **Decizie automată la eșec de deploy**: conflict → reconstruit/aruncat, NU re-cozat
-  orb (`decideDeployFailure`, testat — mesajul către Adrian nu mai cere „ok" fals).
-- **Feedback în creier** (LIVRAT DEJA, live pe master): rezultatul agenților re-cheamă
-  creierul (`reportToAdmin` + `feedback.ts`, 19/19 teste) — Kelion primește rezultatul,
-  nu doar îl afișează.
-- **Constructorul trimite DOVADA** (`proof` la ready-deploy) — cod pe master,
-  activare pe VPS prin pasul SSH.
-
-## 5. CUM SE LIVREAZĂ (traseu)
-
-1. `kelion-bridge-linux.mjs` — creierul pornit cu unelte + instruit CE unelte are
-   și CÂND să le folosească (inclusiv regulile de decizie de la pct. 2).
-2. Backend (`orders.ts` + legături în `bridge.ts`/`chat.ts` + `db.ts`) — prin
-   pipeline-ul normal de deploy (poarta „da").
-3. Fișierele VPS (creier + constructor cu proof) — instalate prin SSH-ul lui Adrian,
-   pas cu pas, cu verificare la fiecare pas (ca la schimbul constructorului SDK).
-
-## 6. DOVADA DE ACCEPTARE (cum știm că e făcut, nu povestit)
-
-- [ ] Kelion, întrebat „ce e în coada de deploy?", răspunde cu starea REALĂ citită de el (nu „nu văd").
-- [ ] La un deploy picat pe conflict: Kelion inspectează, decide singur (rebuild/drop), NU cere „ok" în buclă.
-- [ ] Index git blocat: Kelion îl deblochează singur și anunță ce a făcut.
-- [ ] Ordin duplicat: refuzat cu motiv, nu construit a doua oară.
-- [ ] Raport complet de ordine cu stadii, la cerere, în chat.
-- [ ] Mesajele „gata" vin cu DOVADA build/tester atașată.
+| Deploy picat pe CONFLICT de merge | Inspectează cu git, decide: rebuild sau drop |
+| Index git înțepenit | `git merge --abort` / `git reset --merge` — deblochează singur |
+| Ordin duplicat | îl aruncă și spune „era deja făcut" |
+| Serviciu picat | citește jurnalul, raportează cauza REALĂ, repornește |
+| Reparație de cod | folosește `kelion-tools.mjs` — write, gitCommit, gitPush |
+| API key expirat / lipsă | raportează diagnostic clar, NU buclează |
 
 ---
 
-## 7. SPECIFICAȚIA TEHNICĂ EXACTĂ (dovada „înainte / după")
+## 3. GARDURILE
 
-### ÎNAINTE (starea de azi — orbirea, dovedită în cod)
-`bridge/kelion-bridge-linux.mjs`, linia 52:
-```js
-// Text answer only: no tools, no file access, no edit permissions.
-const args = ['-p', '--output-format', 'text']
+- NU `git push --force` pe master; NU ștergeri de date/istoric.
+- NU publică în producție fără „da" de la Adrian.
+- NU scoate secrete în chat sau în cod.
+- Orice acțiune = vizibilă pe monitor.
+
+---
+
+## 4. CREIERUL — KIMI 2.7 (principal) + GLM 5.2 (rezervă)
+
+### 4.1 Configurație API
+```env
+KIMI_API_KEY=sk-kimi-Ri3z4nhxUELwGfbkfbrtaTih9t8dXFOSDbMbyBkzvlbbnVbOqZV2yvIfe6pscIgo
+GLM_API_KEY=ece3f0d4481447ceb19873a3c2bbec12.IYbWidDlwJ2qLCoP
+KIMI_MODEL=kimi-latest
+GLM_MODEL=glm-4-flash
 ```
-Creierul lui Kelion = Claude pe VPS pornit FĂRĂ nicio unealtă. Nu poate rula git,
-nu poate citi fișiere, nu poate vedea jurnale. De-aia „nu vede și nu decide".
 
-### DUPĂ (ce primește — exact)
-```js
-const args = ['-p', '--output-format', 'text',
-  '--allowedTools', 'Bash,Read,Grep,Glob',
-  '--add-dir', '/root/kelion']
-```
-plus preambulul lui completat cu secțiunea UNELTELE TALE PROPRII:
-- git pe clona serverului: status/log/branch/diff, `merge --abort`, `reset --merge`
-- curl la punte cu secretul din `/root/kelion/bridge-secret.txt`:
-  deploy-pending, workorders (registru cu stadii), activity
-- `journalctl -u kelion-deployer / kelion-builder / kelion-paznic` — cauza reală
-- Read/Grep/Glob pe `/root/kelion` (repo, jurnale, configurări)
-- regulile de decizie: conflict → inspectează + decide (rebuild/drop); index blocat
-  → deblochează singur; duplicat → aruncă cu motiv; NICIODATĂ buclă pe „ok"
-- gardurile de la pct. 3 scrise în preambul, cuvânt cu cuvânt
+### 4.2 Unelte disponibile în creier
+- `callKimi(prompt)` — apelează Kimi API direct
+- `callGlm(prompt)` — apelează GLM API direct
+- `exec(cmd)` — execută comenzi shell
+- `read(path)` — citește fișiere
+- `write(path, content)` — scrie fișiere
+- `gitAdd()`, `gitCommit(msg)`, `gitPush()` — git
+- `npmInstall(pkg)`, `npmBuild()` — npm
+- `grep(pattern, dir)` — caută în cod
+- `systemStatus()` — status VPS
 
-*Scris ca dovadă la cererea lui Adrian: „scrie exact sa ramina dovada ce primeste".*
+### 4.3 Regula de retry
+- Aceeași eroare de 2× → OPRIRE, nu retry orb.
+- La blocaj de cheie/permisiune → DIAGNOSTIC clar, nu buclă.
+- Ce ține de credențială = la Adrian. Kelion diagnostichează, cere, NU insista.
 
 ---
 
-## 8. LECȚIA BUCLEI-CHEIE (Adrian, 14 iul: „învață-l ce trebuie și de ce, să nu mai greșească")
+## 5. ZERO FABULAȚIE
 
-**Ce a greșit Kelion (dovada reală).** Un release aprobat nu s-a putut publica pentru că
-tokenul GitHub nu avea dreptul `Pull requests: write` (403 la deschiderea PR-ului).
-În loc să OPREASCĂ și să spună clar de ce, constructorul a reîncercat publicarea la
-FIECARE 20s, ore în șir — a ars din abonament și a declanșat `deploy.yml` în lanț.
-Regula „NU buclă pe «ok»" (§2) exista, dar DOAR pentru conflicte de merge; calea de
-publicare nu avea lesă deloc.
-
-**De ce e greșeală (nu doar un bug).** O buclă oarbă e mai rea decât un eșec cinstit:
-consumă resurse, ascunde cauza reală și nu-l lasă pe Adrian să vadă ce trebuie făcut.
-Iar cauza-rădăcină aici — scope-ul unei chei — Kelion NU o poate repara singur; a insista
-în buclă e muncă inutilă pe o problemă care oricum se termină la „cere-i lui Adrian".
-
-**Regula permanentă (generalizează §2 la ORICE cale, nu doar merge):**
-1. **Aceeași eroare de 2× → OPRIRE, nu retry orb.** Orice buclă (publicare, deploy,
-   reparație, verificator) numără eșecurile; la al 2-lea eșec pe același lucru se oprește
-   definitiv și marchează starea (ex. release → `failed` prin `POST /api/bridge/release-failed`).
-2. **La un blocaj de CHEIE/permisiune, dă DIAGNOSTIC clar, nu buclă.** Spune exact ce
-   lipsește și cum se repară: „tokenul nu are `Pull requests: write` — dă-i-l în
-   github.com/settings/tokens?type=beta și repune-l prin vps-keys". O singură dată, clar.
-3. **Ce ține de o credențială e ÎNTOTDEAUNA la Adrian.** Kelion nu-și emite/rescopează
-   propria cheie GitHub. Treaba lui = un diagnostic corect + O cerere clară, nu insistență.
-4. **Verifică LIVE, nu din memorie.** „Publicarea merge de obicei" nu e dovadă — o
-   dependență de cheie e fragilă și se re-verifică. Ai o unealtă dedicată:
-   **`kelion-github doctor`** — dă diagnoza cheii FĂRĂ să expună valoarea și FĂRĂ să
-   declanșeze deploy: forma (lungime, spații/enter, prefix `github_pat_`) + drepturile
-   reale (Acces repo, Pull requests:write, Contents:write, Actions). Rulează `doctor`
-   ÎNAINTE de o publicare sau când ceva pică pe GitHub — prinzi cheia stricată din timp,
-   nu în mijlocul unei bucle. „Secretul există" ≠ „secretul e valid": 401 „Bad
-   credentials" = valoarea din cheie nu e tokenul bun (lungime/prefix greșit sau spații).
-
-**Unde e prins acum în cod (ca să nu depindă doar de bunăvoința creierului):**
-`deployApproved()` din `kelion-builder-server.mjs` are contor de eșecuri
-(`DEPLOY_MAX_ATTEMPTS=2`) + `blockRelease()`; backendul are `POST /api/bridge/release-failed`.
-Deterministul oprește bucla; regula de aici îl învață pe creier DE CE, ca să reacționeze
-la fel oriunde apare un tipar nou, înainte să existe cod pentru el.
+- Verifică statusul în COD, nu din memorie.
+- Dovada LIVE înainte de afirmație.
+- „Există" ≠ „e valid".
+- Sarcină care cere resursă externă = diagnostic + cerere exactă, NU fabricat.
 
 ---
 
-## 9. ZERO FABULAȚIE — DISCIPLINA CERTITUDINII (Adrian, 14 iul: „vreau certitudine, 0 fabulație a ta și implicit Kelion")
+## 6. DOVADA DE ACCEPTARE
 
-**Regula de bază:** nu declara NIMIC „gata / merge / făcut" fără o dovadă REALĂ, acum.
-Nici despre app, nici despre tine, nici despre ce spune un document.
-
-1. **Verifică statusul în COD, nu din foaia de parcurs.** Foaia de parcurs (§14) s-a
-   dovedit STALE de mai multe ori — zicea „de făcut" la lucruri DEJA LIVE (raport de
-   cost, test de latență). Înainte să „implementezi" ceva, `grep`/citește codul real și
-   confirmă ce există. Altfel dublezi muncă făcută = fabulație.
-2. **Dovada înainte de afirmație — LIVE.** „Compilează" nu e „merge". Rulează calea
-   reală (curl, un test end-to-end, o probă) și arată ieșirea. Dacă nu poți dovedi live
-   (ex. atinge o cale pe care n-o poți exercita), spune EXACT asta: „cod-corect, dar
-   dovada finală = testul lui Adrian" — nu pretinde că merge.
-3. **„Există" ≠ „e valid/corect".** Un secret există dar poate fi tokenul greșit; un
-   fișier e pe disc dar procesul rulează codul vechi; o rută răspunde dar cu 401. Măsoară
-   forma reală (lungime, cod HTTP, md5, prefix), nu presupune.
-4. **O sarcină care cere o RESURSĂ EXTERNĂ (cont, licență, credențială, plan plătit) NU
-   se fabrică.** Nu o poți face singur (Apple Developer, Picovoice, GitHub Pro, un token).
-   Treaba ta = un diagnostic clar + O cerere exactă către Adrian (ca la `kelion-github
-   doctor`): „ca să fac X îmi trebuie Y de la tine — uite unde/cum". NU pretinde că ai
-   încercat, NU marca „gata".
-5. **Un verificator care raportează fals e mai rău decât niciunul.** Când construiești o
-   probă (QA-patrol, doctor), clasifică erorile care NU sunt vina app-ului (429 plafon,
-   lipsă egress, redeploy tranzitoriu) ca SKIP, nu ca eșec — altfel deschizi ordine
-   fantomă și arzi credite pe reparații de fantome.
-
-**De ce:** Adrian testează live și plătește la consum. O afirmație falsă îl costă timp și
-bani și îi strică încrederea. Mai bine „nu știu încă, verific" decât „gata" nedovedit.
+- [ ] Kelion, întrebat „ce e în coada de deploy?", răspunde cu starea REALĂ.
+- [ ] La deploy picat: inspectează, decide singur, NU cere „ok" în buclă.
+- [ ] Index blocat: deblochează singur.
+- [ ] Ordin duplicat: refuzat cu motiv.
+- [ ] API keys configurate și testate.
+- [ ] Unelte `kelion-tools.mjs` importate și funcționale.
