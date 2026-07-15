@@ -206,6 +206,15 @@ export default function AvatarModel() {
   // NU se joacă deloc — nici automat, nici comandat. Reîmprospătat periodic.
   const disabledG = useRef<Set<string>>(new Set())
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
+  // Fix hydration: valoare fixă inițial, randomizez în useEffect pe client.
+  const blink = useRef({ t: 0, nextAt: 4, phase: 0, duration: 0.16 })
+  const [blinkReady, setBlinkReady] = useState(false)
+  useEffect(() => {
+    blink.current.nextAt = 2 + Math.random() * 4
+    setBlinkReady(true)
+  }, [])
+  const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
+  const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   const blink = useRef({ t: 0, nextAt: 2 + Math.random() * 4, phase: 0, duration: 0.16 })
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
   // Clipurile din catalogul complet, sosite în fundal (mixer.clipAction ține

@@ -269,13 +269,11 @@ export default function Stage({ user }: { user: User }) {
 
   // Free-trial countdown: for a demo session, tick to zero, then show the
   // conversion overlay (sign in + buy credit).
-  const [demoLeft, setDemoLeft] = useState(() =>
-    user.role === 'demo' && user.demoUntil
-      ? Math.max(0, Math.ceil((user.demoUntil - Date.now()) / 1000))
-      : 0,
-  )
+  // Fix hydration: valoare inițială statică (0), calculez real în useEffect.
+  const [demoLeft, setDemoLeft] = useState(0)
   useEffect(() => {
     if (user.role !== 'demo' || !user.demoUntil) return
+    setDemoLeft(Math.max(0, Math.ceil((user.demoUntil - Date.now()) / 1000)))
     const id = window.setInterval(() => {
       setDemoLeft(Math.max(0, Math.ceil(((user.demoUntil ?? 0) - Date.now()) / 1000)))
     }, 1000)
