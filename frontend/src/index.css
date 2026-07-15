@@ -2165,6 +2165,13 @@ body {
   border-radius: 16px;
   overflow: hidden;
 }
+/* FIX scroll (Adrian, 15 iul): conținutul tab-urilor din admin trebuie să
+   poată scroll; fiecare <section> din admin e scrollabil. */
+.admin-panel > section {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
 .admin-token-banner {
   display: flex;
   align-items: center;
