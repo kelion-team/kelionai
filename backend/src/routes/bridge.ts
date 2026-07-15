@@ -1767,7 +1767,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // OGLINDA VEGHERII (Adrian, 11 iul: „implementează și lui Kelion sistemul —
   // să se uite dacă a primit de la tine ceva"): veghea de pe VPS (timer, 1 min)
-  // găsește în caiet note NOI de la dezvoltator (sursa `claude-cloud`) și le aduce aici, iar
+  // găsește în caiet note NOI de la dezvoltator (sursa `builder-cloud`) și le aduce aici, iar
   // creierul e RE-CHEMAT cu ele — Kelion le primește în sesiune în același
   // minut, nu abia când se întâmplă să scrie Adrian. Răspunsul lui intră în
   // chatul adminului (același drum ca reportToAdmin). Plătit DOAR la eveniment

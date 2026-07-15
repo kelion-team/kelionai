@@ -7,7 +7,7 @@ import {
   MODEL_FAST,
 } from './services/modelRouter.js'
 
-// CREIERUL — Kimi (primar) → GLM (rezervă). Anthropic scos complet (Adrian, 12
+// CREIERUL — Kimi (primar) → GLM (rezervă). Third-party provider scos complet (Adrian, 12
 // iul). Design NOU: Kimi acoperă ORICE cerere (nu mai există escaladare pe
 // dificultate spre un al doilea provider); GLM e DOAR rezerva la eșecul lui Kimi
 // (failover-ul din routes/chat.ts, brainModel()), nu o alegere a routerului.

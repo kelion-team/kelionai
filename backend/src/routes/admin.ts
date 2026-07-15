@@ -206,7 +206,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'Pentru FIECARE capacitate cerută mai jos, decide dacă e DEJA implementată în aplicația de acum. ' +
       'Răspunde STRICT o linie pe cerere, exact în formatul: `<id> DONE` sau `<id> TODO` (fără altceva pe linie).\n\n' +
       open.map((g) => `${g.id}: ${g.request}`).join('\n')
-    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`claude` (0 Anthropic).
+    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`builder` (0 Provider).
     const verdict = (await brainComplete(prompt, 1024)) || ''
 
     let done = 0
