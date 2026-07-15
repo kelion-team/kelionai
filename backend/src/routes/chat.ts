@@ -82,6 +82,7 @@ import {
   resolveRequirement,
   ownedRequirement,
   type BridgeFile,
+  quotaTracker,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
 import { MODEL_FAST, MODEL_TOP, chooseModel } from '../services/modelRouter.js'
@@ -91,7 +92,19 @@ import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 // STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
 // modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
 // cost (services/modelRouter.ts), determinist și gratuit. Tier-urile stau acolo,
-// configurabile din mediu (future-proof). Numele vechi rămân pentru restul codului.
+// Detectare erori de quota (403/429 + mesaj specific)
+function isQuotaError(e: unknown): boolean {
+  const msg = String(e)
+  return /usage limit|usage credits|credit balance|quota|429|golit[ăa]?/i.test(msg)
+}
+function logFailover(from: string, to: string, reason: string): void {
+  console.log(`[FAILOVER] ${from} → ${to} (${reason})`)
+}
+
+// Numele vechi de model (compatibilitate). Ambele sunt configurabile din mediu (future-proof).
+const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
+const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
+const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
 const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
 const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
 const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
@@ -1645,6 +1658,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         let final: Message
         try {
           final = await runRound(brainClientFor(model), model)
+          quotaTracker.record(model, true)
+        } catch (e) {
+          // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
+          // Ambele picate → aruncă, catch-ul exterior explică cinstit.
+          if (model === MODEL && (roundText === '' || isQuotaError(e))) {
+            quotaTracker.record(MODEL, false)
+            logFailover('kimi', 'glm', isQuotaError(e) ? 'quota' : 'error')
+            // Kimi însuși are o problemă — îl odihnim și re-servim pe GLM (rezerva).
+            restFable()
+            model = MODEL_RESERVE
+            final = await runRound(brainClientFor(model), model)
+            quotaTracker.record(MODEL_RESERVE, true)
+          } else throw e
+        }
+        try {
+          final = await runRound(brainClientFor(model), model)
         } catch (e) {
           // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
           // Ambele picate → aruncă, catch-ul exterior explică cinstit.
@@ -1910,11 +1939,15 @@ async function runAgent(
       let res: Message
       try {
         res = await make(agentModel)
+        quotaTracker.record(agentModel, true)
       } catch (e) {
         if (agentModel !== MODEL) throw e
+        quotaTracker.record(MODEL, false)
+        logFailover('kimi', 'glm', isQuotaError(e) ? 'quota' : 'error')
         restFable()
         agentModel = MODEL_RESERVE
         res = await make(agentModel)
+        quotaTracker.record(MODEL_RESERVE, true)
       }
       if ((res as { stop_reason?: string }).stop_reason === 'refusal' && agentModel === MODEL) {
         agentModel = MODEL_RESERVE
