@@ -117,7 +117,7 @@ export default function ChatPanel({
 }) {
   const t = strings(lang)
   // Fix hydration: start with the deterministic UI lang, then resolve the browser locale on the client.
-  const [speechLang, setSpeechLang] = useState(lang)
+  const [speechLang, setSpeechLang] = useState<string>(lang)
   useEffect(() => {
     setSpeechLang(defaultSpeechLang(lang))
   }, [lang])

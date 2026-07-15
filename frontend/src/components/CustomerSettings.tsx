@@ -7,7 +7,7 @@ import {
   deleteMyAccount,
   loadLocalLang,
 } from '../lib/prefs'
-import { fetchBalance, startCheckout, type WalletStatus } from '../lib/billing'
+import { fetchBalance, startCheckout, fetchHistory, type WalletStatus, type PurchaseRecord } from '../lib/billing'
 import { LANGS } from '../lib/languages'
 
 // SETĂRI CLIENT (plătitor). Un client are mai puțin acces decât adminul — nu

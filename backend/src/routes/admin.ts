@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import {
+  listAllTransactions,
   listUsers,
   getHistory,
   getCostSummary,
@@ -259,6 +260,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       currency: stripe?.currency ?? 'gbp',
       byKind: costs.byKind,
     })
+  })
+
+  // ORDIN #6G: admin view of all credit transactions (status, amount, credits, user).
+  app.get('/api/admin/transactions', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ transactions: await listAllTransactions(200) })
   })
 
   // Per-USER activity (admin only): who signed in, last IP/place/device, how
