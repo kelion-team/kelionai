@@ -337,12 +337,11 @@ function claudeArgs({ streaming, model, hasFiles, pub, tools, addDir }) {
   // urile noi (--disallowedTools/--exclude-dynamic...) lipseau din CLI-ul de pe
   // VPS și RUPEAU workerul (niciun răspuns). Cu POZĂ: Read + folderul de poze —
   // pentru joburi PUBLICE doar cutia publică din /tmp, NICIODATĂ /root/kelion.
-  // LUCRU: dacă tools e specificat, îl folosim (ex: ['Read','Bash','Edit']);
-  // altfel fallback la Read. addDir permite suprascrierea directorului.
-  if (hasFiles) {
-    const t = tools ?? ['Read']
-    for (const tool of t) args.push('--allowedTools', tool)
-    args.push('--add-dir', addDir ?? (pub ? PUB_INBOX : INBOX))
+  if (hasFiles) args.push('--allowedTools', 'Read', '--add-dir', pub ? PUB_INBOX : INBOX)
+  // WORK LOOP: unelte complete (Read, Bash, Edit, Write) pentru construcție cod
+  if (tools?.length) {
+    args.push('--allowedTools', ...tools)
+    if (addDir) args.push('--add-dir', addDir)
   }
   if (model) args.push('--model', model)
   return args
@@ -884,20 +883,21 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
 // Adrian la coadă.
 async function askWorkClaude(prompt, onChunk, cancel) {
   const model = brainModel()
-  // Unelte complete pentru lucru: Kelion poate citi, edita, scrie și rula comenzi
-  // pe repo. Chat-ul rămâne rapid (fără unelte), doar banda de lucru le primește.
+  // WORK LOOP: unelte complete pentru construcție cod — Read, Bash, Edit, Write
+  const WORK_TOOLS = ['Read', 'Bash', 'Edit', 'Write']
+  const WORK_DIR = '/root/kelion/repo'
   let answer = await runClaudeStream(prompt, {
     timeoutMs: 120_000,
     model,
     onChunk,
-    hasFiles: true,
-    tools: ['Read', 'Bash', 'Edit', 'Write'],
-    addDir: '/root/kelion/repo',
+    hasFiles: false,
     pub: false,
     cancel,
+    tools: WORK_TOOLS,
+    addDir: WORK_DIR,
   })
   if (cancel?.cancelled) return answer
-  if (!answer) answer = await runClaudeText(prompt, { timeoutMs: 60_000, model, hasFiles: true, tools: ['Read', 'Bash', 'Edit', 'Write'], addDir: '/root/kelion/repo', pub: false, cancel })
+  if (!answer) answer = await runClaudeText(prompt, { timeoutMs: 60_000, model, hasFiles: false, pub: false, cancel, tools: WORK_TOOLS, addDir: WORK_DIR })
   if (cancel?.cancelled) return answer
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
@@ -906,11 +906,11 @@ async function askWorkClaude(prompt, onChunk, cancel) {
       timeoutMs: 120_000,
       model: RESERVE,
       onChunk,
-      hasFiles: true,
-      tools: ['Read', 'Bash', 'Edit', 'Write'],
-      addDir: '/root/kelion/repo',
+      hasFiles: false,
       pub: false,
       cancel,
+      tools: WORK_TOOLS,
+      addDir: WORK_DIR,
     })
   }
   if (cancel?.cancelled) return answer
