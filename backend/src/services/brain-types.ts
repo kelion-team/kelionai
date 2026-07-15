@@ -1,7 +1,7 @@
 // Messages API wire-format types — the subset the codebase actually uses.
 // These are plain TypeScript interfaces describing the JSON that Kimi and GLM
-// (both Anthropic-compatible Messages API endpoints) send and receive. No SDK
-// is involved: the native fetch client in `anthropic.ts` produces/consumes
+// (both Messages-compatible API endpoints) send and receive. No SDK
+// is involved: the native fetch client in `brain.ts` produces/consumes
 // exactly these shapes over the wire (POST /v1/messages, SSE streaming).
 
 // ── Content blocks (in a Message response) ────────────────────────────────

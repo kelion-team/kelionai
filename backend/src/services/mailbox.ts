@@ -8,9 +8,6 @@ import { saveInboundEmail, setInboundReplied } from '../db.js'
 import { detectLang } from './lang.js'
 
 // ROW 19 — the contact@ mailbox reader. Polls IMAP for new messages; for each,
-// the Secretary (Linux brain, subscription) drafts a courteous reply IN THE
-// SENDER'S LANGUAGE, we send it as a royal letter, forward the original + draft
-// to the admin, and store everything so the admin SEES what came in and how it
 // was answered. Everything is gated by mailEnabled() and best-effort — a mail
 // hiccup never crashes the app.
 
@@ -66,7 +63,7 @@ export function isAutomated(headers: Map<string, unknown>, fromAddr: string): bo
 // Ask the Secretary (the brain, DIRECT — Kimi/GLM) to draft the reply body. First
 // line = the salutation ("Dear John," / "Stimate Ion,"), the rest = paragraphs.
 // Returns null if the brain is unreachable — the caller then just forwards to the
-// admin. (Trecut de pe punte/`claude` pe creierul direct: 0 Anthropic, fără VPS.)
+// admin. Zero external-provider dependency: Kimi/GLM direct.
 async function draftReply(from: string, subject: string, body: string): Promise<string | null> {
   const prompt =
     'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +

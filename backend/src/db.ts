@@ -193,6 +193,19 @@ export async function initDb(): Promise<void> {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
+    -- STRIPE + CREDITS (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
+    -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
+    CREATE TABLE IF NOT EXISTS transactions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      amount NUMERIC(14,6) NOT NULL,
+      credits NUMERIC(14,6) NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      stripe_payment_intent_id TEXT UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions (status, created_at DESC);
     -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
     -- logs them here (via the log_unsupported_request tool); only the owner/admin
     -- reads them, to prioritise what to build next. Never shown to end users.
@@ -1179,6 +1192,148 @@ export async function topUpUser(
       `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
        VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
       [email, profit, `${stripeRef}:profit`],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
+/** STRIPE + CREDITS (ORDIN #6G): înregistrări în tabela `transactions`. */
+
+export interface Transaction {
+  id: number
+  user_id: string
+  amount: number
+  credits: number
+  status: string
+  stripe_payment_intent_id: string | null
+  created_at: string
+}
+
+/** Creează o tranzacție nouă (plasare PaymentIntent). */
+export async function createTransaction(
+  email: string,
+  amount: number,
+  credits: number,
+  stripePaymentIntentId: string,
+): Promise<number> {
+  if (!dbEnabled() || !email || !stripePaymentIntentId) return 0
+  try {
+    const r = await getPool().query<{ id: number }>(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES ($1, $2, $3, 'pending', $4)
+       ON CONFLICT (stripe_payment_intent_id) DO NOTHING
+       RETURNING id`,
+      [email.toLowerCase(), amount, credits, stripePaymentIntentId],
+    )
+    return r.rows[0]?.id ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/** Actualizează statusul unei tranzacții după ID-ul Stripe PaymentIntent. */
+export async function updateTransactionStatus(
+  stripePaymentIntentId: string,
+  status: string,
+): Promise<void> {
+  if (!dbEnabled() || !stripePaymentIntentId) return
+  try {
+    await getPool().query(
+      'UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now()) WHERE stripe_payment_intent_id = $1',
+      [stripePaymentIntentId, status],
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Istoricul de cumpărături al unui utilizator. */
+export async function listTransactionsForUser(email: string, limit = 50): Promise<Transaction[]> {
+  if (!dbEnabled() || !email) return []
+  try {
+    const r = await getPool().query<Transaction>(
+      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
+       FROM transactions WHERE user_id = $1
+       ORDER BY created_at DESC LIMIT $2`,
+      [email.toLowerCase(), Math.max(1, Math.min(500, limit))],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+/** Toate tranzacțiile (panou admin). */
+export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<Transaction>(
+      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
+       FROM transactions ORDER BY created_at DESC LIMIT $1`,
+      [Math.max(1, Math.min(500, limit))],
+    )
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+/** Creditare unitară din PaymentIntent (ORDIN #6G): tranzacție + wallet + profit.
+ *  Idempotent pe stripe_payment_intent_id. */
+export async function topUpUserFromPaymentIntent(
+  email: string,
+  gross: number,
+  currency: string,
+  stripePaymentIntentId: string,
+): Promise<boolean> {
+  if (!dbEnabled() || !(gross > 0) || !stripePaymentIntentId) return false
+  const userCredit = gross * config.stripe.userShare
+  const profit = gross - userCredit
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query('SELECT 1 FROM transactions WHERE stripe_payment_intent_id = $1', [
+      stripePaymentIntentId,
+    ])
+    if ((seen.rowCount ?? 0) > 0) {
+      // Deja există: doar actualizăm statusul și confirmăm creditul (re-try webhook).
+      await client.query(
+        `UPDATE transactions SET status = 'succeeded' WHERE stripe_payment_intent_id = $1`,
+        [stripePaymentIntentId],
+      )
+      await client.query('COMMIT')
+      return true
+    }
+    await client.query(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES ($1, $2, $3, 'succeeded', $4)`,
+      [email.toLowerCase(), gross, userCredit, stripePaymentIntentId],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'topup', $2, $3, 'user 75%')`,
+      [email, userCredit, stripePaymentIntentId],
+    )
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, $2)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, topup_ref = $2, updated_at = now()`,
+      [email, userCredit, currency],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
+      [email, profit, `${stripePaymentIntentId}:profit`],
     )
     await client.query('COMMIT')
     return true

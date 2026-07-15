@@ -72,20 +72,20 @@ export default function Stage({ user }: { user: User }) {
   // Lit ORANGE when the laptop developer session is actively writing code, so
   // the owner sees when the builder is working on his behalf (admin only). The live
   // work steps are shown on the monitor while active.
-  const [claudeActive, setClaudeActive] = useState(false)
+  const [builderActive, setBuilderActive] = useState(false)
   // TWO LIGHTS, one per link in the chain. "Bridge" = the developer's bridge worker
   // (lit = reachable, pulsing = writing code, OFF = down — the watchdog
   // restarts it and the light re-lights by itself). "Server" = kelionai.app
   // itself (poll failing = OFF; Railway auto-restarts it, light comes back).
-  const [claudeBridge, setClaudeBridge] = useState(false)
+  const [builderBridge, setBuilderBridge] = useState(false)
   // Calitatea legăturii punții: câte din cele 10 benzi WS sunt sus (0–10).
   // Colorează becul verde (toate) → roșu (puține) → stins (jos), NU hardcodat.
   const [bridgeLanes, setBridgeLanes] = useState(0)
   const [serverUp, setServerUp] = useState(true)
-  const [claudeActivity, setClaudeActivity] = useState<string[]>([])
+  const [builderActivity, setBuilderActivity] = useState<string[]>([])
   // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
   const [srvLoad, setSrvLoad] = useState('')
-  // Motorul de lucru activ al constructorului (max/kimi/glm) — afișat permanent.
+  // Motorul de lucru activ al constructorului (kimi/glm) — afișat permanent.
   const [workEngine, setWorkEngine] = useState('')
   // Credit creier Kimi/GLM (Adrian, 13 iul): două becuri în header — verde fix =
   // are credit; verde pâlpâind = motorul ACTIV acum; roșu pâlpâind = fără credit.
@@ -138,7 +138,9 @@ export default function Stage({ user }: { user: User }) {
   // localStorage rămâne doar oglinda pentru primul paint, sursa de adevăr
   // e /api/prefs, ca aranjarea să supraviețuiască oricărei curățări de browser.
   const [avatarEdit, setAvatarEdit] = useState(false)
-  const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>(() => {
+  const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
+  // Fix hydration: localStorage is client-only; read it after hydration.
+  useEffect(() => {
     try {
       const v = JSON.parse(localStorage.getItem('avatar-box') || '') as {
         x?: number
@@ -161,13 +163,12 @@ export default function Stage({ user }: { user: User }) {
         } catch {
           /* fără cheia veche — nimic de migrat */
         }
-        return { x: v.x, y: v.y, s }
+        setAvatarBox({ x: v.x, y: v.y, s })
       }
     } catch {
       /* fără preferință salvată — folosim așezarea implicită */
     }
-    return { x: 58, y: 58, s: 0.42 }
-  })
+  }, [])
   const avatarDragRef = useRef<{ px: number; py: number } | null>(null)
   // RING DE DANS (Adrian, 12 iul, prin Kelion: „la dansuri, avatarul se
   // repoziționează automat mai spre centrul ecranului cât durează clipul"):
@@ -389,10 +390,10 @@ export default function Stage({ user }: { user: User }) {
           } | null) => {
             if (!j) return // 429 — state unchanged
             setServerUp(true)
-            setClaudeActive(!!j.active)
-            setClaudeBridge(!!j.bridge)
+            setBuilderActive(!!j.active)
+            setBuilderBridge(!!j.bridge)
             setBridgeLanes(Number(j.lanes ?? 0))
-            setClaudeActivity(Array.isArray(j.activity) ? j.activity : [])
+            setBuilderActivity(Array.isArray(j.activity) ? j.activity : [])
             setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
             setWorkEngine(typeof j.workEngine === 'string' ? j.workEngine : '')
             setRelPending(typeof j.releases === 'number' ? j.releases : 0)
@@ -426,8 +427,8 @@ export default function Stage({ user }: { user: User }) {
           // A real failure (network / 5xx) → the SERVER light goes off (and with
           // it the bridge). Transient 429s are handled above and never reach here.
           setServerUp(false)
-          setClaudeBridge(false)
-          setClaudeActive(false)
+          setBuilderBridge(false)
+          setBuilderActive(false)
         })
     }
     check()
@@ -536,11 +537,11 @@ export default function Stage({ user }: { user: User }) {
   // Rule (Adrian): the Rec button must capture EVERYTHING the AI does — so the
   // live execution console stays VISIBLE during recording (was hidden by
   // `!recording`, which is exactly why the clip showed nothing happening).
-  const claudeShow =
+  const builderShow =
     user.role === 'admin' &&
-    ((claudeActive && claudeActivity.length > 0) || showWork)
-  const live = claudeShow && !ws.open ? parseLive(claudeActivity) : null
-  const monitorOn = ws.open || (claudeShow && claudeActivity.length > 0)
+    ((builderActive && builderActivity.length > 0) || showWork)
+  const live = builderShow && !ws.open ? parseLive(builderActivity) : null
+  const monitorOn = ws.open || (builderShow && builderActivity.length > 0)
   // Tell the chat when the monitor is busy so it collapses to the slim black
   // speech bar (Adrian's rule) — during live work, not only for open surfaces.
   useEffect(() => {
@@ -554,8 +555,8 @@ export default function Stage({ user }: { user: User }) {
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
         {!ws.open && live && (
-          <div className="workspace-inner claude-console">
-            <div className="claude-console-head">
+          <div className="workspace-inner builder-console">
+            <div className="builder-console-head">
               ● Creierul Linux — execuție în direct
               <span className={`mode-badge mode-${mode}`}>
                 {mode === 'lucru' ? '🛠 Lucru' : mode === 'raport' ? '📊 Raport' : '💬 Chat'}
@@ -571,8 +572,8 @@ export default function Stage({ user }: { user: User }) {
                   💡 {relPending}
                 </span>
               )}
-              <span className={`live-dot ${claudeActive ? 'on' : ''}`}>
-                {claudeActive ? 'LIVE' : 'în așteptare'}
+              <span className={`live-dot ${builderActive ? 'on' : ''}`}>
+                {builderActive ? 'LIVE' : 'în așteptare'}
               </span>
               {/* VITEZA REALĂ a creierului Linux: cronometrul viu cât lucrează,
                   altfel timpul de răspuns REAL măsurat în browser (ce simte
@@ -691,26 +692,26 @@ export default function Stage({ user }: { user: User }) {
             )}
             {/* JURNAL LIVE: fiecare pas al creierului, în ordine, nu o singură
                 linie. Progres cu bară pentru pașii cu procent; restul ca log. */}
-            <div className="claude-rows">
-              {claudeActivity.length === 0 && (
-                <div className="claude-status-line">În așteptare…</div>
+            <div className="builder-rows">
+              {builderActivity.length === 0 && (
+                <div className="builder-status-line">În așteptare…</div>
               )}
-              {claudeActivity.slice(-14).map((raw, i) => {
+              {builderActivity.slice(-14).map((raw, i) => {
                 const m = /^(?:\[\d{1,2}:\d{2}\]\s*)?\[(\d{1,3})%\]\s*(.*)$/.exec(raw)
                 if (m) {
                   const pct = Math.min(100, Number(m[1]))
                   return (
-                    <div key={i} className={`claude-row ${pct >= 100 ? 'done' : ''}`}>
-                      <span className="claude-row-text">{m[2]}</span>
-                      <span className="claude-row-bar">
-                        <span className="claude-row-fill" style={{ width: `${pct}%` }} />
+                    <div key={i} className={`builder-row ${pct >= 100 ? 'done' : ''}`}>
+                      <span className="builder-row-text">{m[2]}</span>
+                      <span className="builder-row-bar">
+                        <span className="builder-row-fill" style={{ width: `${pct}%` }} />
                       </span>
-                      <span className="claude-row-pct">{pct >= 100 ? '✓' : `${pct}%`}</span>
+                      <span className="builder-row-pct">{pct >= 100 ? '✓' : `${pct}%`}</span>
                     </div>
                   )
                 }
                 return (
-                  <div key={i} className="claude-log-line">
+                  <div key={i} className="builder-log-line">
                     {raw}
                   </div>
                 )
@@ -720,12 +721,12 @@ export default function Stage({ user }: { user: User }) {
                 by the VPS paznic every minute) — replaces the old status line
                 that duplicated the top-bar work ticker. */}
             {(srvLoad || workEngine) && (
-              <div className="claude-status">
-                {srvLoad && <div className="claude-status-line srv-load">Serv. Linux — {srvLoad}</div>}
+              <div className="builder-status">
+                {srvLoad && <div className="builder-status-line srv-load">Serv. Linux — {srvLoad}</div>}
                 {/* Adrian, 11 iul: „să fie afișat permanent care constructor
-                    lucrează" — motorul de lucru activ (MAX/KIMI/GLM). */}
+                    lucrează" — motorul de lucru activ (KIMI/GLM). */}
                 {workEngine && (
-                  <div className="claude-status-line srv-load">Motor lucru — {workEngine.toUpperCase()}</div>
+                  <div className="builder-status-line srv-load">Motor lucru — {workEngine.toUpperCase()}</div>
                 )}
               </div>
             )}
@@ -998,9 +999,9 @@ export default function Stage({ user }: { user: User }) {
           {user.role === 'admin' && <span className="badge">admin</span>}
           {user.role === 'admin' && (
             <span
-              className={`claude-ind clickable ${claudeBridge ? 'on' : ''} ${claudeActive ? 'work' : ''}`}
+              className={`builder-ind clickable ${builderBridge ? 'on' : ''} ${builderActive ? 'work' : ''}`}
               style={
-                claudeBridge
+                builderBridge
                   ? (() => {
                       // hue: 120°=verde (10 benzi) → 0°=roșu (1 bandă). Jos = fără
                       // stil → becul cade pe gri (stins). Calitate REALĂ, nu hardcodat.
@@ -1020,8 +1021,8 @@ export default function Stage({ user }: { user: User }) {
                 if (e.key === 'Enter' || e.key === ' ') setShowWork((v) => !v)
               }}
               title={
-                claudeBridge
-                  ? claudeActive
+                builderBridge
+                  ? builderActive
                     ? 'The builder is writing code — click to show/hide the live work monitor'
                     : 'Bridge up — the builder is reachable in chat'
                   : 'BRIDGE DOWN — auto-restarting (watchdog), light returns by itself'
@@ -1032,7 +1033,7 @@ export default function Stage({ user }: { user: User }) {
           )}
           {user.role === 'admin' && (
             <span
-              className={`claude-ind ${serverUp ? 'on' : ''}`}
+              className={`builder-ind ${serverUp ? 'on' : ''}`}
               title={
                 serverUp
                   ? 'Server up — kelionai.app is running'

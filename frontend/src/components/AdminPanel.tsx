@@ -437,7 +437,7 @@ export default function AdminPanel({
     setGaps((cur) => cur.filter((g) => g.id !== id))
   }
 
-  async function sendToClaude(id: number): Promise<void> {
+  async function sendToBuilder(id: number): Promise<void> {
     const res = await escalateGap(id)
     if (res.escalated) {
       // Adrian's flow: the request STAYS visible, marked as sent — it lands in
@@ -1771,7 +1771,7 @@ export default function AdminPanel({
                     <button
                       type="button"
                       className="composer-send"
-                      onClick={() => void sendToClaude(g.id)}
+                      onClick={() => void sendToBuilder(g.id)}
                       title="Trimite cererea la creier: construiește → verifică → publică. Când trece (200) dispare din listă."
                     >
                       Trimite la creier

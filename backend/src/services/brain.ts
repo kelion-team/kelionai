@@ -7,7 +7,7 @@ import type {
 } from './brain-types.js'
 
 // CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider a fost SCOS complet.
-// Nu mai există NICIO dependență de SDK Anthropic — client nativ pe fetch.
+// Nu mai există NICIO dependență de SDK Provider — client nativ pe fetch.
 export const KIMI_BASE = 'https://api.kimi.com/coding/'
 export const GLM_BASE = 'https://api.z.ai/api/anthropic'
 

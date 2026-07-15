@@ -82,6 +82,38 @@ export async function getStripeBalance(): Promise<{
   return { available: sum(j.available), pending: sum(j.pending), currency: cur }
 }
 
+// Create a PaymentIntent for a credit top-up. The frontend confirms the payment
+// with the client_secret; the backend credits the wallet on webhook.
+export type PaymentIntentResult =
+  | { client_secret: string; payment_intent_id: string; amount: number; currency: string }
+  | { error: string }
+
+export async function createPaymentIntent(
+  email: string,
+  name: string,
+  pounds: number,
+): Promise<PaymentIntentResult> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  const amount = Math.max(1, Math.min(500, Math.round(pounds)))
+  const customer = await ensureCustomer(email, name)
+  const body = new URLSearchParams()
+  body.set('amount', String(amount * 100))
+  body.set('currency', config.stripe.currency)
+  body.set('automatic_payment_methods[enabled]', 'true')
+  if (customer) body.set('customer', customer)
+  body.set('metadata[email]', email)
+  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body })
+  if (!r.ok) return { error: `stripe_http_${r.status}` }
+  const j = (await r.json()) as { id?: string; client_secret?: string }
+  if (!j.id || !j.client_secret) return { error: 'no_payment_intent' }
+  return {
+    client_secret: j.client_secret,
+    payment_intent_id: j.id,
+    amount,
+    currency: config.stripe.currency,
+  }
+}
+
 export interface StripeEvent {
   type: string
   data: { object: Record<string, unknown> }

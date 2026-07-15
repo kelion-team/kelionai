@@ -1418,7 +1418,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const isAdmin = user.role === 'admin'
 
     // ADMIN — doar gărzile specifice ownerului, apoi CADE PRIN la creierul direct.
-    // Puntea/Claude-CLI au fost scoase din calea de chat (Adrian, 3 zile): adminul
+    // Puntea/Builder-CLI au fost scoase din calea de chat (Adrian, 3 zile): adminul
     // păstrează aici STOP-pe-cerință, OK→deploy, filtrul anti-ecou ASR și
     // telemetria monitorului, dar răspunsul îl compune ACELAȘI drum direct
     // Kimi→GLM ca la toți ceilalți (mai jos), cu request_repair ca tool.
@@ -1515,13 +1515,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (files.length > 0) stashAdminFiles(files)
       }
       // …și CADE PRIN (fără return) la drumul direct Kimi→GLM de mai jos: adminul
-      // răspunde acum prin ACELAȘI creier direct ca toți (Claude/puntea scoase
+      // răspunde acum prin ACELAȘI creier direct ca toți (Builder/puntea scoase
       // din calea de chat), cu request_repair ca tool pentru cerințele de cod.
     }
 
     // ── DRUM UNIC: DIRECT Kimi→GLM PENTRU TOȚI (Adrian, 3 zile) ─────────────
-    // „Claude out everywhere, Kimi 2.7 + GLM 5.x direct, ultra-rapid." Puntea/
-    // Claude-CLI au fost scoase complet din calea de chat: ADMIN (mai sus, doar
+    // „Builder out everywhere, Kimi 2.7 + GLM 5.x direct, ultra-rapid." Puntea/
+    // Builder-CLI au fost scoase complet din calea de chat: ADMIN (mai sus, doar
     // gărzile + telemetria + fișierele, apoi cade prin), DEMO/gratuiți și
     // clienții plătitori (paywall garantat mai sus) răspund TOȚI direct prin API
     // de mai jos — instant, cu toate uneltele. Demo rămâne izolat, aplicat

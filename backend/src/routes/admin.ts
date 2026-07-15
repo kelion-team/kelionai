@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import {
+  listAllTransactions,
   listUsers,
   getHistory,
   getCostSummary,
@@ -206,7 +207,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       'Pentru FIECARE capacitate cerută mai jos, decide dacă e DEJA implementată în aplicația de acum. ' +
       'Răspunde STRICT o linie pe cerere, exact în formatul: `<id> DONE` sau `<id> TODO` (fără altceva pe linie).\n\n' +
       open.map((g) => `${g.id}: ${g.request}`).join('\n')
-    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`claude` (0 Anthropic).
+    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`builder` (0 Provider).
     const verdict = (await brainComplete(prompt, 1024)) || ''
 
     let done = 0
@@ -259,6 +260,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       currency: stripe?.currency ?? 'gbp',
       byKind: costs.byKind,
     })
+  })
+
+  // ORDIN #6G: admin view of all credit transactions (status, amount, credits, user).
+  app.get('/api/admin/transactions', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ transactions: await listAllTransactions(200) })
   })
 
   // Per-USER activity (admin only): who signed in, last IP/place/device, how
