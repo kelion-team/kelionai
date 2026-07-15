@@ -843,6 +843,10 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
   const full = isPublic
     ? PUBLIC_PREAMBLE + prompt
     : loadContext() + '\n\n' + PREAMBLE + FILES_EXCEPTION + prompt
+  // ADMIN = unelte complete (Read, Bash, Edit, Write) ca să poată executa ordine.
+  // Public = fără unelte (izolare + viteză).
+  const ADMIN_TOOLS = isPublic ? undefined : ['Read', 'Bash', 'Edit', 'Write']
+  const ADMIN_DIR = isPublic ? undefined : '/root/kelion/repo'
   // Buget de timp MĂRGINIT (Adrian, 10 iul + audit): serverul renunță la 75s și
   // maxTries=1, deci n-are rost să măcinăm minute pe un job pe care serverul
   // deja l-a uitat. Chatul fără unelte răspunde în ~2s, deci pragurile astea nu
@@ -858,14 +862,16 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
     pub: isPublic,
     cancel,
     warmChild: standby?.child,
+    tools: ADMIN_TOOLS,
+    addDir: ADMIN_DIR,
   })
   if (cancel?.cancelled) return answer
-  if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles, pub: isPublic, cancel })
+  if (!answer) answer = await runClaudeText(full, { timeoutMs: 45_000, model, hasFiles, pub: isPublic, cancel, tools: ADMIN_TOOLS, addDir: ADMIN_DIR })
   if (cancel?.cancelled) return answer
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
     log('Fable a esuat — trec pe Opus, revin la Fable in 10 min.')
-    answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles, pub: isPublic, cancel })
+    answer = await runClaudeStream(full, { timeoutMs: 90_000, model: RESERVE, onChunk, hasFiles, pub: isPublic, cancel, tools: ADMIN_TOOLS, addDir: ADMIN_DIR })
   }
   if (cancel?.cancelled) return answer
   // PLASĂ FINALĂ GARANTATĂ (Adrian, 10 iul: „să nu se mai poată strica"): dacă TOT
