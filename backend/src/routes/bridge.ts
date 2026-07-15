@@ -246,6 +246,13 @@ export function markFirstWord(): void {
 // atunci). Când e liniște, un mesaj retrimis identic e Adrian care insistă
 // fiindcă n-a primit răspuns — pornește o tură reală, nu-l mai arunca.
 export function brainTurnActive(): boolean {
+  // Protecție anti-blocare: dacă o tură a rămas agățată (>120s) fără finish,
+  // o considerăm terminată — altfel adminul rămâne blocat la infinit ca „ecou".
+  if (turnActive && turnStartAt && Date.now() - turnStartAt > 120_000) {
+    turnActive = false
+    turnStartAt = 0
+    return false
+  }
   return turnActive
 }
 // Tura s-a terminat. `chat` = proces COMPLET (bara ajunge la 100 și apoi se
