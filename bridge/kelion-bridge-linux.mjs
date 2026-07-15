@@ -327,7 +327,7 @@ function makeCancel() {
 // primul cuvânt în ~2s (nu mai explorează serverul 30s). Cu POZĂ atașată =
 // permite DOAR Read pe folderul de poze, ca să le poată privi. Peste tot tăiem
 // secțiunile dinamice uriașe din promptul implicit → prefill mult mai mic.
-function claudeArgs({ streaming, model, hasFiles, pub }) {
+function claudeArgs({ streaming, model, hasFiles, pub, tools, addDir }) {
   const args = ['-p']
   if (streaming) args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages')
   else args.push('--output-format', 'text')
@@ -337,7 +337,13 @@ function claudeArgs({ streaming, model, hasFiles, pub }) {
   // urile noi (--disallowedTools/--exclude-dynamic...) lipseau din CLI-ul de pe
   // VPS și RUPEAU workerul (niciun răspuns). Cu POZĂ: Read + folderul de poze —
   // pentru joburi PUBLICE doar cutia publică din /tmp, NICIODATĂ /root/kelion.
-  if (hasFiles) args.push('--allowedTools', 'Read', '--add-dir', pub ? PUB_INBOX : INBOX)
+  // LUCRU: dacă tools e specificat, îl folosim (ex: ['Read','Bash','Edit']);
+  // altfel fallback la Read. addDir permite suprascrierea directorului.
+  if (hasFiles) {
+    const t = tools ?? ['Read']
+    for (const tool of t) args.push('--allowedTools', tool)
+    args.push('--add-dir', addDir ?? (pub ? PUB_INBOX : INBOX))
+  }
   if (model) args.push('--model', model)
   return args
 }
@@ -691,7 +697,7 @@ setInterval(() => {
   }
 }, 60_000)
 
-function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel, warmChild } = {}) {
+function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, cancel, warmChild, tools, addDir } = {}) {
   return new Promise((resolve) => {
     // Treapta de abonament curentă (standby-ul luat e garantat pe aceeași
     // treaptă — takeStandby aruncă nepotrivitele).
@@ -699,7 +705,7 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
     // Proces de gardă deja pornit (public) → sare peste boot; altfel spawn clasic.
     const child =
       warmChild ??
-      spawn(CLAUDE, claudeArgs({ streaming: true, model: tierModel(tier, model), hasFiles, pub }), spawnOpts(pub, tier))
+      spawn(CLAUDE, claudeArgs({ streaming: true, model: tierModel(tier, model), hasFiles, pub, tools, addDir }), spawnOpts(pub, tier))
     cancel?.attach(child)
     let streamed = '' // ce am trimis deja prin onChunk (bucățile difuzate)
     let finalText = '' // răspunsul autoritar din evenimentul `result`
@@ -781,10 +787,10 @@ function runClaudeStream(prompt, { timeoutMs, model, onChunk, hasFiles, pub, can
 // PLASĂ DE SIGURANȚĂ: modul text vechi (dovedit), fără streaming. Folosit doar
 // dacă streamingul nu scoate nimic (versiune de CLI fără `stream-json`) — așa
 // nu coborâm NICIODATĂ sub comportamentul de azi.
-function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel } = {}) {
+function runClaudeText(prompt, { timeoutMs, model, hasFiles, pub, cancel, tools, addDir } = {}) {
   return new Promise((resolve) => {
     const tier = currentTier()
-    const args = claudeArgs({ streaming: false, model: tierModel(tier, model), hasFiles, pub })
+    const args = claudeArgs({ streaming: false, model: tierModel(tier, model), hasFiles, pub, tools, addDir })
     const child = spawn(CLAUDE, args, spawnOpts(pub, tier))
     cancel?.attach(child)
     let out = ''
@@ -878,16 +884,20 @@ async function askClaude(prompt, onChunk, hasFiles, isPublic, cancel) {
 // Adrian la coadă.
 async function askWorkClaude(prompt, onChunk, cancel) {
   const model = brainModel()
+  // Unelte complete pentru lucru: Kelion poate citi, edita, scrie și rula comenzi
+  // pe repo. Chat-ul rămâne rapid (fără unelte), doar banda de lucru le primește.
   let answer = await runClaudeStream(prompt, {
     timeoutMs: 120_000,
     model,
     onChunk,
-    hasFiles: false,
+    hasFiles: true,
+    tools: ['Read', 'Bash', 'Edit', 'Write'],
+    addDir: '/root/kelion/repo',
     pub: false,
     cancel,
   })
   if (cancel?.cancelled) return answer
-  if (!answer) answer = await runClaudeText(prompt, { timeoutMs: 60_000, model, hasFiles: false, pub: false, cancel })
+  if (!answer) answer = await runClaudeText(prompt, { timeoutMs: 60_000, model, hasFiles: true, tools: ['Read', 'Bash', 'Edit', 'Write'], addDir: '/root/kelion/repo', pub: false, cancel })
   if (cancel?.cancelled) return answer
   if (!answer && model === MODEL) {
     fableDownUntil = Date.now() + REST_MS
@@ -896,7 +906,9 @@ async function askWorkClaude(prompt, onChunk, cancel) {
       timeoutMs: 120_000,
       model: RESERVE,
       onChunk,
-      hasFiles: false,
+      hasFiles: true,
+      tools: ['Read', 'Bash', 'Edit', 'Write'],
+      addDir: '/root/kelion/repo',
       pub: false,
       cancel,
     })
