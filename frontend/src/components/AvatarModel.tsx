@@ -1,4 +1,4 @@
-import { useRef, useLayoutEffect, useEffect, useMemo, useState } from 'react'
+import { useRef, useLayoutEffect, useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF, useAnimations } from '@react-three/drei'
 import { LoopOnce, LoopRepeat } from 'three'
@@ -208,10 +208,8 @@ export default function AvatarModel() {
   const morphs = useRef<(Mesh | SkinnedMesh)[]>([])
   // Fix hydration: valoare fixă inițial, randomizez în useEffect pe client.
   const blink = useRef({ t: 0, nextAt: 4, phase: 0, duration: 0.16 })
-  const [blinkReady, setBlinkReady] = useState(false)
   useEffect(() => {
     blink.current.nextAt = 2 + Math.random() * 4
-    setBlinkReady(true)
   }, [])
   const mouth = useRef(0) // nivelul gurii, netezit spre nivelul vocii (ca la blink)
   // Clipurile din catalogul complet, sosite în fundal (mixer.clipAction ține
