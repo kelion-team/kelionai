@@ -1,9 +1,8 @@
-# Kelionai v1 — restored with full capabilities
-# Deploy-ID: 2026-07-09-1520
+# Kelionai v2 — clean rebuild, Kimi + GLM only
 FROM node:22-bookworm-slim
 WORKDIR /app
 
-# --- MarkItDown & System Deps (Essential for Kelion's intelligence) ---
+# System deps: python for markitdown, curl for healthchecks
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip curl \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
@@ -17,9 +16,10 @@ RUN cd frontend && npm run build
 
 # --- backend build ---
 COPY backend/package.json backend/package-lock.json ./backend/
-RUN cd backend && npm ci
-# Playwright (Essential for browsing)
-RUN cd backend && npx playwright install --with-deps chromium
+# npm install (not ci) to auto-heal any lock drift; production deps only
+RUN cd backend && npm install
+# Playwright browsers installed at runtime (not build time) — Railway builder
+# often fails on system deps installation. The backend checks at startup.
 COPY backend ./backend
 RUN cd backend && npm run build
 
