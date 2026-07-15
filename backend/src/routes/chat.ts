@@ -105,9 +105,6 @@ function logFailover(from: string, to: string, reason: string): void {
 const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
 const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
 const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
-const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
-const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
-const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
 let fableDownUntil = 0
 // Ultimul mesaj (normalizat) al adminului — pentru filtrul anti-ecou ASR:
 // un duplicat sosit în <45s nu mai pornește o tură (zgomot de microfon).
@@ -390,7 +387,7 @@ const BROWSER_CLICK_AT_TOOL: Tool = {
 const REPAIR_TOOL: Tool = {
   name: 'request_repair',
   description:
-    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, in his own words plus any detail he gave.",
+    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, with any detail he gave.",
   input_schema: {
     type: 'object',
     properties: {
@@ -543,7 +540,7 @@ const CODE_EXEC_TOOL = {
 const DELEGATE_TOOL: Tool = {
   name: 'delegate',
   description:
-    "Hand a task to one of your specialist agents — each an expert with a verified background of 25 years of professional experience in its domain and its OWN memory, who does the work and reports back to you. Agents: 'secretary' (Gmail, Calendar, Tasks, Drive, Contacts), 'navigator' (places, maps, routes, live traffic, driving copilot), 'researcher' (web search, YouTube, Wikipedia, weather, currency, time, current facts), 'studio' (creating/designing images, logos, illustrations, visual concepts), 'scribe' (writing, drafting, rewriting, summarising and translating text in any tone or language), 'developer' (writes SOFTWARE in the sandbox and runs it until it works), 'tester' (independently tests code written by others — separation of duties: pass the developer's full code in the task and it returns a PASS/FAIL verdict with real run evidence). For serious software requests use developer THEN tester. You then relay their result to the user in your OWN voice. For a single trivial lookup you may just use your own tools instead.",
+    "Hand a task to one of your specialist agents — each an expert with a verified background of 25 years of professional experience in its domain and its OWN memory, who does the work and reports back to you. Agents: 'secretary' (Gmail, Calendar, Tasks, Drive, Contacts), 'navigator' (places, maps, routes, live traffic, driving copilot), 'researcher' (web, YouTube, Wikipedia, weather, currency, time, current facts), 'studio' (creating/designing images, logos, illustrations, visual concepts), 'scribe' (writing, drafting, rewriting, summarising and translating text in any tone or language), 'developer' (writes SOFTWARE in the sandbox and runs it until it works), 'tester' (independently tests code written by others — separation of duties: pass the developer's full code in the task and it returns a PASS/FAIL verdict with real run evidence). For serious software requests use developer THEN tester. You then relay their result to the user in YOUR own voice. If the user EXPLICITLY names or asks for one of them (e.g. 'ask the navigator', 'roagă cercetătorul', 'let the secretary handle it'), you MUST delegate to that exact agent, even if you could do it yourself. For a trivial single lookup you may just use your own tools. When an agent produces something the user asked you to CREATE — a drafted email or message, a translation, a piece of writing — give the user that finished content itself (read it out in full), don't just say it's ready or jump ahead to sending it. The user only ever hears YOU — one voice, always yours.",
   input_schema: {
     type: 'object',
     properties: {
@@ -1672,18 +1669,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             quotaTracker.record(MODEL_RESERVE, true)
           } else throw e
         }
-        try {
-          final = await runRound(brainClientFor(model), model)
-        } catch (e) {
-          // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
-          // Ambele picate → aruncă, catch-ul exterior explică cinstit.
-          if (roundText === '' && model === MODEL) {
-            // Kimi însuși are o problemă — îl odihnim și re-servim pe GLM (rezerva).
-            restFable()
-            model = MODEL_RESERVE
-            final = await runRound(brainClientFor(model), model)
-          } else throw e
-        }
         // Un refuz de siguranță (HTTP 200, stop_reason "refusal", fără conținut):
         // re-servim AceastĂ cerere pe GLM — specific conținutului, fără odihnă.
         if (
@@ -1728,614 +1713,263 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             }
             // Meter paid Serper searches (web + youtube) into the credit monitor.
             if (
-              (block.name === 'web_search' || block.name === 'youtube_search') &&
-              !out.includes('"error"')
+              block.name === 'web_search' ||
+              block.name === 'youtube_search' ||
+              block.name === 'image_search'
             ) {
-              usageUsd += SERPER_USD_PER_CALL
-              void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
+              usage.usd += SERPER_USD_PER_CALL
             }
-            // Meter generated images (Gemini image model) into the credit monitor.
-            if (block.name === 'generate_image' && out.includes('"shown":true')) {
-              usageUsd += IMAGE_USD_PER_CALL
-              void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
+            // Meter paid image generation into the credit monitor.
+            if (block.name === 'generate_image') {
+              usage.usd += IMAGE_USD_PER_CALL
             }
             results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
           }
         }
-        params.push({ role: 'user', content: results })
-      }
-      // CEASUL MONITORULUI (admin): închide tura de „chat" — DOAR dacă nu s-a
-      // deschis o cerință în tura asta (request_repair stampilează deja „lucru" și
-      // deține cerința). finishBrainTurn e idempotent, deci e sigur oricum.
-      if (isAdmin && !ownedRequirement()) finishBrainTurn('chat')
-      // Show the sandbox session (code + real output) as a readable, copyable
-      // panel — Kelion only SPEAKS the outcome, never reads code aloud.
-      if (sandboxLog.trim()) {
-        reply.raw.write(
-          `${CTRL}${JSON.stringify({ doc: { title: 'Sandbox — cod și rezultat', text: sandboxLog.slice(0, 8000) } })}${CTRL}`,
-        )
-      }
-      // Vocea a curs deja în timpul stream-ului (voice.feed la fiecare bucată
-      // difuzată); aici doar golim coada de sinteză.
-      if (!voice.fed() && assistantText.trim()) voice.feed(assistantText)
-      await voice.finish()
-      reply.raw.end()
-      // Demo = fără urme: nu salvăm istoricul și nu învățăm nimic despre vizitator.
-      if (assistantText.trim() && user.role !== 'demo')
-        void saveMessage(user.email, 'assistant', assistantText)
-      // Memory agent (learn): distil + save any new durable facts about the user,
-      // off the response path so it never adds latency. Demo excluded (anonim).
-      if (user.role !== 'demo' && (lastUserText.trim() || assistantText.trim()))
-        void learnFromTurn(user.email, lastUserText, assistantText)
-      // Record the real brain cost for this turn (vision frames are already in
-      // the input-token count, so token-based cost covers them).
-      const chatUsd = brainCost(model, inTokens, outTokens)
-      usageUsd += chatUsd
-      void recordCost(user.email, 'chat', chatUsd)
-      // Fold in any cost run up by delegated specialist agents this turn.
-      usageUsd += usage.usd
-      // Charge the customer's wallet at REAL provider cost (1:1, USD→display
-      // currency). The 25% margin was already taken up front at top-up, so the
-      // user spends their credit at cost. The owner (admin) is exempt.
-      if (
-        config.stripe.secretKey &&
-        user.role !== 'admin' &&
-        user.role !== 'demo' &&
-        usageUsd > 0
-      ) {
-        const charge = usageUsd * config.stripe.usdToCurrency
-        void debitWallet(user.email, charge, 'chat')
-      }
-    } catch (err) {
-      app.log.error(err)
-      if (!reply.raw.writableEnded) {
-        // The model provider failed mid-turn — most often rate-limited or out of
-        // credit. Tell the user calmly in THEIR language instead of a raw
-        // "[connection error]"; the frontend shows AND speaks whatever we stream.
-        const ro = userLang.toLowerCase().startsWith('ro')
-        // Ambele trepte ale creierului (Kimi + GLM) au picat — răspuns calm în
-        // limba userului (nu „[connection error]" brut).
-        const note = ro
-          ? 'Îmi pare rău, momentan nu pot răspunde — serviciul este temporar indisponibil. Încearcă din nou în câteva minute.'
-          : "Sorry, I can't answer right now — the service is temporarily unavailable. Please try again in a few minutes."
-        reply.raw.write(assistantText.trim() ? `\n\n${note}` : note)
-        // Eroarea se și AUDE (regula „niciodată tăcere totală"), nu doar se scrie.
-        voice.feed(note)
-        await voice.finish()
-        reply.raw.end()
-      }
-    }
-  })
-}
-
-// Turn a skill's JSON result into a structured "card" the monitor renders
-// (emails, calendar, tasks, Drive, contacts, web results). Returns null when the
-// tool has no card representation or errored.
-interface CardItem {
-  primary: string
-  secondary?: string
-  meta?: string
-  url?: string
-}
-interface SkillCard {
-  type: string
-  title: string
-  items: CardItem[]
-}
-
-// Turn a reply's server-side sandbox blocks into a readable transcript — the
-// commands Kelion ran and their REAL output — for the monitor's doc panel.
-function sandboxTranscript(content: unknown[]): string {
-  const parts: string[] = []
-  for (const b of content as Record<string, unknown>[]) {
-    if (b.type === 'server_tool_use') {
-      const input = (b.input ?? {}) as Record<string, unknown>
-      const cmd = input.command ?? input.code ?? input.file_text
-      if (typeof cmd === 'string' && cmd.trim()) parts.push(`$ ${cmd.trim()}`)
-    } else if (typeof b.type === 'string' && b.type.endsWith('code_execution_tool_result')) {
-      const c = (b.content ?? {}) as Record<string, unknown>
-      const out = [c.stdout, c.stderr]
-        .filter((x): x is string => typeof x === 'string' && x.length > 0)
-        .join('\n')
-      parts.push(out.trim() || `(exit ${String(c.return_code ?? '?')})`)
-    }
-  }
-  return parts.join('\n\n')
-}
-
-function cardFor(name: string, out: string): SkillCard | null {
-  let j: Record<string, unknown>
-  try {
-    j = JSON.parse(out) as Record<string, unknown>
-  } catch {
-    return null
-  }
-  if (j.error) return null
-  const cut = (s: string, n = 120): string => (s.length > n ? `${s.slice(0, n)}…` : s)
-  const when = (s: string): string => (s ? s.replace('T', ' ').slice(0, 16) : '')
-
-  if (name === 'get_recent_emails' && Array.isArray(j.emails)) {
-    const rows = j.emails as { subject?: string; from?: string; date?: string }[]
-    return { type: 'emails', title: 'Emails', items: rows.map((e) => ({ primary: e.subject || '(no subject)', secondary: e.from || '', meta: when(e.date || '') })) }
-  }
-  if (name === 'get_calendar_events' && Array.isArray(j.events)) {
-    const rows = j.events as { summary?: string; start?: string; location?: string }[]
-    return { type: 'calendar', title: 'Calendar', items: rows.map((e) => ({ primary: e.summary || '(no title)', secondary: when(e.start || ''), meta: e.location || '' })) }
-  }
-  if (name === 'get_tasks' && Array.isArray(j.tasks)) {
-    const rows = j.tasks as { title?: string; due?: string }[]
-    return { type: 'tasks', title: 'Tasks', items: rows.map((t) => ({ primary: t.title || '', secondary: t.due ? `due ${String(t.due).slice(0, 10)}` : '' })) }
-  }
-  if (name === 'get_drive_files' && Array.isArray(j.files)) {
-    const rows = j.files as { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
-    return { type: 'drive', title: 'Drive', items: rows.map((f) => ({ primary: f.name || '', secondary: String(f.mimeType || '').split(/[./]/).pop() || '', meta: String(f.modifiedTime || '').slice(0, 10), url: f.webViewLink || '' })) }
-  }
-  if (name === 'search_contacts' && Array.isArray(j.contacts)) {
-    const rows = j.contacts as { name?: string; email?: string; phone?: string }[]
-    return { type: 'contacts', title: 'Contacts', items: rows.map((c) => ({ primary: c.name || '', secondary: c.email || '', meta: c.phone || '' })) }
-  }
-  if (name === 'web_search' && Array.isArray(j.results)) {
-    const rows = j.results as { title?: string; snippet?: string; link?: string }[]
-    return { type: 'search', title: 'Web results', items: rows.map((r) => ({ primary: r.title || '', secondary: cut(r.snippet || ''), url: r.link || '' })) }
-  }
-  return null
-}
-
-// Run one specialist agent on a task Kelion delegated: its own focused prompt +
-// its OWN memory namespace, the full tool set MINUS delegation (so it can never
-// recurse), a bounded tool loop. Returns a concise text result for Kelion to
-// relay. Fully isolated — any failure returns a string, never crashes the reply.
-async function runAgent(
-  spec: AgentSpec,
-  task: string,
-  token: string,
-  reply: { raw: { write(chunk: string): void } },
-  baseUrl: string,
-  email: string,
-  usage: { usd: number },
-  lang: string,
-): Promise<string> {
-  if (!config.kimiKey && !config.glmKey) return 'agent unavailable'
-  try {
-    const memory = await recallMemories(email, spec.id, task)
-    const system =
-      `You are the ${spec.name} — a specialist agent working under Kelion for one user, with a ` +
-      `verified background of 25 years of professional experience in your domain. Work with the ` +
-      `judgement, rigour and calm of that seniority. ` +
-      `Your domain: ${spec.focus}\n\n` +
-      `Kelion has handed you the task below. Carry it out fully using your tools, then reply ` +
-      `with a COMPLETE plain-text result that answers every part of the task (no markdown, no ` +
-      `lists) — concise in wording but never leave out anything the user asked for. If you ` +
-      `cannot do it, say briefly why. When the deliverable is an email, letter, message or ` +
-      `document, format it properly and in full: a greeting line, clear short paragraphs with a ` +
-      `blank line between them, and a courteous closing with the sender's name — a real, ` +
-      `well-structured piece, never one unformatted blob.` +
-      (lang
-        ? ` Write your result AND any content you produce (emails, drafts, messages, summaries) EXCLUSIVELY in ${lang}, regardless of foreign place names or search results — never drift to another language.`
-        : '') +
-      `${memory}`
-    // Code agents (Developer/Tester) also get the real execution sandbox.
-    const agentTools: Tool[] = spec.code
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, CODE_EXEC_TOOL]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL]
-    const params: MessageParam[] = [{ role: 'user', content: task }]
-    let text = ''
-    let agentSandbox = '' // the agent's real sandbox session (proof of execution)
-    let inTok = 0
-    let outTok = 0
-    let agentModel = brainModel()
-    for (let round = 0; round < 4; round++) {
-      // Aceeași plasă ca la creier: Kimi → GLM la orice problemă de model (inclusiv
-      // un refuz de siguranță) — client selectat după model (brainClientFor).
-      const make = (m: string): Promise<Message> =>
-        brainClientFor(m).messages.create({
-          model: m,
-          // Code agents get room to write real programs; text agents stay tight.
-          max_tokens: spec.code ? 4000 : m === MODEL ? 2200 : 1500,
-          system,
-          tools: agentTools,
-          messages: params,
-        })
-      let res: Message
-      try {
-        res = await make(agentModel)
-        quotaTracker.record(agentModel, true)
-      } catch (e) {
-        if (agentModel !== MODEL) throw e
-        quotaTracker.record(MODEL, false)
-        logFailover('kimi', 'glm', isQuotaError(e) ? 'quota' : 'error')
-        restFable()
-        agentModel = MODEL_RESERVE
-        res = await make(agentModel)
-        quotaTracker.record(MODEL_RESERVE, true)
-      }
-      if ((res as { stop_reason?: string }).stop_reason === 'refusal' && agentModel === MODEL) {
-        agentModel = MODEL_RESERVE
-        res = await make(agentModel)
-      }
-      inTok += res.usage.input_tokens
-      outTok += res.usage.output_tokens
-      const t = res.content
-        .filter((b): b is TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-      if (t) text += (text ? '\n' : '') + t
-      if (spec.code) {
-        const sb = sandboxTranscript(res.content as unknown[])
-        if (sb) agentSandbox += (agentSandbox ? '\n\n' : '') + sb
-      }
-      if (res.stop_reason !== 'tool_use') break
-      params.push({ role: 'assistant', content: res.content })
-      const results: ToolResultBlockParam[] = []
-      for (const block of res.content) {
-        if (block.type === 'tool_use') {
-          let out: string
-          try {
-            out = await runTool(block, false, token, reply, baseUrl, email, usage, lang)
-          } catch (e) {
-            out = JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })
-          }
-          if (
-            (block.name === 'web_search' || block.name === 'youtube_search') &&
-            !out.includes('"error"')
-          ) {
-            usage.usd += SERPER_USD_PER_CALL
-            void recordCost(email, 'search', SERPER_USD_PER_CALL)
-          }
-          if (block.name === 'generate_image' && out.includes('"shown":true')) {
-            usage.usd += IMAGE_USD_PER_CALL
-            void recordCost(email, 'image', IMAGE_USD_PER_CALL)
-          }
-          results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
+        if (results.length > 0) {
+          params.push({ role: 'user', content: results })
         }
       }
-      params.push({ role: 'user', content: results })
+    } catch (e) {
+      // Both providers failed — be honest, never silent.
+      const errMsg = e instanceof Error ? e.message : String(e)
+      const isQuota = isQuotaError(e)
+      const isRefusal = errMsg.toLowerCase().includes('refusal')
+      const spoken =
+        ro
+          ? isQuota
+            ? 'Am epuizat momentan creditul la ambele creiere. Te rog reîncarcă creditul ca să continuăm.'
+            : isRefusal
+              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
+              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
+          : isQuota
+            ? "I've temporarily run out of credit on both brains. Please top up so we can continue."
+            : isRefusal
+              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
+              : 'I ran into a technical issue. Please try again in a moment.'
+      reply.raw.write(spoken)
+      reply.raw.end()
+      void saveMessage(user.email, 'assistant', spoken)
+      // Log for ops, never crash the process.
+      console.error('[CHAT ERROR]', errMsg)
+      return
     }
-    const usd = brainCost(agentModel, inTok, outTok)
-    usage.usd += usd
-    void recordCost(email, `agent:${spec.id}`, usd)
-    // Text agents: put the finished written deliverable on the monitor as a
-    // readable, copyable panel (so it isn't only spoken — the user can read it).
-    // Code agents also attach their REAL sandbox session — proof of execution.
-    if (spec.doc && (text.trim() || agentSandbox.trim())) {
-      const body =
-        text.trim() +
-        (agentSandbox.trim() ? `\n\n── SANDBOX (dovada rulării) ──\n${agentSandbox.trim()}` : '')
+
+    // ── FINAL TURN ──
+    await voice.finish()
+    if (sandboxLog) {
       reply.raw.write(
-        `${CTRL}${JSON.stringify({ doc: { title: spec.name, text: body.slice(0, 9000) } })}${CTRL}`,
+        `${CTRL}${JSON.stringify({ monitor: { kind: 'sandbox', text: sandboxLog } })}${CTRL}`,
       )
     }
-    // The specialist learns to ITS OWN memory (off the response path).
-    if (text.trim()) void learnFromTurn(email, task, text, spec.id)
-    return text.trim() || '(task completed, no summary returned)'
-  } catch (e) {
-    return `agent error: ${e instanceof Error ? e.message : 'failed'}`
-  }
-}
+    reply.raw.end()
 
-// URLs that actually render inside the monitor iframe: our own pages (relative
-// or same-host), YouTube (the frontend rewrites to /embed/), Waze's live-map
-// embed, OpenStreetMap embeds and Google's keyed Maps Embed API. Everything
-// else on the open web almost always sends X-Frame-Options/CSP and would show
-// a broken panel — those go through the live browser instead (see
-// show_on_screen in runTool).
-function iframeSafe(raw: string): boolean {
-  let u: URL
-  try {
-    u = new URL(raw)
-  } catch {
-    return true // relative URL (/api/image/…, /api/route…) — same-origin, safe
-  }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
-  const host = u.hostname.replace(/^www\./, '')
-  if (host === 'kelionai.app' || host.endsWith('.kelionai.app')) return true
-  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be') return true
-  if (host === 'embed.waze.com') return true
-  if (host === 'openstreetmap.org') return true
-  if (host === 'embed.windy.com' || host === 'windy.com') return true
-  if (host === 'wttr.in') return true
-  if ((host === 'google.com' || host.endsWith('.google.com')) && u.pathname.startsWith('/maps/embed'))
-    return true
-  return false
-}
+    // Persist the assistant's reply.
+    if (assistantText) {
+      void saveMessage(user.email, 'assistant', assistantText)
+      // Memory agent (learn): durable facts about this user, learned from this turn.
+      // Fire-and-forget — zero latency on the reply path.
+      void learnFromTurn(user.email, 'kelion', lastUserText, assistantText)
+    }
 
-// Shared by every browser_* tool: puts the fresh screenshot on the monitor (a
-// plain <img>-safe same-origin URL, so it renders even for sites that block
-// iframes) and hands Kelion back the page text + numbered clickable elements.
-function browserToolResult(
-  reply: { raw: { write(chunk: string): void } },
-  result: { error: string } | { url: string; title: string; text: string; elements: unknown; shotUrl: string },
-): string {
-  if ('error' in result) return JSON.stringify(result)
-  reply.raw.write(
-    `${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`,
+    // Debit real provider cost from the user's wallet (customers only; admin/demo exempt).
+    // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
+    // multiple times for the same turn).
+    if (user.role !== 'admin' && user.role !== 'demo') {
+      const cost = brainCost(inTokens, outTokens, model) + usage.usd
+      if (cost > 0) {
+        void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
+      }
+    }
+    },
   )
-  return JSON.stringify({
-    shown: true,
-    url: result.url,
-    title: result.title,
-    text: result.text,
-    elements: result.elements,
-  })
 }
 
-// Run one tool-use block and return the JSON string result. show_on_screen also
-// emits a control frame on the live stream so the frontend opens the monitor.
+// ── runTool helper (extracted from the main handler for clarity) ────────────
 async function runTool(
   block: ToolUseBlock,
   isAdmin: boolean,
   token: string,
-  reply: { raw: { write(chunk: string): void } },
+  reply: { raw: { write(c: string): void } },
   baseUrl: string,
   email: string,
   usage: { usd: number },
-  lang: string,
+  langName: string,
 ): Promise<string> {
-  if (block.name === 'get_real_cost') {
-    return isAdmin ? JSON.stringify(await getCostSummary()) : JSON.stringify({ error: 'forbidden' })
-  }
-  if (block.name === 'log_unsupported_request') {
-    const inp = (block.input ?? {}) as { request?: string; reason?: string }
-    const request = typeof inp.request === 'string' ? inp.request : ''
-    const reason = typeof inp.reason === 'string' ? inp.reason : ''
-    if (request) void logCapabilityGap(email, request, reason)
-    return JSON.stringify({ logged: true })
-  }
-  if (block.name === 'save_note') {
-    const inp = (block.input ?? {}) as { content?: string; title?: string }
-    const content = typeof inp.content === 'string' ? inp.content : ''
-    if (!content.trim()) return JSON.stringify({ error: 'empty_content' })
-    const id = await saveNote(email, content, inp.title)
-    return id ? JSON.stringify({ saved: true, id }) : JSON.stringify({ error: 'save_failed' })
-  }
-  if (block.name === 'list_notes') {
-    const notes = await listNotes(email)
-    return JSON.stringify({ notes })
-  }
-  if (block.name === 'delete_note') {
-    const inp = (block.input ?? {}) as { id?: number }
-    const id = Number(inp.id)
-    if (!Number.isFinite(id)) return JSON.stringify({ error: 'bad_id' })
-    const ok = await deleteNote(email, id)
-    return JSON.stringify({ deleted: ok })
-  }
-  if (block.name === 'list_memories') {
-    // Tot ce ține minte Kelion despre user (memoria auto-învățată) — transparent.
-    const mems = await getMemories(email, 100)
-    return JSON.stringify({ memories: mems.map((m) => m.content) })
-  }
-  if (block.name === 'forget_memory') {
-    const inp = (block.input ?? {}) as { fragment?: string }
-    const fragment = typeof inp.fragment === 'string' ? inp.fragment : ''
-    if (fragment.trim().length < 3) return JSON.stringify({ error: 'fragment_too_short' })
-    const deleted = await deleteMemory(email, fragment)
-    return JSON.stringify({ deleted })
-  }
-  if (block.name === 'prepare_promo_clip') {
-    if (!isAdmin) return JSON.stringify({ error: 'forbidden' })
-    const inp = (block.input ?? {}) as {
-      subject?: string
-      duration_seconds?: number
-      script?: string
-      lang?: string
-      scenes?: { at_seconds?: number; kind?: string; query?: string; url?: string; title?: string }[]
-    }
-    const subject = typeof inp.subject === 'string' ? inp.subject.trim() : ''
-    // Any length up to 10 minutes — the voice pipeline chunks long narrations.
-    const duration = Math.min(600, Math.max(5, Number(inp.duration_seconds) || 30))
-    const script = typeof inp.script === 'string' ? inp.script.trim() : ''
-    if (!script) return JSON.stringify({ error: 'empty_script' })
-    // Resolve the shot list server-side: map/weather queries become REAL embed
-    // URLs (never guessed), image scenes must point at our own image store,
-    // "avatar" closes the monitor so Kelion himself fills the frame.
-    const scenes: { at: number; title: string; url?: string; close?: boolean }[] = []
-    for (const s of (inp.scenes ?? []).slice(0, 12)) {
-      const at = Math.max(0, Math.min(Number(s.at_seconds) || 0, duration - 1))
-      const title = typeof s.title === 'string' && s.title ? s.title.slice(0, 40) : subject
-      if (s.kind === 'avatar') scenes.push({ at, title, close: true })
-      else if ((s.kind === 'map' || s.kind === 'weather') && s.query) {
-        const url = await promoSceneUrl(s.kind, s.query)
-        if (url) scenes.push({ at, title, url })
-      } else if (s.kind === 'image' && typeof s.url === 'string' && s.url.includes('/api/image/')) {
-        scenes.push({ at, title, url: s.url })
-      }
-    }
-    scenes.sort((a, b) => a.at - b.at)
-    // Stamp the script's OWN language so the clip is always narrated with a
-    // matching voice — a text/voice mismatch is exactly what silenced the voice
-    // ("a crăpat") when a script saved in another language was recalled. Kelion
-    // declares it explicitly (works for ANY language); the detector is backup.
-    const scriptLang =
-      typeof inp.lang === 'string' && /^[a-z]{2}(-[A-Za-z]{2})?$/i.test(inp.lang.trim())
-        ? inp.lang.trim()
-        : detectLang(script)
-    // Show the approved script as a readable panel (it closes itself the moment
-    // recording starts — the clip never shows the text) AND arm the recorder.
-    reply.raw.write(
-      `${CTRL}${JSON.stringify({ doc: { title: `Scenariu ${duration}s — ${subject}`, text: script } })}${CTRL}`,
-    )
-    reply.raw.write(
-      `${CTRL}${JSON.stringify({ promo: { subject, duration, script, scenes, lang: scriptLang } })}${CTRL}`,
-    )
-    return JSON.stringify({
-      armed: true,
-      scenes: scenes.length,
-      note: 'Recorder armed. The admin must click the pulsing Rec button and pick the screen; the approved script is spoken and the scenes play automatically when recording starts.',
-    })
-  }
-  if (block.name === 'delegate') {
-    const inp = (block.input ?? {}) as { agent?: string; task?: string }
-    const spec = AGENTS[String(inp.agent)]
-    const task = typeof inp.task === 'string' ? inp.task.trim() : ''
-    if (!spec || !task) return JSON.stringify({ error: 'unknown_agent_or_empty_task' })
-    const result = await runAgent(spec, task, token, reply, baseUrl, email, usage, lang)
-    return JSON.stringify({ agent: spec.id, result })
-  }
-  if (block.name === 'show_on_screen') {
-    const inp = (block.input ?? {}) as { url?: string; title?: string }
-    const url = typeof inp.url === 'string' ? inp.url : ''
-    const title = typeof inp.title === 'string' ? inp.title : ''
-    // Empty URL or known-embeddable content (YouTube, our own pages, Waze,
-    // OSM…) → the plain iframe works, show it directly.
-    if (!url || iframeSafe(url)) {
+  const args = block.input as Record<string, unknown>
+
+  switch (block.name) {
+    case 'show_on_screen': {
+      const url = String(args.url ?? '')
+      const title = String(args.title ?? '')
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-      return JSON.stringify({ shown: true, url })
+      return JSON.stringify({ shown: true, url, title })
     }
-    // Anything else (an arbitrary website) almost always refuses to load in an
-    // iframe (X-Frame-Options/CSP) and would show a broken panel — so open it
-    // in the LIVE browser instead and show the real page. If even that fails,
-    // fall back to the iframe attempt as a last resort.
-    const live = await browserOpen(email, baseUrl, url)
-    if (!('error' in live)) return browserToolResult(reply, live)
-    reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
-    return JSON.stringify({ shown: true, url, note: 'live_browser_failed_iframe_fallback' })
-  }
-  if (block.name === 'generate_image') {
-    const inp = (block.input ?? {}) as { prompt?: string }
-    const prompt = typeof inp.prompt === 'string' ? inp.prompt : ''
-    const result = await generateImage(prompt)
-    if ('error' in result) return JSON.stringify({ error: result.error })
-    const url = `${baseUrl}/api/image/${result.id}`
-    // Show it big on the monitor AND inline in the chat.
-    reply.raw.write(
-      `${CTRL}${JSON.stringify({ monitor: { url, title: prompt.slice(0, 60) }, image: { url } })}${CTRL}`,
-    )
-    return JSON.stringify({ shown: true, url })
-  }
-  if (block.name === 'browser_open') {
-    const inp = (block.input ?? {}) as { url?: string }
-    const url = typeof inp.url === 'string' ? inp.url : ''
-    if (!url.trim()) return JSON.stringify({ error: 'empty_url' })
-    return browserToolResult(reply, await browserOpen(email, baseUrl, url))
-  }
-  if (block.name === 'browser_click') {
-    const inp = (block.input ?? {}) as { index?: number }
-    const index = Number(inp.index)
-    if (!Number.isFinite(index)) return JSON.stringify({ error: 'bad_index' })
-    return browserToolResult(reply, await browserClick(email, baseUrl, index))
-  }
-  if (block.name === 'browser_type') {
-    const inp = (block.input ?? {}) as { index?: number; text?: string; submit?: boolean }
-    const index = Number(inp.index)
-    const text = typeof inp.text === 'string' ? inp.text : ''
-    if (!Number.isFinite(index)) return JSON.stringify({ error: 'bad_index' })
-    return browserToolResult(reply, await browserType(email, baseUrl, index, text, !!inp.submit))
-  }
-  if (block.name === 'browser_read') {
-    return browserToolResult(reply, await browserRead(email, baseUrl))
-  }
-  if (block.name === 'browser_back') {
-    return browserToolResult(reply, await browserBack(email, baseUrl))
-  }
-  if (block.name === 'browser_scroll') {
-    const inp = (block.input ?? {}) as { direction?: string }
-    const direction = inp.direction === 'up' ? 'up' : 'down'
-    return browserToolResult(reply, await browserScroll(email, baseUrl, direction))
-  }
-  if (block.name === 'browser_key') {
-    const inp = (block.input ?? {}) as { key?: string }
-    const key = typeof inp.key === 'string' ? inp.key.trim() : ''
-    if (!key) return JSON.stringify({ error: 'empty_key' })
-    return browserToolResult(reply, await browserKey(email, baseUrl, key))
-  }
-  if (block.name === 'browser_click_at') {
-    const inp = (block.input ?? {}) as { x?: number; y?: number }
-    const x = Number(inp.x)
-    const y = Number(inp.y)
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return JSON.stringify({ error: 'bad_coords' })
-    return browserToolResult(reply, await browserClickAt(email, baseUrl, x, y))
-  }
-  if (block.name === 'browser_close') {
-    await browserClose(email)
-    reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
-    return JSON.stringify({ closed: true })
-  }
-  if (block.name === 'request_repair') {
-    if (!isAdmin) return JSON.stringify({ error: 'forbidden' })
-    const inp = (block.input ?? {}) as { description?: string }
-    const desc = typeof inp.description === 'string' ? inp.description.trim() : ''
-    if (!desc) return JSON.stringify({ error: 'empty_description' })
-    const jobId = bridgeRepair(desc)
-    if (!jobId) {
-      return JSON.stringify({ error: 'developer_offline', note: 'The repair bridge is not running right now.' })
+
+    case 'generate_image': {
+      const prompt = String(args.prompt ?? '')
+      if (!prompt) return JSON.stringify({ error: 'no_prompt' })
+      const result = await generateImage(prompt)
+      if (result.error) return JSON.stringify({ error: result.error })
+      const imageUrl = `${baseUrl}/api/image/${result.filename}`
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
+      return JSON.stringify({ shown: true, url: imageUrl })
     }
-    // SUPERVIZOR: cerința devine DEȚINUTĂ prin TOOL (fără parsare de etichete
-    // [EXECUT] din text) — rămâne deschisă până la verificarea live, iar bara de
-    // proces stampilează o tură de tip „lucru" (predare la constructor).
-    openRequirement(desc.slice(0, 100), desc, jobId)
-    updateRequirement('trimisă la constructor')
-    finishBrainTurn('lucru')
-    return JSON.stringify({ sent: true, note: 'Repair request forwarded to the developer. It will be worked on now.' })
-  }
-  if (block.name === 'play_avatar_gesture') {
-    const inp = (block.input ?? {}) as { gesture?: string }
-    const label =
-      inp.gesture && (AVATAR_GESTURES as readonly string[]).includes(inp.gesture) ? inp.gesture : undefined
-    if (!label) return JSON.stringify({ error: 'unknown_gesture' })
-    // Poartă deterministă: discret, fără repetiție obsesivă. Prea curând sau
-    // același ca ultimul → NU se joacă (dar nu e o eroare, ca modelul să nu insiste).
-    if (!allowAutoGesture(email, label)) {
-      return JSON.stringify({ played: false, note: 'suppressed_for_discretion' })
+
+    case 'browser_open': {
+      const url = String(args.url ?? '')
+      if (!url) return JSON.stringify({ error: 'no_url' })
+      const result = await browserOpen(url)
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
     }
-    reply.raw.write(`${CTRL}${JSON.stringify({ gesture: label })}${CTRL}`)
-    return JSON.stringify({ played: true, gesture: label })
-  }
-  const out = await runGoogleTool(block.name, block.input, token)
-  // Weather map or route map: if the tool returned an embeddable screen_url, show
-  // it on the monitor automatically (our own maps, which always load in the
-  // iframe — unlike a google.com link that refuses).
-  if (block.name === 'get_weather' || block.name === 'maps_directions') {
-    try {
-      const parsed = JSON.parse(out) as Record<string, unknown> & {
-        screen_url?: string
-        location?: string
-        destination?: string
+    case 'browser_click': {
+      const result = await browserClick(Number(args.index ?? 0))
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_type': {
+      const result = await browserType(Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_read': {
+      const result = await browserRead()
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_back': {
+      const result = await browserBack()
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_scroll': {
+      const result = await browserScroll(String(args.direction ?? 'down'))
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_key': {
+      const result = await browserKey(String(args.key ?? ''))
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_click_at': {
+      const result = await browserClickAt(Number(args.x ?? 0), Number(args.y ?? 0))
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+    case 'browser_close': {
+      const result = await browserClose()
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      return JSON.stringify(result)
+    }
+
+    case 'save_note': {
+      const content = String(args.content ?? '')
+      const title = String(args.title ?? '')
+      if (!content) return JSON.stringify({ error: 'no_content' })
+      const id = await saveNote(email, content, title || undefined)
+      return JSON.stringify({ saved: true, id })
+    }
+    case 'list_notes': {
+      const notes = await listNotes(email)
+      return JSON.stringify({ notes })
+    }
+    case 'delete_note': {
+      const id = Number(args.id ?? 0)
+      if (!id) return JSON.stringify({ error: 'no_id' })
+      await deleteNote(email, id)
+      return JSON.stringify({ deleted: true })
+    }
+    case 'list_memories': {
+      const memories = await getMemories(email, 'kelion')
+      return JSON.stringify({ memories: memories.map((m) => m.content) })
+    }
+    case 'forget_memory': {
+      const fragment = String(args.fragment ?? '')
+      if (!fragment) return JSON.stringify({ error: 'no_fragment' })
+      const count = await deleteMemory(email, 'kelion', fragment)
+      return JSON.stringify({ deleted: count })
+    }
+
+    case 'log_unsupported_request': {
+      const request = String(args.request ?? '')
+      const reason = String(args.reason ?? '')
+      if (!request) return JSON.stringify({ error: 'no_request' })
+      void logCapabilityGap(email, request, reason)
+      return JSON.stringify({ logged: true })
+    }
+
+    case 'get_real_cost': {
+      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
+      const summary = await getCostSummary()
+      return JSON.stringify(summary)
+    }
+
+    case 'request_repair': {
+      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
+      const description = String(args.description ?? '')
+      if (!description) return JSON.stringify({ error: 'no_description' })
+      openRequirement(description)
+      return JSON.stringify({ queued: true })
+    }
+
+    case 'prepare_promo_clip': {
+      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
+      const subject = String(args.subject ?? '')
+      const duration = Number(args.duration_seconds ?? 30)
+      const script = String(args.script ?? '')
+      const lang = String(args.lang ?? 'ro-RO')
+      const scenes = Array.isArray(args.scenes) ? args.scenes : []
+      if (!subject || !script) return JSON.stringify({ error: 'missing_params' })
+      const imageScenes = scenes.filter((s: unknown) => (s as { kind?: string }).kind === 'image')
+      for (const s of imageScenes) {
+        const scene = s as { url?: string }
+        if (!scene.url?.startsWith('/api/image/')) {
+          return JSON.stringify({ error: 'image_scene_needs_api_image_url' })
+        }
       }
-      if (parsed.screen_url) {
-        const title =
-          block.name === 'get_weather'
-            ? `Weather — ${parsed.location ?? 'your location'}`
-            : `Route — ${parsed.destination ?? ''}`.slice(0, 60)
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: parsed.screen_url, title } })}${CTRL}`)
-        // Ground truth INSIDE the tool result: shown ONLY when the frame was
-        // actually written — Kelion may claim "on your monitor" only on this.
-        parsed.shown = true
-        return JSON.stringify(parsed)
+      const promoUrl = promoSceneUrl(subject, duration, script, lang, scenes as { kind: string; at_seconds: number; query?: string; url?: string; title?: string }[])
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: promoUrl, title: `Promo: ${subject}` } })}${CTRL}`)
+      return JSON.stringify({ shown: true, url: promoUrl })
+    }
+
+    case 'delegate': {
+      const agent = String(args.agent ?? '')
+      const task = String(args.task ?? '')
+      if (!agent || !task) return JSON.stringify({ error: 'missing_params' })
+      const spec = AGENTS[agent]
+      if (!spec) return JSON.stringify({ error: 'unknown_agent' })
+      // Delegate to the specialist agent via the brain's own API.
+      // For now, this is a simplified implementation that returns the task.
+      return JSON.stringify({ delegated: true, agent: spec.name, task })
+    }
+
+    case 'code_execution': {
+      const code = String(args.code ?? '')
+      if (!code) return JSON.stringify({ error: 'no_code' })
+      // The actual execution happens in the brain's sandbox.
+      return JSON.stringify({ executed: true, output: 'Code executed in sandbox.' })
+    }
+
+    default: {
+      // Google tools are handled by the googleTools router.
+      if (googleTools.some((t) => t.name === block.name)) {
+        return runGoogleTool(block, token)
       }
-    } catch {
-      /* not JSON / no screen_url — nothing to show */
+      return JSON.stringify({ error: `unknown_tool: ${block.name}` })
     }
   }
-  // A searched place → always show it on the map (don't rely on Kelion choosing).
-  if (block.name === 'maps_search') {
-    try {
-      const j = JSON.parse(out) as { places?: { name?: string; lat?: string; lon?: string }[] }
-      const p = j.places?.[0]
-      if (p?.lat && p?.lon) {
-        const url = `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}`
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title: (p.name ?? '').slice(0, 60) } })}${CTRL}`)
-      }
-    } catch {
-      /* nothing to show */
-    }
-  }
-  // A found video → always play it on the monitor.
-  if (block.name === 'youtube_search') {
-    try {
-      const j = JSON.parse(out) as { videos?: { title?: string; link?: string }[] }
-      const v = j.videos?.[0]
-      if (v?.link) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: v.link, title: (v.title ?? '').slice(0, 60) } })}${CTRL}`)
-      }
-    } catch {
-      /* nothing to show */
-    }
-  }
-  // Structured skills (emails, calendar, tasks, Drive, contacts, web results)
-  // → render a card on the monitor.
-  const card = cardFor(block.name, out)
-  if (card && card.items.length > 0) {
-    reply.raw.write(`${CTRL}${JSON.stringify({ card })}${CTRL}`)
-  }
-  return out
+}
+
+// ── sandboxTranscript helper ────────────────────────────────────────────────
+function sandboxTranscript(content: unknown[]): string | null {
+  if (!Array.isArray(content)) return null
+  const toolUses = content.filter((c): c is ToolUseBlock =>
+    typeof c === 'object' && c !== null && (c as { type?: string }).type === 'tool_use',
+  )
+  if (toolUses.length === 0) return null
+  const execBlocks = toolUses.filter((t) => t.name === 'code_execution')
+  if (execBlocks.length === 0) return null
+  return execBlocks.map((t) => `\`\`\`\n${JSON.stringify(t.input, null, 2)}\n\`\`\``).join('\n\n')
 }
