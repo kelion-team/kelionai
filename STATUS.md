@@ -1,103 +1,44 @@
 # Kelionai — Status
 
-> ⚠️ **PARȚIAL ÎNVECHIT (11 iul 2026).** Ex: „memoria între sesiuni" de mai jos
-> apare la „Next" dar E LIVE de pe 10 iul. **Sursa de adevăr e `AI-HANDOFF.md`**
-> (rădăcina proiectului) — acest fișier rămâne util pentru istoric și lista de
-> credențiale neconfigurate (§ Credentials), dar verifică orice altceva contra
-> AI-HANDOFF.md.
+> **Sursa de adevăr:** `AI-HANDOFF.md` (rădăcina proiectului). Acest fișier reflectă starea curentă a deploy-ului și a infrastructurii.
 
-> Where the build is right now. Updated as milestones land. The full locked
-> product spec lives in Claude's project memory (`kelion-rewrite-spec.md`).
+_Last updated: 2026-07-16_
 
-_Last updated: 2026-07-09_
+## 🚀 Stabilizare completă (16 iul 2026)
 
-## 🚀 Migrare completă pe Linux (9 iul 2026)
-
-- **Laptop Eliminat** — Întreg fluxul de lucru rulează acum pe infrastructură permanentă (Railway + VPS). Laptopul este doar un terminal de vizualizare.
-- **Acces Admin Securizat** — Autentificarea admin (`adrianenc11@gmail.com`) este configurată pentru producție pe `https://kelionai.app`.
-- **Puntea (Bridge) pe VPS** — "Creierul" (Claude Code) rulează ca serviciu `kelion-bridge` pe VPS-ul Linux, conectat la backend prin `BRIDGE_SECRET`.
-- **Autonomie Creier** — Puntea are acum "Ochi și Mâini": acces direct la fișierele repo-ului pe VPS, Git, Bash și jurnalele de sistem (`journalctl`). Poate decide singură la conflicte de deploy sau erori de build.
-- **Monitorizare Live** — Indicatorii **● Bridge**, **● Server** și **● Linux** din dashboard-ul de admin sunt activi și reflectă starea reală a serviciilor de pe Linux.
-- **Audit Căi și Rutine (9 iul 2026)** — Am verificat întreg proiectul (backend, frontend, admin). Toate API-urile și download-urile folosesc acum căile de producție (`https://kelionai.app`). Orice actualizare de program (EXE/APK) este servită instantaneu din baza de date via Punte.
-- **Formate Market Finalizate (9 iul 2026)** — Toate formatele de aplicație sunt active: Windows (Microsoft Store + EXE), Android (Google Play + APK), iOS (App Store + PWA) și Linux (Web App). Codurile QR sunt regenerate automat la fiecare deploy pentru a asigura link-uri mereu valide.
+- **Deploy curat** — Ultimul build (`85ef61fb`) trece fără erori TypeScript.
+- **Curățare Antropic** — Scan complet: 0 referințe `antropic` / `claude` / `CLAUDE` / `Anthropic` în repo. Codul rulează exclusiv pe Kimi 2.7 + GLM 5.2.
+- **Backend TypeScript** — Curat, zero erori de compilare.
+- **VPS Linux** — Bridge (`kelion-bridge`) activ pe `164.68.120.87`. LiveKit self-hostat.
+- **Aider** — Instalat și configurat (`23c83508`) cu Kimi/GLM keys.
 
 ## ✅ Live on kelionai.app
 
-- **Auth** — Google login, allowlisted to `adrianenc11@gmail.com` (sole admin).
-  Google **refresh token** stored in the session; chat route mints a fresh access
-  token per turn, so skills survive past the ~1h access-token expiry.
-- **Avatar** — 3D Ready Player Me, idle animation (breathing, blink, micro-motion),
-  professional formant-based viseme lip-sync (Oculus visemes aa/E/I/O/U/SS/FF).
-- **Brain — multi-agent + memory** (`services/agents.ts`). Five cooperating
-  agents: Router (instant complexity gate), Conversation (Opus persona),
-  Reasoning (Opus extended thinking on complex turns only — deep on hard,
-  instant on simple), Skills (tool-use loop), Memory (cross-session). The Memory
-  agent recalls durable facts about the user into the prompt and, after each
-  turn, a Haiku pass distils + saves new facts (`memories` table). History is
-  sanitized server-side so multi-turn voice chat no longer 400s.
-- **Audio routing** — Bluetooth / external mic + speaker selectable in the ⊕
-  menu (input deviceId on all capture paths; output via setSinkId on Chromium).
-- **Chat tab** — always-on-top, shows only the latest message, ChatGPT-style ⊕
-  functions menu. UI language follows the Google account locale (en/ro).
-- **Voice — hearing** — permanent, hands-free listening (no button). "Hey Kelion"
-  wake word; ~1 min silence → standby. Web Speech API (Google engine in Chrome).
-  Full-duplex path: browser AEC + VAD + Google Chirp STT (talk over Kelion, no echo).
-- **Voice — speaking** — Google **Chirp 3 HD** (male, academic) via `/api/tts`,
-  with the browser voice as automatic fallback. Voice + text in parallel
-  (speaks each sentence as it streams). Say "stop/stai" to interrupt (barge-in).
-- **Vision** — permanent camera (front by default), **voice/text-controlled**
-  ("switch/comută camera", "camera spate/față", "open/close"); the latest frame
-  goes to Claude's native vision **on each turn** (cheap policy). Floating glass
-  preview, top-left.
-- **GPS** — permanent `watchPosition` (free), live coords sent with each chat
-  turn; backend reverse-geocodes (cached) so "here"/"near me" resolves. Capture
-  1 fps still, 4 fps moving, scaling with speed.
-- **Google skills (14 tools)** — generic tool-use framework. Claude can call
-  **Calendar** (read + create events), **Gmail** (read + send), **Drive**,
-  **Tasks** (list/add), **Contacts**, plus **web search** (Serper), **weather**,
-  **maps** (OSM), **YouTube** (Serper), **translate** (Gemini).
-- **Automatic monitor** — Kelion opens the screen himself via the `show_on_screen`
-  tool (control frame on the chat stream); no manual monitor button.
+- **Auth** — Google login, admin `adrianenc11@gmail.com`.
+- **Creier** — Kimi 2.7 principal, GLM 5.2 failover. Quota bar + failover implementat (ordin #6C).
+- **Voice** — Web Speech API (Google) STT + Google Chirp 3 HD TTS. Full-duplex în progres.
+- **Stripe** — Sistem credite 75/25, top-up funcțional.
+- **Admin panel** — Scroll, butoane, toate câmpurile active.
+- **Memorie** — Cross-session prin `memories` table.
 
-## 🔑 Credentials
+## 🔑 Credentials (configurate)
 
-- `GOOGLE_SERVICE_ACCOUNT_JSON` — set in Railway (Chirp 3 HD). ✅
-- LiveKit (`LIVEKIT_URL/API_KEY/API_SECRET`) — in backup, **not yet set** (for
-  full-duplex). `VITE_GOOGLE_MAPS_KEY` — in backup (for the Maps skill).
-- **Picovoice** — not available; wake word runs on the interim Web Speech match.
-- Gmail/Calendar APIs must be **enabled** in Google Cloud project
-  `gen-lang-client-0460348646`, and the user must **re-login** to grant the new
-  scopes (consent screen for Calendar + Gmail).
+- `KIMI_API_KEY` / `GLM_API_KEY` — active în Railway.
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — set (Chirp 3 HD).
+- `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` — set.
+- `BRIDGE_SECRET` — set, puntea VPS conectată.
+- LiveKit (`LIVEKIT_URL/API_KEY/API_SECRET`) — set pe VPS.
 
-## 📦 In repo, nedeployat (4 iul 2026 — ordinul „cât mai mult pe server")
+## 🚧 Next (ordin #7)
 
-- **Comenzile de dispozitiv s-au mutat pe server** — camera („camera spate",
-  „închide camera") și taburile monitorului („închide harta", „treci la video")
-  se interpretează acum în backend (`services/commands.ts`, rulat de `/api/chat`
-  înaintea creierului; răspuns instant cu un cadru `{device}`, fără apel de
-  model). Clientul doar execută cadrul.
-- **Limba vorbită s-a mutat pe server** — detecția (stopwords + alfabete
-  non-latine în `services/lang.ts`) + regula „de două ori la rând" + persistarea
-  rulează în `/api/chat`; clientul primește un cadru `{lang}` și doar comută
-  recognizer-ul + oglinda locală. `franc-min` nu se mai folosește în frontend.
-- **Microfonul e permanent on (5 iul 2026)** — pornește singur la intrare (fără
-  click), se redeschide singur când pista moare (apel, căști Bluetooth scoase,
-  alt app ia microfonul — `track ended` în `audioIO.ts`) sau când tabul redevine
-  vizibil, cu reîncercare cu pas dublat (1s→15s); refuzul de permisiune NU se
-  reîncearcă automat (butonul reîncearcă la atingere). Cât ascultă, ecranul e
-  ținut treaz (`wakelock.ts`). Butonul de mic rămâne doar ca pauză manuală.
+- React hydration #418/#423 — fix final server/client mismatch.
+- Voce full-duplex sub 1s — VAD + filtre zgomot, bufferSize 128.
+- Memorie universală + auto-evaluare.
+- Securitate: auto-backup zilnic, rollback 1-click, criptare credențiale.
+- Tests CI gate — build blocat la erori TS/ESLint.
 
-## 🚧 Next
+## ⚠️ Verificări post-deploy
 
-- Skill result **cards** (MapCard, EmailList, CalendarView…) — replace raw text.
-- Full-duplex voice over **LiveKit** (echo-cancelled hardware path; keys in backup,
-  not yet set). **Picovoice Porcupine** wake word (real low-power engine).
-- Cross-session memory; monetization (credits/Stripe, 75/25 split); admin panel.
-- Engineering: persistent DB + encrypted Google refresh tokens, avatar `.glb`
-  optimization, credit checks before AI calls, rate limiting, tests, CI gate.
-
-## ⚠️ Owner config (not code) — required for Google skills to work
-- Google Cloud Console `gen-lang-client-0460348646`: **enable** Calendar, Gmail,
-  Drive, Tasks, People (Contacts), Cloud TTS APIs (disabled API → `*_http_403`).
-- **Re-login** on kelionai.app after scope changes to grant consent + get a
-  refresh token.
+- `curl -s https://kelionai.app/health` → `{"ok":true}`
+- `journalctl -u kelion-bridge -n 20 --no-pager` → fără erori 403/Quota
+- `git log --oneline -5` → master curat, fără commit-uri de diagnostic
