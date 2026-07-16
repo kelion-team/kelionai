@@ -517,24 +517,26 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
-/* COADA textului care CURGE: containerul e aliniat la DREAPTA și taie
-   overflow-ul din STÂNGA, ca să se vadă mereu SFÂRȘITUL replicii — fără
-   trucuri RTL/LTR care spărțeau textul în litere individuale și lăsau
-   artefacte verticale. */
+/* COADA textului care CURGE: containerul RTL taie overflow-ul din STÂNGA
+   (se vede mereu SFÂRȘITUL replicii), iar textul dinăuntru e IZOLAT LTR.
+   `unicode-bidi: isolate` împiedică motorul bidi să reordoneze caracterele
+   românești (â/ț/ș) sau să spargă cuvintele în litere individuale. */
 .speech-tail {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  direction: ltr;
+  direction: rtl;
   text-align: right;
 }
 .speech-tail-text {
   display: inline-block;
   direction: ltr;
-  unicode-bidi: normal;
+  unicode-bidi: isolate;
   text-align: left;
   white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
@@ -3407,6 +3409,8 @@ a.card-item:hover {
   font-size: 14px;
   letter-spacing: 0.3px;
   padding-left: 100%;
+  word-break: normal;
+  overflow-wrap: normal;
   animation: ticker-scroll linear 1;
   animation-duration: var(--ticker-dur, 6s);
 }
