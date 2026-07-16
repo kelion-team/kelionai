@@ -534,6 +534,7 @@ body {
   direction: ltr;
   unicode-bidi: normal;
   text-align: left;
+  white-space: nowrap;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
