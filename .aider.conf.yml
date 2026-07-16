@@ -1,0 +1,34 @@
+# Configurație Aider — Kimi (primar)
+# Locație: .aider.conf.yml în repo
+
+# Model
+model: openai/kimi-k2-thinking
+
+# API base pentru Kimi (compatibil OpenAI)
+openai-api-base: https://api.kimi.com/coding/v1
+
+# API key — citit din fișier pe VPS
+openai-api-key: ${KIMI_API_KEY}
+
+# Fereastra de context
+max-chat-history-tokens: 262144
+
+# Comportament
+auto-commits: true
+dirty-commits: false
+watch-files: true
+
+# Unelte
+code-theme: monokai
+show-diffs: true
+
+# Lint/check la salvare
+lint-cmd: "npx eslint --fix"
+
+# Repo
+git: true
+gitignore: true
+
+# Output
+verbose: false
+stream: true
