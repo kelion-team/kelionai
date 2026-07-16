@@ -526,13 +526,11 @@ body {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  direction: ltr;
   text-align: right;
 }
 .speech-tail-text {
   display: inline-block;
-  direction: ltr;
-  unicode-bidi: normal;
+  white-space: nowrap;
   text-align: left;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
