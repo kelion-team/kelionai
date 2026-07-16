@@ -1486,7 +1486,7 @@ export default function ChatPanel({
               <span className="ticker">
                 <span
                   className="ticker-text"
-                  key={lastAssistant?.content ?? ''}
+                  key={lastAssistant?.ts ?? 'empty'}
                   style={{ '--ticker-dur': tickerDur(lastAssistant?.content ?? '') } as CSSProperties}
                 >
                   {lastAssistant?.content}
