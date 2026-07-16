@@ -1108,6 +1108,34 @@ function authed(req: FastifyRequest): boolean {
   return ok
 }
 
+// Redundant GitHub-native deploy path: when a release is approved, trigger the
+// deploy-release.yml workflow directly. The VPS builder still polls the
+// approved-releases queue, so this is a graceful fallback, not a replacement.
+async function dispatchGitHubWorkflow(
+  workflowId: string,
+  ref: string,
+  inputs?: Record<string, string>,
+): Promise<{ ok: boolean; status: number }> {
+  const token = config.githubToken
+  if (!token) return { ok: false, status: 0 }
+  const repo = config.githubRepo
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ref, inputs }),
+    })
+    return { ok: res.status === 204, status: res.status }
+  } catch (e) {
+    console.error(`[bridge] dispatchGitHubWorkflow failed: ${e}`)
+    return { ok: false, status: 0 }
+  }
+}
+
 
 // ── QUOTA TRACKER a fost mutat în services/cost.ts (exportă quotaTracker
 // și getQuotaPercent()) ca să fie accesibil și din services și din routes.
@@ -1690,8 +1718,24 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
         // pe VPS îl vede acolo și execută publicarea prin pipeline-ul verificat
         // (PR → merge → deploy.yml + verificare anti-fantomă). Nu mai trimitem
         // un ordin separat de publicare, ca să evităm dublarea și rapoarte false.
+        //
+        // PLUS cale de rezervă GitHub-native (Adrian, 14 iul: „approved releases
+        // trebuie să ajungă la Railway fără intervenție manuală"): dacă VPS-ul e
+        // oprit, backend-ul declanșează direct workflow-ul deploy-release.yml
+        // (merge branch → master → deploy.yml + redeploy toate serviciile Railway).
         if (r.status === 'approved') {
           noteBrainActivity(`🚀 Release aprobat — îl pun în coada de deploy verificat: ${r.title.slice(0, 80)}`)
+          void dispatchGitHubWorkflow('deploy-release.yml', 'master', {
+            branch: r.branch,
+            title: r.title,
+            detail: r.detail,
+          }).then((out) => {
+            if (out.ok) {
+              noteBrainActivity(`🚀 Workflow deploy-release.yml pornit pentru: ${r.title.slice(0, 60)}`)
+            } else {
+              noteBrainActivity(`⚠️ Workflow deploy-release.yml n-a putut porni (status ${out.status}) — rămâne calea VPS`)
+            }
+          })
         }
       }
       return { ok: true, status: r.status }
