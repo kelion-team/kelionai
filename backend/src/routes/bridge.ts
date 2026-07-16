@@ -559,6 +559,43 @@ setInterval(() => {
     })
     .catch(() => {})
 }, 5 * 60_000).unref()
+
+// PLASA DE SIGURANȚĂ PENTRU APROBĂRI BLOCAATE (Adrian, 16 iul: „125 pending
+// changes across 13 services — pipeline-ul automat nu le împinge"). Calea
+// principală (dispatchGitHubWorkflow la momentul aprobării) poate rata tacit:
+// GITHUB_TOKEN lipsă/invalid pe Railway, eroare de rețea, redeploy al
+// backendului exact în secunda aprobării. Release-ul rămânea `approved` la
+// infinit, iar schimbările de Variables/Settings se adunau în dashboard.
+// Aici, la fiecare 10 minute, re-declanșăm deploy-release.yml pentru ORICE
+// aprobare proaspătă (<6h, cu branch real, ne-fantomă) — ACELAȘI filtru ca la
+// /api/bridge/approved-releases. Workflow-ul e idempotent (merge --no-ff pe un
+// branch deja integrat e no-op sau eșuează curat, iar redeploy-ul serviciilor
+// Railway doar aplică pending changes, nu creează/șterge nimic). Fără GITHUB_TOKEN
+// configurat, funcția întoarce ok:false și nu se loghează nimic (zero zgomot).
+setInterval(() => {
+  void (async () => {
+    if (!config.githubToken) return
+    const all = await listStagedReleases(50).catch(() => [])
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000
+    for (const r of all) {
+      if (r.status !== 'approved') continue
+      if (!r.branch || r.branch.trim() === '') continue
+      if (/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) continue
+      if (r.approved_at) {
+        const t = new Date(r.approved_at).getTime()
+        if (Number.isNaN(t) || t < sixHoursAgo) continue
+      }
+      const out = await dispatchGitHubWorkflow('deploy-release.yml', 'master', {
+        branch: r.branch,
+        title: r.title,
+        detail: r.detail,
+      })
+      if (out.ok) {
+        noteBrainActivity(`🚀 Re-declanșare automată deploy-release.yml pentru aprobarea blocată: ${r.title.slice(0, 60)}`)
+      }
+    }
+  })().catch(() => {})
+}, 10 * 60_000).unref()
 let devActivity: string[] = []
 // When two senders beat at once (the rich live work feed from the laptop and a
 // bare generic presence beat), the LAST write used to win and the monitor
