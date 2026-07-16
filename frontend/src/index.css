@@ -3387,7 +3387,9 @@ a.card-item:hover {
   color: #a8d8ff;
 }
 /* TICKER / TELETEXT: o singură linie, care derulează în loc să se rupă sau să
-   crească pagina. Text scurt (încape) → static; text lung → derulează stânga. */
+   crească pagina. Text scurt (încape) → static; text lung → derulează stânga.
+   Font sistem (nu monospace) și letter-spacing normal, ca literele să NU mai
+   pară „sparte" / despărțite vizual. */
 .ticker {
   flex: 1;
   min-width: 0;
@@ -3402,20 +3404,18 @@ a.card-item:hover {
 .ticker-text {
   display: inline-block;
   white-space: nowrap;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
-  letter-spacing: 0.3px;
+  letter-spacing: normal;
   padding-left: 100%;
   animation: ticker-scroll linear 1;
   animation-duration: var(--ticker-dur, 6s);
 }
 .voice-live .ticker-text {
   color: #7dffc0;
-  text-shadow: 0 0 6px rgba(90, 255, 180, 0.5);
 }
 .heard-band .ticker-text {
   color: #ffd9a0;
-  text-shadow: 0 0 6px rgba(255, 200, 120, 0.35);
 }
 @keyframes ticker-scroll {
   from { transform: translateX(0); }

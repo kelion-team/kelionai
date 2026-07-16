@@ -80,12 +80,17 @@ export async function synthesize(
   // Forțăm mereu Chirp 3 HD: stilul din env poate fi fie un nume complet de
   // voce (ex. "ro-RO-Chirp3-HD-Charon"), fie doar stilul (ex. "Charon").
   // Orice altceva / non-Chirp cade pe Charon — nu permitem sinteză non-Chirp.
+  // FIX: numele complet din env poate avea o limbă diferită de limba curentă;
+  // extragem doar stilul (ultimul segment) și reconstruim vocea în `lang`.
   const configured = config.ttsVoiceStyle.trim()
-  const voiceName = /Chirp3-HD/i.test(configured)
-    ? configured
-    : /^[A-Z][a-z]+$/.test(configured)
-      ? `${lang}-Chirp3-HD-${configured}`
-      : `${lang}-Chirp3-HD-Charon`
+  let style = 'Charon'
+  if (/Chirp3-HD/i.test(configured)) {
+    const parts = configured.split('-')
+    style = parts[parts.length - 1] || 'Charon'
+  } else if (/^[A-Z][a-z]+$/.test(configured)) {
+    style = configured
+  }
+  const voiceName = `${lang}-Chirp3-HD-${style}`
 
   const a = getAuth()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
