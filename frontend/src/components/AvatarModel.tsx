@@ -456,6 +456,3 @@ export default function AvatarModel() {
 
   return <primitive ref={root} object={scene} scale={1.65} position={[0, -1.65, 0]} />
 }
-
-useGLTF.preload('/kelion-rpm.glb')
-for (const f of Object.values(CLIP_FILES)) useGLTF.preload(f)

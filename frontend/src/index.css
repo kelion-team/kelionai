@@ -517,24 +517,23 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
-/* „Coada" textului care CURGE: containerul e RTL doar ca overflow-ul să taie
-   din STÂNGA (se vede mereu SFÂRȘITUL replicii), iar textul dinăuntru e IZOLAT
-   LTR. Bug-ul vechi: `unicode-bidi: plaintext` lăsa motorul bidi să REORDONEZE
-   caracterele după „primul caracter puternic" — la diacriticele românești
-   (â/ț/ș) și la textul care curge caracter-cu-caracter, literele apăreau
-   „răzlețe, tăiate" („n , a m înț eles"). `unicode-bidi: isolate` FIXEAZĂ
-   ordinea caracterelor LTR fără reordonare, păstrând ancorarea la dreapta. */
+/* COADA textului care CURGE: containerul e aliniat la DREAPTA și taie
+   overflow-ul din STÂNGA, ca să se vadă mereu SFÂRȘITUL replicii — fără
+   trucuri RTL/LTR care spărțeau textul în litere individuale și lăsau
+   artefacte verticale. */
 .speech-tail {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
+  direction: ltr;
+  text-align: right;
 }
 .speech-tail-text {
+  display: inline-block;
   direction: ltr;
-  unicode-bidi: isolate;
+  unicode-bidi: normal;
+  text-align: left;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
