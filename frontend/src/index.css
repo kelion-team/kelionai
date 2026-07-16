@@ -517,10 +517,13 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
-/* „Coada" textului care CURGE: containerul e RTL (ancorat la dreapta), textul
-   dinăuntru rămâne LTR — pe măsură ce răspunsul vine, se vede mereu SFÂRȘITUL
-   lui, pe un singur rând, fără nicio animație care s-ar reporni la fiecare
-   literă. Folosită în banda K (răspunsul lui Kelion) cât timp streamează. */
+/* „Coada" textului care CURGE: containerul e RTL doar ca overflow-ul să taie
+   din STÂNGA (se vede mereu SFÂRȘITUL replicii), iar textul dinăuntru e IZOLAT
+   LTR. Bug-ul vechi: `unicode-bidi: plaintext` lăsa motorul bidi să REORDONEZE
+   caracterele după „primul caracter puternic" — la diacriticele românești
+   (â/ț/ș) și la textul care curge caracter-cu-caracter, literele apăreau
+   „răzlețe, tăiate" („n , a m înț eles"). `unicode-bidi: isolate` FIXEAZĂ
+   ordinea caracterelor LTR fără reordonare, păstrând ancorarea la dreapta. */
 .speech-tail {
   flex: 1;
   min-width: 0;
@@ -531,7 +534,7 @@ body {
 }
 .speech-tail-text {
   direction: ltr;
-  unicode-bidi: plaintext;
+  unicode-bidi: isolate;
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {

@@ -31,13 +31,21 @@ const LETTER_SOUNDS: Record<string, Record<string, string>> = {
 // Acronime tehnice pe care Chirp le stâlcește de regulă — rostite literă cu
 // literă. Cele de DOUĂ litere ambigue, citite în mod normal CA CUVINTE (OK, AI,
 // IT, OS, GO, ID, PC, TV) sunt lăsate ANUME pe dinafară, ca să nu le mutilăm.
+// LA FEL și jetoanele cu majuscule care SUNT și cuvinte comune (PIN=ac,
+// SIM=simian, ROM=român, RAM=berbec, GIF, WAN, LAN, SEO, PDF, CSV…) — scoase
+// din lista de spart ca TTS-ul să NU mai rostească „litere răzlețe, tăiate,
+// scoase din context" (bug raportat: „n , a m înț eles").
+const COMMON_WORDS = new Set([
+  'PIN', 'SIM', 'ROM', 'GIF', 'RAM', 'WAN', 'LAN', 'SEO', 'PDF', 'CSV', 'RSS',
+  'OTP', 'RGB', 'GUI', 'CLI', 'IDE', 'SDK', 'SQL', 'PHP', 'CSS', 'SVG',
+])
 const TECH_ACRONYMS = new Set([
-  'API', 'SSH', 'HTTP', 'HTTPS', 'URL', 'URI', 'HTML', 'CSS', 'XML', 'JSON',
-  'YAML', 'SQL', 'VPS', 'VPN', 'CPU', 'GPU', 'RAM', 'ROM', 'SSD', 'HDD', 'USB',
-  'GPS', 'PDF', 'DNS', 'SSL', 'TLS', 'CLI', 'GUI', 'SDK', 'IDE', 'TCP', 'UDP',
-  'FTP', 'SMTP', 'IMAP', 'CSV', 'SVG', 'PNG', 'JPG', 'JPEG', 'GIF', 'RPC', 'JWT',
-  'CORS', 'CDN', 'ORM', 'CRUD', 'NPM', 'PHP', 'ASCII', 'UUID', 'GUID', 'LAN',
-  'WAN', 'WWW', 'MP3', 'MP4', 'RSS', 'OTP', 'PIN', 'SIM', 'RGB', 'PDF', 'SEO',
+  'API', 'SSH', 'HTTP', 'HTTPS', 'URL', 'URI', 'HTML', 'XML', 'JSON',
+  'YAML', 'VPS', 'VPN', 'CPU', 'GPU', 'SSD', 'HDD', 'USB',
+  'GPS', 'DNS', 'SSL', 'TLS', 'TCP', 'UDP',
+  'FTP', 'SMTP', 'IMAP', 'PNG', 'JPG', 'JPEG', 'RPC', 'JWT',
+  'CORS', 'CDN', 'ORM', 'CRUD', 'NPM', 'ASCII', 'UUID', 'GUID',
+  'WWW', 'MP3', 'MP4',
 ])
 
 function spellOut(word: string, table: Record<string, string>): string {
@@ -60,6 +68,10 @@ export function academicPronounce(text: string, langBase: string): string {
   if (!table) return text // limbă fără tabel de litere → nu atingem nimic
   // Doar jetoane cu MAJUSCULE (2–8 caractere, litere+cifre), delimitate curat.
   return text.replace(/\b[A-Z][A-Z0-9]{1,7}\b/g, (m) => {
+    // Cuvânt comun (PIN, SIM, ROM, GIF, RAM…) → îl lăsăm INTACT: Chirp îl
+    // citește ca cuvânt normal, nu literă-cu-literă. Altfel TTS-ul rostea
+    // „litere răzlețe, tăiate, scoase din context" (bug raportat).
+    if (COMMON_WORDS.has(m)) return m
     const lettersOnly = m.replace(/[0-9]/g, '')
     if (!TECH_ACRONYMS.has(m) && !TECH_ACRONYMS.has(lettersOnly)) return m
     return spellOut(m, table)
