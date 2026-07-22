@@ -111,10 +111,16 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 Servicii systemd pe VPS: `kelion-bridge`, `kelion-paznic`, `kelion-builder`, `kelion-deployer`.
 
 ## 3. RUTAREA CREIERULUI (cine răspunde cui) — chat.ts
-- **Admin (Adrian)** → puntea (worker `claude` pe VPS = echivalent Claude Code, cu context privat + memorie + fișiere). Punte jos → mesaj cinstit (NU cădea pe API — ordin).
-- **Vizitatori/demo/public** → puntea, banda `public`, personaj neutru `PUBLIC_PREAMBLE`, FĂRĂ context privat, cwd `/tmp`; demo = anonim (fără memorie/istoric injectat). Punte jos → mesaj cinstit (NU API — ordin: „peste tot abonamentul mare").
-- **Clienți plătitori** (credite `paysOwnWay` sau cheia lor BYOK) → API Anthropic direct, cu tool-uri complete. Cheia clientului NU cade NICIODATĂ pe cheile platformei.
-- Joburile publice cer capabilitatea `persona` declarată de worker la `pull` (gard anti-scurgere); jobul public poartă `turn` (pachet subțire) + `visitor` (cheia sesiunii calde per-vizitator).
+> **CORECTAT 22 iul 2026 (după citirea codului real):** descrierea veche de mai jos
+> era GREȘITĂ. Codul (`chat.ts:1426-1430`) arată clar: **puntea/Builder-CLI au fost
+> SCOASE din calea de chat.** ACUM **toți** — inclusiv adminul — primesc răspunsul pe
+> **același drum direct Kimi→GLM din backend** (`brain.ts`, client nativ pe `fetch`).
+> Puntea de pe VPS a rămas DOAR pentru reparații/build (tool-ul `request_repair`),
+> nu pentru compunerea răspunsului de chat.
+- **Admin (Adrian)** → drum direct Kimi→GLM din backend; păstrează aici doar gărzile de owner: STOP-pe-cerință, „OK→deploy", filtrul anti-ecou ASR, telemetria monitorului; reparațiile le predă cu `request_repair` (tool).
+- **Vizitatori/demo/public** → același drum direct Kimi→GLM; personaj neutru, FĂRĂ context privat; demo = anonim (fără memorie/istoric injectat).
+- **Clienți plătitori** (credite `paysOwnWay` sau cheia lor BYOK) → același drum de creier cu tool-uri complete; cheia clientului NU cade NICIODATĂ pe cheile platformei.
+- *(Istoric)* Vechea arhitectură cu benzi `chat`/`work` pe punte + `persona` la `pull` mai există în `bridge.ts`/`kelion-bridge-linux.mjs`, dar NU mai e pe calea de chat.
 
 ## 4. SISTEME CHEIE
 ### 4.1 Memoria (dublată, #20)

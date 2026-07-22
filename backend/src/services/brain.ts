@@ -246,9 +246,13 @@ export async function verifyModels(): Promise<Record<string, string>> {
       return status ? `fail_${status}` : 'fail'
     }
   }
+  // Testăm EXACT modelele pe care rulează aplicația (MODEL_FAST/MODEL_TOP din
+  // modelRouter), nu nume învechite. `kimi-k2-thinking` nici nu e în catalogul
+  // Kimi (endpointul doar întorcea numele înapoi) → verificarea dădea diagnostic
+  // fals. Acum ping-ul lovește modelele reale servite în producție.
   return {
-    'kimi-k2-thinking': await ping(kimi, 'kimi-k2-thinking'),
-    'glm-4.6': await ping(glm, 'glm-4.6'),
+    [MODEL_FAST]: await ping(kimi, MODEL_FAST),
+    [MODEL_TOP]: await ping(glm, MODEL_TOP),
   }
 }
 
@@ -270,8 +274,8 @@ export async function verifyKeys(): Promise<{
       return status ? `fail_${status}` : 'fail'
     }
   }
-  const primary = config.kimiKey ? await ping(kimi, 'kimi-k2-thinking') : 'not_configured'
-  const reserve = config.glmKey ? await ping(glm, 'glm-4.6') : 'not_configured'
+  const primary = config.kimiKey ? await ping(kimi, MODEL_FAST) : 'not_configured'
+  const reserve = config.glmKey ? await ping(glm, MODEL_TOP) : 'not_configured'
   const rawK = process.env.KIMI_API_KEY ?? process.env.KIMI_KEY ?? ''
   const rawG = process.env.GLM_API_KEY ?? process.env.GLM_KEY ?? ''
   const diag = {
