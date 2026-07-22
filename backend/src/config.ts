@@ -41,6 +41,17 @@ export const config = {
     // voce, bărbat"). `cedar` = voce masculină caldă din catalogul Realtime.
     realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'cedar').trim(),
   },
+  // CREIERUL/CHAT-UL selectabil — o SINGURĂ cheie OpenRouter pentru toate
+  // modelele (GPT/Gemini/Claude). Catalogul se ia LIVE din /api/v1/models (auto-
+  // update: modele noi apar fără deploy). Costul REAL vine din răspuns
+  // (usage.cost) → ledger precis. Voce = OpenAI direct (OpenRouter n-are realtime).
+  openrouter: {
+    key: (process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY ?? '').trim(),
+    // Modele implicite per tier (editabile din env, fără deploy). Chat = rapid,
+    // Work = raționament greu/tool-use.
+    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'openai/gpt-4.1-mini').trim(),
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'anthropic/claude-sonnet-5').trim(),
+  },
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
