@@ -1,0 +1,28 @@
+name: vps-set-key
+
+on:
+  workflow_dispatch:
+    inputs:
+      keyb64:
+        description: 'base64 al cheii private'
+        required: true
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setează secretul VPS_SSH_KEY
+        env:
+          GH_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}
+          KEYB64: ${{ inputs.keyb64 }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$KEYB64"
+          printf '%s' "$KEYB64" | base64 -d > key
+          echo "cheie decodată: $(wc -c < key) octeți"
+          if gh secret set VPS_SSH_KEY --repo "${GITHUB_REPOSITORY}" < key; then
+            echo "✅ VPS_SSH_KEY setat"
+          else
+            echo "::error::gh secret set a eșuat (tokenul nu are Secrets:write?)"; exit 1
+          fi
+          rm -f key
