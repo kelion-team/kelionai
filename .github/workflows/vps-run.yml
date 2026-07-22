@@ -27,12 +27,18 @@ jobs:
     steps:
       - name: Rulează comanda pe VPS (SSH cu cheie)
         env:
-          KEY: ${{ secrets.VPS_SSH_KEY }}
+          # Citim cheia și din Secrets și din Variables — pusă din greșeală la
+          # „Variables" (tab-ul vecin), tot merge; diagnosticul de mai jos spune
+          # exact care din surse e goală (doar lungimi, conținutul nu se atinge).
+          KEY_SECRET: ${{ secrets.VPS_SSH_KEY }}
+          KEY_VAR: ${{ vars.VPS_SSH_KEY }}
           CMD: ${{ inputs.cmd }}
         run: |
           set -euo pipefail
+          KEY="${KEY_SECRET:-$KEY_VAR}"
+          echo "diagnostic chei: Secrets.VPS_SSH_KEY lungime=${#KEY_SECRET}, Variables.VPS_SSH_KEY lungime=${#KEY_VAR}"
           if [ -z "$KEY" ]; then
-            echo "::error::Lipsește secretul VPS_SSH_KEY (cheia privată kelion-vps)."; exit 1
+            echo "::error::VPS_SSH_KEY e GOL și în Secrets și în Variables. Verifică: repo kelion-team/kelionai → Settings → Secrets and variables → Actions → tab 'Secrets' → numele exact VPS_SSH_KEY."; exit 1
           fi
           umask 077
           printf '%s\n' "$KEY" > /tmp/vps_key
