@@ -46,6 +46,20 @@ export function primaryLang(tag: string | undefined | null): string | null {
   return m ? m[1].toLowerCase() : null
 }
 
+// Nume de limbă în engleză, pentru instrucțiuni către modele (ex: „reply in
+// Romanian"). Partajat între chat și voce ca să nu dublăm harta în două locuri.
+const LANG_LABELS: Record<string, string> = {
+  ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese',
+  it: 'Italian', de: 'German', nl: 'Dutch', pl: 'Polish', ru: 'Russian',
+  uk: 'Ukrainian', tr: 'Turkish', ar: 'Arabic', zh: 'Chinese', ja: 'Japanese',
+  ko: 'Korean', hi: 'Hindi',
+}
+
+/** English label for a language tag ("ro-RO" → "Romanian"); fallback English. */
+export function langLabel(tag: string | undefined | null): string {
+  return LANG_LABELS[primaryLang(tag) ?? 'en'] ?? 'English'
+}
+
 /**
  * Best-guess language of `text`, or null when not confident. Returns a 2-letter
  * code. Needs a real amount of text and a clear winner to commit.

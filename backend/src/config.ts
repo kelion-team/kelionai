@@ -30,6 +30,17 @@ export const config = {
   googleMapsKey: process.env.GOOGLE_MAPS_KEY ?? '',
   geminiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  // VOCE LIVE — OpenAI Realtime (WebRTC). Cheia stă DOAR pe server; browserul
+  // trimite oferta SDP la /api/realtime/session, backendul o relayează la OpenAI
+  // și injectează server-side modelul + o SINGURĂ voce masculină + persona/limba.
+  // Auto-update model din env (fără deploy) dacă OpenAI schimbă numele.
+  openai: {
+    key: (process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? '').trim(),
+    realtimeModel: (process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime').trim(),
+    // Voce masculină unică, persistentă pentru toți userii (Adrian: „o singură
+    // voce, bărbat"). `cedar` = voce masculină caldă din catalogul Realtime.
+    realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'cedar').trim(),
+  },
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
