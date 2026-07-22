@@ -11,9 +11,11 @@ export function dbEnabled(): boolean {
 function getPool(): pg.Pool {
   if (!pool) {
     const url = config.databaseUrl
-    // Railway's private network (*.railway.internal) doesn't use TLS; the public
-    // proxy does (self-signed).
-    const ssl = url.includes('railway.internal') ? false : { rejectUnauthorized: false }
+    // Local/no-TLS Postgres (VPS pe aceeași mașină, sslmode=disable explicit)
+    // se conectează fără SSL; orice altă țintă primește TLS cu certificat
+    // self-signed acceptat (proxy-uri gestionate).
+    const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
+    const ssl = noTls ? false : { rejectUnauthorized: false }
     pool = new pg.Pool({ connectionString: url, ssl })
   }
   return pool

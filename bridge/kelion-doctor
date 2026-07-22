@@ -28,7 +28,7 @@ line "== KELION-DOCTOR — sănătatea dependențelor =="
 # 1. Aplicația e live?
 V=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "$B/api/version" 2>/dev/null || echo 000)
 if [ "$V" = 200 ]; then line "  App live (/api/version): 200 ✅"
-else line "  App live: HTTP $V ❌"; addp "Aplicația nu răspunde la $B/api/version (HTTP $V). Verifică Railway (serviciul «web»/ultimul deploy) — dacă e roșu, redeploy prin deploy.yml."; fi
+else line "  App live: HTTP $V ❌"; addp "Aplicația nu răspunde la $B/api/version (HTTP $V). Verifică gazda (serviciile de pe VPS / containerul aplicației)."; fi
 
 # 2. Serviciile systemd active?
 if command -v systemctl >/dev/null 2>&1; then
@@ -43,7 +43,7 @@ fi
 if [ -n "$SECRET" ]; then
   ac=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -H "x-bridge-secret: $SECRET" "$B/api/bridge/approved-releases" 2>/dev/null || echo 000)
   if [ "$ac" = 200 ]; then line "  Secret punte (auth backend): 200 ✅"
-  elif [ "$ac" = 401 ]; then line "  Secret punte: 401 ❌"; addp "Secretul punții de pe VPS ($ROOT/bridge-secret.txt) NU se potrivește cu cel din Railway (401). Rulează workflow-ul bridge-deploy (scrie secretul corect din Railway pe VPS)."
+  elif [ "$ac" = 401 ]; then line "  Secret punte: 401 ❌"; addp "Secretul punții de pe VPS ($ROOT/bridge-secret.txt) NU se potrivește cu BRIDGE_SECRET din env-ul backendului (401). Pune aceeași valoare în ambele locuri."
   else line "  Secret punte: HTTP $ac (neconcludent)"; fi
 else
   line "  Secret punte: LIPSĂ ❌"; addp "Lipsește $ROOT/bridge-secret.txt pe VPS — puntea nu se poate autentifica."

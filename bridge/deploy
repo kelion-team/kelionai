@@ -8,13 +8,10 @@
 #   1. CHEIA: tokenul GitHub e deja instalat pe VPS
 #      (/root/kelion/github-token.txt, pus o singură dată prin vps-keys) —
 #      nu se cere nimic, nimănui, niciodată;
-#   2. se citește versiunea live (https://kelionai.app/api/version) ÎNAINTE;
-#   3. se pornește pipeline-ul OFICIAL: dispatch .github/workflows/deploy.yml
-#      pe master → Railway construiește și publică EXACT origin/master;
-#   4. verificarea ANTI-FANTOMĂ: se așteaptă (max ~8 min) până versiunea live
-#      CHIAR se schimbă; dacă nu se schimbă → „deploy EȘUAT", spus cinstit —
-#      NICIODATĂ declarat succes fără dovadă.
+#   2. (22 iul 2026) Railway a fost SCOS — comanda de dedesubt răspunde acum
+#      FAIL CLOSED cu explicație, până e definit pipeline-ul gazdei noi (VPS).
 #
-# REGULILE DE FIER rămân: NICIODATĂ `railway up` direct; NICIODATĂ GitHub prin
-# browser (repo privat → 404 + zid de login); publicat = DOAR origin/master.
+# REGULILE DE FIER rămân: NICIODATĂ publicare pe lângă pipeline-ul verificat;
+# NICIODATĂ GitHub prin browser (repo privat → 404 + zid de login);
+# publicat = DOAR origin/master.
 exec "$(dirname "$(readlink -f "$0")")/kelion-github" deploy "$@"

@@ -76,7 +76,7 @@ export default function Stage({ user }: { user: User }) {
   // TWO LIGHTS, one per link in the chain. "Bridge" = the developer's bridge worker
   // (lit = reachable, pulsing = writing code, OFF = down — the watchdog
   // restarts it and the light re-lights by itself). "Server" = kelionai.app
-  // itself (poll failing = OFF; Railway auto-restarts it, light comes back).
+  // itself (poll failing = OFF; gazda îl repornește automat, light comes back).
   const [builderBridge, setBuilderBridge] = useState(false)
   // Calitatea legăturii punții: câte din cele 10 benzi WS sunt sus (0–10).
   // Colorează becul verde (toate) → roșu (puține) → stins (jos), NU hardcodat.
@@ -1037,7 +1037,7 @@ export default function Stage({ user }: { user: User }) {
               title={
                 serverUp
                   ? 'Server up — kelionai.app is running'
-                  : 'SERVER DOWN — Railway restarts it automatically, light returns by itself'
+                  : 'SERVER DOWN — serverul repornește automat, becul revine singur'
               }
             >
               ● Server

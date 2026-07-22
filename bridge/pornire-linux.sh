@@ -35,11 +35,8 @@ git fetch origin master || { say "⚠️ git fetch a eșuat — verifică rețea
 git reset --hard origin/master || { say "⚠️ reset la origin/master a eșuat"; exit 1; }
 say "cod la zi (master): $(git rev-parse --short HEAD)"
 
-# 2. Deploy pe producție (Railway, serviciul web).
-say "deploy Railway (poate dura câteva minute)…"
-if ! railway up --service web --detach; then
-  say "⚠️ railway up a eșuat — verifică login-ul railway pe VPS (railway whoami)"
-fi
+# 2. (22 iul 2026) Pasul de deploy Railway a fost SCOS — publicarea o face gazda (VPS).
+say "sincronizare încheiată (publicarea o face pipeline-ul gazdei — Railway a fost scos)"
 
 # 2b. CALEA REALĂ RULATĂ (11 iul: latența nu scădea deloc — dovedit că systemd
 #     rulează o COPIE separată, ex. /root/kelion/kelion-bridge.mjs, ÎN AFARA

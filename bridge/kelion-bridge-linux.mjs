@@ -1345,7 +1345,7 @@ async function workLoop() {
 }
 
 // WATCHDOG DE AUTO-RECONECTARE (Adrian, 13 iul: „repară să nu mai cadă chatul la
-// deploy"). La redeploy Railway backendul se schimbă; în cazuri rare long-poll-ul
+// deploy"). La un redeploy al backendului acesta se schimbă; în cazuri rare long-poll-ul
 // rămâne wedged / sesiunea intră în stare moartă → puntea pare „vie" dar e
 // deconectată și cerea repornire MANUALĂ. Acum: dacă nu mai atinge backendul
 // WATCHDOG_MS (3+ cicluri de long-poll ratate), ieșim intenționat; systemd

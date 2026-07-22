@@ -1,9 +1,9 @@
 #!/bin/bash
 # Autonomous repair with safety nets. Called by the bridge worker for a repair
 # request. Fully autonomous, but the app CANNOT stay broken:
-#   Gate 1 — must compile (else revert working tree, no deploy).
-#   Gate 2 — after deploy, must pass health + a home-page smoke check.
-#   Safety net — if unhealthy, reset to origin/master (the ONE source of truth).
+#   Gate 1 — must compile (else revert working tree, nothing pushed).
+#   (22 iul 2026) Railway a fost SCOS: scriptul NU mai publică nimic — împinge
+#   fixul în master, iar publicarea o face pipeline-ul gazdei (VPS), cu dovadă.
 #
 # REGULA 100% SINCRON (Adrian, 10 iul): producția = master, NICIODATĂ un commit
 # local vechi. Cauza reverterilor „build fantomă": scriptul lua ca „bun" HEAD-ul
@@ -41,32 +41,13 @@ fi
 # 3. Commit the fix (clear rollback boundary).
 git add -A && git commit -q -m "auto-repair: $DESC" || true
 
-# 4. Deploy to production.
-echo "[$(date -Is)] DEPLOY..."
-if ! railway up --service web --detach; then echo "DEPLOY_FAILED"; exit 3; fi
+# 4. (Railway scos, 22 iul 2026) NU se mai publică de aici. Fixul compilat se
+#    împinge în master (pasul de mai jos); publicarea efectivă e treaba
+#    pipeline-ului gazdei, cu verificare reală — nu a scriptului de reparație.
 
-# 5. Health + home-page smoke check (up to 3 min).
-ok=0
-for i in $(seq 1 12); do
-  sleep 15
-  code=$(curl -s -o /dev/null -w "%{http_code}" https://kelionai.app/health --max-time 10 || echo 0)
-  home=$(curl -s https://kelionai.app/ --max-time 10 | grep -c 'index-' || echo 0)
-  if [ "$code" = "200" ] && [ "${home:-0}" -ge 1 ]; then ok=1; break; fi
-done
-
-# 6. Safety net — unhealthy → înapoi la MASTER (adevărul unic), redeploy. NU la
-#    un HEAD local vechi (aia era cauza reverterilor „build fantomă").
-if [ "$ok" != "1" ]; then
-  echo "[$(date -Is)] UNHEALTHY -> ROLLBACK la master $GOOD"
-  git reset --hard "$GOOD"
-  railway up --service web --detach || true
-  echo "ROLLED_BACK"
-  exit 4
-fi
-
-# 7. Reușit + sănătos → ÎMPINGE fixul în master. Așa Kelion PUBLICĂ cod NOU
-#    corect care DEVINE adevărul (master avansează curat cu +1 commit), nu un
-#    commit local care diverge și readuce stale la următorul deploy de pe VPS.
+# 5. Reușit → ÎMPINGE fixul în master. Așa Kelion PUBLICĂ cod NOU corect care
+#    DEVINE adevărul (master avansează curat cu +1 commit), nu un commit local
+#    care diverge și readuce stale la următoarea sincronizare de pe VPS.
 if git push origin HEAD:master; then
   echo "[$(date -Is)] FIXED_AND_LIVE + PUSHED_TO_MASTER ($(git rev-parse --short HEAD))"
 else

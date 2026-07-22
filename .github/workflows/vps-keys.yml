@@ -12,11 +12,10 @@
 #   KIMI_KEY           — cheia Kimi for Coding (dacă vrei s-o scrii/rotești)
 #   GLM_KEY            — cheia GLM Coding Plan
 #   VPS_GITHUB_TOKEN   — token GitHub fin-granulat pentru VPS
-#   RAILWAY_TOKEN      — token Railway (există deja, folosit și de alte workflow-uri)
 #
 # Scrie pe VPS exact în fișierele pe care le citește workerul:
 #   /root/kelion/kimi-key.txt · /root/kelion/glm-key.txt ·
-#   /root/kelion/github-token.txt · RAILWAY_TOKEN în /root/kelion/claude.env
+#   /root/kelion/github-token.txt
 name: vps-keys
 
 on:
@@ -26,7 +25,7 @@ on:
         description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
         type: choice
-        options: [railway, kimi, glm, github, all]
+        options: [kimi, glm, github, all]
 
 jobs:
   put:
@@ -40,7 +39,6 @@ jobs:
           KIMI_KEY: ${{ secrets.KIMI_KEY }}
           GLM_KEY: ${{ secrets.GLM_KEY }}
           GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
-          RW_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           WHICH: ${{ inputs.which }}
         run: |
           set -euo pipefail
@@ -73,16 +71,9 @@ jobs:
               'cat > /root/kelion/github-token.txt && chmod 600 /root/kelion/github-token.txt && echo "github-token.txt scris: $(wc -c < /root/kelion/github-token.txt) octeti"'
           fi
 
-          if want railway; then
-            [ -n "$RW_TOKEN" ] || { echo "::error::secretul RAILWAY_TOKEN lipsește"; exit 1; }
-            # UPSERT în claude.env: înlocuiește linia dacă există, altfel o adaugă.
-            printf '%s' "$RW_TOKEN" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
-              'RT=$(cat); F=/root/kelion/claude.env; touch "$F"; grep -v "^RAILWAY_TOKEN=" "$F" > "$F.tmp" || true; echo "RAILWAY_TOKEN=$RT" >> "$F.tmp"; mv "$F.tmp" "$F"; chmod 600 "$F"; echo "RAILWAY_TOKEN scris în claude.env"'
-          fi
 
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
             'for f in /root/kelion/kimi-key.txt /root/kelion/glm-key.txt /root/kelion/github-token.txt; do
                if [ -f "$f" ]; then echo "$f: $(wc -c < "$f") octeti, permisiuni $(stat -c %a "$f")"; else echo "$f: LIPSĂ"; fi
-             done
-             echo "claude.env are RAILWAY_TOKEN: $(grep -c "^RAILWAY_TOKEN=" /root/kelion/claude.env 2>/dev/null || echo 0) linie(i)"'
+             done'

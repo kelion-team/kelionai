@@ -1,4 +1,4 @@
-// FULL AUDIT of everything Kelion has. Run: railway run node scripts/audit.mjs
+// FULL AUDIT of everything Kelion has. Run (cu env-ul producției): node scripts/audit.mjs
 // Tests every external dependency + Google API + brain (Kimi/GLM) + voice. Google
 // user-data skills are tested at the API-enablement level (the live 200 needs
 // the user's own login, which a server probe can't hold).

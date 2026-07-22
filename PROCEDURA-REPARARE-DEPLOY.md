@@ -39,7 +39,7 @@ git checkout -b fix/ordinea-N
 
 Modifică doar fișierele necesare pentru această ordine.
 
-### 3. Build + test (pe VPS, NU pe Railway)
+### 3. Build + test (pe VPS)
 
 ```bash
 cd /root/kelion/repo/backend
@@ -50,19 +50,17 @@ npm test
 
 Dacă **oricare** dintre comenzi dă eroare → STOP. Nu deploya. Repară eroarea și reia de la pasul 3.
 
-### 4. Deploy pe Railway (DOAR dacă build-ul a trecut)
+### 4. Publicare (DOAR dacă build-ul a trecut)
 
-```bash
-cd /root/kelion/repo
-bridge/kelion-github publish fix/ordinea-N "Fix ordinea N" "Descriere scurtă"
-```
+> **ATENȚIE (22 iul 2026): Railway a fost SCOS.** Pipeline-ul de publicare al
+> gazdei noi (VPS) nu e încă definit — `kelion-github deploy`/`publish` răspunde
+> FAIL CLOSED. Pașii de mai jos duc codul în `master` (obligatoriu), dar
+> publicarea efectivă pe gazdă se face separat și se dovedește la pasul 5.
 
-Sau, dacă `kelion-github` nu merge:
 ```bash
 git checkout master
 git merge fix/ordinea-N
 git push origin master
-# Așteaptă 2-3 minute pentru GitHub Actions (deploy.yml)
 ```
 
 ### 5. Verificare LIVE (obligatoriu — așteaptă 60 secunde după push)

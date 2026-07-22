@@ -3,9 +3,9 @@
 # rulării GitHub Actions (repo privat, vizibil doar owner-ului).
 #
 # NU cere parola VPS — endpoint-urile /api/bridge/memory și /api/bridge/chat-history
-# sunt deja protejate de BRIDGE_SECRET (același model ca health check-ul din
-# bridge-deploy.yml). Luăm secretul din Railway (RAILWAY_TOKEN, deja secret
-# GitHub) și citim direct — fără SSH, fără să distribuim secretul mai departe.
+# sunt deja protejate de BRIDGE_SECRET. Secretul vine din GitHub Secrets
+# (BRIDGE_SECRET; Railway a fost scos pe 22 iul 2026) — fără SSH, fără să
+# distribuim secretul mai departe.
 name: read-caiet
 
 on:
@@ -30,25 +30,13 @@ jobs:
     steps:
       - name: Citește caietul comun (shared_memory) + istoricul admin
         env:
-          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SECRET: ${{ secrets.BRIDGE_SECRET }}
           POST_CONTENT: ${{ inputs.post_content }}
           POST_SOURCE: ${{ inputs.post_source }}
           POST_ORDER: ${{ inputs.post_order }}
         run: |
           set -uo pipefail
-          [ -z "$TOKEN" ] && { echo "::error::RAILWAY_TOKEN lipsește"; exit 1; }
-          GQL=https://backboard.railway.com/graphql/v2
-          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
-          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
-          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0]')
-          PID=$(echo "$P" | jq -r '.id')
-          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id')
-          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
-          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
-          SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
-          [ -z "$SECRET" ] && { echo "::error::BRIDGE_SECRET lipsă din Railway"; exit 1; }
-          echo "::add-mask::$SECRET"
+          [ -z "$SECRET" ] && { echo "::error::BRIDGE_SECRET lipsește din Settings → Secrets → Actions."; exit 1; }
 
           # SCRIERE în caiet (opțional) — convenția ORIGINALĂ dintre cei doi
           # Claude: Kelion citește caietul la FIECARE mesaj, deci o notă pusă

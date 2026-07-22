@@ -304,7 +304,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
   // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
   // expună valori secrete. Include Kimi, GLM, Stripe, Google, Serper, Gemini,
-  // Mail (SMTP+IMAP), LiveKit, Railway, GitHub și SESSION_SECRET.
+  // Mail (SMTP+IMAP), LiveKit, GitHub și SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

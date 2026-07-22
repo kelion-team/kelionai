@@ -3,8 +3,8 @@
 # camerele „voice-*" și intră în ele când un user deschide microfonul pe
 # kelionai.app → STT (Chirp) → creierul-punte (Kimi/GLM) → TTS (Chirp) cu barge-in.
 #
-# Cheile LiveKit + BRIDGE_SECRET le ia agentul singur din Railway (RAILWAY_TOKEN
-# din claude.env) — nu apar în log. Determinist, fără LLM. Izolat de kelion-bridge:
+# Cheile LiveKit + BRIDGE_SECRET le ia agentul din env/claude.env — nu apar în
+# log. (Railway scos, 22 iul 2026.) Determinist, fără LLM. Izolat de kelion-bridge:
 # dacă pică, chatul HTTP care merge acum NU e afectat.
 name: vps-voice-agent-run
 

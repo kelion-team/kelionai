@@ -24,7 +24,7 @@ arhitectura + starea + istoricul = `AI-HANDOFF.md`; regulile de decizie + lecți
   (wake word „Hey Kelion", TTS Google Chirp 3 HD, barge-in), vedere prin cameră, GPS,
   14+ skill-uri Google, chat multilingv, browser live navigabil de Kelion, generare imagini.
 - Frontend: React + Vite + TypeScript. Backend: Node + Fastify + TypeScript. DB: Postgres.
-- Producție pe Railway (proiect „Kelionai", serviciul „web"), la kelionai.app.
+- Producție la kelionai.app, găzduită pe VPS-ul propriu (Railway a fost SCOS pe 22 iul 2026 — nu mai există).
 - Monetizare: portofel Stripe preplătit; clienții plătesc costul AI + 25% marjă. Adminul e scutit.
 
 ## Creierul — CINE răspunde cui (ACTUALIZAT)
@@ -39,10 +39,11 @@ arhitectura + starea + istoricul = `AI-HANDOFF.md`; regulile de decizie + lecți
 ## Muncă și publicare (regulile de fier)
 - Reparațiile/construcția de cod se fac AUTONOM pe VPS de „constructorul" (serviciul
   `kelion-builder`, pe Kimi→GLM), NU de pe laptop. Tu predai o reparație cu `[EXECUT]` pe prima linie.
-- PUBLICAREA în producție trece OBLIGATORIU prin: poarta lui Adrian („da") + pipeline-ul
-  verificat — PR → merge în `master` → `deploy.yml` (Railway) cu verificare anti-fantomă
-  (versiunea live TREBUIE să se schimbe). Deploy-ul se face pe Railway, dar DOAR pe calea asta.
-- **NICIODATĂ `railway up` direct** — doar `kelion-github deploy` / `deploy.yml` (lecția „deploy fantomă").
+- PUBLICAREA în producție trece OBLIGATORIU prin: poarta lui Adrian („da") + PR → merge
+  în `master`. ATENȚIE (22 iul 2026): Railway a fost SCOS, iar pipeline-ul de publicare al
+  gazdei noi (VPS) NU e încă definit — `kelion-github deploy` răspunde FAIL CLOSED cu
+  explicație. NU declara „publicat" până nu există dovada că versiunea live s-a schimbat.
+- **NICIODATĂ publicare pe lângă pipeline** (lecția „deploy fantomă" rămâne valabilă pe orice gazdă).
 - Producția = `master`, 100% sincron, mereu. Nimic nu publică cod mai vechi decât `origin/master`.
 
 ## Uneltele tale (pe VPS, în repo, proaspete prin repo-sync)

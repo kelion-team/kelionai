@@ -294,14 +294,14 @@ export function setAnalysisDetail(text: string): void {
 // Adrian just replies "ok" in chat and the server publishes it immediately.
 // The builder stages a fix when it built clean; an "ok" in chat sets
 // `deployWanted`; the server deployer polls, opens PR → merges → dispatches
-// deploy.yml (pipeline GitHub/Railway, NOT railway up direct), marks done.
+// the host's publish pipeline (Railway a fost scos pe 22 iul), marks done.
 // COADĂ, nu sertar unic (5 iul): două fixuri gata în același timp se călcau pe
 // picior — al doilea îl SUPRASCRIA pe primul și un „da" publica altceva decât
 // credea Adrian. Acum fiecare fix stă la rând; fiecare „da" publică PRIMUL.
 const readyDeploys: { branch: string; summary: string; at: number }[] = []
 let deployWanted: { branch: string; summary: string } | null = null
 // FĂRĂ AMNEZIE LA RESTART (Adrian, 5 iul: „da"-ul lui a căzut în gol după un
-// restart Railway care a uitat sertarul din RAM): coada de release se persistă
+// restart al backendului care a uitat sertarul din RAM): coada de release se persistă
 // în Postgres la fiecare schimbare și se reîncarcă la pornire.
 function persistReady(): void {
   void saveKv('ready_deploys', JSON.stringify(readyDeploys)).catch(() => {})
@@ -423,7 +423,7 @@ interface OwnedReq {
 }
 let ownedReq: OwnedReq | null = null
 // Cerința deținută supraviețuiește restartului (Postgres) — o cerință deschisă
-// nu se pierde când Railway repornește backendul (Adrian, 5 iul).
+// nu se pierde când backendul e repornit (Adrian, 5 iul).
 function persistOwned(): void {
   void saveKv('owned_req', ownedReq ? JSON.stringify(ownedReq) : '').catch(() => {})
 }
@@ -560,42 +560,10 @@ setInterval(() => {
     .catch(() => {})
 }, 5 * 60_000).unref()
 
-// PLASA DE SIGURANȚĂ PENTRU APROBĂRI BLOCAATE (Adrian, 16 iul: „125 pending
-// changes across 13 services — pipeline-ul automat nu le împinge"). Calea
-// principală (dispatchGitHubWorkflow la momentul aprobării) poate rata tacit:
-// GITHUB_TOKEN lipsă/invalid pe Railway, eroare de rețea, redeploy al
-// backendului exact în secunda aprobării. Release-ul rămânea `approved` la
-// infinit, iar schimbările de Variables/Settings se adunau în dashboard.
-// Aici, la fiecare 10 minute, re-declanșăm deploy-release.yml pentru ORICE
-// aprobare proaspătă (<6h, cu branch real, ne-fantomă) — ACELAȘI filtru ca la
-// /api/bridge/approved-releases. Workflow-ul e idempotent (merge --no-ff pe un
-// branch deja integrat e no-op sau eșuează curat, iar redeploy-ul serviciilor
-// Railway doar aplică pending changes, nu creează/șterge nimic). Fără GITHUB_TOKEN
-// configurat, funcția întoarce ok:false și nu se loghează nimic (zero zgomot).
-setInterval(() => {
-  void (async () => {
-    if (!config.githubToken) return
-    const all = await listStagedReleases(50).catch(() => [])
-    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000
-    for (const r of all) {
-      if (r.status !== 'approved') continue
-      if (!r.branch || r.branch.trim() === '') continue
-      if (/^RELEASE APROBAT DE ADRIAN:/.test(r.title)) continue
-      if (r.approved_at) {
-        const t = new Date(r.approved_at).getTime()
-        if (Number.isNaN(t) || t < sixHoursAgo) continue
-      }
-      const out = await dispatchGitHubWorkflow('deploy-release.yml', 'master', {
-        branch: r.branch,
-        title: r.title,
-        detail: r.detail,
-      })
-      if (out.ok) {
-        noteBrainActivity(`🚀 Re-declanșare automată deploy-release.yml pentru aprobarea blocată: ${r.title.slice(0, 60)}`)
-      }
-    }
-  })().catch(() => {})
-}, 10 * 60_000).unref()
+// (22 iul) Plasa de siguranță care re-declanșa deploy-release.yml la 10 minute
+// a fost SCOASĂ odată cu Railway: gazda nu mai există, iar workflow-urile de
+// deploy Railway au fost șterse din repo. Aprobările rămân vizibile la
+// /api/bridge/approved-releases pentru pipeline-ul de publicare al gazdei noi.
 let devActivity: string[] = []
 // When two senders beat at once (the rich live work feed from the laptop and a
 // bare generic presence beat), the LAST write used to win and the monitor
@@ -608,7 +576,7 @@ let lastRichFeed = 0
 const devLog: string[] = []
 const devLogSeen = new Set<string>()
 // FĂRĂ AMNEZIE LA RESTART (Adrian, 6 iul): jurnalul era doar în RAM și dispărea
-// la fiecare deploy/restart Railway — de-aia părea mereu gol. Persistat în
+// la fiecare deploy/restart — de-aia părea mereu gol. Persistat în
 // Postgres ca sayQueue/readyDeploys/ownedReq: se salvează la fiecare linie
 // nouă și se reîncarcă la pornire.
 void loadKv('dev_log')
@@ -623,7 +591,7 @@ void loadKv('dev_log')
 // Ora din jurnal/monitor/admin trebuie să fie ACEEAȘI oră pe care Adrian o
 // vede în chat (ora lui locală), nu UTC-ul serverului. Fusul lui e reținut din
 // fiecare tură de chat și PERSISTAT în kv_state („da"-ul lui, 5 iul: aceeași
-// oră și în admin) — un restart/redeploy Railway nu-l mai uită; Europe/Bucharest
+// oră și în admin) — un restart/redeploy nu-l mai uită; Europe/Bucharest
 // doar până se află prima dată. (Fixul original, 226d248, rămăsese pe un branch
 // nemergeuit — de-aia „s-a schimbat ora iar" la fiecare deploy.)
 let ownerTz = 'Europe/Bucharest'
@@ -1144,35 +1112,6 @@ function authed(req: FastifyRequest): boolean {
   }
   return ok
 }
-
-// Redundant GitHub-native deploy path: when a release is approved, trigger the
-// deploy-release.yml workflow directly. The VPS builder still polls the
-// approved-releases queue, so this is a graceful fallback, not a replacement.
-async function dispatchGitHubWorkflow(
-  workflowId: string,
-  ref: string,
-  inputs?: Record<string, string>,
-): Promise<{ ok: boolean; status: number }> {
-  const token = config.githubToken
-  if (!token) return { ok: false, status: 0 }
-  const repo = config.githubRepo
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ref, inputs }),
-    })
-    return { ok: res.status === 204, status: res.status }
-  } catch (e) {
-    console.error(`[bridge] dispatchGitHubWorkflow failed: ${e}`)
-    return { ok: false, status: 0 }
-  }
-}
-
 
 // ── QUOTA TRACKER a fost mutat în services/cost.ts (exportă quotaTracker
 // și getQuotaPercent()) ca să fie accesibil și din services și din routes.
@@ -1749,30 +1688,13 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
           config.adminEmail,
           `Release ${r.status === 'approved' ? 'APROBAT' : 'RESPINS'}: „${r.title.slice(0, 200)}"`,
         )
-        // DRUMUL CORECT, AUTOMAT (11 iul: robinetul railway up e închis — vezi
-        // /api/bridge/approved-releases): „da"-ul lui Adrian face release-ul
-        // disponibil la /api/bridge/approved-releases; constructorul headless de
-        // pe VPS îl vede acolo și execută publicarea prin pipeline-ul verificat
-        // (PR → merge → deploy.yml + verificare anti-fantomă). Nu mai trimitem
-        // un ordin separat de publicare, ca să evităm dublarea și rapoarte false.
-        //
-        // PLUS cale de rezervă GitHub-native (Adrian, 14 iul: „approved releases
-        // trebuie să ajungă la Railway fără intervenție manuală"): dacă VPS-ul e
-        // oprit, backend-ul declanșează direct workflow-ul deploy-release.yml
-        // (merge branch → master → deploy.yml + redeploy toate serviciile Railway).
+        // DRUMUL DE PUBLICARE (22 iul, după scoaterea Railway): „da"-ul lui
+        // Adrian face release-ul disponibil la /api/bridge/approved-releases;
+        // publicarea efectivă o execută pipeline-ul gazdei (workerul de pe VPS),
+        // care îl citește de acolo. Calea de rezervă GitHub-native către
+        // Railway (deploy-release.yml) a fost ștearsă odată cu Railway.
         if (r.status === 'approved') {
-          noteBrainActivity(`🚀 Release aprobat — îl pun în coada de deploy verificat: ${r.title.slice(0, 80)}`)
-          void dispatchGitHubWorkflow('deploy-release.yml', 'master', {
-            branch: r.branch,
-            title: r.title,
-            detail: r.detail,
-          }).then((out) => {
-            if (out.ok) {
-              noteBrainActivity(`🚀 Workflow deploy-release.yml pornit pentru: ${r.title.slice(0, 60)}`)
-            } else {
-              noteBrainActivity(`⚠️ Workflow deploy-release.yml n-a putut porni (status ${out.status}) — rămâne calea VPS`)
-            }
-          })
+          noteBrainActivity(`🚀 Release aprobat — așteaptă pipeline-ul de publicare al gazdei: ${r.title.slice(0, 80)}`)
         }
       }
       return { ok: true, status: r.status }
@@ -2275,8 +2197,8 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
 
   // Worker → server: "give me the next admin prompt" (long-poll up to 25s).
   // ALERTĂ INSTANT DE PUBLICARE (Adrian, 10 iul: „kelion trebuie să primească
-  // instant err de la railway" — nu tu să-mi arăți poze din dashboard). Chemat
-  // de pipeline-ul deploy.yml (GitHub Actions) la orice eșec — țintă negăsită,
+  // instant erorile de publicare" — nu tu să-mi arăți poze din dashboard). Chemat
+  // de pipeline-ul de publicare la orice eșec — țintă negăsită,
   // build picat, sau kelionai.app nu răspunde 200 după publicare. Kelion îi
   // spune lui Adrian pe loc, în chat, fără să mai caute el singur.
   app.post('/api/bridge/deploy-alert', async (req, reply) => {
@@ -2286,7 +2208,7 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
     const detail = String(body.detail ?? '').slice(0, 1200)
     const runUrl = String(body.runUrl ?? '').slice(0, 300)
     sayToAdmin(
-      `🔴 Publicarea pe Railway a eșuat — etapa „${stage}".${detail ? `\n${detail}` : ''}${runUrl ? `\nJurnal: ${runUrl}` : ''}`,
+      `🔴 Publicarea a eșuat — etapa „${stage}".${detail ? `\n${detail}` : ''}${runUrl ? `\nJurnal: ${runUrl}` : ''}`,
     )
     return { ok: true }
   })

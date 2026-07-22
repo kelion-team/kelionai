@@ -30,7 +30,6 @@ import { existsSync, readFileSync } from 'node:fs'
 const require = createRequire(import.meta.url)
 
 const CLAUDE_ENV = '/root/kelion/claude.env'
-const RAILWAY_GQL = 'https://backboard.railway.com/graphql/v2'
 
 function loadEnvFile(path) {
   const out = {}
@@ -487,58 +486,22 @@ async function runWorker() {
   process.exit(0)
 }
 
-// Cheile LiveKit: din env dacă există, altfel din Railway (RAILWAY_TOKEN din
-// claude.env — același mecanism ca bridge/kelion-livekit-tls.mjs). NU luăm
-// LIVEKIT_URL din Railway (ăla e wss-ul extern) — agentul merge pe LiveKit-ul
-// LOCAL (ws://localhost:7880), fără TLS intern.
-async function railwayGql(token, query, variables) {
-  const r = await fetch(RAILWAY_GQL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-  })
-  return r.json()
-}
-async function resolveKeysFromRailway() {
-  if (CFG.apiKey && CFG.apiSecret) return
+// Cheile LiveKit + BRIDGE_SECRET: din env-ul procesului sau din
+// /root/kelion/claude.env (LIVEKIT_API_KEY / LIVEKIT_API_SECRET /
+// BRIDGE_SECRET). Railway a fost scos pe 22 iul 2026 — nu mai există niciun
+// fallback la API-ul lui; fără chei în env/claude.env agentul se oprește curat.
+function resolveKeysFromEnvFile() {
+  if (CFG.apiKey && CFG.apiSecret && CFG.bridgeSecret) return
   const env = loadEnvFile(CLAUDE_ENV)
-  const token = env.RAILWAY_TOKEN?.trim() || process.env.RAILWAY_TOKEN?.trim()
-  if (!token) return
-  try {
-    const proj = await railwayGql(
-      token,
-      'query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}',
-    )
-    const projects = proj?.data?.projects?.edges?.map((e) => e.node) || []
-    const match = projects.find((p) => /kelion/i.test(p.name))
-    if (!match) return
-    const environmentId = (
-      match.environments?.edges?.map((e) => e.node)?.find((e) => e.name === 'production') ||
-      match.environments?.edges?.[0]?.node
-    )?.id
-    const serviceId = (
-      match.services?.edges?.map((e) => e.node)?.find((s) => s.name === 'web') ||
-      match.services?.edges?.[0]?.node
-    )?.id
-    if (!environmentId || !serviceId) return
-    const varsResp = await railwayGql(
-      token,
-      'query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}',
-      { p: match.id, e: environmentId, s: serviceId },
-    )
-    const vars = varsResp?.data?.variables || {}
-    if (!CFG.apiKey) CFG.apiKey = (vars.LIVEKIT_API_KEY || '').trim()
-    if (!CFG.apiSecret) CFG.apiSecret = (vars.LIVEKIT_API_SECRET || '').trim()
-    if (!CFG.bridgeSecret) CFG.bridgeSecret = (vars.BRIDGE_SECRET || '').trim()
-    if (CFG.apiKey) log('chei LiveKit reutilizate din Railway:', CFG.apiKey.slice(0, 8) + '...')
-  } catch (e) {
-    log('nu am putut lua cheile din Railway (folosesc env):', String(e).slice(0, 80))
-  }
+  if (!CFG.apiKey) CFG.apiKey = (env.LIVEKIT_API_KEY || '').trim()
+  if (!CFG.apiSecret) CFG.apiSecret = (env.LIVEKIT_API_SECRET || '').trim()
+  if (!CFG.bridgeSecret) CFG.bridgeSecret = (env.BRIDGE_SECRET || '').trim()
+  if (CFG.apiKey) log('chei LiveKit din claude.env:', CFG.apiKey.slice(0, 8) + '...')
 }
 
 async function main() {
   loadSdks()
-  await resolveKeysFromRailway()
+  resolveKeysFromEnvFile()
   const args = process.argv.slice(2)
   const roomIdx = args.indexOf('--room')
   const roomName = roomIdx !== -1 && args[roomIdx + 1] ? args[roomIdx + 1] : 'voice-agent-test'

@@ -394,7 +394,7 @@ const SYSTEM_PROMPT =
   `Un singur edit real bate zece explicații. Nu atinge *.test.ts/config/infra dacă cererea nu e despre ele.\n` +
   `4) VERIFICĂ: rulează cu bash \`npm run build\` în backend/ ȘI frontend/ și \`npm test\` în backend/ până trec fără erori; ` +
   `dacă pică, citește eroarea reală și repar-o. Apoi re-citește \`git diff\` și confirmă criteriu cu criteriu că OBIECTIVUL e chiar ATINS ` +
-  `(nu doar „a compilat"). NU face deploy, NU rula railway.\n\n` +
+  `(nu doar „a compilat"). NU face deploy, NU publica nimic.\n\n` +
   `DOVADĂ ÎNAINTE DE AFIRMAȚIE: nu spune că merge ceva fără să fi rulat comanda (build/test/curl) și văzut ieșirea reală. ` +
   `Pentru un bug raportat, întâi REPRODU-l cu o comandă reală; dacă nu se mai reproduce, scrie "NU SE MAI REPRODUCE" și oprește-te.\n\n` +
   `LA FINAL, răspunde SCURT cu, pe linii separate:\n` +

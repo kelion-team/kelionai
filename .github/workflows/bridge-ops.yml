@@ -1,9 +1,10 @@
 # OCHII ȘI MÂINILE creierului de cod pe puntea de producție.
 #
 # Problema pe care o rezolvă: creierul de cod (Claude din GitHub/cloud) nu avea
-# NICIO cale spre puntea live — secretul punții (BRIDGE_SECRET) trăiește doar în
-# Railway. Workflow-ul ăsta îl citește din Railway prin API (mascat, nu apare
-# niciodată în loguri) și execută o operațiune de diagnostic/reparație pe
+# NICIO cale spre puntea live. Workflow-ul ia BRIDGE_SECRET din GitHub Secrets
+# (Railway a fost scos pe 22 iul 2026 — secretul trebuie pus O DATĂ în repo:
+# Settings → Secrets → Actions → BRIDGE_SECRET, aceeași valoare ca în env-ul
+# backendului) și execută o operațiune de diagnostic/reparație pe
 # endpoint-urile punții. Pornit DOAR manual (workflow_dispatch) — nu rulează
 # niciodată singur.
 #
@@ -33,28 +34,14 @@ jobs:
   ops:
     runs-on: ubuntu-latest
     steps:
-      - name: Ia BRIDGE_SECRET din Railway (mascat) și execută operațiunea
+      - name: Execută operațiunea pe punte (BRIDGE_SECRET din GitHub Secrets)
         env:
-          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SECRET: ${{ secrets.BRIDGE_SECRET }}
           OP: ${{ inputs.op }}
           TEXT: ${{ inputs.text }}
         run: |
           set -euo pipefail
-          GQL=https://backboard.railway.com/graphql/v2
-          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
-          # Găsește proiectul (aceeași logică validată în deploy.yml: unicul kelion).
-          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
-          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name | test("kelion";"i"))][0]')
-          PID=$(echo "$P" | jq -r '.id')
-          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node | select(.name=="production")][0].id')
-          SVCID=$(echo "$P" | jq -r '[.services.edges[].node | select(.name=="web")][0].id // .services.edges[0].node.id')
-          if [ -z "$PID" ] || [ "$PID" = "null" ]; then echo "::error::Nu găsesc proiectul"; exit 1; fi
-          # Variabilele serviciului web (decriptate) → BRIDGE_SECRET, mascat imediat.
-          VQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){variables(projectId:$p,environmentId:$e,serviceId:$s)}",variables:{p:$p,e:$e,s:$s}}')
-          SECRET=$(gql "$VQ" | jq -r '.data.variables.BRIDGE_SECRET // empty')
-          if [ -z "$SECRET" ]; then echo "::error::BRIDGE_SECRET nu e setat pe serviciu"; exit 1; fi
-          echo "::add-mask::$SECRET"
+          if [ -z "$SECRET" ]; then echo "::error::BRIDGE_SECRET lipsește din Settings → Secrets → Actions (pune aceeași valoare ca în env-ul backendului)."; exit 1; fi
           B=https://kelionai.app
           H="x-bridge-secret: $SECRET"
           case "$OP" in

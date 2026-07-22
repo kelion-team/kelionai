@@ -28,7 +28,7 @@
 # GitHub ai vrea să „vezi", citește-o cu `api`: ex. `kelion-github api /pulls/106`,
 # `api /commits/master`, `api "/actions/runs?per_page=3"`. Trece direct, cu cheia.
 #
-# REGULA DE FIER rămâne: NICIODATĂ railway up direct — doar `deploy` de aici,
+# REGULA DE FIER rămâne: NICIODATĂ publicare pe lângă pipeline — doar `deploy` de aici,
 # care trece prin pipeline-ul cu verificarea că versiunea live CHIAR s-a schimbat.
 set -u
 REPO="kelion-team/kelionai"
@@ -110,20 +110,12 @@ case "$cmd" in
     exec "$0" deploy
     ;;
   deploy)
-    BEFORE=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
-    echo "versiune înainte: $BEFORE"
-    CODE=$(gh_api -o /dev/null -w '%{http_code}' -X POST "$API/actions/workflows/deploy.yml/dispatches" -d '{"ref":"master"}')
-    [ "$CODE" != "204" ] && { echo "EROARE: dispatch deploy.yml → HTTP $CODE"; exit 1; }
-    echo "deploy.yml pornit — aștept verificarea anti-fantomă (versiunea TREBUIE să se schimbe)…"
-    for i in $(seq 1 60); do
-      sleep 8
-      NOW=$(curl -s --max-time 8 https://kelionai.app/api/version || echo '{}')
-      if [ -n "$NOW" ] && [ "$NOW" != "$BEFORE" ] && [ "$NOW" != "{}" ]; then
-        echo "✅ PUBLICAT + VERIFICAT: $NOW"
-        exit 0
-      fi
-    done
-    echo "❌ Versiunea NU s-a schimbat în ~8 min — deploy eșuat sau fantomă. NU declara succes."
+    # (22 iul 2026) Railway a fost SCOS — deploy.yml nu mai există. Pipeline-ul
+    # de publicare al gazdei noi (VPS) nu e încă definit în repo. FAIL CLOSED:
+    # nu declanșăm nimic și spunem exact asta, ca niciun agent să nu creadă că
+    # a publicat. Merge-ul în master rămâne valid (codul e în GitHub); publicarea
+    # efectivă o face gazda, cu aprobarea lui Adrian.
+    echo "❌ DEPLOY INDISPONIBIL: Railway a fost scos (22 iul 2026), iar pipeline-ul de publicare al gazdei noi nu e definit încă. Codul e în master, dar publicarea trebuie făcută pe gazda reală (VPS). NU declara publicat."
     exit 1
     ;;
   runs)

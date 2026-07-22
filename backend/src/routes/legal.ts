@@ -93,7 +93,7 @@ const PRIVACY = page(
     <li><strong>Moonshot AI (Kimi)</strong> — processes conversation content to generate replies (primary).</li>
     <li><strong>Zhipu AI (GLM / z.ai)</strong> — processes conversation content to generate replies (reserve).</li>
     <li><strong>Google Cloud</strong> — speech-to-text and text-to-speech (voice).</li>
-    <li><strong>Railway</strong> — hosting and database.</li>
+    <li><strong>Dedicated VPS server (EU)</strong> — hosting and database.</li>
   </ul>
 
   <h2>Retention</h2>

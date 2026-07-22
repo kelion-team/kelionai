@@ -10,7 +10,7 @@
 //   4. Adrian aproba din tab-ul Admin "Release-uri".
 //   5. Constructorul vede aprobarea (GET /api/bridge/approved-releases) si abia
 //      ATUNCI face deploy: PR → merge în master → dispatch deploy.yml (pipeline
-//      GitHub/Railway, NU railway up direct).
+//      verificat prin GitHub — nicio publicare pe lângă pipeline).
 //
 // MONITOR LIVE (ordinul lui Adrian, 4 iul: "trebuie sa vad live cu ce te ocupi
 // pe monitor"): constructorul NU mai lucreaza mut. Claude ruleaza cu
@@ -24,7 +24,7 @@
 // build ruleaza doar in repo-ul proiectului.
 //
 // Mediu (din /root/kelion/claude.env): BRIDGE_SECRET, CLAUDE_CODE_OAUTH_TOKEN,
-// RAILWAY_TOKEN (pentru deploy). Repo la /root/kelion/app (clona proiectului).
+// (Railway a fost scos, 22 iul 2026.) Repo la /root/kelion/app (clona proiectului).
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 // CODER NATIV (fără binarul `claude`, fără Anthropic — ordinul lui Adrian „0
@@ -612,7 +612,7 @@ async function build(order) {
     `Esti constructorul Kelionai. Sarcina de la Adrian: "${order.text}". ` +
     `Editeaza codul in acest repo ca sa o rezolvi. Compileaza (npm run build in backend SI frontend) ` +
     `si ruleaza testele (npm test in backend) pana trec fara erori. ` +
-    `NU face deploy, NU rula railway.\n` +
+    `NU face deploy, NU publica nimic.\n` +
     // MODELUL DE ABORDARE SI EXECUTIE (Adrian, 13 iul: „ii trebuie un model
     // performant de abordare si executie"): cei 4 pasi OBLIGATORII, in ordine.
     // Fara ei, pe un ordin vag constructorul flaileaza (ex: bucla pe db.test.ts,
@@ -1008,7 +1008,7 @@ async function deployApproved(r) {
   // Release-ul se marchează publicat abia după ce pipeline-ul a confirmat
   // verificarea anti-fantomă (versiunea live s-a schimbat).
   await api('/api/bridge/release-deployed', 'POST', { id: r.id })
-  say('🟢 PUBLICAT + VERIFICAT LIVE prin pipeline GitHub/Railway')
+  say('🟢 PUBLICAT + VERIFICAT LIVE prin pipeline-ul verificat')
   pushProgress(98, 'Publicat — regenerez QR-uri')
 
   // După deploy, regenerăm codurile QR ca să reflecte ultimele căi.

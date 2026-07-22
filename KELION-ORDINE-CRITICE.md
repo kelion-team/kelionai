@@ -214,7 +214,7 @@ Trebuie sa treaca fara erori TS.
 
 ## REGULA DE FIER
 
-- **NICIODATA** `railway up` direct
+- **NICIODATA** publicare pe lângă pipeline-ul verificat (Railway a fost scos, 22 iul 2026)
 - **NICIODATA** force-push
 - **INTOTDEAUNA** build + test inainte de commit
 - **INTOTDEAUNA** verificare live cu curl dupa deploy

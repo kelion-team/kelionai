@@ -96,7 +96,7 @@ export function systemStatus() {
   return exec('top -bn1 | head -20 && df -h && free -h');
 }
 
-// ── Deploy Railway via kelion-github ──
+// ── Deploy via kelion-github (fail closed de la scoaterea Railway, 22 iul 2026) ──
 export function deploy() {
   return exec('npx kelion-github deploy');
 }

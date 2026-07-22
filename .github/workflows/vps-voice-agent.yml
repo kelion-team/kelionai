@@ -5,8 +5,8 @@
 # LiveKit-ul LOCAL (ws://localhost:7880) și poate intra într-o cameră. FĂRĂ
 # microfon — validează fundația (instalare + conexiune) înainte de bucla audio.
 #
-# Determinist, fără LLM. Cheile LiveKit le ia agentul singur din Railway
-# (RAILWAY_TOKEN din claude.env) — nu apar în log.
+# Determinist, fără LLM. Cheile LiveKit le ia agentul din env/claude.env
+# (LIVEKIT_API_KEY/SECRET) — nu apar în log. (Railway scos, 22 iul 2026.)
 name: vps-voice-agent
 
 on:
@@ -63,7 +63,7 @@ jobs:
           fi
 
           echo "=== test de conexiune (agentul intră într-o cameră de test) ==="
-          # LiveKit local, fără TLS intern. Cheile le ia agentul din Railway (claude.env).
+          # LiveKit local, fără TLS intern. Cheile le ia agentul din claude.env.
           LIVEKIT_URL=ws://localhost:7880 node "$REPO/bridge/voice-agent/kelion-voice-agent.mjs" --test --room voice-agent-test
 
           echo "=== camere active acum (dovadă din server) ==="

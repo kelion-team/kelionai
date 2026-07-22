@@ -60,7 +60,7 @@ const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
 // fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
-// → restart-loop pe Railway. Le prindem și le logăm, ca aplicația live să NU cadă
+// → restart-loop pe gazdă. Le prindem și le logăm, ca aplicația live să NU cadă
 // dintr-o eroare izolată. (Fixul de fond rămâne `.catch` pe fiecare `.then`.)
 process.on('unhandledRejection', (reason) => {
   app.log.error({ reason }, 'unhandledRejection — prins global, procesul rămâne viu')
@@ -190,18 +190,18 @@ app.addHook('onSend', async (req, reply) => {
   }
 })
 
-// Health — must return exactly 200 (200-only rule + Railway healthcheck)
+// Health — must return exactly 200 (200-only rule + healthcheck-ul gazdei)
 app.get('/health', async () => ({ status: 'ok' }))
 
 // VERSIUNEA DEPLOY-ULUI (Adrian, 10 iul: „la orice deploy nou se actualizează
-// filigranul, browserul repornește curat"). Railway injectează sha-ul
-// commitului publicat; frontend-ul îl sondează și, când se schimbă, face
-// resetul curat la ultima versiune. Filigranul îl afișează — deci SE SCHIMBĂ
-// la ORICE publicare, chiar dacă interfața n-a fost atinsă (cache de layer).
-const DEPLOY_SHA = (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7)
+// filigranul, browserul repornește curat"). Gazda poate injecta sha-ul
+// commitului publicat prin GIT_COMMIT_SHA; frontend-ul îl sondează și, când se
+// schimbă, face resetul curat la ultima versiune. Filigranul îl afișează —
+// deci SE SCHIMBĂ la ORICE publicare, chiar dacă interfața n-a fost atinsă.
+const DEPLOY_SHA = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
 const BOOT_AT = new Date().toISOString()
-// Railway prin `railway up` NU injectează sha-ul (dovedit live: v gol) →
-// momentul pornirii E versiunea: se schimbă la fiecare publicare.
+// Fără sha injectat, momentul pornirii E versiunea: se schimbă la fiecare
+// publicare reală.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')

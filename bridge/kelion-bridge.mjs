@@ -99,7 +99,7 @@ async function pull() {
     body: '{}',
     signal: AbortSignal.timeout(40_000),
   })
-  if (res.status === 401) throw new Error('Secret respins de server — verifică BRIDGE_SECRET pe Railway.')
+  if (res.status === 401) throw new Error('Secret respins de server — verifică BRIDGE_SECRET din env-ul backendului.')
   if (!res.ok) throw new Error(`pull HTTP ${res.status}`)
   const j = await res.json()
   const job = j.job ?? null

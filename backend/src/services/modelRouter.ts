@@ -8,12 +8,12 @@
 // minim. Decizia e DETERMINISTĂ și GRATUITĂ (fără un apel de model în plus, deci
 // zero cost/latență adăugate pentru rutare).
 //
-// FUTURE-PROOF: tier-urile sunt configurabile din mediu (Railway). Când apare un
+// FUTURE-PROOF: tier-urile sunt configurabile din mediu (env pe gazdă). Când apare un
 // model mai nou/mai puternic — acum sau în viitor — setezi variabila și intră
 // INSTANT, fără deploy. Pentru mai multe trepte, extinzi MODEL_LADDER.
 
 // CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider scos complet (Adrian, 12
-// iul). Configurabile din Railway (KELION_FAST_MODEL / KELION_TOP_MODEL) dacă
+// iul). Configurabile din env-ul gazdei (KELION_FAST_MODEL / KELION_TOP_MODEL) dacă
 // furnizorii schimbă numele; implicit modelele native ale planurilor.
 // Adrian, 14 iul: „creierul forțat Kimi 2.7, ZERO rabat la putere, dar primul
 // cuvânt sub 1s". CATALOG REAL (Kimi /v1/models, verificat live 14 iul): endpointul
