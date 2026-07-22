@@ -34,7 +34,11 @@ export const config = {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
     currency: (process.env.STRIPE_CURRENCY ?? 'gbp').toLowerCase(),
-    userShare: Number(process.env.USER_SHARE ?? 0.7),
+    // Split banilor la fiecare alimentare: 75% devin credite pentru user, 25%
+    // intră în fondul real al adminului (care plătește cheile AI). Adrian, iul:
+    // „la admin știi ce trebuie cu 25%". Codul din topUpUser marca deja „user
+    // 75% / margin 25%", dar implicitul era 0.7 — aliniat acum la cerință.
+    userShare: Number(process.env.USER_SHARE ?? 0.75),
     creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
     usdToCurrency: Number(process.env.USD_TO_CURRENCY ?? 0.8),
   },
