@@ -1414,49 +1414,6 @@ const EMPTY_VISIT: DemoVisit = {
   browser: '', os: '', device: '', lang: '', referrer: '', isBot: false,
 }
 
-export async function tryStartDemo(
-  fingerprint: string,
-  ip: string,
-  visit: DemoVisit = EMPTY_VISIT,
-  sessionEmail = '',
-): Promise<{ ok: boolean; reason?: 'cap' | 'used' }> {
-  if (!dbEnabled()) return { ok: true }
-  try {
-    const pool = getPool()
-    // FĂRĂ plafon global pe număr de probe (Adrian, 13 iul: „10 minute pe
-    // utilizator, nu există limită la câți testează"). Limita reală e per
-    // sesiune (10 min, DEMO_SECONDS) — nu pe câți vizitatori intră într-o zi.
-    // Rămâne DOAR garda anti-reabuz per amprentă/IP de mai jos.
-    if (fingerprint || ip) {
-      const used = Number(
-        (
-          await pool.query<{ n: string }>(
-            `SELECT COUNT(*) AS n FROM demo_uses
-             WHERE started_at >= now() - interval '30 days'
-               AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))`,
-            [fingerprint, ip],
-          )
-        ).rows[0]?.n ?? 0,
-      )
-      if (used > 0) return { ok: false, reason: 'used' }
-    }
-    await pool.query(
-      `INSERT INTO demo_uses
-         (fingerprint, ip, country, country_code, city, region, isp, tz,
-          browser, os, device, lang, referrer, is_bot, session_email)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [
-        fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
-        visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
-        visit.referrer, visit.isBot, sessionEmail,
-      ],
-    )
-    return { ok: true }
-  } catch {
-    return { ok: true }
-  }
-}
-
 /**
  * Record a plain SITE VISIT (anyone who opens the landing page — not just demo
  * starters). Deduped: the same fingerprint/IP within 6 hours counts once, so a

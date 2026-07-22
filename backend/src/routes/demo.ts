@@ -1,8 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { config } from '../config.js'
-import { setDemoSession, getSessionUser, makeDemoEmail } from '../session.js'
+import { getSessionUser } from '../session.js'
 import {
-  tryStartDemo,
   logVisit,
   touchVisit,
   addLead,
@@ -152,23 +150,9 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Start a free trial (default 3 minutes of full access). Collects the owner's
-  // visitor analytics (human/bot, geo, device, language, referrer), enforces the
-  // daily cap and a light per-fingerprint/IP anti-reuse.
-  app.post<{ Body: { fp?: string; ref?: string } }>('/api/demo/start', async (req, reply) => {
-    const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
-    const referrer = typeof req.body?.ref === 'string' ? req.body.ref.slice(0, 300) : ''
-    const { ip, visit } = await visitorProfile(req, referrer)
-    // Same email on the analytics row AND the session — the link that lets the
-    // owner click a trial and read its conversation.
-    const sessionEmail = makeDemoEmail()
-    const res = await tryStartDemo(fp, ip, visit, sessionEmail)
-    if (!res.ok) {
-      return reply.code(429).send({ error: res.reason === 'cap' ? 'cap_reached' : 'already_used' })
-    }
-    setDemoSession(reply, config.demo.seconds, sessionEmail)
-    return reply.send({ ok: true, seconds: config.demo.seconds })
-  })
+  // FĂRĂ tier gratuit (Adrian: „se scot total minutele de test, userii cumpără
+  // să probeze"). Vizita e în continuare urmărită (analytics de mai sus), dar
+  // NIMENI nu mai primește o sesiune gratuită — accesul cere cont + credite.
 
   // A visitor leaves their email (the only real channel to an anonymous visitor):
   // stored as a lead the owner can then email from the admin panel. Public but

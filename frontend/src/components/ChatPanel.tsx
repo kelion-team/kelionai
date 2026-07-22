@@ -109,11 +109,9 @@ function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): 
 export default function ChatPanel({
   lang,
   isAdmin,
-  isDemo = false,
 }: {
   readonly lang: Lang
   readonly isAdmin: boolean
-  readonly isDemo?: boolean
 }) {
   const t = strings(lang)
   // Fix hydration: start with the deterministic UI lang, then resolve the browser locale on the client.
@@ -463,24 +461,6 @@ export default function ChatPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // A potential customer entering the free trial is welcomed: Kelion greets
-  // FIRST, politely, matching the visitor's time of day — spoken and shown.
-  // English (the demo's default); he switches the moment the visitor speaks
-  // their own language. Deterministic (no AI round-trip): instant and safe.
-  useEffect(() => {
-    if (!isDemo) return
-    const h = new Date().getHours()
-    const daypart = h >= 5 && h < 12 ? 'Good morning' : h >= 12 && h < 18 ? 'Good afternoon' : 'Good evening'
-    const id = window.setTimeout(() => {
-      ack(
-        `${daypart}, and welcome — I'm Kelion, your personal assistant. ` +
-          `You have three free minutes with me: ask me anything, in any language.`,
-      )
-    }, 1500)
-    return () => window.clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDemo])
 
   // ── Quota vertical bar (albastru = Kimi, verde = GLM) ──
   useEffect(() => {
@@ -1137,11 +1117,7 @@ export default function ChatPanel({
   // Load the user's persisted speech language (localStorage instantly, then the
   // server which follows the user across devices). Auto-detection still refines
   // it from what's actually spoken/typed.
-  // A free-trial (demo) visitor is a STRANGER: never inherit a language another
-  // person left on this browser — the demo always starts in English (the app's
-  // base language) and only switches when THIS visitor clearly uses another.
   useEffect(() => {
-    if (isDemo) return
     const apply = (code: string | null): void => {
       if (!code || code === speechLangRef.current) return
       speechLangRef.current = code
@@ -1156,7 +1132,7 @@ export default function ChatPanel({
       // (e.g. left over from an earlier mis-detection), correct it.
       if (serverPrefs.speechLang && serverPrefs.speechLang !== local) mirrorLang(serverPrefs.speechLang)
     })
-  }, [isDemo])
+  }, [])
 
   // Permanent vision — camera ON by default. The camera is switched by voice/
   // text command (no button), so no need to probe for a second camera here.

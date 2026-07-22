@@ -988,7 +988,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (
       config.stripe.secretKey &&
       user.role !== 'admin' &&
-      user.role !== 'demo' &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -1182,8 +1181,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Memory agent (recall): inject the durable facts Kelion has learned about
     // this user so the conversation is continuous across sessions. Citit mai
-    // sus (drumul unic spre bază). DEMO = anonim, fără memorie injectată.
-    if (user.role !== 'demo') systemPrompt += memRecall
+    // sus (drumul unic spre bază).
+    systemPrompt += memRecall
 
     // ── BIOMETRIE (voce + față) — identificare titular vs. altcineva ──────────
     // Adrian: „nimic direct în chat, tot în paralel, să nu încetinească chatul".
@@ -1416,10 +1415,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // această tură, banda din UI îl afișează. Nu e ecou local — dacă banda nu se
     // schimbă când vorbești, vocea a murit ÎNAINTE de creier.
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
-    // Demo = fără istoric (spec Adrian, 10 iul): mesajele vizitatorilor demo
-    // nu se salvează nicăieri.
-    if (lastTurn?.role === 'user' && user.role !== 'demo')
-      void saveMessage(user.email, 'user', lastTurn.content)
+    if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
     const isAdmin = user.role === 'admin'
 
@@ -1757,10 +1753,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       void learnFromTurn(user.email, 'kelion', lastUserText, assistantText)
     }
 
-    // Debit real provider cost from the user's wallet (customers only; admin/demo exempt).
+    // Debit real provider cost from the user's wallet (customers only; admin exempt).
     // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
     // multiple times for the same turn).
-    if (user.role !== 'admin' && user.role !== 'demo') {
+    if (user.role !== 'admin') {
       const cost = brainCost(model, inTokens, outTokens) + usage.usd
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)

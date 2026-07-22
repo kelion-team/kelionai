@@ -11,7 +11,7 @@ import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import ReleaseAlertBanner from '../components/ReleaseAlertBanner'
 import type { User } from '../lib/api'
-import { logout, startGoogleLogin, startGoogleConnect } from '../lib/api'
+import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
 import {
   getWorkspace,
@@ -267,21 +267,6 @@ export default function Stage({ user }: { user: User }) {
   // set by the promo pipeline; falls back to the timestamp name.
   const recNameRef = useRef<string | null>(null)
   const ws = useSyncExternalStore(subscribeWorkspace, getWorkspace)
-
-  // Free-trial countdown: for a demo session, tick to zero, then show the
-  // conversion overlay (sign in + buy credit).
-  // Fix hydration: valoare inițială statică (0), calculez real în useEffect.
-  const [demoLeft, setDemoLeft] = useState(0)
-  useEffect(() => {
-    if (user.role !== 'demo' || !user.demoUntil) return
-    setDemoLeft(Math.max(0, Math.ceil((user.demoUntil - Date.now()) / 1000)))
-    const id = window.setInterval(() => {
-      setDemoLeft(Math.max(0, Math.ceil(((user.demoUntil ?? 0) - Date.now()) / 1000)))
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [user.role, user.demoUntil])
-  const demoOver = user.role === 'demo' && !!user.demoUntil && demoLeft <= 0
-  const mmss = `${Math.floor(demoLeft / 60)}:${String(demoLeft % 60).padStart(2, '0')}`
 
   // Keep the screen awake while a map/route is on the monitor, so navigation
   // never freezes when the browser would otherwise throttle the tab.
@@ -986,11 +971,6 @@ export default function Stage({ user }: { user: User }) {
             ⚙
           </button>
         )}
-        {user.role === 'demo' && !demoOver && (
-          <span className="trial-pill">
-            {t.trialLabel} · {mmss}
-          </span>
-        )}
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
@@ -1061,7 +1041,7 @@ export default function Stage({ user }: { user: User }) {
               Admin
             </button>
           )}
-          {user.role !== 'demo' && !user.googleConnected && (
+          {!user.googleConnected && (
             <button
               type="button"
               className="ghost"
@@ -1092,7 +1072,7 @@ export default function Stage({ user }: { user: User }) {
           the laptop is mirrored here in real time. Floats over the whole monitor
           but never blocks clicks (pointer-events: none), so the owner keeps
           talking to Kelion while WATCHING the work happen. */}
-      <ChatPanel lang={lang} isAdmin={user.role === 'admin'} isDemo={user.role === 'demo'} />
+      <ChatPanel lang={lang} isAdmin={user.role === 'admin'} />
 
       {adminOpen && (
         <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
@@ -1102,36 +1082,6 @@ export default function Stage({ user }: { user: User }) {
 
       {settingsOpen && <CustomerSettings user={user} onClose={() => setSettingsOpen(false)} />}
 
-      {demoOver && (
-        <div className="demo-over">
-          <div className="demo-over-card">
-            <span className="brand-lg">Kelionai</span>
-            <h2>{t.trialOverTitle}</h2>
-            <p>{t.trialOverBody}</p>
-            <button type="button" className="google-btn" onClick={startGoogleLogin}>
-              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#FFC107"
-                  d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"
-                />
-                <path
-                  fill="#FF3D00"
-                  d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
-                />
-                <path
-                  fill="#4CAF50"
-                  d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.2C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-7.6l-6.6 5.1C9.6 39.6 16.2 44 24 44z"
-                />
-                <path
-                  fill="#1976D2"
-                  d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.2C41.4 36.5 44 31 44 24c0-1.3-.1-2.3-.4-3.5z"
-                />
-              </svg>
-              {t.buyCreditCta}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

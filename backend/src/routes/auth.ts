@@ -82,8 +82,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   ].join(' ')
   app.get('/auth/google/connect', async (req, reply) => {
     const user = getSessionUser(req)
-    // Must be a real (non-demo) signed-in user to grant Google access.
-    if (!user || user.role === 'demo') {
+    if (!user) {
       return reply.redirect(`${config.frontendOrigin}/?error=closed`)
     }
     const state = 'c.' + crypto.randomBytes(16).toString('hex')
@@ -248,7 +247,6 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         picture: user.picture,
         role: user.role,
         locale: user.locale,
-        demoUntil: user.demoUntil,
         googleConnected: Boolean(refresh),
       },
     })

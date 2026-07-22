@@ -8,12 +8,9 @@ export interface SessionUser {
   email: string
   name: string
   picture: string
-  role: 'admin' | 'customer' | 'demo'
+  role: 'admin' | 'customer'
   // Language from the user's Google account (e.g. "ro", "en-GB"). Drives UI language.
   locale: string
-  // For a free trial ("demo") session only: the epoch-ms when the 3 minutes end,
-  // so the frontend can show a live countdown and the conversion overlay at zero.
-  demoUntil?: number
   // Google OAuth access token + expiry (ms) for calling Google skills on the
   // user's behalf. The access token is valid ~1h; the refresh token (kept in the
   // signed, httpOnly session cookie) lets the chat route mint a fresh access
@@ -34,7 +31,6 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     picture: user.picture,
     role: user.role,
     locale: user.locale,
-    demoUntil: user.demoUntil,
     googleAccessToken: user.googleAccessToken,
     googleTokenExp: user.googleTokenExp,
     googleRefreshToken: user.googleRefreshToken,
@@ -46,35 +42,6 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
     secure: config.isProd,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 30,
-  })
-}
-
-// The throwaway identity for one free trial. Generated up front so the SAME
-// email is stored on the visitor's analytics row AND used for the session —
-// that's the link that lets the owner click a trial and read its conversation.
-export function makeDemoEmail(): string {
-  return `demo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}@demo.kelionai.app`
-}
-
-// Issue a short-lived free-trial ("demo") session: full access for `seconds`,
-// no Google skills, its own throwaway identity. The JWT itself expires a little
-// after the trial so the very last request doesn't 401 early.
-export function setDemoSession(reply: FastifyReply, seconds: number, email = makeDemoEmail()): void {
-  const payload: SessionUser = {
-    email,
-    name: 'Guest',
-    picture: '',
-    role: 'demo',
-    locale: 'en',
-    demoUntil: Date.now() + seconds * 1000,
-  }
-  const token = jwt.sign(payload, config.sessionSecret, { expiresIn: seconds + 15 })
-  reply.setCookie(SESSION_COOKIE, token, {
-    path: '/',
-    httpOnly: true,
-    secure: config.isProd,
-    sameSite: 'lax',
-    maxAge: seconds + 15,
   })
 }
 
@@ -95,8 +62,7 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
     const u = jwt.verify(token, config.sessionSecret) as SessionUser
     // Re-derivă rolul din email (W10 #5): rolul „înghețat" în JWT rămânea admin
     // 30 de zile dacă ADMIN_EMAIL se schimba — revocarea de admin nu avea efect.
-    // Demo rămâne demo (identitate throwaway); restul, rol după emailul curent.
-    u.role = u.role === 'demo' ? 'demo' : roleFor(u.email)
+    u.role = roleFor(u.email)
     return u
   } catch {
     return null

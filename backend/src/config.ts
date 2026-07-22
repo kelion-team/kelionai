@@ -75,10 +75,6 @@ export const config = {
       .trim()
       .toLowerCase(),
   },
-  demo: {
-    seconds: Number(process.env.DEMO_SECONDS ?? 600),
-    capPerDay: Number(process.env.DEMO_CAP_PER_DAY ?? 10),
-  },
   openSignup: (process.env.OPEN_SIGNUP ?? '1') !== '0',
   allowlist: (process.env.ALLOWLIST ?? 'adrianenc11@gmail.com')
     .split(',')
