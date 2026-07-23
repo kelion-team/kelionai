@@ -169,8 +169,6 @@ export default function ChatPanel({
   const [cameraOn, setCameraOn] = useState(true)
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
-  // BARA VERTICALĂ DE QUOTA (albastru = Kimi, verde = GLM) — procente de la /api/quota.
-  const [quota, setQuota] = useState<{ kimi: number; glm: number }>({ kimi: 100, glm: 100 })
   // Attached images (ChatGPT-style composer). Sent to the brain's vision on send.
   // Attachments are images (url = data URL, used for vision), documents
   // (text = the Markdown extracted by MarkItDown, prepended to the message),
@@ -460,31 +458,6 @@ export default function ChatPanel({
       window.removeEventListener('kelion:rec-stopped', onStopped)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // ── Quota vertical bar (albastru = Kimi, verde = GLM) ──
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      try {
-        const r = await fetch('/api/quota', { credentials: 'include' })
-        if (!r.ok) return
-        const j = (await r.json()) as { kimi?: number; glm?: number }
-        if (cancelled) return
-        setQuota({
-          kimi: Math.max(0, Math.min(100, Math.round(Number.isFinite(Number(j.kimi)) ? Number(j.kimi) : 100))),
-          glm: Math.max(0, Math.min(100, Math.round(Number.isFinite(Number(j.glm)) ? Number(j.glm) : 100))),
-        })
-      } catch {
-        // silent — bara rămâne la 100% dacă endpoint-ul nu răspunde
-      }
-    }
-    void load()
-    const id = setInterval(load, 30_000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
   }, [])
 
   // ── File attachment (ChatGPT-style) ──
@@ -1285,64 +1258,6 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {isAdmin && (
-        <div
-          className="quota-bar"
-          style={{
-            position: 'fixed',
-            top: 80,
-            right: 12,
-            width: 16,
-            height: 120,
-            display: 'flex',
-            gap: 4,
-            zIndex: 50,
-          }}
-        >
-          <div
-            title={`Kimi quota: ${quota.kimi}%`}
-            style={{
-              flex: 1,
-              height: '100%',
-              background: '#e5e7eb',
-              borderRadius: 4,
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'flex-end',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: `${quota.kimi}%`,
-                background: '#3b82f6',
-                transition: 'height 0.5s ease',
-              }}
-            />
-          </div>
-          <div
-            title={`GLM quota: ${quota.glm}%`}
-            style={{
-              flex: 1,
-              height: '100%',
-              background: '#e5e7eb',
-              borderRadius: 4,
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'flex-end',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: `${quota.glm}%`,
-                background: '#22c55e',
-                transition: 'height 0.5s ease',
-              }}
-            />
-          </div>
-        </div>
-      )}
       {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
           spațiul unde apare semnul de creier... nu se mai afișează în afara
           spațiului de acolo răspunsurile de chat”). Bulele care pluteau peste

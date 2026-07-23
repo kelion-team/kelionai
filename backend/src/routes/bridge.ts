@@ -9,7 +9,7 @@ import { budgetCheck, sameFailure, DEFAULT_AUTONOMY } from '../services/autonomy
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
 import { runVoiceTurn } from '../services/voiceTurn.js'
-import { quotaTracker } from '../services/cost.js'
+import { getAdminAccount } from '../db.js'
 import {
   saveMessage,
   getRecentHistory,
@@ -2037,28 +2037,16 @@ export async function bridgeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const events = await listTierEvents(40) // cele mai noi întâi
-    const statusOf = (name: 'kimi' | 'glm'): { ok: boolean; reason: string } => {
-      // Motorul folosit ACUM are garantat credit.
-      if (workEngine === name) return { ok: true, reason: '' }
-      // Altfel, primul eveniment (cel mai nou) care menționează treapta decide:
-      // dacă a PLECAT de pe ea cu motiv de quota → fără credit; dacă a AJUNS pe
-      // ea → are credit.
-      for (const e of events) {
-        if (e.to_tier === name) return { ok: true, reason: '' }
-        if (e.from_tier === name) {
-          const quota = BRAIN_QUOTA_RE.test(e.reason || '')
-          return { ok: !quota, reason: quota ? (e.reason || '').slice(0, 160) : '' }
-        }
-      }
-      return { ok: true, reason: '' } // fără istoric → presupunem OK
-    }
-    const kimi = statusOf('kimi')
-    const glm = statusOf('glm')
+    // Creierul e 100% OpenRouter (0 Kimi, 0 GLM). Afișăm dacă cheia e configurată
+    // + fondul REAL al adminului (loaded − cost real). „cit e real", nu nelimitat.
+    const pool = await getAdminAccount()
     return {
-      active: workEngine || null,
-      kimi: { ok: kimi.ok, reason: kimi.reason, topup: TOPUP.kimi, percent: quotaTracker.percent('kimi') },
-      glm: { ok: glm.ok, reason: glm.reason, topup: TOPUP.glm, percent: quotaTracker.percent('glm') },
+      active: 'openrouter',
+      openrouter: {
+        ok: Boolean(config.openrouter.key),
+        topup: 'https://openrouter.ai/credits',
+      },
+      pool,
     }
   })
 

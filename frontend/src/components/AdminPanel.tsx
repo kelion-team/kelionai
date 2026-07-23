@@ -114,13 +114,13 @@ function Flag({ code }: { readonly code: string }) {
 }
 
 const AI_LABELS: Record<string, string> = {
-  chat: 'Kimi/GLM (brain)',
+  chat: 'Creier (OpenRouter)',
   correct: 'Gemini (correct)',
   image: 'Images (Gemini)',
   tts: 'Voice (TTS)',
   asr: 'Hearing (STT)',
   search: 'Search (Serper)',
-  memory: 'Memory (Kimi)',
+  memory: 'Memorie',
 }
 
 // Group the history newest-first, with a date header per day (Today / Yesterday /
