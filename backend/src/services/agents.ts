@@ -3,9 +3,9 @@ import { config } from '../config.js'
 import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } from '../db.js'
 import { brainCost } from './cost.js'
 import { brain } from './brain.js'
-import { MODEL_FAST } from './modelRouter.js'
 
-const MEMORY_MODEL = MODEL_FAST
+// Memoria rulează pe modelul de chat implicit (OpenRouter). Kimi/GLM scoase.
+const MEMORY_MODEL = config.openrouter.chatDefault
 
 export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
   const recent = await getMemories(email, 40, agent)
@@ -41,7 +41,7 @@ export async function learnFromTurn(
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if ((!config.kimiKey && !config.glmKey) || (!userMsg.trim() && !assistantMsg.trim())) return
+  if (!config.openrouter.key || (!userMsg.trim() && !assistantMsg.trim())) return
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )

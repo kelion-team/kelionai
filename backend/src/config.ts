@@ -19,8 +19,6 @@ export const config = {
     redirectUri: required('GOOGLE_REDIRECT_URI'),
   },
   sessionSecret: required('SESSION_SECRET'),
-  kimiKey: (process.env.KIMI_API_KEY ?? process.env.KIMI_KEY ?? '').trim(),
-  glmKey: (process.env.GLM_API_KEY ?? process.env.GLM_KEY ?? '').trim(),
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
   databaseUrl: process.env.DATABASE_URL ?? '',
   googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? '',

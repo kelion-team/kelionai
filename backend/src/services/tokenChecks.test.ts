@@ -16,8 +16,7 @@ describe('Token checks', () => {
   it('reports not_configured when no external keys are set', async () => {
     const checks = await runAllTokenChecks()
     const names = checks.map((c) => c.name)
-    expect(names).toContain('Kimi API key')
-    expect(names).toContain('GLM API key')
+    expect(names).toContain('OpenRouter API key')
     expect(names).toContain('Stripe secret key')
     expect(names).toContain('Google service account')
     expect(names).toContain('Serper API key')

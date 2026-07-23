@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { brain, glm, type BrainClient } from '../services/brain.js'
 import type {
   Tool,
   Message,
@@ -87,47 +86,14 @@ import {
   type BridgeFile,
 } from './bridge.js'
 import { randomUUID } from 'node:crypto'
-import { MODEL_FAST, MODEL_TOP, chooseModel, isQuotaError } from '../services/modelRouter.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 
-// STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
-// modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
-// cost (services/modelRouter.ts), determinist și gratuit. Tier-urile stau acolo,
-// Detectare erori de quota (403/429 + cuvinte-cheie) — isQuotaError importat
-// din services/modelRouter.ts; folosit de failover Kimi → GLM.
-function logFailover(from: string, to: string, reason: string): void {
-  console.log(`[FAILOVER] ${from} → ${to} (${reason})`)
-}
-
-// Numele vechi de model (compatibilitate). Ambele sunt configurabile din mediu (future-proof).
-const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
-const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
-const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
-let fableDownUntil = 0
-
-function brainModel(): string {
-  return Date.now() < fableDownUntil ? MODEL_RESERVE : MODEL
-}
-function restFable(): void {
-  fableDownUntil = Date.now() + FABLE_REST_MS
-}
-// CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider scos complet (Adrian, 12
-// iul). Kimi și GLM sunt provideri DIFERIȚI (baseURL + cheie diferite), deci
-// failover-ul trebuie să schimbe CLIENTUL, nu doar numele modelului: modelul
-// rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
-function brainClientFor(model: string): BrainClient {
-  return model === MODEL_RESERVE ? glm : brain
-}
-
-// STRUCTURA AGREATĂ (Adrian): creier selectabil prin OpenRouter (chat: GPT/
-// Gemini). Modelul ales de user e citit din KV (aceeași sursă ca
-// /api/models/selection). Întoarce NULL dacă OpenRouter nu e configurat sau
-// userul n-a ales explicit → tura cade pe calea existentă Kimi/GLM (neatinsă).
+// CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
+// selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
+// de user, altfel implicitul tier-ului chat (GPT). Întoarce NULL doar dacă lipsește
+// cheia OpenRouter → creierul nu poate porni (mesaj onest, nicio plasă Kimi/GLM).
 async function selectedChatModel(email: string): Promise<string | null> {
-  // Kimi/GLM SCOASE (Adrian: „Kimi se scoate definitiv"). Creierul e OpenRouter:
-  // modelul ALES de user, altfel implicitul tier-ului chat (GPT). Cade pe Kimi/GLM
-  // DOAR dacă lipsește cheia OpenRouter — stare tranzitorie până la ștergerea lor.
   if (!config.openrouter.key) return null
   try {
     const raw = await loadKv(`model_choice:${email}`)
@@ -1570,30 +1536,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Provider cost incurred by delegated specialist agents (their own brain
     // calls + tool costs), accumulated so it's billed to the same wallet.
     const usage = { usd: 0 }
-    // Plasa de siguranță a creierului: Kimi (primar) → GLM (rezervă). Dacă o
-    // rundă pică (sau e refuzată) înainte să curgă text, aceeași rundă e re-servită
-    // pe GLM — CLIENT diferit, nu doar model diferit (vezi brainClientFor).
-    // Router automat capabilitate↔cost: Kimi acoperă orice cerere (primar); GLM e
-    // rezerva la eșec, ridicată automat de brainModel() după o „odihnă".
-    const chosen = chooseModel(lastUserText)
-    let model = chosen === MODEL_FAST ? brainModel() : chosen
-    // LANGUAGE GUARDIAN — SCOS (Adrian, 14 iul: „procedura de identificare limbă e
-    // inutilă aici; modelul comută nativ pe limba auzită; Chirp 3 e suficient").
-    // Guardian-ul reținea primul cuvânt până se aduna o propoziție întreagă ca să
-    // verifice limba — latență pură pe primul cuvânt, redundant cu regula din prompt
-    // („Always reply in the user's language") + cu Chirp (STT aude limba, TTS o
-    // vorbește). Dezactivat → primul cuvânt curge INSTANT. `guardTag=null` face
-    // `released` mereu true; logica de re-servire nu se mai declanșează.
-    const guardTag = null
 
-    // ── CREIER SELECTABIL (structura agreată: chat GPT/Gemini prin OpenRouter) ─
-    // Dacă userul a ales explicit un model, rulăm turul prin ORCHESTRATOR, cu
-    // ACELEAȘI unelte + persona + memorie ca pe Kimi/GLM. Emiterea (client + voce)
-    // și coada (istoric/debit) sunt COMUNE. La orice eșec, cade pe Kimi/GLM —
-    // guard implicit OFF → calea existentă rămâne neatinsă.
-    let orHandled = false
+    // ── CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian) ────────────────────
+    // Un singur creier: modelul ALES de user (chat), altfel implicitul GPT. Toate
+    // uneltele + persona + memoria identice indiferent de model; streaming → primul
+    // cuvânt instant. Fără cheie OpenRouter = fără creier (nicio plasă Kimi/GLM,
+    // scoase definitiv) → mesaj onest în catch.
     const orChatModel = await selectedChatModel(user.email)
-    if (orChatModel) {
+    try {
+      if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
       for (const p of params) {
         const content = typeof p.content === 'string' ? p.content : ''
@@ -1616,202 +1567,47 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           speechPref && langName ? langName : '',
         )
       }
-      try {
-        const r = await runOrchestrator(
-          orChatModel,
-          orMsgs,
-          tools as unknown as AnthropicTool[],
-          execTool,
-          {
-            maxTokens: 5000,
-            onText: (txt) => {
-              noteFirstWord()
-              reply.raw.write(txt)
-              voice.feed(txt)
-            },
+      const r = await runOrchestrator(
+        orChatModel,
+        orMsgs,
+        tools as unknown as AnthropicTool[],
+        execTool,
+        {
+          maxTokens: 5000,
+          onText: (txt) => {
+            noteFirstWord()
+            reply.raw.write(txt)
+            voice.feed(txt)
           },
-        )
-        assistantText += r.text
-        usage.usd += r.costUsd
-        orHandled = true
-      } catch {
-        // OpenRouter a picat → nu blocăm userul, cădem pe Kimi/GLM mai jos.
-        orHandled = false
-      }
-    }
-
-    try {
-      // Tool-use loop: stream text each round; if the brain requests tools, run them
-      // and feed the results back, then continue, until it's done.
-      for (let round = 0; round < 5; round++) {
-        if (orHandled) break // turul a fost servit de orchestrator (model ales)
-        let roundText = ''
-        let guardTripped = false
-        // gateOn=true holds the opening for the language check; correct=true adds
-        // the hard corrective and streams live (accept the result no matter what).
-        const runRound = (
-          c: BrainClient,
-          m: string,
-          correct = false,
-          gateOn = true,
-        ): Promise<Message> => {
-          roundText = ''
-          guardTripped = false
-          let gate = ''
-          let released = !gateOn || guardTag == null
-          const sys =
-            correct && langName
-              ? `${systemPrompt}\n\nURGENT LANGUAGE CORRECTION: your previous attempt began in the WRONG language. Reply now EXCLUSIVELY in ${langName} — every single word in ${langName}.`
-              : systemPrompt
-          const stream = c.messages.stream({
-            model: m,
-            // Fable thinks internally within the output budget — give it room.
-            // Headroom also covers long deliverables (a 10-minute promo script
-            // is ~2000 tokens, written once in chat and once in the tool call).
-            max_tokens: m === MODEL ? 5000 : 3500,
-            system: sys,
-            tools,
-            messages: params,
-          })
-          stream.on('text', (delta) => {
-            roundText += delta
-            if (guardTripped) return // decided to discard — swallow the rest
-            if (released) {
-              noteFirstWord()
-              reply.raw.write(delta)
-              voice.feed(delta)
-              return
-            }
-            gate += delta
-            // Decide as soon as there's a sentence to judge (or enough text).
-            if (/[.!?…\n]/.test(gate) || gate.length >= 120) {
-              if (checkLang(gate, guardTag).ok) {
-                released = true
-                noteFirstWord()
-                reply.raw.write(gate)
-                voice.feed(gate)
-              } else {
-                guardTripped = true
-              }
-            }
-          })
-          return stream.finalMessage().then((msg) => {
-            // Short reply that never reached a boundary: judge what we have.
-            if (!released && !guardTripped && gate) {
-              if (checkLang(gate, guardTag).ok) {
-                noteFirstWord()
-                reply.raw.write(gate)
-                voice.feed(gate)
-                released = true
-              } else {
-                guardTripped = true
-              }
-            }
-            return msg
-          })
-        }
-        let final: Message
-        try {
-          final = await runRound(brainClientFor(model), model)
-          quotaTracker.record(model, true)
-        } catch (e) {
-          // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
-          // Ambele picate → aruncă, catch-ul exterior explică cinstit.
-          if (model === MODEL && (roundText === '' || isQuotaError(e))) {
-            quotaTracker.record(MODEL, false)
-            logFailover('kimi', 'glm', isQuotaError(e) ? 'quota' : 'error')
-            // Kimi însuși are o problemă — îl odihnim și re-servim pe GLM (rezerva).
-            restFable()
-            model = MODEL_RESERVE
-            final = await runRound(brainClientFor(model), model)
-            quotaTracker.record(MODEL_RESERVE, true)
-          } else throw e
-        }
-        // Un refuz de siguranță (HTTP 200, stop_reason "refusal", fără conținut):
-        // re-servim AceastĂ cerere pe GLM — specific conținutului, fără odihnă.
-        if (
-          (final as { stop_reason?: string }).stop_reason === 'refusal' &&
-          roundText === '' &&
-          model === MODEL
-        ) {
-          model = MODEL_RESERVE
-          final = await runRound(brainClientFor(model), model)
-        }
-        // Guardian tripped: the opening was the wrong language and NOTHING was
-        // sent — re-serve this round once, corrected and ungated (never silent).
-        if (guardTripped && guardTag) {
-          inTokens += final.usage.input_tokens
-          outTokens += final.usage.output_tokens
-          final = await runRound(brainClientFor(model), model, true, false)
-        }
-        assistantText += roundText
-        inTokens += final.usage.input_tokens
-        outTokens += final.usage.output_tokens
-        // Sandbox activity (code written + its REAL output) goes on the monitor.
-        const sb = sandboxTranscript(final.content as unknown[])
-        if (sb) sandboxLog += (sandboxLog ? '\n\n' : '') + sb
-        if (final.stop_reason !== 'tool_use') break
-
-        params.push({ role: 'assistant', content: final.content })
-        const results: ToolResultBlockParam[] = []
-        for (const block of final.content) {
-          if (block.type === 'tool_use') {
-            // A tool must NEVER crash the whole reply — always return a result so
-            // the tool_use/tool_result pairing stays valid and the chat continues.
-            let out: string
-            try {
-              // Agents inherit the user's language only when it's ESTABLISHED;
-              // for adaptive (new/demo) users they mirror the task's language.
-              out = await runTool(
-                block, isAdmin, token, reply, baseUrl, user.email, usage,
-                speechPref && langName ? langName : '',
-              )
-            } catch (e) {
-              out = JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })
-            }
-            // Meter paid Serper searches (web + youtube) into the credit monitor.
-            if (
-              block.name === 'web_search' ||
-              block.name === 'youtube_search' ||
-              block.name === 'image_search'
-            ) {
-              usage.usd += SERPER_USD_PER_CALL
-            }
-            // Meter paid image generation into the credit monitor.
-            if (block.name === 'generate_image') {
-              usage.usd += IMAGE_USD_PER_CALL
-            }
-            results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
-          }
-        }
-        if (results.length > 0) {
-          params.push({ role: 'user', content: results })
-        }
-      }
+        },
+      )
+      assistantText += r.text
+      usage.usd += r.costUsd
     } catch (e) {
-      // Both providers failed — be honest, never silent.
+      // Creierul a picat — onest, niciodată tăcut. Fără plasă Kimi/GLM (scoase).
       const errMsg = e instanceof Error ? e.message : String(e)
-      const isQuota = isQuotaError(e)
-      const isRefusal = errMsg.toLowerCase().includes('refusal')
-      const spoken =
-        ro
-          ? isQuota
-            ? 'Am epuizat momentan creditul la ambele creiere. Te rog reîncarcă creditul ca să continuăm.'
-            : isRefusal
-              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
-              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-          : isQuota
-            ? "I've temporarily run out of credit on both brains. Please top up so we can continue."
-            : isRefusal
-              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
-              : 'I ran into a technical issue. Please try again in a moment.'
+      const low = errMsg.toLowerCase()
+      const isQuota =
+        low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
+      const isRefusal = low.includes('refusal')
+      const spoken = ro
+        ? isQuota
+          ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
+          : isRefusal
+            ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
+            : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
+        : isQuota
+          ? "I've temporarily run out of brain credit. Please top up so we can continue."
+          : isRefusal
+            ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
+            : 'I ran into a technical issue. Please try again in a moment.'
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
-      // Log for ops, never crash the process.
       console.error('[CHAT ERROR]', errMsg)
       return
     }
+
 
     // ── FINAL TURN ──
     await voice.finish()
@@ -1834,7 +1630,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
     // multiple times for the same turn).
     if (user.role !== 'admin') {
-      const cost = brainCost(model, inTokens, outTokens) + usage.usd
+      const cost = usage.usd
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }

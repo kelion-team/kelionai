@@ -32,29 +32,22 @@ async function fetchStatus(url: string, init: RequestInit): Promise<{ ok: boolea
   }
 }
 
-// 1. Creierul — Kimi (primar) + GLM (rezervă)
+// 1. Creierul — OpenRouter (o singură cheie pentru GPT/Gemini/Claude). Kimi/GLM scoase.
 async function checkBrainKeys(): Promise<TokenCheck[]> {
   try {
     const v = await timed(20_000, () => verifyKeys())
     return [
       {
-        name: 'Kimi API key',
+        name: 'OpenRouter API key',
         status: v.primary === 'ok' ? 'ok' : (v.primary === 'not_configured' ? 'not_configured' : (v.primary.startsWith('fail_') ? (v.primary as `fail_${number}`) : 'fail')),
         detail: v.primary === 'ok' ? 'autentificare + credit OK' : v.primary,
-        requiredScope: 'Mesaje API (coding)',
-      },
-      {
-        name: 'GLM API key',
-        status: v.reserve === 'ok' ? 'ok' : (v.reserve === 'not_configured' ? 'not_configured' : (v.reserve.startsWith('fail_') ? (v.reserve as `fail_${number}`) : 'fail')),
-        detail: v.reserve === 'ok' ? 'autentificare + credit OK' : v.reserve,
-        requiredScope: 'Mesaje API (format Messages)',
+        requiredScope: 'Chat Completions (GPT/Gemini/Claude)',
       },
     ]
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return [
-      { name: 'Kimi API key', status: 'fail', detail: msg, requiredScope: 'Mesaje API (coding)' },
-      { name: 'GLM API key', status: 'fail', detail: msg, requiredScope: 'Mesaje API (format Messages)' },
+      { name: 'OpenRouter API key', status: 'fail', detail: msg, requiredScope: 'Chat Completions (GPT/Gemini/Claude)' },
     ]
   }
 }
