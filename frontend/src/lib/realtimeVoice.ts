@@ -117,7 +117,22 @@ export async function startRealtimeVoice(
     let stopLip: (() => void) | null = null
     pc.ontrack = (ev) => {
       audioEl.srcObject = ev.streams[0] ?? new MediaStream([ev.track])
-      void audioEl.play?.().catch(() => {})
+      // AUTOPLAY: browserul poate refuza redarea audio până la un gest al
+      // userului. Vechea variantă înghițea refuzul (`.catch(()=>{})`) → Kelion
+      // se conecta dar „vocea lipsea cu desăvârșire". Acum, dacă redarea e
+      // blocată, o REÎNCERCĂM la primul gest (click/tastă/atingere) și apoi
+      // curățăm ascultătorii — vocea pornește de la prima interacțiune.
+      const GESTURES = ['pointerdown', 'keydown', 'touchstart'] as const
+      const removeUnlock = (): void => {
+        for (const g of GESTURES) window.removeEventListener(g, unlock)
+      }
+      const unlock = (): void => {
+        void audioEl.play?.().then(removeUnlock).catch(() => {})
+      }
+      void audioEl.play?.().catch(() => {
+        for (const g of GESTURES) window.addEventListener(g, unlock, { passive: true })
+      })
+      cleanups.push(removeUnlock)
       stopLip?.()
       stopLip = driveVoiceLevelFromElement(audioEl)
       cleanups.push(() => stopLip?.())
