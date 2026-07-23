@@ -41,8 +41,11 @@ import {
   getFaceprint,
   saveFaceprint,
   faceDistance,
+  loadKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
+import { resolveModel, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { runOrchestrator } from '../services/orchestrator.js'
 import { brainCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, quotaTracker } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
@@ -115,6 +118,22 @@ function restFable(): void {
 // rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
 function brainClientFor(model: string): BrainClient {
   return model === MODEL_RESERVE ? glm : brain
+}
+
+// STRUCTURA AGREATĂ (Adrian): creier selectabil prin OpenRouter (chat: GPT/
+// Gemini). Modelul ales de user e citit din KV (aceeași sursă ca
+// /api/models/selection). Întoarce NULL dacă OpenRouter nu e configurat sau
+// userul n-a ales explicit → tura cade pe calea existentă Kimi/GLM (neatinsă).
+async function selectedChatModel(email: string): Promise<string | null> {
+  if (!config.openrouter.key) return null
+  try {
+    const raw = await loadKv(`model_choice:${email}`)
+    const chat = raw ? (JSON.parse(raw) as { chat?: string }).chat : null
+    if (!chat) return null
+    return await resolveModel('chat', chat)
+  } catch {
+    return null
+  }
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -1564,10 +1583,66 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // vorbește). Dezactivat → primul cuvânt curge INSTANT. `guardTag=null` face
     // `released` mereu true; logica de re-servire nu se mai declanșează.
     const guardTag = null
+
+    // ── CREIER SELECTABIL (structura agreată: chat GPT/Gemini prin OpenRouter) ─
+    // Dacă userul a ales explicit un model, rulăm turul prin ORCHESTRATOR, cu
+    // ACELEAȘI unelte + persona + memorie ca pe Kimi/GLM. Emiterea (client + voce)
+    // și coada (istoric/debit) sunt COMUNE. La orice eșec, cade pe Kimi/GLM —
+    // guard implicit OFF → calea existentă rămâne neatinsă.
+    let orHandled = false
+    const orChatModel = await selectedChatModel(user.email)
+    if (orChatModel) {
+      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
+      for (const p of params) {
+        const content = typeof p.content === 'string' ? p.content : ''
+        if (content) orMsgs.push({ role: p.role === 'assistant' ? 'assistant' : 'user', content })
+      }
+      let callN = 0
+      const execTool = async (name: string, argsJson: string): Promise<string> => {
+        let input: unknown = {}
+        try {
+          input = JSON.parse(argsJson || '{}')
+        } catch {
+          input = {}
+        }
+        if (name === 'web_search' || name === 'youtube_search' || name === 'image_search')
+          usage.usd += SERPER_USD_PER_CALL
+        if (name === 'generate_image') usage.usd += IMAGE_USD_PER_CALL
+        const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
+        return runTool(
+          block, isAdmin, token, reply, baseUrl, user.email, usage,
+          speechPref && langName ? langName : '',
+        )
+      }
+      try {
+        const r = await runOrchestrator(
+          orChatModel,
+          orMsgs,
+          tools as unknown as AnthropicTool[],
+          execTool,
+          {
+            maxTokens: 5000,
+            onText: (txt) => {
+              noteFirstWord()
+              reply.raw.write(txt)
+              voice.feed(txt)
+            },
+          },
+        )
+        assistantText += r.text
+        usage.usd += r.costUsd
+        orHandled = true
+      } catch {
+        // OpenRouter a picat → nu blocăm userul, cădem pe Kimi/GLM mai jos.
+        orHandled = false
+      }
+    }
+
     try {
       // Tool-use loop: stream text each round; if the brain requests tools, run them
       // and feed the results back, then continue, until it's done.
       for (let round = 0; round < 5; round++) {
+        if (orHandled) break // turul a fost servit de orchestrator (model ales)
         let roundText = ''
         let guardTripped = false
         // gateOn=true holds the opening for the language check; correct=true adds
