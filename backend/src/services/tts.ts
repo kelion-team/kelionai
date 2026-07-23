@@ -1,15 +1,12 @@
-import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 
-// Shared Google Cloud Text-to-Speech synthesis — Chirp 3 HD (male, academic).
-// ONE implementation used by BOTH the authenticated /api/tts route and the
-// public /api/greet landing greeting, so the synth logic is never duplicated.
+// TTS pe OpenAI (aceeași cheie ca vocea live) — pentru /api/tts + salutul de pe
+// landing. Fără cheie Google TTS: „2 chei, punct" (Adrian). Voce masculină
+// consistentă cu vocea live (`onyx`). OpenAI detectează limba din text.
 
-const TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
+const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech'
 
-// Default region per language for 2-letter shorthand (the frontend normally
-// sends a full BCP-47 tag; this is a safety net).
 const DEFAULT_REGION: Record<string, string> = {
   en: 'US', ro: 'RO', fr: 'FR', de: 'DE', es: 'ES', it: 'IT', pt: 'BR', nl: 'NL',
   pl: 'PL', ru: 'RU', uk: 'UA', tr: 'TR', ar: 'XA', hi: 'IN', ja: 'JP', ko: 'KR',
@@ -17,8 +14,6 @@ const DEFAULT_REGION: Record<string, string> = {
   id: 'ID', th: 'TH', vi: 'VN',
 }
 
-// Normalise a locale to a BCP-47 `ll-RR` tag (e.g. "ro" → "ro-RO", "fr-fr" →
-// "fr-FR"). Falls back to en-US for anything malformed.
 export function normalizeLang(raw: string | undefined): string {
   const s = (raw ?? '').trim()
   const m = /^([a-z]{2})(?:[-_]([a-z]{2}))?$/i.exec(s)
@@ -28,21 +23,9 @@ export function normalizeLang(raw: string | undefined): string {
   return `${lng}-${region}`
 }
 
-let auth: GoogleAuth | null = null
-function getAuth(): GoogleAuth | null {
-  if (!config.googleServiceAccountJson) return null
-  if (!auth) {
-    auth = new GoogleAuth({
-      credentials: JSON.parse(config.googleServiceAccountJson) as Record<string, unknown>,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    })
-  }
-  return auth
-}
-
-/** True when SOME Google TTS credential is configured (service account or key). */
+/** True când cheia OpenAI e configurată (aceeași care face și vocea live). */
 export function ttsConfigured(): boolean {
-  return getAuth() !== null || !!config.googleTtsKey
+  return !!config.openai.key
 }
 
 export type TtsResult =
@@ -50,18 +33,15 @@ export type TtsResult =
   | { ok: false; status: number; error: string }
 
 export interface SynthOpts {
-  // Output encoding. Default MP3 (browser <audio>). The full-duplex voice agent
-  // asks for LINEAR16 raw PCM at a fixed sample rate so it can push samples
-  // straight into a LiveKit AudioSource — no client-side MP3 decoder needed.
+  // MP3 pentru <audio> din browser (implicit); LINEAR16 = PCM brut 24kHz.
   encoding?: 'MP3' | 'LINEAR16'
   sampleRateHertz?: number
 }
 
 /**
- * Synthesise `text` in `langRaw` via Chirp 3 HD. Returns a typed result so
- * callers can map failures to the right HTTP status. No auth, no cost
- * accounting here — that stays in the route. Default output is MP3; pass
- * `{ encoding: 'LINEAR16', sampleRateHertz }` for raw PCM (voice agent).
+ * Sintetizează `text` prin OpenAI TTS. Întoarce un rezultat tipat ca apelantul
+ * să mapeze erorile pe statusul HTTP corect. Fără auth/cost aici (rămân în rută).
+ * Implicit MP3; `{ encoding: 'LINEAR16' }` → PCM brut (24kHz) pentru agenți.
  */
 export async function synthesize(
   text: string,
@@ -74,47 +54,32 @@ export async function synthesize(
 
   const lang = normalizeLang(langRaw)
   // MOD ACADEMIC: respellăm acronimele tehnice literă-cu-literă în limba țintă
-  // ca să fie rostite corect (API → „a pe i"), nu stâlcite. Strat pur pe text,
-  // nu atinge microfonul. Vezi services/pronounce.ts.
+  // ca să fie rostite corect (API → „a pe i"). Strat pur pe text.
   const spoken = academicPronounce(clean, lang.split('-')[0])
-  // Forțăm mereu Chirp 3 HD: stilul din env poate fi fie un nume complet de
-  // voce (ex. "ro-RO-Chirp3-HD-Charon"), fie doar stilul (ex. "Charon").
-  // Orice altceva / non-Chirp cade pe Charon — nu permitem sinteză non-Chirp.
-  const configured = config.ttsVoiceStyle.trim()
-  const voiceName = /Chirp3-HD/i.test(configured)
-    ? configured
-    : /^[A-Z][a-z]+$/.test(configured)
-      ? `${lang}-Chirp3-HD-${configured}`
-      : `${lang}-Chirp3-HD-Charon`
 
-  const a = getAuth()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  let url = TTS_URL
-  if (a) {
-    const token = await a.getAccessToken()
-    if (!token) return { ok: false, status: 502, error: 'tts_auth_failed' }
-    headers.Authorization = `Bearer ${token}`
-  } else {
-    url = `${TTS_URL}?key=${config.googleTtsKey}`
+  // OpenAI TTS: `pcm` = LINEAR16 24kHz mono; altfel `mp3`. Voce masculină unică.
+  const format = opts.encoding === 'LINEAR16' ? 'pcm' : 'mp3'
+  let res: Response
+  try {
+    res = await fetch(OPENAI_SPEECH, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.openai.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.openai.ttsModel,
+        voice: config.openai.ttsVoice,
+        input: spoken,
+        response_format: format,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    return { ok: false, status: 502, error: 'tts_failed' }
   }
-
-  const encoding = opts.encoding ?? 'MP3'
-  const audioConfig: Record<string, unknown> = { audioEncoding: encoding }
-  // LINEAR16 must declare its sample rate — the voice agent pushes these samples
-  // into a LiveKit AudioSource created at the SAME rate, so they line up 1:1.
-  if (encoding === 'LINEAR16') audioConfig.sampleRateHertz = opts.sampleRateHertz ?? 24000
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      input: { text: spoken },
-      voice: { languageCode: lang, name: voiceName },
-      audioConfig,
-    }),
-  })
   if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
-  const j = (await res.json()) as { audioContent?: string }
-  if (!j.audioContent) return { ok: false, status: 502, error: 'tts_empty' }
-  return { ok: true, audio: Buffer.from(j.audioContent, 'base64') }
+  const audio = Buffer.from(await res.arrayBuffer())
+  if (audio.length === 0) return { ok: false, status: 502, error: 'tts_empty' }
+  return { ok: true, audio }
 }

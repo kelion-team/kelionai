@@ -38,6 +38,11 @@ export const config = {
     // Voce masculină unică, persistentă pentru toți userii (Adrian: „o singură
     // voce, bărbat"). `cedar` = voce masculină caldă din catalogul Realtime.
     realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'cedar').trim(),
+    // TTS pe OpenAI (aceeași cheie) — pentru salutul de pe landing + /api/tts.
+    // Fără cheie Google TTS: OpenAI acoperă și asta (Adrian: „2 chei, punct").
+    // `onyx` = voce masculină, consistentă cu vocea live.
+    ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
+    ttsVoice: (process.env.OPENAI_TTS_VOICE ?? 'onyx').trim(),
   },
   // CREIERUL/CHAT-UL selectabil — o SINGURĂ cheie OpenRouter pentru toate
   // modelele (GPT/Gemini/Claude). Catalogul se ia LIVE din /api/v1/models (auto-
@@ -49,6 +54,12 @@ export const config = {
     // Work = raționament greu/tool-use.
     chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'openai/gpt-4.1-mini').trim(),
     workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'anthropic/claude-sonnet-5').trim(),
+    // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
+    // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
+    imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),
+    // Căutare web prin OpenRouter: modelul de chat + plugin-ul `web` (orice model
+    // îl acceptă). Fără cheie Serper. Model editabil din env.
+    searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'openai/gpt-4.1-mini').trim(),
   },
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
