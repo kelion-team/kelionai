@@ -18,7 +18,7 @@ RUN cd frontend && npm run build
 COPY backend/package.json backend/package-lock.json ./backend/
 # npm install (not ci) to auto-heal any lock drift; production deps only
 RUN cd backend && npm install
-# Playwright browsers installed at runtime (not build time) — Railway builder
+# Playwright browsers installed at runtime (not build time) — the image builder
 # often fails on system deps installation. The backend checks at startup.
 COPY backend ./backend
 RUN cd backend && npm run build

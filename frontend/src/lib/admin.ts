@@ -103,39 +103,6 @@ export async function fetchStores(): Promise<StoresData | null> {
 
 // The persistent ORDER BOOK: every task sent to execution — what, when, and
 // whether the builder picked it up. Survives every deploy (Postgres).
-export interface WorkOrder {
-  id: string
-  text: string
-  status: string
-  created_at: string
-  delivered_at: string | null
-}
-
-export async function fetchWorkOrders(): Promise<WorkOrder[]> {
-  try {
-    const r = await fetch('/api/admin/workorders', { credentials: 'include' })
-    if (!r.ok) return []
-    const j = (await r.json()) as { orders?: WorkOrder[] }
-    return j.orders ?? []
-  } catch {
-    return []
-  }
-}
-
-// Arhivează un ordin (îl scoate din lista „în lucru" → arhiva apelabilă de Kelion).
-// NU șterge nimic din bază: registrul rămâne permanent, Kelion îl vede oricând.
-export async function archiveWorkOrder(id: string): Promise<boolean> {
-  try {
-    const r = await fetch(`/api/admin/workorders/${encodeURIComponent(id)}/archive`, {
-      method: 'POST',
-      credentials: 'include',
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.
@@ -329,26 +296,6 @@ export async function manageUser(
   }
 }
 
-// Approval gate: releases the server builder staged, awaiting the owner's OK.
-export interface StagedRelease {
-  id: string
-  title: string
-  detail: string
-  branch?: string
-  status: 'pending' | 'approved' | 'rejected' | 'deployed' | 'blocked'
-  at: string
-}
-
-export async function fetchReleases(): Promise<StagedRelease[]> {
-  try {
-    const r = await fetch('/api/admin/releases', { credentials: 'include' })
-    if (!r.ok) return []
-    return ((await r.json()) as { releases?: StagedRelease[] }).releases ?? []
-  } catch {
-    return []
-  }
-}
-
 export interface InboundEmail {
   id: number
   from_addr: string
@@ -409,59 +356,6 @@ export async function fetchContactMessages(): Promise<ContactMessage[]> {
     const r = await fetch('/api/admin/contact-messages', { credentials: 'include' })
     if (!r.ok) return []
     return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
-  } catch {
-    return []
-  }
-}
-
-export async function decideRelease(id: string, decision: 'approve' | 'reject'): Promise<void> {
-  try {
-    await fetch('/api/admin/releases/decide', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ id, decision }),
-    })
-  } catch {
-    /* non-fatal */
-  }
-}
-
-export interface GithubTokenStatus {
-  ok: boolean
-  since: string | null
-}
-
-export async function fetchGithubTokenStatus(): Promise<GithubTokenStatus | null> {
-  try {
-    const r = await fetch('/api/admin/github-token-status', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as GithubTokenStatus
-  } catch {
-    return null
-  }
-}
-
-export async function resetGithubToken(): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/github-token-reset', {
-      method: 'POST',
-      credentials: 'include',
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
-
-// The builder's full work journal (admin only) — the history the live monitor
-// deliberately does not carry around.
-export async function fetchDevLog(): Promise<string[]> {
-  try {
-    const r = await fetch('/api/admin/devlog', { credentials: 'include' })
-    if (!r.ok) return []
-    const j = (await r.json()) as { log?: string[] }
-    return j.log ?? []
   } catch {
     return []
   }
@@ -547,35 +441,6 @@ export async function resolveGap(id: number, resolved = true): Promise<void> {
     })
   } catch {
     /* non-fatal */
-  }
-}
-
-// Escalate a gap to the developer via the bridge. Returns whether
-// it was actually sent (online) so the UI can tell the admin to start the bridge.
-export async function escalateGap(id: number): Promise<{ escalated: boolean; online: boolean }> {
-  try {
-    const r = await fetch('/api/admin/gaps/escalate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ id }),
-    })
-    if (!r.ok) return { escalated: false, online: false }
-    return (await r.json()) as { escalated: boolean; online: boolean }
-  } catch {
-    return { escalated: false, online: false }
-  }
-}
-
-// Triaj decizional: creierul verifică fiecare cerere deschisă — cele DEJA făcute
-// se șterg, restul pleacă la constructor. Întoarce câte s-au curățat / trimis.
-export async function triageGaps(): Promise<{ done: number; sent: number; offline?: boolean }> {
-  try {
-    const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
-    if (!r.ok) return { done: 0, sent: 0 }
-    return (await r.json()) as { done: number; sent: number; offline?: boolean }
-  } catch {
-    return { done: 0, sent: 0 }
   }
 }
 

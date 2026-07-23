@@ -11,9 +11,11 @@ export function dbEnabled(): boolean {
 function getPool(): pg.Pool {
   if (!pool) {
     const url = config.databaseUrl
-    // Railway's private network (*.railway.internal) doesn't use TLS; the public
-    // proxy does (self-signed).
-    const ssl = url.includes('railway.internal') ? false : { rejectUnauthorized: false }
+    // Local/no-TLS Postgres (VPS pe aceeași mașină, sslmode=disable explicit)
+    // se conectează fără SSL; orice altă țintă primește TLS cu certificat
+    // self-signed acceptat (proxy-uri gestionate).
+    const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
+    const ssl = noTls ? false : { rejectUnauthorized: false }
     pool = new pg.Pool({ connectionString: url, ssl })
   }
   return pool
@@ -1363,6 +1365,37 @@ export async function getWalletStatus(email: string): Promise<{ balance: number;
   }
 }
 
+/** Reîncărcare automată per user (ca să nu rămână fără credit — cerința Adrian).
+ *  `threshold` = sub câte CREDITE se declanșează; `topupAmount` = suma de taxat
+ *  (aceeași unitate ca top-up-ul manual). Stocat în KV, ca preferințele. */
+export interface AutoRecharge {
+  enabled: boolean
+  threshold: number
+  topupAmount: number
+}
+const AUTO_RECHARGE_DEFAULT: AutoRecharge = { enabled: false, threshold: 20, topupAmount: 10 }
+
+export async function getAutoRecharge(email: string): Promise<AutoRecharge> {
+  try {
+    const raw = await loadKv(`autorecharge:${email}`)
+    if (!raw) return { ...AUTO_RECHARGE_DEFAULT }
+    const p = JSON.parse(raw) as Partial<AutoRecharge>
+    return {
+      enabled: Boolean(p.enabled),
+      threshold: Number.isFinite(p.threshold) ? Math.max(0, Number(p.threshold)) : AUTO_RECHARGE_DEFAULT.threshold,
+      topupAmount: Number.isFinite(p.topupAmount)
+        ? Math.max(1, Math.min(500, Number(p.topupAmount)))
+        : AUTO_RECHARGE_DEFAULT.topupAmount,
+    }
+  } catch {
+    return { ...AUTO_RECHARGE_DEFAULT }
+  }
+}
+
+export async function setAutoRecharge(email: string, v: AutoRecharge): Promise<void> {
+  await saveKv(`autorecharge:${email}`, JSON.stringify(v))
+}
+
 /** Owner loads the provider-credit pool (real money he put at the AI providers). */
 export async function loadAdminPool(amount: number): Promise<void> {
   if (!dbEnabled() || !(amount > 0)) return
@@ -1410,49 +1443,6 @@ export interface DemoVisit {
 const EMPTY_VISIT: DemoVisit = {
   country: '', code: '', city: '', region: '', isp: '', tz: '',
   browser: '', os: '', device: '', lang: '', referrer: '', isBot: false,
-}
-
-export async function tryStartDemo(
-  fingerprint: string,
-  ip: string,
-  visit: DemoVisit = EMPTY_VISIT,
-  sessionEmail = '',
-): Promise<{ ok: boolean; reason?: 'cap' | 'used' }> {
-  if (!dbEnabled()) return { ok: true }
-  try {
-    const pool = getPool()
-    // FĂRĂ plafon global pe număr de probe (Adrian, 13 iul: „10 minute pe
-    // utilizator, nu există limită la câți testează"). Limita reală e per
-    // sesiune (10 min, DEMO_SECONDS) — nu pe câți vizitatori intră într-o zi.
-    // Rămâne DOAR garda anti-reabuz per amprentă/IP de mai jos.
-    if (fingerprint || ip) {
-      const used = Number(
-        (
-          await pool.query<{ n: string }>(
-            `SELECT COUNT(*) AS n FROM demo_uses
-             WHERE started_at >= now() - interval '30 days'
-               AND ((fingerprint <> '' AND fingerprint = $1) OR (ip <> '' AND ip = $2))`,
-            [fingerprint, ip],
-          )
-        ).rows[0]?.n ?? 0,
-      )
-      if (used > 0) return { ok: false, reason: 'used' }
-    }
-    await pool.query(
-      `INSERT INTO demo_uses
-         (fingerprint, ip, country, country_code, city, region, isp, tz,
-          browser, os, device, lang, referrer, is_bot, session_email)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [
-        fingerprint, ip, visit.country, visit.code, visit.city, visit.region,
-        visit.isp, visit.tz, visit.browser, visit.os, visit.device, visit.lang,
-        visit.referrer, visit.isBot, sessionEmail,
-      ],
-    )
-    return { ok: true }
-  } catch {
-    return { ok: true }
-  }
 }
 
 /**

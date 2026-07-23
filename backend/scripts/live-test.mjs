@@ -2,8 +2,8 @@
 // minted admin session and asserts a PASS/FAIL for EVERY functionality: base
 // skills, Google tools, the 5 specialist agents, owner identity, cross-session
 // memory, the capability-gap log and the document panel. Run:
-//   railway run node backend/scripts/live-test.mjs
-// (railway run injects SESSION_SECRET). Prints ✅/❌ per feature + a summary; a
+//   (cu env-ul producției încărcat) node backend/scripts/live-test.mjs
+// (are nevoie de SESSION_SECRET în env). Prints ✅/❌ per feature + a summary; a
 // non-zero exit means something failed.
 import jwt from 'jsonwebtoken'
 

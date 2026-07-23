@@ -33,12 +33,12 @@ the mechanism. A stale handoff doc is worse than none: it misleads the next AI.
 - `backend/` — Node + Fastify + TS. Routes in `src/routes/`, services in `src/services/`.
 - `frontend/` — React + Vite + TS. `src/pages/Stage.tsx`, `src/components/ChatPanel.tsx`.
 - `bridge/` — the VPS worker (`kelion-bridge-linux.mjs`) + autonomous repair/deploy scripts.
-- `Dockerfile`, `railway.json` — deploy.
+- `Dockerfile` — imaginea aplicației (gazda: VPS propriu; Railway scos, 22 iul 2026).
 
 ## Build & deploy
 ```bash
 # from the repo root, on a branch:
-# edit → commit → push → PR → merge to master → Railway auto-deploys → VERIFY LIVE
+# edit → commit → push → PR → merge to master → publicare pe gazdă (VPS) → VERIFY LIVE
 ```
 Full CI/workflow list, env vars, DB schema, brain-routing rules, and current
 project state: **`AI-HANDOFF.md`**.

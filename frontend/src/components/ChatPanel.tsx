@@ -42,6 +42,7 @@ import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
+import { startRealtimeVoice } from '../lib/realtimeVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
@@ -109,11 +110,9 @@ function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): 
 export default function ChatPanel({
   lang,
   isAdmin,
-  isDemo = false,
 }: {
   readonly lang: Lang
   readonly isAdmin: boolean
-  readonly isDemo?: boolean
 }) {
   const t = strings(lang)
   // Fix hydration: start with the deterministic UI lang, then resolve the browser locale on the client.
@@ -148,6 +147,9 @@ export default function ChatPanel({
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
+  // VOCE LIVE OpenAI Realtime (full-duplex, WebRTC) — calea implicită. Dacă nu e
+  // disponibilă (fără cheie/eșec), cădem O DATĂ pe STT→creier→TTS pentru sesiune.
+  const realtimeOffRef = useRef(false)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
   // (re)pornire a microfonului — vezi ensureMic mai jos.
@@ -171,8 +173,6 @@ export default function ChatPanel({
   const [cameraOn, setCameraOn] = useState(true)
   const [facing, setFacing] = useState<Facing>('user')
   const [menuOpen, setMenuOpen] = useState(false)
-  // BARA VERTICALĂ DE QUOTA (albastru = Kimi, verde = GLM) — procente de la /api/quota.
-  const [quota, setQuota] = useState<{ kimi: number; glm: number }>({ kimi: 100, glm: 100 })
   // Attached images (ChatGPT-style composer). Sent to the brain's vision on send.
   // Attachments are images (url = data URL, used for vision), documents
   // (text = the Markdown extracted by MarkItDown, prepended to the message),
@@ -464,49 +464,6 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // A potential customer entering the free trial is welcomed: Kelion greets
-  // FIRST, politely, matching the visitor's time of day — spoken and shown.
-  // English (the demo's default); he switches the moment the visitor speaks
-  // their own language. Deterministic (no AI round-trip): instant and safe.
-  useEffect(() => {
-    if (!isDemo) return
-    const h = new Date().getHours()
-    const daypart = h >= 5 && h < 12 ? 'Good morning' : h >= 12 && h < 18 ? 'Good afternoon' : 'Good evening'
-    const id = window.setTimeout(() => {
-      ack(
-        `${daypart}, and welcome — I'm Kelion, your personal assistant. ` +
-          `You have three free minutes with me: ask me anything, in any language.`,
-      )
-    }, 1500)
-    return () => window.clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDemo])
-
-  // ── Quota vertical bar (albastru = Kimi, verde = GLM) ──
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      try {
-        const r = await fetch('/api/quota', { credentials: 'include' })
-        if (!r.ok) return
-        const j = (await r.json()) as { kimi?: number; glm?: number }
-        if (cancelled) return
-        setQuota({
-          kimi: Math.max(0, Math.min(100, Math.round(Number.isFinite(Number(j.kimi)) ? Number(j.kimi) : 100))),
-          glm: Math.max(0, Math.min(100, Math.round(Number.isFinite(Number(j.glm)) ? Number(j.glm) : 100))),
-        })
-      } catch {
-        // silent — bara rămâne la 100% dacă endpoint-ul nu răspunde
-      }
-    }
-    void load()
-    const id = setInterval(load, 30_000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [])
-
   // ── File attachment (ChatGPT-style) ──
   function openFilePicker(): void {
     setMenuOpen(false)
@@ -777,25 +734,11 @@ export default function ChatPanel({
     const docBlock = docs.map((d) => `[Document: ${d.name}]\n${d.text}`).join('\n\n')
     const base = msg || (docBlock ? 'Am atașat un document — citește-l și spune-mi ce conține.' : t.imagePrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
-    // ADMIN: every raw attachment (photo, arhivă, video, orice) rides the
-    // bridge to the brain alongside the text.
-    // + VEDEREA CONTINUĂ (Adrian, 11 iul → 13 iul: „să folosească tot din Kimi
-    // 2.7"): cu camera pornită pleacă ULTIMELE 8 CADRE (≈2s de mișcare la 4 fps),
-    // nu unul singur — creierul K2 (256k context, vedere multi-cadru) vede
-    // MIȘCAREA, nu o clipă înghețată. 8 e echilibrul cadre/latență; modelul ar
-    // duce zeci, dar mai multe cadre = mai multă latență pe tura de chat. Pentru
-    // TOȚI userii (regula nr. 9): adminului îi merg pe punte ca files, publicului
-    // ca `images` (serverul le face fișiere de job în cutia publică).
+    // VEDEREA CONTINUĂ (Adrian, 11 iul): cu camera pornită pleacă ULTIMELE 8 CADRE
+    // (≈2s de mișcare la 4 fps), nu unul singur — creierul vede MIȘCAREA, nu o
+    // clipă înghețată. Pentru TOȚI userii la fel (regula nr. 9): cadrele merg prin
+    // `images`, iar poza atașată explicit prin `image`.
     const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-8) : []
-    const adminFiles = isAdmin
-      ? [
-          ...atts
-            .filter((a) => a.url.startsWith('data:'))
-            .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url })),
-          ...camFrames.map((url, i) => ({ name: `cadru-${i + 1}.jpg`, type: 'image/jpeg', data: url })),
-        ]
-      : []
-    const bridgeFiles = adminFiles.length > 0 ? adminFiles : undefined
 
     // Features vocale colectate de la ultima frază vorbită (dictare live sau batch).
     const voiceFeatures = getPendingVoiceFeatures() ?? undefined
@@ -827,12 +770,10 @@ export default function ChatPanel({
         coordsRef.current ?? undefined,
         handleControl,
         screen,
-        bridgeFiles,
         ac.signal,
         Boolean(attached), // poză lipită/încărcată explicit — analiză fără condiție
-        // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele 4 cadre.
-        // Adminul le trimite deja ca files pe punte — nu le dublăm în corp.
-        !isAdmin && camFrames.length > 0 ? camFrames : undefined,
+        // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele cadre.
+        camFrames.length > 0 ? camFrames : undefined,
         voiceFeatures,
         face?.descriptor,
         face?.photo,
@@ -932,6 +873,45 @@ export default function ChatPanel({
     // ramura de OPRIRE (nimic de oprit) și butonul părea mort. try/finally
     // garantează eliberarea flagului pe ORICE drum de ieșire.
     try {
+      // ── VOCE LIVE OpenAI Realtime (full-duplex): microfon + WebRTC direct la
+      // OpenAI (creierul de voce), care redă singur răspunsul + are barge-in/anti-
+      // ecou nativ. Transcriptul curge pe bandă și se salvează pe server. Dacă nu
+      // e disponibilă (fără cheie / eșec), cădem O DATĂ pe STT→creier→TTS.
+      if (!realtimeOffRef.current) {
+        try {
+          const rv = await startRealtimeVoice({
+            language: speechLangRef.current,
+            onUserTranscript: (text) => setLiveVoice(text),
+            onAssistantTranscript: (text) => setLiveVoice(text),
+            onState: (s, note) => {
+              if (s === 'error') {
+                // Realtime a picat → pentru restul sesiunii folosim STT.
+                realtimeOffRef.current = true
+                if (micRef.current) {
+                  micRef.current = null
+                  setListening(false)
+                  setLiveVoice('')
+                  micStartingRef.current = false
+                  void ensureMicRef.current()
+                }
+                void note
+              }
+            },
+          })
+          if (micManualOffRef.current || micRef.current) {
+            rv.stop()
+            return
+          }
+          micRef.current = rv as unknown as MicHandle
+          micBackoffRef.current = 1000
+          setListening(true)
+          return
+        } catch {
+          // Realtime indisponibil (fără cheie OpenAI / WebRTC blocat) → STT.
+          realtimeOffRef.current = true
+        }
+      }
+
       // ── DICTARE LIVE (streaming): fiecare cuvânt apare pe bandă instant, se
       // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
       // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
@@ -1137,11 +1117,7 @@ export default function ChatPanel({
   // Load the user's persisted speech language (localStorage instantly, then the
   // server which follows the user across devices). Auto-detection still refines
   // it from what's actually spoken/typed.
-  // A free-trial (demo) visitor is a STRANGER: never inherit a language another
-  // person left on this browser — the demo always starts in English (the app's
-  // base language) and only switches when THIS visitor clearly uses another.
   useEffect(() => {
-    if (isDemo) return
     const apply = (code: string | null): void => {
       if (!code || code === speechLangRef.current) return
       speechLangRef.current = code
@@ -1156,7 +1132,7 @@ export default function ChatPanel({
       // (e.g. left over from an earlier mis-detection), correct it.
       if (serverPrefs.speechLang && serverPrefs.speechLang !== local) mirrorLang(serverPrefs.speechLang)
     })
-  }, [isDemo])
+  }, [])
 
   // Permanent vision — camera ON by default. The camera is switched by voice/
   // text command (no button), so no need to probe for a second camera here.
@@ -1309,64 +1285,6 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {isAdmin && (
-        <div
-          className="quota-bar"
-          style={{
-            position: 'fixed',
-            top: 80,
-            right: 12,
-            width: 16,
-            height: 120,
-            display: 'flex',
-            gap: 4,
-            zIndex: 50,
-          }}
-        >
-          <div
-            title={`Kimi quota: ${quota.kimi}%`}
-            style={{
-              flex: 1,
-              height: '100%',
-              background: '#e5e7eb',
-              borderRadius: 4,
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'flex-end',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: `${quota.kimi}%`,
-                background: '#3b82f6',
-                transition: 'height 0.5s ease',
-              }}
-            />
-          </div>
-          <div
-            title={`GLM quota: ${quota.glm}%`}
-            style={{
-              flex: 1,
-              height: '100%',
-              background: '#e5e7eb',
-              borderRadius: 4,
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'flex-end',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: `${quota.glm}%`,
-                background: '#22c55e',
-                transition: 'height 0.5s ease',
-              }}
-            />
-          </div>
-        </div>
-      )}
       {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
           spațiul unde apare semnul de creier... nu se mai afișează în afara
           spațiului de acolo răspunsurile de chat”). Bulele care pluteau peste

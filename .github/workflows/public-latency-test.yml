@@ -1,8 +1,7 @@
-# TEST LIVE al chatului PUBLIC (demo) + jurnalele serverului pentru acea tură.
-# Doar-citire pe producție: pornește o sesiune demo reală (IP-ul runnerului e
-# proaspăt), trimite un mesaj, cronometrează PRIMUL CUVÂNT, apoi scoate din
-# Railway jurnalele deployment-ului activ ca să vedem CE a făcut serverul cu
-# tura (punte? stall? răspuns?). Nu modifică nimic.
+# TEST LIVE al chatului PUBLIC (demo). Doar-citire pe producție: pornește o
+# sesiune demo reală (IP-ul runnerului e proaspăt), trimite un mesaj și
+# cronometrează PRIMUL CUVÂNT. Nu modifică nimic. (Pasul care scotea jurnalele
+# deployment-ului din Railway a fost scos pe 22 iul 2026, odată cu Railway.)
 name: public-latency-test
 
 on:
@@ -60,25 +59,3 @@ jobs:
               time.sleep(2)
           PY
 
-      - name: Jurnalele serverului pentru tura de mai sus (deployment activ)
-        env:
-          TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: |
-          set -uo pipefail
-          [ -z "$TOKEN" ] && { echo "fără RAILWAY_TOKEN"; exit 0; }
-          GQL=https://backboard.railway.com/graphql/v2
-          gql() { curl -sS --max-time 30 "$GQL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"; }
-          RESP=$(gql '{"query":"query{projects{edges{node{id name environments{edges{node{id name}}} services{edges{node{id name}}}}}}}"}')
-          P=$(echo "$RESP" | jq '[.data.projects.edges[].node | select(.name|test("kelion";"i"))][0] // .data.projects.edges[0].node')
-          PID=$(echo "$P" | jq -r '.id')
-          ENVID=$(echo "$P" | jq -r '[.environments.edges[].node|select(.name=="production")][0].id // .environments.edges[0].node.id')
-          SVCID=$(echo "$P" | jq -r '[.services.edges[].node|select(.name=="web")][0].id // .services.edges[0].node.id')
-          DQ=$(jq -nc --arg p "$PID" --arg e "$ENVID" --arg s "$SVCID" \
-            '{query:"query($p:String!,$e:String!,$s:String!){deployments(first:1,input:{projectId:$p,environmentId:$e,serviceId:$s}){edges{node{id status}}}}",variables:{p:$p,e:$e,s:$s}}')
-          DID=$(gql "$DQ" | jq -r '.data.deployments.edges[0].node.id // empty')
-          echo "deployment activ: $DID"
-          [ -z "$DID" ] && exit 0
-          LQ=$(jq -nc --arg d "$DID" '{query:"query($d:String!){deploymentLogs(deploymentId:$d,limit:500){message}}",variables:{d:$d}}')
-          echo "=== linii relevante (bridge/public/stall/eroare) ==="
-          gql "$LQ" | jq -r '.data.deploymentLogs[]?.message // empty' \
-            | grep -iE "asr|Recognize|chirp|streaming|InvalidArgument|PermissionDenied|NOT_FOUND|Unauthenticated|bridge|stall|error|eroare" | tail -80 || echo "(nimic relevant)"

@@ -5,7 +5,7 @@ import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ContactModal from '../components/ContactModal'
 import VisitorChatWidget from '../components/VisitorChatWidget'
-import { startGoogleLogin, startDemo } from '../lib/api'
+import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
@@ -36,7 +36,6 @@ export default function Landing({ error }: { error?: string | null }) {
   // The start page is ALWAYS English — the professional international default.
   // (The conversation itself still adapts to the visitor's own language.)
   const t = strings('en')
-  const [busy, setBusy] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
   // Versiunea live (aceeași sursă ca filigranul din browser) — o arătăm sub
@@ -57,7 +56,9 @@ export default function Landing({ error }: { error?: string | null }) {
       window.clearInterval(id)
     }
   }, [])
-  const [notice, setNotice] = useState<string | null>(
+  // Eroare venită prin URL (ex: ?error=closed). Afișată o dată; nu se schimbă
+  // după montare (nu mai există flux de probă care s-o actualizeze).
+  const [notice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )
   // Lead capture: a visitor leaves an email so the owner can reach them.
@@ -100,22 +101,6 @@ export default function Landing({ error }: { error?: string | null }) {
       }).catch(() => {}),
     )
   }, [])
-
-  async function tryDemo(): Promise<void> {
-    if (busy) return
-    setBusy(true)
-    setNotice(null)
-    const fp = await deviceFingerprint()
-    const res = await startDemo(fp, document.referrer)
-    if (res === 'ok') {
-      window.location.href = '/' // reload into the live app on the demo session
-      return
-    }
-    setBusy(false)
-    setNotice(
-      res === 'already_used' ? t.trialUsed : res === 'cap_reached' ? t.trialBusy : t.errGeneric,
-    )
-  }
 
   return (
     <div className="landing">
@@ -163,15 +148,10 @@ export default function Landing({ error }: { error?: string | null }) {
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            <button
-              type="button"
-              className="cta-primary"
-              onClick={() => void tryDemo()}
-              disabled={busy}
-            >
-              {busy ? t.trialStarting : t.tryFree}
-            </button>
-            <button type="button" className="google-btn" onClick={startGoogleLogin}>
+            {/* Fără probă gratuită (Adrian): singura cale de intrare e contul
+                Google, apoi cumpărarea de credite. Nimeni nu mai primește
+                minute gratis. */}
+            <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fill="#FFC107"

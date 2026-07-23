@@ -1,6 +1,6 @@
 // Verify MarkItDown ingestion end-to-end on the live server: POST real documents
 // to /api/ingest with a minted admin session and print the Markdown returned.
-//   railway run node backend/scripts/ingest-test.mjs
+//   (cu env-ul producției încărcat) node backend/scripts/ingest-test.mjs
 import jwt from 'jsonwebtoken'
 import { readFileSync } from 'node:fs'
 

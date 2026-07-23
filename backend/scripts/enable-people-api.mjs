@@ -1,5 +1,5 @@
 // Try to enable People API on the project using the service account already in
-// Railway (GOOGLE_SERVICE_ACCOUNT_JSON). Works only if that SA has the
+// env-ul gazdei (GOOGLE_SERVICE_ACCOUNT_JSON). Works only if that SA has the
 // serviceusage.services.enable permission; otherwise reports the 403 so we know
 // it must be done in the console.
 import { GoogleAuth } from 'google-auth-library'

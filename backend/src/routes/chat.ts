@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { brain, glm, type BrainClient } from '../services/brain.js'
 import type {
   Tool,
   Message,
@@ -41,9 +40,13 @@ import {
   getFaceprint,
   saveFaceprint,
   faceDistance,
+  loadKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { brainCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, quotaTracker } from '../services/cost.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { runOrchestrator } from '../services/orchestrator.js'
+import { maybeAutoRecharge } from '../services/autorecharge.js'
+import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
@@ -63,58 +66,27 @@ import {
   browserClose,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
-import {
-  bridgeOnline,
-  bridgeRepair,
-  resetBrainActivity,
-  markFirstWord,
-  brainTurnActive,
-  finishBrainTurn,
-  setOwnerTz,
-  setProgress,
-  setAnalysisDetail,
-  getReadyDeploy,
-  triggerDeploy,
-  recentDevLog,
-  stashAdminFiles,
-  openRequirement,
-  updateRequirement,
-  resolveRequirement,
-  ownedRequirement,
-  type BridgeFile,
-} from './bridge.js'
 import { randomUUID } from 'node:crypto'
-import { MODEL_FAST, MODEL_TOP, chooseModel, isQuotaError } from '../services/modelRouter.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
-import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 
-// STRATEGIA DE MODEL (Adrian, 10 iul): viteză maximă implicit, escaladare la
-// modelul cel mai puternic la nevoie — decis de routerul automat capabilitate↔
-// cost (services/modelRouter.ts), determinist și gratuit. Tier-urile stau acolo,
-// Detectare erori de quota (403/429 + cuvinte-cheie) — isQuotaError importat
-// din services/modelRouter.ts; folosit de failover Kimi → GLM.
-function logFailover(from: string, to: string, reason: string): void {
-  console.log(`[FAILOVER] ${from} → ${to} (${reason})`)
-}
-
-// Numele vechi de model (compatibilitate). Ambele sunt configurabile din mediu (future-proof).
-const MODEL = MODEL_FAST // implicit: rapid + ieftin, primul cuvânt <1s
-const MODEL_RESERVE = MODEL_TOP // cel mai puternic: cereri grele + orice eșec
-const FABLE_REST_MS = 10 * 60_000 // după un eșec dur, folosește modelul TOP 10 min
-let fableDownUntil = 0
-
-function brainModel(): string {
-  return Date.now() < fableDownUntil ? MODEL_RESERVE : MODEL
-}
-function restFable(): void {
-  fableDownUntil = Date.now() + FABLE_REST_MS
-}
-// CREIERUL — Kimi (primar) → GLM (rezervă). Vechiul provider scos complet (Adrian, 12
-// iul). Kimi și GLM sunt provideri DIFERIȚI (baseURL + cheie diferite), deci
-// failover-ul trebuie să schimbe CLIENTUL, nu doar numele modelului: modelul
-// rezervei (MODEL_TOP=glm) merge pe clientul GLM, restul pe Kimi.
-function brainClientFor(model: string): BrainClient {
-  return model === MODEL_RESERVE ? glm : brain
+// CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
+// selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
+// de user, altfel implicitul tier-ului chat (GPT). Întoarce NULL doar dacă lipsește
+// cheia OpenRouter → creierul nu poate porni (mesaj onest, nicio plasă Kimi/GLM).
+async function selectedBrainModel(email: string, text: string): Promise<string | null> {
+  if (!config.openrouter.key) return null
+  let sel: { chat?: string; work?: string } = {}
+  try {
+    const raw = await loadKv(`model_choice:${email}`)
+    if (raw) sel = JSON.parse(raw) as { chat?: string; work?: string }
+  } catch {
+    sel = {}
+  }
+  // ESCALADARE automată CHAT → CREIER: cerere grea (raționament/cod/multi-pas)
+  // urcă la treapta CREIER (work, GPT/Claude); restul rămâne pe CHAT (GPT/Gemini).
+  // Persona/voce/limbă/memorie/unelte sunt IDENTICE — se schimbă DOAR modelul.
+  const heavy = taskDifficulty(text) >= ESCALATE_AT
+  return heavy ? resolveModel('work', sel.work) : resolveModel('chat', sel.chat)
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -372,25 +344,6 @@ const BROWSER_CLICK_AT_TOOL: Tool = {
       y: { type: 'number', description: 'Y pixel (0–800).' },
     },
     required: ['x', 'y'],
-  },
-}
-
-// ADMIN ONLY. When the owner asks to FIX, CHANGE or ADD something in the
-// Kelionai APP ITSELF (a bug, a feature, the code/site) — not an ordinary task —
-// hand the request to the owner's developer through the bridge.
-const REPAIR_TOOL: Tool = {
-  name: 'request_repair',
-  description:
-    "ADMIN ONLY. Use ONLY when the owner (Adrian) asks you to REPAIR, FIX, CHANGE, or ADD something in the Kelionai APPLICATION ITSELF — a bug in the app, a broken feature, a code/website change, something that isn't working right. This forwards his request to his developer who does the actual fix in the project. Do NOT use it for ordinary user tasks (search, maps, email, notes) — only for changes to the app/software. Pass a clear, complete description of what he wants fixed or changed, with any detail he gave.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      description: {
-        type: 'string',
-        description: 'Clear, complete description of the fix/change the owner wants, with any detail he gave.',
-      },
-    },
-    required: ['description'],
   },
 }
 
@@ -707,15 +660,6 @@ over show_on_screen whenever the user wants to actually browse, read inside,
 search within, or click through a real website — show_on_screen only displays a
 static page and cannot click, type or read it back to you.
 
-REPAIRS (owner only): if the request_repair tool is available and the OWNER asks
-you to fix, change, repair or add something in the Kelionai APP ITSELF (a bug, a
-broken feature, the code or the website — not an ordinary task), call
-request_repair with a clear, complete description of what he wants. That hands it
-to his developer, who does the real fix. After calling it, tell him plainly you
-have sent the repair request to be worked on. Never pretend YOU changed the app's
-code — you can't; you only forward it. This is ONLY for changes to the app itself,
-never for normal tasks (search, maps, email, notes, browsing).
-
 CRITICAL — SHOWING THINGS: You can put something on the user's monitor ONLY by
 calling a tool. If the user asks to SEE, SHOW, or display a place, a route, a
 video, the weather, or an image, you MUST call the matching tool (maps_search,
@@ -832,8 +776,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       messages?: ChatMessage[]
       image?: string
       // VEDEREA CONTINUĂ (Adrian, 11 iul): ultimele 4 cadre ale camerei —
-      // pentru TOȚI userii (regula nr. 9), nu doar admin (adminul le trimite
-      // deja prin `files` pe punte; publicul le trimite aici).
+      // pentru TOȚI userii (regula nr. 9).
       images?: string[]
       // Poza a fost ATAȘATĂ EXPLICIT (Ctrl+V / încărcată), nu e cadrul ambient
       // al camerei — cerere de analiză fără condiție (vezi VISION_INTENT mai jos).
@@ -842,9 +785,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       screen?: { kind: string; title: string; active: boolean }[]
       now?: string
       tz?: string
-      // Raw attachments for the ADMIN bridge: photos, archives, video — any
-      // file rides the bridge to the developer (saved server-side by the worker).
-      files?: { name?: string; type?: string; data?: string }[]
       // Features vocale extrase 100% client-side pentru identificare speaker + gen.
       voiceFeatures?: VoiceFeatures
       // Descriptor facial 128-d (face-api), extras client-side când camera e
@@ -855,10 +795,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   }>(
     '/api/chat',
     {
-      // This is the ONE route allowed a big body (admin bridge photos/archives/
-      // video). And it is the most cost-sensitive one, so it gets a tighter
-      // rate limit than the global default — 40/min per IP is far more than a
-      // human types, but stops an automated flood from burning API/subscription.
+      // This route allows a big body (camera frames / attached images). It is the
+      // most cost-sensitive one, so it gets a tighter rate limit than the global
+      // default — 40/min per IP is far more than a human types, but stops an
+      // automated flood from burning API/subscription.
       bodyLimit: 100_000_000,
       config: { rateLimit: { max: 40, timeWindow: '1 minute' } },
     },
@@ -988,7 +928,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (
       config.stripe.secretKey &&
       user.role !== 'admin' &&
-      user.role !== 'demo' &&
+      (await getBalance(user.email)) <= 0 &&
+      // Ultima șansă înainte de paywall: reîncărcare automată din cardul salvat
+      // (dacă userul a activat-o). Dacă reușește, continuă fără să-l blocheze.
+      !(await maybeAutoRecharge(user.email, user.name)) &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -1156,12 +1099,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Owner-only: never refuse the owner. If something can't be done on the spot,
     // it is handled off-band (his developer builds it) — so Kelion says he's on
-    // it / has sent it to be built, NEVER "I can't". This is the fallback path;
-    // when the owner's bridge is online his messages are answered by it directly.
+    // it / has sent it to be built, NEVER "I can't".
     if (user.role === 'admin') {
-      // Aceeași oră peste tot: jurnalul/monitorul se ștampilează pe fusul lui
-      // Adrian (trimis de client la fiecare tură), nu pe UTC-ul serverului.
-      if (typeof req.body?.tz === 'string' && req.body.tz) setOwnerTz(req.body.tz)
       systemPrompt +=
         `\n\nOWNER — NEVER REFUSE: you are talking to Adrian, your owner. You must NEVER tell him "I can't do that" or "I don't have access". If it is something you can do, do it. If it is something that needs building or fixing in the app, tell him plainly that you are taking care of it / have sent it to be built (and silently log_unsupported_request so it reaches his developer) — but frame it as handled, never as a refusal. Always give him a real, helpful spoken answer; never a dead end.`
       systemPrompt +=
@@ -1182,8 +1121,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Memory agent (recall): inject the durable facts Kelion has learned about
     // this user so the conversation is continuous across sessions. Citit mai
-    // sus (drumul unic spre bază). DEMO = anonim, fără memorie injectată.
-    if (user.role !== 'demo') systemPrompt += memRecall
+    // sus (drumul unic spre bază).
+    systemPrompt += memRecall
 
     // ── BIOMETRIE (voce + față) — identificare titular vs. altcineva ──────────
     // Adrian: „nimic direct în chat, tot în paralel, să nu încetinească chatul".
@@ -1275,32 +1214,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         'comporți potrivit. NU o pomeni NICIODATĂ cu voce tare: nu spune că recunoști vocea sau fața, ' +
         'că identifici, calibrezi, înveți sau „vezi" cine e, nu descrie persoana și nu comenta camera. ' +
         'Folosește-o strict discret (ex. prudență cu datele personale dacă e altcineva). Zero cuvinte despre procedură.'
-    }
-
-    // CONTEXT LIVE ADMIN (portat de pe vechea punte): jurnalul lucrului de azi +
-    // caietul comun pe care-l împart serverul și constructorul de pe laptop, ca
-    // chatul să știe exact ce s-a construit/învățat. Admin-only (GPS-ul și ora
-    // s-au injectat deja mai sus, generic, pentru toți). getSharedMemory e un
-    // await punctual doar pentru admin (nu-l punem în Promise.all-ul comun, ca să
-    // nu adauge un drum spre bază la fiecare user).
-    if (user.role === 'admin') {
-      const journal = recentDevLog(15)
-      if (journal.length > 0) {
-        systemPrompt +=
-          `\n\nJURNALUL LUCRULUI DE AZI (dezvoltatorul pe laptop, live):\n${journal.join('\n')}`
-      }
-      const shared = await getSharedMemory(30)
-      if (shared.length > 0) {
-        systemPrompt +=
-          '\n\nMEMORIA COMUNĂ (caietul pe care-l împărțiți tu și constructorul de pe laptop):\n' +
-          shared.map((m) => `- [${m.source || '?'}] ${m.content}`).join('\n')
-      }
-      // PANOU ADMIN — STARE LIVE (Adrian, 14 iul: „Kelion trebuie să vadă permanent
-      // tot ce e în fiecare buton admin"). Rezumat compact, cache 30s, admin-only —
-      // Kelion e mereu conștient de joburi/cereri/release-uri/amprente/useri fără să
-      // încetinească chatul. Nu-l recită nesolicitat (e context, nu replică).
-      const panel = await buildAdminSnapshot()
-      if (panel) systemPrompt += `\n\n${panel}`
     }
 
     // CONTINUITATE ÎNTRE SESIUNI (#20): dacă ultima discuție a fost demult,
@@ -1416,103 +1329,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // această tură, banda din UI îl afișează. Nu e ecou local — dacă banda nu se
     // schimbă când vorbești, vocea a murit ÎNAINTE de creier.
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
-    // Demo = fără istoric (spec Adrian, 10 iul): mesajele vizitatorilor demo
-    // nu se salvează nicăieri.
-    if (lastTurn?.role === 'user' && user.role !== 'demo')
-      void saveMessage(user.email, 'user', lastTurn.content)
+    if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
     const isAdmin = user.role === 'admin'
 
-    // ADMIN — doar gărzile specifice ownerului, apoi CADE PRIN la creierul direct.
-    // Puntea/Builder-CLI au fost scoase din calea de chat (Adrian, 3 zile): adminul
-    // păstrează aici STOP-pe-cerință, OK→deploy, filtrul anti-ecou ASR și
-    // telemetria monitorului, dar răspunsul îl compune ACELAȘI drum direct
-    // Kimi→GLM ca la toți ceilalți (mai jos), cu request_repair ca tool.
-    if (isAdmin) {
-      // STOP pe cerință: dacă Adrian spune „stop / oprește / lasă / anulează" cât
-      // o cerință e în lucru, o ÎNCHIDEM — supervizorul vede că nu mai e nimic de
-      // dus la capăt (ownedReq = null) și nu mai re-asignează. Fără asta, bucla de
-      // re-asignare (până la 3 încercări) ignora comanda. Revenim la modul chat.
-      const stopCmd = /^\s*(stop|stai|opre[șs]te(?:\-te)?|oprire|las[ăa](?:\s*asta)?|renun[țt][ăa]|anuleaz[ăa]|nu mai lucra|gata cu asta)[\s.!]*$/i
-      if (stopCmd.test(lastUserText) && ownedRequirement()) {
-        resolveRequirement()
-        const msg = 'Am oprit — cerința e închisă, nu mai reîncerc. Sunt pe modul chat, spune-mi ce vrei.'
-        reply.raw.write(msg)
-        reply.raw.end()
-        void saveMessage(user.email, 'assistant', msg)
-        return
-      }
-      // OK → DEPLOY: PRIMUL, înaintea oricărui filtru (bug 5 iul: filtrul de
-      // ecou înghițea al doilea „da" din 45s → publicarea nu pornea și
-      // aplicația părea moartă). Un „da" e ORDIN, niciodată zgomot.
-      const affirm = /^\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]?|deploy|hai|bun|merge|gata|am\s+(spus|zis|dat)\s+da|am\s+aprobat|am\s+dat\s+drumul)([\s.!,;:?-]+\s*(ok(ay)?|da|d[aă]\-?i drumul|public[aă]?|deploy|hai|bun|merge|gata))*\s*[.!?]*\s*$/i
-      if (getReadyDeploy() && affirm.test(lastUserText)) {
-        const t = triggerDeploy()
-        const msg = t
-          ? 'Am zis să se publice — serverul dă drumul acum. Îți spun când e live.'
-          : 'Nu mai am nimic pregătit de publicat acum.'
-        reply.raw.write(msg)
-        reply.raw.end()
-        void saveMessage(user.email, 'assistant', msg)
-        return
-      }
-      // ── FILTRU ANTI-ZGOMOT ASR (Adrian, 5 iul) ────────────────────────────
-      // Microfonul permanent trimite uneori ACEEAȘI frază de mai multe ori
-      // („Nu." ×7) sau fragmente dublate în același mesaj. Fiecare duplicat
-      // pornea o tură plină → creierul umplea chatul („Sunt aici") și zgomotul
-      // suprascria „Cererea în analiză". Regula: propozițiile identice
-      // consecutive se strâng într-una; un mesaj identic cu precedentul, sosit
-      // în <45s, nu pornește o tură — dar primește un rând scurt, NICIODATĂ
-      // tăcere totală (tăcerea arăta ca o aplicație moartă — bug 5 iul).
-      const normNoise = (s: string): string =>
-        s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-      const cleanUserText = lastUserText
-        .split(/(?<=[.!?])\s+/)
-        .filter((s, i, arr) => i === 0 || normNoise(s) !== normNoise(arr[i - 1]))
-        .join(' ')
-        .trim()
-      const noiseKey = normNoise(cleanUserText)
-
-      // ── TELEMETRIE MONITOR (admin) ──────────────────────────────────────
-      // Monitor gol la fiecare comandă, bara pornește la „Creierul analizează",
-      // iar detaliul din spatele barei = cererea reală (gardă ≥3 cuvinte, ca
-      // zgomotul scurt de microfon să nu suprascrie cererea adevărată).
-      resetBrainActivity()
-      setProgress(30, 'Creierul analizează')
-      if (normNoise(cleanUserText).split(' ').filter(Boolean).length >= 3)
-        setAnalysisDetail(cleanUserText)
-      // ACCES TOTAL: fișierele atașate de admin în chat (poze, capturi, arhive,
-      // video) se pun deoparte pentru constructor, ca builder-ul să vadă exact
-      // ce a văzut vocea. Cadrele camerei merg pe calea vederii (params), nu aici.
-      if (req.body?.files?.length) {
-        const files: BridgeFile[] = []
-        let budget = 95_000_000 // ~70MB decoded — maximul fizic al țevii
-        const addFile = (name: string, type: string, raw: string): void => {
-          const data = raw.includes(',') ? raw.slice(raw.indexOf(',') + 1) : raw
-          if (!data || data.length > budget) return
-          budget -= data.length
-          files.push({ name: name.slice(0, 120), type: type.slice(0, 80), data })
-        }
-        for (const f of req.body.files) {
-          if (typeof f?.data === 'string')
-            addFile(f.name || 'fisier', f.type || 'application/octet-stream', f.data)
-        }
-        if (files.length > 0) stashAdminFiles(files)
-      }
-      // …și CADE PRIN (fără return) la drumul direct Kimi→GLM de mai jos: adminul
-      // răspunde acum prin ACELAȘI creier direct ca toți (Builder/puntea scoase
-      // din calea de chat), cu request_repair ca tool pentru cerințele de cod.
-    }
-
-    // ── DRUM UNIC: DIRECT Kimi→GLM PENTRU TOȚI (Adrian, 3 zile) ─────────────
-    // „Builder out everywhere, Kimi 2.7 + GLM 5.x direct, ultra-rapid." Puntea/
-    // Builder-CLI au fost scoase complet din calea de chat: ADMIN (mai sus, doar
-    // gărzile + telemetria + fișierele, apoi cade prin), DEMO/gratuiți și
-    // clienții plătitori (paywall garantat mai sus) răspund TOȚI direct prin API
-    // de mai jos — instant, cu toate uneltele. Demo rămâne izolat, aplicat
-    // punctual pe fiecare efect secundar (istoric/memorie/învățare/portofel/
-    // request_repair), nu printr-o ramură separată. Costul real se debitează din
-    // creditele plătitorilor (debitWallet la finalul turei); adminul e scutit.
+    // ── DRUM UNIC: CREIER DIRECT PENTRU TOȚI ───────────────────────────────
+    // Orchestratorul OpenRouter (chat/creier, cu escaladare automată) răspunde
+    // pentru TOȚI — admin, gratuiți și clienți plătitori (paywall garantat mai
+    // sus) — instant, cu toate uneltele. Costul real se debitează din creditele
+    // plătitorilor (debitWallet la finalul turei); adminul e scutit.
 
     const NOTE_TOOLS = [SAVE_NOTE_TOOL, LIST_NOTES_TOOL, DELETE_NOTE_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL]
     const BROWSER_TOOLS = [
@@ -1526,11 +1351,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLICK_AT_TOOL,
       BROWSER_CLOSE_TOOL,
     ]
-    // request_repair is offered ONLY to the admin AND only when his local
-    // developer bridge is actually online — no point otherwise.
-    const REPAIR_TOOLS = isAdmin && bridgeOnline() ? [REPAIR_TOOL] : []
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...REPAIR_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1543,8 +1365,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const noteFirstWord = (): void => {
       if (firstWordMarked || !isAdmin) return
       firstWordMarked = true
-      markFirstWord()
-      setProgress(65, 'Compun răspunsul')
     }
     let sandboxLog = '' // commands + real output from the code-execution sandbox
     let inTokens = 0
@@ -1553,192 +1373,78 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Provider cost incurred by delegated specialist agents (their own brain
     // calls + tool costs), accumulated so it's billed to the same wallet.
     const usage = { usd: 0 }
-    // Plasa de siguranță a creierului: Kimi (primar) → GLM (rezervă). Dacă o
-    // rundă pică (sau e refuzată) înainte să curgă text, aceeași rundă e re-servită
-    // pe GLM — CLIENT diferit, nu doar model diferit (vezi brainClientFor).
-    // Router automat capabilitate↔cost: Kimi acoperă orice cerere (primar); GLM e
-    // rezerva la eșec, ridicată automat de brainModel() după o „odihnă".
-    const chosen = chooseModel(lastUserText)
-    let model = chosen === MODEL_FAST ? brainModel() : chosen
-    // LANGUAGE GUARDIAN — SCOS (Adrian, 14 iul: „procedura de identificare limbă e
-    // inutilă aici; modelul comută nativ pe limba auzită; Chirp 3 e suficient").
-    // Guardian-ul reținea primul cuvânt până se aduna o propoziție întreagă ca să
-    // verifice limba — latență pură pe primul cuvânt, redundant cu regula din prompt
-    // („Always reply in the user's language") + cu Chirp (STT aude limba, TTS o
-    // vorbește). Dezactivat → primul cuvânt curge INSTANT. `guardTag=null` face
-    // `released` mereu true; logica de re-servire nu se mai declanșează.
-    const guardTag = null
-    try {
-      // Tool-use loop: stream text each round; if the brain requests tools, run them
-      // and feed the results back, then continue, until it's done.
-      for (let round = 0; round < 5; round++) {
-        let roundText = ''
-        let guardTripped = false
-        // gateOn=true holds the opening for the language check; correct=true adds
-        // the hard corrective and streams live (accept the result no matter what).
-        const runRound = (
-          c: BrainClient,
-          m: string,
-          correct = false,
-          gateOn = true,
-        ): Promise<Message> => {
-          roundText = ''
-          guardTripped = false
-          let gate = ''
-          let released = !gateOn || guardTag == null
-          const sys =
-            correct && langName
-              ? `${systemPrompt}\n\nURGENT LANGUAGE CORRECTION: your previous attempt began in the WRONG language. Reply now EXCLUSIVELY in ${langName} — every single word in ${langName}.`
-              : systemPrompt
-          const stream = c.messages.stream({
-            model: m,
-            // Fable thinks internally within the output budget — give it room.
-            // Headroom also covers long deliverables (a 10-minute promo script
-            // is ~2000 tokens, written once in chat and once in the tool call).
-            max_tokens: m === MODEL ? 5000 : 3500,
-            system: sys,
-            tools,
-            messages: params,
-          })
-          stream.on('text', (delta) => {
-            roundText += delta
-            if (guardTripped) return // decided to discard — swallow the rest
-            if (released) {
-              noteFirstWord()
-              reply.raw.write(delta)
-              voice.feed(delta)
-              return
-            }
-            gate += delta
-            // Decide as soon as there's a sentence to judge (or enough text).
-            if (/[.!?…\n]/.test(gate) || gate.length >= 120) {
-              if (checkLang(gate, guardTag).ok) {
-                released = true
-                noteFirstWord()
-                reply.raw.write(gate)
-                voice.feed(gate)
-              } else {
-                guardTripped = true
-              }
-            }
-          })
-          return stream.finalMessage().then((msg) => {
-            // Short reply that never reached a boundary: judge what we have.
-            if (!released && !guardTripped && gate) {
-              if (checkLang(gate, guardTag).ok) {
-                noteFirstWord()
-                reply.raw.write(gate)
-                voice.feed(gate)
-                released = true
-              } else {
-                guardTripped = true
-              }
-            }
-            return msg
-          })
-        }
-        let final: Message
-        try {
-          final = await runRound(brainClientFor(model), model)
-          quotaTracker.record(model, true)
-        } catch (e) {
-          // Kimi pică → odihnă + re-servire pe GLM (client GLM via brainClientFor).
-          // Ambele picate → aruncă, catch-ul exterior explică cinstit.
-          if (model === MODEL && (roundText === '' || isQuotaError(e))) {
-            quotaTracker.record(MODEL, false)
-            logFailover('kimi', 'glm', isQuotaError(e) ? 'quota' : 'error')
-            // Kimi însuși are o problemă — îl odihnim și re-servim pe GLM (rezerva).
-            restFable()
-            model = MODEL_RESERVE
-            final = await runRound(brainClientFor(model), model)
-            quotaTracker.record(MODEL_RESERVE, true)
-          } else throw e
-        }
-        // Un refuz de siguranță (HTTP 200, stop_reason "refusal", fără conținut):
-        // re-servim AceastĂ cerere pe GLM — specific conținutului, fără odihnă.
-        if (
-          (final as { stop_reason?: string }).stop_reason === 'refusal' &&
-          roundText === '' &&
-          model === MODEL
-        ) {
-          model = MODEL_RESERVE
-          final = await runRound(brainClientFor(model), model)
-        }
-        // Guardian tripped: the opening was the wrong language and NOTHING was
-        // sent — re-serve this round once, corrected and ungated (never silent).
-        if (guardTripped && guardTag) {
-          inTokens += final.usage.input_tokens
-          outTokens += final.usage.output_tokens
-          final = await runRound(brainClientFor(model), model, true, false)
-        }
-        assistantText += roundText
-        inTokens += final.usage.input_tokens
-        outTokens += final.usage.output_tokens
-        // Sandbox activity (code written + its REAL output) goes on the monitor.
-        const sb = sandboxTranscript(final.content as unknown[])
-        if (sb) sandboxLog += (sandboxLog ? '\n\n' : '') + sb
-        if (final.stop_reason !== 'tool_use') break
 
-        params.push({ role: 'assistant', content: final.content })
-        const results: ToolResultBlockParam[] = []
-        for (const block of final.content) {
-          if (block.type === 'tool_use') {
-            // A tool must NEVER crash the whole reply — always return a result so
-            // the tool_use/tool_result pairing stays valid and the chat continues.
-            let out: string
-            try {
-              // Agents inherit the user's language only when it's ESTABLISHED;
-              // for adaptive (new/demo) users they mirror the task's language.
-              out = await runTool(
-                block, isAdmin, token, reply, baseUrl, user.email, usage,
-                speechPref && langName ? langName : '',
-              )
-            } catch (e) {
-              out = JSON.stringify({ error: e instanceof Error ? e.message : 'tool_failed' })
-            }
-            // Meter paid Serper searches (web + youtube) into the credit monitor.
-            if (
-              block.name === 'web_search' ||
-              block.name === 'youtube_search' ||
-              block.name === 'image_search'
-            ) {
-              usage.usd += SERPER_USD_PER_CALL
-            }
-            // Meter paid image generation into the credit monitor.
-            if (block.name === 'generate_image') {
-              usage.usd += IMAGE_USD_PER_CALL
-            }
-            results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
-          }
-        }
-        if (results.length > 0) {
-          params.push({ role: 'user', content: results })
-        }
+    // ── CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian) ────────────────────
+    // Un singur creier: modelul ALES de user (chat), altfel implicitul GPT. Toate
+    // uneltele + persona + memoria identice indiferent de model; streaming → primul
+    // cuvânt instant. Fără cheie OpenRouter = fără creier (nicio plasă Kimi/GLM,
+    // scoase definitiv) → mesaj onest în catch.
+    const orChatModel = await selectedBrainModel(user.email, lastUserText)
+    try {
+      if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
+      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
+      for (const p of params) {
+        const content = typeof p.content === 'string' ? p.content : ''
+        if (content) orMsgs.push({ role: p.role === 'assistant' ? 'assistant' : 'user', content })
       }
+      let callN = 0
+      const execTool = async (name: string, argsJson: string): Promise<string> => {
+        let input: unknown = {}
+        try {
+          input = JSON.parse(argsJson || '{}')
+        } catch {
+          input = {}
+        }
+        if (name === 'web_search' || name === 'youtube_search' || name === 'image_search')
+          usage.usd += SERPER_USD_PER_CALL
+        if (name === 'generate_image') usage.usd += IMAGE_USD_PER_CALL
+        const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
+        return runTool(
+          block, isAdmin, token, reply, baseUrl, user.email, usage,
+          speechPref && langName ? langName : '',
+        )
+      }
+      const r = await runOrchestrator(
+        orChatModel,
+        orMsgs,
+        tools as unknown as AnthropicTool[],
+        execTool,
+        {
+          maxTokens: 5000,
+          onText: (txt) => {
+            noteFirstWord()
+            reply.raw.write(txt)
+            voice.feed(txt)
+          },
+        },
+      )
+      assistantText += r.text
+      usage.usd += r.costUsd
     } catch (e) {
-      // Both providers failed — be honest, never silent.
+      // Creierul a picat — onest, niciodată tăcut. Fără plasă Kimi/GLM (scoase).
       const errMsg = e instanceof Error ? e.message : String(e)
-      const isQuota = isQuotaError(e)
-      const isRefusal = errMsg.toLowerCase().includes('refusal')
-      const spoken =
-        ro
-          ? isQuota
-            ? 'Am epuizat momentan creditul la ambele creiere. Te rog reîncarcă creditul ca să continuăm.'
-            : isRefusal
-              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
-              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-          : isQuota
-            ? "I've temporarily run out of credit on both brains. Please top up so we can continue."
-            : isRefusal
-              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
-              : 'I ran into a technical issue. Please try again in a moment.'
+      const low = errMsg.toLowerCase()
+      const isQuota =
+        low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
+      const isRefusal = low.includes('refusal')
+      const spoken = ro
+        ? isQuota
+          ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
+          : isRefusal
+            ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
+            : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
+        : isQuota
+          ? "I've temporarily run out of brain credit. Please top up so we can continue."
+          : isRefusal
+            ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
+            : 'I ran into a technical issue. Please try again in a moment.'
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
-      // Log for ops, never crash the process.
       console.error('[CHAT ERROR]', errMsg)
       return
     }
+
 
     // ── FINAL TURN ──
     await voice.finish()
@@ -1757,14 +1463,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       void learnFromTurn(user.email, 'kelion', lastUserText, assistantText)
     }
 
-    // Debit real provider cost from the user's wallet (customers only; admin/demo exempt).
+    // Debit real provider cost from the user's wallet (customers only; admin exempt).
     // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
     // multiple times for the same turn).
-    if (user.role !== 'admin' && user.role !== 'demo') {
-      const cost = brainCost(model, inTokens, outTokens) + usage.usd
+    if (user.role !== 'admin') {
+      const cost = usage.usd
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
+      // Proactiv, în fundal: dacă a coborât sub prag, reîncarcă din cardul salvat
+      // ÎNAINTE de a ajunge la 0 — userul nu se blochează în mijlocul sesiunii.
+      void maybeAutoRecharge(user.email, user.name)
     }
     },
   )
@@ -1890,14 +1599,6 @@ async function runTool(
       if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
       const summary = await getCostSummary()
       return JSON.stringify(summary)
-    }
-
-    case 'request_repair': {
-      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
-      const description = String(args.description ?? '')
-      if (!description) return JSON.stringify({ error: 'no_description' })
-      openRequirement(description)
-      return JSON.stringify({ queued: true })
     }
 
     case 'prepare_promo_clip': {

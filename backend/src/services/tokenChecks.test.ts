@@ -4,7 +4,6 @@ import { runAllTokenChecks } from './tokenChecks.js'
 describe('Token checks', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    vi.stubEnv('RAILWAY_TOKEN', '')
     vi.stubEnv('VPS_GITHUB_TOKEN', '')
     vi.stubEnv('GITHUB_TOKEN', '')
   })
@@ -17,8 +16,7 @@ describe('Token checks', () => {
   it('reports not_configured when no external keys are set', async () => {
     const checks = await runAllTokenChecks()
     const names = checks.map((c) => c.name)
-    expect(names).toContain('Kimi API key')
-    expect(names).toContain('GLM API key')
+    expect(names).toContain('OpenRouter API key')
     expect(names).toContain('Stripe secret key')
     expect(names).toContain('Google service account')
     expect(names).toContain('Serper API key')
@@ -26,7 +24,6 @@ describe('Token checks', () => {
     expect(names).toContain('Mail SMTP')
     expect(names).toContain('Mail IMAP')
     expect(names).toContain('LiveKit API key/secret')
-    expect(names).toContain('Railway token')
     expect(names).toContain('GitHub token')
     expect(names).toContain('SESSION_SECRET')
 

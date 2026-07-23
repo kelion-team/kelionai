@@ -25,7 +25,6 @@ import {
   getUserActivity,
   getDownloadStats,
   listInboundEmails,
-  markGapEscalated,
   getDisabledGestures,
   setDisabledGestures,
 } from '../db.js'
@@ -37,8 +36,6 @@ import { getStripeBalance } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
-import { bridgeRepair, bridgeOnline } from './bridge.js'
-import { brainComplete } from '../services/brain.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
 // Live checks against the four public install locations. Cached 5 minutes so
@@ -161,83 +158,29 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Escalate a gap to the owner's developer through the bridge —
-  // the "Trimite la creier" button. Forwards the request text as a
-  // build/repair task and marks the gap resolved. If the bridge isn't running,
-  // nothing is sent and the gap stays open (the UI tells the admin to start it).
-  app.post<{ Body: { id?: number } }>('/api/admin/gaps/escalate', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.body?.id)
-    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
-    const gap = (await getCapabilityGaps(true)).find((g) => g.id === id)
-    if (!gap) return reply.code(404).send({ error: 'not_found' })
-    // Adrian's flow (4 iul): escalation lands in the PERSISTENT order registry
-    // (visible as pending in Admin → Jurnal), and the gap STAYS in this list —
-    // he cleans it himself with "Rezolvat" only after the fix is deployed and
-    // HE has tested it. Nothing disappears before his eyes confirm it.
-    bridgeRepair(
-      `Cerere de la utilizatori (din culegerea de dorințe a lui Kelion), escaladată de admin — ` +
-        `construiește/adaugă această capacitate în aplicația Kelionai: "${gap.request}"` +
-        (gap.reason ? ` (motiv notat: ${gap.reason})` : ''),
-    )
-    // Tag it as sent — it stays visible (marcat „trimis la creier") and is
-    // CLEARED automatically când deploy-ul reușește (healthcheck 200).
-    await markGapEscalated(id)
-    return reply.send({ escalated: true, online: true })
-  })
-
-  // CRITERIU DECIZIONAL (Adrian, 4 iul): pentru fiecare cerere deschisă, întreabă
-  // CREIERUL dacă e DEJA implementată. DA → o șterge definitiv din listă. NU → o
-  // trimite la constructor (și rămâne marcată, dispare singură la deploy reușit).
-  // Așa nu se retrimite orbește ce s-a făcut deja, iar lista se curăță singură.
-  app.post('/api/admin/gaps/triage', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // TOATE cererile deschise (nu doar cele netrimise) — o cerere „trimisă" dar
-    // neconstruită trebuie re-verificată; ce e făcut iese, restul (re)pleacă.
-    const open = await getCapabilityGaps(false)
-    if (open.length === 0) return reply.send({ done: 0, sent: 0, checked: 0 })
-    if (!bridgeOnline()) return reply.send({ done: 0, sent: 0, checked: 0, offline: true })
-
-    const prompt =
-      'Ești creierul Kelionai și cunoști starea REALĂ a aplicației (monitor live pas-cu-pas + bară de proces, ' +
-      'voce sintetizată pe server Chirp 3 trimisă prin punte, microfon full-duplex cu filtru de zgomot și VOX, ' +
-      'punte cu 10 canale, limba userului aplicată, camera→creier, emailuri contact@, etc). ' +
-      'Pentru FIECARE capacitate cerută mai jos, decide dacă e DEJA implementată în aplicația de acum. ' +
-      'Răspunde STRICT o linie pe cerere, exact în formatul: `<id> DONE` sau `<id> TODO` (fără altceva pe linie).\n\n' +
-      open.map((g) => `${g.id}: ${g.request}`).join('\n')
-    // Verdict de la creierul DIRECT (Kimi/GLM), nu prin punte/`builder` (0 Provider).
-    const verdict = (await brainComplete(prompt, 1024)) || ''
-
-    let done = 0
-    let sent = 0
-    for (const g of open) {
-      const m = new RegExp(`(?:^|\\n)\\s*${g.id}\\s*[:.\\-]?\\s*(DONE|TODO)`, 'i').exec(verdict)
-      const isDone = m ? m[1].toUpperCase() === 'DONE' : false
-      if (isDone) {
-        await setGapResolved(g.id, true) // s-a făcut deja → scoasă definitiv
-        done++
-      } else if (!g.escalated) {
-        // nefăcut și încă netrimis → la constructor, marcată „trimisă"
-        bridgeRepair(
-          `Cerere de la utilizatori (culegerea lui Kelion), triată de admin — construiește/adaugă: ` +
-            `"${g.request}"${g.reason ? ` (motiv: ${g.reason})` : ''}`,
-        )
-        await markGapEscalated(g.id)
-        sent++
-      }
-      // nefăcut ȘI deja trimis → rămâne în listă (așteaptă construirea); nu spamăm.
-    }
-    return reply.send({ done, sent, checked: open.length })
-  })
-
   // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
   // (admin only). This is what the admin sees instead of the users' credits.
   app.get('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await getAdminAccount())
+  })
+
+  // Creierul e 100% OpenRouter (0 Kimi, 0 GLM). Butonul de fond din bara de admin:
+  // arată dacă cheia OpenRouter e configurată + fondul REAL al adminului
+  // (loaded − cost real), nu nelimitat, cu link direct spre alimentare.
+  app.get('/api/admin/brain-credit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const pool = await getAdminAccount()
+    return reply.send({
+      active: 'openrouter',
+      openrouter: {
+        ok: Boolean(config.openrouter.key),
+        topup: 'https://openrouter.ai/credits',
+      },
+      pool,
+    })
   })
 
   // The owner's REAL money picture (admin only): live Stripe balance (revenue
@@ -304,7 +247,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
   // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
   // expună valori secrete. Include Kimi, GLM, Stripe, Google, Serper, Gemini,
-  // Mail (SMTP+IMAP), LiveKit, Railway, GitHub și SESSION_SECRET.
+  // Mail (SMTP+IMAP), LiveKit, GitHub și SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

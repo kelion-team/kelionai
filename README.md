@@ -29,7 +29,7 @@ can be swapped to Chirp 3 HD without touching the chat UI.
 | Backend | Node + Fastify + TypeScript |
 | Auth | Google OAuth (Sign in with Google) + signed session cookie |
 | DB | PostgreSQL (later milestones) |
-| Deploy | Railway, domain `kelionai.app` |
+| Deploy | VPS propriu (Railway scos, 22 iul 2026), domain `kelionai.app` |
 
 ## Engineering rules (non-negotiable)
 

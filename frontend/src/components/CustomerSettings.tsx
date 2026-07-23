@@ -83,6 +83,13 @@ const EN: L = {
   close: 'Close',
 }
 
+interface CatModel {
+  id: string
+  name: string
+  provider: string
+  vision: boolean
+}
+
 export default function CustomerSettings({
   user,
   onClose,
@@ -99,16 +106,56 @@ export default function CustomerSettings({
   const [wallet, setWallet] = useState<WalletStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  // Modele selectabile (OpenRouter) + reîncărcare automată.
+  const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
+  const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
+  const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
+    enabled: false,
+    threshold: 20,
+    topupAmount: 10,
+  })
+  const ro = base === 'ro'
 
   useEffect(() => {
     void (async () => {
       const [p, b] = await Promise.all([loadServerPrefs(), fetchBalance()])
-      if (p) {
-        if (p.speechLang) setLang(p.speechLang)
-      }
+      if (p?.speechLang) setLang(p.speechLang)
       if (b) setWallet(b)
+      try {
+        const [cat, s, a] = await Promise.all([
+          fetch('/api/models/catalog', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+          fetch('/api/models/selection', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+          fetch('/api/billing/autorecharge', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+        ])
+        if (cat) setCatalog({ chat: cat.chat ?? [], work: cat.work ?? [] })
+        if (s) setSel({ chat: s.chat ?? '', work: s.work ?? '' })
+        if (a) setAr({ enabled: !!a.enabled, threshold: Number(a.threshold ?? 20), topupAmount: Number(a.topupAmount ?? 10) })
+      } catch {
+        /* endpointuri indisponibile → secțiunile rămân goale */
+      }
     })()
   }, [])
+
+  async function onModel(tier: 'chat' | 'work', model: string): Promise<void> {
+    setSel((s) => ({ ...s, [tier]: model }))
+    await fetch('/api/models/selection', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tier, model }),
+    }).catch(() => {})
+  }
+
+  async function onAr(patch: Partial<typeof ar>): Promise<void> {
+    const next = { ...ar, ...patch }
+    setAr(next)
+    await fetch('/api/billing/autorecharge', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(next),
+    }).catch(() => {})
+  }
 
   async function onLang(code: string): Promise<void> {
     setLang(code)
@@ -170,9 +217,66 @@ export default function CustomerSettings({
             ))}
           </div>
           <p className="settings-note">{t.marginNote}</p>
+
+          {/* Reîncărcare automată — ca să nu rămâi fără credit în mijlocul unei sesiuni */}
+          <label className="contact-label" style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="checkbox" checked={ar.enabled} onChange={(e) => void onAr({ enabled: e.target.checked })} />
+            {ro ? 'Reîncărcare automată (să nu rămân fără credit)' : 'Auto top-up (never run out of credit)'}
+          </label>
+          {ar.enabled && (
+            <div className="settings-topup" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="settings-note">{ro ? 'Când scad sub' : 'When below'}</span>
+              <input
+                type="number"
+                min={0}
+                value={ar.threshold}
+                onChange={(e) => void onAr({ threshold: Math.max(0, Number(e.target.value)) })}
+                style={{ width: 70 }}
+              />
+              <span className="settings-note">{ro ? 'credite, reîncarcă £' : 'credits, top up £'}</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={ar.topupAmount}
+                onChange={(e) => void onAr({ topupAmount: Math.max(1, Math.min(500, Number(e.target.value))) })}
+                style={{ width: 70 }}
+              />
+            </div>
+          )}
         </section>
 
-        {/* 3 — Cont */}
+        {/* 3 — Model AI (chat + creier), selectabil prin OpenRouter */}
+        {(catalog.chat.length > 0 || catalog.work.length > 0) && (
+          <section className="settings-sec">
+            <h4>{ro ? 'Model AI' : 'AI model'}</h4>
+            <label className="contact-label">{ro ? 'Chat (conversație)' : 'Chat'}</label>
+            <select value={sel.chat} onChange={(e) => void onModel('chat', e.target.value)}>
+              {catalog.chat.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <label className="contact-label" style={{ marginTop: 8 }}>
+              {ro ? 'Creier (sarcini grele)' : 'Brain (heavy tasks)'}
+            </label>
+            <select value={sel.work} onChange={(e) => void onModel('work', e.target.value)}>
+              {catalog.work.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <p className="settings-note">
+              {ro
+                ? 'Toate capabilitățile (voce, Google, memorie) merg la fel, indiferent de model.'
+                : 'All capabilities (voice, Google, memory) work the same, whichever model you pick.'}
+            </p>
+          </section>
+        )}
+
+        {/* 4 — Cont */}
         <section className="settings-sec">
           <h4>{t.account}</h4>
           <div className="settings-account">

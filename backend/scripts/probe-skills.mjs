@@ -3,7 +3,7 @@
 // of guessing.
 //
 //   node scripts/probe-skills.mjs                 # uses backend/.env keys
-//   railway run node scripts/probe-skills.mjs     # uses PRODUCTION keys
+//   (cu env-ul producției încărcat) node scripts/probe-skills.mjs
 //
 // (Run from the backend/ directory, after `npm run build`.) Google skills —
 // Calendar, Gmail, Drive, Tasks, Contacts — need a per-user OAuth token and are

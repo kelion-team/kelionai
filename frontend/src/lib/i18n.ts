@@ -49,13 +49,6 @@ export interface Strings {
   lowCredit: string
   landingHeadline: string
   landingSub: string
-  tryFree: string
-  trialStarting: string
-  trialLabel: string
-  trialOverTitle: string
-  trialOverBody: string
-  trialBusy: string
-  trialUsed: string
   buyCreditCta: string
   manualTitle: string
   multilingual: string
@@ -121,7 +114,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'Speech recognition is not supported in this browser. Use Chrome.',
     hearingLabel: 'Kelion is hearing',
     chatError: 'Error.',
-    brainNotActive: 'The brain is not active yet (Kimi/GLM key missing).',
+    brainNotActive: 'The brain is not active yet (OpenRouter key missing).',
     brainError: 'Brain error. Please try again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
     backOnline: "We're back online.",
@@ -132,13 +125,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Your brilliant assistant. It sees, hears and speaks.',
     landingSub:
       'Talk to Kelion in your own language — ask, show, navigate, create. Try it free for 10 minutes, no sign-up.',
-    tryFree: 'Try 10 minutes free',
-    trialStarting: 'Starting your free trial…',
-    trialLabel: 'Free trial',
-    trialOverTitle: 'Your 10 free minutes are up',
-    trialOverBody: 'Enjoyed Kelion? Sign in with Google and add credit to keep going.',
-    trialBusy: 'The free trial is busy right now. Please try again shortly, or sign in.',
-    trialUsed: "You've already used your free trial. Sign in with Google to continue.",
     buyCreditCta: 'Sign in & get credit',
     manualTitle: 'Everything Kelion can do',
     multilingual: 'Multinational support — understands and replies in dozens of languages, written and spoken.',
@@ -215,7 +201,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'Recunoașterea vocală nu e suportată în acest browser. Folosește Chrome.',
     hearingLabel: 'Kelion aude',
     chatError: 'Eroare.',
-    brainNotActive: 'Creierul nu e încă activat (lipsește cheia Kimi/GLM).',
+    brainNotActive: 'Creierul nu e încă activat (lipsește cheia OpenRouter).',
     brainError: 'Eroare la creier. Încearcă din nou.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
     backOnline: 'Am revenit online.',
@@ -226,13 +212,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Asistentul tău genial. Vede, aude și vorbește.',
     landingSub:
       'Vorbește cu Kelion în limba ta — întreabă, arată, navighează, creează. Încearcă gratis 10 minute, fără cont.',
-    tryFree: 'Încearcă 10 minute gratis',
-    trialStarting: 'Îți pornesc proba gratuită…',
-    trialLabel: 'Probă gratuită',
-    trialOverTitle: 'Cele 10 minute gratuite s-au terminat',
-    trialOverBody: 'Ți-a plăcut Kelion? Conectează-te cu Google și adaugă credit ca să continui.',
-    trialBusy: 'Proba gratuită e ocupată acum. Încearcă din nou în scurt timp sau conectează-te.',
-    trialUsed: 'Ai folosit deja proba gratuită. Conectează-te cu Google ca să continui.',
     buyCreditCta: 'Conectează-te și ia credit',
     manualTitle: 'Tot ce știe Kelion să facă',
     multilingual: 'Suport multinațional — înțelege și răspunde în zeci de limbi, scris și vorbit.',
@@ -309,7 +288,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'El reconocimiento de voz no es compatible con este navegador. Usa Chrome.',
     hearingLabel: 'Kelion está escuchando',
     chatError: 'Error.',
-    brainNotActive: 'El cerebro aún no está activo (falta la clave de Kimi/GLM).',
+    brainNotActive: 'El cerebro aún no está activo (falta la clave de OpenRouter).',
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
     backOnline: 'Volvimos a estar en línea.',
@@ -320,13 +299,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Tu asistente brillante. Ve, oye y habla.',
     landingSub:
       'Habla con Kelion en tu idioma — pregunta, muestra, navega, crea. Pruébalo gratis 10 minutos, sin registro.',
-    tryFree: 'Prueba 10 minutos gratis',
-    trialStarting: 'Iniciando tu prueba gratuita…',
-    trialLabel: 'Prueba gratuita',
-    trialOverTitle: 'Tus 10 minutos gratis han terminado',
-    trialOverBody: '¿Te gustó Kelion? Inicia sesión con Google y añade crédito para continuar.',
-    trialBusy: 'La prueba gratuita está ocupada ahora. Inténtalo de nuevo en breve o inicia sesión.',
-    trialUsed: 'Ya usaste tu prueba gratuita. Inicia sesión con Google para continuar.',
     buyCreditCta: 'Inicia sesión y obtén crédito',
     manualTitle: 'Todo lo que Kelion sabe hacer',
     multilingual: 'Soporte multinacional — entiende y responde en decenas de idiomas, escrito y hablado.',
@@ -403,7 +375,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'La reconnaissance vocale n’est pas prise en charge par ce navigateur. Utilisez Chrome.',
     hearingLabel: 'Kelion écoute',
     chatError: 'Erreur.',
-    brainNotActive: 'Le cerveau n’est pas encore actif (clé Kimi/GLM manquante).',
+    brainNotActive: 'Le cerveau n’est pas encore actif (clé OpenRouter manquante).',
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
     backOnline: 'Nous sommes de retour en ligne.',
@@ -414,13 +386,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Votre assistant brillant. Il voit, entend et parle.',
     landingSub:
       'Parlez à Kelion dans votre langue — demandez, montrez, naviguez, créez. Essayez gratuitement 10 minutes, sans inscription.',
-    tryFree: 'Essayer 10 minutes gratuites',
-    trialStarting: 'Démarrage de votre essai gratuit…',
-    trialLabel: 'Essai gratuit',
-    trialOverTitle: 'Vos 10 minutes gratuites sont écoulées',
-    trialOverBody: 'Kelion vous a plu ? Connectez-vous avec Google et ajoutez du crédit pour continuer.',
-    trialBusy: 'L’essai gratuit est occupé pour le moment. Réessayez bientôt ou connectez-vous.',
-    trialUsed: 'Vous avez déjà utilisé votre essai gratuit. Connectez-vous avec Google pour continuer.',
     buyCreditCta: 'Connectez-vous et obtenez du crédit',
     manualTitle: 'Tout ce que Kelion sait faire',
     multilingual: 'Support multinational — comprend et répond dans des dizaines de langues, à l’écrit comme à l’oral.',
@@ -497,7 +462,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'Spracherkennung wird in diesem Browser nicht unterstützt. Nutze Chrome.',
     hearingLabel: 'Kelion hört zu',
     chatError: 'Fehler.',
-    brainNotActive: 'Das Gehirn ist noch nicht aktiv (Kimi/GLM-Schlüssel fehlt).',
+    brainNotActive: 'Das Gehirn ist noch nicht aktiv (OpenRouter-Schlüssel fehlt).',
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
     backOnline: 'Wir sind wieder online.',
@@ -508,13 +473,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Dein brillanter Assistent. Er sieht, hört und spricht.',
     landingSub:
       'Sprich mit Kelion in deiner Sprache — frag, zeig, navigiere, erschaffe. Teste ihn 10 Minuten gratis, ohne Konto.',
-    tryFree: '10 Minuten gratis testen',
-    trialStarting: 'Deine Gratis-Probe startet…',
-    trialLabel: 'Gratis-Probe',
-    trialOverTitle: 'Deine 10 Gratis-Minuten sind um',
-    trialOverBody: 'Hat dir Kelion gefallen? Melde dich mit Google an und lade Guthaben auf.',
-    trialBusy: 'Die Gratis-Probe ist gerade belegt. Versuche es gleich noch einmal oder melde dich an.',
-    trialUsed: 'Du hast deine Gratis-Probe bereits genutzt. Melde dich mit Google an, um weiterzumachen.',
     buyCreditCta: 'Anmelden & Guthaben holen',
     manualTitle: 'Alles, was Kelion kann',
     multilingual: 'Multinationale Unterstützung — versteht und antwortet in Dutzenden Sprachen, schriftlich und gesprochen.',
@@ -591,7 +549,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'Il riconoscimento vocale non è supportato in questo browser. Usa Chrome.',
     hearingLabel: 'Kelion sta ascoltando',
     chatError: 'Errore.',
-    brainNotActive: 'Il cervello non è ancora attivo (manca la chiave Kimi/GLM).',
+    brainNotActive: 'Il cervello non è ancora attivo (manca la chiave OpenRouter).',
     brainError: 'Errore del cervello. Riprova.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
     backOnline: 'Siamo di nuovo online.',
@@ -602,13 +560,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'Il tuo assistente brillante. Vede, sente e parla.',
     landingSub:
       'Parla con Kelion nella tua lingua — chiedi, mostra, naviga, crea. Provalo gratis per 10 minuti, senza registrazione.',
-    tryFree: 'Prova 10 minuti gratis',
-    trialStarting: 'Avvio della prova gratuita…',
-    trialLabel: 'Prova gratuita',
-    trialOverTitle: 'I tuoi 10 minuti gratis sono finiti',
-    trialOverBody: 'Ti è piaciuto Kelion? Accedi con Google e aggiungi credito per continuare.',
-    trialBusy: 'La prova gratuita è occupata al momento. Riprova a breve o accedi.',
-    trialUsed: 'Hai già usato la tua prova gratuita. Accedi con Google per continuare.',
     buyCreditCta: 'Accedi e ottieni credito',
     manualTitle: 'Tutto ciò che Kelion sa fare',
     multilingual: 'Supporto multinazionale — capisce e risponde in decine di lingue, scritte e parlate.',
@@ -685,7 +636,7 @@ const dict: Record<Lang, Strings> = {
     micUnsupported: 'O reconhecimento de voz não é suportado neste navegador. Use o Chrome.',
     hearingLabel: 'Kelion está ouvindo',
     chatError: 'Erro.',
-    brainNotActive: 'O cérebro ainda não está ativo (falta a chave da Kimi/GLM).',
+    brainNotActive: 'O cérebro ainda não está ativo (falta a chave da OpenRouter).',
     brainError: 'Erro do cérebro. Tente novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
     backOnline: 'Estamos online novamente.',
@@ -696,13 +647,6 @@ const dict: Record<Lang, Strings> = {
     landingHeadline: 'O seu assistente brilhante. Ele vê, ouve e fala.',
     landingSub:
       'Fale com o Kelion no seu idioma — pergunte, mostre, navegue, crie. Experimente grátis por 10 minutos, sem cadastro.',
-    tryFree: 'Experimente 10 minutos grátis',
-    trialStarting: 'Iniciando o seu teste gratuito…',
-    trialLabel: 'Teste gratuito',
-    trialOverTitle: 'Os seus 10 minutos grátis acabaram',
-    trialOverBody: 'Gostou do Kelion? Entre com o Google e adicione crédito para continuar.',
-    trialBusy: 'O teste gratuito está ocupado agora. Tente novamente em breve ou inicie sessão.',
-    trialUsed: 'Você já usou o seu teste gratuito. Entre com o Google para continuar.',
     buyCreditCta: 'Entre e obtenha crédito',
     manualTitle: 'Tudo o que o Kelion sabe fazer',
     multilingual: 'Suporte multinacional — entende e responde em dezenas de idiomas, escrito e falado.',

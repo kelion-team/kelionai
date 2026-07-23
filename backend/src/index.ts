@@ -25,17 +25,17 @@ import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
-import { bridgeRoutes } from './routes/bridge.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { livekitRoutes } from './routes/livekit.js'
+import { realtimeRoutes } from './routes/realtime.js'
+import { modelRoutes } from './routes/models.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
-import { getQuotaPercent } from './services/cost.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -53,14 +53,13 @@ const LINUX_ZIP = 'Kelionai-linux.zip'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
-// payloads — covers audio buffers, documents and camera frames. The ONE route
-// that legitimately needs big bodies (the admin bridge carrying photos/archives/
-// video to the developer) raises its own limit to 100MB per-route (see chat.ts).
+// payloads — covers audio buffers, documents and camera frames. The /api/chat
+// route raises its own limit to 100MB per-route for camera frames (see chat.ts).
 const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
 // fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
-// → restart-loop pe Railway. Le prindem și le logăm, ca aplicația live să NU cadă
+// → restart-loop pe gazdă. Le prindem și le logăm, ca aplicația live să NU cadă
 // dintr-o eroare izolată. (Fixul de fond rămâne `.catch` pe fiecare `.then`.)
 process.on('unhandledRejection', (reason) => {
   app.log.error({ reason }, 'unhandledRejection — prins global, procesul rămâne viu')
@@ -70,8 +69,7 @@ process.on('uncaughtException', (err) => {
 })
 
 await app.register(cookie)
-// CANALUL PERMANENT al punții (Adrian, 4 iul): minim 5 benzi WebSocket
-// full-duplex, mereu deschise, între server și creierul de pe Linux.
+// WebSocket pentru microfonul full-duplex (STT stream) și vocea live.
 await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
@@ -84,17 +82,15 @@ await app.register(cors, {
 // RATE LIMITING — the first line of defence against cost-abuse and DoS. Keyed on
 // the REAL client IP (Cloudflare puts it in cf-connecting-ip; req.ip is only the
 // CF edge, shared by everyone). A generous global cap absorbs legitimate polling
-// (dev-status, presence, bridge) while stopping floods; the expensive /api/chat
+// (dev-status, presence) while stopping floods; the expensive /api/chat
 // route sets a tighter per-route limit of its own (see chat.ts).
 await app.register(rateLimit, {
   global: true,
   max: 120,
   timeWindow: '1 minute',
-  // Exempt the HIGH-FREQUENCY legitimate pollers so they never trip the limit
-  // (which would flicker the Bridge/Server lights): the health check, the
-  // dev-status/heartbeat presence, the admin chat-incoming poll, and every
-  // secret-protected /api/bridge/* endpoint (already gated by the shared secret,
-  // not an abuse vector). The cost-sensitive /api/chat keeps its own tighter cap.
+  // Exempt the HIGH-FREQUENCY legitimate pollers so they never trip the limit:
+  // the health check, the dev-status/heartbeat presence, the admin chat-incoming
+  // poll. The cost-sensitive /api/chat keeps its own tighter cap.
   allowList: (req) => {
     const u = (req.url || '').split('?')[0]
     return (
@@ -111,8 +107,7 @@ await app.register(rateLimit, {
       u === '/api/dev/status' ||
       u === '/api/dev/heartbeat' ||
       u === '/api/chat/incoming' ||
-      u === '/api/visit/ping' ||
-      u.startsWith('/api/bridge/')
+      u === '/api/visit/ping'
     )
   },
   keyGenerator: (req) => {
@@ -190,18 +185,18 @@ app.addHook('onSend', async (req, reply) => {
   }
 })
 
-// Health — must return exactly 200 (200-only rule + Railway healthcheck)
+// Health — must return exactly 200 (200-only rule + healthcheck-ul gazdei)
 app.get('/health', async () => ({ status: 'ok' }))
 
 // VERSIUNEA DEPLOY-ULUI (Adrian, 10 iul: „la orice deploy nou se actualizează
-// filigranul, browserul repornește curat"). Railway injectează sha-ul
-// commitului publicat; frontend-ul îl sondează și, când se schimbă, face
-// resetul curat la ultima versiune. Filigranul îl afișează — deci SE SCHIMBĂ
-// la ORICE publicare, chiar dacă interfața n-a fost atinsă (cache de layer).
-const DEPLOY_SHA = (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7)
+// filigranul, browserul repornește curat"). Gazda poate injecta sha-ul
+// commitului publicat prin GIT_COMMIT_SHA; frontend-ul îl sondează și, când se
+// schimbă, face resetul curat la ultima versiune. Filigranul îl afișează —
+// deci SE SCHIMBĂ la ORICE publicare, chiar dacă interfața n-a fost atinsă.
+const DEPLOY_SHA = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
 const BOOT_AT = new Date().toISOString()
-// Railway prin `railway up` NU injectează sha-ul (dovedit live: v gol) →
-// momentul pornirii E versiunea: se schimbă la fiecare publicare.
+// Fără sha injectat, momentul pornirii E versiunea: se schimbă la fiecare
+// publicare reală.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
@@ -211,8 +206,6 @@ app.get('/api/version', async (_req, reply) => {
 // Test/verification endpoint for the SDK constructor
 app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
 
-// Quota live pentru bara verticală din frontend (Kimi/GLM).
-app.get('/api/quota', async () => getQuotaPercent())
 
 await app.register(authRoutes)
 await app.register(chatRoutes)
@@ -230,12 +223,13 @@ await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
 await app.register(browserRoutes)
-await app.register(bridgeRoutes)
 await app.register(contactRoutes)
 await app.register(greetRoutes)
 await app.register(meseriiRoutes)
 await app.register(voiceprintRoutes)
 await app.register(livekitRoutes)
+await app.register(realtimeRoutes)
+await app.register(modelRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)

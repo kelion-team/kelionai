@@ -103,10 +103,9 @@ După fiecare ordin executat, Kelion Builder trimite un **scurt raport** pe cana
 ```bash
 cat /root/kelion/kimi-key.txt      # KIMI_API_KEY
 cat /root/kelion/glm-key.txt       # GLM_API_KEY
-cat /root/kelion/railway-token.txt # RAILWAY_TOKEN (dacă există)
 ```
 
-**Regulă de fier:** `railway up` se folosește **NICIODATĂ**. Deploy doar prin `git push` pe master.
+**Regulă de fier:** nicio publicare pe lângă pipeline (Railway a fost scos, 22 iul 2026). Codul intră DOAR prin `git push` pe master.
 
 ---
 

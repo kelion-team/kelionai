@@ -50,10 +50,67 @@ export async function createCheckout(
   body.set('line_items[0][price_data][unit_amount]', String(amount * 100))
   body.set('line_items[0][price_data][product_data][name]', 'Kelion credit')
   body.set('metadata[email]', email)
+  // SALVEAZĂ cardul pentru reîncărcarea automată (ca userul să nu rămână fără
+  // credit — cerința lui Adrian). Cardul devine metoda implicită a clientului.
+  body.set('payment_intent_data[setup_future_usage]', 'off_session')
   const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return { error: `stripe_http_${r.status}` }
   const j = (await r.json()) as { url?: string }
   return j.url ? { url: j.url } : { error: 'no_checkout_url' }
+}
+
+// Metoda de plată salvată a clientului (pentru reîncărcarea automată off-session).
+async function defaultPaymentMethod(customerId: string): Promise<string | null> {
+  const c = await fetch(`${API}/customers/${customerId}`, { headers: authHeaders() })
+  if (c.ok) {
+    const j = (await c.json()) as { invoice_settings?: { default_payment_method?: string } }
+    if (j.invoice_settings?.default_payment_method) return j.invoice_settings.default_payment_method
+  }
+  // Fallback: primul card salvat al clientului.
+  const pm = await fetch(`${API}/payment_methods?customer=${customerId}&type=card&limit=1`, {
+    headers: authHeaders(),
+  })
+  if (!pm.ok) return null
+  const pj = (await pm.json()) as { data?: { id: string }[] }
+  return pj.data?.[0]?.id ?? null
+}
+
+export type ChargeResult =
+  | { ok: true; paymentIntentId: string; amount: number }
+  | { ok: false; error: string }
+
+// Taxează OFF-SESSION cardul salvat al userului (reîncărcare automată). Suma în
+// aceeași unitate ca top-up-ul manual. Creditarea (75/25) o face webhookul +
+// apelul idempotent din serviciul de auto-recharge.
+export async function chargeSavedCard(
+  email: string,
+  name: string,
+  pounds: number,
+): Promise<ChargeResult> {
+  if (!config.stripe.secretKey) return { ok: false, error: 'stripe_not_configured' }
+  const amount = Math.max(1, Math.min(500, Math.round(pounds)))
+  const customer = await ensureCustomer(email, name)
+  if (!customer) return { ok: false, error: 'no_customer' }
+  const pm = await defaultPaymentMethod(customer)
+  if (!pm) return { ok: false, error: 'no_saved_card' }
+  const body = new URLSearchParams()
+  body.set('amount', String(amount * 100))
+  body.set('currency', config.stripe.currency)
+  body.set('customer', customer)
+  body.set('payment_method', pm)
+  body.set('off_session', 'true')
+  body.set('confirm', 'true')
+  body.set('metadata[email]', email)
+  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body })
+  const j = (await r.json().catch(() => ({}))) as {
+    id?: string
+    status?: string
+    error?: { message?: string }
+  }
+  if (!r.ok || !j.id || j.status !== 'succeeded') {
+    return { ok: false, error: j.error?.message ?? `stripe_http_${r.status}` }
+  }
+  return { ok: true, paymentIntentId: j.id, amount }
 }
 
 // The REAL Stripe balance (money actually held at Stripe), summed per state and
