@@ -831,7 +831,17 @@ async function mapsSearch(query: string, max: number): Promise<string> {
     lon: p.lon ?? '',
     type: p.type ?? '',
   }))
-  return JSON.stringify({ places })
+  // URL de ecran: harta se AFIȘEAZĂ dintr-un singur apel de unealtă (creierul nu
+  // face mereu al doilea show_on_screen). Embed OpenStreetMap centrat pe primul
+  // rezultat, cu marker. runGoogleTool → default-case scrie {monitor} din el.
+  const f = places[0]
+  const la = Number(f?.lat)
+  const lo = Number(f?.lon)
+  const screen_url =
+    Number.isFinite(la) && Number.isFinite(lo)
+      ? `https://www.openstreetmap.org/export/embed.html?bbox=${lo - 0.05}%2C${la - 0.03}%2C${lo + 0.05}%2C${la + 0.03}&layer=mapnik&marker=${la}%2C${lo}`
+      : undefined
+  return JSON.stringify({ places, screen_url })
 }
 
 // Build a ready-to-embed monitor URL for a promo-clip scene (map or weather) —
@@ -936,6 +946,12 @@ async function mapsDirections(origin: string, destination: string): Promise<stri
   })
 }
 
+// Link watch/short → URL de embed pentru monitor (redabil în iframe).
+function ytEmbed(link: string): string | undefined {
+  const m = (link || '').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/)
+  return m ? `https://www.youtube.com/embed/${m[1]}` : undefined
+}
+
 async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
@@ -954,7 +970,7 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
           .filter((r) => (r.link ?? '').includes('youtube.com/watch') || (r.link ?? '').includes('youtu.be/'))
           .slice(0, n)
           .map((r) => ({ title: r.title ?? '', link: r.link ?? '' }))
-        if (videos.length > 0) return JSON.stringify({ videos })
+        if (videos.length > 0) return JSON.stringify({ videos, screen_url: ytEmbed(videos[0].link) })
       }
     } catch {
       /* fall through to Gemini */
@@ -991,7 +1007,7 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
       seen.add(link)
       videos.push({ title: '', link })
     }
-    if (videos.length > 0) return JSON.stringify({ videos: videos.slice(0, n) })
+    if (videos.length > 0) return JSON.stringify({ videos: videos.slice(0, n), screen_url: ytEmbed(videos[0].link) })
   }
 
   // Nothing playable found. Signal not_found so Kelion says so in his own voice —

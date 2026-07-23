@@ -1642,7 +1642,23 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
-        return runGoogleTool(block.name, block.input, token)
+        const result = await runGoogleTool(block.name, block.input, token)
+        // AFIȘARE AUTOMATĂ: uneltele care întorc `screen_url` (hartă, rută, vreme,
+        // video) trebuie să APARĂ pe monitor dintr-un SINGUR apel — creierul nu
+        // face mereu al doilea `show_on_screen`, deci userul vedea „am arătat
+        // harta" fără nimic pe ecran. Emitem noi frame-ul {monitor} din rezultat.
+        try {
+          const p = JSON.parse(result) as { screen_url?: string; location?: string; origin?: string }
+          if (p.screen_url) {
+            const url = p.screen_url.startsWith('/') ? `${baseUrl}${p.screen_url}` : p.screen_url
+            reply.raw.write(
+              `${CTRL}${JSON.stringify({ monitor: { url, title: p.location || p.origin || '' } })}${CTRL}`,
+            )
+          }
+        } catch {
+          /* rezultat non-JSON sau fără screen_url — nimic de afișat */
+        }
+        return result
       }
       return JSON.stringify({ error: `unknown_tool: ${block.name}` })
     }

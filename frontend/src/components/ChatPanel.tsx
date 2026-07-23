@@ -374,26 +374,6 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // The developer can WALK IN first (admin only): messages the developer leaves through the
-  // bridge are picked up here and shown in chat — already persisted to history
-  // by the server. The owner's rule: "când intri, mă strigi" — the developer calls
-  // him, not only answers.
-  useEffect(() => {
-    if (!isAdmin) return
-    const id = window.setInterval(() => {
-      void fetch('/api/chat/incoming', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : { messages: [] }))
-        .then((j: { messages?: string[] }) => {
-          const arr = j.messages ?? []
-          if (arr.length === 0) return
-          for (const m of arr) ack(m)
-        })
-        .catch(() => {})
-    }, 8_000)
-    return () => window.clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin])
-
   // Arm the recorder for an approved promo take (also used by "reluăm" to redo
   // the same take): remember the script + scenes and light up the Rec button
   // with a suggestive clip name.
