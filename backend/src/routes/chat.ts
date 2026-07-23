@@ -45,6 +45,7 @@ import {
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { brainCost, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, quotaTracker } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
@@ -975,6 +976,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (
       config.stripe.secretKey &&
       user.role !== 'admin' &&
+      (await getBalance(user.email)) <= 0 &&
+      // Ultima șansă înainte de paywall: reîncărcare automată din cardul salvat
+      // (dacă userul a activat-o). Dacă reușește, continuă fără să-l blocheze.
+      !(await maybeAutoRecharge(user.email, user.name)) &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -1634,6 +1639,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
+      // Proactiv, în fundal: dacă a coborât sub prag, reîncarcă din cardul salvat
+      // ÎNAINTE de a ajunge la 0 — userul nu se blochează în mijlocul sesiunii.
+      void maybeAutoRecharge(user.email, user.name)
     }
     },
   )

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser } from '../db.js'
+import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge } from '../db.js'
 import { createCheckout, createPaymentIntent, verifyWebhook } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -42,6 +42,33 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if ('error' in result) return reply.code(502).send(result)
     return reply.send(result)
   })
+
+  // Reîncărcare automată (ca userul să nu rămână fără credit). Userul o pornește,
+  // își alege pragul (în credite) și suma de reîncărcare. Cardul se salvează la
+  // primul checkout (setup_future_usage), apoi taxarea e off-session.
+  app.get('/api/billing/autorecharge', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    return reply.send(await getAutoRecharge(user.email))
+  })
+
+  app.put<{ Body: { enabled?: boolean; threshold?: number; topupAmount?: number } }>(
+    '/api/billing/autorecharge',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const cur = await getAutoRecharge(user.email)
+      const next = {
+        enabled: typeof req.body?.enabled === 'boolean' ? req.body.enabled : cur.enabled,
+        threshold: Number.isFinite(req.body?.threshold) ? Math.max(0, Number(req.body?.threshold)) : cur.threshold,
+        topupAmount: Number.isFinite(req.body?.topupAmount)
+          ? Math.max(1, Math.min(500, Number(req.body?.topupAmount)))
+          : cur.topupAmount,
+      }
+      await setAutoRecharge(user.email, next)
+      return reply.send(next)
+    },
+  )
 
   // ORDIN #6G: user purchase history from the transactions table.
   app.get('/api/billing/history', async (req, reply) => {
