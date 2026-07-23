@@ -9,7 +9,6 @@ import ContactModal from '../components/ContactModal'
 import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
-import ReleaseAlertBanner from '../components/ReleaseAlertBanner'
 import type { User } from '../lib/api'
 import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
@@ -23,44 +22,16 @@ import {
   isEmbeddable,
   setMonitorWorking,
 } from '../lib/workspace'
-import { getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 
-// Live-work feed shown ON KELION'S MONITOR. A line shaped "[NN%] text" is a
-// WORK ITEM: it stays on the monitor permanently, its bar fills 0→100% in
-// place (the same text at a new percent replaces the old line), and at 100%
-// it is ticked off (dimmed + strikethrough) but remains listed. Plain lines
-// are status notes — only the latest few stay; stale ones disappear.
-interface LiveItem {
-  key: string
-  text: string
-  pct: number
-}
-function parseLive(lines: string[]): { tasks: LiveItem[]; status: string[] } {
-  const tasks: LiveItem[] = []
-  const status: string[] = []
-  const seen = new Set<string>()
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /^\s*\[(\d{1,3})%\]\s*(.*)$/.exec(lines[i])
-    const text = (m ? m[2] : lines[i]).trim()
-    if (!text) continue
-    const key = text.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    if (m) tasks.unshift({ key, text, pct: Math.min(100, Number(m[1])) })
-    else if (status.length < 1) status.unshift(text)
-  }
-  return { tasks: tasks.slice(-30), status }
-}
-
 export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox'>('finance')
+  const [adminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox'>('finance')
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -69,24 +40,6 @@ export default function Stage({ user }: { user: User }) {
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
-  // Lit ORANGE when the laptop developer session is actively writing code, so
-  // the owner sees when the builder is working on his behalf (admin only). The live
-  // work steps are shown on the monitor while active.
-  const [builderActive, setBuilderActive] = useState(false)
-  // TWO LIGHTS, one per link in the chain. "Bridge" = the developer's bridge worker
-  // (lit = reachable, pulsing = writing code, OFF = down — the watchdog
-  // restarts it and the light re-lights by itself). "Server" = kelionai.app
-  // itself (poll failing = OFF; gazda îl repornește automat, light comes back).
-  const [builderBridge, setBuilderBridge] = useState(false)
-  // Calitatea legăturii punții: câte din cele 10 benzi WS sunt sus (0–10).
-  // Colorează becul verde (toate) → roșu (puține) → stins (jos), NU hardcodat.
-  const [bridgeLanes, setBridgeLanes] = useState(0)
-  const [serverUp, setServerUp] = useState(true)
-  const [builderActivity, setBuilderActivity] = useState<string[]>([])
-  // Real Linux server load (posted by the VPS paznic) — bottom-left readout.
-  const [srvLoad, setSrvLoad] = useState('')
-  // Motorul de lucru activ al constructorului (kimi/glm) — afișat permanent.
-  const [workEngine, setWorkEngine] = useState('')
   // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
   // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
   const [brainCredit, setBrainCredit] = useState<{
@@ -101,7 +54,7 @@ export default function Stage({ user }: { user: User }) {
       fetch('/api/admin/brain-credit', { credentials: 'include' })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
-          if (alive && j && j.kimi && j.glm) setBrainCredit(j)
+          if (alive && j && j.openrouter && j.pool) setBrainCredit(j)
         })
         .catch(() => {})
     }
@@ -133,8 +86,6 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [user.role])
-  // Becul de release-uri (Adrian, 11 iul): câte decizii îl așteaptă.
-  const [relPending, setRelPending] = useState(0)
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
   // colțului, editate cu dublu-click pe avatar. SALVATĂ PE SERVER per
   // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
@@ -227,40 +178,6 @@ export default function Stage({ user }: { user: User }) {
     const t = window.setTimeout(() => void saveAvatarBox(avatarBox), 800)
     return () => window.clearTimeout(t)
   }, [avatarBox])
-  // The CURRENT process, 0→100%, from intake to finish (his real requirement:
-  // the bar tracks what's being executed, start to end — not server resources).
-  const [progress, setProgress] = useState<{ pct: number; label: string; file: string } | null>(
-    null,
-  )
-  // CERINȚA DEȚINUTĂ: ce cerință de execuție e încă deschisă (neverificată live).
-  // Rămâne pe monitor până creierul o verifică — dovada că nu „trimite și uită".
-  const [mode, setMode] = useState<'chat' | 'lucru' | 'raport'>('chat')
-  // VITEZA CREIERULUI (Adrian, 10 iul): timpii ultimei ture (tip + total + primul
-  // cuvânt) și cronometrul viu cât o tură e în curs — afișați în capul consolei.
-  const [lastTurn, setLastTurn] = useState<{ kind: string; totalMs: number; firstMs: number } | null>(
-    null,
-  )
-  const [elapsedMs, setElapsedMs] = useState(0)
-  // Timpul de răspuns REAL măsurat în browser (ChatPanel) — ce simte userul.
-  const realLatency = useSyncExternalStore(subscribeRealLatency, getRealLatency)
-  const [owned, setOwned] = useState<{ summary: string; status: string; ageMs: number } | null>(
-    null,
-  )
-  // Ordinul din 5 iul: CLICK pe bara „Creierul analizează" → se deschide
-  // detaliul cu CE analizează (cererea în lucru + ultimii pași din jurnal).
-  const [showAnalysis, setShowAnalysis] = useState(false)
-  const [analysis, setAnalysis] = useState<{
-    request: string
-    stage: { pct: number; label: string; file: string } | null
-    steps: string[]
-    // Codul scris SUB bară (Adrian, 11 iul: „să văd scriptic softul care se
-    // scrie") — ultimele editări ale constructorului, live.
-    code: { file: string; text: string }[]
-  } | null>(null)
-  // The live-work console is NOT permanent on the owner's monitor — the AIs
-  // see the journal server-side regardless. He opens it only when he wants:
-  // one click on the "● Bridge" light shows/hides it.
-  const [showWork, setShowWork] = useState(false)
   // Voice-armed recorder: "înregistrează" makes the Rec button pulse red — one
   // click starts (the browser demands a real click to pick the screen);
   // "oprește înregistrarea" stops fully hands-free.
@@ -349,147 +266,9 @@ export default function Stage({ user }: { user: User }) {
     return () => window.removeEventListener('kelion:rec', onRec)
   }, [recording])
 
-  // Poll whether the laptop developer session is actively writing code.
-  useEffect(() => {
-    if (user.role !== 'admin') return
-    const check = (): void => {
-      void fetch('/api/dev/status', { credentials: 'include' })
-        .then((r) => {
-          // 429 = rate-limited, NOT down. A transient throttle must never
-          // flicker the lights — keep the last known state and move on.
-          if (r.status === 429) return null
-          if (!r.ok) throw new Error('server')
-          return r.json()
-        })
-        .then(
-          (j: {
-            active?: boolean
-            bridge?: boolean
-            lanes?: number
-            activity?: string[]
-            srv?: string
-            workEngine?: string
-            releases?: number
-            progress?: { pct?: number; label?: string; file?: string }
-            owned?: { summary?: string; status?: string; ageMs?: number } | null
-            mode?: string
-            lastTurn?: { kind?: string; totalMs?: number; firstMs?: number } | null
-            elapsedMs?: number
-          } | null) => {
-            if (!j) return // 429 — state unchanged
-            setServerUp(true)
-            setBuilderActive(!!j.active)
-            setBuilderBridge(!!j.bridge)
-            setBridgeLanes(Number(j.lanes ?? 0))
-            setBuilderActivity(Array.isArray(j.activity) ? j.activity : [])
-            setSrvLoad(typeof j.srv === 'string' ? j.srv : '')
-            setWorkEngine(typeof j.workEngine === 'string' ? j.workEngine : '')
-            setRelPending(typeof j.releases === 'number' ? j.releases : 0)
-            const p = j.progress
-            setProgress(
-              p && typeof p.pct === 'number'
-                ? { pct: Number(p.pct), label: String(p.label ?? ''), file: String(p.file ?? '') }
-                : null,
-            )
-            const o = j.owned
-            setOwned(
-              o && typeof o.summary === 'string'
-                ? { summary: o.summary, status: String(o.status ?? ''), ageMs: Number(o.ageMs ?? 0) }
-                : null,
-            )
-            setMode(j.mode === 'lucru' || j.mode === 'raport' ? j.mode : 'chat')
-            const lt = j.lastTurn
-            setLastTurn(
-              lt && typeof lt.totalMs === 'number'
-                ? {
-                    kind: lt.kind === 'lucru' ? 'lucru' : 'chat',
-                    totalMs: Number(lt.totalMs),
-                    firstMs: Number(lt.firstMs ?? 0),
-                  }
-                : null,
-            )
-            setElapsedMs(typeof j.elapsedMs === 'number' ? j.elapsedMs : 0)
-          },
-        )
-        .catch(() => {
-          // A real failure (network / 5xx) → the SERVER light goes off (and with
-          // it the bridge). Transient 429s are handled above and never reach here.
-          setServerUp(false)
-          setBuilderBridge(false)
-          setBuilderActive(false)
-        })
-    }
-    check()
-    // 2s cadence: the paznic posts real numbers every ~2s, so the bars move
-    // smoothly and live (CSS eases each change over the gap).
-    const id = window.setInterval(check, 2_000)
-    return () => window.clearInterval(id)
-  }, [user.role])
-
-  // Cât timp detaliul analizei e deschis, îl reîmprospătăm la 3s — Adrian vede
-  // LIVE ce cerere analizează creierul și pașii care se adaugă în jurnal.
-  useEffect(() => {
-    if (!showAnalysis || user.role !== 'admin') return
-    const load = (): void => {
-      void fetch('/api/dev/analysis', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then(
-          (j: {
-            request?: string
-            stage?: { pct?: number; label?: string; file?: string } | null
-            steps?: string[]
-            code?: { file?: string; text?: string }[]
-          } | null) => {
-            if (!j) return
-            setAnalysis({
-              request: typeof j.request === 'string' ? j.request : '',
-              stage:
-                j.stage && typeof j.stage.pct === 'number'
-                  ? {
-                      pct: Number(j.stage.pct),
-                      label: String(j.stage.label ?? ''),
-                      file: String(j.stage.file ?? ''),
-                    }
-                  : null,
-              steps: Array.isArray(j.steps) ? j.steps : [],
-              code: Array.isArray(j.code)
-                ? j.code.map((c) => ({ file: String(c.file ?? ''), text: String(c.text ?? '') }))
-                : [],
-            })
-          },
-        )
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 3_000)
-    return () => window.clearInterval(id)
-  }, [showAnalysis, user.role])
-
   // VERSIUNE NOUĂ — NEintruziv (Adrian, 10 iul: „chat distrus, audio și scris").
-  // ÎNAINTE: pagina se reseta DUR singură (golea tot cache-ul + reload) la fiecare
-  // build nou — la deschidere, din 45 în 45s și la revenirea pe tab. Cât publicam
-  // des, îți smulgea pagina PESTE chat, în mijlocul vorbirii/scrisului → distrugea
-  // ȘI audio ȘI scris deodată. ACUM nu mai atingem pagina din timpul unei
-  // conversații: App.tsx afișează bara „Update now" (watchForUpdate), iar TU
-  // apeși când ești gata — resetul dur rămâne, dar la comanda ta, nu peste chat.
-
-  // AUTO-WAKE THE BUILDER: the instant the app confirms an ADMIN user, it sets
-  // the server wake flag the laptop wake-agent polls. The old second channel —
-  // a hidden iframe firing kelionai:// every 90s — was THE source of the
-  // visible cmd flashes (Chrome launched the .cmd launcher with a console
-  // window at exactly 90s intervals; trapped and proven 4 iul). The builder now
-  // pulls its own work orders, so the protocol launch is gone for good.
-  useEffect(() => {
-    if (user.role !== 'admin') return
-    const wake = (): void => {
-      void fetch('/api/bridge/request-wake', { method: 'POST', credentials: 'include' }).catch(
-        () => {},
-      )
-    }
-    wake()
-    const id = window.setInterval(wake, 90_000)
-    return () => window.clearInterval(id)
-  }, [user.role])
+  // App.tsx afișează bara „Update now" (watchForUpdate) și TU apeși când ești
+  // gata — resetul dur rămâne, dar la comanda ta, nu peste chat.
 
   // Presence ping (every 60s): feeds the owner's per-USER analytics — who is
   // signed in, from what IP/place/device, and for how long they stayed.
@@ -515,23 +294,12 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [])
-  // The builder's live work shows on Kelion's MONITOR (the workspace surface) ONLY
-  // when the owner opens it (click on the ● Bridge light) and code is being
-  // written: the avatar shrinks to its corner and the monitor lists every work
-  // item with its live 0→100% bar. A real task (map, page, doc) always wins
-  // the monitor back; nothing is displayed permanently.
-  // OBLIGATORY: while there is active work, the monitor shows it BY ITSELF (no
-  // click). The Bridge-light click only lets the owner FORCE it open when idle.
-  // Rule (Adrian): the Rec button must capture EVERYTHING the AI does — so the
-  // live execution console stays VISIBLE during recording (was hidden by
-  // `!recording`, which is exactly why the clip showed nothing happening).
-  const builderShow =
-    user.role === 'admin' &&
-    ((builderActive && builderActivity.length > 0) || showWork)
-  const live = builderShow && !ws.open ? parseLive(builderActivity) : null
-  const monitorOn = ws.open || (builderShow && builderActivity.length > 0)
+  // Monitorul (suprafața din spatele avatarului) e deschis DOAR de o sarcină reală
+  // (hartă, pagină, doc, imagine) — avatarul se micșorează în colț cât timp e ceva
+  // pe ecran, altfel e prim-plan.
+  const monitorOn = ws.open
   // Tell the chat when the monitor is busy so it collapses to the slim black
-  // speech bar (Adrian's rule) — during live work, not only for open surfaces.
+  // speech bar (Adrian's rule) când e o suprafață deschisă.
   useEffect(() => {
     setMonitorWorking(monitorOn)
   }, [monitorOn])
@@ -542,184 +310,6 @@ export default function Stage({ user }: { user: User }) {
       {recording && <div className="rec-watermark">kelionai.app</div>}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
-        {!ws.open && live && (
-          <div className="workspace-inner builder-console">
-            <div className="builder-console-head">
-              ● Creierul Linux — execuție în direct
-              <span className={`mode-badge mode-${mode}`}>
-                {mode === 'lucru' ? '🛠 Lucru' : mode === 'raport' ? '📊 Raport' : '💬 Chat'}
-              </span>
-              {/* BECUL (Adrian, 11 iul: „când sunt release-uri să apară un bec
-                  care pâlpâie, să știu să verific") — pâlpâie cât timp există
-                  decizii care îl așteaptă; dispare singur după decizie. */}
-              {relPending > 0 && (
-                <span
-                  className="rel-alert"
-                  title={`${relPending} release-uri așteaptă decizia ta — Admin → Release-uri sau „da" în chat`}
-                >
-                  💡 {relPending}
-                </span>
-              )}
-              <span className={`live-dot ${builderActive ? 'on' : ''}`}>
-                {builderActive ? 'LIVE' : 'în așteptare'}
-              </span>
-              {/* VITEZA REALĂ a creierului Linux: cronometrul viu cât lucrează,
-                  altfel timpul de răspuns REAL măsurat în browser (ce simte
-                  userul), iar dacă lipsește — timpii ultimei ture de pe server. */}
-              {elapsedMs > 0 ? (
-                <span className="speed-badge live" title="Cronometru — tura curentă">
-                  ⏱ {(elapsedMs / 1000).toFixed(1)}s
-                </span>
-              ) : realLatency ? (
-                <span
-                  className="speed-badge"
-                  title={`Timp de răspuns REAL (măsurat în browser): ${(realLatency.totalMs / 1000).toFixed(1)}s total, primul cuvânt la ${(realLatency.firstMs / 1000).toFixed(1)}s`}
-                >
-                  ⏱ {(realLatency.totalMs / 1000).toFixed(1)}s
-                  {realLatency.firstMs ? ` (1ᵘˡ cuvânt ${(realLatency.firstMs / 1000).toFixed(1)}s)` : ''}
-                </span>
-              ) : lastTurn ? (
-                <span
-                  className="speed-badge"
-                  title={
-                    lastTurn.firstMs
-                      ? `Ultima tură (${lastTurn.kind}): ${(lastTurn.totalMs / 1000).toFixed(1)}s total, primul cuvânt la ${(lastTurn.firstMs / 1000).toFixed(1)}s`
-                      : `Ultima tură (${lastTurn.kind}): ${(lastTurn.totalMs / 1000).toFixed(1)}s`
-                  }
-                >
-                  ⏱ {lastTurn.kind === 'lucru' ? 'lucru' : 'chat'} ·{' '}
-                  {(lastTurn.totalMs / 1000).toFixed(1)}s
-                  {lastTurn.firstMs
-                    ? ` (1ᵘˡ cuvânt ${(lastTurn.firstMs / 1000).toFixed(1)}s)`
-                    : ''}
-                </span>
-              ) : null}
-            </div>
-            {/* BARA PROCESULUI 0→100% — CE SE EXECUTĂ acum, de la început
-                (preluare) până la final (live/gata). Se umple fluid pe măsură ce
-                procesul trece prin etape; arată și fișierul la care se lucrează.
-                Asta a cerut Adrian: procesul de la început la sfârșit, nu resurse. */}
-            {/* CERINȚA DEȚINUTĂ: rămâne pe monitor până creierul o VERIFICĂ live
-                — dovada vizibilă că nu „trimite și uită" (Adrian, 5 iul). */}
-            {owned && (
-              <div className="owned-req">
-                <span className="owned-dot" />
-                <span className="owned-text">
-                  Cerință deschisă: <b>{owned.summary}</b>
-                  {owned.status ? <span className="owned-status"> — {owned.status}</span> : null}
-                </span>
-              </div>
-            )}
-            {progress && progress.pct > 0 && (
-              /* CLICK pe bară (ordinul 5 iul): se deschide detaliul analizei —
-                 cererea aflată în lucru + ultimii pași din jurnal, live. */
-              <div
-                className="proc-progress clickable"
-                title="Click: vezi ce analizează creierul"
-                onClick={() => setShowAnalysis((v) => !v)}
-              >
-                <div className="proc-top">
-                  <span className="proc-label">
-                    <span className="proc-caret">{showAnalysis ? '▾' : '▸'}</span>
-                    {progress.label || 'În lucru'}
-                    {progress.file ? <span className="proc-file"> · {progress.file}</span> : null}
-                  </span>
-                  <span className="proc-pct">{progress.pct}%</span>
-                </div>
-                <div className="proc-track">
-                  <div
-                    className={`proc-fill ${progress.pct >= 100 ? 'done' : ''}`}
-                    style={{ width: `${Math.max(0, Math.min(100, progress.pct))}%` }}
-                  />
-                </div>
-                {showAnalysis && (
-                  <div className="proc-detail" onClick={(e) => e.stopPropagation()}>
-                    {analysis === null ? (
-                      <div className="proc-detail-line">Se încarcă…</div>
-                    ) : (
-                      <>
-                        <div className="proc-detail-title">Cererea în analiză</div>
-                        <div className="proc-detail-req">
-                          {analysis.request || '— nicio cerere activă acum —'}
-                        </div>
-                        {/* CE și CUM editează ACUM (Adrian, 5 iul: „să văd clar
-                            când deschid ce și cum editează"): operația curentă
-                            + fișierul exact în care lucrează. */}
-                        {analysis.stage && (
-                          <div className="proc-detail-line">
-                            Acum: {analysis.stage.label}
-                            {analysis.stage.file ? ` · ${analysis.stage.file}` : ''}
-                            {` — ${analysis.stage.pct}%`}
-                          </div>
-                        )}
-                        {/* FĂRĂ „Ultimii pași" aici — pașii curg deja LIVE în
-                            consola de dedesubt; repetarea lor dubla monitorul
-                            (Adrian, 5 iul: „vezi dublat?"). Detaliul arată DOAR
-                            cererea; jurnalul complet rămâne în Admin → Jurnal. */}
-                        {/* CODUL SUB BARĂ (Adrian, 11 iul: „să văd scriptic
-                            softul care se scrie, tot ce se face sub bară"):
-                            fiecare editare a constructorului, live. */}
-                        {analysis.code.length > 0 && (
-                          <>
-                            <div className="proc-detail-title">Codul care se scrie</div>
-                            <div className="proc-code">
-                              {analysis.code.map((c, i) => (
-                                <div key={i} className="proc-code-block">
-                                  {c.file && <div className="proc-code-file">{c.file}</div>}
-                                  <pre>{c.text}</pre>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* JURNAL LIVE: fiecare pas al creierului, în ordine, nu o singură
-                linie. Progres cu bară pentru pașii cu procent; restul ca log. */}
-            <div className="builder-rows">
-              {builderActivity.length === 0 && (
-                <div className="builder-status-line">În așteptare…</div>
-              )}
-              {builderActivity.slice(-14).map((raw, i) => {
-                const m = /^(?:\[\d{1,2}:\d{2}\]\s*)?\[(\d{1,3})%\]\s*(.*)$/.exec(raw)
-                if (m) {
-                  const pct = Math.min(100, Number(m[1]))
-                  return (
-                    <div key={i} className={`builder-row ${pct >= 100 ? 'done' : ''}`}>
-                      <span className="builder-row-text">{m[2]}</span>
-                      <span className="builder-row-bar">
-                        <span className="builder-row-fill" style={{ width: `${pct}%` }} />
-                      </span>
-                      <span className="builder-row-pct">{pct >= 100 ? '✓' : `${pct}%`}</span>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={i} className="builder-log-line">
-                    {raw}
-                  </div>
-                )
-              })}
-            </div>
-            {/* Bottom-left: the REAL Linux server load in percentages (posted
-                by the VPS paznic every minute) — replaces the old status line
-                that duplicated the top-bar work ticker. */}
-            {(srvLoad || workEngine) && (
-              <div className="builder-status">
-                {srvLoad && <div className="builder-status-line srv-load">Serv. Linux — {srvLoad}</div>}
-                {/* Adrian, 11 iul: „să fie afișat permanent care constructor
-                    lucrează" — motorul de lucru activ (KIMI/GLM). */}
-                {workEngine && (
-                  <div className="builder-status-line srv-load">Motor lucru — {workEngine.toUpperCase()}</div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
         {ws.open && (
           <div className="workspace-inner">
             <div className="workspace-head">
@@ -967,52 +557,6 @@ export default function Stage({ user }: { user: User }) {
           <span>{user.name}</span>
           {user.role === 'admin' && <span className="badge">admin</span>}
           {user.role === 'admin' && (
-            <span
-              className={`builder-ind clickable ${builderBridge ? 'on' : ''} ${builderActive ? 'work' : ''}`}
-              style={
-                builderBridge
-                  ? (() => {
-                      // hue: 120°=verde (10 benzi) → 0°=roșu (1 bandă). Jos = fără
-                      // stil → becul cade pe gri (stins). Calitate REALĂ, nu hardcodat.
-                      const h = (Math.min(Math.max(bridgeLanes, 0), 10) / 10) * 120
-                      return {
-                        color: `hsl(${h} 85% 55%)`,
-                        borderColor: `hsl(${h} 85% 55% / 0.6)`,
-                        background: `hsl(${h} 85% 55% / 0.14)`,
-                      }
-                    })()
-                  : undefined
-              }
-              onClick={() => setShowWork((v) => !v)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') setShowWork((v) => !v)
-              }}
-              title={
-                builderBridge
-                  ? builderActive
-                    ? 'The builder is writing code — click to show/hide the live work monitor'
-                    : 'Bridge up — the builder is reachable in chat'
-                  : 'BRIDGE DOWN — auto-restarting (watchdog), light returns by itself'
-              }
-            >
-              ● Bridge
-            </span>
-          )}
-          {user.role === 'admin' && (
-            <span
-              className={`builder-ind ${serverUp ? 'on' : ''}`}
-              title={
-                serverUp
-                  ? 'Server up — kelionai.app is running'
-                  : 'SERVER DOWN — serverul repornește automat, becul revine singur'
-              }
-            >
-              ● Server
-            </span>
-          )}
-          {user.role === 'admin' && (
             <button
               type="button"
               className={`ghost ${recording ? 'rec-on' : ''} ${recArmed && !recording ? 'rec-armed' : ''}`}
@@ -1049,18 +593,6 @@ export default function Stage({ user }: { user: User }) {
         </div>
       </header>
 
-      <ReleaseAlertBanner
-        user={user}
-        onOpenReleases={() => {
-          setAdminTab('releases')
-          setAdminOpen(true)
-        }}
-      />
-
-      {/* FULL-MONITOR live work feed (admin only): every step the builder executes on
-          the laptop is mirrored here in real time. Floats over the whole monitor
-          but never blocks clicks (pointer-events: none), so the owner keeps
-          talking to Kelion while WATCHING the work happen. */}
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} />
 
       {adminOpen && (

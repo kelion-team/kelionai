@@ -25,7 +25,6 @@ import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
-import { bridgeRoutes } from './routes/bridge.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { greetRoutes } from './routes/greet.js'
@@ -54,9 +53,8 @@ const LINUX_ZIP = 'Kelionai-linux.zip'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
-// payloads — covers audio buffers, documents and camera frames. The ONE route
-// that legitimately needs big bodies (the admin bridge carrying photos/archives/
-// video to the developer) raises its own limit to 100MB per-route (see chat.ts).
+// payloads — covers audio buffers, documents and camera frames. The /api/chat
+// route raises its own limit to 100MB per-route for camera frames (see chat.ts).
 const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
@@ -71,8 +69,7 @@ process.on('uncaughtException', (err) => {
 })
 
 await app.register(cookie)
-// CANALUL PERMANENT al punții (Adrian, 4 iul): minim 5 benzi WebSocket
-// full-duplex, mereu deschise, între server și creierul de pe Linux.
+// WebSocket pentru microfonul full-duplex (STT stream) și vocea live.
 await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
@@ -85,17 +82,15 @@ await app.register(cors, {
 // RATE LIMITING — the first line of defence against cost-abuse and DoS. Keyed on
 // the REAL client IP (Cloudflare puts it in cf-connecting-ip; req.ip is only the
 // CF edge, shared by everyone). A generous global cap absorbs legitimate polling
-// (dev-status, presence, bridge) while stopping floods; the expensive /api/chat
+// (dev-status, presence) while stopping floods; the expensive /api/chat
 // route sets a tighter per-route limit of its own (see chat.ts).
 await app.register(rateLimit, {
   global: true,
   max: 120,
   timeWindow: '1 minute',
-  // Exempt the HIGH-FREQUENCY legitimate pollers so they never trip the limit
-  // (which would flicker the Bridge/Server lights): the health check, the
-  // dev-status/heartbeat presence, the admin chat-incoming poll, and every
-  // secret-protected /api/bridge/* endpoint (already gated by the shared secret,
-  // not an abuse vector). The cost-sensitive /api/chat keeps its own tighter cap.
+  // Exempt the HIGH-FREQUENCY legitimate pollers so they never trip the limit:
+  // the health check, the dev-status/heartbeat presence, the admin chat-incoming
+  // poll. The cost-sensitive /api/chat keeps its own tighter cap.
   allowList: (req) => {
     const u = (req.url || '').split('?')[0]
     return (
@@ -112,8 +107,7 @@ await app.register(rateLimit, {
       u === '/api/dev/status' ||
       u === '/api/dev/heartbeat' ||
       u === '/api/chat/incoming' ||
-      u === '/api/visit/ping' ||
-      u.startsWith('/api/bridge/')
+      u === '/api/visit/ping'
     )
   },
   keyGenerator: (req) => {
@@ -229,7 +223,6 @@ await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
 await app.register(browserRoutes)
-await app.register(bridgeRoutes)
 await app.register(contactRoutes)
 await app.register(greetRoutes)
 await app.register(meseriiRoutes)

@@ -24,15 +24,7 @@ import {
   type VisitorMsg,
   fetchDemos,
   fetchActivity,
-  fetchDevLog,
-  fetchReleases,
-  decideRelease,
-  fetchGithubTokenStatus,
-  resetGithubToken,
   resolveGap,
-  escalateGap,
-  triageGaps,
-  type StagedRelease,
   type UserSummary,
   type HistoryRow,
   type CapabilityGap,
@@ -43,9 +35,6 @@ import {
   type UserActivityRow,
   fetchStores,
   type StoresData,
-  fetchWorkOrders,
-  archiveWorkOrder,
-  type WorkOrder,
   fetchInbound,
   fetchMailboxLive,
   type MailboxLiveItem,
@@ -68,31 +57,6 @@ function fmtDur(seconds: number): string {
   if (m < 60) return `${m}m`
   return `${Math.floor(m / 60)}h ${m % 60}m`
 }
-
-// Stadiul unui job + dacă e TERMINAT (certificat/finalizat) → merge în arhivă.
-function jobStageLabel(status: string): string {
-  switch (status) {
-    case 'certified':
-      return '✅ certificat (test PASS)'
-    case 'finalized':
-      return '✅ finalizat (închis)'
-    case 'published':
-      return '🟢 publicat pe live'
-    case 'failed':
-      return '🔴 a picat'
-    case 'dismissed':
-      return '🗄️ arhivat (scos din față)'
-    case 'delivered':
-      return '🔧 preluat de constructor'
-    default:
-      return '⏳ în așteptare'
-  }
-}
-// TERMINAT = iese din lista „în lucru" și intră în arhiva apelabilă de Kelion.
-// Auto-arhivare (Adrian, 14 iul „dacă e gata, autoarhivare"): pe lângă cele
-// certificate/finalizate, includem și stadiile TERMINALE onest — publicat pe
-// live, picat, sau arhivat manual — ca lista de sus să arate DOAR ce chiar lucră.
-const JOB_DONE = new Set(['certified', 'finalized', 'published', 'failed', 'dismissed'])
 
 // A REAL flag image (Windows doesn't render emoji flags — they show as "GB"
 // text). flagcdn serves every ISO country; on any failure we fall back to a dot.
@@ -155,10 +119,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'tokenuri'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'tokenuri'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'joburi' | 'jurnal' | 'releases' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
   >(initialTab ?? 'finance')
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
@@ -180,10 +144,6 @@ export default function AdminPanel({
   const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
   const [mailboxLoading, setMailboxLoading] = useState(false)
   const [contactMsgs, setContactMsgs] = useState<ContactMessage[]>([])
-  // Arhivă apelabilă: joburile terminate și release-urile decise se strâng într-o
-  // secțiune pliabilă, ca lista activă să arate DOAR ce e în lucru / de aprobat.
-  const [showJobArchive, setShowJobArchive] = useState(false)
-  const [showRelArchive, setShowRelArchive] = useState(false)
   const [copied, setCopied] = useState(false)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -198,15 +158,7 @@ export default function AdminPanel({
   const [leads, setLeads] = useState<Lead[]>([])
   const [demos, setDemos] = useState<DemoStats | null>(null)
   const [activity, setActivity] = useState<UserActivity | null>(null)
-  const [devLog, setDevLog] = useState<string[]>([])
-  const [releases, setReleases] = useState<StagedRelease[]>([])
-  const [tokenStatus, setTokenStatus] = useState<{ ok: boolean; since: string | null; loading: boolean }>({
-    ok: true,
-    since: null,
-    loading: false,
-  })
   const [stores, setStores] = useState<StoresData | null>(null)
-  const [orders, setOrders] = useState<WorkOrder[]>([])
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
   // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
@@ -241,14 +193,7 @@ export default function AdminPanel({
   }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
-  // Gaps already sent to execution this session — shown marked, never hidden.
-  const [escalatedIds, setEscalatedIds] = useState<Set<number>>(new Set())
-  const [triaging, setTriaging] = useState(false)
 
-  async function decide(id: string, d: 'approve' | 'reject'): Promise<void> {
-    await decideRelease(id, d)
-    setReleases((cur) => cur.map((r) => (r.id === id ? { ...r, status: d === 'approve' ? 'approved' : 'rejected' } : r)))
-  }
   // The conversation of a clicked TRIAL visitor — what interested them, and in
   // what language they wrote / Kelion answered.
   const [convo, setConvo] = useState<{ v: DemoRecent; rows: HistoryRow[] } | null>(null)
@@ -312,11 +257,6 @@ export default function AdminPanel({
     void fetchLeads().then(setLeads)
     void fetchVisitorConvos().then(setVconvos)
     void fetchActivity().then(setActivity)
-    void fetchDevLog().then(setDevLog)
-    void fetchReleases().then(setReleases)
-    void fetchGithubTokenStatus().then((s) => {
-      if (s) setTokenStatus({ ok: s.ok, since: s.since, loading: false })
-    })
   }, [])
 
   // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
@@ -373,14 +313,6 @@ export default function AdminPanel({
     }
   }
 
-  // Tab „Joburi" deschis → auto-refresh la 8s (Adrian: „actualizare automată fără
-  // alte butoane"), ca stadiul fiecărui ordin să se miște singur în timp real.
-  useEffect(() => {
-    if (tab !== 'joburi') return
-    const id = window.setInterval(() => void fetchWorkOrders().then(setOrders), 8_000)
-    return () => window.clearInterval(id)
-  }, [tab])
-
   // Tab „Amprente vocale" deschis → încarcă lista și reîmprospătează la 10s.
   useEffect(() => {
     if (tab !== 'voiceprints') return
@@ -394,17 +326,6 @@ export default function AdminPanel({
     const id = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(id)
   }, [tab])
-
-  // Monitorizare token GitHub — banner în admin când constructorul e oprit.
-  useEffect(() => {
-    const load = async (): Promise<void> => {
-      const s = await fetchGithubTokenStatus()
-      if (s) setTokenStatus({ ok: s.ok, since: s.since, loading: false })
-    }
-    void load()
-    const id = window.setInterval(() => void load(), 10_000)
-    return () => window.clearInterval(id)
-  }, [])
 
   // Tab „Gesturi" deschis → încarcă lista dezactivată.
   useEffect(() => {
@@ -437,18 +358,6 @@ export default function AdminPanel({
     setGaps((cur) => cur.filter((g) => g.id !== id))
   }
 
-  async function sendToBuilder(id: number): Promise<void> {
-    const res = await escalateGap(id)
-    if (res.escalated) {
-      // Adrian's flow: the request STAYS visible, marked as sent — it lands in
-      // the persistent order registry (Jurnal) and HE cleans it here with
-      // "Rezolvat" only after the fix is deployed and he tested it.
-      setEscalatedIds((cur) => new Set(cur).add(id))
-    } else {
-      alert('Nu am putut trimite — încearcă din nou în câteva secunde.')
-    }
-  }
-
   useEffect(() => {
     if (!selected) return
     setLoading(true)
@@ -461,39 +370,6 @@ export default function AdminPanel({
   return (
     <div className={`admin-overlay ${peek ? 'peek' : ''}`}>
       <div className="admin-panel">
-        {!tokenStatus.ok && (
-          <div className="admin-token-banner" role="alert">
-            <span className="admin-token-icon">🛑</span>
-            <div className="admin-token-text">
-              <strong>Constructorul este OPRIT</strong> — tokenul GitHub de pe VPS este invalid.
-              {' '}
-              {tokenStatus.since && (
-                <span className="admin-token-since">
-                  Din {new Date(tokenStatus.since).toLocaleString('ro-RO')}.
-                </span>
-              )}
-              {' '}Înlocuiește tokenul în <code>/root/kelion/github-token.txt</code>, apoi confirmă aici.
-            </div>
-            <button
-              type="button"
-              className="admin-token-btn"
-              disabled={tokenStatus.loading}
-              onClick={async () => {
-                setTokenStatus((c) => ({ ...c, loading: true }))
-                const ok = await resetGithubToken()
-                if (ok) {
-                  setTokenStatus({ ok: true, since: null, loading: false })
-                  void fetchReleases().then(setReleases)
-                } else {
-                  setTokenStatus((c) => ({ ...c, loading: false }))
-                  alert('Nu am putut reset. Încearcă din nou.')
-                }
-              }}
-            >
-              {tokenStatus.loading ? 'Se confirmă…' : 'Token GitHub înlocuit'}
-            </button>
-          </div>
-        )}
         <header className="admin-head">
           <div className="admin-tabs">
             <button
@@ -502,19 +378,6 @@ export default function AdminPanel({
               onClick={() => setTab('finance')}
             >
               Bani
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'joburi' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('joburi')
-                void fetchWorkOrders().then(setOrders)
-              }}
-            >
-              Joburi/Ordine
-              {orders.filter((o) => !JOB_DONE.has(o.status)).length > 0
-                ? ` (${orders.filter((o) => !JOB_DONE.has(o.status)).length})`
-                : ''}
             </button>
             <button
               type="button"
@@ -560,30 +423,6 @@ export default function AdminPanel({
               onClick={() => setTab('gaps')}
             >
               Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'jurnal' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('jurnal')
-                void fetchDevLog().then(setDevLog)
-                void fetchWorkOrders().then(setOrders)
-              }}
-            >
-              Jurnal lucru
-            </button>
-            <button
-              type="button"
-              className={`admin-tab ${tab === 'releases' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('releases')
-                void fetchReleases().then(setReleases)
-              }}
-            >
-              Release-uri
-              {releases.filter((r) => r.status === 'pending').length > 0
-                ? ` (${releases.filter((r) => r.status === 'pending').length})`
-                : ''}
             </button>
             <button
               type="button"
@@ -762,106 +601,6 @@ export default function AdminPanel({
             )}
           </section>
         )}
-        {tab === 'releases' && (
-          <section className="admin-finance">
-            <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                Release-uri — modificări construite de dezvoltator, în așteptarea aprobării tale. Nimic nu
-                intră live până nu apeși „Aprobă și publică".
-              </div>
-              {releases.filter((r) => r.status === 'pending').length === 0 && (
-                <div className="chat-hint">
-                  Nimic de aprobat acum. Aici apar DOAR modificările în așteptare; cele aprobate
-                  sau respinse se mută în arhiva apelabilă de mai jos.
-                </div>
-              )}
-              {releases
-                .filter((r) => r.status === 'pending')
-                .map((r) => (
-                <div key={r.id} className={`release-row status-${r.status}`}>
-                  <div className="release-main">
-                    <span className="release-title">{r.title}</span>
-                    {r.branch && <span className="release-branch">{r.branch}</span>}
-                    <span className={`release-badge b-${r.status}`}>
-                      {r.status === 'pending'
-                        ? 'ÎN AȘTEPTARE'
-                        : r.status === 'approved'
-                          ? 'APROBAT'
-                          : r.status === 'deployed'
-                            ? 'PUBLICAT'
-                            : r.status === 'blocked'
-                              ? 'BLOCAT (token GitHub)'
-                              : 'RESPINS'}
-                    </span>
-                    <span className="release-time">
-                      {new Date(r.at).toLocaleString('ro-RO', {
-                        day: 'numeric',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                  {r.detail && <pre className="release-detail">{r.detail}</pre>}
-                  {r.status === 'pending' && (
-                    <div className="release-actions">
-                      <button
-                        type="button"
-                        className="composer-send"
-                        onClick={() => void decide(r.id, 'approve')}
-                      >
-                        Aprobă și publică
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => void decide(r.id, 'reject')}
-                      >
-                        Respinge
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {releases.filter((r) => r.status !== 'pending').length > 0 && (
-              <div className="fin-breakdown">
-                <button
-                  type="button"
-                  className="admin-tab"
-                  onClick={() => setShowRelArchive((v) => !v)}
-                >
-                  {showRelArchive ? '▾' : '▸'} Arhivă release-uri (apelabilă de Kelion) ·{' '}
-                  {releases.filter((r) => r.status !== 'pending').length}
-                </button>
-                {showRelArchive &&
-                  releases
-                    .filter((r) => r.status !== 'pending')
-                    .map((r) => (
-                      <div className="fin-row" key={r.id}>
-                        <span>{r.title.length > 160 ? `${r.title.slice(0, 160)}…` : r.title}</span>
-                        <span>
-                          {r.status === 'approved'
-                            ? '✅ aprobat'
-                            : r.status === 'deployed'
-                              ? '🟢 publicat'
-                              : r.status === 'blocked'
-                                ? '🛑 blocat (token GitHub)'
-                                : '⛔ respins'}{' '}
-                          ·{' '}
-                          {new Date(r.at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-                    ))}
-              </div>
-            )}
-          </section>
-        )}
         {tab === 'stores' && (
           <section className="admin-finance">
             {!stores && <p className="chat-hint">Se verifică magazinele live…</p>}
@@ -1024,120 +763,6 @@ export default function AdminPanel({
                       <b>Răspuns:</b> {m.reply.slice(0, 300)}
                     </div>
                   )}
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-        {tab === 'joburi' && (
-          <section className="admin-finance">
-            <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                Joburi ÎN LUCRU — cererile trimise la execuție, cu stadiul lor real (se
-                actualizează singur). Cele terminate se mută în arhiva de mai jos.
-              </div>
-              {orders.filter((o) => !JOB_DONE.has(o.status)).length === 0 && (
-                <div className="chat-hint">Niciun job în lucru acum.</div>
-              )}
-              {orders
-                .filter((o) => !JOB_DONE.has(o.status))
-                .map((o) => (
-                  <div className="fin-row" key={o.id}>
-                    <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
-                    <span>
-                      {jobStageLabel(o.status)} ·{' '}
-                      {new Date(o.created_at).toLocaleString('ro-RO', {
-                        day: 'numeric',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                      {' · '}
-                      <button
-                        type="button"
-                        className="ghost"
-                        title="Scoate-l din lista «în lucru» → arhiva apelabilă de Kelion (nu se șterge nimic)"
-                        onClick={() =>
-                          void archiveWorkOrder(o.id).then((ok) => {
-                            if (ok) void fetchWorkOrders().then(setOrders)
-                          })
-                        }
-                      >
-                        arhivează
-                      </button>
-                    </span>
-                  </div>
-                ))}
-            </div>
-            {orders.filter((o) => JOB_DONE.has(o.status)).length > 0 && (
-              <div className="fin-breakdown">
-                <button
-                  type="button"
-                  className="admin-tab"
-                  onClick={() => setShowJobArchive((v) => !v)}
-                >
-                  {showJobArchive ? '▾' : '▸'} Arhivă joburi terminate (apelabilă de Kelion) ·{' '}
-                  {orders.filter((o) => JOB_DONE.has(o.status)).length}
-                </button>
-                {showJobArchive &&
-                  orders
-                    .filter((o) => JOB_DONE.has(o.status))
-                    .map((o) => (
-                      <div className="fin-row" key={o.id}>
-                        <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
-                        <span>
-                          {jobStageLabel(o.status)} ·{' '}
-                          {new Date(o.created_at).toLocaleString('ro-RO', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-                    ))}
-              </div>
-            )}
-          </section>
-        )}
-        {tab === 'jurnal' && (
-          <section className="admin-finance">
-            <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                Ordine de lucru — tot ce s-a trimis la execuție (păstrat permanent, supraviețuiește
-                oricărui restart). Vezi exact CE s-a trimis și dacă constructorul l-a preluat.
-              </div>
-              {orders.length === 0 && (
-                <div className="chat-hint">Niciun ordin înregistrat încă (registrul pornește de la acest release).</div>
-              )}
-              {orders.map((o) => (
-                <div className="fin-row" key={o.id}>
-                  <span>{o.text.length > 160 ? `${o.text.slice(0, 160)}…` : o.text}</span>
-                  <span>
-                    {o.status === 'pending' ? '⏳ în așteptare' : '✓ preluat'} ·{' '}
-                    {new Date(o.created_at).toLocaleString('ro-RO', {
-                      day: 'numeric',
-                      month: 'short',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                Jurnal lucru — istoricul complet al lucrului (monitorul arată doar lucrul curent)
-              </div>
-              {devLog.length === 0 && (
-                <div className="chat-hint">
-                  Jurnalul e gol — se umple cât timp dezvoltatorul lucrează (de la ultima repornire a
-                  serverului).
-                </div>
-              )}
-              {[...devLog].reverse().map((l, i) => (
-                <div className="devlog-line" key={i}>
-                  {l}
                 </div>
               ))}
             </div>
@@ -1722,29 +1347,6 @@ export default function AdminPanel({
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
-            {gaps.length > 0 && (
-              <div className="gaps-bulk">
-                <span>
-                  Verifică cu creierul: ce s-a făcut deja se șterge definitiv; ce nu, pleacă la
-                  construit (și dispare după publicare).
-                </span>
-                <button
-                  type="button"
-                  className="composer-send"
-                  disabled={triaging}
-                  onClick={() => {
-                    setTriaging(true)
-                    void triageGaps().then((r) => {
-                      setTriaging(false)
-                      void fetchGaps().then(setGaps)
-                      if (r.offline) alert('Creierul (puntea) e jos acum — reîncearcă în câteva secunde.')
-                    })
-                  }}
-                >
-                  {triaging ? 'Verific…' : 'Verifică și curăță (decide creierul)'}
-                </button>
-              </div>
-            )}
             {gaps.length === 0 && (
               <p className="chat-hint">
                 Nicio cerere neacoperită încă. Aici apar lucrurile pe care userii i le cer lui Kelion și pe
@@ -1763,20 +1365,6 @@ export default function AdminPanel({
                   </span>
                 </div>
                 <div className="admin-gap-actions">
-                  {g.escalated || escalatedIds.has(g.id) ? (
-                    <span className="gap-sent">
-                      ✓ Trimisă la creier — se construiește; dispare singură după deploy reușit
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="composer-send"
-                      onClick={() => void sendToBuilder(g.id)}
-                      title="Trimite cererea la creier: construiește → verifică → publică. Când trece (200) dispare din listă."
-                    >
-                      Trimite la creier
-                    </button>
-                  )}
                   <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
                     Rezolvat (curăță)
                   </button>

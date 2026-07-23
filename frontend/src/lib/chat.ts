@@ -102,8 +102,6 @@ export async function* streamChat(
   coords?: Coords,
   onControl?: (c: ChatControl) => void,
   screen?: ScreenTask[],
-  // ADMIN only: raw attachments (any file type) that ride the bridge to the developer.
-  files?: { name: string; type: string; data: string }[],
   // STOP: semnal de abandon — „stop" scris/vorbit taie tura PE LOC (nu în coadă).
   signal?: AbortSignal,
   // Poza a fost ATAȘATĂ EXPLICIT (lipită cu Ctrl+V sau încărcată) — cerere de
@@ -134,7 +132,6 @@ export async function* streamChat(
         imageIsAttachment,
         coords,
         screen,
-        files,
         voiceFeatures,
         faceDescriptor,
         facePhoto,
@@ -264,7 +261,6 @@ export async function* streamChat(
             imageIsAttachment,
             coords,
             screen,
-            files,
             voiceFeatures,
             faceDescriptor,
             facePhoto,

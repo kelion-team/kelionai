@@ -734,25 +734,11 @@ export default function ChatPanel({
     const docBlock = docs.map((d) => `[Document: ${d.name}]\n${d.text}`).join('\n\n')
     const base = msg || (docBlock ? 'Am atașat un document — citește-l și spune-mi ce conține.' : t.imagePrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
-    // ADMIN: every raw attachment (photo, arhivă, video, orice) rides the
-    // bridge to the brain alongside the text.
-    // + VEDEREA CONTINUĂ (Adrian, 11 iul → 13 iul: „să folosească tot din Kimi
-    // 2.7"): cu camera pornită pleacă ULTIMELE 8 CADRE (≈2s de mișcare la 4 fps),
-    // nu unul singur — creierul K2 (256k context, vedere multi-cadru) vede
-    // MIȘCAREA, nu o clipă înghețată. 8 e echilibrul cadre/latență; modelul ar
-    // duce zeci, dar mai multe cadre = mai multă latență pe tura de chat. Pentru
-    // TOȚI userii (regula nr. 9): adminului îi merg pe punte ca files, publicului
-    // ca `images` (serverul le face fișiere de job în cutia publică).
+    // VEDEREA CONTINUĂ (Adrian, 11 iul): cu camera pornită pleacă ULTIMELE 8 CADRE
+    // (≈2s de mișcare la 4 fps), nu unul singur — creierul vede MIȘCAREA, nu o
+    // clipă înghețată. Pentru TOȚI userii la fel (regula nr. 9): cadrele merg prin
+    // `images`, iar poza atașată explicit prin `image`.
     const camFrames = cameraOnRef.current && !attached ? frameBufRef.current.slice(-8) : []
-    const adminFiles = isAdmin
-      ? [
-          ...atts
-            .filter((a) => a.url.startsWith('data:'))
-            .map((a) => ({ name: a.name, type: a.type ?? 'image/png', data: a.url })),
-          ...camFrames.map((url, i) => ({ name: `cadru-${i + 1}.jpg`, type: 'image/jpeg', data: url })),
-        ]
-      : []
-    const bridgeFiles = adminFiles.length > 0 ? adminFiles : undefined
 
     // Features vocale colectate de la ultima frază vorbită (dictare live sau batch).
     const voiceFeatures = getPendingVoiceFeatures() ?? undefined
@@ -784,12 +770,10 @@ export default function ChatPanel({
         coordsRef.current ?? undefined,
         handleControl,
         screen,
-        bridgeFiles,
         ac.signal,
         Boolean(attached), // poză lipită/încărcată explicit — analiză fără condiție
-        // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele 4 cadre.
-        // Adminul le trimite deja ca files pe punte — nu le dublăm în corp.
-        !isAdmin && camFrames.length > 0 ? camFrames : undefined,
+        // Vederea continuă pentru TOȚI userii (regula nr. 9): ultimele cadre.
+        camFrames.length > 0 ? camFrames : undefined,
         voiceFeatures,
         face?.descriptor,
         face?.photo,
