@@ -87,10 +87,13 @@ export default function Stage({ user }: { user: User }) {
   const [srvLoad, setSrvLoad] = useState('')
   // Motorul de lucru activ al constructorului (kimi/glm) — afișat permanent.
   const [workEngine, setWorkEngine] = useState('')
-  // Credit creier Kimi/GLM (Adrian, 13 iul): două becuri în header — verde fix =
-  // are credit; verde pâlpâind = motorul ACTIV acum; roșu pâlpâind = fără credit.
-  type BrainOne = { ok: boolean; reason: string; topup: string; percent: number }
-  const [brainCredit, setBrainCredit] = useState<{ active: string | null; kimi: BrainOne; glm: BrainOne } | null>(null)
+  // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
+  // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
+  const [brainCredit, setBrainCredit] = useState<{
+    active: string | null
+    openrouter: { ok: boolean; topup: string }
+    pool: { loaded: number; remaining: number; spent: number; profit: number }
+  } | null>(null)
   useEffect(() => {
     if (user.role !== 'admin') return
     let alive = true
@@ -930,47 +933,33 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* Bara verticală QUOTA Kimi + GLM (Adrian, 15 iul).  Dreptunghi
-                subțire, fill de jos în sus, culoare după procent: 0-30 roșu,
-                30-70 galben, 70-100 verde. Click → alimentare.  */}
+            {/* Fond real admin (loaded - cost real) - nu nelimitat. Click -> alimentare OpenRouter. */}
             {brainCredit && (
-              <span className="quota-bar-wrap" title="Quota disponibil creier (Kimi stânga, GLM dreapta) — click pentru alimentare">
-                {(['kimi','glm'] as const).map((key) => {
-                  const s = brainCredit[key]
-                  const p = Math.max(0, Math.min(100, s.percent ?? 100))
-                  const color = p <= 30 ? '#ff4444' : p <= 70 ? '#ffaa00' : '#22c55e'
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      className="quota-bar"
-                      onClick={() => window.open(s.topup, '_blank', 'noopener')}
-                      title={`${key.toUpperCase()} — ${p}% disponibil. ${!s.ok ? 'FĂRĂ CREDIT: ' + (s.reason || 'quota golită') : brainCredit.active === key ? 'Motor ACTIV' : 'Stand-by'} · click pentru alimentare`}
-                    >
-                      <span
-                        className="quota-bar-fill"
-                        style={{ height: `${p}%`, background: color }}
-                      />
-                      <span className="quota-bar-label">{key[0].toUpperCase()}</span>
-                    </button>
-                  )
-                })}
-              </span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
+                title={
+                  brainCredit.openrouter.ok
+                    ? `Fond real: £${brainCredit.pool.remaining.toFixed(2)} rămas din £${brainCredit.pool.loaded.toFixed(2)} · click pentru alimentare`
+                    : 'Cheia OpenRouter nu e configurată'
+                }
+              >
+                {brainCredit.openrouter.ok ? `£${brainCredit.pool.remaining.toFixed(0)}` : '⚠ OpenRouter'}
+              </button>
             )}
           </>
         )}
         {user.role === 'customer' && <WalletButton />}
-        {user.role === 'customer' && (
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setSettingsOpen(true)}
-            title="Setări"
-            aria-label="Setări"
-          >
-            ⚙
-          </button>
-        )}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => setSettingsOpen(true)}
+          title="Setări"
+          aria-label="Setări"
+        >
+          ⚙
+        </button>
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
