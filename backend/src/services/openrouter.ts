@@ -94,8 +94,90 @@ export async function resolveModel(tier: ModelTier, wanted?: string | null): Pro
 }
 
 export interface OrMessage {
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  // Pentru tura de tool: legătura cu apelul cerut de model.
+  tool_call_id?: string
+  tool_calls?: OrToolCall[]
+}
+
+// Unealtă în format Anthropic (cum sunt definite în chat.ts).
+export interface AnthropicTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+export interface OrToolCall {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+// Conversie Anthropic → OpenAI (OpenRouter): input_schema → parameters.
+export function toolsToOpenAI(tools: AnthropicTool[]): unknown[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }))
+}
+
+export interface OrChatResult {
+  text: string
+  toolCalls: OrToolCall[]
+  costUsd: number
+  model: string
+  stop: string
+}
+
+/**
+ * O tură de chat prin OpenRouter CU tool-use (format OpenAI). Întoarce textul,
+ * eventualele apeluri de unelte cerute de model, și costul REAL. Cheamă-l în
+ * buclă: execuți uneltele, adaugi rezultatele ca mesaje role:'tool', re-apelezi.
+ */
+export async function openrouterChat(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[] = [],
+  opts: { maxTokens?: number; temperature?: number } = {},
+): Promise<OrChatResult> {
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature ?? 0.7,
+    usage: { include: true },
+  }
+  if (tools.length) {
+    body.tools = toolsToOpenAI(tools)
+    body.tool_choice = 'auto'
+  }
+  const r = await fetch(`${OR_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.openrouter.key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://kelionai.app',
+      'X-Title': 'Kelionai',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (!r.ok) throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
+  const j = (await r.json()) as {
+    choices?: { message?: { content?: string; tool_calls?: OrToolCall[] }; finish_reason?: string }[]
+    usage?: { cost?: number }
+    model?: string
+  }
+  const choice = j.choices?.[0]
+  return {
+    text: choice?.message?.content ?? '',
+    toolCalls: choice?.message?.tool_calls ?? [],
+    costUsd: Number(j.usage?.cost ?? 0),
+    model: j.model ?? model,
+    stop: choice?.finish_reason ?? 'stop',
+  }
 }
 
 export interface OrResult {

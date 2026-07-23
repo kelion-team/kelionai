@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel } from './openrouter.js'
+import { toModel, resolveModel, toolsToOpenAI } from './openrouter.js'
+import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
   it('acceptă doar modele GPT/Gemini/Claude cu tools', () => {
@@ -15,6 +16,21 @@ describe('openrouter catalog', () => {
     expect(toModel({ id: 'mistral/large', supported_parameters: ['tools'] })).toBeNull()
     // variantă veche exclusă
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
+  })
+
+  it('convertește uneltele Anthropic → OpenAI (input_schema → parameters)', () => {
+    const out = toolsToOpenAI([
+      { name: 'get_x', description: 'ia x', input_schema: { type: 'object', properties: {} } },
+    ]) as { type: string; function: { name: string; parameters: unknown } }[]
+    expect(out[0].type).toBe('function')
+    expect(out[0].function.name).toBe('get_x')
+    expect(out[0].function.parameters).toEqual({ type: 'object', properties: {} })
+  })
+
+  it('orchestratorul se oprește curat fără cheie (nu blochează)', async () => {
+    const r = await runOrchestrator('openai/gpt-4.1-mini', [{ role: 'user', content: 'salut' }], [], async () => '')
+    expect(r.text).toBe('')
+    expect(r.costUsd).toBe(0)
   })
 
   it('resolveModel cade pe implicit când modelul cerut nu e în tier', async () => {
