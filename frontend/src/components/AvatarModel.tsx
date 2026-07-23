@@ -1,7 +1,7 @@
 import { useRef, useLayoutEffect, useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF, useAnimations } from '@react-three/drei'
-import { LoopOnce, LoopRepeat } from 'three'
+import { LoopOnce, LoopRepeat, LoadingManager } from 'three'
 import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
 import { getVoiceLevel } from '../lib/audioIO'
@@ -320,7 +320,12 @@ export default function AvatarModel() {
   // restul. Numele devine cel comandabil ([GEST nume]).
   useEffect(() => {
     let disposed = false
-    const loader = new GLTFLoader()
+    // MANAGER SEPARAT (nu DefaultLoadingManager): descărcarea bibliotecii din
+    // fundal NU trebuie să atingă `useProgress`/AvatarLoading — altfel bara de
+    // încărcare reapărea la ~2.5s după primul paint și avatarul „se încărca de
+    // 2 ori" (o dată nucleul, o dată biblioteca). Cu manager propriu, indicatorul
+    // apare O SINGURĂ DATĂ, pentru avatarul de bază, apoi rămâne.
+    const loader = new GLTFLoader(new LoadingManager())
     const queue = Object.entries(LAZY_CLIP_FILES)
     const loadNext = (): void => {
       if (disposed) return
