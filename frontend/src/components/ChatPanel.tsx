@@ -42,6 +42,7 @@ import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
+import { startRealtimeVoice } from '../lib/realtimeVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
@@ -146,6 +147,9 @@ export default function ChatPanel({
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
+  // VOCE LIVE OpenAI Realtime (full-duplex, WebRTC) — calea implicită. Dacă nu e
+  // disponibilă (fără cheie/eșec), cădem O DATĂ pe STT→creier→TTS pentru sesiune.
+  const realtimeOffRef = useRef(false)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
   // (re)pornire a microfonului — vezi ensureMic mai jos.
@@ -885,6 +889,45 @@ export default function ChatPanel({
     // ramura de OPRIRE (nimic de oprit) și butonul părea mort. try/finally
     // garantează eliberarea flagului pe ORICE drum de ieșire.
     try {
+      // ── VOCE LIVE OpenAI Realtime (full-duplex): microfon + WebRTC direct la
+      // OpenAI (creierul de voce), care redă singur răspunsul + are barge-in/anti-
+      // ecou nativ. Transcriptul curge pe bandă și se salvează pe server. Dacă nu
+      // e disponibilă (fără cheie / eșec), cădem O DATĂ pe STT→creier→TTS.
+      if (!realtimeOffRef.current) {
+        try {
+          const rv = await startRealtimeVoice({
+            language: speechLangRef.current,
+            onUserTranscript: (text) => setLiveVoice(text),
+            onAssistantTranscript: (text) => setLiveVoice(text),
+            onState: (s, note) => {
+              if (s === 'error') {
+                // Realtime a picat → pentru restul sesiunii folosim STT.
+                realtimeOffRef.current = true
+                if (micRef.current) {
+                  micRef.current = null
+                  setListening(false)
+                  setLiveVoice('')
+                  micStartingRef.current = false
+                  void ensureMicRef.current()
+                }
+                void note
+              }
+            },
+          })
+          if (micManualOffRef.current || micRef.current) {
+            rv.stop()
+            return
+          }
+          micRef.current = rv as unknown as MicHandle
+          micBackoffRef.current = 1000
+          setListening(true)
+          return
+        } catch {
+          // Realtime indisponibil (fără cheie OpenAI / WebRTC blocat) → STT.
+          realtimeOffRef.current = true
+        }
+      }
+
       // ── DICTARE LIVE (streaming): fiecare cuvânt apare pe bandă instant, se
       // validează când e confirmat, iar la o PAUZĂ > 3s fraza pleacă la creier
       // (ordinul lui Adrian, 10 iul). Dacă WS-ul pică sau rămâne mut, cădem O DATĂ
