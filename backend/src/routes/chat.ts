@@ -43,7 +43,7 @@ import {
   loadKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -94,15 +94,20 @@ import { buildAdminSnapshot } from '../services/adminSnapshot.js'
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
 // de user, altfel implicitul tier-ului chat (GPT). Întoarce NULL doar dacă lipsește
 // cheia OpenRouter → creierul nu poate porni (mesaj onest, nicio plasă Kimi/GLM).
-async function selectedChatModel(email: string): Promise<string | null> {
+async function selectedBrainModel(email: string, text: string): Promise<string | null> {
   if (!config.openrouter.key) return null
+  let sel: { chat?: string; work?: string } = {}
   try {
     const raw = await loadKv(`model_choice:${email}`)
-    const chat = raw ? (JSON.parse(raw) as { chat?: string }).chat : null
-    return await resolveModel('chat', chat)
+    if (raw) sel = JSON.parse(raw) as { chat?: string; work?: string }
   } catch {
-    return resolveModel('chat', null)
+    sel = {}
   }
+  // ESCALADARE automată CHAT → CREIER: cerere grea (raționament/cod/multi-pas)
+  // urcă la treapta CREIER (work, GPT/Claude); restul rămâne pe CHAT (GPT/Gemini).
+  // Persona/voce/limbă/memorie/unelte sunt IDENTICE — se schimbă DOAR modelul.
+  const heavy = taskDifficulty(text) >= ESCALATE_AT
+  return heavy ? resolveModel('work', sel.work) : resolveModel('chat', sel.chat)
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -1547,7 +1552,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // uneltele + persona + memoria identice indiferent de model; streaming → primul
     // cuvânt instant. Fără cheie OpenRouter = fără creier (nicio plasă Kimi/GLM,
     // scoase definitiv) → mesaj onest în catch.
-    const orChatModel = await selectedChatModel(user.email)
+    const orChatModel = await selectedBrainModel(user.email, lastUserText)
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]

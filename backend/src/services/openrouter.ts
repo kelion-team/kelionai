@@ -84,6 +84,28 @@ export async function getCatalog(force = false): Promise<Catalog> {
   return cache
 }
 
+// Dificultatea cerută de sarcină (0-100), pur euristic din text (0 cost/latență).
+// Semnale: lungime, raționament/analiză, cod/depanare, multi-pas. Pe baza ei
+// ESCALADĂM chat→creier (Adrian: „legate, escaladează singur").
+export function taskDifficulty(text: string): number {
+  const t = (text || '').toLowerCase()
+  let d = 15 // conversație simplă: salut, întrebare scurtă, mulțumire
+  const len = t.length
+  if (len > 1000) d += 65
+  else if (len > 500) d += 45
+  else if (len > 200) d += 20
+  // Raționament / analiză / explicație aprofundată.
+  if (/(analiz[ăae]|demonstr|rezolv[ăa]|[îi]n detaliu|pas cu pas|g[âa]nde[șs]te|ra[țt]ion|argument[ea]|compar[ăa]|evalu[eaă]|de ce\b|cum func[țt]ion|strategi[ea]|plan detaliat|explic)/.test(t)) d += 65
+  // Cod / software / depanare — cel mai exigent.
+  if (/(algoritm|debug|\bcod\b|\bprogram|func[țt]i|script|\bbug\b|refactor|optimiz|compil|stack ?trace|except|sql|regex)/.test(t)) d += 70
+  // Multi-pas.
+  if ((t.match(/\?/g) || []).length >= 3 || /(și apoi|dup[ăa] care|mai [îi]nt[âa]i)/.test(t)) d += 12
+  return Math.min(100, Math.max(0, d))
+}
+
+// Prag de escaladare: peste el, cererea urcă de la CHAT la CREIER.
+export const ESCALATE_AT = 60
+
 /** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
   const fallback = tier === 'chat' ? config.openrouter.chatDefault : config.openrouter.workDefault
