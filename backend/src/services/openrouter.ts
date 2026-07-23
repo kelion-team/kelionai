@@ -130,6 +130,105 @@ export interface OrChatResult {
   stop: string
 }
 
+// Variantă STREAMING: textul curge prin `onText` (primul cuvânt instant, ca pe
+// vechiul Kimi), iar apelurile de unelte se asamblează pe index din delte.
+export async function openrouterChatStream(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[],
+  onText: (delta: string) => void,
+  opts: { maxTokens?: number; temperature?: number } = {},
+): Promise<OrChatResult> {
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature ?? 0.7,
+    stream: true,
+    usage: { include: true },
+    stream_options: { include_usage: true },
+  }
+  if (tools.length) {
+    body.tools = toolsToOpenAI(tools)
+    body.tool_choice = 'auto'
+  }
+  const r = await fetch(`${OR_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.openrouter.key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://kelionai.app',
+      'X-Title': 'Kelionai',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  })
+  if (!r.ok || !r.body) {
+    throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
+  }
+
+  let text = ''
+  let costUsd = 0
+  let served = model
+  let stop = 'stop'
+  // Apelurile de unelte vin fragmentat, pe index; le asamblăm.
+  const calls = new Map<number, { id: string; name: string; args: string }>()
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let nl: number
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim()
+      buf = buf.slice(nl + 1)
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (data === '[DONE]') continue
+      let ev: {
+        choices?: {
+          delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
+          finish_reason?: string
+        }[]
+        usage?: { cost?: number }
+        model?: string
+      }
+      try {
+        ev = JSON.parse(data)
+      } catch {
+        continue
+      }
+      if (ev.model) served = ev.model
+      if (ev.usage?.cost != null) costUsd = Number(ev.usage.cost)
+      const choice = ev.choices?.[0]
+      if (!choice) continue
+      if (choice.finish_reason) stop = choice.finish_reason
+      const d = choice.delta
+      if (d?.content) {
+        text += d.content
+        onText(d.content)
+      }
+      for (const tc of d?.tool_calls ?? []) {
+        const idx = tc.index ?? 0
+        const cur = calls.get(idx) ?? { id: '', name: '', args: '' }
+        if (tc.id) cur.id = tc.id
+        if (tc.function?.name) cur.name = tc.function.name
+        if (tc.function?.arguments) cur.args += tc.function.arguments
+        calls.set(idx, cur)
+      }
+    }
+  }
+
+  const toolCalls: OrToolCall[] = [...calls.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, c]) => ({ id: c.id || `call_${c.name}`, type: 'function', function: { name: c.name, arguments: c.args } }))
+  return { text, toolCalls, costUsd, model: served, stop }
+}
+
 /**
  * O tură de chat prin OpenRouter CU tool-use (format OpenAI). Întoarce textul,
  * eventualele apeluri de unelte cerute de model, și costul REAL. Cheamă-l în

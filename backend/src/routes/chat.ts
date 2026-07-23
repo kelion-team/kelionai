@@ -125,14 +125,16 @@ function brainClientFor(model: string): BrainClient {
 // /api/models/selection). Întoarce NULL dacă OpenRouter nu e configurat sau
 // userul n-a ales explicit → tura cade pe calea existentă Kimi/GLM (neatinsă).
 async function selectedChatModel(email: string): Promise<string | null> {
+  // Kimi/GLM SCOASE (Adrian: „Kimi se scoate definitiv"). Creierul e OpenRouter:
+  // modelul ALES de user, altfel implicitul tier-ului chat (GPT). Cade pe Kimi/GLM
+  // DOAR dacă lipsește cheia OpenRouter — stare tranzitorie până la ștergerea lor.
   if (!config.openrouter.key) return null
   try {
     const raw = await loadKv(`model_choice:${email}`)
     const chat = raw ? (JSON.parse(raw) as { chat?: string }).chat : null
-    if (!chat) return null
     return await resolveModel('chat', chat)
   } catch {
-    return null
+    return resolveModel('chat', null)
   }
 }
 

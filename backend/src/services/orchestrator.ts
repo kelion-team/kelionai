@@ -1,5 +1,6 @@
 import {
   openrouterChat,
+  openrouterChatStream,
   type AnthropicTool,
   type OrMessage,
   type OrToolCall,
@@ -45,15 +46,22 @@ export async function runOrchestrator(
   let served = model
 
   for (let round = 1; round <= maxRounds; round++) {
-    const res = await openrouterChat(model, convo, tools, {
-      maxTokens: opts.maxTokens,
-      temperature: opts.temperature,
-    })
+    // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
+    // apel simplu (ex: agenți în fundal care nu difuzează).
+    const res = opts.onText
+      ? await openrouterChatStream(model, convo, tools, opts.onText, {
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+        })
+      : await openrouterChat(model, convo, tools, {
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+        })
     totalCost += res.costUsd
     served = res.model
 
     if (res.toolCalls.length === 0) {
-      if (res.text) opts.onText?.(res.text)
+      // La streaming textul a curs deja prin onText; nu-l re-emitem.
       return { text: res.text, costUsd: totalCost, model: served, rounds: round }
     }
 
