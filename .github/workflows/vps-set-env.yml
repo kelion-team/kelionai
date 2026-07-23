@@ -1,0 +1,92 @@
+# ── CHEI NOI ÎN ENV-UL DE PE VPS, SECURIZAT ──────────────────────────────────
+# Calea SIGURĂ de a pune chei noi pe kelionai.app: valorile vin din GitHub
+# Secrets (GitHub le maschează AUTOMAT în TOATE logurile) și pleacă spre VPS
+# prin STDIN — niciodată într-o comandă care apare în jurnal. Cheia nu ajunge
+# nici în git, nici în chat, nici în logul de Actions.
+#
+# CUM SE FOLOSEȘTE (Adrian):
+#   1. Repo → Settings → Secrets and variables → Actions → New repository secret.
+#      Adaugă, cu numele EXACT, doar cheile pe care le ai:
+#        SERPER_API_KEY        (căutare web + youtube)
+#        GEMINI_API_KEY        (generare imagini)  + opțional GEMINI_MODEL
+#        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
+#        GOOGLE_API_KEY        (o cheie Google Cloud care poate acoperi TTS/Gemini)
+#        GOOGLE_MAPS_KEY       (opțional; harta merge și fără, pe OSM)
+#   2. Actions → „vps-set-env" → Run workflow. Scrie DOAR secretele setate,
+#      apoi repornește containerul ca să le încarce. Restul rămâne neatins.
+#   Necesită și secretul VPS_SSH_KEY (deja pus).
+
+name: vps-set-env
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart:
+        description: 'Repornește app-ul după scriere (ca să încarce cheile noi)?'
+        type: boolean
+        default: true
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scrie cheile în env-ul VPS (din Secrets, mascate, prin STDIN)
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_KEY }}
+          RESTART: ${{ inputs.restart }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEY" ] || { echo "::error::VPS_SSH_KEY lipsește (Settings → Secrets → Actions)."; exit 1; }
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          SSH="ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87"
+
+          # Construim liniile KEY=VALUE DOAR pentru secretele setate (valorile
+          # trăiesc în memoria runner-ului, mascate de GitHub). Le trimitem prin
+          # STDIN unui script remote care face upsert în /root/kelion/kelionai.env.
+          {
+            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY; do
+              val="${!name:-}"
+              [ -n "$val" ] && printf '%s=%s\n' "$name" "$val"
+            done
+          } | $SSH '
+            set -e
+            f=/root/kelion/kelionai.env
+            touch "$f"; chmod 600 "$f"
+            c=0
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              name="${line%%=*}"
+              val="${line#*=}"
+              grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
+              printf "%s\n" "$line" >> "$f.tmp"
+              mv "$f.tmp" "$f"; chmod 600 "$f"
+              echo "  $name: scris (${#val} caractere) — valoarea NU se afișează"
+              c=$((c+1))
+            done
+            echo "total chei scrise/actualizate: $c"
+            if [ "$c" -eq 0 ]; then
+              echo "::warning::Niciun secret setat în GitHub. Adaugă-le în Settings → Secrets → Actions."
+            fi
+          '
+
+          if [ "${RESTART:-true}" = "true" ]; then
+            echo "== Repornesc containerul ca să încarce env-ul nou (fără rebuild) =="
+            $SSH '
+              set -e
+              docker rm -f kelionai-app >/dev/null 2>&1 || true
+              docker run -d --name kelionai-app --restart unless-stopped \
+                --network host --env-file /root/kelion/kelionai.env \
+                -e PORT=8080 -e NODE_ENV=production kelionai:latest >/dev/null
+              sleep 4
+              code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/version || echo 000)
+              echo "app repornit — /api/version HTTP $code"
+            '
+          fi
