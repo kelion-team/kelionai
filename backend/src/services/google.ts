@@ -1,5 +1,6 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
+import { openrouterWebSearch } from './openrouter.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -489,90 +490,15 @@ export async function geminiVision(jpegBase64: string, question: string): Promis
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-
-  // Primary: Serper.dev (the paid plan) when a key is set and accepted. We ask
-  // for EVERYTHING Google returns — not only the organic links but the direct
-  // answer box, the knowledge-graph fact panel, "people also ask", fresh news
-  // and related searches — so the brain answers from the richest, most current
-  // picture possible (căutare web „la maxim", 10 iul).
-  if (config.serperKey) {
-    try {
-      const res = await tfetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: Math.max(n, 10) }),
-      })
-      if (res.ok) {
-        const j = (await res.json()) as {
-          organic?: SerperResult[]
-          answerBox?: { answer?: string; snippet?: string; title?: string; link?: string }
-          knowledgeGraph?: {
-            title?: string
-            type?: string
-            description?: string
-            attributes?: Record<string, string>
-            website?: string
-          }
-          peopleAlsoAsk?: { question?: string; snippet?: string; link?: string }[]
-          topStories?: { title?: string; link?: string; source?: string; date?: string }[]
-          news?: { title?: string; link?: string; source?: string; date?: string }[]
-          relatedSearches?: { query?: string }[]
-        }
-        const results = (j.organic ?? []).slice(0, n).map((r) => ({
-          title: r.title ?? '',
-          link: r.link ?? '',
-          snippet: r.snippet ?? '',
-          ...(r.date ? { date: r.date } : {}),
-        }))
-        const kg = j.knowledgeGraph
-        const stories = (j.topStories ?? j.news ?? [])
-          .slice(0, 4)
-          .map((s) => ({ title: s.title ?? '', link: s.link ?? '', source: s.source ?? '', date: s.date ?? '' }))
-        const paa = (j.peopleAlsoAsk ?? [])
-          .slice(0, 4)
-          .map((p) => ({ question: p.question ?? '', snippet: p.snippet ?? '', link: p.link ?? '' }))
-        const related = (j.relatedSearches ?? []).slice(0, 6).map((r) => r.query ?? '').filter(Boolean)
-        const out = {
-          answer: j.answerBox?.answer ?? j.answerBox?.snippet ?? '',
-          ...(kg
-            ? {
-                knowledgeGraph: {
-                  title: kg.title ?? '',
-                  type: kg.type ?? '',
-                  description: kg.description ?? '',
-                  attributes: kg.attributes ?? {},
-                  website: kg.website ?? '',
-                },
-              }
-            : {}),
-          results,
-          ...(paa.length ? { peopleAlsoAsk: paa } : {}),
-          ...(stories.length ? { news: stories } : {}),
-          ...(related.length ? { related } : {}),
-          source: 'serper',
-        }
-        // Only accept a Serper answer that actually carries signal; otherwise
-        // fall through to Gemini so search never returns an empty shell.
-        if (out.answer || results.length || 'knowledgeGraph' in out) return JSON.stringify(out)
-      }
-      // Non-OK (e.g. 403 bad key) → fall through to Gemini so search still works.
-    } catch {
-      /* network error → fall through to Gemini */
-    }
-  }
-
-  // Fallback: Gemini Google Search grounding (uses the Gemini key). Guarantees
-  // search keeps working even if the Serper key is missing or rejected.
-  const g = await geminiGroundedSearch(query)
-  if (g) {
-    return JSON.stringify({
-      answer: g.text,
-      results: g.sources.slice(0, n).map((s) => ({ title: s.title, link: s.link, snippet: '' })),
-      source: 'google',
-    })
-  }
-
-  return JSON.stringify({ error: 'search_unavailable' })
+  // Căutare web prin OpenRouter (plugin `web`) — aceeași cheie ca creierul, fără
+  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări).
+  const r = await openrouterWebSearch(query)
+  if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
+  return JSON.stringify({
+    answer: r.text,
+    results: r.sources.slice(0, n).map((s) => ({ title: s.title, link: s.url, snippet: '' })),
+    source: 'openrouter',
+  })
 }
 
 const WEATHER_CODES: Record<number, string> = {
@@ -955,64 +881,35 @@ function ytEmbed(link: string): string | undefined {
 async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
-
-  // Primary: Serper.dev (the paid plan) when a key is set and accepted.
-  if (config.serperKey) {
-    try {
-      const res = await tfetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: `${query} site:youtube.com` }),
-      })
-      if (res.ok) {
-        const j = (await res.json()) as { organic?: SerperResult[] }
-        const videos = (j.organic ?? [])
-          .filter((r) => (r.link ?? '').includes('youtube.com/watch') || (r.link ?? '').includes('youtu.be/'))
-          .slice(0, n)
-          .map((r) => ({ title: r.title ?? '', link: r.link ?? '' }))
-        if (videos.length > 0) return JSON.stringify({ videos, screen_url: ytEmbed(videos[0].link) })
-      }
-    } catch {
-      /* fall through to Gemini */
-    }
-  }
-
-  // Fallback: Gemini grounded search, asked for real YouTube watch links.
-  const g = await geminiGroundedSearch(
-    `Find the best YouTube videos for: "${query}". ` +
-      `Reply ONLY as a list, one per line, in the form: Title — https://www.youtube.com/watch?v=ID ` +
-      `using real, currently-available videos.`,
+  // Prin OpenRouter (plugin web) — cerem linkuri REALE de watch. Fără Serper.
+  const r = await openrouterWebSearch(
+    `${query} — best YouTube videos`,
+    'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
   )
-  if (g) {
-    const videos: { title: string; link: string }[] = []
-    const seen = new Set<string>()
-    const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
-    // Prefer "Title — URL" / "Title - URL" / "[Title](URL)" so we keep titles.
-    const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
-    let m: RegExpExecArray | null
-    while ((m = labelled.exec(g.text)) !== null) {
-      const title = (m[1] ?? m[3] ?? '').trim()
-      let link = (m[2] ?? m[4] ?? '').trim()
-      if (!link.startsWith('http')) link = `https://${link}`
-      if (seen.has(link)) continue
-      seen.add(link)
-      videos.push({ title, link })
+  const seen = new Set<string>()
+  const videos: { title: string; link: string }[] = []
+  // Din sursele reale (citări) — cele mai sigure.
+  for (const s of r.sources) {
+    if (ytEmbed(s.url) && !seen.has(s.url)) {
+      seen.add(s.url)
+      videos.push({ title: s.title, link: s.url })
     }
-    // Catch any bare URLs we missed.
-    const bare = new RegExp(ytUrl, 'g')
-    while ((m = bare.exec(g.text)) !== null) {
-      let link = m[0]
-      if (!link.startsWith('http')) link = `https://${link}`
-      if (seen.has(link)) continue
-      seen.add(link)
-      videos.push({ title: '', link })
-    }
-    if (videos.length > 0) return JSON.stringify({ videos: videos.slice(0, n), screen_url: ytEmbed(videos[0].link) })
   }
-
-  // Nothing playable found. Signal not_found so Kelion says so in his own voice —
-  // NOT a YouTube results-page URL, which refuses to embed and breaks playback
-  // (that was the "voice fails when the song isn't found" case).
+  // Plus orice link youtube din text (Title — URL / URL simplu).
+  const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
+  const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
+  let m: RegExpExecArray | null
+  while ((m = labelled.exec(r.text)) !== null) {
+    const title = (m[1] ?? m[3] ?? '').trim()
+    let link = (m[2] ?? m[4] ?? '').trim()
+    if (!link.startsWith('http')) link = `https://${link}`
+    if (seen.has(link)) continue
+    seen.add(link)
+    videos.push({ title, link })
+  }
+  if (videos.length > 0) {
+    return JSON.stringify({ videos: videos.slice(0, n), screen_url: ytEmbed(videos[0].link) })
+  }
   return JSON.stringify({ videos: [], not_found: true })
 }
 

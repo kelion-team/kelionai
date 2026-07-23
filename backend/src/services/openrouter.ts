@@ -350,3 +350,94 @@ export async function openrouterComplete(
     model: j.model ?? model,
   }
 }
+
+// ── IMAGINE prin OpenRouter (aceeași cheie ca creierul; fără Gemini separat) ──
+// Modelul de imagini întoarce imaginea inline în `message.images[].image_url.url`
+// (data URL). Întoarcem mime + bytes; costul REAL vine din usage.cost.
+export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: string }
+export async function openrouterImage(prompt: string): Promise<OrImage> {
+  if (!config.openrouter.key) return { error: 'image_not_configured' }
+  let r: Response
+  try {
+    r = await fetch(`${OR_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.openrouter.key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://kelionai.app',
+        'X-Title': 'Kelionai',
+      },
+      body: JSON.stringify({
+        model: config.openrouter.imageModel,
+        messages: [{ role: 'user', content: prompt }],
+        modalities: ['image', 'text'],
+        usage: { include: true },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    })
+  } catch {
+    return { error: 'image_unavailable' }
+  }
+  if (!r.ok) return { error: `image_http_${r.status}` }
+  const j = (await r.json().catch(() => ({}))) as {
+    choices?: { message?: { images?: { image_url?: { url?: string } }[] } }[]
+    usage?: { cost?: number }
+  }
+  const url = j.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? ''
+  const m = /^data:([^;]+);base64,(.+)$/s.exec(url)
+  if (!m) return { error: 'no_image' }
+  return { mime: m[1], buf: Buffer.from(m[2], 'base64'), costUsd: Number(j.usage?.cost ?? 0) }
+}
+
+// ── CĂUTARE WEB prin OpenRouter (plugin `web`; fără Serper) ───────────────────
+// Orice model acceptă plugin-ul `web`: OpenRouter caută pe web și dă modelului
+// rezultatele, iar răspunsul include text + citări (annotations url_citation).
+export interface OrSearchResult {
+  text: string
+  sources: { title: string; url: string }[]
+  costUsd: number
+}
+export async function openrouterWebSearch(query: string, instruction?: string): Promise<OrSearchResult> {
+  if (!config.openrouter.key) return { text: '', sources: [], costUsd: 0 }
+  const sys = instruction ?? 'Search the web and answer concisely with the most current, factual information. Cite sources.'
+  let r: Response
+  try {
+    r = await fetch(`${OR_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.openrouter.key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://kelionai.app',
+        'X-Title': 'Kelionai',
+      },
+      body: JSON.stringify({
+        model: config.openrouter.searchModel,
+        plugins: [{ id: 'web' }],
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: query },
+        ],
+        max_tokens: 900,
+        usage: { include: true },
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+  } catch {
+    return { text: '', sources: [], costUsd: 0 }
+  }
+  if (!r.ok) return { text: '', sources: [], costUsd: 0 }
+  const j = (await r.json().catch(() => ({}))) as {
+    choices?: {
+      message?: {
+        content?: string
+        annotations?: { type?: string; url_citation?: { title?: string; url?: string } }[]
+      }
+    }[]
+    usage?: { cost?: number }
+  }
+  const msg = j.choices?.[0]?.message
+  const sources = (msg?.annotations ?? [])
+    .filter((a) => a.type === 'url_citation' && a.url_citation?.url)
+    .map((a) => ({ title: a.url_citation?.title ?? '', url: a.url_citation?.url ?? '' }))
+  return { text: msg?.content ?? '', sources, costUsd: Number(j.usage?.cost ?? 0) }
+}
