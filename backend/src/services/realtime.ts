@@ -170,16 +170,16 @@ export async function openaiRealtimeAnswer(
         // emite NICIODATĂ transcriptul userului.
         transcription: { model: config.openai.realtimeTranscribeModel, language: iso },
         // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
-        // (nu pe tăcere brută). `interrupt_response:true` = barge-in real
-        // (full-duplex). `create_response:false` = CUVÂNT DE TREZIRE (Adrian, 24
-        // iul: „Kelion răspunde DOAR dacă aude «Kelion»/«Key» + acțiune"): modelul
-        // NU mai răspunde la orice sunet; clientul trimite `response.create` doar
-        // când transcriptul userului conține cuvântul de trezire. Restul rămâne
-        // ascultat (transcript), dar Kelion tace până e chemat pe nume.
+        // (nu pe tăcere brută). `create_response:true` = Kelion răspunde când
+        // termini de vorbit (full-duplex RESPONSIV — auzul NU are voie să pice),
+        // `interrupt_response:true` = barge-in real. NOTĂ: cuvântul de trezire
+        // strict (`create_response:false` + gating pe „Kelion") a fost scos —
+        // dacă transcrierea nu prindea EXACT numele, Kelion nu mai răspundea
+        // deloc („nu mă aude"). Trezirea fiabilă se face pe client (vezi hasWakeWord).
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
-          create_response: false,
+          create_response: true,
           interrupt_response: true,
         },
       },

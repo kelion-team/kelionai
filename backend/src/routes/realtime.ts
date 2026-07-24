@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, getMeserieActiva, saveMessage } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
@@ -30,10 +31,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // parserul OpenAI (pion) dădea „unmarshal SDP: EOF" (cauza „nu mă aude").
       const offer = raw.endsWith('\n') ? raw : raw + '\r\n'
 
-      // Limba PERSISTATĂ a userului învinge; dacă nu are una salvată, folosim ce
-      // trimite clientul; altfel română. Așa vocea rămâne pe aceeași limbă peste
-      // sesiuni și peste orice escaladare de model — invizibil pentru user.
-      const lang = (await getSpeechLang(user.email)) || req.body?.language || 'ro'
+      // LIMBA (fix „Kelion vorbește în spaniolă" — Adrian, 24 iul): OWNER-ul e
+      // MEREU în română (regula proprietarului, ca în restul aplicației), fără
+      // să conteze ce limbă a fost detectată/salvată greșit. Pentru ceilalți:
+      // limba PERSISTATĂ învinge, altfel ce trimite clientul, altfel română.
+      // Normalizăm la cod ISO 2 litere valid → instrucțiunile și transcrierea
+      // primesc o limbă curată (nu un tag ciudat care ar deraia vocea).
+      let lang = (await getSpeechLang(user.email)) || req.body?.language || 'ro'
+      lang = String(lang).slice(0, 2).toLowerCase()
+      if (!/^[a-z]{2}$/.test(lang)) lang = 'ro'
+      if (user.email === config.adminEmail) lang = 'ro'
 
       let meserieName: string | null = null
       const meserieId = await getMeserieActiva(user.email)
