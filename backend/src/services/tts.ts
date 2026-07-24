@@ -1,10 +1,17 @@
+import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 
-// TTS pe OpenAI (aceeași cheie ca vocea live) — pentru /api/tts + salutul de pe
-// landing. Fără cheie Google TTS: „2 chei, punct" (Adrian). Voce masculină
-// consistentă cu vocea live (`onyx`). OpenAI detectează limba din text.
+// TTS — Chirp 3 HD (Google) ca PRINCIPAL, OpenAI ca REZERVĂ.
+//
+// Adrian (24 iul): „vocea Chirp 3 HD, full-duplex". Deci sinteza vocii lui
+// Kelion e Google Chirp 3 HD (voce naturală, masculină — stil implicit Charon),
+// prin cheia `GOOGLE_TTS_API_KEY` (sau un service account). Dacă nicio cheie
+// Google nu e configurată — sau apelul Google pică — cădem pe OpenAI TTS ca să
+// nu rămână niciodată mut. Vocea live (full-duplex) vine din calea STT→creier→
+// acest TTS + barge-in, nu din OpenAI Realtime (Realtime nu poate reda Chirp).
 
+const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
 const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech'
 
 const DEFAULT_REGION: Record<string, string> = {
@@ -23,9 +30,26 @@ export function normalizeLang(raw: string | undefined): string {
   return `${lng}-${region}`
 }
 
-/** True când cheia OpenAI e configurată (aceeași care face și vocea live). */
+let auth: GoogleAuth | null = null
+function getAuth(): GoogleAuth | null {
+  if (!config.googleServiceAccountJson) return null
+  if (!auth) {
+    auth = new GoogleAuth({
+      credentials: JSON.parse(config.googleServiceAccountJson) as Record<string, unknown>,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    })
+  }
+  return auth
+}
+
+/** Google Chirp 3 HD e disponibil (service account SAU cheie API). */
+function googleTtsAvailable(): boolean {
+  return getAuth() !== null || !!config.googleTtsKey
+}
+
+/** True când EXISTĂ o cale de sinteză: Google Chirp 3 HD sau OpenAI ca rezervă. */
 export function ttsConfigured(): boolean {
-  return !!config.openai.key
+  return googleTtsAvailable() || !!config.openai.key
 }
 
 export type TtsResult =
@@ -39,9 +63,10 @@ export interface SynthOpts {
 }
 
 /**
- * Sintetizează `text` prin OpenAI TTS. Întoarce un rezultat tipat ca apelantul
- * să mapeze erorile pe statusul HTTP corect. Fără auth/cost aici (rămân în rută).
- * Implicit MP3; `{ encoding: 'LINEAR16' }` → PCM brut (24kHz) pentru agenți.
+ * Sintetizează `text` în limba `langRaw`. Încearcă întâi Chirp 3 HD (Google);
+ * dacă nu e configurat sau pică, cade pe OpenAI. Rezultat tipat ca apelantul să
+ * mapeze erorile pe statusul HTTP corect. Implicit MP3; `{ encoding: 'LINEAR16' }`
+ * → PCM brut (24kHz) pentru agentul de voce.
  */
 export async function synthesize(
   text: string,
@@ -57,6 +82,69 @@ export async function synthesize(
   // ca să fie rostite corect (API → „a pe i"). Strat pur pe text.
   const spoken = academicPronounce(clean, lang.split('-')[0])
 
+  // 1) Chirp 3 HD (Google) — vocea principală cerută.
+  if (googleTtsAvailable()) {
+    const r = await synthChirp(spoken, lang, opts)
+    if (r.ok) return r
+    // Google a picat → nu rămânem muți, încercăm OpenAI mai jos.
+  }
+
+  // 2) Rezervă: OpenAI TTS (voce masculină `onyx`).
+  if (config.openai.key) return synthOpenAI(spoken, opts)
+
+  return { ok: false, status: 502, error: 'tts_failed' }
+}
+
+// ── Chirp 3 HD (Google) ──────────────────────────────────────────────────────
+async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promise<TtsResult> {
+  // Forțăm mereu Chirp 3 HD: stilul din env poate fi un nume complet de voce
+  // (ex. „ro-RO-Chirp3-HD-Charon") sau doar stilul (ex. „Charon"). Orice altceva
+  // cade pe Charon — voce masculină caldă.
+  const configured = config.ttsVoiceStyle.trim()
+  const voiceName = /Chirp3-HD/i.test(configured)
+    ? configured
+    : /^[A-Z][a-z]+$/.test(configured)
+      ? `${lang}-Chirp3-HD-${configured}`
+      : `${lang}-Chirp3-HD-Charon`
+
+  const a = getAuth()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  let url = GOOGLE_TTS_URL
+  if (a) {
+    const token = await a.getAccessToken().catch(() => null)
+    if (!token) return { ok: false, status: 502, error: 'tts_auth_failed' }
+    headers.Authorization = `Bearer ${token}`
+  } else {
+    url = `${GOOGLE_TTS_URL}?key=${config.googleTtsKey}`
+  }
+
+  const encoding = opts.encoding ?? 'MP3'
+  const audioConfig: Record<string, unknown> = { audioEncoding: encoding }
+  if (encoding === 'LINEAR16') audioConfig.sampleRateHertz = opts.sampleRateHertz ?? 24000
+
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        input: { text: spoken },
+        voice: { languageCode: lang, name: voiceName },
+        audioConfig,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    return { ok: false, status: 502, error: 'tts_failed' }
+  }
+  if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
+  const j = (await res.json().catch(() => ({}))) as { audioContent?: string }
+  if (!j.audioContent) return { ok: false, status: 502, error: 'tts_empty' }
+  return { ok: true, audio: Buffer.from(j.audioContent, 'base64') }
+}
+
+// ── Rezervă: OpenAI TTS ──────────────────────────────────────────────────────
+async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> {
   // OpenAI TTS: `pcm` = LINEAR16 24kHz mono; altfel `mp3`. Voce masculină unică.
   const format = opts.encoding === 'LINEAR16' ? 'pcm' : 'mp3'
   let res: Response
