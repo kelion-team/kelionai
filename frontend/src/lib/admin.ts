@@ -63,6 +63,31 @@ export async function fetchFinance(): Promise<Finance | null> {
   }
 }
 
+// CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
+export interface MoneyCircuit {
+  payoutsInterval: string
+  issuingStatus: string
+  cards: { id: string; last4: string; status: string }[]
+  issuingAvailable: number
+  error?: string
+}
+export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
+  try {
+    const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
+    return r.ok ? ((await r.json()) as MoneyCircuit) : null
+  } catch {
+    return null
+  }
+}
+export async function createAiCard(): Promise<{ id: string; last4: string; url: string } | null> {
+  try {
+    const r = await fetch('/api/admin/money-circuit/card', { method: 'POST', credentials: 'include' })
+    return r.ok ? ((await r.json()) as { id: string; last4: string; url: string }) : null
+  } catch {
+    return null
+  }
+}
+
 // VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
 export async function sellCredits(
   email: string,

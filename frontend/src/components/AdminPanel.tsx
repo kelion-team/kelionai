@@ -18,6 +18,9 @@ import {
   updatePool,
   manageUser,
   sellCredits,
+  fetchMoneyCircuit,
+  createAiCard,
+  type MoneyCircuit,
   fetchLeads,
   emailLead,
   type Lead,
@@ -155,6 +158,9 @@ export default function AdminPanel({
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [triaging, setTriaging] = useState(false)
   const [finance, setFinance] = useState<Finance | null>(null)
+  // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
+  const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
+  const [cardBusy, setCardBusy] = useState(false)
   // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
@@ -245,6 +251,7 @@ export default function AdminPanel({
     void fetchUsers().then(setUsers)
     void fetchGaps().then(setGaps)
     void fetchFinance().then(setFinance)
+    void fetchMoneyCircuit().then(setCircuit)
     void fetchTransactions().then(setTransactions)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
@@ -569,6 +576,67 @@ export default function AdminPanel({
                     )}
                   </div>
                 )}
+                {/* CIRCUITUL BANILOR, din admin (Adrian, 24 iul: „din platforma
+                    kelionai admin"): userii plătesc → punga Stripe → cardul
+                    virtual → OpenAI + OpenRouter. Fiecare verigă cu starea ei
+                    LIVE; ce se poate prin API se face de AICI. */}
+                <div className="or-wallet">
+                  <div className="or-wallet-main">
+                    <span className="or-wallet-label">Circuitul banilor: useri → Stripe → AI</span>
+                  </div>
+                  {!circuit && <span className="or-wallet-sub">Se citește starea din Stripe…</span>}
+                  {circuit && (
+                    <>
+                      <span className="or-wallet-sub">
+                        {circuit.payoutsInterval === 'manual' ? '✅' : '❌'} 1. Banii RĂMÂN în pungă (payouts: {circuit.payoutsInterval}){' '}
+                        {circuit.payoutsInterval !== 'manual' && (
+                          <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
+                        )}
+                      </span>
+                      <span className="or-wallet-sub">
+                        {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
+                        {circuit.issuingStatus !== 'active' && (
+                          <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">Activează</a>
+                        )}
+                      </span>
+                      <span className="or-wallet-sub">
+                        {circuit.cards.length > 0 ? `✅ 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}` : '❌ 3. Cardul Kelion AI: necreat'}{' '}
+                        {circuit.issuingStatus === 'active' && circuit.cards.length === 0 && (
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={cardBusy}
+                            onClick={async () => {
+                              setCardBusy(true)
+                              const c = await createAiCard()
+                              setCardBusy(false)
+                              if (c) {
+                                window.open(c.url, '_blank', 'noopener')
+                                void fetchMoneyCircuit().then(setCircuit)
+                              } else window.alert('Crearea cardului a eșuat — activează întâi Issuing.')
+                            }}
+                          >
+                            {cardBusy ? 'Se creează…' : 'Creează cardul'}
+                          </button>
+                        )}
+                        {circuit.cards.length > 0 && (
+                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi datele cardului</a>
+                        )}
+                      </span>
+                      <span className="or-wallet-sub">
+                        4. Cardul pus la AI:{' '}
+                        <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">OpenAI (voce)</a>
+                        {' · '}
+                        <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">OpenRouter (creier)</a>
+                        {' '}— cu auto-recharge pornit la amândouă
+                      </span>
+                      <span className="or-wallet-sub">
+                        Punga Issuing (gata de cheltuit pe card): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong>{' '}
+                        <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Adaugă fonduri</a>
+                      </span>
+                    </>
+                  )}
+                </div>
                 <div className="pool-manage">
                   <div className="pool-manage-head">
                     Pool AI — banii puși la dispoziția AI. Încărcat {sym}

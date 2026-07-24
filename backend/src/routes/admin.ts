@@ -34,7 +34,7 @@ import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
-import { getStripeBalance, createSaleCheckout } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -342,6 +342,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (req.body?.direction === 'withdraw') await withdrawAdminPool(amount)
     else await loadAdminPool(amount)
     return reply.send(await getAdminAccount())
+  })
+
+  // CIRCUITUL BANILOR din adminul Kelionai (Adrian, 24 iul): starea live a
+  // fiecărei verigi Stripe→AI + crearea cardului virtual prin API. STRICT admin.
+  app.get('/api/admin/money-circuit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await getMoneyCircuit())
+  })
+  app.post('/api/admin/money-circuit/card', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const r = await createKelionCard(user.email)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, ...r })
   })
 
   // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de

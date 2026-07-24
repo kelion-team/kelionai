@@ -163,6 +163,88 @@ export async function chargeSavedCard(
   return { ok: true, paymentIntentId: j.id, amount }
 }
 
+// ── CIRCUITUL BANILOR, din adminul Kelionai (Adrian, 24 iul: „din platforma
+// kelionai admin") ───────────────────────────────────────────────────────────
+// Starea LIVE a fiecărei verigi Stripe→AI: payouts (Manual = banii rămân în
+// pungă), capacitatea Issuing, cardurile virtuale existente. Ce se poate face
+// prin API se face de aici (creare card); ce cere dashboard-ul (activare
+// Issuing, introducerea cardului la OpenAI/OpenRouter) primește link direct.
+export interface MoneyCircuit {
+  payoutsInterval: string // 'manual' = corect (banii rămân în pungă)
+  issuingStatus: string // 'active' | 'inactive' | 'pending' | 'unknown'
+  cards: { id: string; last4: string; status: string }[]
+  issuingAvailable: number // punga Issuing (bani gata de cheltuit pe card), GBP
+  error?: string
+}
+
+export async function getMoneyCircuit(): Promise<MoneyCircuit> {
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0 }
+  if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
+  try {
+    const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
+    if (acc.ok) {
+      const a = (await acc.json()) as {
+        settings?: { payouts?: { schedule?: { interval?: string } } }
+        capabilities?: { card_issuing?: string }
+      }
+      out.payoutsInterval = a.settings?.payouts?.schedule?.interval ?? 'unknown'
+      out.issuingStatus = a.capabilities?.card_issuing ?? 'inactive'
+    }
+    const bal = await fetch(`${API}/balance`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
+    if (bal.ok) {
+      const b = (await bal.json()) as { issuing?: { available?: { amount: number }[] } }
+      out.issuingAvailable = (b.issuing?.available?.[0]?.amount ?? 0) / 100
+    }
+    if (out.issuingStatus === 'active') {
+      const cards = await fetch(`${API}/issuing/cards?limit=5&status=active`, {
+        headers: authHeaders(),
+        signal: AbortSignal.timeout(12_000),
+      })
+      if (cards.ok) {
+        const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string }[] }
+        out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '' }))
+      }
+    }
+    return out
+  } catch (e) {
+    return { ...out, error: String(e).slice(0, 120) }
+  }
+}
+
+// Creează cardul virtual „Kelion AI" prin API (necesită Issuing activ):
+// cardholder pe emailul adminului + card virtual GBP. Detaliile complete
+// (număr/CVC) se văd în dashboardul Stripe (API-ul le dă doar cu acces PCI
+// special) — întoarcem linkul direct la card.
+export async function createKelionCard(adminEmail: string): Promise<
+  { id: string; last4: string; url: string } | { error: string }
+> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  try {
+    const chBody = new URLSearchParams()
+    chBody.set('name', 'Kelion AI')
+    chBody.set('email', adminEmail)
+    chBody.set('type', 'individual')
+    chBody.set('billing[address][line1]', 'Kelionai')
+    chBody.set('billing[address][city]', 'London')
+    chBody.set('billing[address][postal_code]', 'EC1A 1AA')
+    chBody.set('billing[address][country]', 'GB')
+    const ch = await fetch(`${API}/issuing/cardholders`, { method: 'POST', headers: authHeaders(), body: chBody })
+    const chJ = (await ch.json().catch(() => ({}))) as { id?: string; error?: { message?: string } }
+    if (!ch.ok || !chJ.id) return { error: chJ.error?.message ?? `cardholder_http_${ch.status}` }
+    const cBody = new URLSearchParams()
+    cBody.set('cardholder', chJ.id)
+    cBody.set('currency', config.stripe.currency)
+    cBody.set('type', 'virtual')
+    cBody.set('status', 'active')
+    const card = await fetch(`${API}/issuing/cards`, { method: 'POST', headers: authHeaders(), body: cBody })
+    const cardJ = (await card.json().catch(() => ({}))) as { id?: string; last4?: string; error?: { message?: string } }
+    if (!card.ok || !cardJ.id) return { error: cardJ.error?.message ?? `card_http_${card.status}` }
+    return { id: cardJ.id, last4: cardJ.last4 ?? '????', url: `https://dashboard.stripe.com/issuing/cards/${cardJ.id}` }
+  } catch (e) {
+    return { error: String(e).slice(0, 160) }
+  }
+}
+
 // The REAL Stripe balance (money actually held at Stripe), summed per state and
 // returned in major units of the account currency. This is the owner's true
 // revenue-side figure — not a hand-typed number.
