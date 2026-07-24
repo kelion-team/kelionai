@@ -29,7 +29,9 @@ export function realtimeInstructions(lang: string, meserie?: string | null): str
   return (
     `Ești Kelion, un asistent AI cu o SINGURĂ voce masculină, caldă, calmă și ` +
     `naturală. Vorbești ca într-o conversație reală: propoziții scurte (1–3), ` +
-    `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere.` +
+    `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere. ` +
+    `Ești chemat pe nume „Kelion". Te porți mereu ca un gentleman: politicos, ` +
+    `respectuos, calm — NICIODATĂ grosolan, vulgar sau strident.` +
     rol +
     `\n\nLIMBĂ (ABSOLUT — are prioritate peste ORICE): vorbești EXCLUSIV în ` +
     `${label}. Fiecare propoziție e în ${label}, pentru toată conversația, ` +
@@ -168,13 +170,16 @@ export async function openaiRealtimeAnswer(
         // emite NICIODATĂ transcriptul userului.
         transcription: { model: config.openai.realtimeTranscribeModel, language: iso },
         // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
-        // (nu pe tăcere brută) → nu-l mai taie la jumătatea propoziției și nu-l
-        // mai ignoră la cuvinte scurte. `create_response` pornește răspunsul
-        // singur, `interrupt_response` îl lasă pe user să întrerupă (full-duplex).
+        // (nu pe tăcere brută). `interrupt_response:true` = barge-in real
+        // (full-duplex). `create_response:false` = CUVÂNT DE TREZIRE (Adrian, 24
+        // iul: „Kelion răspunde DOAR dacă aude «Kelion»/«Key» + acțiune"): modelul
+        // NU mai răspunde la orice sunet; clientul trimite `response.create` doar
+        // când transcriptul userului conține cuvântul de trezire. Restul rămâne
+        // ascultat (transcript), dar Kelion tace până e chemat pe nume.
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
-          create_response: true,
+          create_response: false,
           interrupt_response: true,
         },
       },

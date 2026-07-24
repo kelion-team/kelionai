@@ -10,6 +10,16 @@
 
 import { driveVoiceLevelFromElement } from './audioIO'
 
+// CUVÂNT DE TREZIRE (Adrian, 24 iul: „Kelion răspunde DOAR dacă aude «Kelion»
+// sau «Key» + acțiune"). Transcrierea aude „Kelion" în multe forme (accent,
+// zgomot): acceptăm variantele frecvente + „key/chei". Cerem și o graniță de
+// cuvânt ca o discuție care doar POMENEȘTE alt cuvânt să nu-l trezească aiurea.
+const WAKE_WORD_RE =
+  /\b(k[eé]lion|kellion|kelian|kel[iy]on|chelion|chel[iy]on|c[aă]lion|kelly|k[eé]y|chei|chey)\b/i
+export function hasWakeWord(text: string): boolean {
+  return WAKE_WORD_RE.test((text || '').toLowerCase())
+}
+
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
 export interface RealtimeVoiceHandle {
@@ -190,6 +200,11 @@ export async function startRealtimeVoice(
         userText.delete(itemId)
         onUserTranscript?.(t, true)
         persistTranscript('user', t)
+        // CUVÂNT DE TREZIRE (Adrian, 24 iul: „Kelion răspunde DOAR dacă aude
+        // «Kelion»/«Key» + acțiune"). Serverul are `create_response:false`, deci
+        // Kelion tace până e chemat pe nume: doar aici, când transcriptul conține
+        // cuvântul de trezire, îi cerem să răspundă. Altfel rămâne ascultător mut.
+        if (hasWakeWord(t)) send({ type: 'response.create' })
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)
