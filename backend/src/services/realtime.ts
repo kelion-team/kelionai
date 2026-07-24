@@ -137,7 +137,7 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
           },
           section: {
             type: 'string',
-            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox'],
+            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'],
             description: 'Optional admin section (only when view=admin).',
           },
         },

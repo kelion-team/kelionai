@@ -20,6 +20,32 @@ ENVFILE=/root/kelion/kelionai.env
 BRANCH="${1:-master}"
 CADDY_DIR=/root/kelion-caddy
 
+echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
+# Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
+# paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
+# claude; watchdog.sh + paznic-chat.sh (cron, la fiecare minut) le REPORNEAU
+# la orice oprire; timerele caiet-watch/perpetuum/qa-patrol arătau spre
+# scripturi care nu mai există. Idempotent la FIECARE deploy, în 3 straturi:
+# 1) resuscitatorii afară din crontab (backupurile rămân);
+crontab -l 2>/dev/null | grep -vE 'watchdog\.sh|paznic-chat\.sh' | crontab - 2>/dev/null || true
+# 2) serviciile: stop + disable + unit-file mutat + mask (mask-ul eșuează cât
+#    timp unit-file-ul real există — de-aia întâi îl mutăm în dead-units/);
+mkdir -p /root/kelion/dead-units
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+  systemctl stop "$s" 2>/dev/null || true
+  systemctl disable "$s" 2>/dev/null || true
+  mv "/etc/systemd/system/$s.service" /root/kelion/dead-units/ 2>/dev/null || true
+done
+systemctl daemon-reload 2>/dev/null || true
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+  systemctl mask "$s" 2>/dev/null || true
+done
+# 3) timerele moarte (scripturile lor au dispărut din repo).
+for t in kelion-caiet-watch kelion-perpetuum kelion-qa-patrol; do
+  systemctl stop "$t.timer" 2>/dev/null || true
+  systemctl disable "$t.timer" 2>/dev/null || true
+done
+
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
 git fetch origin --prune

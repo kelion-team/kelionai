@@ -260,7 +260,7 @@ const OPEN_APP_VIEW_TOOL: Tool = {
       },
       section: {
         type: 'string',
-        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox'],
+        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'],
         description: 'Optional admin section (only when view=admin).',
       },
     },
@@ -768,10 +768,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // CREIERUL e pe Kimi (primar) → GLM (rezervă). Vechiul provider scos complet
-    // (Adrian, 12 iul: „rămâne doar Kimi și GLM"). Dacă lipsesc
-    // ambele chei, plasa de siguranță din streaming dă o eroare clară în limba
-    // userului — de aceea nu mai există aici un gard 503 „brain_not_configured".
+    // CREIERUL e 100% OpenRouter (o singură cheie, GPT/Gemini/Claude — Kimi și
+    // GLM scoase definitiv, 23-24 iul). Dacă lipsește cheia, plasa de siguranță
+    // din streaming dă o eroare clară în limba userului — de aceea nu mai există
+    // aici un gard 503 „brain_not_configured".
     const rawMessages = req.body?.messages
     const image = req.body?.image
     // Cadrele multiple (max 4, doar imagini reale) — cad înapoi pe `image`
@@ -1752,8 +1752,15 @@ async function runTool(
         }
       }
       const promoUrl = await promoSceneUrl('map', subject)
+      // ARMAREA RECORDERULUI (audit 24 iul: „clip promo nu merge din chat scris")
+      // — frame-ul `{promo}` e cel pe care ChatPanel îl așteaptă (c.promo?.script
+      // → armPromo) ca să armeze butonul Rec cu scenariul aprobat; înainte se
+      // emitea DOAR `{monitor}` și recorderul nu se arma niciodată.
+      reply.raw.write(
+        `${CTRL}${JSON.stringify({ promo: { subject, duration, script, lang, scenes } })}${CTRL}`,
+      )
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: promoUrl, title: `Promo: ${subject}` } })}${CTRL}`)
-      return JSON.stringify({ shown: true, url: promoUrl })
+      return JSON.stringify({ armed: true, shown: true, url: promoUrl })
     }
 
     default: {
