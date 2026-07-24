@@ -51,15 +51,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      // LOGARE FULL GOOGLE (Adrian, 24 iul: „la logare trebuie să se logeze full
-      // la Google"): dintr-un singur login se acordă TOATE scope-urile (identitate
-      // + Gmail/Calendar/Drive/Tasks/Contacts), cu refresh token — nu mai e nevoie
-      // de pasul separat „Connect Google". access_type=offline + prompt=consent
-      // garantează refresh token-ul pentru ca skill-urile să meargă lung.
-      scope: CONNECT_SCOPES,
-      access_type: 'offline',
-      include_granted_scopes: 'true',
-      prompt: 'consent',
+      // DOAR IDENTITATE la login (Adrian, 24 iul: „Google hasn't verified this
+      // app — îmi sperie clienții"). Aceste 3 scope-uri sunt NON-sensibile, deci
+      // Google NU afișează ecranul roșu de avertisment — orice vizitator se poate
+      // loga liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
+      // rămân OPȚIONALE, cerute la nevoie prin „Conectează Gmail & Calendar"
+      // (doar cine le vrea trece prin consimțământ, nu toți userii la login).
+      scope: 'openid email profile',
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)

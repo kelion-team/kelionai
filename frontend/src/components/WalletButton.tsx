@@ -87,14 +87,25 @@ export function WalletButton({
       void refresh()
     }
     window.addEventListener('kelion:paywall', onPaywall)
+    // CREDIT ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
+    // real, valoarea reală"): reîmprospătăm la fiecare 15s, imediat ce fereastra
+    // redevine activă (revii în tab) ȘI la orice semnal că s-a consumat/creditat.
+    const onChanged = (): void => void refresh()
+    window.addEventListener('kelion:credits-changed', onChanged)
+    const onVisible = (): void => { if (!document.hidden) void refresh() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onChanged)
     // Returned from a successful top-up — refresh and clean the URL.
     if (new URLSearchParams(window.location.search).get('topup') === 'success') {
       window.history.replaceState({}, '', window.location.pathname)
       setTimeout(() => void refresh(), 1500)
     }
-    const poll = window.setInterval(() => void refresh(), 60_000) // keep % fresh
+    const poll = window.setInterval(() => void refresh(), 15_000) // sold LIVE
     return () => {
       window.removeEventListener('kelion:paywall', onPaywall)
+      window.removeEventListener('kelion:credits-changed', onChanged)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onChanged)
       clearInterval(poll)
     }
   }, [])
@@ -125,14 +136,17 @@ export function WalletButton({
   const critical = percent <= 5 // stays blinking red at the very end
   return (
     <div className="wallet">
+      {/* Pastila = SOLDUL curent (creditele pe care le AI), nu „cumpără X".
+          Adrian, 24 iul: „e greșită comunicarea — am 150 credite sau cumpăr
+          150?". Icon portofel + număr = clar sold; adăugarea e în meniu. */}
       <button
         type="button"
         className={`ghost wallet-badge ${critical ? 'blink-red' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={t.buyCredit}
+        title={ro ? 'Creditele tale disponibile — apasă pentru a adăuga' : 'Your available credits — click to add more'}
       >
+        <span aria-hidden style={{ marginRight: 5 }}>💳</span>
         {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
-        <span className="wallet-plus" aria-hidden>＋</span>
       </button>
       {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
           absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
@@ -150,7 +164,11 @@ export function WalletButton({
       )}
       {open && (
         <div className="wallet-menu">
-          <span className="wallet-menu-title">{paywalled ? t.topUp : t.buyCredit}</span>
+          {/* SOLD curent, clar separat de acțiunea de adăugare. */}
+          <span className="wallet-menu-balance">
+            {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
+          </span>
+          <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
           {firstTopUp && (
             <span className="wallet-menu-note">
               {ro

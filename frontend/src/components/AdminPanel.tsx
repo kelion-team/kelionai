@@ -259,6 +259,18 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
+  // BANI ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
+  // real, valoarea reală"): cât timp tabul Bani e deschis, reîmprospătăm soldul
+  // OpenRouter, Stripe, profit și tranzacțiile la fiecare 15s — valori LIVE.
+  useEffect(() => {
+    if (tab !== 'finance') return
+    const id = window.setInterval(() => {
+      void fetchFinance().then(setFinance)
+      void fetchTransactions().then(setTransactions)
+    }, 15_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
   // Live visitor chat: refresh the conversation list while the tab is open, and
   // poll the OPEN conversation for new visitor lines (both every few seconds).
   useEffect(() => {
@@ -518,6 +530,42 @@ export default function AdminPanel({
                     </span>
                   </div>
                 </div>
+                {/* PUNGA LUI KELION = soldul REAL, exact din contul OpenRouter
+                    (creierul central). Valoare LIVE; când e sub prag, avertizăm
+                    să depui bani. Doar adminul vede acest tab. */}
+                {finance.openrouter && (
+                  <div className={`or-wallet ${finance.openrouter.low ? 'low' : ''}`}>
+                    <div className="or-wallet-main">
+                      <span className="or-wallet-label">
+                        OpenRouter — punga lui Kelion (creierul central)
+                      </span>
+                      <span className="or-wallet-val">
+                        {finance.openrouter.live ? `$${finance.openrouter.balance.toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                    {!finance.openrouter.live && (
+                      <span className="or-wallet-sub">
+                        Nu pot citi soldul acum (cheia OpenRouter lipsește sau contul e inaccesibil).
+                      </span>
+                    )}
+                    {finance.openrouter.live && finance.openrouter.low && (
+                      <span className="or-wallet-sub">
+                        ⚠️ Sub ${finance.openrouter.threshold} — depune bani ca să nu pice creierul.{' '}
+                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
+                          Alimentează OpenRouter
+                        </a>
+                      </span>
+                    )}
+                    {finance.openrouter.live && !finance.openrouter.low && (
+                      <span className="or-wallet-sub">
+                        Se alimentează central, automat, din acest cont.{' '}
+                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
+                          Alimentează
+                        </a>
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="pool-manage">
                   <div className="pool-manage-head">
                     Pool AI — banii puși la dispoziția AI. Încărcat {sym}

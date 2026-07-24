@@ -2643,6 +2643,13 @@ body {
   opacity: 0.7;
   padding: 2px 4px;
 }
+.wallet-menu-balance {
+  font-size: 14px;
+  padding: 4px 4px 6px;
+  border-bottom: 1px solid #2a2f3a;
+  margin-bottom: 4px;
+}
+.wallet-menu-balance strong { color: #7ee2a8; }
 .wallet-menu-note {
   font-size: 11px;
   line-height: 1.35;
@@ -2911,6 +2918,46 @@ a.card-item:hover {
 }
 
 /* Pool AI — controale de adăugat/scos bani în tab-ul „Bani". */
+/* PUNGA LUI KELION — soldul real OpenRouter (creierul central), doar admin. */
+.or-wallet {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #12151c;
+}
+.or-wallet.low {
+  border-color: #b4442e;
+  background: #221312;
+}
+.or-wallet-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.or-wallet-label {
+  font-size: 13px;
+  opacity: 0.7;
+}
+.or-wallet-val {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.or-wallet.low .or-wallet-val {
+  color: #ff8d8d;
+}
+.or-wallet-sub {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.or-wallet-sub a {
+  color: #7db4ff;
+}
 .pool-manage {
   margin-top: 14px;
   padding: 14px 16px;

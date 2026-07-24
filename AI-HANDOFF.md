@@ -242,6 +242,11 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 22 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **24 IUL — DETECȚIE AUDIO ULTRA-PERFORMANTĂ + full-duplex + OpenRouter „punga lui Kelion" (branch `claude/reia-l9l2qx`, PR #359):**
+  1. **VOCE full-duplex — cauza reală „nu mă aude":** `/v1/realtime/calls` cerea modelul ca PARAMETRU ÎN URL (`?model=`) — fără el, OpenAI răspundea „missing_model" și sesiunea nu pornea DELOC. Adăugat. Fixul era în cod dar NEDEPLOYAT → Adrian testa mereu codul vechi.
+  2. **Detecție audio (Adrian: „detecția audio defectă, voce/voce, voce/text"):** `services/realtime.ts` — transcriere cu modelul MARE `gpt-4o-transcribe` (nu „mini") + **`language: <iso>`** fixat pe limba persistată a userului (elimină ghicirea greșită a limbii) + **`turn_detection: semantic_vad`** (create+interrupt response = full-duplex real) + **`noise_reduction: near_field`**. Config nou: `OPENAI_REALTIME_TRANSCRIBE_MODEL`, `OPENAI_REALTIME_VAD_EAGERNESS`.
+  3. **OpenRouter = punga lui Kelion (Adrian, 24 iul):** creierul se alimentează CENTRAL din contul OpenRouter, nu de fiecare user. `services/openrouter.ts` `getOpenRouterBalance()` (GET /credits → total_credits−total_usage = sold EXACT, ca „$5,83"); admin `/api/admin/brain-credit` + `/api/admin/finance` întorc soldul real; card „punga lui Kelion" în tabul Bani (LIVE, refresh 15s). `services/openrouterAlert.ts` + wiring index → email admin când soldul < prag (`OPENROUTER_LOW_USD`, implicit $10), 1/zi. **Userii NU văd** (rute admin-only).
+  4. **Credite în timp real:** WalletButton poll 15s + refresh pe focus/visibilitychange + eveniment `kelion:credits-changed`; tabul Bani (admin) reîmprospătat la 15s.
 - 🗓️ **24 IUL — 6 FIXURI DE VOCE din audit („nu mă aude") — branch `claude/reia-l9l2qx`, NEmerge-uit/NEdeployat încă:**
   1. `routes/realtime.ts`: `.trim()` pe oferta SDP tăia CRLF-ul final obligatoriu → OpenAI „failed to unmarshal SDP: EOF"; acum se păstrează/reface `\r\n`-ul final.
   2. `services/realtime.ts`: sesiunea Realtime primește `audio.input.transcription` (`gpt-4o-mini-transcribe`) — fără el GA nu emitea NICIODATĂ transcriptul userului.

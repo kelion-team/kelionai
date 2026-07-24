@@ -28,6 +28,8 @@ import { browserRoutes } from './routes/browser.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { triageGaps } from './services/gapsTriage.js'
+import { reconcileStripePayments } from './services/stripeReconcile.js'
+import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
@@ -305,6 +307,26 @@ try {
   app.log.info(`Kelionai backend on :${config.port}`)
   // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
   startMailbox()
+  // PLASA BANILOR (Adrian, 24 iul: „nu e de joacă cu banii userilor"):
+  // reconciliere Stripe la boot + la fiecare oră — orice plată reală rămasă
+  // necreditată (webhook pierdut/respins) se aplică singură, idempotent.
+  setTimeout(() => {
+    const run = (): void => {
+      void reconcileStripePayments()
+        .then((r) => { if (r.credited > 0) app.log.warn(r, 'stripe reconcile: plăți recuperate') })
+        .catch(() => {})
+    }
+    run()
+    setInterval(run, 60 * 60 * 1000)
+  }, 20_000)
+  // ALERTĂ SOLD OPENROUTER (Adrian, 24 iul: „se anunță admin că e nevoie să
+  // depună bani"): creierul e alimentat CENTRAL din punga lui Kelion; când
+  // soldul real scade sub prag, îl anunțăm pe admin pe email (o dată/zi).
+  // La 40s după boot, apoi la fiecare 30 min. Best-effort.
+  setTimeout(() => {
+    void checkOpenRouterBalance().catch(() => {})
+    setInterval(() => { void checkOpenRouterBalance().catch(() => {}) }, 30 * 60 * 1000)
+  }, 40_000)
   // TRIAJ AUTONOM zilnic al cererilor neacoperite (Adrian, 24 iul): Kelion
   // decide singur ce aduce valoare (rămâne „DE IMPLEMENTAT") și ce se închide
   // automat. La 1h după boot, apoi la 24h. Best-effort — nu blochează nimic.

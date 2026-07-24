@@ -22,6 +22,14 @@ export interface Finance {
   byKind: Record<string, number>
   // Consumat AZI la AI (USD, real) — cardul „Consumat azi" din tabul Bani.
   today: number
+  // „Punga lui Kelion" — soldul REAL, exact din contul OpenRouter (USD).
+  openrouter?: {
+    balance: number
+    low: boolean
+    threshold: number
+    live: boolean
+    topup: string
+  }
 }
 
 export interface TransactionRow {

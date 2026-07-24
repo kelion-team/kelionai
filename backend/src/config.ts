@@ -47,6 +47,14 @@ export const config = {
     // Realtime pică — Adrian, 24 iul: „nu mă aude"). Google STT rămâne primar
     // DOAR dacă există service account; altfel transcrie OpenAI.
     transcribeModel: (process.env.OPENAI_TRANSCRIBE_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
+    // DETECȚIA AUDIO în VOCE LIVE (Adrian, 24 iul: „detecția audio defectă,
+    // necesar detecție ultra-performantă"). Modelul MARE `gpt-4o-transcribe`
+    // (nu „mini") transcrie vorbirea userului în Realtime cu acuratețe maximă.
+    realtimeTranscribeModel: (process.env.OPENAI_REALTIME_TRANSCRIBE_MODEL ?? 'gpt-4o-transcribe').trim(),
+    // Cât de „nerăbdător" e VAD-ul semantic să decidă că userul a terminat de
+    // vorbit: low=așteaptă mai mult (nu-l taie), high=răspunde repede. „auto" e
+    // echilibrul recomandat de OpenAI.
+    realtimeVadEagerness: (process.env.OPENAI_REALTIME_VAD_EAGERNESS ?? 'auto').trim(),
   },
   // CREIERUL/CHAT-UL selectabil — o SINGURĂ cheie OpenRouter pentru toate
   // modelele (GPT/Gemini/Claude). Catalogul se ia LIVE din /api/v1/models (auto-

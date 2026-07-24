@@ -998,12 +998,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // 24 iul: „la audit nu vede că sunt logat la contul Google"). Fără asta,
     // auditul spunea „nu ești conectat" deși userul era logat cu Google.
     systemPrompt +=
-      `\n\nUSER ACCOUNT (real, from the server session): the user IS signed in via Google as ${user.email}` +
+      `\n\nUSER ACCOUNT (silent context — NEVER announce or narrate this, just act on it): the user IS signed in via Google as ${user.email}` +
       `${user.role === 'admin' ? ' (the OWNER/admin of this app)' : ''}. ` +
-      (user.googleRefreshToken || token
-        ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked.'
-        : 'The heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT yet connected — for those, tell the user to press "Conectează Gmail & Calendar" in the wallet menu (top bar). Everything else works now.') +
-      ' Never claim the user is not logged in — they are.'
+      // „Conectat la Gmail" = DOAR dacă există refresh token din fluxul Connect
+      // (scope-urile grele). Login-ul simplu dă un access token de IDENTITATE
+      // fără drept pe Gmail — nu înseamnă conectat (Adrian, 24 iul: „zice că sunt
+      // conectat la Gmail dar nu poate aduce date").
+      (user.googleRefreshToken
+        ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked, without saying "you are connected".'
+        : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Conectează Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
+      ' NEVER proactively state whether the user is logged in or connected — the interface already shows it. Just answer what they asked.'
     // OCHII PE F12 (Adrian, 24 iul: „el trebuie să aibă acces la logurile").
     // Erorile RECENTE din browserul userului, trimise de client — Kelion
     // diagnostichează din simptome reale, nu din ghicit.
