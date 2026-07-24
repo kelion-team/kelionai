@@ -44,7 +44,10 @@ export const config = {
     // Fără cheie Google TTS: OpenAI acoperă și asta (Adrian: „2 chei, punct").
     // `onyx` = voce masculină, consistentă cu vocea live.
     ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
-    ttsVoice: (process.env.OPENAI_TTS_VOICE ?? 'onyx').trim(),
+    // O SINGURĂ voce masculină în TOATĂ aplicația (Adrian, 24 iul: „unifică — acum
+    // creierul o voce, chatul alta"). `ash` = EXACT vocea din Realtime (full-duplex),
+    // disponibilă și la TTS → rezerva/salutul sună identic cu vocea live, nu diferit.
+    ttsVoice: (process.env.OPENAI_TTS_VOICE ?? 'ash').trim(),
     // STT de rezervă pe aceeași cheie OpenAI (auzul NU are voie să moară dacă
     // Realtime pică — Adrian, 24 iul: „nu mă aude"). Google STT rămâne primar
     // DOAR dacă există service account; altfel transcrie OpenAI.
