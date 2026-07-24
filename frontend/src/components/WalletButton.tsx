@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchBalance, startCheckout } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
@@ -48,6 +48,13 @@ export function WalletButton({
   const [custom, setCustom] = useState('')
   // Eroarea checkout-ului AFIȘATĂ, nu înghițită („apăs și nu se execută").
   const [payErr, setPayErr] = useState('')
+  // „CREDIT ADĂUGAT" (Adrian, 24 iul: „mesajul «adăugat credit» e suficient
+  // pentru useri, restul în spate la mine automat"): când soldul CREȘTE între
+  // două citiri (adminul a vândut/creditat), userul vede doar mesajul — nicio
+  // mecanică de plată în față.
+  const [addedCredits, setAddedCredits] = useState<number | null>(null)
+  const prevCreditsRef = useRef<number | null>(null)
+  const addedTimerRef = useRef<number | null>(null)
 
   const errText = (code: string): string => {
     if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
@@ -70,6 +77,15 @@ export function WalletButton({
   const refresh = async (): Promise<void> => {
     const b = await fetchBalance()
     if (b) {
+      // Soldul a CRESCUT → mesajul „credit adăugat" (atât vede userul; vânzarea
+      // și plata rămân în spatele adminului). 8s, apoi dispare singur.
+      const prev = prevCreditsRef.current
+      if (prev !== null && b.credits > prev) {
+        setAddedCredits(b.credits - prev)
+        if (addedTimerRef.current != null) clearTimeout(addedTimerRef.current)
+        addedTimerRef.current = window.setTimeout(() => setAddedCredits(null), 8000)
+      }
+      prevCreditsRef.current = b.credits
       setCredits(b.credits)
       setPercent(b.percent)
       setFirstTopUp(!!b.firstTopUp)
@@ -177,6 +193,12 @@ export function WalletButton({
           {t.lowCredit}
         </button>
       )}
+      {/* „CREDIT ADĂUGAT" — singurul mesaj pe care îl vede userul la o vânzare. */}
+      {addedCredits !== null && (
+        <span className="wallet-toast">
+          ✅ {ro ? `${addedCredits.toLocaleString()} credite adăugate` : `${addedCredits.toLocaleString()} credits added`}
+        </span>
+      )}
       {open && (
         <div className="wallet-menu">
           {/* SOLD curent, clar separat de acțiunea de adăugare. */}
@@ -231,13 +253,7 @@ export function WalletButton({
               </div>
               {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
             </>
-          ) : (
-            <span className="wallet-menu-note">
-              {ro
-                ? 'Creditele se obțin prin linkul de plată primit de la administrator.'
-                : 'Credits are purchased via the payment link you receive from the administrator.'}
-            </span>
-          )}
+          ) : null}
           <div className="wallet-menu-sep" />
           <button
             type="button"
