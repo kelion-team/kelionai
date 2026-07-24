@@ -872,26 +872,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const lastIncomingText = lastIncoming?.role === 'user' ? lastIncoming.content : ''
     const deviceCmd = interpretDeviceCommand(lastIncomingText, req.body?.screen)
     const gestureCmd = interpretGestureCommand(lastIncomingText)
-    // LIMBA (Adrian, 10 iul: „blochează limba admin pe română, restul pe detecție
-    // automată"). ADMINUL e blocat PERMANENT pe română — NU detectăm, NU comutăm
-    // niciodată pe locale-ul contului sau pe ce citește (asta rezolvă „nu respectă
-    // limba admin" + cercul vicios al recognizer-ului). RESTUL userilor rămân pe
-    // detecția automată (trackSpeechLang), exact ca până acum.
-    const adminLocked = user.role === 'admin'
-    const committedLang = adminLocked
-      ? null // adminul nu comută niciodată — e mereu ro
-      : deviceCmd || gestureCmd
+    // LIMBA (regula FINALĂ a lui Adrian, 24 iul: „default pentru TOȚI începe în
+    // engleză, se detectează limba și se menține per user"). FĂRĂ excepții de
+    // rol: toți userii (inclusiv ownerul) pornesc în engleză până când limba
+    // REALĂ e detectată din ce scriu/vorbesc (aceeași limbă nouă pe 2 mesaje
+    // consecutive → comisă și persistată). Nu folosim locale-ul browserului/
+    // contului — limba vine din interacțiune, nu din setările dispozitivului.
+    const committedLang =
+      deviceCmd || gestureCmd
         ? null // a device/gesture command is an order, not conversation — never shifts the language
-        : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
+        : trackSpeechLang(user.email, lastIncomingText, storedPref)
     // FLUENȚĂ (B4): scriere DB fire-and-forget — nimic din aval nu-i citește
     // rezultatul, deci nu are ce căuta pe drumul primului cuvânt.
     if (committedLang) void setSpeechLangPref(user.email, committedLang)
-    // Ce anunțăm clientului ca limbă: adminul primește MEREU ro-RO (idempotent pe
-    // client — applyLang schimbă recognizer-ul doar dacă diferă), ca microfonul
-    // să asculte română; restul primesc comutarea detectată.
-    const announceLang = adminLocked ? 'ro-RO' : committedLang
-    const speechPref = adminLocked ? 'ro-RO' : (committedLang ?? storedPref)
-    const userLang = speechPref || user.locale || 'unknown'
+    // Clientului i se anunță DOAR comutarea detectată (recognizer-ul o urmează).
+    const announceLang = committedLang
+    const speechPref = committedLang ?? storedPref
+    // Default ENGLEZĂ până la prima detecție — nu locale, nu 'unknown'.
+    const userLang = speechPref || 'en'
     const ro = userLang.toLowerCase().startsWith('ro')
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
