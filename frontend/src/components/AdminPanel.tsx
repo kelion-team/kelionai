@@ -631,8 +631,9 @@ export default function AdminPanel({
                         {' '}— cu auto-recharge pornit la amândouă
                       </span>
                       <span className="or-wallet-sub">
-                        Punga Issuing (gata de cheltuit pe card): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong>{' '}
-                        <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Adaugă fonduri</a>
+                        Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
+                        EXCLUSIV din plățile userilor (circuit închis, nicio alimentare externă).{' '}
+                        <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
                       </span>
                     </>
                   )}
