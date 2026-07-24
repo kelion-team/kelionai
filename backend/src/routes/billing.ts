@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge } from '../db.js'
-import { createCheckout, createPaymentIntent, verifyWebhook } from '../services/stripe.js'
+import { createCheckout, createPaymentIntent, verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // The customer sees CREDITS (1 credit = config.stripe.creditValue) and the %
@@ -101,6 +101,16 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const sig = (req.headers['stripe-signature'] as string | undefined) ?? ''
     const event = verifyWebhook(req.rawBody ?? '', sig)
     if (!event) {
+      // FALLBACK SECURIZAT (STRIPE_WEBHOOK_SECRET lipsă pe VPS → plățile nu se
+      // creditau): re-verificăm evenimentul direct la Stripe cu cheia secretă și
+      // creditam DOAR dacă Stripe confirmă că e plătit. Bani reali, niciodată
+      // pierduți; niciodată creditare oarbă pe un payload nesemnat.
+      const v = await verifyEventWithApi(req.rawBody ?? '')
+      if (v) {
+        await topUpUser(v.email, v.amount, v.currency, v.ref)
+        reply.code(200).send({ received: true, via: 'api_verify' })
+        return
+      }
       reply.code(400).send({ error: 'bad_signature' })
       return
     }
