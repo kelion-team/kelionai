@@ -12,8 +12,15 @@ import { strings, resolveLang } from '../lib/i18n'
 //
 // VALORI PRESETATE (Adrian, 24 iul): PRIMA alimentare = £20 minim (activarea
 // creierului), apoi orice MULTIPLU de £5. Regula e validată și pe server.
-const AMOUNTS_FIRST = [20, 30, 50]
-const AMOUNTS_NEXT = [5, 10, 20, 50]
+//
+// SE VÂND CREDITE, NU LIRE (Adrian, 24 iul: „trebuie să se poată vinde X
+// credite pe bani"): produsul afișat e pachetul de CREDITE, cu prețul lângă.
+// Conversia: userul primește 75% din plată drept credit, 1 credit = £0.10 →
+// £ × 7.5 credite. Presetările sunt alese să dea numere ÎNTREGI de credite.
+const CREDITS_PER_POUND = 7.5
+const creditsFor = (pounds: number): number => Math.floor(pounds * CREDITS_PER_POUND)
+const AMOUNTS_FIRST = [20, 30, 50] // 150 / 225 / 375 credite
+const AMOUNTS_NEXT = [10, 20, 50] // 75 / 150 / 375 credite
 
 export function WalletButton({
   onOpenSettings,
@@ -184,10 +191,11 @@ export function WalletButton({
                 : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
             </span>
           )}
+          {/* PACHETE DE CREDITE (produsul = creditele, prețul lângă). */}
           <div className="wallet-amounts">
             {presets.map((a) => (
-              <button key={a} type="button" className="ghost" onClick={() => pay(a)}>
-                £{a}
+              <button key={a} type="button" className="ghost wallet-pack" onClick={() => pay(a)}>
+                <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
               </button>
             ))}
           </div>
@@ -211,7 +219,9 @@ export function WalletButton({
                 if (n !== null) pay(n)
               }}
             >
-              {ro ? 'Alimentează' : 'Top up'}
+              {customValid() !== null
+                ? `${creditsFor(customValid() as number)} ${t.credits}`
+                : ro ? 'Alimentează' : 'Top up'}
             </button>
           </div>
           {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
