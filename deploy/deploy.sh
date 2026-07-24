@@ -52,7 +52,13 @@ docker run -d --name kelion-caddy --restart unless-stopped --network host \
   -v "$CADDY_DIR/data:/data" -v "$CADDY_DIR/config:/config" \
   caddy:2 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 
-echo "== 6. Verific LIVE (versiunea trebuie să răspundă) =="
+echo "== 6. Backup criptat zilnic (cron) =="
+# Instalează/actualizează IDEMPOTENT cronul de backup criptat al DB-ului
+# (Adrian, 24 iul: „salvări periodice în zona criptată"). Zilnic la 03:15 UTC.
+install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
+
+echo "== 7. Verific LIVE (versiunea trebuie să răspundă) =="
 sleep 6
 curl -s -m 8 http://127.0.0.1:8080/api/version || echo "(încă pornește — verifică 'docker logs kelionai-app')"
 echo; echo "✅ Deploy rulat. Verifică kelionai.app după ce Cloudflare pointează pe VPS."
