@@ -36,17 +36,30 @@ export function realtimeInstructions(lang: string, meserie?: string | null): str
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
   // păstrăm (consistență între sesiuni). Dacă NU (user nou, limbă nedetectată),
   // pornim în ENGLEZĂ și OGLINDIM limba pe care o vorbește userul, stabil.
+  //
+  // GARDĂ DE LIMBĂ (Adrian, 24 iul: „vorbește în altă limbă" — dovadă live:
+  // Kelion răspundea în RUSĂ la vorbire românească). Fără ancoră, transcrierea
+  // audio ghicea printre TOATE limbile și auzea româna ca rusă. Constrângem
+  // vocea EXCLUSIV la cele 7 limbi ale aplicației; orice nesiguranță → ENGLEZĂ;
+  // niciodată rusă/ucraineană sau altceva din afara listei.
+  const SUPPORTED = 'English, Romanian, French, Spanish, Portuguese, Italian, German'
+  const guard =
+    `\n\nLANGUAGE — HARD RULES: You may speak ONLY in one of these languages: ` +
+    `${SUPPORTED}. NEVER answer in Russian, Ukrainian, or any language outside ` +
+    `this list. If you are ever unsure which language you heard, answer in ` +
+    `English. Never mix two languages in one reply.`
   const known = /^[a-z]{2}$/.test(lang)
   const limba = known
     ? `\n\nLIMBĂ: limba stabilită a utilizatorului este ${langLabel(lang)}. ` +
       `Vorbește în ${langLabel(lang)} și păstreaz-o consecvent toată conversația. ` +
-      `Schimbă DOAR dacă utilizatorul chiar începe să vorbească susținut în altă limbă.`
+      `Schimbă DOAR dacă utilizatorul chiar începe să vorbească susținut în altă ` +
+      `limbă DIN LISTA de mai sus.`
     : `\n\nLIMBĂ: începe în ENGLEZĂ. Detectează limba în care vorbește EFECTIV ` +
-      `utilizatorul (dintr-o propoziție clară) și de-atunci răspunde EXCLUSIV în ` +
-      `acea limbă, consecvent pentru tot restul conversației. NU comuta pe cuvinte ` +
-      `scurte/ambigue ("ok", "salut", "hello") — așteaptă o propoziție clară. ` +
-      `Niciodată nu amesteca două limbi în același răspuns.`
-  return persona + limba
+      `utilizatorul (dintr-o propoziție clară, DOAR din lista de mai sus) și ` +
+      `de-atunci răspunde EXCLUSIV în acea limbă, consecvent pentru tot restul ` +
+      `conversației. NU comuta pe cuvinte scurte/ambigue ("ok", "salut", "hello") ` +
+      `— așteaptă o propoziție clară.`
+  return persona + guard + limba
 }
 
 // ── UNELTELE VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi lipsesc

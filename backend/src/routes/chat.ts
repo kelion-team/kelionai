@@ -888,8 +888,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Clientului i se anunță DOAR comutarea detectată (recognizer-ul o urmează).
     const announceLang = committedLang
     const speechPref = committedLang ?? storedPref
-    // Default ENGLEZĂ până la prima detecție — nu locale, nu 'unknown'.
-    const userLang = speechPref || 'en'
+    // LIMBA (Adrian — regulă FINALĂ, obligatorie: „default pornirea engleză;
+    // ADMIN = română mereu; restul detectează și menține per user"). Adminul
+    // primește ROMÂNĂ fix, indiferent de ce s-a detectat; ceilalți: limba
+    // persistată, altfel engleza default până la prima detecție clară.
+    const isAdminUser = user.role === 'admin'
+    const userLang = isAdminUser ? 'ro' : speechPref || 'en'
     const ro = userLang.toLowerCase().startsWith('ro')
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
@@ -1430,7 +1434,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email, usage,
-          speechPref && langName ? langName : '',
+          (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
       const r = await runOrchestrator(

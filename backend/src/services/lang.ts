@@ -165,6 +165,13 @@ export function detectSpeechLang(text: string, previousLang?: string | null): st
   return two ? (BCP47[two] ?? null) : null
 }
 
+// Limbile pe care aplicația le SUPORTĂ efectiv (i18n + persona vocii). NICIODATĂ
+// nu persistăm o limbă în afara acestui set: dovada live (24 iul) — vorbirea
+// românească era auzită ca RUSĂ, iar o comitere oarbă ar fi fixat „ru" pentru
+// user și ar fi otrăvit toate sesiunile. O transcriere aiurea (rusă, ucraineană
+// etc.) e ignorată; limba stabilită rămâne cea reală (sau engleza default).
+const SUPPORTED_LANGS = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
+
 // Per-user "pending switch" state: a NEW language seen once, waiting for its
 // confirming second message. In-memory is fine — losing it merely re-asks for
 // the confirmation, it can never corrupt the stored preference.
@@ -183,6 +190,9 @@ export function trackSpeechLang(
   const seed = detectSpeechLang(text, current)
   if (!seed) return null
   const base = (c: string): string => c.toLowerCase().split('-')[0]
+  // GARDĂ: nu comitem NICIODATĂ o limbă în afara setului suportat (o transcriere
+  // greșită — ex. română auzită ca rusă — nu are voie să devină preferința).
+  if (!SUPPORTED_LANGS.has(base(seed))) return null
   if (current && base(seed) === base(current)) {
     pendingSwitch.delete(email) // matches the established language — no switch
     return null

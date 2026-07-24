@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage } from '../db.js'
 import { trackSpeechLang } from '../services/lang.js'
@@ -32,14 +33,19 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // parserul OpenAI (pion) dădea „unmarshal SDP: EOF" (cauza „nu mă aude").
       const offer = raw.endsWith('\n') ? raw : raw + '\r\n'
 
-      // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, comută TOT pe
-      // limba mea și o menține per user"). Folosim DOAR limba PERSISTATĂ a
-      // userului (stabilită dintr-o interacțiune reală). Dacă NU are una (user
-      // nou, limbă nedetectată), lăsăm GOL → sesiunea pornește în engleză și
-      // OGLINDEȘTE limba pe care o vorbește userul (vezi realtimeInstructions).
-      // Fără „owner mereu română" — se detectează din vorbire, nu se impune.
-      let lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
-      if (!/^[a-z]{2}$/.test(lang)) lang = ''
+      // LIMBA (Adrian, 24 iul — regulă FINALĂ, obligatorie: „default pornirea
+      // engleză; ADMIN = română mereu; restul userilor detectează și menține per
+      // user"). ADMINUL (Adrian) vorbește ROMÂNĂ fix — pinăm și transcrierea pe
+      // română, ca vorbirea lui să nu mai fie auzită greșit ca rusă (dovadă live:
+      // Kelion îi răspundea în rusă). Restul: limba PERSISTATĂ dintr-o
+      // interacțiune reală; dacă n-au una → GOL → pornesc în engleză și oglindesc.
+      let lang: string
+      if (user.email.toLowerCase() === config.adminEmail) {
+        lang = 'ro'
+      } else {
+        lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
+        if (!/^[a-z]{2}$/.test(lang)) lang = ''
+      }
 
       let meserieName: string | null = null
       const meserieId = await getMeserieActiva(user.email)
