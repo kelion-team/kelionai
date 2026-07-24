@@ -123,9 +123,20 @@ export function deviceAck(cmd: DeviceCommand, ro: boolean): string {
 // One-time gestures the server can trigger on the avatar, either from a spoken
 // command (interpreted deterministically here) or from the brain via the
 // play_avatar_gesture tool. They play once and blend back to idle.
-export type GestureLabel = 'raiseRightHand' | 'salute' | 'pointMonitor'
+export type GestureLabel = 'raiseRightHand' | 'salute' | 'pointMonitor' | 'dans'
 
 const GESTURE_KEYWORDS: { label: GestureLabel; patterns: RegExp[] }[] = [
+  {
+    // „Dansează!" e comandă DIRECTĂ (Adrian, 24 iul: în test Kelion a refuzat să
+    // danseze — modelul de chat nu chema unealta). Determinist, fără creier:
+    // doar forme imperative clare, ca o discuție DESPRE dans să nu-l pornească.
+    label: 'dans',
+    patterns: [
+      /\bdanseaz[ăa]\b/i,
+      /\bf[ăa]\s+un\s+dans\b/i,
+      /\b(do\s+a\s+dance|dance\s+for\s+me)\b/i,
+    ],
+  },
   {
     label: 'raiseRightHand',
     patterns: [
@@ -167,6 +178,8 @@ export function gestureAck(label: GestureLabel, ro: boolean): string {
         return 'Salute.'
       case 'pointMonitor':
         return 'Pointing at the monitor.'
+      case 'dans':
+        return 'Dancing!'
     }
   }
   switch (label) {
@@ -176,5 +189,7 @@ export function gestureAck(label: GestureLabel, ro: boolean): string {
       return 'Salut.'
     case 'pointMonitor':
       return 'Arăt spre monitor.'
+    case 'dans':
+      return 'Dansez!'
   }
 }
