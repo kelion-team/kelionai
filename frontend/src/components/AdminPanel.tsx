@@ -554,13 +554,15 @@ export default function AdminPanel({
                         <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
                           Alimentează OpenRouter
                         </a>
+                        {' · '}
+                        Ca să se alimenteze SINGUR, activează „Auto Top-Up" pe OpenRouter (cu un card salvat) — se reîncarcă automat sub prag.
                       </span>
                     )}
                     {finance.openrouter.live && !finance.openrouter.low && (
                       <span className="or-wallet-sub">
-                        Se alimentează central, automat, din acest cont.{' '}
+                        Creierul central consumă din acest cont. Pentru alimentare automată, activează „Auto Top-Up" pe OpenRouter.{' '}
                         <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
-                          Alimentează
+                          Deschide OpenRouter
                         </a>
                       </span>
                     )}

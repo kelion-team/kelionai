@@ -35,9 +35,11 @@ export const config = {
   openai: {
     key: (process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? '').trim(),
     realtimeModel: (process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime').trim(),
-    // Voce masculină unică, persistentă pentru toți userii (Adrian: „o singură
-    // voce, bărbat"). `cedar` = voce masculină caldă din catalogul Realtime.
-    realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'cedar').trim(),
+    // Voce masculină unică, persistentă pentru toți userii (Adrian, 24 iul:
+    // „vocea e full-duplex, nu e masculină" — `cedar` suna neutru). `ash` =
+    // voce CLAR masculină, caldă și naturală din catalogul Realtime (gentleman,
+    // nimic strident/vulgar). Editabilă din env fără deploy.
+    realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'ash').trim(),
     // TTS pe OpenAI (aceeași cheie) — pentru salutul de pe landing + /api/tts.
     // Fără cheie Google TTS: OpenAI acoperă și asta (Adrian: „2 chei, punct").
     // `onyx` = voce masculină, consistentă cu vocea live.

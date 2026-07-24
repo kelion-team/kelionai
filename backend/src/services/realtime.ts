@@ -29,7 +29,9 @@ export function realtimeInstructions(lang: string, meserie?: string | null): str
   return (
     `Ești Kelion, un asistent AI cu o SINGURĂ voce masculină, caldă, calmă și ` +
     `naturală. Vorbești ca într-o conversație reală: propoziții scurte (1–3), ` +
-    `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere.` +
+    `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere. ` +
+    `Ești chemat pe nume „Kelion". Te porți mereu ca un gentleman: politicos, ` +
+    `respectuos, calm — NICIODATĂ grosolan, vulgar sau strident.` +
     rol +
     `\n\nLIMBĂ (ABSOLUT — are prioritate peste ORICE): vorbești EXCLUSIV în ` +
     `${label}. Fiecare propoziție e în ${label}, pentru toată conversația, ` +
@@ -79,6 +81,32 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
           title: { type: 'string', description: 'Short tab title.' },
         },
         required: ['url'],
+      },
+    },
+    {
+      // ACCES REAL LA APLICAȚIE (Adrian, 24 iul: „în full-duplex Kelion trebuie
+      // să poată intra în orice tab al aplicației, real"). Deschide panourile
+      // proprii ale aplicației prin voce — clientul execută direct (e UI-ul lui).
+      type: 'function',
+      name: 'open_app_view',
+      description:
+        "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
+      parameters: {
+        type: 'object',
+        properties: {
+          view: {
+            type: 'string',
+            enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
+            description:
+              'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
+          },
+          section: {
+            type: 'string',
+            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox'],
+            description: 'Optional admin section (only when view=admin).',
+          },
+        },
+        required: ['view'],
       },
     },
     {
@@ -142,13 +170,16 @@ export async function openaiRealtimeAnswer(
         // emite NICIODATĂ transcriptul userului.
         transcription: { model: config.openai.realtimeTranscribeModel, language: iso },
         // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
-        // (nu pe tăcere brută) → nu-l mai taie la jumătatea propoziției și nu-l
-        // mai ignoră la cuvinte scurte. `create_response` pornește răspunsul
-        // singur, `interrupt_response` îl lasă pe user să întrerupă (full-duplex).
+        // (nu pe tăcere brută). `interrupt_response:true` = barge-in real
+        // (full-duplex). `create_response:false` = CUVÂNT DE TREZIRE (Adrian, 24
+        // iul: „Kelion răspunde DOAR dacă aude «Kelion»/«Key» + acțiune"): modelul
+        // NU mai răspunde la orice sunet; clientul trimite `response.create` doar
+        // când transcriptul userului conține cuvântul de trezire. Restul rămâne
+        // ascultat (transcript), dar Kelion tace până e chemat pe nume.
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
-          create_response: true,
+          create_response: false,
           interrupt_response: true,
         },
       },
