@@ -1339,9 +1339,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         } catch {
           input = {}
         }
-        if (name === 'web_search' || name === 'youtube_search' || name === 'image_search')
+        if (name === 'web_search' || name === 'youtube_search' || name === 'image_search') {
           usage.usd += SERPER_USD_PER_CALL
-        if (name === 'generate_image') usage.usd += IMAGE_USD_PER_CALL
+          // CONTABILITATE REALĂ (audit QA 24 iul, A1): fără recordCost, tabul
+          // Bani nu vedea NICIODATĂ costul căutării/imaginilor/creierului.
+          void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
+        }
+        if (name === 'generate_image') {
+          usage.usd += IMAGE_USD_PER_CALL
+          void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
+        }
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email, usage,
@@ -1364,6 +1371,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       )
       assistantText += r.text
       usage.usd += r.costUsd
+      // CONTABILITATE REALĂ (audit QA 24 iul, A1): costul CREIERULUI intră în
+      // cost_events pentru TOȚI userii (inclusiv admin) — tabul Bani arăta 0
+      // la „Creier" pentru că recordCost nu era apelat nicăieri pe calea chat.
+      void recordCost(user.email, 'chat', r.costUsd)
     } catch (e) {
       // Creierul a picat — onest, niciodată tăcut. Fără plasă Kimi/GLM (scoase).
       const errMsg = e instanceof Error ? e.message : String(e)
