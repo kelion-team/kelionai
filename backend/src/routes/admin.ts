@@ -34,7 +34,7 @@ import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
-import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -366,6 +366,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const r = await createKelionCard(user.email)
     if ('error' in r) return reply.code(502).send(r)
     return reply.send({ ok: true, ...r })
+  })
+
+  // DEPUNEREA OWNERULUI (Adrian, 24 iul: „de unde din admin depun bani să
+  // ajungă în Stripe și din Stripe în OpenRouter?"): checkout marcat
+  // owner_deposit — bani în pungă FĂRĂ credite; transferul automat îi duce
+  // spre card → AI. STRICT admin.
+  app.post<{ Body: { pounds?: number } }>('/api/admin/deposit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const pounds = Math.round(Number(req.body?.pounds ?? 0))
+    if (!(pounds > 0) || pounds > 2000) return reply.code(400).send({ error: 'bad_amount' })
+    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    const r = await createOwnerDeposit(user.email, pounds, baseUrl)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, url: r.url, pounds })
   })
 
   // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de

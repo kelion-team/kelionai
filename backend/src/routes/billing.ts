@@ -136,7 +136,9 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       }
       const email = s.metadata?.email ?? s.customer_details?.email ?? ''
       const amount = (s.amount_total ?? 0) / 100
-      if (email && amount > 0 && s.payment_intent) {
+      // Depunerea OWNERULUI = bani în pungă, FĂRĂ credite (nu e vânzare).
+      const isOwnerDeposit = (s.metadata as { owner_deposit?: string } | undefined)?.owner_deposit === '1'
+      if (!isOwnerDeposit && email && amount > 0 && s.payment_intent) {
         // O SINGURĂ cheie de idempotență pe plată: PaymentIntent id (audit 24
         // iul, P0-2). Vechea ramură „fără PI → creditează pe session id (cs_…)"
         // permitea DUBLAREA banilor: Stripe trimite și checkout.session.completed
@@ -163,7 +165,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         pi.receipt_email ??
         ''
       const amount = (pi.amount ?? 0) / 100
-      if (email && pi.id && amount > 0) {
+      const piOwnerDeposit = (pi.metadata as { owner_deposit?: string } | undefined)?.owner_deposit === '1'
+      if (!piOwnerDeposit && email && pi.id && amount > 0) {
         // Vânzare admin (sale_credits) → EXACT X credite; altfel formula 75%.
         const saleCredits = Number(pi.metadata?.sale_credits ?? 0)
         if (saleCredits > 0) {

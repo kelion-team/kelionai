@@ -100,6 +100,36 @@ export async function createSaleCheckout(
   return j.url ? { url: j.url, pounds: pence / 100 } : { error: 'no_checkout_url' }
 }
 
+// ── DEPUNEREA OWNERULUI ÎN PUNGĂ, din admin (Adrian, 24 iul: „de unde din
+// admin depun bani să ajungă în Stripe și din Stripe imediat în OpenRouter?")
+// Checkout Stripe marcat `owner_deposit` — banii intră în punga plăților ca
+// orice plată, dar NU generează credite (toate căile de creditare îl sar).
+// De acolo: transferul automat orar → punga cardului → OpenAI/OpenRouter.
+export async function createOwnerDeposit(
+  email: string,
+  pounds: number,
+  baseUrl: string,
+): Promise<CheckoutResult> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  const amount = Math.max(1, Math.min(2000, Math.round(pounds)))
+  const body = new URLSearchParams()
+  body.set('mode', 'payment')
+  body.set('success_url', `${baseUrl}/?deposit=success`)
+  body.set('cancel_url', `${baseUrl}/?deposit=cancel`)
+  body.set('line_items[0][quantity]', '1')
+  body.set('line_items[0][price_data][currency]', config.stripe.currency)
+  body.set('line_items[0][price_data][unit_amount]', String(amount * 100))
+  body.set('line_items[0][price_data][product_data][name]', 'Kelion pot deposit (owner)')
+  body.set('metadata[email]', email)
+  body.set('metadata[owner_deposit]', '1')
+  body.set('payment_intent_data[metadata][email]', email)
+  body.set('payment_intent_data[metadata][owner_deposit]', '1')
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
+  if (!r.ok) return { error: `stripe_http_${r.status}` }
+  const j = (await r.json()) as { url?: string }
+  return j.url ? { url: j.url } : { error: 'no_checkout_url' }
+}
+
 // Metoda de plată salvată a clientului (pentru reîncărcarea automată off-session).
 async function defaultPaymentMethod(customerId: string): Promise<string | null> {
   const c = await fetch(`${API}/customers/${customerId}`, { headers: authHeaders() })
@@ -228,6 +258,41 @@ export function lastAutoFundStatus(): { at: string; ok: boolean; detail: string 
 const ISSUING_MIN = Math.max(0, Number(process.env.ISSUING_MIN_GBP ?? '10') || 10)
 const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') || 20)
 
+// DEPUNERE AUTOMATĂ A OWNERULUI (Adrian, 24 iul: „când vede că trebuiesc bani,
+// să se ducă automat"): dacă punga cardului E goală ȘI punga plăților n-are din
+// ce (nici în tranzit), platforma debitează SINGURĂ cardul salvat al ownerului
+// (off-session, marcat owner_deposit → FĂRĂ credite) — banii intră în punga
+// plăților și circuitul curge. Max o dată/zi (Idempotency-Key pe zi), sumă din
+// env OWNER_AUTODEPOSIT_GBP (implicit 20; 0 = oprit).
+const OWNER_AUTODEPOSIT = Math.max(0, Number(process.env.OWNER_AUTODEPOSIT_GBP ?? '20') || 0)
+
+async function autoOwnerDeposit(): Promise<string> {
+  if (OWNER_AUTODEPOSIT <= 0) return 'auto-depunere oprită (OWNER_AUTODEPOSIT_GBP=0)'
+  const email = config.adminEmail
+  const customer = await ensureCustomer(email, '')
+  if (!customer) return 'fără client Stripe pentru owner'
+  const pm = await defaultPaymentMethod(customer)
+  if (!pm) return 'ownerul nu are card salvat (o plată prin aplicație îl salvează)'
+  const body = new URLSearchParams()
+  body.set('amount', String(OWNER_AUTODEPOSIT * 100))
+  body.set('currency', config.stripe.currency)
+  body.set('customer', customer)
+  body.set('payment_method', pm)
+  body.set('off_session', 'true')
+  body.set('confirm', 'true')
+  body.set('metadata[email]', email)
+  body.set('metadata[owner_deposit]', '1')
+  const idemKey = `kelion-ownerdep-${new Date().toISOString().slice(0, 10)}`
+  const r = await fetch(`${API}/payment_intents`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
+    body,
+  })
+  const j = (await r.json().catch(() => ({}))) as { id?: string; status?: string; error?: { message?: string } }
+  if (!r.ok || j.status !== 'succeeded') return `auto-depunere eșuată: ${j.error?.message ?? `http_${r.status}`}`
+  return `auto-depunere owner £${OWNER_AUTODEPOSIT} reușită (${j.id}) — intră în pungă la decontare`
+}
+
 export async function autoFundIssuing(): Promise<void> {
   if (!config.stripe.secretKey) return
   try {
@@ -236,15 +301,25 @@ export async function autoFundIssuing(): Promise<void> {
     if (!r.ok) return
     const b = (await r.json()) as {
       available?: { amount: number; currency: string }[]
+      pending?: { amount: number; currency: string }[]
       issuing?: { available?: { amount: number; currency: string }[] }
     }
     const cur = config.stripe.currency
     const payments = (b.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
+    const pendingAmt = (b.pending ?? []).find((a) => a.currency === cur)?.amount ?? 0
     const issuing = (b.issuing?.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
-    // Punga cardului are destul SAU punga plăților n-are din ce → nimic de făcut.
+    // Punga cardului are destul → nimic de făcut.
     if (issuing >= ISSUING_MIN * 100) return
     const want = Math.min(ISSUING_TOPUP * 100, payments)
-    if (want < 100) return // sub £1 nu are sens
+    if (want < 100) {
+      // Punga plăților GOALĂ și nimic pe drum → depunerea automată a ownerului
+      // (cardul salvat, o dată/zi). Banii intră în pungă la decontare.
+      if (payments + pendingAmt < ISSUING_TOPUP * 100) {
+        const msg = await autoOwnerDeposit()
+        lastAutoFund = { at: new Date().toISOString(), ok: /reușită/.test(msg), detail: msg }
+      }
+      return
+    }
     const body = new URLSearchParams()
     body.set('amount', String(want))
     body.set('currency', cur)
@@ -448,6 +523,8 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
   if (ev.type === 'checkout.session.completed' && id.startsWith('cs_')) {
     const s = await getJson(`checkout/sessions/${id}`)
     if (!s || s.payment_status !== 'paid') return null
+    // Depunerea ownerului: bani în pungă, fără credite.
+    if ((s.metadata as { owner_deposit?: string } | undefined)?.owner_deposit === '1') return null
     const email =
       (s.metadata as { email?: string } | undefined)?.email ??
       (s.customer_details as { email?: string } | undefined)?.email ??
@@ -463,6 +540,8 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
   if (ev.type === 'payment_intent.succeeded' && id.startsWith('pi_')) {
     const pi = await getJson(`payment_intents/${id}`)
     if (!pi || pi.status !== 'succeeded') return null
+    // Depunerea ownerului: bani în pungă, fără credite.
+    if ((pi.metadata as { owner_deposit?: string } | undefined)?.owner_deposit === '1') return null
     const email = (pi.metadata as { email?: string } | undefined)?.email ?? String(pi.receipt_email ?? '')
     const amount = Number(pi.amount ?? 0) / 100
     if (!email || !(amount > 0)) return null
