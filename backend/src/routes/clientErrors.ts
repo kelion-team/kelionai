@@ -1,0 +1,45 @@
+import type { FastifyInstance } from 'fastify'
+import { getSessionUser } from '../session.js'
+
+// ── ERORILE DIN BROWSERUL USERULUI (F12) — ochii lui Kelion pe client ────────
+// Adrian (24 iul): „el trebuie să aibă acces la logurile F12". Frontend-ul
+// prinde erorile consolei (window.onerror, unhandledrejection, console.error)
+// și le trimite aici; chat.ts injectează erorile RECENTE în contextul lui
+// Kelion, ca la „de ce nu merge X?" să diagnosticheze din simptomele REALE ale
+// browserului, nu din ghicit. Ring în memorie per user — diagnostic, nu arhivă.
+
+interface ClientErr {
+  ts: number
+  msg: string
+}
+
+const rings = new Map<string, ClientErr[]>()
+const MAX_PER_USER = 50
+
+/** Erorile din ultimele `sinceMs` ms pentru user — pentru contextul de chat. */
+export function recentClientErrors(email: string, sinceMs = 15 * 60_000): string[] {
+  const now = Date.now()
+  return (rings.get(email) ?? [])
+    .filter((e) => now - e.ts < sinceMs)
+    .map((e) => `[${new Date(e.ts).toISOString().slice(11, 19)}] ${e.msg}`)
+}
+
+export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
+  app.post<{ Body: { errors?: string[] } }>('/api/client-errors', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const list = Array.isArray(req.body?.errors) ? req.body.errors : []
+    const ring = rings.get(user.email) ?? []
+    const now = Date.now()
+    for (const raw of list.slice(0, 10)) {
+      const msg = String(raw ?? '').slice(0, 400).trim()
+      if (!msg) continue
+      // Dedup: aceeași eroare repetată în rafală nu umple ringul.
+      if (ring.some((e) => e.msg === msg && now - e.ts < 60_000)) continue
+      ring.push({ ts: now, msg })
+    }
+    while (ring.length > MAX_PER_USER) ring.shift()
+    rings.set(user.email, ring)
+    return reply.send({ ok: true })
+  })
+}

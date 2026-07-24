@@ -34,6 +34,26 @@ export function WalletButton({
   const [paywalled, setPaywalled] = useState(false)
   const [firstTopUp, setFirstTopUp] = useState(false)
   const [custom, setCustom] = useState('')
+  // Eroarea checkout-ului AFIȘATĂ, nu înghițită („apăs și nu se execută").
+  const [payErr, setPayErr] = useState('')
+
+  const errText = (code: string): string => {
+    if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
+    if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.'
+    if (code === 'min_5') return ro ? 'Minim £5.' : 'Minimum £5.'
+    if (code === 'stripe_not_configured') return ro ? 'Plățile nu sunt configurate pe server.' : 'Payments are not configured on the server.'
+    if (code === 'offline') return ro ? 'Fără conexiune — încearcă din nou.' : 'No connection — try again.'
+    return (ro ? 'Plata nu a pornit: ' : 'Payment failed to start: ') + code
+  }
+  const pay = (amount: number): void => {
+    setPayErr('')
+    void startCheckout(amount).then((err) => {
+      if (err) {
+        setPayErr(errText(err))
+        console.error('checkout failed:', err) // ajunge și la Kelion (F12 → server)
+      }
+    })
+  }
 
   const refresh = async (): Promise<void> => {
     const b = await fetchBalance()
@@ -126,7 +146,7 @@ export function WalletButton({
           )}
           <div className="wallet-amounts">
             {presets.map((a) => (
-              <button key={a} type="button" className="ghost" onClick={() => void startCheckout(a)}>
+              <button key={a} type="button" className="ghost" onClick={() => pay(a)}>
                 £{a}
               </button>
             ))}
@@ -148,12 +168,13 @@ export function WalletButton({
               disabled={customValid() === null}
               onClick={() => {
                 const n = customValid()
-                if (n !== null) void startCheckout(n)
+                if (n !== null) pay(n)
               }}
             >
               {ro ? 'Alimentează' : 'Top up'}
             </button>
           </div>
+          {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
           <div className="wallet-menu-sep" />
           <button
             type="button"

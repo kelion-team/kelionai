@@ -869,6 +869,8 @@ export default function ChatPanel({
             onState: (s, note) => {
               if (s === 'error') {
                 // Realtime a picat → pentru restul sesiunii folosim STT.
+                // Simptomul pleacă la server (F12 → Kelion) ca să fie diagnosticabil.
+                console.error('voce realtime a picat:', note ?? 'fără detalii')
                 realtimeOffRef.current = true
                 if (micRef.current) {
                   micRef.current = null
@@ -877,7 +879,6 @@ export default function ChatPanel({
                   micStartingRef.current = false
                   void ensureMicRef.current()
                 }
-                void note
               }
             },
           })

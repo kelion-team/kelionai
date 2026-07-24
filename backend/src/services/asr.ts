@@ -44,16 +44,61 @@ export interface TranscribeOpts {
   pcm?: { sampleRateHertz: number; channels?: number }
 }
 
+// ── REZERVĂ OpenAI (aceeași cheie ca vocea) ──────────────────────────────────
+// AUZUL NU ARE VOIE SĂ MOARĂ (Adrian, 24 iul: „nu mă aude"): dacă Realtime pică
+// pe client, calea batch STT era singura plasă — dar cerea Google STT, care nu
+// e configurat pe VPS → Kelion rămânea surd. Acum: Google primar (dacă există
+// service account), altfel OpenAI /v1/audio/transcriptions pe cheia existentă.
+
+// PCM brut → WAV minim (antet 44 bytes), ca OpenAI să-l poată decoda.
+function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number): Uint8Array {
+  const h = Buffer.alloc(44)
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8)
+  h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20)
+  h.writeUInt16LE(channels, 22); h.writeUInt32LE(sampleRate, 24)
+  h.writeUInt32LE(sampleRate * channels * 2, 28); h.writeUInt16LE(channels * 2, 32)
+  h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([h, Buffer.from(pcm)])
+}
+
+async function transcribeOpenAI(audioBase64: string, opts: TranscribeOpts): Promise<TranscribeResult> {
+  if (!config.openai.key) return { ok: false, status: 503, error: 'asr_not_configured' }
+  let buf: Uint8Array = Buffer.from(audioBase64, 'base64')
+  let filename = 'audio.webm' // blob-ul browserului; OpenAI detectează containerul
+  if (opts.pcm) {
+    buf = pcmToWav(buf, opts.pcm.sampleRateHertz, opts.pcm.channels ?? 1)
+    filename = 'audio.wav'
+  }
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(buf)]), filename)
+  form.append('model', config.openai.transcribeModel)
+  const lang2 = (opts.langHint ?? '').trim().slice(0, 2).toLowerCase()
+  if (/^[a-z]{2}$/.test(lang2)) form.append('language', lang2)
+  try {
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.openai.key}` },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) return { ok: false, status: 502, error: `asr_failed:${res.status}` }
+    const j = (await res.json()) as { text?: string }
+    return { ok: true, lang: lang2 || null, transcript: (j.text ?? '').trim() }
+  } catch {
+    return { ok: false, status: 502, error: 'asr_failed' }
+  }
+}
+
 /**
- * Transcribe base64 audio via Google STT v2 chirp_3. Returns a typed result so
- * callers map failures to the right HTTP status. No auth gate, no cost
- * accounting here — that stays in the caller (route vs. voice agent path).
+ * Transcribe base64 audio. Google STT v2 chirp_3 când există service account
+ * (calea originală, dovedită); altfel — sau dacă Google pică — OpenAI pe aceeași
+ * cheie ca vocea. Rezultat tipat; fără auth-gate/cost aici (rămân în apelant).
  */
 export async function transcribe(audioBase64: string, opts: TranscribeOpts = {}): Promise<TranscribeResult> {
-  const a = getAuth()
-  if (!a || !projectId) return { ok: false, status: 503, error: 'asr_not_configured' }
   const audio = audioBase64.trim()
   if (!audio) return { ok: false, status: 400, error: 'bad_request' }
+  const a = getAuth()
+  if (!a || !projectId) return transcribeOpenAI(audio, opts)
 
   const rawLang = (opts.langHint ?? '').trim()
   const langHint = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(rawLang) ? normalizeLang(rawLang) : ''
@@ -88,7 +133,8 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       }),
     })
     if (!res.ok) {
-      return { ok: false, status: 502, error: `asr_failed:${res.status}` }
+      // Google a refuzat — nu rămânem surzi: încercăm OpenAI pe aceeași cheie.
+      return transcribeOpenAI(audio, opts)
     }
     const j = (await res.json()) as {
       results?: { languageCode?: string; alternatives?: { transcript?: string }[] }[]
@@ -96,6 +142,6 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
     const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
     return { ok: true, lang: r0?.languageCode ?? null, transcript: r0?.alternatives?.[0]?.transcript ?? '' }
   } catch {
-    return { ok: false, status: 502, error: 'asr_failed' }
+    return transcribeOpenAI(audio, opts)
   }
 }

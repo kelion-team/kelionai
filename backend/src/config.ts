@@ -43,6 +43,10 @@ export const config = {
     // `onyx` = voce masculină, consistentă cu vocea live.
     ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
     ttsVoice: (process.env.OPENAI_TTS_VOICE ?? 'onyx').trim(),
+    // STT de rezervă pe aceeași cheie OpenAI (auzul NU are voie să moară dacă
+    // Realtime pică — Adrian, 24 iul: „nu mă aude"). Google STT rămâne primar
+    // DOAR dacă există service account; altfel transcrie OpenAI.
+    transcribeModel: (process.env.OPENAI_TRANSCRIBE_MODEL ?? 'gpt-4o-mini-transcribe').trim(),
   },
   // CREIERUL/CHAT-UL selectabil — o SINGURĂ cheie OpenRouter pentru toate
   // modelele (GPT/Gemini/Claude). Catalogul se ia LIVE din /api/v1/models (auto-
