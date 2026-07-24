@@ -7,7 +7,7 @@ import {
   deleteMyAccount,
   loadLocalLang,
 } from '../lib/prefs'
-import { fetchBalance, startCheckout, type WalletStatus } from '../lib/billing'
+import { fetchBalance, type WalletStatus } from '../lib/billing'
 import { LANGS } from '../lib/languages'
 
 // SETĂRI CLIENT (plătitor). Un client are mai puțin acces decât adminul — nu
@@ -19,8 +19,6 @@ import { LANGS } from '../lib/languages'
 // creierul e pe Kimi/GLM, toți userii trec prin creditul de mai sus.
 // Backend-ul (prefs + billing + me/delete) e deja verificat live. NU dublează
 // cod: folosește exact aceleași rute pe care le folosește restul aplicației.
-
-const AMOUNTS = [5, 10, 20, 50]
 
 // Etichete în limba clientului (ro pentru vorbitorii de română, altfel engleză —
 // clienții pot fi din orice limbă). Doar textele UI; valorile vin de la server.
@@ -203,19 +201,20 @@ export default function CustomerSettings({
           </select>
         </section>
 
-        {/* 2 — Credit / portofel (+ mențiunea 25%) */}
+        {/* 2 — Credit / portofel (+ mențiunea 25%). Alimentarea MANUALĂ se face
+            dintr-un SINGUR loc — pastila de credit din bară (Adrian, 24 iul:
+            „utilizatorul trebuie să vadă doar acea parte de alimentare"). Aici
+            rămân doar soldul, regula 25% și reîncărcarea automată. */}
         <section className="settings-sec">
           <h4>{t.wallet}</h4>
           <div className="settings-credits">
             <strong>{wallet ? wallet.credits.toLocaleString() : '…'}</strong> {t.credits}
           </div>
-          <div className="settings-topup">
-            {AMOUNTS.map((a) => (
-              <button key={a} type="button" className="ghost" onClick={() => void startCheckout(a)}>
-                £{a}
-              </button>
-            ))}
-          </div>
+          <p className="settings-note">
+            {ro
+              ? 'Alimentezi din pastila de credit „＋" din bara de sus (prima dată £20, apoi multipli de £5).'
+              : 'Top up from the credit pill “＋” in the top bar (first £20, then multiples of £5).'}
+          </p>
           <p className="settings-note">{t.marginNote}</p>
 
           {/* Reîncărcare automată — ca să nu rămâi fără credit în mijlocul unei sesiuni */}
@@ -234,12 +233,17 @@ export default function CustomerSettings({
                 style={{ width: 70 }}
               />
               <span className="settings-note">{ro ? 'credite, reîncarcă £' : 'credits, top up £'}</span>
+              {/* Multipli de £5 (regula cunoscută), min £5 — rotunjim la 5 la ieșire. */}
               <input
                 type="number"
-                min={1}
+                min={5}
                 max={500}
+                step={5}
                 value={ar.topupAmount}
-                onChange={(e) => void onAr({ topupAmount: Math.max(1, Math.min(500, Number(e.target.value))) })}
+                onChange={(e) => {
+                  const n = Math.max(5, Math.min(500, Math.round(Number(e.target.value) / 5) * 5))
+                  void onAr({ topupAmount: n })
+                }}
                 style={{ width: 70 }}
               />
             </div>

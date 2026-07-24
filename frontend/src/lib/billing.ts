@@ -6,6 +6,9 @@ export interface WalletStatus {
   credits: number
   percent: number
   currency: string
+  // True dacă userul n-a alimentat niciodată: prima alimentare = £20 minim
+  // (activarea creierului), apoi orice multiplu de £5.
+  firstTopUp?: boolean
 }
 
 export interface PurchaseRecord {

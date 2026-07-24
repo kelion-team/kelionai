@@ -3,28 +3,55 @@ import { fetchBalance, startCheckout } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
 
-// Customer-facing credit. Shows ONE value — available CREDITS — and a top-up
-// menu. Low-credit reminders escalate discreetly (a brief pill, more often as it
-// drops; the badge blinks red at ≤5%). All text is in the user's own language.
-const AMOUNTS = [5, 10, 20, 50]
+// Credit vizibil pentru ORICE user logat (Adrian, 24 iul: „când te-ai logat cu
+// Google trebuie să poți cumpăra credit, nu văd cum se alimentează"). Arată O
+// SINGURĂ valoare — creditele disponibile — cu un „＋" evident și meniul de
+// reîncărcare. Din același meniu se ajunge la Setări și la conectarea
+// Gmail/Calendar — bara nu mai are rotița ⚙ separată, nici butonul „Connect
+// Google" care părea o re-logare. Toate textele în limba userului.
+//
+// VALORI PRESETATE (Adrian, 24 iul): PRIMA alimentare = £20 minim (activarea
+// creierului), apoi orice MULTIPLU de £5. Regula e validată și pe server.
+const AMOUNTS_FIRST = [20, 30, 50]
+const AMOUNTS_NEXT = [5, 10, 20, 50]
 
-export function WalletButton(): React.JSX.Element {
-  const t = strings(resolveLang(loadLocalLang() ?? navigator.language))
+export function WalletButton({
+  onOpenSettings,
+  googleConnected,
+  onConnectGoogle,
+}: {
+  readonly onOpenSettings: () => void
+  readonly googleConnected?: boolean
+  readonly onConnectGoogle?: () => void
+}): React.JSX.Element {
+  const langKey = resolveLang(loadLocalLang() ?? navigator.language)
+  const t = strings(langKey)
+  const ro = langKey.slice(0, 2).toLowerCase() === 'ro'
   const [credits, setCredits] = useState<number | null>(null)
   const [percent, setPercent] = useState(100)
   const [open, setOpen] = useState(false)
   const [toast, setToast] = useState(false)
   const [paywalled, setPaywalled] = useState(false)
+  const [firstTopUp, setFirstTopUp] = useState(false)
+  const [custom, setCustom] = useState('')
 
   const refresh = async (): Promise<void> => {
     const b = await fetchBalance()
     if (b) {
       setCredits(b.credits)
       setPercent(b.percent)
+      setFirstTopUp(!!b.firstTopUp)
       // reflectă realitatea: la sold 0 rămâne paywalled, altfel iese — altfel
       // un refresh cu credits=0 lăsa meniul de top-up blocat deschis pe veci.
       setPaywalled(b.credits <= 0)
     }
+  }
+
+  const minAmount = firstTopUp ? 20 : 5
+  const presets = firstTopUp ? AMOUNTS_FIRST : AMOUNTS_NEXT
+  const customValid = (): number | null => {
+    const n = Number(custom)
+    return Number.isFinite(n) && n >= minAmount && n % 5 === 0 ? n : null
   }
 
   useEffect(() => {
@@ -80,6 +107,7 @@ export function WalletButton(): React.JSX.Element {
         title={t.buyCredit}
       >
         {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
+        <span className="wallet-plus" aria-hidden>＋</span>
       </button>
       {(toast || paywalled) && !open && (
         <button type="button" className={`wallet-toast ${critical || paywalled ? 'urgent' : ''}`} onClick={() => setOpen(true)}>
@@ -89,11 +117,67 @@ export function WalletButton(): React.JSX.Element {
       {open && (
         <div className="wallet-menu">
           <span className="wallet-menu-title">{paywalled ? t.topUp : t.buyCredit}</span>
-          {AMOUNTS.map((a) => (
-            <button key={a} type="button" className="ghost" onClick={() => void startCheckout(a)}>
-              £{a}
+          {firstTopUp && (
+            <span className="wallet-menu-note">
+              {ro
+                ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
+                : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+            </span>
+          )}
+          <div className="wallet-amounts">
+            {presets.map((a) => (
+              <button key={a} type="button" className="ghost" onClick={() => void startCheckout(a)}>
+                £{a}
+              </button>
+            ))}
+          </div>
+          <div className="wallet-custom">
+            <span aria-hidden>£</span>
+            <input
+              type="number"
+              min={minAmount}
+              step={5}
+              inputMode="numeric"
+              placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+            />
+            <button
+              type="button"
+              className="ghost"
+              disabled={customValid() === null}
+              onClick={() => {
+                const n = customValid()
+                if (n !== null) void startCheckout(n)
+              }}
+            >
+              {ro ? 'Alimentează' : 'Top up'}
             </button>
-          ))}
+          </div>
+          <div className="wallet-menu-sep" />
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setOpen(false)
+              onOpenSettings()
+            }}
+          >
+            ⚙ {ro ? 'Setări' : 'Settings'}
+          </button>
+          {onConnectGoogle && !googleConnected && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setOpen(false)
+                onConnectGoogle()
+              }}
+              title={ro ? 'Dă acces la Gmail, Calendar și Drive' : 'Grant Gmail, Calendar & Drive access'}
+            >
+              {ro ? 'Conectează Gmail & Calendar' : 'Connect Gmail & Calendar'}
+            </button>
+          )}
         </div>
       )}
     </div>
