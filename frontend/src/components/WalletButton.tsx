@@ -129,9 +129,18 @@ export function WalletButton({
         {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
         <span className="wallet-plus" aria-hidden>＋</span>
       </button>
-      {(toast || paywalled) && !open && (
-        <button type="button" className={`wallet-toast ${critical || paywalled ? 'urgent' : ''}`} onClick={() => setOpen(true)}>
-          {paywalled ? t.topUp : t.lowCredit}
+      {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
+          absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
+          „se suprapun imagini și butoane"). Reamintirea trecătoare (6s) rămâne
+          plutitoare — dispare singură. */}
+      {paywalled && !open && (
+        <button type="button" className="wallet-toast wallet-toast-inline urgent" onClick={() => setOpen(true)}>
+          {t.topUp}
+        </button>
+      )}
+      {toast && !paywalled && !open && (
+        <button type="button" className={`wallet-toast ${critical ? 'urgent' : ''}`} onClick={() => setOpen(true)}>
+          {t.lowCredit}
         </button>
       )}
       {open && (

@@ -2722,6 +2722,13 @@ body {
   border-color: #ff5b5b;
   color: #ffd0d0;
 }
+/* Varianta ÎN BARĂ (paywall permanent): în fluxul topbar-ului, nu absolută —
+   ca să nu acopere titlul tabului de pe monitor. */
+.wallet-toast-inline {
+  position: static;
+  margin-left: 8px;
+  animation: none;
+}
 @keyframes toast-in {
   from {
     opacity: 0;
