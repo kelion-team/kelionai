@@ -2614,6 +2614,15 @@ body {
 /* Prepaid credit wallet (customer topbar) */
 .wallet {
   position: relative;
+  /* Topbar-ul e pointer-events:none (să nu acopere scena) și fiecare copil
+     interactiv REACTIVEAZĂ click-urile (.who, .cost-meter...). .wallet nu o
+     făcea → TOATE click-urile pe credit/„reîncarcă" treceau PRIN buton (Adrian,
+     24 iul: „apăs pe reîncarcă și nu se execută procedura"). */
+  pointer-events: auto;
+}
+/* Orice buton direct în topbar (fondul admin £, etc.) — la fel. */
+.topbar > button {
+  pointer-events: auto;
 }
 .wallet-menu {
   position: absolute;

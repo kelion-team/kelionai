@@ -91,7 +91,9 @@ export default function Stage({ user }: { user: User }) {
   // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
   // localStorage rămâne doar oglinda pentru primul paint, sursa de adevăr
   // e /api/prefs, ca aranjarea să supraviețuiască oricărei curățări de browser.
-  const [avatarEdit, setAvatarEdit] = useState(false)
+  // Aranjarea manuală e DEZACTIVATĂ (Adrian, 24 iul) — rămâne doar starea
+  // vizuală (fals mereu); poziția vine de pe server.
+  const avatarEdit = false
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
   // Fix hydration: localStorage is client-only; read it after hydration.
   useEffect(() => {
@@ -123,7 +125,6 @@ export default function Stage({ user }: { user: User }) {
       /* fără preferință salvată — folosim așezarea implicită */
     }
   }, [])
-  const avatarDragRef = useRef<{ px: number; py: number } | null>(null)
   // RING DE DANS (Adrian, 12 iul, prin Kelion: „la dansuri, avatarul se
   // repoziționează automat mai spre centrul ecranului cât durează clipul"):
   // pe un gest de dans, colțul se mută lin spre centru și crește; la finalul
@@ -421,42 +422,11 @@ export default function Stage({ user }: { user: User }) {
               }
             : undefined
         }
-        onDoubleClick={() => {
-          if (monitorOn) setAvatarEdit((e) => !e)
-        }}
       >
-      {avatarEdit && monitorOn && (
-        <div
-          className="avatar-edit-overlay"
-          onPointerDown={(e) => {
-            avatarDragRef.current = { px: e.clientX, py: e.clientY }
-            ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-          }}
-          onPointerMove={(e) => {
-            const d = avatarDragRef.current
-            if (!d) return
-            const dx = e.clientX - d.px
-            const dy = e.clientY - d.py
-            avatarDragRef.current = { px: e.clientX, py: e.clientY }
-            setAvatarBox((b) => ({
-              ...b,
-              x: b.x + (dx / window.innerWidth) * 100,
-              y: b.y + (dy / window.innerHeight) * 100,
-            }))
-          }}
-          onPointerUp={() => {
-            avatarDragRef.current = null
-          }}
-          onWheel={(e) => {
-            setAvatarBox((b) => ({
-              ...b,
-              s: Math.min(0.9, Math.max(0.12, b.s * (e.deltaY < 0 ? 1.07 : 0.935))),
-            }))
-          }}
-        >
-          <span className="avatar-edit-hint">Trage = muți · rotița = mărime · dublu-click = gata</span>
-        </div>
-      )}
+      {/* MODUL DE ARANJARE MANUALĂ DEZACTIVAT (Adrian, 24 iul: „dezactivează
+          fereastra din rotiță pentru mutări și ajustări manuale") — dublu-click
+          nu mai deschide fereastra de tras/scalat cu rotița; aranjarea salvată
+          pe server rămâne exact cum e. */}
       {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „picioarele nu
           i se văd complet" — clipurile de mișcare leagănă șoldurile, deci sub
           tălpi (−1.65) trebuie aer real: camera centrată la y −0.25, distanța
@@ -547,6 +517,7 @@ export default function Stage({ user }: { user: User }) {
           onOpenSettings={() => setSettingsOpen(true)}
           googleConnected={user.googleConnected}
           onConnectGoogle={startGoogleConnect}
+          isAdmin={user.role === 'admin'}
         />
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,

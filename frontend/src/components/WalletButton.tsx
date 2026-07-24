@@ -19,10 +19,14 @@ export function WalletButton({
   onOpenSettings,
   googleConnected,
   onConnectGoogle,
+  isAdmin,
 }: {
   readonly onOpenSettings: () => void
   readonly googleConnected?: boolean
   readonly onConnectGoogle?: () => void
+  // Adminul (owner) nu plătește credite — vede portofelul și POATE testa
+  // alimentarea, dar fără sâcâiala „Te rog reîncarcă" (nu e blocat niciodată).
+  readonly isAdmin?: boolean
 }): React.JSX.Element {
   const langKey = resolveLang(loadLocalLang() ?? navigator.language)
   const t = strings(langKey)
@@ -63,7 +67,8 @@ export function WalletButton({
       setFirstTopUp(!!b.firstTopUp)
       // reflectă realitatea: la sold 0 rămâne paywalled, altfel iese — altfel
       // un refresh cu credits=0 lăsa meniul de top-up blocat deschis pe veci.
-      setPaywalled(b.credits <= 0)
+      // Adminul nu e blocat NICIODATĂ → fără pastila de paywall pentru el.
+      setPaywalled(!isAdmin && b.credits <= 0)
     }
   }
 
