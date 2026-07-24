@@ -242,6 +242,32 @@ const PLAY_AVATAR_GESTURE_TOOL: Tool = {
   },
 }
 
+// ACCES REAL LA TAB-URILE APLICAȚIEI din chatul SCRIS (Adrian, 24 iul: „Kelion
+// trebuie să poată intra în orice tab al aplicației, real"). Pandantul uneltei
+// din voce (services/realtime.ts) — execuția emite frame-ul {nav} spre client.
+const OPEN_APP_VIEW_TOOL: Tool = {
+  name: 'open_app_view',
+  description:
+    "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      view: {
+        type: 'string',
+        enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
+        description:
+          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
+      },
+      section: {
+        type: 'string',
+        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox'],
+        description: 'Optional admin section (only when view=admin).',
+      },
+    },
+    required: ['view'],
+  },
+}
+
 // User-facing notes ("reține asta", "salvează-mi asta") — explicit, visible,
 // listable and deletable by the user themselves. Distinct from Kelion's silent
 // auto-learned long-term memory: a note only exists because the user asked for it.
@@ -1329,8 +1355,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLOSE_TOOL,
     ]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
-      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1527,6 +1553,37 @@ async function runTool(
       return JSON.stringify({ shown: true, url, title })
     }
 
+    // GESTURI PE CONTEXT (audit 24 iul, plângerea lui Adrian: „nu are creier să
+    // aplice gesturile pe context"). Unealta ERA oferită creierului dar nu avea
+    // execuție → cădea pe default cu „unknown_tool" și modelul se dezvăța s-o
+    // cheme. Acum: validare + poarta anti-repetiție + frame-ul {gesture} spre
+    // client (ChatPanel îl mapează pe clip și animă avatarul).
+    case 'play_avatar_gesture': {
+      const g = String(args.gesture ?? '')
+      if (!(AVATAR_GESTURES as readonly string[]).includes(g)) {
+        return JSON.stringify({ error: 'unknown_gesture' })
+      }
+      if (!allowAutoGesture(email, g)) {
+        return JSON.stringify({ played: false, reason: 'cooldown' })
+      }
+      reply.raw.write(`${CTRL}${JSON.stringify({ gesture: g })}${CTRL}`)
+      return JSON.stringify({ played: true })
+    }
+
+    // ACCES LA TAB-URILE APLICAȚIEI din chatul SCRIS (audit 24 iul — exista
+    // doar pe voce). Emite frame-ul {nav}; clientul îl traduce în evenimentul
+    // kelion:navigate, iar Stage deschide panoul (adminul rămâne gate-uit acolo).
+    case 'open_app_view': {
+      const view = String(args.view ?? '').trim().toLowerCase()
+      const section = String(args.section ?? '').trim()
+      if (!['settings', 'wallet', 'contact', 'admin', 'home'].includes(view)) {
+        return JSON.stringify({ error: 'unknown_view' })
+      }
+      if (view === 'admin' && !isAdmin) return JSON.stringify({ error: 'admin_only' })
+      reply.raw.write(`${CTRL}${JSON.stringify({ nav: { view, section } })}${CTRL}`)
+      return JSON.stringify({ opened: view, section: section || null })
+    }
+
     case 'generate_image': {
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
@@ -1541,49 +1598,97 @@ async function runTool(
       const url = String(args.url ?? '')
       if (!url) return JSON.stringify({ error: 'no_url' })
       const result = await browserOpen(email, baseUrl, url)
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_click': {
       const result = await browserClick(email, baseUrl, Number(args.index ?? 0))
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_type': {
       const result = await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_read': {
       const result = await browserRead(email, baseUrl)
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_back': {
       const result = await browserBack(email, baseUrl)
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_scroll': {
       const result = await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down')
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_key': {
       const result = await browserKey(email, baseUrl, String(args.key ?? ''))
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_click_at': {
       const result = await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0))
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
+      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
+      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
+      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
+      // (mereu embeddabil); modelul primește separat textul + elementele.
+      if (!('error' in result)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+      }
       return JSON.stringify(result)
     }
     case 'browser_close': {
       await browserClose(email)
-      const result = { closed: true }
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { kind: 'browser', ...result } })}${CTRL}`)
-      return JSON.stringify(result)
+      // Browserul s-a închis → curăță monitorul (url gol = ecran liber).
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
+      return JSON.stringify({ closed: true })
     }
 
     case 'save_note': {

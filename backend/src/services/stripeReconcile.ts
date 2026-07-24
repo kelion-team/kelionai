@@ -18,21 +18,23 @@ export interface ReconcileResult {
 
 export async function reconcileStripePayments(): Promise<ReconcileResult> {
   if (!config.stripe.secretKey) return { scanned: 0, credited: 0 }
-  let data: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string }; customer_details?: { email?: string } }[] = []
+  const headers = { Authorization: `Bearer ${config.stripe.secretKey}` }
+
+  // 1) Sesiunile Checkout plătite (limită mărită la 100 — audit P1-1: la 25, a
+  // 26-a plată dintr-un vârf cădea de pe listă și nu se mai recupera).
+  let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string }; customer_details?: { email?: string } }[] = []
   try {
-    const r = await fetch('https://api.stripe.com/v1/checkout/sessions?limit=25', {
-      headers: { Authorization: `Bearer ${config.stripe.secretKey}` },
+    const r = await fetch('https://api.stripe.com/v1/checkout/sessions?limit=100', {
+      headers,
       signal: AbortSignal.timeout(15_000),
     })
-    if (!r.ok) return { scanned: 0, credited: 0 }
-    const j = (await r.json()) as { data?: typeof data }
-    data = j.data ?? []
+    if (r.ok) sessions = ((await r.json()) as { data?: typeof sessions }).data ?? []
   } catch {
-    return { scanned: 0, credited: 0 }
+    /* mergem mai departe cu PI-urile */
   }
 
   let credited = 0
-  for (const s of data) {
+  for (const s of sessions) {
     if (s.payment_status !== 'paid') continue
     const email = s.metadata?.email ?? s.customer_details?.email ?? ''
     const amount = (s.amount_total ?? 0) / 100
@@ -43,5 +45,28 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     const ok = await topUpUser(email, amount, s.currency ?? config.stripe.currency, ref)
     if (ok) credited++
   }
-  return { scanned: data.length, credited }
+
+  // 2) PaymentIntents reușite (audit P1-1: reîncărcarea automată debita cardul,
+  // dar dacă creditarea imediată pica ȘI webhookul era mort, banii nu mai veneau
+  // de NICĂIERI — PI-urile nu apar în lista de checkout sessions). Aceeași
+  // creditare idempotentă, pe aceeași cheie pi_.
+  let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string }; receipt_email?: string }[] = []
+  try {
+    const r = await fetch('https://api.stripe.com/v1/payment_intents?limit=100', {
+      headers,
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (r.ok) pis = ((await r.json()) as { data?: typeof pis }).data ?? []
+  } catch {
+    return { scanned: sessions.length, credited }
+  }
+  for (const pi of pis) {
+    if (pi.status !== 'succeeded') continue
+    const email = pi.metadata?.email ?? pi.receipt_email ?? ''
+    const amount = (pi.amount ?? 0) / 100
+    if (!email || !(amount > 0) || !pi.id) continue
+    const ok = await topUpUser(email, amount, pi.currency ?? config.stripe.currency, pi.id)
+    if (ok) credited++
+  }
+  return { scanned: sessions.length + pis.length, credited }
 }

@@ -751,12 +751,28 @@ export async function unblockUser(email: string): Promise<void> {
 /** Admin grants credit straight to a user's wallet (no Stripe, no split). */
 export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
   if (!dbEnabled() || !email || !(amount !== 0)) return
+  const e = email.toLowerCase()
   try {
     await getPool().query(
-      `INSERT INTO wallets (user_email, balance, currency) VALUES ($1, $2, $3)
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, greatest($2, 0))
        ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, updated_at = now()`,
-      [email.toLowerCase(), amount, currency],
+         SET balance = wallets.balance + $2,
+             topup_ref = greatest(wallets.balance + $2, wallets.topup_ref),
+             updated_at = now()`,
+      [e, amount, currency],
+    )
+    // URMĂ CONTABILĂ (audit 24 iul, P2-2): cadoul adminului era invizibil — nici
+    // billing_events, nici transactions → gaură în pista de audit + userul rămânea
+    // pe „prima alimentare £20" deși avea sold. Acum ambele registre îl văd.
+    await getPool().query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES ($1, 'grant', $2, $3, 'credit admin (fără Stripe)')`,
+      [e, amount, `grant:${e}:${Date.now()}`],
+    )
+    await getPool().query(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES ($1, $2, $3, 'admin_grant', NULL)`,
+      [e, amount, Math.floor(amount / config.stripe.creditValue)],
     )
   } catch {
     /* non-fatal */
@@ -1186,18 +1202,21 @@ export async function topUpUser(
     }
     await client.query(
       `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'topup', $2, $3, 'user 75%')`,
+       VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
       [email, userCredit, stripeRef],
     )
+    // Email NORMALIZAT (audit P2-3: un email cu alt caz creditat aici nu mai era
+    // citit NICIODATĂ de endpoint-ul de sold) + topup_ref = NOUL SOLD complet
+    // (audit P1-3: doar ultima alimentare falsifica procentul de alertă).
     await client.query(
-      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, $2)
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
        ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, topup_ref = $2, updated_at = now()`,
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
       [email, userCredit, currency],
     )
     await client.query(
       `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
+       VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
       [email, profit, `${stripeRef}:profit`],
     )
     // CONTABILITATE VIZIBILĂ (Adrian, 24 iul: „să văd REAL în baza de date cine
@@ -1321,37 +1340,51 @@ export async function topUpUserFromPaymentIntent(
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    const seen = await client.query('SELECT 1 FROM transactions WHERE stripe_payment_intent_id = $1', [
-      stripePaymentIntentId,
-    ])
-    if ((seen.rowCount ?? 0) > 0) {
-      // Deja există: doar actualizăm statusul și confirmăm creditul (re-try webhook).
+    const seen = await client.query<{ status: string }>(
+      'SELECT status FROM transactions WHERE stripe_payment_intent_id = $1',
+      [stripePaymentIntentId],
+    )
+    // CAPCANA „pending" DEZAMORSATĂ (audit 24 iul, P0-3): înainte, ORICE rând
+    // existent (inclusiv `pending` de la plasarea intenției) era tratat ca „deja
+    // creditat" → status devenea `succeeded` FĂRĂ niciun ban în portofel: user
+    // plătit, credit zero, tabelă „verde". Acum sărim peste creditare DOAR dacă
+    // statusul anterior era chiar `succeeded`; pentru pending/failed continuăm cu
+    // creditarea completă (dublarea rămâne blocată de uniq_billing_ref → ROLLBACK).
+    const priorStatus = seen.rows[0]?.status ?? null
+    if (priorStatus === 'succeeded' || priorStatus === 'paid') {
+      await client.query('COMMIT')
+      return true
+    }
+    if (priorStatus !== null) {
       await client.query(
         `UPDATE transactions SET status = 'succeeded' WHERE stripe_payment_intent_id = $1`,
         [stripePaymentIntentId],
       )
-      await client.query('COMMIT')
-      return true
+    } else {
+      // Creditele în UNITĂȚI de credit (1 credit = £0.10), consecvent cu
+      // topUpUser și cu afișarea din admin — nu în lire (era de 10× mai mic).
+      await client.query(
+        `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+         VALUES ($1, $2, $3, 'succeeded', $4)`,
+        [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripePaymentIntentId],
+      )
     }
     await client.query(
-      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
-       VALUES ($1, $2, $3, 'succeeded', $4)`,
-      [email.toLowerCase(), gross, userCredit, stripePaymentIntentId],
-    )
-    await client.query(
       `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'topup', $2, $3, 'user 75%')`,
+       VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
       [email, userCredit, stripePaymentIntentId],
     )
+    // Email NORMALIZAT (P2-3) + topup_ref = NOUL SOLD complet (P1-3), nu doar
+    // ultima alimentare — altfel procentul de alertă avea referință falsă.
     await client.query(
-      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES ($1, $2, $3, $2)
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
        ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, topup_ref = $2, updated_at = now()`,
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
       [email, userCredit, currency],
     )
     await client.query(
       `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
+       VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
       [email, profit, `${stripePaymentIntentId}:profit`],
     )
     await client.query('COMMIT')
@@ -1373,7 +1406,7 @@ export async function getWalletStatus(email: string): Promise<{ balance: number;
   if (!dbEnabled()) return { balance: 0, topupRef: 0 }
   try {
     const r = await getPool().query<{ balance: string; topup_ref: string }>(
-      'SELECT balance, topup_ref FROM wallets WHERE user_email = $1',
+      'SELECT balance, topup_ref FROM wallets WHERE user_email = lower($1)',
       [email],
     )
     return { balance: Number(r.rows[0]?.balance ?? 0), topupRef: Number(r.rows[0]?.topup_ref ?? 0) }

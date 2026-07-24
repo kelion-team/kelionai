@@ -285,6 +285,12 @@ export default function ChatPanel({
       window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: GESTURE_TO_CLIP[c.gesture] }))
       return
     }
+    // Kelion deschide tab-urile aplicației din chatul SCRIS (open_app_view →
+    // frame {nav}); Stage ascultă kelion:navigate și face gate-ul de admin.
+    if (c.nav?.view) {
+      window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: c.nav }))
+      return
+    }
     // Bargraf-ul intrării în creier: serverul spune EXACT ce text predă
     // creierului — se afișează pe banda dedicată până la tura următoare.
     if (c.heard !== undefined) {
@@ -986,6 +992,9 @@ export default function ChatPanel({
             return
           }
           micRef.current = rv as unknown as MicHandle
+          // Dacă TTS-ul de rezervă încă redă în momentul instalării, pornim MUT
+          // (anti-ecou), ca pe căile STT — unmute-ul vine de la stopVoice/onEnd.
+          if (isVoicePlaying()) rv.setMuted(true)
           micBackoffRef.current = 1000
           setListening(true)
           return

@@ -111,7 +111,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         reply.code(200).send({ received: true, via: 'api_verify' })
         return
       }
-      reply.code(400).send({ error: 'bad_signature' })
+      // Eveniment care nu e o plată de creditat (charge.updated, invoice.* etc.)
+      // sau fără email atribuibil: răspundem 200 „ignored" (audit P2-4) — 400
+      // repetat făcea Stripe să reîncerce zile întregi și putea DEZACTIVA
+      // endpointul (atunci chiar s-ar pierde calea semnată). Creditarea rămâne
+      // strict pe evenimente verificate; plățile scăpate le prinde reconcilierea.
+      reply.code(200).send({ received: true, ignored: true })
       return
     }
 
@@ -126,14 +131,15 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       }
       const email = s.metadata?.email ?? s.customer_details?.email ?? ''
       const amount = (s.amount_total ?? 0) / 100
-      if (email && amount > 0) {
-        // Prefer to credit via the unified PaymentIntent path when the PI id is
-        // present; otherwise fall back to the legacy top-up path.
-        if (s.payment_intent) {
-          await topUpUserFromPaymentIntent(email, amount, s.currency ?? config.stripe.currency, s.payment_intent)
-        } else {
-          await topUpUser(email, amount, s.currency ?? config.stripe.currency, s.id ?? '')
-        }
+      if (email && amount > 0 && s.payment_intent) {
+        // O SINGURĂ cheie de idempotență pe plată: PaymentIntent id (audit 24
+        // iul, P0-2). Vechea ramură „fără PI → creditează pe session id (cs_…)"
+        // permitea DUBLAREA banilor: Stripe trimite și checkout.session.completed
+        // ȘI payment_intent.succeeded pentru aceeași plată, iar cheile diferite
+        // (cs_ vs pi_) treceau amândouă de dedup. Fără PI în payload NU credităm
+        // aici — reconcilierea orară ia PI-ul autoritar de la Stripe și creditează
+        // idempotent pe aceeași cheie. Bani niciodată dublați, niciodată pierduți.
+        await topUpUserFromPaymentIntent(email, amount, s.currency ?? config.stripe.currency, s.payment_intent)
       }
     }
 

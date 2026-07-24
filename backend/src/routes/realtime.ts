@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, getMeserieActiva, saveMessage } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage } from '../db.js'
+import { trackSpeechLang } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
@@ -125,6 +126,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const text = String(req.body?.text ?? '').trim()
       const role = req.body?.role === 'assistant' ? 'assistant' : 'user'
       if (text) await saveMessage(user.email, role, text)
+      // DETECȚIA LIMBII DIN VOCE (audit 24 iul, P4 — Adrian: „nu depistează
+      // limba vorbită"). Chatul scris persista limba prin trackSpeechLang, dar
+      // vocea NU o făcea niciodată → sesiunea următoare pornea iar de la zero.
+      // Aceeași regulă ca în scris: limba nouă confirmată pe 2 mesaje
+      // consecutive → persistată per user; sesiunile viitoare pornesc direct în ea.
+      if (text && role === 'user') {
+        const current = await getSpeechLang(user.email)
+        const committed = trackSpeechLang(user.email, text, current)
+        if (committed) void setSpeechLangPref(user.email, committed)
+      }
       return reply.send({ ok: true })
     },
   )

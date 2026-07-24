@@ -10,16 +10,6 @@
 
 import { driveVoiceLevelFromElement } from './audioIO'
 
-// CUVÂNT DE TREZIRE (Adrian, 24 iul: „Kelion răspunde DOAR dacă aude «Kelion»
-// sau «Key» + acțiune"). Transcrierea aude „Kelion" în multe forme (accent,
-// zgomot): acceptăm variantele frecvente + „key/chei". Cerem și o graniță de
-// cuvânt ca o discuție care doar POMENEȘTE alt cuvânt să nu-l trezească aiurea.
-const WAKE_WORD_RE =
-  /\b(k[eé]lion|kellion|kelian|kel[iy]on|chelion|chel[iy]on|c[aă]lion|kelly|k[eé]y|chei|chey)\b/i
-export function hasWakeWord(text: string): boolean {
-  return WAKE_WORD_RE.test((text || '').toLowerCase())
-}
-
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
 export interface RealtimeVoiceHandle {
@@ -155,17 +145,52 @@ export async function startRealtimeVoice(
       cleanups.push(() => stopLip?.())
     }
 
+    // FIX „moare tăcut" (audit 24 iul, P2): înainte tratam DOAR `failed`.
+    // Când OpenAI închide apelul (limită de sesiune, idle, cădere server) starea
+    // trece prin `disconnected`/`closed` FĂRĂ să ajungă vreodată la `failed` →
+    // micRef rămânea instalat, UI arăta „ascult", dar nu mai exista nici auz,
+    // nici voce („audio nu există"). Acum: `closed` = fatal imediat; la
+    // `disconnected` dăm un răgaz de 4s (ICE își poate reveni) și abia apoi
+    // declarăm sesiunea moartă — handler-ul din ChatPanel repornește singur.
+    let discTimer: number | null = null
+    const clearDisc = (): void => {
+      if (discTimer != null) {
+        clearTimeout(discTimer)
+        discTimer = null
+      }
+    }
+    cleanups.push(clearDisc)
     pc.onconnectionstatechange = () => {
       if (closed) return
-      if (pc.connectionState === 'connected') onState?.('live')
-      else if (pc.connectionState === 'failed') {
+      const st = pc.connectionState
+      if (st === 'connected') {
+        clearDisc()
+        onState?.('live')
+      } else if (st === 'failed' || st === 'closed') {
+        clearDisc()
         stop()
-        onState?.('error', 'connection-failed')
+        onState?.('error', `connection-${st}`)
+      } else if (st === 'disconnected') {
+        clearDisc()
+        discTimer = window.setTimeout(() => {
+          if (!closed && pc.connectionState === 'disconnected') {
+            stop()
+            onState?.('error', 'connection-disconnected')
+          }
+        }, 4000)
       }
     }
 
     // 3) dataChannel — evenimentele OpenAI Realtime (transcript + erori + barge-in).
     const dc = pc.createDataChannel('oai-events')
+    // Canalul de evenimente închis grațios de server = sesiune moartă (fără el
+    // nu mai există nici transcript, nici tool-calls) — tratăm ca eroare fatală.
+    dc.onclose = () => {
+      if (!closed) {
+        stop()
+        onState?.('error', 'dc-closed')
+      }
+    }
     const send = (obj: unknown): void => {
       if (dc.readyState === 'open') {
         try {
@@ -286,9 +311,11 @@ export async function startRealtimeVoice(
       interrupt: () => send({ type: 'response.cancel' }),
     }
   } catch (e) {
-    const aborted = signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')
     stop()
-    if (!aborted) onState?.('error', e instanceof Error ? e.message : 'connection failed')
+    // FIX „numărare dublă" (audit 24 iul, P3): aici NU mai chemăm onState('error')
+    // — aruncăm excepția, iar catch-ul din ChatPanel numără EL eșecul de pornire.
+    // Înainte, un singur eșec incrementa contorul de 2 ori (onState + catch) →
+    // „3 șanse" erau de fapt 2 și full-duplexul se stingea prematur pe STT.
     throw e
   }
 }

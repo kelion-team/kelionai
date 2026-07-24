@@ -183,9 +183,9 @@ export async function openaiRealtimeAnswer(
         // (nu pe tăcere brută). `create_response:true` = Kelion răspunde când
         // termini de vorbit (full-duplex RESPONSIV — auzul NU are voie să pice),
         // `interrupt_response:true` = barge-in real. NOTĂ: cuvântul de trezire
-        // strict (`create_response:false` + gating pe „Kelion") a fost scos —
-        // dacă transcrierea nu prindea EXACT numele, Kelion nu mai răspundea
-        // deloc („nu mă aude"). Trezirea fiabilă se face pe client (vezi hasWakeWord).
+        // strict (`create_response:false` + gating pe „Kelion") a fost SCOS
+        // definitiv — dacă transcrierea nu prindea EXACT numele, Kelion nu mai
+        // răspundea deloc („nu mă aude"). Kelion răspunde când termini de vorbit.
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
