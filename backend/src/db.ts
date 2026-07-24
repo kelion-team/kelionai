@@ -1200,6 +1200,18 @@ export async function topUpUser(
        VALUES ($1, 'profit', $2, $3, 'margin 25%')`,
       [email, profit, `${stripeRef}:profit`],
     )
+    // CONTABILITATE VIZIBILĂ (Adrian, 24 iul: „să văd REAL în baza de date cine
+    // a alimentat, cât, și repartizarea banilor"). Până acum, alimentările prin
+    // topUpUser (webhook + reconciliere) nu scriau NIMIC în `transactions` →
+    // tabul admin „Tranzacții" rămânea gol deși banii intrau. Acum fiecare
+    // alimentare lasă rândul contabil complet, în ACEEAȘI tranzacție SQL:
+    // suma brută plătită, creditele primite (75%), userul și referința Stripe.
+    await client.query(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES ($1, $2, $3, 'paid', $4)
+       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
+      [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripeRef],
+    )
     await client.query('COMMIT')
     return true
   } catch {
