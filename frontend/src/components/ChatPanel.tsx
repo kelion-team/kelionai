@@ -147,11 +147,12 @@ export default function ChatPanel({
   // dacă WS-ul pică sau rămâne mut, ca vocea să nu se rupă niciodată.
   const streamModeRef = useRef(true)
   const micRef = useRef<MicHandle | null>(null)
-  // VOCE = Chirp 3 HD (Adrian, 24 iul: „Chirp 3 HD full-duplex"). OpenAI Realtime
-  // e DEZACTIVAT ca voce (nu poate reda Chirp): mergem pe STT continuu → creier →
-  // TTS Chirp 3 HD + barge-in = senzație full-duplex cu vocea Google HD. Sinteza
-  // Chirp e pe server (services/tts.ts), cu OpenAI ca rezervă dacă lipsește cheia.
-  const realtimeOffRef = useRef(true)
+  // VOCE = OpenAI Realtime `cedar` — chat FULL-DUPLEX nativ cu escaladare, pe
+  // cele 2 chei (Adrian, 24 iul: „chat fullduplex realtime cu escaladare").
+  // Chirp ar fi cerut o a 3-a cheie Google (nicio cheie AIza nu a fost dată în
+  // chat — verificat). DOAR dacă Realtime pică (fără cheie/eșec WebRTC) cădem O
+  // DATĂ pe STT→creier→TTS pentru sesiune (rezervă, nu regulă).
+  const realtimeOffRef = useRef(false)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
   // (re)pornire a microfonului — vezi ensureMic mai jos.
