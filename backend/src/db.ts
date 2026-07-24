@@ -786,10 +786,25 @@ export async function deleteUserData(email: string): Promise<void> {
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    for (const t of ['messages', 'user_prefs', 'memories', 'wallets', 'visits', 'blocked_users']) {
-      const col = t === 'blocked_users' ? 'email' : 'user_email'
+    // GDPR complet (audit 24 iul): pe lângă datele de conversație, se șterg și
+    // datele biometrice (amprente vocale/faciale), notițele și conturile Google
+    // legate. NIMIC personal nu rămâne. (Coloanele diferă pe tabele — atenție:
+    // o eroare într-o tranzacție Postgres o otrăvește pe TOATĂ, deci lista
+    // conține DOAR tabele+coloane verificate în schema de mai sus.)
+    const targets: [string, string][] = [
+      ['messages', 'user_email'], ['user_prefs', 'user_email'], ['memories', 'user_email'],
+      ['wallets', 'user_email'], ['visits', 'user_email'], ['blocked_users', 'email'],
+      ['voiceprints', 'user_email'], ['faceprints', 'user_email'], ['notes', 'user_email'],
+      ['google_accounts', 'email'], ['cost_events', 'user_email'],
+    ]
+    for (const [t, col] of targets) {
       await client.query(`DELETE FROM ${t} WHERE ${col} = $1`, [e])
     }
+    // EVIDENȚA FINANCIARĂ (transactions, billing_events) NU se șterge — legea
+    // cere păstrarea plăților — dar se ANONIMIZEAZĂ: emailul devine un marcaj
+    // ireversibil, deci nu mai e dată personală, iar contabilitatea rămâne întreagă.
+    await client.query(`UPDATE transactions SET user_id = 'deleted-user' WHERE user_id = $1`, [e])
+    await client.query(`UPDATE billing_events SET user_email = 'deleted-user' WHERE user_email = $1`, [e])
     await client.query('COMMIT')
   } catch {
     await client.query('ROLLBACK').catch(() => {})

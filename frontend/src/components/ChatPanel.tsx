@@ -444,6 +444,25 @@ export default function ChatPanel({
       lastPromoRef.current = p // kept so "reluăm" can redo this exact take
       takeActiveRef.current = true
       closeAllTasks() // the script panel is done — clean frame for the clip
+      // VOCEA CLIPULUI (QA 24 iul: scenariul aprobat nu era rostit NICIODATĂ la
+      // înregistrare — clipul ieșea mut). Sintetizăm scriptul cu vocea unică
+      // (ash, prin /api/tts) și îl redăm peste scenele care se derulează.
+      void fetch('/api/tts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: p.script, lang: p.lang ?? 'ro-RO' }),
+      })
+        .then(async (r) => {
+          if (!r.ok) return
+          const buf = await r.arrayBuffer()
+          let bin = ''
+          const bytes = new Uint8Array(buf)
+          for (let i = 0; i < bytes.length; i += 0x8000)
+            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+          playVoice(btoa(bin))
+        })
+        .catch(() => {})
       for (const s of p.scenes ?? []) {
         promoTimersRef.current.push(
           window.setTimeout(() => {

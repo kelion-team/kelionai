@@ -453,11 +453,37 @@ async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult 
   return { text, sources }
 }
 
-// VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — Gemini
-// se uită la un screenshot și răspunde la o întrebare despre ce se vede. Folosit
-// de verificarea vizuală: constructorul confirmă că rezultatul cerut chiar apare
-// pe ecran (gesturi, UI, layout), nu doar că „build trece".
+// VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model
+// cu vedere se uită la un screenshot și răspunde la o întrebare despre ce se vede.
+// Folosit de verificarea vizuală din admin. MIGRAT PE OPENROUTER (audit 24 iul:
+// `GEMINI_API_KEY` lipsea pe VPS → ruta pica MEREU cu `gemini_vision_indisponibil`);
+// acum folosește ACEEAȘI cheie OpenRouter ca tot creierul (regula „o singură
+// cheie") — Gemini direct rămâne DOAR fallback dacă cheia lui există.
 export async function geminiVision(jpegBase64: string, question: string): Promise<string | null> {
+  // 1) OpenRouter (cheia unică a creierului) — modelul de chat are vedere.
+  if (config.openrouter.key) {
+    try {
+      const { openrouterChat } = await import('./openrouter.js')
+      const r = await openrouterChat(
+        config.openrouter.chatDefault,
+        [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: question },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpegBase64}` } },
+            ],
+          },
+        ],
+        [],
+        { maxTokens: 600, temperature: 0.1 },
+      )
+      if (r.text.trim()) return r.text.trim()
+    } catch {
+      /* cade pe Gemini mai jos */
+    }
+  }
+  // 2) Fallback: Gemini direct (doar dacă cheia lui e configurată).
   if (!config.geminiKey) return null
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
   let res: Response

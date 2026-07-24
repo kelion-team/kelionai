@@ -26,6 +26,7 @@ import {
   getSpeechLang,
   setSpeechLangPref,
   getMeserieActiva,
+  setMeserieActivaPref,
   getDisabledGestures,
   saveNote,
   listNotes,
@@ -271,6 +272,24 @@ const OPEN_APP_VIEW_TOOL: Tool = {
 // User-facing notes ("reține asta", "salvează-mi asta") — explicit, visible,
 // listable and deletable by the user themselves. Distinct from Kelion's silent
 // auto-learned long-term memory: a note only exists because the user asked for it.
+// COMUTAREA MESERIEI DIN CHAT (QA 24 iul: rolul se putea schimba DOAR din UI —
+// Kelion nu putea onora „treci pe rolul de bucătar"). id=0 dezactivează rolul.
+const SET_ROLE_TOOL: Tool = {
+  name: 'set_active_role',
+  description:
+    'Switch the user\'s active role/persona ("meserie") when they ask for it (e.g. "activează rolul de bucătar", "switch to the influencer role", "scoate rolul"). Pass role_id=0 to clear the role. Confirm briefly after switching.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      role_id: {
+        type: 'number',
+        description: 'The role id from the list (1..15), or 0 to deactivate the current role.',
+      },
+    },
+    required: ['role_id'],
+  },
+}
+
 const SAVE_NOTE_TOOL: Tool = {
   name: 'save_note',
   description:
@@ -1357,8 +1376,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLOSE_TOOL,
     ]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
-      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1565,11 +1584,32 @@ async function runTool(
       if (!(AVATAR_GESTURES as readonly string[]).includes(g)) {
         return JSON.stringify({ error: 'unknown_gesture' })
       }
+      // GESTURILE OPRITE DE ADRIAN rămân oprite (QA 24 iul): enum-ul uneltei e
+      // filtrat, dar un model care ignoră enum-ul putea reda un gest dezactivat
+      // — re-verificăm AICI, contra listei reale din DB, nu doar în ofertă.
+      if ((await getDisabledGestures()).includes(g)) {
+        return JSON.stringify({ played: false, reason: 'disabled_by_admin' })
+      }
       if (!allowAutoGesture(email, g)) {
         return JSON.stringify({ played: false, reason: 'cooldown' })
       }
       reply.raw.write(`${CTRL}${JSON.stringify({ gesture: g })}${CTRL}`)
       return JSON.stringify({ played: true })
+    }
+
+    // COMUTAREA MESERIEI (QA 24 iul): userul cere prin chat, Kelion o schimbă
+    // pe loc; persona nouă intră în vigoare de la următoarea tură (persona se
+    // construiește per-tură din getMeserieActiva).
+    case 'set_active_role': {
+      const id = Number(args.role_id ?? -1)
+      if (id === 0) {
+        await setMeserieActivaPref(email, null)
+        return JSON.stringify({ ok: true, role: null })
+      }
+      const m = getMeserie(id)
+      if (!m) return JSON.stringify({ error: 'unknown_role', hint: 'role_id 1..15 or 0 to clear' })
+      await setMeserieActivaPref(email, id)
+      return JSON.stringify({ ok: true, role: m.nume })
     }
 
     // ACCES LA TAB-URILE APLICAȚIEI din chatul SCRIS (audit 24 iul — exista
@@ -1752,12 +1792,28 @@ async function runTool(
         }
       }
       const promoUrl = await promoSceneUrl('map', subject)
+      // SCENELE ÎN FORMA CLIENTULUI (QA 24 iul: serverul emitea scenele brute
+      // {at_seconds,kind,query,url}, clientul așteaptă {at,title,url,close} →
+      // toate timerele ieșeau NaN și scenele map/weather rămâneau fără URL).
+      // Convertim AICI: at_seconds→at; map/weather→URL real prin promoSceneUrl;
+      // avatar = scenă fără URL (clientul închide monitorul → avatarul singur).
+      const clientScenes: { at: number; title: string; url?: string; close?: boolean }[] = []
+      for (const raw of scenes) {
+        const s = raw as { at_seconds?: number; kind?: string; query?: string; url?: string; title?: string }
+        const at = Math.max(0, Number(s.at_seconds ?? 0))
+        const title = String(s.title ?? s.query ?? subject)
+        if (s.kind === 'image' && s.url) clientScenes.push({ at, title, url: s.url })
+        else if (s.kind === 'map' || s.kind === 'weather') {
+          const u = await promoSceneUrl(s.kind, String(s.query ?? subject))
+          if (u) clientScenes.push({ at, title, url: u })
+        } else clientScenes.push({ at, title, close: true }) // avatar → ecran liber
+      }
       // ARMAREA RECORDERULUI (audit 24 iul: „clip promo nu merge din chat scris")
       // — frame-ul `{promo}` e cel pe care ChatPanel îl așteaptă (c.promo?.script
       // → armPromo) ca să armeze butonul Rec cu scenariul aprobat; înainte se
       // emitea DOAR `{monitor}` și recorderul nu se arma niciodată.
       reply.raw.write(
-        `${CTRL}${JSON.stringify({ promo: { subject, duration, script, lang, scenes } })}${CTRL}`,
+        `${CTRL}${JSON.stringify({ promo: { subject, duration, script, lang, scenes: clientScenes } })}${CTRL}`,
       )
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: promoUrl, title: `Promo: ${subject}` } })}${CTRL}`)
       return JSON.stringify({ armed: true, shown: true, url: promoUrl })
