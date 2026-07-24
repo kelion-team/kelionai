@@ -5,6 +5,7 @@ import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
+import { brainComplete } from '../services/brain.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -72,6 +73,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (user.googleRefreshToken && (user.googleTokenExp ?? 0) < Date.now() + 60_000) {
         const refreshed = await refreshGoogleAccessToken(user.googleRefreshToken)
         if (refreshed) token = refreshed.accessToken
+      }
+
+      // ESCALADAREA ÎN VOCE: cererile grele merg la CREIER (modelul work).
+      if (name === 'ask_brain') {
+        const request = String(args.request ?? '').trim()
+        if (!request) return reply.send({ output: JSON.stringify({ error: 'empty_request' }) })
+        const answer = await brainComplete(
+          `Ești Kelion (creierul de lucru). Răspunde complet dar CONCIS, ca text simplu de rostit cu voce (fără markdown):\n\n${request}`,
+          2000,
+        )
+        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }
 
       if (name === 'generate_image') {

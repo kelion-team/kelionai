@@ -69,6 +69,7 @@ import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '.
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
+import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -150,6 +151,25 @@ const IMAGE_TOOL: Tool = {
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
 // owner-only monitor, so the owner (Adrian) can see what to build next. This is
 // invisible to the user — it never replaces telling them honestly it can't do it.
+// ── ACCES INTEGRAL LA CODUL SURSĂ (Adrian, 24 iul) — admin only ─────────────
+// „Kelion trebuie să aibă acces la codul sursă integral": își citește propriul
+// cod din container (read-only) — la „repară X" se uită în COD, nu ghicește.
+const LIST_SOURCE_TOOL: Tool = {
+  name: 'list_source',
+  description: "ADMIN ONLY. List your own source code tree (backend/ + frontend/). Use to orient before reading files.",
+  input_schema: { type: 'object', properties: { dir: { type: 'string', description: "Subdirectory (e.g. 'backend/src/routes'); default root." } } },
+}
+const READ_SOURCE_TOOL: Tool = {
+  name: 'read_source',
+  description: "ADMIN ONLY. Read one of your own source files (with line numbers). Use for diagnosing bugs the owner reports — look at the REAL code.",
+  input_schema: { type: 'object', properties: { path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." } }, required: ['path'] },
+}
+const SEARCH_SOURCE_TOOL: Tool = {
+  name: 'search_source',
+  description: "ADMIN ONLY. Search your own source code (regex/text) — returns file:line matches. Use to find where a feature/bug lives.",
+  input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Text or regex to search for.' } }, required: ['query'] },
+}
+
 const LOG_GAP_TOOL: Tool = {
   name: 'log_unsupported_request',
   description:
@@ -1275,7 +1295,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLOSE_TOOL,
     ]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
       : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1410,7 +1430,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       void saveMessage(user.email, 'assistant', assistantText)
       // Memory agent (learn): durable facts about this user, learned from this turn.
       // Fire-and-forget — zero latency on the reply path.
-      void learnFromTurn(user.email, 'kelion', lastUserText, assistantText)
+      // FIX CRITIC (audit 24 iul): argumentele erau inversate — 'kelion' ajungea
+      // ca userMsg și răspunsul ca nume de agent → memoria nu mai reținea NIMIC.
+      void learnFromTurn(user.email, lastUserText, assistantText, 'kelion')
     }
 
     // Debit real provider cost from the user's wallet (customers only; admin exempt).
@@ -1443,6 +1465,19 @@ async function runTool(
   const args = block.input as Record<string, unknown>
 
   switch (block.name) {
+    case 'list_source': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return listSource(String(args.dir ?? '.'))
+    }
+    case 'read_source': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return readSource(String(args.path ?? ''))
+    }
+    case 'search_source': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return searchSource(String(args.query ?? ''))
+    }
+
     case 'show_on_screen': {
       const url = String(args.url ?? '')
       const title = String(args.title ?? '')
@@ -1533,7 +1568,8 @@ async function runTool(
     case 'forget_memory': {
       const fragment = String(args.fragment ?? '')
       if (!fragment) return JSON.stringify({ error: 'no_fragment' })
-      const count = await deleteMemory(email, 'kelion', fragment)
+      // FIX (audit 24 iul): ordinea corectă e (email, fragment, agent).
+      const count = await deleteMemory(email, fragment, 'kelion')
       return JSON.stringify({ deleted: count })
     }
 
