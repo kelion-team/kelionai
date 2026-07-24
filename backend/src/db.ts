@@ -1401,6 +1401,64 @@ export async function topUpUserFromPaymentIntent(
   }
 }
 
+/** VÂNZARE ADMIN: creditează EXACT `credits` credite (nu formula 75%, ca să nu
+ *  apară erori de rotunjire — userul primește fix ce i s-a vândut). Idempotent
+ *  pe stripe_ref. Diferența dintre brut și valoarea creditelor = marja, în
+ *  registru ca de obicei. */
+export async function creditSaleExact(
+  email: string,
+  gross: number,
+  currency: string,
+  stripeRef: string,
+  credits: number,
+): Promise<boolean> {
+  if (!dbEnabled() || !(gross > 0) || !stripeRef || !(credits > 0)) return false
+  const userCredit = Math.round(credits * config.stripe.creditValue * 100) / 100
+  const profit = Math.max(0, Math.round((gross - userCredit) * 100) / 100)
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'topup', $2, $3, 'vânzare admin — credite exacte')`,
+      [email, userCredit, stripeRef],
+    )
+    await client.query(
+      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
+       ON CONFLICT (user_email) DO UPDATE
+         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
+      [email, userCredit, currency],
+    )
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'profit', $2, $3, 'marjă vânzare admin')`,
+      [email, profit, `${stripeRef}:profit`],
+    )
+    await client.query(
+      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+       VALUES (lower($1), $2, $3, 'paid', $4)
+       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
+      [email, gross, Math.floor(credits), stripeRef],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
 /** RETRAGEREA creditelor la REFUND (incident real 24 iul: plată rambursată pe
  *  card dar creditată în portofel = credite pentru bani inexistenți). Găsește
  *  alimentarea după stripe_ref, scade creditul userului din portofel, marchează

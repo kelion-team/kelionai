@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import { topUpUser, revokeTopUpForRefund } from '../db.js'
+import { topUpUser, revokeTopUpForRefund, creditSaleExact } from '../db.js'
 import { hasRefund } from './stripe.js'
 
 // ── RECONCILIEREA AUTOMATĂ A PLĂȚILOR (Adrian, 24 iul: „nu e de joacă cu banii
@@ -29,7 +29,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
 
   // 1) Sesiunile Checkout plătite (limită mărită la 100 — audit P1-1: la 25, a
   // 26-a plată dintr-un vârf cădea de pe listă și nu se mai recupera).
-  let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string }; customer_details?: { email?: string } }[] = []
+  let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string; sale_credits?: string }; customer_details?: { email?: string } }[] = []
   try {
     const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?limit=100&created[gte]=${since}`, {
       headers,
@@ -49,9 +49,13 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     if (!email || !(amount > 0) || !ref) continue
     // RAMBURSATĂ = NU se creditează (incident real: £25 rambursată dar creditată).
     if (await hasRefund(ref)) continue
-    // Idempotent: dacă stripe_ref există deja în billing_events, topUpUser
-    // întoarce false și nu se creditează nimic în plus.
-    const ok = await topUpUser(email, amount, s.currency ?? config.stripe.currency, ref)
+    // Idempotent: dacă stripe_ref există deja în billing_events, creditarea
+    // întoarce false și nu se creditează nimic în plus. Vânzările admin
+    // (sale_credits) primesc EXACT creditele vândute.
+    const saleCredits = Number(s.metadata?.sale_credits ?? 0)
+    const ok = saleCredits > 0
+      ? await creditSaleExact(email, amount, s.currency ?? config.stripe.currency, ref, saleCredits)
+      : await topUpUser(email, amount, s.currency ?? config.stripe.currency, ref)
     if (ok) credited++
   }
 
@@ -59,7 +63,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
   // dar dacă creditarea imediată pica ȘI webhookul era mort, banii nu mai veneau
   // de NICĂIERI — PI-urile nu apar în lista de checkout sessions). Aceeași
   // creditare idempotentă, pe aceeași cheie pi_.
-  let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string }; receipt_email?: string }[] = []
+  let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string; sale_credits?: string }; receipt_email?: string }[] = []
   try {
     const r = await fetch(`https://api.stripe.com/v1/payment_intents?limit=100&created[gte]=${since}`, {
       headers,
@@ -76,7 +80,10 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     if (!email || !(amount > 0) || !pi.id) continue
     // RAMBURSATĂ = NU se creditează.
     if (await hasRefund(pi.id)) continue
-    const ok = await topUpUser(email, amount, pi.currency ?? config.stripe.currency, pi.id)
+    const saleCredits = Number(pi.metadata?.sale_credits ?? 0)
+    const ok = saleCredits > 0
+      ? await creditSaleExact(email, amount, pi.currency ?? config.stripe.currency, pi.id, saleCredits)
+      : await topUpUser(email, amount, pi.currency ?? config.stripe.currency, pi.id)
     if (ok) credited++
   }
 

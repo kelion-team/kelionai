@@ -183,48 +183,61 @@ export function WalletButton({
           <span className="wallet-menu-balance">
             {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
           </span>
-          <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
-          {firstTopUp && (
+          {/* VÂNZAREA E LA ADMIN (Adrian, 24 iul, confirmat DA: „butonul de
+              credite e doar la admin; ceilalți doar afișare"). Userii obișnuiți
+              văd DOAR soldul; creditele se cumpără prin linkul de plată primit
+              de la administrator. Adminul păstrează meniul (testare). */}
+          {isAdmin ? (
+            <>
+              <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
+              {firstTopUp && (
+                <span className="wallet-menu-note">
+                  {ro
+                    ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
+                    : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+                </span>
+              )}
+              <div className="wallet-amounts">
+                {presets.map((a) => (
+                  <button key={a} type="button" className="ghost wallet-pack" onClick={() => pay(a)}>
+                    <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
+                  </button>
+                ))}
+              </div>
+              <div className="wallet-custom">
+                <span aria-hidden>£</span>
+                <input
+                  type="number"
+                  min={minAmount}
+                  step={5}
+                  inputMode="numeric"
+                  placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
+                  value={custom}
+                  onChange={(e) => setCustom(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={customValid() === null}
+                  onClick={() => {
+                    const n = customValid()
+                    if (n !== null) pay(n)
+                  }}
+                >
+                  {customValid() !== null
+                    ? `${creditsFor(customValid() as number)} ${t.credits}`
+                    : ro ? 'Alimentează' : 'Top up'}
+                </button>
+              </div>
+              {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
+            </>
+          ) : (
             <span className="wallet-menu-note">
               {ro
-                ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
-                : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+                ? 'Creditele se obțin prin linkul de plată primit de la administrator.'
+                : 'Credits are purchased via the payment link you receive from the administrator.'}
             </span>
           )}
-          {/* PACHETE DE CREDITE (produsul = creditele, prețul lângă). */}
-          <div className="wallet-amounts">
-            {presets.map((a) => (
-              <button key={a} type="button" className="ghost wallet-pack" onClick={() => pay(a)}>
-                <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
-              </button>
-            ))}
-          </div>
-          <div className="wallet-custom">
-            <span aria-hidden>£</span>
-            <input
-              type="number"
-              min={minAmount}
-              step={5}
-              inputMode="numeric"
-              placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
-              value={custom}
-              onChange={(e) => setCustom(e.target.value)}
-            />
-            <button
-              type="button"
-              className="ghost"
-              disabled={customValid() === null}
-              onClick={() => {
-                const n = customValid()
-                if (n !== null) pay(n)
-              }}
-            >
-              {customValid() !== null
-                ? `${creditsFor(customValid() as number)} ${t.credits}`
-                : ro ? 'Alimentează' : 'Top up'}
-            </button>
-          </div>
-          {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
           <div className="wallet-menu-sep" />
           <button
             type="button"
