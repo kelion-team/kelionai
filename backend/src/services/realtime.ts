@@ -109,7 +109,11 @@ export async function openaiRealtimeAnswer(
   const session = {
     type: 'realtime',
     model: config.openai.realtimeModel,
-    audio: { output: { voice: config.openai.realtimeVoice } },
+    audio: {
+      // Fără input.transcription, GA nu emite NICIODATĂ transcriptul userului.
+      input: { transcription: { model: 'gpt-4o-mini-transcribe' } },
+      output: { voice: config.openai.realtimeVoice },
+    },
     instructions: realtimeInstructions(lang, meserie),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
     tools: realtimeTools(),

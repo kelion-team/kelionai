@@ -242,6 +242,13 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 22 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **24 IUL — 6 FIXURI DE VOCE din audit („nu mă aude") — branch `claude/reia-l9l2qx`, NEmerge-uit/NEdeployat încă:**
+  1. `routes/realtime.ts`: `.trim()` pe oferta SDP tăia CRLF-ul final obligatoriu → OpenAI „failed to unmarshal SDP: EOF"; acum se păstrează/reface `\r\n`-ul final.
+  2. `services/realtime.ts`: sesiunea Realtime primește `audio.input.transcription` (`gpt-4o-mini-transcribe`) — fără el GA nu emitea NICIODATĂ transcriptul userului.
+  3. `lib/micStream.ts`: refuzul CURAT de WS (1011 asr_not_configured / 1008 auth) dădea doar `onclose`, nu `onerror` → acum `onclose` fără niciun mesaj primit cheamă `onError('ws')` → căderea pe batch chiar se declanșează.
+  4. `lib/realtimeVoice.ts` + `ChatPanel.tsx`: erorile benigne (`cancel`/`active_response`) doar se loghează; cele fatale cheamă `stop()` ÎNAINTE de `onState('error')` — nu mai rămânea sesiunea vie (mic capturat, facturare) + al 2-lea microfon în paralel; ChatPanel curăță și el handle-ul cu `stop()`.
+  5. Mimetype pe calea batch ASR: `audioIO.ts` trimite `mime`-ul real al MediaRecorder-ului la `/api/asr` (Safari = audio/mp4), `routes/asr.ts` îl relayează, `services/asr.ts` alege extensia fișierului pentru OpenAI după el; eșecul `/api/asr` nu mai moare tăcut (console.error → F12 → Kelion).
+  6. `lib/realtimeVoice.ts`: apel de unealtă cu nume nerezolvabil primește acum `function_call_output` `{"error":"unknown_tool"}` + `response.create` — modelul nu mai rămâne agățat.
 - 🗓️ **24 IUL — VAL DE FIXURI LIVE (PR #341, #342, #343, #344 — toate merge-uite + deployate pe VPS):**
   1. **Unelte false SCOASE (PR #341):** `code_execution` + `delegate` mințeau (sandbox inexistent, delegare no-op) — șterse complet (unelte, registru AGENTS, prompt „YOUR TEAM/SANDBOX"). Adrian: „nimic hardcodat, totul real din funcții".
   2. **Bară + alimentare (PR #341):** rotița ⚙ și „Connect Google" SCOASE din bară (păreau re-login); `WalletButton` (credit + „＋") pentru ORICE user logat; Setări + „Conectează Gmail & Calendar" în meniul portofelului. **Alimentare într-un SINGUR loc**: prima alimentare **£20 minim** (pornește creierul), apoi **multipli de £5** — validat pe server (`validateTopUp` în `billing.ts`; `/api/billing/balance` întoarce `firstTopUp`); auto-recharge constrâns la ×5. Stripe în spate, UI se reîmprospătează la `/?topup=success`.

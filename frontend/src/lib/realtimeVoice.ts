@@ -222,10 +222,28 @@ export async function startRealtimeVoice(
               })
               send({ type: 'response.create' })
             })
+        } else {
+          // Nume nerezolvabil (sau fără handler): răspundem totuși — altfel
+          // modelul rămâne agățat așteptând rezultatul funcției.
+          send({
+            type: 'conversation.item.create',
+            item: { type: 'function_call_output', call_id: callId, output: '{"error":"unknown_tool"}' },
+          })
+          send({ type: 'response.create' })
         }
       } else if (type === 'error') {
         const err = (m.error as Record<string, unknown>) ?? {}
-        onState?.('error', String(err.message ?? 'realtime-error'))
+        const msg = String(err.message ?? err.code ?? 'realtime-error')
+        // Erori BENIGNE (cancellation_failed / conversation_already_has_active_
+        // response) nu dărâmă sesiunea — doar le notăm și mergem mai departe.
+        if (/cancel|active_response/i.test(`${String(err.code ?? '')} ${msg}`)) {
+          console.warn('realtime eroare benignă:', msg)
+        } else {
+          // FATAL: oprim sesiunea ÎNAINTE de a anunța — altfel rămânea vie
+          // (mic capturat, facturare) și pornea AL DOILEA microfon în paralel.
+          stop()
+          onState?.('error', msg)
+        }
       }
     }
 

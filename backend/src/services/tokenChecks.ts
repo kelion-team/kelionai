@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
 import { getStripeBalance } from './stripe.js'
 import { mailEnabled } from './mail.js'
@@ -108,20 +109,41 @@ async function checkGoogleTtsKey(): Promise<TokenCheck> {
   return { name: 'Google TTS API key', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Cloud Text-to-Speech API' }
 }
 
-// 5. Serper — web search real
-async function checkSerper(): Promise<TokenCheck> {
-  if (!config.serperKey) {
-    return { name: 'Serper API key', status: 'not_configured', requiredScope: 'Google Search API' }
+// 5. OpenAI — vocea live (Realtime), STT de rezervă și TTS merg pe această cheie
+async function checkOpenAI(): Promise<TokenCheck> {
+  if (!config.openai.key) {
+    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'not_configured', requiredScope: 'Realtime + Audio API' }
   }
-  const r = await fetchStatus('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: 'kelionai.app', num: 1 }),
+  const r = await fetchStatus('https://api.openai.com/v1/models', {
+    headers: { Authorization: `Bearer ${config.openai.key}` },
   })
   if (r.ok) {
-    return { name: 'Serper API key', status: 'ok', detail: 'search OK', requiredScope: 'Google Search API' }
+    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'ok', detail: 'models list OK', requiredScope: 'Realtime + Audio API' }
   }
-  return { name: 'Serper API key', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Google Search API' }
+  return { name: 'OpenAI API key (voce/STT/TTS)', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Realtime + Audio API' }
+}
+
+// 5b. Google OAuth — loginul aplicației. Doar prezența client id + secret (fără
+// apel extern: Google nu oferă o verificare cheap a perechii fără un flow real).
+function checkGoogleOAuth(): TokenCheck {
+  if (!config.google.clientId || !config.google.clientSecret) {
+    return { name: 'Google OAuth (login)', status: 'not_configured', requiredScope: 'OAuth 2.0 client (login + Connect Google)' }
+  }
+  return { name: 'Google OAuth (login)', status: 'ok', detail: 'client id + secret prezente', requiredScope: 'OAuth 2.0 client (login + Connect Google)' }
+}
+
+// 5c. PostgreSQL — baza de date (SELECT 1 real, nu doar prezența URL-ului)
+async function checkDb(): Promise<TokenCheck> {
+  if (!dbEnabled()) {
+    return { name: 'PostgreSQL', status: 'not_configured', requiredScope: 'DATABASE_URL' }
+  }
+  try {
+    await timed(15_000, () => getPool().query('SELECT 1'))
+    return { name: 'PostgreSQL', status: 'ok', detail: 'SELECT 1 OK', requiredScope: 'DATABASE_URL' }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { name: 'PostgreSQL', status: 'fail', detail: msg, requiredScope: 'DATABASE_URL' }
+  }
 }
 
 // 6. Gemini API key — corectare STT, imagini, grounded search fallback
@@ -205,21 +227,6 @@ async function checkLiveKit(): Promise<TokenCheck> {
   }
 }
 
-// 10. GitHub token — folosit la PR/merge/deploy pe VPS
-async function checkGithub(): Promise<TokenCheck> {
-  const token = process.env.VPS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? ''
-  if (!token) {
-    return { name: 'GitHub token', status: 'not_configured', requiredScope: 'Contents:write, Actions:write, Pull requests:write' }
-  }
-  const r = await fetchStatus('https://api.github.com/user', {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-  })
-  if (r.ok) {
-    return { name: 'GitHub token', status: 'ok', detail: 'GET /user OK', requiredScope: 'Contents:write, Actions:write, Pull requests:write' }
-  }
-  return { name: 'GitHub token', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Contents:write, Actions:write, Pull requests:write' }
-}
-
 // 11. Session secret — nu e token extern, dar e critic pentru securitate
 function checkSessionSecret(): TokenCheck {
   if (!config.sessionSecret) {
@@ -232,17 +239,18 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, stripe, googleSa, googleTts, serper, gemini, smtp, imap, livekit, github, session] = await Promise.all([
+  const [brain, stripe, googleSa, googleTts, openai, gemini, smtp, imap, livekit, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
     checkStripe(),
     checkGoogleServiceAccount(),
     checkGoogleTtsKey(),
-    checkSerper(),
+    checkOpenAI(),
     checkGemini(),
     checkMailSmtp(),
     checkMailImap(),
     checkLiveKit(),
-    checkGithub(),
+    checkDb(),
+    Promise.resolve(checkGoogleOAuth()),
     Promise.resolve(checkSessionSecret()),
   ])
   return [
@@ -250,12 +258,13 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     stripe,
     googleSa,
     googleTts,
-    serper,
+    openai,
     gemini,
     smtp,
     imap,
     livekit,
-    github,
+    db,
+    googleOauth,
     session,
   ]
 }
