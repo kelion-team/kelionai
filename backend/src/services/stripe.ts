@@ -50,6 +50,10 @@ export async function createCheckout(
   body.set('line_items[0][price_data][unit_amount]', String(amount * 100))
   body.set('line_items[0][price_data][product_data][name]', 'Kelion credit')
   body.set('metadata[email]', email)
+  // Emailul și pe PaymentIntent (audit 24 iul, P2-4): PI-ul NU moștenește
+  // metadata sesiunii, iar fără email evenimentul payment_intent.succeeded nu
+  // putea fi atribuit → 400 repetat la webhook (Stripe poate dezactiva endpointul).
+  body.set('payment_intent_data[metadata][email]', email)
   // SALVEAZĂ cardul pentru reîncărcarea automată (ca userul să nu rămână fără
   // credit — cerința lui Adrian). Cardul devine metoda implicită a clientului.
   body.set('payment_intent_data[setup_future_usage]', 'off_session')
@@ -101,7 +105,16 @@ export async function chargeSavedCard(
   body.set('off_session', 'true')
   body.set('confirm', 'true')
   body.set('metadata[email]', email)
-  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body })
+  // ANTI DUBLĂ-DEBITARE (audit 24 iul, P1-2): Idempotency-Key per user + fereastră
+  // de 10 min — dacă două procese/retry-uri cer aceeași reîncărcare aproape
+  // simultan, Stripe execută UNA singură (lacătul in-memory nu supraviețuiește
+  // restartului și nu există între instanțe; cheia asta da).
+  const idemKey = `kelion-ar-${email.toLowerCase()}-${Math.floor(Date.now() / 600_000)}`
+  const r = await fetch(`${API}/payment_intents`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
+    body,
+  })
   const j = (await r.json().catch(() => ({}))) as {
     id?: string
     status?: string

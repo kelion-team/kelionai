@@ -93,8 +93,12 @@ export default function Stage({ user }: { user: User }) {
           break
         case 'admin':
           if (user.role === 'admin') {
-            const sec = String(d?.section ?? '') as typeof adminTab
-            if (sec) setAdminTab(sec)
+            // Secțiune VALIDATĂ (audit 24 iul): un string liber de la model
+            // („bani", „finanțe") seta un tab inexistent → panou gol. Doar
+            // secțiunile reale trec; altfel rămâne tabul curent.
+            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox'] as const
+            const sec = String(d?.section ?? '')
+            if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             setAdminOpen(true)
           }
           break

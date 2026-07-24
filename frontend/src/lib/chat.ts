@@ -44,6 +44,9 @@ export interface ChatControl {
   // The server committed a new speech language (detected + persisted there);
   // the client applies it to the recognizer and mirrors it locally.
   lang?: string
+  // ACCES LA TAB-URILE APLICAȚIEI din chatul scris (unealta open_app_view):
+  // clientul traduce în evenimentul kelion:navigate; Stage deschide panoul.
+  nav?: { view: string; section?: string }
   // Out of credit — the client should open the top-up (buy credit) flow.
   paywall?: boolean
   // Puls de viață de la server cât gândește creierul (nimic de afișat) — ține
@@ -118,46 +121,11 @@ export async function* streamChat(
   faceDescriptor?: number[],
   facePhoto?: string,
 ): AsyncGenerator<string> {
-  let res: Response
-  try {
-    res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      signal,
-      body: JSON.stringify({
-        messages,
-        image,
-        images,
-        imageIsAttachment,
-        coords,
-        screen,
-        voiceFeatures,
-        faceDescriptor,
-        facePhoto,
-        // Kelion's built-in sense of "now": the client's real local time + zone,
-        // sent every turn so he always knows today's date and the current time.
-        now: new Date().toISOString(),
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      }),
-    })
-  } catch {
-    // The request never reached the server — no connection (e.g. a tunnel while
-    // driving). Signal 'offline' so the UI says so clearly (and speaks it).
-    throw new Error('offline')
-  }
-
-  if (!res.ok || !res.body) {
-    let code = 'error'
-    try {
-      const j = (await res.json()) as { error?: string }
-      if (j.error === 'brain_not_configured') code = 'brain_not_configured'
-    } catch {
-      /* non-JSON error body */
-    }
-    // Throw a stable code; the UI maps it to the user's language.
-    throw new Error(code)
-  }
+  // BUG FINANCIAR REPARAT (audit 24 iul): aici mai exista un POST /api/chat al
+  // cărui răspuns NU era citit niciodată — openStream() de mai jos deschidea AL
+  // DOILEA POST identic, singurul consumat. Serverul rula deci FIECARE mesaj de
+  // DOUĂ ori: dublu cost la creier, istoric dublat, frame-urile primei ture
+  // pierdute. Un singur POST rămâne: cel din openStream().
 
   // Deduplication set: a reconnect may re-send events we already processed.
   const seenIds = new Set<string>()

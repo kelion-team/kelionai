@@ -1016,7 +1016,13 @@ export function playVoice(base64Mp3: string, onStart?: () => void, onEnd?: () =>
 export function stopVoice(): void {
   clearGapTimer()
   voiceQueue.length = 0
+  // FIX „microfon mut pe viață" (audit 24 iul, P1): callback-ul de final (care
+  // face UNMUTE pe microfonul sesiunii Realtime) era ARUNCAT fără să fie chemat
+  // → după un „stop"/barge-in scris în timpul redării, pista rămânea enabled=false
+  // pentru totdeauna = „nu mă aude". Îl executăm ÎNAINTE de a-l șterge.
+  const end = pendingVoiceEnd
   pendingVoiceEnd = null
+  end?.()
   if (curVoice) {
     try {
       curVoice.pause()

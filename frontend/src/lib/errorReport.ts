@@ -7,12 +7,19 @@
 
 const queue: string[] = []
 let timer: number | null = null
-const seen = new Set<string>()
+// Dedup CU EXPIRARE (audit 24 iul, P1-4): vechiul Set pe viață trimitea o eroare
+// RECURENTĂ o singură dată per sesiune de pagină — după fereastra serverului de
+// 15 min, Kelion n-o mai vedea deși încă se producea. Acum retrimitem după 5 min.
+const seen = new Map<string, number>()
+const RESEND_AFTER_MS = 5 * 60_000
 
 export function reportClientError(msg: string): void {
   const m = (msg ?? '').slice(0, 400).trim()
-  if (!m || seen.has(m)) return
-  seen.add(m)
+  if (!m) return
+  const now = Date.now()
+  const last = seen.get(m)
+  if (last !== undefined && now - last < RESEND_AFTER_MS) return
+  seen.set(m, now)
   if (seen.size > 200) seen.clear() // resetăm dedupul, nu memoria
   queue.push(m)
   if (timer == null) timer = window.setTimeout(() => void flush(), 3000)
