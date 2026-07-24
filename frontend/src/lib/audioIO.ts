@@ -481,9 +481,15 @@ export async function startMic(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ audio: b64, lang: getLang() }),
+        // mime = containerul REAL al MediaRecorder-ului (ex. audio/mp4 pe
+        // Safari) — backendul alege numele fișierului pentru OpenAI după el.
+        body: JSON.stringify({ audio: b64, lang: getLang(), mime: blob.type || mime }),
       })
-      if (!r.ok) return
+      if (!r.ok) {
+        // nu mai murim tăcut — eroarea ajunge la Kelion prin raportarea F12
+        console.error('asr batch a picat:', r.status)
+        return
+      }
       const j = (await r.json()) as { transcript?: string }
       const text = (j.transcript ?? '').trim()
       if (text) onTranscript(text)

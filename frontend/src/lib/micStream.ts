@@ -300,6 +300,11 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     }
     ws.onclose = () => {
       wsReady = false
+      // Refuz CURAT de la server (ex. 1011 asr_not_configured, 1008 auth):
+      // vine DOAR onclose, niciodată onerror — fără plasa asta fallback-ul pe
+      // batch nu se declanșa niciodată (surd permanent). 'ws' e eticheta pe
+      // care ChatPanel o mapează pe căderea în batch.
+      if (!closed && !gotAnyMsg) opts.onError('ws')
     }
   }
 

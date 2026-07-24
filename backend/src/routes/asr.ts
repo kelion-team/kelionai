@@ -16,14 +16,17 @@ import { transcribe } from '../services/asr.js'
 // session gate + cost accounting.
 
 export async function asrRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { audio?: string; lang?: string } }>('/api/asr', async (req, reply) => {
+  app.post<{ Body: { audio?: string; lang?: string; mime?: string } }>('/api/asr', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
     const audio = req.body?.audio?.trim()
     if (!audio) return reply.code(400).send({ error: 'bad_request' })
 
-    const r = await transcribe(audio, { langHint: (req.body?.lang ?? '').trim() })
+    // mime = containerul real al MediaRecorder-ului din browser (ex. audio/mp4
+    // pe Safari) — transcribe() alege numele fișierului pentru OpenAI după el.
+    const mime = (req.body?.mime ?? '').trim()
+    const r = await transcribe(audio, { langHint: (req.body?.lang ?? '').trim(), mime: mime || undefined })
     if (!r.ok) {
       if (r.status === 502) app.log.warn({ error: r.error }, 'google asr failed')
       return reply.code(r.status).send({ error: r.error.split(':')[0] })

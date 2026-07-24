@@ -939,6 +939,9 @@ export default function ChatPanel({
                 console.error('voce realtime a picat:', note ?? 'fără detalii')
                 realtimeOffRef.current = true
                 if (micRef.current) {
+                  // Curăță sesiunea Realtime dacă mai există (mic + WebRTC),
+                  // altfel rămânea capturată în paralel cu microfonul STT.
+                  micRef.current?.stop?.()
                   micRef.current = null
                   setListening(false)
                   setLiveVoice('')

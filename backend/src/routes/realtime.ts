@@ -23,8 +23,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-      const offer = String(req.body?.sdp ?? '').trim()
-      if (!offer) return reply.code(400).send({ error: 'bad_request: sdp required' })
+      const raw = String(req.body?.sdp ?? '')
+      if (!raw.trim()) return reply.code(400).send({ error: 'bad_request: sdp required' })
+      // NU trim(): SDP-ul se termină obligatoriu cu \r\n — .trim() îl tăia și
+      // parserul OpenAI (pion) dădea „unmarshal SDP: EOF" (cauza „nu mă aude").
+      const offer = raw.endsWith('\n') ? raw : raw + '\r\n'
 
       // Limba PERSISTATĂ a userului învinge; dacă nu are una salvată, folosim ce
       // trimite clientul; altfel română. Așa vocea rămâne pe aceeași limbă peste

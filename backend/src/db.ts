@@ -8,7 +8,8 @@ export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
 }
 
-function getPool(): pg.Pool {
+// Exportat pentru verificarea live „PostgreSQL" din tokenChecks (SELECT 1).
+export function getPool(): pg.Pool {
   if (!pool) {
     const url = config.databaseUrl
     // Local/no-TLS Postgres (VPS pe aceeași mașină, sslmode=disable explicit)

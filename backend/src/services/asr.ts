@@ -42,6 +42,9 @@ export interface TranscribeOpts {
   // encoded container, so Google needs to be told the format explicitly. When
   // omitted we use autoDecodingConfig (browser WAV/encoded blob).
   pcm?: { sampleRateHertz: number; channels?: number }
+  // Containerul real al MediaRecorder-ului din browser (ex. 'audio/mp4' pe
+  // Safari) — pe calea OpenAI alege extensia fișierului trimis la transcriere.
+  mime?: string
 }
 
 // ── REZERVĂ OpenAI (aceeași cheie ca vocea) ──────────────────────────────────
@@ -64,7 +67,14 @@ function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number): Uint8A
 async function transcribeOpenAI(audioBase64: string, opts: TranscribeOpts): Promise<TranscribeResult> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'asr_not_configured' }
   let buf: Uint8Array = Buffer.from(audioBase64, 'base64')
-  let filename = 'audio.webm' // blob-ul browserului; OpenAI detectează containerul
+  // OpenAI decodează după EXTENSIA numelui de fișier — o alegem din mimetype-ul
+  // real al browserului (Safari trimite audio/mp4, nu webm), altfel transcrierea
+  // pica exact pe dispozitivele Apple.
+  const mime = (opts.mime ?? '').toLowerCase()
+  let filename = 'audio.webm' // implicit: blob-ul Chrome/Firefox
+  if (mime.includes('audio/mp4')) filename = 'audio.mp4'
+  else if (mime.includes('audio/ogg')) filename = 'audio.ogg'
+  else if (mime.includes('audio/wav')) filename = 'audio.wav'
   if (opts.pcm) {
     buf = pcmToWav(buf, opts.pcm.sampleRateHertz, opts.pcm.channels ?? 1)
     filename = 'audio.wav'
