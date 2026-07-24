@@ -864,8 +864,23 @@ export default function ChatPanel({
         try {
           const rv = await startRealtimeVoice({
             language: speechLangRef.current,
-            onUserTranscript: (text) => setLiveVoice(text),
-            onAssistantTranscript: (text) => setLiveVoice(text),
+            // SCRISUL însoțește vorbirea (Adrian, 24 iul: „nu afișează ce zice,
+            // doar vorbește"): parțialele curg pe banda live, iar transcriptul
+            // FINAL al fiecărei ture intră în CHAT ca mesaj vizibil.
+            onUserTranscript: (text, done) => {
+              if (done) {
+                setLiveVoice('')
+                const t = text.trim()
+                if (t) setMessages((ms) => [...ms, { role: 'user', content: t, ts: Date.now() }])
+              } else setLiveVoice(text)
+            },
+            onAssistantTranscript: (text, done) => {
+              if (done) {
+                setLiveVoice('')
+                const t = text.trim()
+                if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
+              } else setLiveVoice(text)
+            },
             onState: (s, note) => {
               if (s === 'error') {
                 // Realtime a picat → pentru restul sesiunii folosim STT.
