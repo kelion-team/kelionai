@@ -376,6 +376,36 @@ export async function createKelionCard(adminEmail: string): Promise<
   }
 }
 
+// ── PAYOUT ADMIN (Adrian, 24 iul: „să scrie clar PAYOUT admin și să fie către
+// cardul declarat REAL, nu cel virtual") ─────────────────────────────────────
+// Payout-ul Stripe merge prin DESIGN exclusiv către contul bancar/cardul REAL
+// declarat la Settings→Payouts — cardul virtual Issuing nu poate primi payout
+// (șine diferite). Aici doar îl declanșăm din admin, etichetat clar: pe
+// extrasul lui apare „PAYOUT ADMIN".
+export async function createAdminPayout(
+  pounds: number,
+): Promise<{ id: string; arrival: string } | { error: string }> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  const amount = Math.round(pounds * 100)
+  if (!(amount > 0)) return { error: 'bad_amount' }
+  const body = new URLSearchParams()
+  body.set('amount', String(amount))
+  body.set('currency', config.stripe.currency)
+  body.set('statement_descriptor', 'PAYOUT ADMIN')
+  body.set('description', 'PAYOUT admin — profit Kelionai (către contul real declarat)')
+  const r = await fetch(`${API}/payouts`, { method: 'POST', headers: authHeaders(), body })
+  const j = (await r.json().catch(() => ({}))) as {
+    id?: string
+    arrival_date?: number
+    error?: { message?: string }
+  }
+  if (!r.ok || !j.id) return { error: j.error?.message ?? `stripe_http_${r.status}` }
+  const arrival = j.arrival_date
+    ? new Date(j.arrival_date * 1000).toISOString().slice(0, 10)
+    : ''
+  return { id: j.id, arrival }
+}
+
 // The REAL Stripe balance (money actually held at Stripe), summed per state and
 // returned in major units of the account currency. This is the owner's true
 // revenue-side figure — not a hand-typed number.

@@ -89,6 +89,22 @@ export async function createAiCard(): Promise<{ id: string; last4: string; url: 
   }
 }
 
+// PAYOUT ADMIN: profitul → contul bancar/cardul REAL declarat (nu cel virtual).
+export async function adminPayout(pounds: number): Promise<{ id: string; arrival: string } | null> {
+  try {
+    const r = await fetch('/api/admin/payout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pounds }),
+    })
+    if (!r.ok) return null
+    return (await r.json()) as { id: string; arrival: string }
+  } catch {
+    return null
+  }
+}
+
 // DEPUNEREA OWNERULUI: bani în punga Stripe (fără credite) → checkout URL.
 export async function ownerDeposit(pounds: number): Promise<string | null> {
   try {
