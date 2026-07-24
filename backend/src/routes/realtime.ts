@@ -37,7 +37,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (!res.ok) {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
-        req.log.warn({ upstreamStatus: res.status, upstreamError: res.error }, 'realtime upstream refuz')
+        req.log.warn(
+          { upstreamStatus: res.status, upstreamError: res.error, sdpLen: offer.length, sdpHead: offer.slice(0, 40) },
+          'realtime upstream refuz',
+        )
         const code = res.status === 503 ? 503 : 502
         return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
       }
