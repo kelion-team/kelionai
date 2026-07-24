@@ -183,7 +183,16 @@ export async function* streamChat(
       const dataLines: string[] = []
       for (const line of block.split('\n')) {
         if (line.startsWith('id:')) id = line.slice(3).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5))
+        else if (line.startsWith('data:')) {
+          // SSE spec: dacă după "data:" urmează UN spațiu, acel spațiu e parte
+          // din framing și se scoate (serverul scrie „data: <chunk>"). FĂRĂ asta,
+          // fiecare token venea cu un spațiu în față și cuvintele se spărgeau —
+          // „detaliat" (token-urile det/ali/at) → „det ali at" (bug raportat de
+          // Adrian). Se scoate EXACT un spațiu, deci spațiile reale din text rămân.
+          let v = line.slice(5)
+          if (v.startsWith(' ')) v = v.slice(1)
+          dataLines.push(v)
+        }
         // comment lines (heartbeat) and other fields are ignored
       }
       if (id !== undefined || dataLines.length > 0) {
