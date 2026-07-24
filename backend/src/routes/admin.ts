@@ -34,7 +34,7 @@ import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
-import { getStripeBalance } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -342,6 +342,24 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (req.body?.direction === 'withdraw') await withdrawAdminPool(amount)
     else await loadAdminPool(amount)
     return reply.send(await getAdminAccount())
+  })
+
+  // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de
+  // credite e doar la admin"). Adminul alege userul + X credite → primește
+  // linkul de plată Stripe pe care i-l trimite userului. La plată, userul
+  // primește EXACT X credite (webhook/reconciliere pe metadata sale_credits),
+  // cu tranzacția în registru. Userii NU au buton de cumpărare — doar afișare.
+  app.post<{ Body: { email?: string; credits?: number } }>('/api/admin/sell-credits', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const email = String(req.body?.email ?? '').trim().toLowerCase()
+    const credits = Math.floor(Number(req.body?.credits ?? 0))
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: 'bad_email' })
+    if (!(credits > 0) || credits > 100_000) return reply.code(400).send({ error: 'bad_credits' })
+    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
+    const r = await createSaleCheckout(email, credits, baseUrl)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, url: r.url, pounds: r.pounds, credits, email })
   })
 
   // ── User management (admin only) ──────────────────────────────────────────

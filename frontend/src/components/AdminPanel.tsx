@@ -17,6 +17,7 @@ import {
   type TransactionRow,
   updatePool,
   manageUser,
+  sellCredits,
   fetchLeads,
   emailLead,
   type Lead,
@@ -1071,6 +1072,35 @@ export default function AdminPanel({
                           }}
                         >
                           Credit
+                        </button>
+                        {/* VÂNZARE (Adrian, 24 iul): X credite pe bani — generează
+                            linkul de plată Stripe pentru user; la plată primește
+                            EXACT X credite. Userii nu au buton de cumpărare. */}
+                        <button
+                          type="button"
+                          className="user-act"
+                          onClick={async () => {
+                            const s = window.prompt(`Câte credite îi vinzi lui ${u.email}?`)
+                            if (s == null) return
+                            const credits = Math.floor(Number(s))
+                            if (!(credits > 0)) return
+                            const r = await sellCredits(u.email, credits)
+                            if (!r) {
+                              window.alert('Generarea linkului a eșuat — vezi consola.')
+                              return
+                            }
+                            try {
+                              await navigator.clipboard.writeText(r.url)
+                            } catch {
+                              /* clipboard indisponibil — linkul rămâne în prompt */
+                            }
+                            window.prompt(
+                              `${r.credits} credite = £${r.pounds.toFixed(2)}. Linkul de plată (copiat deja în clipboard) — trimite-i-l userului:`,
+                              r.url,
+                            )
+                          }}
+                        >
+                          Vinde credite
                         </button>
                         <button
                           type="button"

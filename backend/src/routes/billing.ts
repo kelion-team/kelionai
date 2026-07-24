@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund } from '../db.js'
+import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund, creditSaleExact } from '../db.js'
 import { createCheckout, createPaymentIntent, verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -107,7 +107,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       // pierduți; niciodată creditare oarbă pe un payload nesemnat.
       const v = await verifyEventWithApi(req.rawBody ?? '')
       if (v) {
-        await topUpUser(v.email, v.amount, v.currency, v.ref)
+        // Vânzare admin (sale_credits pe metadata) → creditare EXACTĂ; altfel 75%.
+        if (v.saleCredits && v.saleCredits > 0) {
+          await creditSaleExact(v.email, v.amount, v.currency, v.ref, v.saleCredits)
+        } else {
+          await topUpUser(v.email, v.amount, v.currency, v.ref)
+        }
         reply.code(200).send({ received: true, via: 'api_verify' })
         return
       }
@@ -148,7 +153,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         id?: string
         amount?: number
         currency?: string
-        metadata?: { email?: string }
+        metadata?: { email?: string; sale_credits?: string }
         charges?: { data?: { billing_details?: { email?: string } }[] }
         receipt_email?: string
       }
@@ -159,7 +164,13 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         ''
       const amount = (pi.amount ?? 0) / 100
       if (email && pi.id && amount > 0) {
-        await topUpUserFromPaymentIntent(email, amount, pi.currency ?? config.stripe.currency, pi.id)
+        // Vânzare admin (sale_credits) → EXACT X credite; altfel formula 75%.
+        const saleCredits = Number(pi.metadata?.sale_credits ?? 0)
+        if (saleCredits > 0) {
+          await creditSaleExact(email, amount, pi.currency ?? config.stripe.currency, pi.id, saleCredits)
+        } else {
+          await topUpUserFromPaymentIntent(email, amount, pi.currency ?? config.stripe.currency, pi.id)
+        }
       }
     }
 

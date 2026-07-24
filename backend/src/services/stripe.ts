@@ -63,6 +63,43 @@ export async function createCheckout(
   return j.url ? { url: j.url } : { error: 'no_checkout_url' }
 }
 
+// ── VÂNZARE DE CREDITE DE CĂTRE ADMIN (Adrian, 24 iul: „se vând X credite pe
+// bani; butonul de credite e doar la admin") ─────────────────────────────────
+// Adminul alege userul + X credite → generăm un link de plată Stripe pentru
+// prețul lor. Prețul: userul primește EXACT X credite (1 credit = £0.10 din
+// consum), iar la regula 75/25 prețul brut = X×0.10/0.75, rotunjit ÎN SUS la
+// bănuț ca creditarea exactă să fie mereu acoperită. Metadata de pe
+// PaymentIntent (email + sale_credits) spune webhook-ului/reconcilierii să
+// crediteze EXACT X, nu formula procentuală (fără erori de rotunjire).
+export async function createSaleCheckout(
+  email: string,
+  credits: number,
+  baseUrl: string,
+): Promise<{ url: string; pounds: number } | { error: string }> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  const c = Math.floor(credits)
+  if (!(c > 0) || c > 100_000) return { error: 'bad_credits' }
+  const pence = Math.ceil((c * 100 * config.stripe.creditValue) / config.stripe.userShare)
+  const customer = await ensureCustomer(email, '')
+  const body = new URLSearchParams()
+  body.set('mode', 'payment')
+  if (customer) body.set('customer', customer)
+  body.set('success_url', `${baseUrl}/?topup=success`)
+  body.set('cancel_url', `${baseUrl}/?topup=cancel`)
+  body.set('line_items[0][quantity]', '1')
+  body.set('line_items[0][price_data][currency]', config.stripe.currency)
+  body.set('line_items[0][price_data][unit_amount]', String(pence))
+  body.set('line_items[0][price_data][product_data][name]', `${c} Kelion credits`)
+  body.set('metadata[email]', email)
+  body.set('metadata[sale_credits]', String(c))
+  body.set('payment_intent_data[metadata][email]', email)
+  body.set('payment_intent_data[metadata][sale_credits]', String(c))
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
+  if (!r.ok) return { error: `stripe_http_${r.status}` }
+  const j = (await r.json()) as { url?: string }
+  return j.url ? { url: j.url, pounds: pence / 100 } : { error: 'no_checkout_url' }
+}
+
 // Metoda de plată salvată a clientului (pentru reîncărcarea automată off-session).
 async function defaultPaymentMethod(customerId: string): Promise<string | null> {
   const c = await fetch(`${API}/customers/${customerId}`, { headers: authHeaders() })
@@ -221,7 +258,14 @@ export function verifyWebhook(raw: string, sigHeader: string): StripeEvent | nul
 // evenimentul (id + tip) și RE-INTEROGĂM Stripe cu cheia noastră SECRETĂ: doar
 // dacă Stripe confirmă că obiectul e REAL și PLĂTIT, creditam. Sursa de adevăr
 // e API-ul Stripe autentificat, nu payload-ul webhook.
-export type VerifiedTopup = { email: string; amount: number; currency: string; ref: string } | null
+export type VerifiedTopup = {
+  email: string
+  amount: number
+  currency: string
+  ref: string
+  // Vânzare admin: numărul EXACT de credite vândute (metadata sale_credits).
+  saleCredits?: number
+} | null
 
 // PLĂȚILE RAMBURSATE NU SE CREDITEAZĂ (incident real 24 iul: plata de £25 din
 // iunie fusese RAMBURSATĂ integral pe card, dar plasa a creditat-o — „bani"
@@ -274,7 +318,8 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
     const ref = String(s.payment_intent ?? s.id ?? id)
     if (!email || !(amount > 0)) return null
     if (await hasRefund(ref)) return null // rambursată → NU se creditează
-    return { email, amount, currency: String(s.currency ?? config.stripe.currency), ref }
+    const saleCredits = Number((s.metadata as { sale_credits?: string } | undefined)?.sale_credits ?? 0)
+    return { email, amount, currency: String(s.currency ?? config.stripe.currency), ref, saleCredits }
   }
 
   if (ev.type === 'payment_intent.succeeded' && id.startsWith('pi_')) {
@@ -284,7 +329,8 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
     const amount = Number(pi.amount ?? 0) / 100
     if (!email || !(amount > 0)) return null
     if (await hasRefund(id)) return null // rambursată → NU se creditează
-    return { email, amount, currency: String(pi.currency ?? config.stripe.currency), ref: id }
+    const saleCredits = Number((pi.metadata as { sale_credits?: string } | undefined)?.sale_credits ?? 0)
+    return { email, amount, currency: String(pi.currency ?? config.stripe.currency), ref: id, saleCredits }
   }
 
   return null

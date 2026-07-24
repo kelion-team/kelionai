@@ -63,6 +63,26 @@ export async function fetchFinance(): Promise<Finance | null> {
   }
 }
 
+// VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
+export async function sellCredits(
+  email: string,
+  credits: number,
+): Promise<{ url: string; pounds: number; credits: number } | null> {
+  try {
+    const r = await fetch('/api/admin/sell-credits', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, credits }),
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { url?: string; pounds?: number; credits?: number }
+    return j.url ? { url: j.url, pounds: j.pounds ?? 0, credits: j.credits ?? credits } : null
+  } catch {
+    return null
+  }
+}
+
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
 export async function updatePool(amount: number, direction: 'add' | 'withdraw'): Promise<boolean> {
