@@ -57,6 +57,8 @@ export default function Stage({ user }: { user: User }) {
       low?: boolean
       live?: boolean
     }
+    // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
+    stripe?: { available: number; pending: number; currency: string } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
   } | null>(null)
   useEffect(() => {
@@ -561,6 +563,23 @@ export default function Stage({ user }: { user: User }) {
                 {brainCredit.openrouter.live
                   ? `OpenRouter $${(brainCredit.openrouter.balance ?? 0).toFixed(2)}`
                   : '⚠ OpenRouter'}
+              </button>
+            )}
+            {/* PUNGA STRIPE (Adrian, 24 iul: „după OpenRouter — banii în Stripe,
+                reali"): disponibil acum + în tranzit. Roșu pulsând sub zero.
+                Click → tabul Bani din admin (circuitul complet). */}
+            {brainCredit?.stripe && (
+              <button
+                type="button"
+                className={`ghost ${brainCredit.stripe.available <= 0 ? 'blink-red' : ''}`}
+                onClick={() => {
+                  setAdminTab('finance')
+                  setAdminOpen(true)
+                }}
+                title={`Punga Stripe (banii userilor): disponibil £${brainCredit.stripe.available.toFixed(2)}, în tranzit £${brainCredit.stripe.pending.toFixed(2)} · click pentru circuitul banilor`}
+              >
+                Stripe £{brainCredit.stripe.available.toFixed(2)}
+                {brainCredit.stripe.pending > 0 && ` (+£${brainCredit.stripe.pending.toFixed(2)} în tranzit)`}
               </button>
             )}
           </>
