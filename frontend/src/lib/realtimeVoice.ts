@@ -200,11 +200,6 @@ export async function startRealtimeVoice(
         userText.delete(itemId)
         onUserTranscript?.(t, true)
         persistTranscript('user', t)
-        // CUVÂNT DE TREZIRE (Adrian, 24 iul: „Kelion răspunde DOAR dacă aude
-        // «Kelion»/«Key» + acțiune"). Serverul are `create_response:false`, deci
-        // Kelion tace până e chemat pe nume: doar aici, când transcriptul conține
-        // cuvântul de trezire, îi cerem să răspundă. Altfel rămâne ascultător mut.
-        if (hasWakeWord(t)) send({ type: 'response.create' })
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)
