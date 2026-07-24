@@ -3,6 +3,8 @@ import { getSessionUser } from '../session.js'
 import { getSpeechLang, getMeserieActiva, saveMessage } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
+import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
+import { generateImage } from '../services/image.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -46,6 +48,53 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       }
       // Clientul citește răspunsul ca text (answer SDP) → setRemoteDescription.
       return reply.header('content-type', 'application/sdp').send(res.sdp)
+    },
+  )
+
+  // EXECUȚIA UNELTELOR DIN VOCE (autonomia vocii — Adrian, 24 iul). Modelul
+  // Realtime cere o funcție pe dataChannel; clientul o trimite AICI; serverul o
+  // rulează cu cheile lui (aceleași unelte ca chatul scris) și întoarce
+  // rezultatul + eventualul screen_url pe care clientul îl pune pe monitor.
+  app.post<{ Body: { name?: string; args?: unknown } }>(
+    '/api/realtime/tool',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const name = String(req.body?.name ?? '').trim()
+      const args = (req.body?.args ?? {}) as Record<string, unknown>
+      if (!name) return reply.code(400).send({ error: 'bad_request' })
+
+      // Token Google proaspăt (ca în chat) pentru uneltele Gmail/Calendar/etc.
+      let token = user.googleAccessToken ?? ''
+      if (user.googleRefreshToken && (user.googleTokenExp ?? 0) < Date.now() + 60_000) {
+        const refreshed = await refreshGoogleAccessToken(user.googleRefreshToken)
+        if (refreshed) token = refreshed.accessToken
+      }
+
+      if (name === 'generate_image') {
+        const prompt = String(args.prompt ?? '')
+        if (!prompt) return reply.send({ output: JSON.stringify({ error: 'no_prompt' }) })
+        const r = await generateImage(prompt)
+        if ('error' in r) return reply.send({ output: JSON.stringify({ error: r.error }) })
+        const url = `https://${req.headers.host ?? 'kelionai.app'}/api/image/${r.id}`
+        return reply.send({ output: JSON.stringify({ shown: true, url }), screen: { url, title: 'Imagine' } })
+      }
+
+      const out = await runGoogleTool(name, args, token)
+      // screen_url din rezultat → clientul deschide monitorul (ca în chat).
+      let screen: { url: string; title: string } | undefined
+      try {
+        const j = JSON.parse(out) as { screen_url?: string }
+        if (j.screen_url) {
+          const url = /^https?:/i.test(j.screen_url)
+            ? j.screen_url
+            : `https://${req.headers.host ?? 'kelionai.app'}${j.screen_url}`
+          screen = { url, title: name.replace(/_/g, ' ') }
+        }
+      } catch {
+        /* rezultat non-JSON — doar text pentru model */
+      }
+      return reply.send({ output: out.slice(0, 6000), screen })
     },
   )
 

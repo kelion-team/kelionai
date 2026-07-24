@@ -881,6 +881,42 @@ export default function ChatPanel({
                 if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
               } else setLiveVoice(text)
             },
+            // AUTONOMIA VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi
+            // lipsesc instrumente de a afișa pe ecran"): uneltele cerute de
+            // modelul de voce se execută AICI — show_on_screen direct în client
+            // (monitorul e al browserului), restul prin server, care întoarce
+            // rezultatul + eventualul screen_url de pus pe monitor.
+            onToolCall: async (name, argsJson) => {
+              let args: Record<string, unknown> = {}
+              try {
+                args = JSON.parse(argsJson || '{}') as Record<string, unknown>
+              } catch {
+                /* argumente stricate → obiect gol */
+              }
+              if (name === 'show_on_screen') {
+                const url = String(args.url ?? '').trim()
+                const title = String(args.title ?? '') || 'Ecran'
+                if (url) handleControl({ monitor: { url, title } })
+                else closeAllTasks()
+                return JSON.stringify({ shown: true, url })
+              }
+              try {
+                const r = await fetch('/api/realtime/tool', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ name, args }),
+                })
+                const j = (await r.json()) as {
+                  output?: string
+                  screen?: { url: string; title: string }
+                }
+                if (j.screen?.url) handleControl({ monitor: { url: j.screen.url, title: j.screen.title } })
+                return String(j.output ?? '{}')
+              } catch (e) {
+                return JSON.stringify({ error: String(e).slice(0, 200) })
+              }
+            },
             onState: (s, note) => {
               if (s === 'error') {
                 // Realtime a picat → pentru restul sesiunii folosim STT.
