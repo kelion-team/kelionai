@@ -21,6 +21,7 @@ import {
   fetchMoneyCircuit,
   createAiCard,
   ownerDeposit,
+  adminPayout,
   type MoneyCircuit,
   fetchLeads,
   emailLead,
@@ -635,6 +636,27 @@ export default function AdminPanel({
                         Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
                         AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
                         <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
+                      </span>
+                      {/* PAYOUT ADMIN (Adrian): profitul → contul/cardul REAL
+                          declarat la Stripe (prin design, NU cel virtual).
+                          Pe extras scrie „PAYOUT ADMIN". */}
+                      <span className="or-wallet-sub">
+                        🏦 PAYOUT admin (către cardul/contul tău REAL, nu cel virtual):{' '}
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={async () => {
+                            const s = window.prompt('Câte lire tragi în contul tău real? (din disponibil)')
+                            if (s == null) return
+                            const pounds = Number(s)
+                            if (!(pounds > 0)) return
+                            const r = await adminPayout(pounds)
+                            if (r) window.alert(`PAYOUT ADMIN creat: £${pounds.toFixed(2)} → contul tău real${r.arrival ? `, ajunge ~${r.arrival}` : ''}.`)
+                            else window.alert('Payout eșuat — verifică disponibilul (nu poate depăși punga disponibilă).')
+                          }}
+                        >
+                          Trage profitul
+                        </button>
                       </span>
                       {/* DEPUNEREA OWNERULUI (Adrian): bani în pungă prin ușa din
                           față — checkout Stripe marcat owner_deposit, FĂRĂ să

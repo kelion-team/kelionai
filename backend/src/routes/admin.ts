@@ -34,7 +34,7 @@ import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
-import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -381,6 +381,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const r = await createOwnerDeposit(user.email, pounds, baseUrl)
     if ('error' in r) return reply.code(502).send(r)
     return reply.send({ ok: true, url: r.url, pounds })
+  })
+
+  // PAYOUT ADMIN (Adrian, 24 iul: „să scrie clar PAYOUT admin, către cardul
+  // declarat REAL"): declanșează payout-ul Stripe din admin — merge prin design
+  // DOAR către contul bancar/cardul real din Settings→Payouts, niciodată către
+  // cardul virtual. Pe extras: „PAYOUT ADMIN". STRICT admin.
+  app.post<{ Body: { pounds?: number } }>('/api/admin/payout', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const pounds = Number(req.body?.pounds ?? 0)
+    if (!(pounds > 0) || pounds > 10_000) return reply.code(400).send({ error: 'bad_amount' })
+    const r = await createAdminPayout(pounds)
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send({ ok: true, ...r })
   })
 
   // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de
