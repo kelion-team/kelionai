@@ -26,7 +26,9 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
 <style>html,body,#map{height:100%;margin:0;background:#0b0d12}
 #hud{position:absolute;z-index:1000;left:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1px solid #2a3350}
-#recenter{position:absolute;z-index:1000;right:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
+/* SUS-dreapta, NU jos-dreapta: acolo stă avatarul în colț și acoperea butonul
+   (Adrian, 24 iul: „se suprapun imagini și butoane"). */
+#recenter{position:absolute;z-index:1000;right:12px;top:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer}</style></head>
 <body><div id="map"></div><div id="hud" style="display:none"></div><button id="recenter">Urmărește mașina ↺</button>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
