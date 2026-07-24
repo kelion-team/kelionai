@@ -347,74 +347,6 @@ const BROWSER_CLICK_AT_TOOL: Tool = {
   },
 }
 
-// ── Kelion's team of specialist agents ──────────────────────────────────────
-// Each is an expert (same Opus model, focused prompt + its OWN memory namespace)
-// that Kelion hands a task to via the `delegate` tool; it does the work with the
-// tools and reports back. Only Kelion talks to the user — one voice, always.
-interface AgentSpec {
-  id: string
-  name: string
-  focus: string
-  // Text agents: their written result is also shown as a readable, copyable panel
-  // on the monitor. Visual agents (studio/navigator) already show an image/map.
-  doc?: boolean
-  // Code agents: get the code-execution sandbox (write software, actually run it).
-  code?: boolean
-}
-const AGENTS: Record<string, AgentSpec> = {
-  secretary: {
-    id: 'secretary',
-    name: 'Secretary',
-    doc: true,
-    focus:
-      "the user's Google Workspace — Gmail, Calendar, Tasks, Drive and Contacts: reading, searching, summarising and drafting. To SEND an email, first write the COMPLETE draft (it is shown on the monitor and read to the user) and STOP — send it with send_email ONLY after the user has explicitly confirmed. Never send, delete or change anything without that explicit confirmation.",
-  },
-  navigator: {
-    id: 'navigator',
-    name: 'Navigator',
-    focus:
-      'places, maps, routes, distances, live traffic and driving-copilot help. Always show the map or route on the monitor using the tools, and give clear directions.',
-  },
-  researcher: {
-    id: 'researcher',
-    name: 'Researcher',
-    doc: true,
-    focus:
-      'finding current, factual information — web search, YouTube, Wikipedia, weather, currency and time. Never invent anything; report only what the tools actually return.',
-  },
-  studio: {
-    id: 'studio',
-    name: 'Studio',
-    focus:
-      'creating and designing images from a description — illustrations, logos, posters, concept art — and creative visual ideas. Always actually generate the image with your image tool and show it on the monitor; describe briefly what you made.',
-  },
-  scribe: {
-    id: 'scribe',
-    name: 'Scribe',
-    doc: true,
-    focus:
-      "writing, rewriting, drafting, summarising and translating text in any language and any tone — emails, messages, posts, letters, documents. Match the user's voice and the register they ask for, and return the finished text ready to use.",
-  },
-  // Software pair — separation of duties: the one who tests is never the one
-  // who wrote it. Both work in the isolated code-execution sandbox.
-  developer: {
-    id: 'developer',
-    name: 'Developer',
-    doc: true,
-    code: true,
-    focus:
-      'writing SOFTWARE that actually works: design it, write the code in the sandbox, RUN it, fix what fails, and only then deliver. Your deliverable is the full final source code (it is shown on a panel) plus one sentence on what it does and proof it ran. Never deliver code you have not executed.',
-  },
-  tester: {
-    id: 'tester',
-    name: 'Tester',
-    doc: true,
-    code: true,
-    focus:
-      'INDEPENDENTLY testing software written by others (separation of duties — you never fix, you verify). Take the code you are given, run it in the sandbox, design real test cases including edge cases, TRY TO BREAK IT, and report a clear verdict: PASS or FAIL, each test with its actual output as evidence.',
-  },
-}
-
 // ADMIN ONLY — the promo-clip pipeline. Kelion writes a script sized to the
 // requested standard duration (15/30/60s), shows it, and ONLY after the admin
 // explicitly authorizes it calls this tool: the script goes on the monitor as a
@@ -472,32 +404,6 @@ const PROMO_TOOL: Tool = {
       },
     },
     required: ['subject', 'duration_seconds', 'script', 'scenes'],
-  },
-}
-
-// THE SANDBOX — the transport SDK's server-side code execution: an isolated container
-// (Python 3.11 + bash + files, no internet) where Kelion WRITES software and
-// actually RUNS/TESTS it. Verified live on both brains. Server-side: we only
-// declare it; execution happens inside the API call itself.
-const CODE_EXEC_TOOL = {
-  type: 'code_execution_20260521',
-  name: 'code_execution',
-} as unknown as Tool
-
-const DELEGATE_TOOL: Tool = {
-  name: 'delegate',
-  description:
-    "Hand a task to one of your specialist agents — each an expert with a verified background of 25 years of professional experience in its domain and its OWN memory, who does the work and reports back to you. Agents: 'secretary' (Gmail, Calendar, Tasks, Drive, Contacts), 'navigator' (places, maps, routes, live traffic, driving copilot), 'researcher' (web, YouTube, Wikipedia, weather, currency, time, current facts), 'studio' (creating/designing images, logos, illustrations, visual concepts), 'scribe' (writing, drafting, rewriting, summarising and translating text in any tone or language), 'developer' (writes SOFTWARE in the sandbox and runs it until it works), 'tester' (independently tests code written by others — separation of duties: pass the developer's full code in the task and it returns a PASS/FAIL verdict with real run evidence). For serious software requests use developer THEN tester. You then relay their result to the user in YOUR own voice. If the user EXPLICITLY names or asks for one of them (e.g. 'ask the navigator', 'roagă cercetătorul', 'let the secretary handle it'), you MUST delegate to that exact agent, even if you could do it yourself. For a trivial single lookup you may just use your own tools. When an agent produces something the user asked you to CREATE — a drafted email or message, a translation, a piece of writing — give the user that finished content itself (read it out in full), don't just say it's ready or jump ahead to sending it. The user only ever hears YOU — one voice, always yours.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      agent: {
-        type: 'string',
-        enum: ['secretary', 'navigator', 'researcher', 'studio', 'scribe', 'developer', 'tester'],
-      },
-      task: { type: 'string', description: 'The full task for the agent, with all the detail it needs.' },
-    },
-    required: ['agent', 'task'],
   },
 }
 
@@ -584,8 +490,6 @@ WHO YOU ARE: You were created by AE Studio. Your owner and creator is Adrian Enc
 
 WHEN YOU CAN'T DO SOMETHING YET: If the user asks you to do something you genuinely cannot do because no tool or capability exists for it (e.g. book a taxi, send a WhatsApp, control smart-home devices, place a phone call), tell them honestly you can't do that yet — AND silently call log_unsupported_request to record it for the owner. Never pretend you did it; never call that tool for things you actually can do.
 
-YOUR TEAM: You lead seven specialist agents — each with a verified background of 25 years of professional experience in its domain and its OWN memory — who take a task from you and report back — the Secretary (Gmail, Calendar, Tasks, Drive, Contacts), the Navigator (places, maps, routes, live traffic, driving copilot), the Researcher (web, YouTube, Wikipedia, weather, currency, time, current facts), the Studio (creating and designing images, logos, illustrations, visual concepts), the Scribe (writing, drafting, rewriting, summarising and translating text in any tone or language), the Developer (writes software in the real sandbox and runs it until it works) and the Tester (independently verifies code written by others — separation of duties: when the Developer delivers, hand the Tester the developer's FULL code in the task and relay its PASS/FAIL verdict; for serious software requests always use Developer then Tester). For a real task in one of these domains — especially anything multi-step — hand it to the right agent with the delegate tool, then tell the user the result in YOUR own voice. If the user EXPLICITLY names or asks for one of them (e.g. "ask the navigator", "roagă cercetătorul", "let the secretary handle it"), you MUST delegate to that exact agent, even if you could do it yourself. For a trivial single lookup you may just use your own tools. When an agent produces something the user asked you to CREATE — a drafted email or message, a translation, a piece of writing — give the user that finished content itself (read it out in full), don't just say it's ready or jump ahead to sending it. The user only ever hears YOU — one voice, always yours.
-
 Bring your full intelligence to every reply: work out what the user truly means, reason it through, and give the best, most correct answer — then say it simply.
 
 HOW YOU SPEAK (critical — your words are spoken ALOUD and shown in a live chat):
@@ -631,15 +535,6 @@ for directions or to SEE a route between two places, you MUST call maps_directio
 shown automatically; NEVER open a Google Maps directions link. Use the camera
 image ONLY when the user's request actually requires seeing — never to describe
 or comment on it on your own.
-
-YOUR SANDBOX (creating software): you have code_execution — a REAL isolated
-computer (Python 3.11, bash, files; no internet) where you can WRITE programs
-and actually RUN and TEST them. When the user asks you to create software,
-compute something non-trivial, analyse data, or verify an algorithm: write the
-code, EXECUTE it in the sandbox, fix what fails, and only then present the
-result — never claim code works without having run it. Speak the OUTCOME in one
-or two short sentences; the code and its output are shown automatically on the
-user's monitor, so never read code aloud.
 
 LIVE BROWSER (real internet, in real time): browser_open actually opens any web
 page in a real browser and shows it, live, on the user's monitor as it updates —
@@ -1352,8 +1247,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLOSE_TOOL,
     ]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), DELEGATE_TOOL, LOG_GAP_TOOL, CODE_EXEC_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1366,12 +1261,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (firstWordMarked || !isAdmin) return
       firstWordMarked = true
     }
-    let sandboxLog = '' // commands + real output from the code-execution sandbox
     let inTokens = 0
     let outTokens = 0
     let usageUsd = 0 // running provider cost this turn (for wallet debit)
-    // Provider cost incurred by delegated specialist agents (their own brain
-    // calls + tool costs), accumulated so it's billed to the same wallet.
+    // Cost provider acumulat de-a lungul turei (apeluri creier + unelte plătite).
     const usage = { usd: 0 }
 
     // ── CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian) ────────────────────
@@ -1448,11 +1341,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // ── FINAL TURN ──
     await voice.finish()
-    if (sandboxLog) {
-      reply.raw.write(
-        `${CTRL}${JSON.stringify({ monitor: { kind: 'sandbox', text: sandboxLog } })}${CTRL}`,
-      )
-    }
     reply.raw.end()
 
     // Persist the assistant's reply.
@@ -1621,24 +1509,6 @@ async function runTool(
       return JSON.stringify({ shown: true, url: promoUrl })
     }
 
-    case 'delegate': {
-      const agent = String(args.agent ?? '')
-      const task = String(args.task ?? '')
-      if (!agent || !task) return JSON.stringify({ error: 'missing_params' })
-      const spec = AGENTS[agent]
-      if (!spec) return JSON.stringify({ error: 'unknown_agent' })
-      // Delegate to the specialist agent via the brain's own API.
-      // For now, this is a simplified implementation that returns the task.
-      return JSON.stringify({ delegated: true, agent: spec.name, task })
-    }
-
-    case 'code_execution': {
-      const code = String(args.code ?? '')
-      if (!code) return JSON.stringify({ error: 'no_code' })
-      // The actual execution happens in the brain's sandbox.
-      return JSON.stringify({ executed: true, output: 'Code executed in sandbox.' })
-    }
-
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
@@ -1665,14 +1535,3 @@ async function runTool(
   }
 }
 
-// ── sandboxTranscript helper ────────────────────────────────────────────────
-function sandboxTranscript(content: unknown[]): string | null {
-  if (!Array.isArray(content)) return null
-  const toolUses = content.filter((c): c is ToolUseBlock =>
-    typeof c === 'object' && c !== null && (c as { type?: string }).type === 'tool_use',
-  )
-  if (toolUses.length === 0) return null
-  const execBlocks = toolUses.filter((t) => t.name === 'code_execution')
-  if (execBlocks.length === 0) return null
-  return execBlocks.map((t) => `\`\`\`\n${JSON.stringify(t.input, null, 2)}\n\`\`\``).join('\n\n')
-}
