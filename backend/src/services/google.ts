@@ -1,6 +1,6 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
-import { openrouterWebSearch } from './openrouter.js'
+import { openrouterComplete, openrouterWebSearch } from './openrouter.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -937,7 +937,23 @@ export async function youtubeFirstEmbed(
 
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
-  if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
+  // Fără cheie Gemini: traducem prin OpenRouter (aceeași cheie ca creierul), ca
+  // butonul „Tradu în română" din admin să meargă mereu. Gemini rămâne calea
+  // întâi dacă are cheie.
+  if (!config.geminiKey) {
+    try {
+      const r = await openrouterComplete(
+        config.openrouter.searchModel,
+        [{ role: 'user', content: `Translate to ${target}. Reply ONLY with the translation:\n${text}` }],
+        { temperature: 0 },
+      )
+      const out = r.text.trim()
+      if (!out) return JSON.stringify({ error: 'translate_not_configured' })
+      return JSON.stringify({ translation: out, target })
+    } catch {
+      return JSON.stringify({ error: 'translate_failed' })
+    }
+  }
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
   const res = await tfetch(url, {
     method: 'POST',

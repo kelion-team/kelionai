@@ -13,6 +13,8 @@ import {
   fetchGaps,
   runGapsTriage,
   fetchFinance,
+  fetchTransactions,
+  type TransactionRow,
   updatePool,
   manageUser,
   fetchLeads,
@@ -31,7 +33,6 @@ import {
   type CapabilityGap,
   type Finance,
   type DemoStats,
-  type DemoRecent,
   type UserActivity,
   type UserActivityRow,
   fetchStores,
@@ -84,7 +85,7 @@ const AI_LABELS: Record<string, string> = {
   image: 'Images (Gemini)',
   tts: 'Voice (TTS)',
   asr: 'Hearing (STT)',
-  search: 'Search (Serper)',
+  search: 'Căutare (OpenRouter web)',
   memory: 'Memorie',
 }
 
@@ -153,6 +154,8 @@ export default function AdminPanel({
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [triaging, setTriaging] = useState(false)
   const [finance, setFinance] = useState<Finance | null>(null)
+  // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
+  const [transactions, setTransactions] = useState<TransactionRow[]>([])
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
   const [poolAmount, setPoolAmount] = useState('')
   const [poolBusy, setPoolBusy] = useState(false)
@@ -195,20 +198,6 @@ export default function AdminPanel({
   }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
-
-  // The conversation of a clicked TRIAL visitor — what interested them, and in
-  // what language they wrote / Kelion answered.
-  const [convo, setConvo] = useState<{ v: DemoRecent; rows: HistoryRow[] } | null>(null)
-  const [convoLoading, setConvoLoading] = useState(false)
-
-  async function openVisitorConvo(v: DemoRecent): Promise<void> {
-    if (!v.session_email) return
-    setConvoLoading(true)
-    setConvo({ v, rows: [] })
-    const rows = await fetchHistory(v.session_email)
-    setConvo({ v, rows })
-    setConvoLoading(false)
-  }
 
   // The conversation + testing profile of a clicked user (tab "Utilizatori") —
   // ce a scris (chatul) și cum a testat (browser/device/IP/sesiuni/timp), într-un
@@ -255,6 +244,7 @@ export default function AdminPanel({
     void fetchUsers().then(setUsers)
     void fetchGaps().then(setGaps)
     void fetchFinance().then(setFinance)
+    void fetchTransactions().then(setTransactions)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
     void fetchVisitorConvos().then(setVconvos)
@@ -490,7 +480,7 @@ export default function AdminPanel({
             {!finance && <p className="chat-hint">Se încarcă…</p>}
             {finance && (
               <>
-                <div className="fin-cards">
+                <div className="fin-cards fin-cards-4">
                   <div className="fin-card">
                     <span className="fin-label">Stripe — disponibil</span>
                     <span className="fin-val">
@@ -515,6 +505,10 @@ export default function AdminPanel({
                       {sym}
                       {finance.spent.toFixed(2)}
                     </span>
+                  </div>
+                  <div className="fin-card">
+                    <span className="fin-label">Consumat azi</span>
+                    <span className="fin-val">${finance.today.toFixed(2)}</span>
                   </div>
                   <div className="fin-card">
                     <span className="fin-label">Profit</span>
@@ -596,6 +590,29 @@ export default function AdminPanel({
                     <div className="fin-row" key={k}>
                       <span>{AI_LABELS[k] ?? k}</span>
                       <span>${v.toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Tranzacțiile Stripe REALE (alimentări credite) — cine, cât, status, când. */}
+                <div className="fin-breakdown">
+                  <div className="fin-breakdown-head">Tranzacții — alimentări credite prin Stripe</div>
+                  {transactions.length === 0 && <div className="chat-hint">Nicio tranzacție încă.</div>}
+                  {transactions.map((t) => (
+                    <div className="fin-row" key={t.id}>
+                      <span>
+                        {t.user_id} · {t.status} ·{' '}
+                        {new Date(t.created_at).toLocaleString('ro-RO', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <span>
+                        {sym}
+                        {Number(t.amount).toFixed(2)} · {Number(t.credits).toFixed(0)} credite
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1098,17 +1115,11 @@ export default function AdminPanel({
             {!demos && <p className="chat-hint">Se încarcă…</p>}
             {demos && (
               <>
-                <div className="fin-cards fin-cards-4">
+                <div className="fin-cards">
                   <div className="fin-card">
                     <span className="fin-label">Vizite azi / total</span>
                     <span className="fin-val">
                       {demos.visitsToday} / {demos.visitsTotal}
-                    </span>
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Probe demo azi / total</span>
-                    <span className="fin-val">
-                      {demos.today} / {demos.total}
                     </span>
                   </div>
                   <div className="fin-card">
@@ -1134,73 +1145,46 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
+                {/* Probele demo sunt MOARTE (nimic nu mai scrie demo_uses) — lista
+                    arată doar VIZITELE, fără badge/flux DEMO. */}
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">
-                    Vizite recente — profil complet · click pe o PROBĂ ca să vezi conversația
-                  </div>
+                  <div className="fin-breakdown-head">Vizite recente — profil complet</div>
                   {demos.recent.length === 0 && <div className="chat-hint">—</div>}
-                  {demos.recent.map((r, i) => {
-                    const clickable = r.kind === 'demo' && !!r.session_email
-                    return (
-                      <div
-                        className={`vis-row ${clickable ? 'vis-clickable' : ''}`}
-                        key={i}
-                        role={clickable ? 'button' : undefined}
-                        tabIndex={clickable ? 0 : undefined}
-                        onClick={clickable ? () => void openVisitorConvo(r) : undefined}
-                        onKeyDown={
-                          clickable
-                            ? (e) => {
-                                if (e.key === 'Enter' || e.key === ' ') void openVisitorConvo(r)
-                              }
-                            : undefined
-                        }
-                        title={clickable ? 'Vezi ce l-a interesat' : undefined}
-                      >
-                        <div className="vis-main">
-                          <span className="vis-flagline">
-                            <Flag code={r.code} />
-                            <strong>
-                              {r.country || 'Necunoscut'}
-                              {r.region && r.region !== r.city ? ` · ${r.region}` : ''}
-                              {r.city ? ` · ${r.city}` : ''}
-                            </strong>
-                          </span>
-                          <span className={`vis-badge ${r.kind === 'demo' ? 'kind-demo' : 'kind-visit'}`}>
-                            {r.kind === 'demo' ? 'DEMO' : 'VIZITĂ'}
-                          </span>
-                          <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
-                            {r.is_bot ? 'BOT' : 'UMAN'}
-                          </span>
-                          {clickable && <span className="vis-open">deschide ›</span>}
-                          <span className="vis-time">
-                            {new Date(r.started_at).toLocaleString('ro-RO', {
-                              day: 'numeric',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </div>
-                        <div className="vis-meta">
-                          <span>{r.ip}</span>
-                          {r.isp && <span>{r.isp}</span>}
-                          <span>
-                            {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
-                            {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
-                          </span>
-                          {r.lang && <span>limbă {r.lang}</span>}
-                          <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
-                        </div>
-                        {r.topic && (
-                          <div className="vis-interest">
-                            ce l-a interesat: „{r.topic.slice(0, 160)}
-                            {r.topic.length > 160 ? '…' : ''}"
-                          </div>
-                        )}
+                  {demos.recent.map((r, i) => (
+                    <div className="vis-row" key={i}>
+                      <div className="vis-main">
+                        <span className="vis-flagline">
+                          <Flag code={r.code} />
+                          <strong>
+                            {r.country || 'Necunoscut'}
+                            {r.region && r.region !== r.city ? ` · ${r.region}` : ''}
+                            {r.city ? ` · ${r.city}` : ''}
+                          </strong>
+                        </span>
+                        <span className={`vis-badge ${r.is_bot ? 'bot' : 'human'}`}>
+                          {r.is_bot ? 'BOT' : 'UMAN'}
+                        </span>
+                        <span className="vis-time">
+                          {new Date(r.started_at).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
                       </div>
-                    )
-                  })}
+                      <div className="vis-meta">
+                        <span>{r.ip}</span>
+                        {r.isp && <span>{r.isp}</span>}
+                        <span>
+                          {[r.browser, r.os].filter(Boolean).join(' / ') || '—'}
+                          {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
+                        </span>
+                        {r.lang && <span>limbă {r.lang}</span>}
+                        <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -1453,51 +1437,6 @@ export default function AdminPanel({
           </section>
         </div>
       </div>
-      {convo && (
-        <div className="convo-overlay" onClick={() => setConvo(null)}>
-          <div className="convo-panel" onClick={(e) => e.stopPropagation()}>
-            <header className="admin-head">
-              <div className="convo-title">
-                <strong>Ce l-a interesat</strong>
-                <span className="convo-sub">
-                  {convo.v.country || 'Necunoscut'}
-                  {convo.v.city ? ` · ${convo.v.city}` : ''} ·{' '}
-                  {convo.v.lang ? `limbă browser: ${convo.v.lang}` : 'limbă necunoscută'} ·{' '}
-                  {convo.v.device === 'mobile' ? 'mobil' : 'desktop'}
-                </span>
-              </div>
-              <button type="button" className="ghost" onClick={() => setConvo(null)}>
-                Close
-              </button>
-            </header>
-            <div className="convo-insight">
-              {convoLoading
-                ? 'Se încarcă…'
-                : convo.rows.length === 0
-                  ? 'A intrat în probă dar nu a scris nimic — doar a privit.'
-                  : `A scris ${convo.rows.filter((r) => r.role === 'user').length} mesaje. ` +
-                    `Limba lui (din browser): ${convo.v.lang || 'necunoscută'}. ` +
-                    'Vezi mai jos ce a întrebat și în ce limbă i-a răspuns Kelion — așa afli dacă a descoperit că-și poate folosi limba.'}
-            </div>
-            <div className="admin-history convo-body">
-              {!convoLoading && convo.rows.length === 0 && (
-                <p className="chat-hint">— fără conversație —</p>
-              )}
-              {convo.rows.map((h, i) => (
-                <div key={i} className={`bubble ${h.role === 'user' ? 'user' : 'assistant'}`}>
-                  <span className="admin-msg-time">
-                    {new Date(h.created_at).toLocaleTimeString('ro-RO', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                  {h.content}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
       {userConvo && (
         <div className="convo-overlay" onClick={() => setUserConvo(null)}>
           <div className="convo-panel" onClick={(e) => e.stopPropagation()}>

@@ -20,6 +20,8 @@ export interface Finance {
   profit: number
   currency: string
   byKind: Record<string, number>
+  // Consumat AZI la AI (USD, real) — cardul „Consumat azi" din tabul Bani.
+  today: number
 }
 
 export interface TransactionRow {

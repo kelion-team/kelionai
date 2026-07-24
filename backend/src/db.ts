@@ -1638,9 +1638,11 @@ export interface DemoStats {
   recent: DemoRecent[]
 }
 
-// The owner's visitor analytics (admin only): EVERY site visit + every demo
-// try — totals, a breakdown by country across both, and the latest arrivals
-// (each row tagged visit/demo) with their full profile.
+// The owner's visitor analytics (admin only): EVERY site visit — totals, a
+// breakdown by country, and the latest arrivals with their full profile.
+// Jumătatea „probe demo" e MOARTĂ (nimic nu mai scrie demo_uses), deci nu mai
+// interogăm tabela; câmpurile de demo rămân 0/goale ca FORMA tipului DemoStats
+// să nu se schimbe (frontend-ul nu crapă).
 export async function getDemoStats(): Promise<DemoStats> {
   const empty: DemoStats = {
     total: 0, today: 0, bots: 0, visitsTotal: 0, visitsToday: 0, byCountry: [], recent: [],
@@ -1648,14 +1650,6 @@ export async function getDemoStats(): Promise<DemoStats> {
   if (!dbEnabled()) return empty
   try {
     const pool = getPool()
-    const counts = (
-      await pool.query<{ total: string; today: string; bots: string }>(
-        `SELECT COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE started_at >= date_trunc('day', now())) AS today,
-                COUNT(*) FILTER (WHERE is_bot) AS bots
-         FROM demo_uses`,
-      )
-    ).rows[0]
     const vCounts = (
       await pool.query<{ total: string; today: string; bots: string }>(
         `SELECT COUNT(*) AS total,
@@ -1668,8 +1662,7 @@ export async function getDemoStats(): Promise<DemoStats> {
       await pool.query<{ country: string; country_code: string; n: string }>(
         `SELECT COALESCE(NULLIF(country,''),'Unknown') AS country, country_code,
                 COUNT(*) AS n
-         FROM (SELECT country, country_code FROM demo_uses
-               UNION ALL SELECT country, country_code FROM visits) AS x
+         FROM visits
          GROUP BY country, country_code ORDER BY COUNT(*) DESC LIMIT 30`,
       )
     ).rows.map((r) => ({ country: r.country, code: r.country_code, count: Number(r.n) }))
@@ -1692,18 +1685,9 @@ export async function getDemoStats(): Promise<DemoStats> {
         session_email: string
         topic: string
       }>(
-        `SELECT * FROM (
-           SELECT 'demo'::text AS kind, d.ip, d.country, d.country_code, d.city, d.region, d.isp,
-                  d.browser, d.os, d.device, d.lang, d.referrer, d.is_bot, d.started_at, d.session_email,
-                  COALESCE((SELECT m.content FROM messages m
-                            WHERE m.user_email = d.session_email AND m.role = 'user'
-                            ORDER BY m.created_at ASC LIMIT 1), '') AS topic
-           FROM demo_uses d
-           UNION ALL
-           SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
-                  browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email, '' AS topic
-           FROM visits
-         ) AS x ORDER BY started_at DESC LIMIT 60`,
+        `SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
+                browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email, '' AS topic
+         FROM visits ORDER BY started_at DESC LIMIT 60`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
@@ -1724,9 +1708,9 @@ export async function getDemoStats(): Promise<DemoStats> {
       topic: r.topic ?? '',
     }))
     return {
-      total: Number(counts?.total ?? 0),
-      today: Number(counts?.today ?? 0),
-      bots: Number(counts?.bots ?? 0) + Number(vCounts?.bots ?? 0),
+      total: 0,
+      today: 0,
+      bots: Number(vCounts?.bots ?? 0),
       visitsTotal: Number(vCounts?.total ?? 0),
       visitsToday: Number(vCounts?.today ?? 0),
       byCountry,
