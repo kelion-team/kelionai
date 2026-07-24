@@ -75,11 +75,13 @@ import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
 // de user, altfel implicitul tier-ului chat (GPT). Întoarce NULL doar dacă lipsește
 // cheia OpenRouter → creierul nu poate porni (mesaj onest, nicio plasă Kimi/GLM).
-async function selectedBrainModel(email: string, text: string): Promise<string | null> {
+async function selectedBrainModel(email: string, text: string, kvRaw?: string | null): Promise<string | null> {
   if (!config.openrouter.key) return null
   let sel: { chat?: string; work?: string } = {}
   try {
-    const raw = await loadKv(`model_choice:${email}`)
+    // FLUENȚĂ (A5): kv-ul vine pre-citit din Promise.all-ul turei (fără încă
+    // un drum DB serial aici); fallback la citire doar pentru apelanții vechi.
+    const raw = kvRaw !== undefined ? kvRaw : await loadKv(`model_choice:${email}`)
     if (raw) sel = JSON.parse(raw) as { chat?: string; work?: string }
   } catch {
     sel = {}
@@ -130,6 +132,24 @@ const SHOW_TOOL: Tool = {
       title: { type: 'string', description: 'Short caption for the panel header.' },
     },
     required: ['url'],
+  },
+}
+
+// AFIȘAREA PROPRIILOR RECOMANDĂRI/PLANURI pe monitor (Adrian, 24 iul: „nu poate
+// afișa pe monitor ce recomandă"). Când Kelion scrie el însuși un plan, o listă,
+// un rezumat, cod — îl pune DIRECT pe monitor ca document lizibil, NU pe un site
+// extern (pastebin etc. refuză iframe → ecran gol).
+const SHOW_DOCUMENT_TOOL: Tool = {
+  name: 'show_document',
+  description:
+    "Show YOUR OWN written content on the user's monitor as a clean, readable document — a plan, a checklist, a summary, code, step-by-step instructions, a recommendation. Use this INSTEAD of putting your text on an external paste site (those refuse to embed and show a blank screen). The user reads it on the big screen while you talk.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Short document title.' },
+      text: { type: 'string', description: 'The full document content (plain text or markdown).' },
+    },
+    required: ['title', 'text'],
   },
 }
 
@@ -764,18 +784,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // total, fără cârpeli"): creierul e Kimi→GLM; nu mai există cheie de client.
     // Toți userii trec prin paywall-ul normal (creditul din portofel).
     const lastForRecall = messages.at(-1)
-    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures] = await Promise.all([
+    // FLUENȚĂ (audit 24 iul, A1): recall-ul semantic putea aștepta embedding-ul
+    // Google până la 8s — pe drumul PRIMULUI cuvânt. Deadline dur de 400ms: ce
+    // nu e gata la timp nu intră în tura asta (memoria full-text rămâne).
+    const recallWithDeadline = Promise.race([
+      recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
+    ])
+    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv] = await Promise.all([
       getSpeechLang(user.email),
       getMeserieActiva(user.email),
-      // Memory agent (recall): DB pur (fără model, fără credite) — faptele
-      // durabile despre user; mesajul curent e indiciul de relevanță.
-      recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
+      recallWithDeadline,
       // Continuitate între sesiuni (#20): momentul ultimului mesaj salvat — DB
       // pur, în paralel cu restul (zero latență adăugată).
       getRecentHistory(user.email, 1).catch(() => []),
       // GESTURI dezactivate de Adrian din panoul admin — ce NU e bifat NU apare
       // deloc (Adrian, 13 iul): filtrăm tool-ul + promptul cu lista asta.
       getDisabledGestures().catch(() => [] as string[]),
+      // FLUENȚĂ (A5): alegerea de model a userului citită AICI, în paralel —
+      // nu ca încă un drum DB serial chiar înainte de apelul creierului.
+      loadKv(`model_choice:${user.email}`).catch(() => null),
     ])
     const gestureOff = new Set(disabledGestures)
     // Tool-ul de gesturi, filtrat: gesturile dezactivate NU mai sunt oferite
@@ -829,7 +857,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       : deviceCmd || gestureCmd
         ? null // a device/gesture command is an order, not conversation — never shifts the language
         : trackSpeechLang(user.email, lastIncomingText, storedPref || user.locale)
-    if (committedLang) await setSpeechLangPref(user.email, committedLang)
+    // FLUENȚĂ (B4): scriere DB fire-and-forget — nimic din aval nu-i citește
+    // rezultatul, deci nu are ce căuta pe drumul primului cuvânt.
+    if (committedLang) void setSpeechLangPref(user.email, committedLang)
     // Ce anunțăm clientului ca limbă: adminul primește MEREU ro-RO (idempotent pe
     // client — applyLang schimbă recognizer-ul doar dacă diferă), ca microfonul
     // să asculte română; restul primesc comutarea detectată.
@@ -1295,8 +1325,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLOSE_TOOL,
     ]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
-      : [...googleTools, SHOW_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1320,7 +1350,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // uneltele + persona + memoria identice indiferent de model; streaming → primul
     // cuvânt instant. Fără cheie OpenRouter = fără creier (nicio plasă Kimi/GLM,
     // scoase definitiv) → mesaj onest în catch.
-    const orChatModel = await selectedBrainModel(user.email, lastUserText)
+    const orChatModel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv)
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -1476,6 +1506,14 @@ async function runTool(
     case 'search_source': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return searchSource(String(args.query ?? ''))
+    }
+
+    case 'show_document': {
+      const title = String(args.title ?? 'Document')
+      const text = String(args.text ?? '')
+      if (!text.trim()) return JSON.stringify({ error: 'empty' })
+      reply.raw.write(`${CTRL}${JSON.stringify({ doc: { title, text } })}${CTRL}`)
+      return JSON.stringify({ shown: true })
     }
 
     case 'show_on_screen': {
