@@ -19,12 +19,18 @@ export interface ReconcileResult {
 export async function reconcileStripePayments(): Promise<ReconcileResult> {
   if (!config.stripe.secretKey) return { scanned: 0, credited: 0 }
   const headers = { Authorization: `Bearer ${config.stripe.secretKey}` }
+  // FEREASTRĂ DE 7 ZILE (incident real, 24 iul: plasa a creditat plăți din
+  // MARTIE și IUNIE — era veche a aplicației — iar Adrian a văzut credite
+  // „din senin": „eu am plătit doar £20, a doua de unde a venit?"). Plasa
+  // recuperează DOAR plăți recente scăpate de webhook; plățile istorice se
+  // creditează doar MANUAL, după verificare umană. Plată unică, fără surprize.
+  const since = Math.floor(Date.now() / 1000) - 7 * 86_400
 
   // 1) Sesiunile Checkout plătite (limită mărită la 100 — audit P1-1: la 25, a
   // 26-a plată dintr-un vârf cădea de pe listă și nu se mai recupera).
   let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string }; customer_details?: { email?: string } }[] = []
   try {
-    const r = await fetch('https://api.stripe.com/v1/checkout/sessions?limit=100', {
+    const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?limit=100&created[gte]=${since}`, {
       headers,
       signal: AbortSignal.timeout(15_000),
     })
@@ -52,7 +58,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
   // creditare idempotentă, pe aceeași cheie pi_.
   let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string }; receipt_email?: string }[] = []
   try {
-    const r = await fetch('https://api.stripe.com/v1/payment_intents?limit=100', {
+    const r = await fetch(`https://api.stripe.com/v1/payment_intents?limit=100&created[gte]=${since}`, {
       headers,
       signal: AbortSignal.timeout(15_000),
     })
