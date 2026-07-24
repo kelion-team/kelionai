@@ -29,6 +29,7 @@ import {
   setDisabledGestures,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
+import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
 import { geminiVision } from '../services/google.js'
@@ -146,6 +147,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
+  })
+
+  // TRIAJUL AUTONOM (Adrian, 24 iul): Kelion decide singur pe fiecare gap —
+  // valoros (rămâne, „DE IMPLEMENTAT") sau închis automat cu motiv. Butonul din
+  // admin doar declanșează; aceeași funcție rulează și zilnic, autonom.
+  app.post('/api/admin/gaps/triage', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await triageGaps())
   })
 
   // Mark a gap resolved / reopen it (admin only). Used by the "Reject" button.

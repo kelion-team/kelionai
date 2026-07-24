@@ -27,6 +27,7 @@ import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
+import { triageGaps } from './services/gapsTriage.js'
 import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
@@ -304,6 +305,15 @@ try {
   app.log.info(`Kelionai backend on :${config.port}`)
   // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
   startMailbox()
+  // TRIAJ AUTONOM zilnic al cererilor neacoperite (Adrian, 24 iul): Kelion
+  // decide singur ce aduce valoare (rămâne „DE IMPLEMENTAT") și ce se închide
+  // automat. La 1h după boot, apoi la 24h. Best-effort — nu blochează nimic.
+  setTimeout(() => {
+    void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonom)')).catch(() => {})
+    setInterval(() => {
+      void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonom)')).catch(() => {})
+    }, 24 * 60 * 60 * 1000)
+  }, 60 * 60 * 1000)
 } catch (err) {
   app.log.error(err)
   process.exit(1)

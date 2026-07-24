@@ -225,6 +225,10 @@ export async function initDb(): Promise<void> {
     );
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
+    -- TRIAJUL AUTONOM al lui Kelion (Adrian, 24 iul): decizia lui pe fiecare
+    -- cerere neacoperită — „DE IMPLEMENTAT: ..." sau „ÎNCHIS AUTONOM: ...".
+    ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triage TEXT;
+    ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triaged_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
     -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
     -- memories table: memories are auto-learned facts Kelion recalls silently;
@@ -2077,6 +2081,8 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
+  // Decizia autonomă a lui Kelion („DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...").
+  triage?: string | null
   created_at: string
   last_seen: string
 }
@@ -2118,7 +2124,7 @@ export async function getCapabilityGaps(includeResolved = false, limit = 200): P
   try {
     const where = includeResolved ? '' : 'WHERE resolved = false'
     const r = await getPool().query<CapabilityGap>(
-      `SELECT id, user_email, request, reason, hits, resolved, escalated, created_at, last_seen
+      `SELECT id, user_email, request, reason, hits, resolved, escalated, triage, created_at, last_seen
        FROM capability_gaps ${where}
        ORDER BY resolved ASC, hits DESC, last_seen DESC LIMIT $1`,
       [limit],
@@ -2134,6 +2140,19 @@ export async function setGapResolved(id: number, resolved: boolean): Promise<voi
   if (!dbEnabled()) return
   try {
     await getPool().query('UPDATE capability_gaps SET resolved = $2 WHERE id = $1', [id, resolved])
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Decizia de triaj a lui Kelion pe un gap (+ eventuala închidere automată). */
+export async function setGapTriage(id: number, triage: string, resolved: boolean): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      'UPDATE capability_gaps SET triage = $2, triaged_at = now(), resolved = $3 WHERE id = $1',
+      [id, triage.slice(0, 500), resolved],
+    )
   } catch {
     /* non-fatal */
   }

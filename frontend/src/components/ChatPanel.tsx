@@ -121,6 +121,21 @@ export default function ChatPanel({
     setSpeechLang(defaultSpeechLang(lang))
   }, [lang])
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  // ISTORIC PERMANENT ÎNTRE SESIUNI (Adrian, 24 iul): la deschidere, chatul se
+  // umple cu conversația salvată pe server (/api/chat/history) — continuitate
+  // reală, nu chat gol la fiecare vizită. Nu suprascrie mesaje deja apărute.
+  useEffect(() => {
+    void fetch('/api/chat/history', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { history?: { role: 'user' | 'assistant'; content: string }[] } | null) => {
+        const h = j?.history ?? []
+        if (h.length === 0) return
+        setMessages((ms) =>
+          ms.length > 0 ? ms : h.map((m) => ({ role: m.role, content: m.content, ts: Date.now() })),
+        )
+      })
+      .catch(() => {})
+  }, [])
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
