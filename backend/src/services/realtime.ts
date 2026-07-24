@@ -91,6 +91,23 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
         required: ['prompt'],
       },
     },
+    {
+      // ESCALADAREA ÎN VOCE (Adrian, 24 iul: „incrementează automat modelele pe
+      // nivel de dificultate, de la chat live voce până la cereri foarte grele"):
+      // la o cerere GREA, modelul de voce predă întrebarea CREIERULUI (modelul
+      // work — Claude/GPT prin OpenRouter) și rostește răspunsul expertului.
+      type: 'function',
+      name: 'ask_brain',
+      description:
+        "HEAVY requests only — deep analysis, architecture, coding, math, long multi-step reasoning, anything that needs an expert brain. Pass the user's full request; you get back the expert answer to read aloud (summarize naturally, do not read markdown).",
+      parameters: {
+        type: 'object',
+        properties: {
+          request: { type: 'string', description: "The user's full request, with any needed context." },
+        },
+        required: ['request'],
+      },
+    },
   ]
 }
 
