@@ -39,8 +39,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // română, ca vorbirea lui să nu mai fie auzită greșit ca rusă (dovadă live:
       // Kelion îi răspundea în rusă). Restul: limba PERSISTATĂ dintr-o
       // interacțiune reală; dacă n-au una → GOL → pornesc în engleză și oglindesc.
+      const isAdmin = user.email.toLowerCase() === config.adminEmail
       let lang: string
-      if (user.email.toLowerCase() === config.adminEmail) {
+      if (isAdmin) {
         lang = 'ro'
       } else {
         lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
@@ -51,7 +52,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const meserieId = await getMeserieActiva(user.email)
       if (meserieId != null) meserieName = getMeserie(meserieId)?.nume ?? null
 
-      const res = await openaiRealtimeAnswer(offer, lang, meserieName)
+      // hardLock = adminul (Adrian) — română MEREU, fără comutare pe italiană.
+      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin)
       if (!res.ok) {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
@@ -141,7 +143,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // vocea NU o făcea niciodată → sesiunea următoare pornea iar de la zero.
       // Aceeași regulă ca în scris: limba nouă confirmată pe 2 mesaje
       // consecutive → persistată per user; sesiunile viitoare pornesc direct în ea.
-      if (text && role === 'user') {
+      // ADMIN = română MEREU (Adrian, în Italia): NU comităm și NU re-pinăm
+      // limba din vorbire — altfel, dacă spune/aude italiană, sesiunea live ar
+      // comuta pe italiană („2 voci: ro și italiană"). Rămâne blocat pe română.
+      const isAdmin = user.email.toLowerCase() === config.adminEmail
+      if (text && role === 'user' && !isAdmin) {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)
         if (committed) void setSpeechLangPref(user.email, committed)

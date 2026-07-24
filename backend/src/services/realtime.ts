@@ -21,7 +21,7 @@ const OPENAI_CALLS = 'https://api.openai.com/v1/realtime/calls'
 // Persona Kelion pentru VOCE — consistentă cu voiceTurn.ts (ton cald, scurt,
 // vorbit), plus blocajul ABSOLUT de limbă (aceeași regulă ca în chat): Kelion
 // vorbește EXCLUSIV în limba persistată a userului, orice ar auzi.
-export function realtimeInstructions(lang: string, meserie?: string | null): string {
+export function realtimeInstructions(lang: string, meserie?: string | null, hardLock = false): string {
   const rol = meserie
     ? ` Ai rolul activ ales de utilizator: „${meserie}" — răspunde din perspectiva acestui rol.`
     : ''
@@ -49,7 +49,15 @@ export function realtimeInstructions(lang: string, meserie?: string | null): str
     `this list. If you are ever unsure which language you heard, answer in ` +
     `English. Never mix two languages in one reply.`
   const known = /^[a-z]{2}$/.test(lang)
-  const limba = known
+  // HARD LOCK (Adrian, admin, în Italia): „adminul primește română MEREU,
+  // indiferent ce aude". Fără lock, când Adrian aude/spune italiană vocea comuta
+  // pe italiană → „2 voci: ro și italiană". Cu lock, limba NU se schimbă NICIODATĂ.
+  const limba = hardLock && known
+    ? `\n\nLIMBĂ: vorbește EXCLUSIV în ${langLabel(lang)}, MEREU, pentru tot ` +
+      `restul conversației. NU comuta NICIODATĂ pe altă limbă, orice ai auzi — ` +
+      `chiar dacă utilizatorul sau fundalul e în italiană, engleză sau altceva, ` +
+      `tu răspunzi tot în ${langLabel(lang)}.`
+    : known
     ? `\n\nLIMBĂ: limba stabilită a utilizatorului este ${langLabel(lang)}. ` +
       `Vorbește în ${langLabel(lang)} și păstreaz-o consecvent toată conversația. ` +
       `Schimbă DOAR dacă utilizatorul chiar începe să vorbească susținut în altă ` +
@@ -167,6 +175,7 @@ export async function openaiRealtimeAnswer(
   offerSdp: string,
   lang: string,
   meserie?: string | null,
+  hardLock = false,
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
 
@@ -208,7 +217,7 @@ export async function openaiRealtimeAnswer(
       },
       output: { voice: config.openai.realtimeVoice },
     },
-    instructions: realtimeInstructions(lang, meserie),
+    instructions: realtimeInstructions(lang, meserie, hardLock),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
     tools: realtimeTools(),
     tool_choice: 'auto',
