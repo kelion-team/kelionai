@@ -200,3 +200,59 @@ export function verifyWebhook(raw: string, sigHeader: string): StripeEvent | nul
     return null
   }
 }
+
+// ── VERIFICARE FĂRĂ SECRET DE WEBHOOK (fallback securizat) ───────────────────
+// Dacă STRIPE_WEBHOOK_SECRET lipsește (cazul VPS-ului → plățile nu se creditau,
+// Adrian a plătit £20 și n-a apărut), NU putem valida semnătura. În loc să
+// respingem (bani pierduți) SAU să creditam orbește (gaură de securitate), luăm
+// evenimentul (id + tip) și RE-INTEROGĂM Stripe cu cheia noastră SECRETĂ: doar
+// dacă Stripe confirmă că obiectul e REAL și PLĂTIT, creditam. Sursa de adevăr
+// e API-ul Stripe autentificat, nu payload-ul webhook.
+export type VerifiedTopup = { email: string; amount: number; currency: string; ref: string } | null
+
+export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
+  let ev: StripeEvent
+  try {
+    ev = JSON.parse(raw) as StripeEvent
+  } catch {
+    return null
+  }
+  if (!config.stripe.secretKey) return null
+  const obj = ev.data?.object as Record<string, unknown> | undefined
+  const id = String(obj?.id ?? '')
+  if (!id) return null
+
+  async function getJson(path: string): Promise<Record<string, unknown> | null> {
+    try {
+      const r = await fetch(`${API}/${path}`, { headers: authHeaders() })
+      if (!r.ok) return null
+      return (await r.json()) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+
+  if (ev.type === 'checkout.session.completed' && id.startsWith('cs_')) {
+    const s = await getJson(`checkout/sessions/${id}`)
+    if (!s || s.payment_status !== 'paid') return null
+    const email =
+      (s.metadata as { email?: string } | undefined)?.email ??
+      (s.customer_details as { email?: string } | undefined)?.email ??
+      ''
+    const amount = Number(s.amount_total ?? 0) / 100
+    const ref = String(s.payment_intent ?? s.id ?? id)
+    if (!email || !(amount > 0)) return null
+    return { email, amount, currency: String(s.currency ?? config.stripe.currency), ref }
+  }
+
+  if (ev.type === 'payment_intent.succeeded' && id.startsWith('pi_')) {
+    const pi = await getJson(`payment_intents/${id}`)
+    if (!pi || pi.status !== 'succeeded') return null
+    const email = (pi.metadata as { email?: string } | undefined)?.email ?? String(pi.receipt_email ?? '')
+    const amount = Number(pi.amount ?? 0) / 100
+    if (!email || !(amount > 0)) return null
+    return { email, amount, currency: String(pi.currency ?? config.stripe.currency), ref: id }
+  }
+
+  return null
+}
