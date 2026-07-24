@@ -301,10 +301,19 @@ body {
     grid-template-columns: 1fr;
     grid-template-rows: 42svh 1fr;
   }
+  /* FIX TELEFON (Adrian, 24 iul: „pe telefon nu pot gestiona nimic"): hero-ul
+     păstra height:100svh și, fiind poziționat, se revărsa PESTE panoul de jos —
+     acoperea complet logarea și butoanele. Pe mobil hero-ul respectă rândul lui. */
+  .landing-hero {
+    height: 42svh;
+  }
   .landing-hero-fade {
     background: linear-gradient(180deg, transparent 55%, rgba(11, 13, 18, 0.9) 100%);
   }
   .landing-panel {
+    /* Deasupra oricărei revărsări a hero-ului poziționat — mereu vizibil. */
+    position: relative;
+    z-index: 2;
     padding: 4vh 8vw;
     align-items: flex-start;
   }
