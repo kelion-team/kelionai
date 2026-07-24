@@ -95,7 +95,8 @@ export default function CustomerSettings({
   readonly user: User
   readonly onClose: () => void
 }): React.JSX.Element {
-  const base = (loadLocalLang() ?? (typeof navigator !== 'undefined' ? navigator.language : 'en'))
+  // Default ENGLEZĂ până la identificarea limbii (nu limba browserului).
+  const base = (loadLocalLang() ?? 'en')
     .slice(0, 2)
     .toLowerCase()
   const t = base === 'ro' ? RO : EN

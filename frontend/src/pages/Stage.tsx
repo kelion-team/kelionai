@@ -23,13 +23,17 @@ import {
   setMonitorWorking,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
-import { loadServerPrefs, saveAvatarBox } from '../lib/prefs'
+import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 
 export default function Stage({ user }: { user: User }) {
   // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
-  const lang = resolveLang(user.role === 'admin' ? 'ro' : user.locale)
+  // LIMBA UI (regula finală, Adrian 24 iul: „default ENGLEZĂ pentru toți; după
+  // identificarea limbii se aplică procedura existentă"). Fără forțare pe rol,
+  // fără locale de browser/cont: oglinda locală a limbii IDENTIFICATE de server
+  // (scrisă de frame-ul {lang} → mirrorLang), altfel engleză.
+  const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox'>('finance')
