@@ -185,7 +185,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance] = await Promise.all([getAdminAccount(), getOpenRouterBalance()])
+    const [pool, orBalance, stripeBal] = await Promise.all([
+      getAdminAccount(),
+      getOpenRouterBalance(),
+      getStripeBalance(),
+    ])
     return reply.send({
       active: 'openrouter',
       openrouter: {
@@ -201,6 +205,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         live: orBalance.ok,
         error: orBalance.error,
       },
+      // PUNGA STRIPE în bară (Adrian, 24 iul: „după OpenRouter, banii în
+      // Stripe, reali") — disponibil + în tranzit, doar pentru admin.
+      stripe: stripeBal
+        ? { available: stripeBal.available, pending: stripeBal.pending, currency: stripeBal.currency }
+        : null,
       pool,
     })
   })
