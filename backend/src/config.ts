@@ -46,8 +46,9 @@ export const config = {
     ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
     // O SINGURĂ voce masculină în TOATĂ aplicația (Adrian, 24 iul: „unifică — acum
     // creierul o voce, chatul alta"). `ash` = EXACT vocea din Realtime (full-duplex),
-    // disponibilă și la TTS → rezerva/salutul sună identic cu vocea live, nu diferit.
-    ttsVoice: (process.env.OPENAI_TTS_VOICE ?? 'ash').trim(),
+    // disponibilă și la TTS → chatul scris sună IDENTIC cu vocea live, nu diferit.
+    // Urmează vocea Realtime dacă e schimbată din env, ca să rămână mereu aceeași.
+    ttsVoice: (process.env.OPENAI_TTS_VOICE ?? process.env.OPENAI_REALTIME_VOICE ?? 'ash').trim(),
     // STT de rezervă pe aceeași cheie OpenAI (auzul NU are voie să moară dacă
     // Realtime pică — Adrian, 24 iul: „nu mă aude"). Google STT rămâne primar
     // DOAR dacă există service account; altfel transcrie OpenAI.

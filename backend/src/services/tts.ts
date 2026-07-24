@@ -2,14 +2,14 @@ import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 
-// TTS — Chirp 3 HD (Google) ca PRINCIPAL, OpenAI ca REZERVĂ.
+// TTS — O SINGURĂ VOCE MASCULINĂ ÎN TOATĂ APLICAȚIA.
 //
-// Adrian (24 iul): „vocea Chirp 3 HD, full-duplex". Deci sinteza vocii lui
-// Kelion e Google Chirp 3 HD (voce naturală, masculină — stil implicit Charon),
-// prin cheia `GOOGLE_TTS_API_KEY` (sau un service account). Dacă nicio cheie
-// Google nu e configurată — sau apelul Google pică — cădem pe OpenAI TTS ca să
-// nu rămână niciodată mut. Vocea live (full-duplex) vine din calea STT→creier→
-// acest TTS + barge-in, nu din OpenAI Realtime (Realtime nu poate reda Chirp).
+// Adrian (24 iul): „sunt 2 voci, chat și creier — unifică". Vocea live
+// full-duplex e OpenAI Realtime, legată intrinsec de vocile OpenAI (`ash`) și
+// care NU poate reda Chirp. Ca să sune IDENTIC peste tot (chat scris, salut
+// landing, /api/tts), sinteza folosește ACEEAȘI voce OpenAI `ash` ca vocea live.
+// Google Chirp 3 HD rămâne DOAR plasă de siguranță — se folosește doar când
+// OpenAI nu e disponibil (fără cheie / apel picat), ca să nu rămână niciodată mut.
 
 const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
 const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech'
@@ -82,15 +82,19 @@ export async function synthesize(
   // ca să fie rostite corect (API → „a pe i"). Strat pur pe text.
   const spoken = academicPronounce(clean, lang.split('-')[0])
 
-  // 1) Chirp 3 HD (Google) — vocea principală cerută.
-  if (googleTtsAvailable()) {
-    const r = await synthChirp(spoken, lang, opts)
+  // O SINGURĂ VOCE MASCULINĂ ÎN TOATĂ APLICAȚIA (Adrian: „sunt 2 voci, chat și
+  // creier — unifică"). Vocea live full-duplex vine din OpenAI Realtime, care e
+  // legat INTRINSEC de vocile OpenAI (`ash`) și NU poate reda Chirp. Ca să sune
+  // IDENTIC peste tot, chatul scris folosește ACEEAȘI voce OpenAI ca vocea live.
+  // 1) OpenAI TTS cu vocea `ash` (= vocea Realtime) — vocea unică.
+  if (config.openai.key) {
+    const r = await synthOpenAI(spoken, opts)
     if (r.ok) return r
-    // Google a picat → nu rămânem muți, încercăm OpenAI mai jos.
+    // OpenAI a picat (ex. fără credit) → nu rămânem muți, cădem pe Google mai jos.
   }
 
-  // 2) Rezervă: OpenAI TTS (voce masculină `onyx`).
-  if (config.openai.key) return synthOpenAI(spoken, opts)
+  // 2) Plasă de siguranță: Google Chirp 3 HD (doar când OpenAI nu e disponibil).
+  if (googleTtsAvailable()) return synthChirp(spoken, lang, opts)
 
   return { ok: false, status: 502, error: 'tts_failed' }
 }
