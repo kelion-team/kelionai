@@ -13,8 +13,21 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const { balance, topupRef } = await getWalletStatus(user.email)
     const credits = Math.floor(balance / config.stripe.creditValue)
     const percent = topupRef > 0 ? Math.max(0, Math.min(100, (balance / topupRef) * 100)) : 100
-    return reply.send({ credits, percent, currency: config.stripe.currency })
+    // firstTopUp = userul n-a alimentat niciodată (topup_ref e 0). Prima alimentare
+    // e mai mare (activarea creierului = £20 minim); apoi orice multiplu de £5.
+    return reply.send({ credits, percent, currency: config.stripe.currency, firstTopUp: topupRef <= 0 })
   })
+
+  // Regula de alimentare (Adrian, 24 iul): prima alimentare = £20 minim (activarea
+  // creierului), apoi orice multiplu de £5. Validată pe server, nu doar în UI.
+  async function validateTopUp(email: string, amount: number): Promise<string | null> {
+    if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
+    if (amount % 5 !== 0) return 'must_be_multiple_of_5'
+    const { topupRef } = await getWalletStatus(email)
+    const min = topupRef <= 0 ? 20 : 5
+    if (amount < min) return topupRef <= 0 ? 'first_topup_min_20' : 'min_5'
+    return null
+  }
 
   // Start a top-up: returns a Stripe Checkout URL to redirect the user to.
   app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
@@ -22,7 +35,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     if (!config.stripe.secretKey) return reply.code(503).send({ error: 'stripe_not_configured' })
     const amount = Number(req.body?.amount ?? 10)
-    if (!Number.isFinite(amount) || amount <= 0) return reply.code(400).send({ error: 'bad_amount' })
+    const bad = await validateTopUp(user.email, amount)
+    if (bad) return reply.code(400).send({ error: bad })
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     const result = await createCheckout(user.email, user.name ?? '', amount, baseUrl)
     if ('error' in result) return reply.code(502).send(result)
@@ -37,7 +51,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     if (!config.stripe.secretKey) return reply.code(503).send({ error: 'stripe_not_configured' })
     const amount = Number(req.body?.amount ?? 10)
-    if (!Number.isFinite(amount) || amount <= 0) return reply.code(400).send({ error: 'bad_amount' })
+    const bad = await validateTopUp(user.email, amount)
+    if (bad) return reply.code(400).send({ error: bad })
     const result = await createPaymentIntent(user.email, user.name ?? '', amount)
     if ('error' in result) return reply.code(502).send(result)
     return reply.send(result)

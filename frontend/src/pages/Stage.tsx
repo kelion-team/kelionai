@@ -540,16 +540,14 @@ export default function Stage({ user }: { user: User }) {
             )}
           </>
         )}
-        {user.role === 'customer' && <WalletButton />}
-        <button
-          type="button"
-          className="ghost"
-          onClick={() => setSettingsOpen(true)}
-          title="Setări"
-          aria-label="Setări"
-        >
-          ⚙
-        </button>
+        {/* Credit + reîncărcare pentru ORICE user logat (Adrian, 24 iul). Din
+            meniul portofelului se ajunge și la Setări și la conectarea Gmail —
+            bara nu mai are rotița ⚙ separată, nici butonul „Connect Google". */}
+        <WalletButton
+          onOpenSettings={() => setSettingsOpen(true)}
+          googleConnected={user.googleConnected}
+          onConnectGoogle={startGoogleConnect}
+        />
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}

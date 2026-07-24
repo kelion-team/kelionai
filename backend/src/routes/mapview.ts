@@ -27,8 +27,8 @@ export async function mapviewRoutes(app: FastifyInstance): Promise<void> {
 #hud{position:absolute;z-index:1000;left:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
 font:600 14px system-ui,sans-serif;padding:8px 12px;border-radius:12px;border:1px solid #2a3350}
 #recenter{position:absolute;z-index:1000;right:12px;bottom:12px;background:rgba(12,14,20,.82);color:#eaf0ff;
-border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer;display:none}</style></head>
-<body><div id="map"></div><div id="hud" style="display:none"></div><button id="recenter">Urmărește ↺</button>
+border:1px solid #2a3350;border-radius:999px;padding:8px 14px;font:600 13px system-ui;cursor:pointer}</style></head>
+<body><div id="map"></div><div id="hud" style="display:none"></div><button id="recenter">Urmărește mașina ↺</button>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 var c=${JSON.stringify(coords)};
@@ -43,18 +43,19 @@ if(c.length>1){
   map.fitBounds(line.getBounds(),{padding:[30,30]});
 }else{map.setView([44.43,26.10],6);}
 
-// ── Live position: a blue dot that follows the car, re-centering as it moves,
-// with a remaining-distance readout. This is what makes it a driving copilot
-// (not a static snapshot). The user can stop following by panning; the
-// "Urmărește" button re-arms follow mode.
-var carDot=null,following=true,gotFix=false;
+// ── Live position: a blue dot for the car + a remaining-distance readout.
+// IMPLICIT arătăm TOT traseul (fitBounds mai sus), NU zoom pe mașină — altfel
+// GPS-ul acoperea ruta la prima poziție și userul vedea doar un punct (bug
+// raportat de Adrian). Urmărirea mașinii (zoom + centrare) e OPȚIONALĂ: butonul
+// „Urmărește mașina" o pornește (util când chiar conduci), pan-ul o oprește.
+var carDot=null,following=false;
 var hud=document.getElementById('hud'),btn=document.getElementById('recenter');
 function haversineKm(a,b){var R=6371,d2r=Math.PI/180;
  var dLat=(b[0]-a[0])*d2r,dLon=(b[1]-a[1])*d2r;
  var s=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a[0]*d2r)*Math.cos(b[0]*d2r)*Math.sin(dLon/2)*Math.sin(dLon/2);
  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));}
-map.on('dragstart',function(){following=false;btn.style.display='block';});
-btn.onclick=function(){following=true;btn.style.display='none';if(carDot)map.setView(carDot.getLatLng(),16);};
+map.on('dragstart',function(){following=false;});
+btn.onclick=function(){following=true;if(carDot)map.setView(carDot.getLatLng(),15);};
 function onPos(p){
   var pos=[p.coords.latitude,p.coords.longitude];
   if(!carDot){
@@ -63,8 +64,7 @@ function onPos(p){
   if(dest){var km=haversineKm(pos,dest);
     hud.style.display='block';
     hud.textContent=(km<1?Math.round(km*1000)+' m':km.toFixed(1)+' km')+' până la destinație';}
-  if(following){map.setView(pos,gotFix?map.getZoom():16,{animate:true});}
-  gotFix=true;
+  if(following){map.setView(pos,map.getZoom()<13?15:map.getZoom(),{animate:true});}
 }
 if(navigator.geolocation){
   navigator.geolocation.watchPosition(onPos,function(){},{enableHighAccuracy:true,maximumAge:2000,timeout:15000});
