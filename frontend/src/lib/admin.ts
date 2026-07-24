@@ -89,6 +89,23 @@ export async function createAiCard(): Promise<{ id: string; last4: string; url: 
   }
 }
 
+// DEPUNEREA OWNERULUI: bani în punga Stripe (fără credite) → checkout URL.
+export async function ownerDeposit(pounds: number): Promise<string | null> {
+  try {
+    const r = await fetch('/api/admin/deposit', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pounds }),
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { url?: string }
+    return j.url ?? null
+  } catch {
+    return null
+  }
+}
+
 // VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
 export async function sellCredits(
   email: string,

@@ -29,7 +29,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
 
   // 1) Sesiunile Checkout plătite (limită mărită la 100 — audit P1-1: la 25, a
   // 26-a plată dintr-un vârf cădea de pe listă și nu se mai recupera).
-  let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string; sale_credits?: string }; customer_details?: { email?: string } }[] = []
+  let sessions: { id?: string; payment_status?: string; amount_total?: number; currency?: string; payment_intent?: string; metadata?: { email?: string; sale_credits?: string; owner_deposit?: string }; customer_details?: { email?: string } }[] = []
   try {
     const r = await fetch(`https://api.stripe.com/v1/checkout/sessions?limit=100&created[gte]=${since}`, {
       headers,
@@ -43,6 +43,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
   let credited = 0
   for (const s of sessions) {
     if (s.payment_status !== 'paid') continue
+    if (s.metadata?.owner_deposit === '1') continue // depunere owner — fără credite
     const email = s.metadata?.email ?? s.customer_details?.email ?? ''
     const amount = (s.amount_total ?? 0) / 100
     const ref = s.payment_intent ?? s.id ?? ''
@@ -63,7 +64,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
   // dar dacă creditarea imediată pica ȘI webhookul era mort, banii nu mai veneau
   // de NICĂIERI — PI-urile nu apar în lista de checkout sessions). Aceeași
   // creditare idempotentă, pe aceeași cheie pi_.
-  let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string; sale_credits?: string }; receipt_email?: string }[] = []
+  let pis: { id?: string; status?: string; amount?: number; currency?: string; metadata?: { email?: string; sale_credits?: string; owner_deposit?: string }; receipt_email?: string }[] = []
   try {
     const r = await fetch(`https://api.stripe.com/v1/payment_intents?limit=100&created[gte]=${since}`, {
       headers,
@@ -75,6 +76,7 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
   }
   for (const pi of pis) {
     if (pi.status !== 'succeeded') continue
+    if (pi.metadata?.owner_deposit === '1') continue // depunere owner — fără credite
     const email = pi.metadata?.email ?? pi.receipt_email ?? ''
     const amount = (pi.amount ?? 0) / 100
     if (!email || !(amount > 0) || !pi.id) continue

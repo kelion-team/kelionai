@@ -20,6 +20,7 @@ import {
   sellCredits,
   fetchMoneyCircuit,
   createAiCard,
+  ownerDeposit,
   type MoneyCircuit,
   fetchLeads,
   emailLead,
@@ -634,6 +635,27 @@ export default function AdminPanel({
                         Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
                         AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
                         <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
+                      </span>
+                      {/* DEPUNEREA OWNERULUI (Adrian): bani în pungă prin ușa din
+                          față — checkout Stripe marcat owner_deposit, FĂRĂ să
+                          genereze credite. De aici: transfer automat → card → AI. */}
+                      <span className="or-wallet-sub">
+                        💰 Depune bani în pungă (owner, fără credite):{' '}
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={async () => {
+                            const s = window.prompt('Câte lire depui în pungă? (întreg, max 2000)')
+                            if (s == null) return
+                            const pounds = Math.round(Number(s))
+                            if (!(pounds > 0)) return
+                            const url = await ownerDeposit(pounds)
+                            if (url) window.open(url, '_blank', 'noopener')
+                            else window.alert('Generarea plății a eșuat.')
+                          }}
+                        >
+                          Depune
+                        </button>
                       </span>
                       {circuit.autoFund && (
                         <span className="or-wallet-sub">
