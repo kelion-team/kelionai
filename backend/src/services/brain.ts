@@ -48,6 +48,37 @@ export const brain = {
   },
 }
 
+// VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). În sesiunea Realtime (doar audio)
+// Kelion n-avea ochi. Clientul capturează un cadru din cameră și-l trimite aici;
+// îl dăm unui model cu vedere (GPT/Gemini prin OpenRouter) și întoarcem o
+// descriere scurtă, naturală, de rostit cu voce. Gol la eșec — nu aruncă.
+export async function describeScene(imageDataUrl: string, question?: string): Promise<string> {
+  try {
+    const r = await openrouterChat(
+      config.openrouter.chatDefault,
+      [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                question?.trim() ||
+                'Privește prin camera utilizatorului și spune scurt și natural ce vezi ACUM, ca și cum te-ai uita chiar acum. Fără liste, fără markdown.',
+            },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+      [],
+      { maxTokens: 400 },
+    )
+    return r.text.trim()
+  } catch {
+    return ''
+  }
+}
+
 // Un răspuns text scurt de la creier (mailbox, admin). Gol la eșec — nu aruncă.
 export async function brainComplete(prompt: string, maxTokens = 1024): Promise<string> {
   try {

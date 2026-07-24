@@ -8,7 +8,7 @@ import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
-import { brainComplete } from '../services/brain.js'
+import { brainComplete, describeScene } from '../services/brain.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -90,6 +90,19 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (user.googleRefreshToken && (user.googleTokenExp ?? 0) < Date.now() + 60_000) {
         const refreshed = await refreshGoogleAccessToken(user.googleRefreshToken)
         if (refreshed) token = refreshed.accessToken
+      }
+
+      // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). Clientul capturează un cadru
+      // din cameră și-l trimite în args.image; îl dăm unui model cu vedere și
+      // întoarcem o descriere de rostit. Fără cameră/cadru → mesaj clar.
+      if (name === 'look' || name === 'see') {
+        const image = String((args as { image?: string }).image ?? '')
+        const question = String(args.question ?? args.request ?? '').trim()
+        if (!/^data:image\//.test(image)) {
+          return reply.send({ output: JSON.stringify({ error: 'no_camera', hint: 'camera closed' }) })
+        }
+        const seen = await describeScene(image, question)
+        return reply.send({ output: seen || JSON.stringify({ error: 'vision_unavailable' }) })
       }
 
       // ESCALADAREA ÎN VOCE: cererile grele merg la CREIER (modelul work).

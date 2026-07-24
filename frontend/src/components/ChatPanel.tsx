@@ -952,6 +952,14 @@ export default function ChatPanel({
                   }
                 }, 30000)
               }
+              // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"): la „look", capturăm
+              // cadrul curent din camera userului și-l injectăm în apel, ca
+              // serverul să-l dea modelului cu vedere. Fără cameră/cadru →
+              // serverul întoarce „no_camera" și Kelion o spune firesc.
+              if (name === 'look' || name === 'see') {
+                const frame = latestFrameRef.current ?? captureRef.current?.() ?? ''
+                if (frame) (args as Record<string, unknown>).image = frame
+              }
               if (name === 'show_on_screen') {
                 const url = String(args.url ?? '').trim()
                 const title = String(args.title ?? '') || 'Ecran'

@@ -31,6 +31,14 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere. ` +
     `Ești chemat pe nume „Kelion". Te porți mereu ca un gentleman: politicos, ` +
     `respectuos, calm — NICIODATĂ grosolan, vulgar sau strident.` +
+    // OCHI + ESCALADARE (Adrian: „de ce nu vede, de ce nu escaladează?"). Vocea
+    // avea uneltele, dar nu i se spunea să le folosească → nu vedea, nu urca.
+    ` Ai OCHI: poți vedea prin camera utilizatorului. Când te întreabă ce vezi, ` +
+    `îți arată ceva, îți cere să te uiți sau să citești ceva, ori vrea descrisă ` +
+    `scena/un obiect — cheamă unealta „look" și spune ce vezi.` +
+    ` Pentru cereri GRELE (analiză, cod, matematică, raționament lung, planificare, ` +
+    `explicații aprofundate) NU improviza: cheamă unealta „ask_brain" cu întrebarea ` +
+    `completă și rostește natural răspunsul expertului. Cererile simple le răspunzi direct.` +
     rol
   // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
@@ -134,6 +142,22 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
           },
         },
         required: ['view'],
+      },
+    },
+    {
+      // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). Kelion privește prin camera
+      // userului. Clientul injectează cadrul curent în `image` înainte de a
+      // trimite apelul la server (vezi ChatPanel onToolCall).
+      type: 'function',
+      name: 'look',
+      description:
+        "Look through the user's camera and see what is in front of them RIGHT NOW. Call this whenever the user asks what you see, asks you to look at or read something they show you, or to describe their surroundings or an object.",
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Optional: what specifically to look for or read.' },
+        },
+        required: [],
       },
     },
     {
