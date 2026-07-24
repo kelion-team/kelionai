@@ -69,6 +69,7 @@ export interface MoneyCircuit {
   issuingStatus: string
   cards: { id: string; last4: string; status: string }[]
   issuingAvailable: number
+  autoFund?: { at: string; ok: boolean; detail: string } | null
   error?: string
 }
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {

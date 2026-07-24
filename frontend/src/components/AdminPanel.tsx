@@ -632,9 +632,18 @@ export default function AdminPanel({
                       </span>
                       <span className="or-wallet-sub">
                         Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
-                        EXCLUSIV din plățile userilor (circuit închis, nicio alimentare externă).{' '}
+                        AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
                         <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
                       </span>
+                      {circuit.autoFund && (
+                        <span className="or-wallet-sub">
+                          {circuit.autoFund.ok ? '✅' : '⚠️'} Ultimul transfer automat plăți→card:{' '}
+                          {circuit.autoFund.detail}
+                          {!circuit.autoFund.ok && /permission|beta|not.*enabled|Unrecognized|unknown/i.test(circuit.autoFund.detail) && (
+                            <> — endpointul Balance Transfers e în beta la Stripe: cere accesul din <a href="https://dashboard.stripe.com/support" target="_blank" rel="noreferrer">dashboard</a> (o dată)</>
+                          )}
+                        </span>
+                      )}
                     </>
                   )}
                 </div>

@@ -174,11 +174,13 @@ export interface MoneyCircuit {
   issuingStatus: string // 'active' | 'inactive' | 'pending' | 'unknown'
   cards: { id: string; last4: string; status: string }[]
   issuingAvailable: number // punga Issuing (bani gata de cheltuit pe card), GBP
+  // Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API).
+  autoFund?: { at: string; ok: boolean; detail: string } | null
   error?: string
 }
 
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0 }
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
     const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
@@ -208,6 +210,60 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
     return out
   } catch (e) {
     return { ...out, error: String(e).slice(0, 120) }
+  }
+}
+
+// ── ALIMENTAREA AUTOMATĂ A PUNGII CARDULUI, ÎN PLATFORMĂ (Adrian, 24 iul:
+// „tot prin Stripe, circuit unificat, nimic extern"; soluția din documentația
+// oficială Stripe: Balance Transfer API — docs.stripe.com/issuing/funding/balance)
+// POST /v1/balance_transfers mută banii din punga PLĂȚILOR (banii userilor) în
+// punga CARDULUI (Issuing), prin API, fără nicio sursă externă. UK: decontare
+// într-o zi lucrătoare. NOTĂ: endpointul e în beta la Stripe — până la aprobare
+// răspunde 4xx, iar noi raportăm starea în panoul Circuitul banilor.
+let lastAutoFund: { at: string; ok: boolean; detail: string } | null = null
+export function lastAutoFundStatus(): { at: string; ok: boolean; detail: string } | null {
+  return lastAutoFund
+}
+
+const ISSUING_MIN = Math.max(0, Number(process.env.ISSUING_MIN_GBP ?? '10') || 10)
+const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') || 20)
+
+export async function autoFundIssuing(): Promise<void> {
+  if (!config.stripe.secretKey) return
+  try {
+    // Starea reală a celor două pungi.
+    const r = await fetch(`${API}/balance`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
+    if (!r.ok) return
+    const b = (await r.json()) as {
+      available?: { amount: number; currency: string }[]
+      issuing?: { available?: { amount: number; currency: string }[] }
+    }
+    const cur = config.stripe.currency
+    const payments = (b.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
+    const issuing = (b.issuing?.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
+    // Punga cardului are destul SAU punga plăților n-are din ce → nimic de făcut.
+    if (issuing >= ISSUING_MIN * 100) return
+    const want = Math.min(ISSUING_TOPUP * 100, payments)
+    if (want < 100) return // sub £1 nu are sens
+    const body = new URLSearchParams()
+    body.set('amount', String(want))
+    body.set('currency', cur)
+    body.set('source_balance[type]', 'payments')
+    body.set('destination_balance[type]', 'issuing')
+    const t = await fetch(`${API}/balance_transfers`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body,
+      signal: AbortSignal.timeout(15_000),
+    })
+    const j = (await t.json().catch(() => ({}))) as { id?: string; error?: { message?: string } }
+    lastAutoFund = {
+      at: new Date().toISOString(),
+      ok: t.ok && !!j.id,
+      detail: t.ok && j.id ? `transferat £${(want / 100).toFixed(2)} în punga cardului (${j.id})` : j.error?.message ?? `http_${t.status}`,
+    }
+  } catch (e) {
+    lastAutoFund = { at: new Date().toISOString(), ok: false, detail: String(e).slice(0, 120) }
   }
 }
 

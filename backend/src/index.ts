@@ -30,6 +30,7 @@ import { startMailbox } from './services/mailbox.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
+import { autoFundIssuing } from './services/stripe.js'
 import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
@@ -319,6 +320,15 @@ try {
     run()
     setInterval(run, 60 * 60 * 1000)
   }, 20_000)
+  // ALIMENTAREA AUTOMATĂ A PUNGII CARDULUI (Adrian, 24 iul: „tot prin Stripe,
+  // circuit unificat, nimic extern"): când punga cardului scade sub prag și
+  // punga plăților are bani, transferăm prin Balance Transfer API — banii
+  // userilor curg singuri spre cardul care hrănește AI-ul. La 60s după boot,
+  // apoi orar. (Endpoint beta la Stripe — starea apare în Circuitul banilor.)
+  setTimeout(() => {
+    void autoFundIssuing().catch(() => {})
+    setInterval(() => { void autoFundIssuing().catch(() => {}) }, 60 * 60 * 1000)
+  }, 60_000)
   // ALERTĂ SOLD OPENROUTER (Adrian, 24 iul: „se anunță admin că e nevoie să
   // depună bani"): creierul e alimentat CENTRAL din punga lui Kelion; când
   // soldul real scade sub prag, îl anunțăm pe admin pe email (o dată/zi).
