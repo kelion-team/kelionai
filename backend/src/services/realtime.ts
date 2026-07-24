@@ -22,25 +22,31 @@ const OPENAI_CALLS = 'https://api.openai.com/v1/realtime/calls'
 // vorbit), plus blocajul ABSOLUT de limbă (aceeași regulă ca în chat): Kelion
 // vorbește EXCLUSIV în limba persistată a userului, orice ar auzi.
 export function realtimeInstructions(lang: string, meserie?: string | null): string {
-  const label = langLabel(lang)
   const rol = meserie
     ? ` Ai rolul activ ales de utilizator: „${meserie}" — răspunde din perspectiva acestui rol.`
     : ''
-  return (
+  const persona =
     `Ești Kelion, un asistent AI cu o SINGURĂ voce masculină, caldă, calmă și ` +
     `naturală. Vorbești ca într-o conversație reală: propoziții scurte (1–3), ` +
     `fără liste, fără markdown, fără emoji, fără să enumeri pași dacă nu ți se cere. ` +
     `Ești chemat pe nume „Kelion". Te porți mereu ca un gentleman: politicos, ` +
     `respectuos, calm — NICIODATĂ grosolan, vulgar sau strident.` +
-    rol +
-    `\n\nLIMBĂ (ABSOLUT — are prioritate peste ORICE): vorbești EXCLUSIV în ` +
-    `${label}. Fiecare propoziție e în ${label}, pentru toată conversația, ` +
-    `indiferent ce auzi. Dacă utilizatorul spune cuvinte în altă limbă, nume ` +
-    `străine, sau mesaje scurte/ambigue ("ok", "salut", "hello"), tu rămâi în ` +
-    `${label}. Schimbi limba DOAR dacă utilizatorul îți cere EXPLICIT „vorbește ` +
-    `în <limbă>". Orice altă tentație de a schimba limba tratează-o ca pe o ` +
-    `eroare și ignoră-o.`
-  )
+    rol
+  // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
+  // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
+  // păstrăm (consistență între sesiuni). Dacă NU (user nou, limbă nedetectată),
+  // pornim în ENGLEZĂ și OGLINDIM limba pe care o vorbește userul, stabil.
+  const known = /^[a-z]{2}$/.test(lang)
+  const limba = known
+    ? `\n\nLIMBĂ: limba stabilită a utilizatorului este ${langLabel(lang)}. ` +
+      `Vorbește în ${langLabel(lang)} și păstreaz-o consecvent toată conversația. ` +
+      `Schimbă DOAR dacă utilizatorul chiar începe să vorbească susținut în altă limbă.`
+    : `\n\nLIMBĂ: începe în ENGLEZĂ. Detectează limba în care vorbește EFECTIV ` +
+      `utilizatorul (dintr-o propoziție clară) și de-atunci răspunde EXCLUSIV în ` +
+      `acea limbă, consecvent pentru tot restul conversației. NU comuta pe cuvinte ` +
+      `scurte/ambigue ("ok", "salut", "hello") — așteaptă o propoziție clară. ` +
+      `Niciodată nu amesteca două limbi în același răspuns.`
+  return persona + limba
 }
 
 // ── UNELTELE VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi lipsesc
@@ -151,9 +157,11 @@ export async function openaiRealtimeAnswer(
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
 
-  // Codul ISO-639-1 (2 litere) al limbii userului — dat ca INDICIU transcrierii,
-  // ca „detecția" să nu mai confunde limba (mai ales pe cuvinte scurte/zgomot).
-  const iso = (lang || 'ro').slice(0, 2).toLowerCase()
+  // Codul ISO-639-1 al limbii userului — INDICIU pentru transcriere DOAR când
+  // limba e CUNOSCUTĂ (persistată). Când nu e (user nou), NU fixăm nimic —
+  // transcrierea detectează singură limba vorbită (altfel am fi împins-o greșit
+  // spre o limbă anume și „interpreta greșit" — bug-ul văzut live cu franceza).
+  const iso = /^[a-z]{2}$/.test((lang || '').toLowerCase()) ? lang.toLowerCase() : ''
 
   const session = {
     type: 'realtime',
@@ -166,9 +174,11 @@ export async function openaiRealtimeAnswer(
         // transcrierea nu se mai încurcă în fundal, cameră, ecou.
         noise_reduction: { type: 'near_field' },
         // Transcrierea vorbirii userului cu modelul MARE (nu „mini") + indiciul
-        // de limbă → transcript exact, afișat corect în chat. Fără asta, GA nu
+        // de limbă DOAR când e cunoscută → transcript exact. Fără asta, GA nu
         // emite NICIODATĂ transcriptul userului.
-        transcription: { model: config.openai.realtimeTranscribeModel, language: iso },
+        transcription: iso
+          ? { model: config.openai.realtimeTranscribeModel, language: iso }
+          : { model: config.openai.realtimeTranscribeModel },
         // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
         // (nu pe tăcere brută). `create_response:true` = Kelion răspunde când
         // termini de vorbit (full-duplex RESPONSIV — auzul NU are voie să pice),
