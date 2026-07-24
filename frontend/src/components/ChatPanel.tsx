@@ -176,6 +176,13 @@ export default function ChatPanel({
   // reușită (`live`) resetează contorul. Așa un eșec pasager nu mai omoară duplexul.
   const realtimeFailCountRef = useRef(0)
   const REALTIME_MAX_FAILS = 3
+  // SEMI-DUPLEX LA ESCALADARE (Adrian: „când escaladează se folosește aceeași
+  // voce și trece în semiduplex când gândește, revine la normal după ce se
+  // rezolvă"). Când vocea live cheamă creierul greu (`ask_brain`), gândirea +
+  // răspunsul durează; punem microfonul pe mut (semi-duplex) cât gândește, ca să
+  // nu se audă peste el, apoi revenim la full-duplex când termină de vorbit.
+  // Vocea rămâne ACEEAȘI (tot Realtime) — se schimbă doar modul duplex.
+  const thinkingRef = useRef(false)
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
   // (re)pornire a microfonului — vezi ensureMic mai jos.
@@ -908,6 +915,12 @@ export default function ChatPanel({
                 setLiveVoice('')
                 const t = text.trim()
                 if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
+                // REVENIRE LA FULL-DUPLEX: Kelion a terminat de rostit răspunsul
+                // escaladat → reactivăm microfonul (ieșim din semi-duplex).
+                if (thinkingRef.current) {
+                  thinkingRef.current = false
+                  micRef.current?.setMuted?.(false)
+                }
               } else setLiveVoice(text)
             },
             // AUTONOMIA VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi
@@ -921,6 +934,23 @@ export default function ChatPanel({
                 args = JSON.parse(argsJson || '{}') as Record<string, unknown>
               } catch {
                 /* argumente stricate → obiect gol */
+              }
+              // ESCALADARE LA CREIER → SEMI-DUPLEX: cât timp creierul greu
+              // gândește și Kelion urmează să rostească răspunsul, punem
+              // microfonul pe mut ca să nu se audă peste el. Revenim la
+              // full-duplex când transcriptul FINAL al lui Kelion sosește
+              // (vezi onAssistantTranscript). Aceeași voce tot timpul.
+              if (name === 'ask_brain') {
+                thinkingRef.current = true
+                micRef.current?.setMuted?.(true)
+                // Plasă de siguranță: dacă răspunsul nu mai sosește (eroare),
+                // reactivăm microfonul după 30s ca să nu rămână mut definitiv.
+                window.setTimeout(() => {
+                  if (thinkingRef.current) {
+                    thinkingRef.current = false
+                    micRef.current?.setMuted?.(false)
+                  }
+                }, 30000)
               }
               if (name === 'show_on_screen') {
                 const url = String(args.url ?? '').trim()
