@@ -416,8 +416,21 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
+  // Decizia autonomă a lui Kelion: „DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...".
+  triage?: string | null
   created_at: string
   last_seen: string
+}
+
+// Declanșează triajul autonom al lui Kelion pe toate gap-urile deschise.
+export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number } | null> {
+  try {
+    const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as { triaged: number; kept: number; closed: number }
+  } catch {
+    return null
+  }
 }
 
 export async function fetchGaps(all = false): Promise<CapabilityGap[]> {

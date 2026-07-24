@@ -11,6 +11,7 @@ import {
   fetchHistory,
   translateToRo,
   fetchGaps,
+  runGapsTriage,
   fetchFinance,
   updatePool,
   manageUser,
@@ -150,6 +151,7 @@ export default function AdminPanel({
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
+  const [triaging, setTriaging] = useState(false)
   const [finance, setFinance] = useState<Finance | null>(null)
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
   const [poolAmount, setPoolAmount] = useState('')
@@ -1347,6 +1349,24 @@ export default function AdminPanel({
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
+            {/* TRIAJ AUTONOM (Adrian, 24 iul): Kelion decide singur — valoros
+                rămâne „DE IMPLEMENTAT", restul se închide automat cu motiv. */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                className="ghost"
+                disabled={triaging}
+                onClick={() => {
+                  setTriaging(true)
+                  void runGapsTriage().then(async (r) => {
+                    setTriaging(false)
+                    if (r) setGaps(await fetchGaps())
+                  })
+                }}
+              >
+                {triaging ? 'Kelion analizează…' : '🤖 Triaj Kelion (autonom)'}
+              </button>
+            </div>
             {gaps.length === 0 && (
               <p className="chat-hint">
                 Nicio cerere neacoperită încă. Aici apar lucrurile pe care userii i le cer lui Kelion și pe
@@ -1357,6 +1377,11 @@ export default function AdminPanel({
               <div key={g.id} className="admin-gap">
                 <div className="admin-gap-main">
                   <span className="admin-gap-req">{g.request}</span>
+                  {g.triage && (
+                    <span className="admin-gap-reason" style={{ color: g.triage.startsWith('DE IMPLEMENTAT') ? '#7ee2a8' : '#ffb86b' }}>
+                      {g.triage}
+                    </span>
+                  )}
                   {g.reason && <span className="admin-gap-reason">{g.reason}</span>}
                   <span className="admin-gap-meta">
                     {g.hits > 1 ? `cerut de ${g.hits} ori · ` : ''}
