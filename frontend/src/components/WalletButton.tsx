@@ -87,6 +87,13 @@ export function WalletButton({
       void refresh()
     }
     window.addEventListener('kelion:paywall', onPaywall)
+    // Kelion deschide portofelul prin voce (unealta open_app_view → Stage →
+    // acest eveniment). Îl deschidem și reîmprospătăm soldul.
+    const onWalletOpen = (): void => {
+      setOpen(true)
+      void refresh()
+    }
+    window.addEventListener('kelion:wallet-open', onWalletOpen)
     // CREDIT ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
     // real, valoarea reală"): reîmprospătăm la fiecare 15s, imediat ce fereastra
     // redevine activă (revii în tab) ȘI la orice semnal că s-a consumat/creditat.

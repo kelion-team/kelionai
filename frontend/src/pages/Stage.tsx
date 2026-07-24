@@ -32,7 +32,7 @@ export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(user.role === 'admin' ? 'ro' : user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [adminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox'>('finance')
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox'>('finance')
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -45,7 +45,14 @@ export default function Stage({ user }: { user: User }) {
   // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
   const [brainCredit, setBrainCredit] = useState<{
     active: string | null
-    openrouter: { ok: boolean; topup: string }
+    openrouter: {
+      ok: boolean
+      topup: string
+      // Soldul REAL, exact din contul OpenRouter (USD) — „punga lui Kelion".
+      balance?: number
+      low?: boolean
+      live?: boolean
+    }
     pool: { loaded: number; remaining: number; spent: number; profit: number }
   } | null>(null)
   useEffect(() => {
@@ -65,6 +72,41 @@ export default function Stage({ user }: { user: User }) {
       alive = false
       window.clearInterval(id)
     }
+  }, [user.role])
+  // ACCES REAL LA APLICAȚIE PRIN VOCE/CHAT (Adrian, 24 iul: „Kelion trebuie să
+  // poată intra în orice tab al aplicației, real"). Kelion cheamă unealta
+  // `open_app_view` → ChatPanel emite `kelion:navigate` → aici deschidem chiar
+  // panoul cerut. Adminul e gate-uit: un user obișnuit NU poate deschide adminul.
+  useEffect(() => {
+    const onNav = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { view?: string; section?: string } | undefined
+      const view = String(d?.view ?? '').toLowerCase()
+      switch (view) {
+        case 'settings':
+          setSettingsOpen(true)
+          break
+        case 'wallet':
+          window.dispatchEvent(new Event('kelion:wallet-open'))
+          break
+        case 'contact':
+          setContactOpen(true)
+          break
+        case 'admin':
+          if (user.role === 'admin') {
+            const sec = String(d?.section ?? '') as typeof adminTab
+            if (sec) setAdminTab(sec)
+            setAdminOpen(true)
+          }
+          break
+        case 'home':
+          setSettingsOpen(false)
+          setContactOpen(false)
+          setAdminOpen(false)
+          break
+      }
+    }
+    window.addEventListener('kelion:navigate', onNav)
+    return () => window.removeEventListener('kelion:navigate', onNav)
   }, [user.role])
   // CREDIT USER pe CERCUL-logo (Adrian, 13 iul): clientul își dă seama din cerc
   // — verde = are credit, ROȘU PULSÂND = i s-a terminat creditul. Doar clienți.
@@ -494,19 +536,23 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* Fond real admin (loaded - cost real) - nu nelimitat. Click -> alimentare OpenRouter. */}
+            {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
+                realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
+                creierul central. Roșu când e sub prag. Click → alimentare. */}
             {brainCredit && (
               <button
                 type="button"
-                className="ghost"
+                className={`ghost ${brainCredit.openrouter.low ? 'blink-red' : ''}`}
                 onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
                 title={
-                  brainCredit.openrouter.ok
-                    ? `Fond real: £${brainCredit.pool.remaining.toFixed(2)} rămas din £${brainCredit.pool.loaded.toFixed(2)} · click pentru alimentare`
-                    : 'Cheia OpenRouter nu e configurată'
+                  brainCredit.openrouter.live
+                    ? `OpenRouter (creierul central): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
+                    : 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)'
                 }
               >
-                {brainCredit.openrouter.ok ? `£${brainCredit.pool.remaining.toFixed(0)}` : '⚠ OpenRouter'}
+                {brainCredit.openrouter.live
+                  ? `OpenRouter $${(brainCredit.openrouter.balance ?? 0).toFixed(2)}`
+                  : '⚠ OpenRouter'}
               </button>
             )}
           </>

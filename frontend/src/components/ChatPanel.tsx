@@ -168,6 +168,14 @@ export default function ChatPanel({
   // chat — verificat). DOAR dacă Realtime pică (fără cheie/eșec WebRTC) cădem O
   // DATĂ pe STT→creier→TTS pentru sesiune (rezervă, nu regulă).
   const realtimeOffRef = useRef(false)
+  // FIX „chat full duplex nu există" (Adrian, 24 iul): înainte, ORICE eroare
+  // Realtime (chiar tranzitorie — un 502, un hop ICE, un input-ended benign)
+  // punea `realtimeOffRef=true` PERMANENT pe toată sesiunea → full-duplex se
+  // stingea definitiv și cădea mut pe half-duplex STT. Acum numărăm eșecurile:
+  // dăm full-duplex-ului 3 șanse înainte să latch-uim pe STT, iar o conexiune
+  // reușită (`live`) resetează contorul. Așa un eșec pasager nu mai omoară duplexul.
+  const realtimeFailCountRef = useRef(0)
+  const REALTIME_MAX_FAILS = 3
   // Unește bucățile de VOX tăiate la o pauză de gândire (nu de final-de-frază)
   // într-un singur gând, înainte de a-l trimite creierului. Refăcut la fiecare
   // (re)pornire a microfonului — vezi ensureMic mai jos.
@@ -915,6 +923,16 @@ export default function ChatPanel({
                 else closeAllTasks()
                 return JSON.stringify({ shown: true, url })
               }
+              // ACCES REAL LA APLICAȚIE (Adrian, 24 iul): Kelion deschide panourile
+              // proprii ale aplicației prin voce. Se execută în client (e UI-ul lui):
+              // dispatch un eveniment pe care Stage/WalletButton îl ascultă. Gate-ul
+              // de admin e în Stage (un user obișnuit nu poate deschide adminul).
+              if (name === 'open_app_view') {
+                const view = String(args.view ?? '').trim()
+                const section = String(args.section ?? '').trim()
+                window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: { view, section } }))
+                return JSON.stringify({ opened: view || 'home', section: section || null })
+              }
               try {
                 const r = await fetch('/api/realtime/tool', {
                   method: 'POST',
@@ -933,11 +951,23 @@ export default function ChatPanel({
               }
             },
             onState: (s, note) => {
+              // Conexiune Realtime SOLIDĂ (WebRTC `connected`) → resetează contorul
+              // de eșecuri: full-duplex merge, orice pățanie de dinainte se iartă.
+              if (s === 'live') {
+                realtimeFailCountRef.current = 0
+                return
+              }
               if (s === 'error') {
-                // Realtime a picat → pentru restul sesiunii folosim STT.
-                // Simptomul pleacă la server (F12 → Kelion) ca să fie diagnosticabil.
-                console.error('voce realtime a picat:', note ?? 'fără detalii')
-                realtimeOffRef.current = true
+                // Numărăm eșecul. Latch-uim pe STT DOAR după 3 eșecuri; sub prag
+                // lăsăm `realtimeOffRef=false` ca următoarea pornire să REÎNCERCE
+                // full-duplex (nu-l stingem definitiv pe o pățanie pasageră).
+                realtimeFailCountRef.current += 1
+                const giveUp = realtimeFailCountRef.current >= REALTIME_MAX_FAILS
+                console.error(
+                  `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
+                  note ?? 'fără detalii',
+                )
+                if (giveUp) realtimeOffRef.current = true
                 if (micRef.current) {
                   // Curăță sesiunea Realtime dacă mai există (mic + WebRTC),
                   // altfel rămânea capturată în paralel cu microfonul STT.
@@ -960,8 +990,11 @@ export default function ChatPanel({
           setListening(true)
           return
         } catch {
-          // Realtime indisponibil (fără cheie OpenAI / WebRTC blocat) → STT.
-          realtimeOffRef.current = true
+          // Pornirea Realtime a aruncat (fără cheie / WebRTC blocat). Numărăm la
+          // fel: 3 șanse înainte de a latch-ui pe STT — un eșec pasager la pornire
+          // nu mai stinge full-duplex-ul pentru toată sesiunea.
+          realtimeFailCountRef.current += 1
+          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) realtimeOffRef.current = true
         }
       }
 
