@@ -27,6 +27,13 @@ export interface RealtimeVoiceOpts {
   onUserTranscript?: (text: string, final: boolean) => void
   /** Transcriptul lui Kelion: (text, final). */
   onAssistantTranscript?: (text: string, final: boolean) => void
+  /**
+   * AUTONOMIA VOCII: modelul cere o unealtă (hărți/vreme/web/Gmail/afișare pe
+   * ecran...). Handler-ul o execută (de regulă prin POST /api/realtime/tool)
+   * și întoarce rezultatul ca string — trimis înapoi modelului, care continuă
+   * vorbind. Fără handler, vocea rămâne fără unelte (doar conversație).
+   */
+  onToolCall?: (name: string, argsJson: string) => Promise<string>
   signal?: AbortSignal
 }
 
@@ -49,7 +56,7 @@ function persistTranscript(role: 'user' | 'assistant', text: string): void {
 export async function startRealtimeVoice(
   opts: RealtimeVoiceOpts = {},
 ): Promise<RealtimeVoiceHandle> {
-  const { onState, onUserTranscript, onAssistantTranscript, signal } = opts
+  const { onState, onUserTranscript, onAssistantTranscript, onToolCall, signal } = opts
   onState?.('connecting')
 
   let closed = false
@@ -161,6 +168,9 @@ export async function startRealtimeVoice(
     // Textul parțial pe id-uri, ca să salvăm turele complete în istoric.
     const userText = new Map<string, string>()
     const asstText = new Map<string, string>()
+    // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
+    // function_call_arguments.done — legate prin call_id.
+    const toolNames = new Map<string, string>()
     dc.onmessage = (ev) => {
       let m: Record<string, unknown>
       try {
@@ -189,6 +199,30 @@ export async function startRealtimeVoice(
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
+      } else if (type === 'response.output_item.added') {
+        // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
+        const item = (m.item as Record<string, unknown>) ?? {}
+        if (item.type === 'function_call') {
+          toolNames.set(String(item.call_id ?? ''), String(item.name ?? ''))
+        }
+      } else if (type === 'response.function_call_arguments.done') {
+        // AUTONOMIA VOCII: execută unealta și trimite rezultatul înapoi, apoi
+        // cere continuarea răspunsului — Kelion vorbește pe baza rezultatului.
+        const callId = String(m.call_id ?? '')
+        const name = String(m.name ?? toolNames.get(callId) ?? '')
+        toolNames.delete(callId)
+        const argsJson = String(m.arguments ?? '{}')
+        if (name && onToolCall) {
+          void onToolCall(name, argsJson)
+            .catch((e) => JSON.stringify({ error: String(e).slice(0, 200) }))
+            .then((output) => {
+              send({
+                type: 'conversation.item.create',
+                item: { type: 'function_call_output', call_id: callId, output: String(output ?? '{}') },
+              })
+              send({ type: 'response.create' })
+            })
+        }
       } else if (type === 'error') {
         const err = (m.error as Record<string, unknown>) ?? {}
         onState?.('error', String(err.message ?? 'realtime-error'))
