@@ -130,15 +130,25 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         id?: string
         amount_total?: number
         currency?: string
-        metadata?: { email?: string }
+        metadata?: { email?: string; sale_credits?: string; owner_deposit?: string }
         customer_details?: { email?: string }
         payment_intent?: string
       }
       const email = s.metadata?.email ?? s.customer_details?.email ?? ''
       const amount = (s.amount_total ?? 0) / 100
       // Depunerea OWNERULUI = bani în pungă, FĂRĂ credite (nu e vânzare).
-      const isOwnerDeposit = (s.metadata as { owner_deposit?: string } | undefined)?.owner_deposit === '1'
+      const isOwnerDeposit = s.metadata?.owner_deposit === '1'
       if (!isOwnerDeposit && email && amount > 0 && s.payment_intent) {
+        // VÂNZARE ADMIN și pe calea sesiunii (D1 din verificarea totală, 24 iul):
+        // ordinea evenimentelor Stripe nu e garantată — dacă sesiunea sosește
+        // prima, fără citirea sale_credits userul lua formula 75% în loc de
+        // creditele EXACTE, iar dedupul bloca apoi corecția. Oglinda ramurii PI.
+        const sessionSaleCredits = Number(s.metadata?.sale_credits ?? 0)
+        if (sessionSaleCredits > 0) {
+          await creditSaleExact(email, amount, s.currency ?? config.stripe.currency, s.payment_intent, sessionSaleCredits)
+          reply.code(200).send({ received: true })
+          return
+        }
         // O SINGURĂ cheie de idempotență pe plată: PaymentIntent id (audit 24
         // iul, P0-2). Vechea ramură „fără PI → creditează pe session id (cs_…)"
         // permitea DUBLAREA banilor: Stripe trimite și checkout.session.completed
