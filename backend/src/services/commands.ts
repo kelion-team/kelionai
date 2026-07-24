@@ -132,7 +132,10 @@ const GESTURE_KEYWORDS: { label: GestureLabel; patterns: RegExp[] }[] = [
     // doar forme imperative clare, ca o discuție DESPRE dans să nu-l pornească.
     label: 'dans',
     patterns: [
-      /\bdanseaz[ăa]\b/i,
+      // FĂRĂ \b după diacritice: în JS \b se bazează pe \w (ASCII), deci după
+      // „ă" nu există graniță de cuvânt → /danseaz[ăa]\b/ NU prindea „Dansează!"
+      // (bug dovedit în testul live din 24 iul). Prefixul e suficient de precis.
+      /\bdanseaz/i,
       /\bf[ăa]\s+un\s+dans\b/i,
       /\b(do\s+a\s+dance|dance\s+for\s+me)\b/i,
     ],
