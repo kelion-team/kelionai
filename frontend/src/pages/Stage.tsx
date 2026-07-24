@@ -28,7 +28,8 @@ import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 
 export default function Stage({ user }: { user: User }) {
-  const lang = resolveLang(user.locale)
+  // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
+  const lang = resolveLang(user.role === 'admin' ? 'ro' : user.locale)
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox'>('finance')

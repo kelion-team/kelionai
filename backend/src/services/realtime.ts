@@ -146,7 +146,10 @@ export async function openaiRealtimeAnswer(
 
   let r: Response
   try {
-    r = await fetch(OPENAI_CALLS, {
+    // FIX FINAL VOCE (dovadă live 24 iul: OpenAI „missing_model"): API-ul Realtime
+    // GA cere modelul ca PARAMETRU ÎN URL, nu doar în JSON-ul de sesiune.
+    const callsUrl = `${OPENAI_CALLS}?model=${encodeURIComponent(config.openai.realtimeModel)}`
+    r = await fetch(callsUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.openai.key}` },
       body: form,

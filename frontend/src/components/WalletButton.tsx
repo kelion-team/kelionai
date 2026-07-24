@@ -125,14 +125,17 @@ export function WalletButton({
   const critical = percent <= 5 // stays blinking red at the very end
   return (
     <div className="wallet">
+      {/* Pastila = SOLDUL curent (creditele pe care le AI), nu „cumpără X".
+          Adrian, 24 iul: „e greșită comunicarea — am 150 credite sau cumpăr
+          150?". Icon portofel + număr = clar sold; adăugarea e în meniu. */}
       <button
         type="button"
         className={`ghost wallet-badge ${critical ? 'blink-red' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={t.buyCredit}
+        title={ro ? 'Creditele tale disponibile — apasă pentru a adăuga' : 'Your available credits — click to add more'}
       >
+        <span aria-hidden style={{ marginRight: 5 }}>💳</span>
         {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
-        <span className="wallet-plus" aria-hidden>＋</span>
       </button>
       {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
           absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
@@ -150,7 +153,11 @@ export function WalletButton({
       )}
       {open && (
         <div className="wallet-menu">
-          <span className="wallet-menu-title">{paywalled ? t.topUp : t.buyCredit}</span>
+          {/* SOLD curent, clar separat de acțiunea de adăugare. */}
+          <span className="wallet-menu-balance">
+            {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
+          </span>
+          <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
           {firstTopUp && (
             <span className="wallet-menu-note">
               {ro
