@@ -38,7 +38,11 @@ export interface RealtimeVoiceOpts {
 }
 
 // Salvează o tură în istoric (memorie + continuitate între sesiuni). Best-effort.
-function persistTranscript(role: 'user' | 'assistant', text: string): void {
+function persistTranscript(
+  role: 'user' | 'assistant',
+  text: string,
+  onCommittedLang?: (lang: string) => void,
+): void {
   const t = text.trim()
   if (!t) return
   void fetch('/api/realtime/transcript', {
@@ -46,7 +50,14 @@ function persistTranscript(role: 'user' | 'assistant', text: string): void {
     headers: { 'content-type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ role, text: t }),
-  }).catch(() => {})
+  })
+    .then(async (r) => {
+      // Serverul a COMIS limba detectată (2 mesaje consecutive) → ancorăm
+      // sesiunea live pe ea (vezi apelantul) — transcrierea nu mai ghicește.
+      const j = (await r.json().catch(() => null)) as { lang?: string } | null
+      if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
+    })
+    .catch(() => {})
 }
 
 /**
@@ -224,7 +235,18 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? userText.get(itemId) ?? '')
         userText.delete(itemId)
         onUserTranscript?.(t, true)
-        persistTranscript('user', t)
+        // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
+        // (session.update, fără repornire) — „limba aleatoare" dispare: de-acum
+        // fiecare frază e transcrisă în limba stabilită, nu ghicită de la zero.
+        persistTranscript('user', t, (lang) => {
+          send({
+            type: 'session.update',
+            session: {
+              type: 'realtime',
+              audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
+            },
+          })
+        })
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)

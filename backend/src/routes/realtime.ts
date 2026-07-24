@@ -4,6 +4,7 @@ import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage } from 
 import { trackSpeechLang } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
+import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete } from '../services/brain.js'
@@ -52,6 +53,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           { upstreamStatus: res.status, upstreamError: res.error, sdpLen: offer.length, sdpHead: offer.slice(0, 40) },
           'realtime upstream refuz',
         )
+        // CONT FĂRĂ CREDIT (incident 24 iul: vocea moartă, descoperită abia la
+        // test): anunțăm adminul pe email IMEDIAT, nu la următorul test manual.
+        if (isQuotaError(res.error)) alertOpenAiQuota()
         const code = res.status === 503 ? 503 : 502
         return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
       }
@@ -135,6 +139,12 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)
         if (committed) void setSpeechLangPref(user.email, committed)
+        // ANCORAREA LIMBII ÎN SESIUNEA LIVE (Adrian, 24 iul: „limba fără
+        // detecție e aleatoare"): fără ancoră, transcrierea ghicește FIECARE
+        // frază independent (româna iese spaniolă/franceză la întâmplare) și
+        // otrăvește detecția. Întoarcem limba comisă → clientul o fixează PE
+        // LOC în sesiunea Realtime (session.update), fără repornire.
+        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase() })
       }
       return reply.send({ ok: true })
     },
