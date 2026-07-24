@@ -964,16 +964,23 @@ export default function ChatPanel({
                 return
               }
               if (s === 'error') {
-                // Numărăm eșecul. Latch-uim pe STT DOAR după 3 eșecuri; sub prag
-                // lăsăm `realtimeOffRef=false` ca următoarea pornire să REÎNCERCE
-                // full-duplex (nu-l stingem definitiv pe o pățanie pasageră).
-                realtimeFailCountRef.current += 1
-                const giveUp = realtimeFailCountRef.current >= REALTIME_MAX_FAILS
-                console.error(
-                  `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
-                  note ?? 'fără detalii',
-                )
-                if (giveUp) realtimeOffRef.current = true
+                // ROTAȚIE DE SESIUNE ≠ EȘEC (dovadă F12 live, 24 iul: „Your
+                // session hit the maximum duration of 60 minutes" → contorul
+                // ajungea la 3 după 3 ore de folosire continuă și stingea
+                // definitiv full-duplexul). Limita de 60 min a OpenAI e ciclu de
+                // viață NORMAL: repornim FĂRĂ să penalizăm.
+                const isRotation = /maximum duration|session.*(expired|limit)|60 minutes/i.test(note ?? '')
+                if (!isRotation) {
+                  // Numărăm eșecul REAL. Latch pe STT DOAR după 3 eșecuri; sub
+                  // prag următoarea pornire REÎNCEARCĂ full-duplex.
+                  realtimeFailCountRef.current += 1
+                  const giveUp = realtimeFailCountRef.current >= REALTIME_MAX_FAILS
+                  console.error(
+                    `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
+                    note ?? 'fără detalii',
+                  )
+                  if (giveUp) realtimeOffRef.current = true
+                }
                 if (micRef.current) {
                   // Curăță sesiunea Realtime dacă mai există (mic + WebRTC),
                   // altfel rămânea capturată în paralel cu microfonul STT.
@@ -995,6 +1002,23 @@ export default function ChatPanel({
           // Dacă TTS-ul de rezervă încă redă în momentul instalării, pornim MUT
           // (anti-ecou), ca pe căile STT — unmute-ul vine de la stopVoice/onEnd.
           if (isVoicePlaying()) rv.setMuted(true)
+          // ROTIRE PROACTIVĂ la 55 min (limita OpenAI e 60): repornim sesiunea
+          // ÎNAINTE să ne-o taie serverul — utilizatorul nu simte nicio ruptură
+          // și niciun „eșec" nu se numără. Timerul moare odată cu sesiunea.
+          const rotateTimer = window.setTimeout(() => {
+            if (micRef.current === (rv as unknown as MicHandle) && !micManualOffRef.current) {
+              rv.stop()
+              micRef.current = null
+              setListening(false)
+              micStartingRef.current = false
+              void ensureMicRef.current()
+            }
+          }, 55 * 60_000)
+          const origStop = rv.stop.bind(rv)
+          rv.stop = () => {
+            clearTimeout(rotateTimer)
+            origStop()
+          }
           micBackoffRef.current = 1000
           setListening(true)
           return
