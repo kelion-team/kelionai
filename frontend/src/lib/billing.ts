@@ -32,7 +32,9 @@ export async function fetchBalance(): Promise<WalletStatus | null> {
 }
 
 // Start a top-up: ask the backend for a Stripe Checkout URL and redirect there.
-export async function startCheckout(amount: number): Promise<void> {
+// ÎNTOARCE eroarea în loc s-o înghită (Adrian, 24 iul: „apăs pe +credite și nu
+// se execută procedura" — orice eșec era tăcut, butonul părea mort).
+export async function startCheckout(amount: number): Promise<string | null> {
   try {
     const r = await fetch('/api/billing/checkout', {
       method: 'POST',
@@ -40,11 +42,15 @@ export async function startCheckout(amount: number): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount }),
     })
-    if (!r.ok) return
-    const j = (await r.json()) as { url?: string }
-    if (j.url) window.location.href = j.url
+    const j = (await r.json().catch(() => ({}))) as { url?: string; error?: string }
+    if (!r.ok) return j.error ?? `checkout_http_${r.status}`
+    if (j.url) {
+      window.location.href = j.url
+      return null
+    }
+    return 'no_checkout_url'
   } catch {
-    /* ignore — button stays clickable to retry */
+    return 'offline'
   }
 }
 

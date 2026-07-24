@@ -68,6 +68,7 @@ import {
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
+import { recentClientErrors } from './clientErrors.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -943,6 +944,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     systemPrompt += absoluteLock
       ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
       : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
+    // STAREA CONTULUI — Kelion trebuie să ȘTIE natural cine e userul (Adrian,
+    // 24 iul: „la audit nu vede că sunt logat la contul Google"). Fără asta,
+    // auditul spunea „nu ești conectat" deși userul era logat cu Google.
+    systemPrompt +=
+      `\n\nUSER ACCOUNT (real, from the server session): the user IS signed in via Google as ${user.email}` +
+      `${user.role === 'admin' ? ' (the OWNER/admin of this app)' : ''}. ` +
+      (user.googleRefreshToken || token
+        ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked.'
+        : 'The heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT yet connected — for those, tell the user to press "Conectează Gmail & Calendar" in the wallet menu (top bar). Everything else works now.') +
+      ' Never claim the user is not logged in — they are.'
+    // OCHII PE F12 (Adrian, 24 iul: „el trebuie să aibă acces la logurile").
+    // Erorile RECENTE din browserul userului, trimise de client — Kelion
+    // diagnostichează din simptome reale, nu din ghicit.
+    const cerrs = recentClientErrors(user.email)
+    if (cerrs.length > 0) {
+      systemPrompt +=
+        `\n\nBROWSER CONSOLE (the user's own F12 errors, last 15 min — REAL symptoms from their device; use them to diagnose "why doesn't X work" and say plainly what is failing):\n- ` +
+        cerrs.slice(-8).join('\n- ')
+    }
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
     // next turn; the raw lat/lon (all the skills need) is injected immediately.
@@ -1139,27 +1159,35 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // reading signs and labels — all must summon Kelion's eyes instantly.
     const VISION_INTENT =
       /(\bsee\b|\blook\b|\bwatch\b|show me what|what('?s| is) this|what am i|what do you see|\bcamera\b|\bpicture\b|\bphoto\b|\bimage\b|colou?r|read this|\bscan\b|describe|in front of|ahead of me|obstacle|traffic light|cross(ing)? the (street|road)|\bsign\b|\blabel\b|\bdanger\b)|vezi|vede|uit[aăâ]|uite|prive[sșş]te|ce (e|este|am|[țt]in|ai[ -])|camer[aă]|imagin|poz[aă]|culoar|cite[sșş]te|scanea|descrie|[îi]n fa[țt][aă]|ce se afl[aă]|obstacol|pericol|semafor|trec(e|i)? strada|indicator|etichet[aă]|panou|u[șs][aă]|sc[aă]ri|trotuar|bordur[aă]/i
-    // VEDEREA CONTINUĂ și pe calea API (clienți): toate cadrele primite (max 4),
-    // nu doar unul — creierul acceptă mai multe blocuri de imagine per mesaj.
-    const apiCam = camFrames.length > 0 ? camFrames : image ? [image] : []
-    if (apiCam.length > 0 && params.length > 0) {
+    // POZA ≠ VĂZUL — DOUĂ căi separate (Adrian, 24 iul: „nu le amesteca"):
+    //   1. POZA ÎNCĂRCATĂ (atașament explicit) — se analizează MEREU, singură;
+    //      înainte, cadrele camerei o ÎNLOCUIAU dacă era camera pornită.
+    //   2. CAMERA (văzul continuu) — cadrele pleacă DOAR când userul întreabă
+    //      ceva vizual (VISION_INTENT: „mă vezi", „ce vezi", „descrie" etc.).
+    const attachedPhoto = imageIsAttachment && image ? [image] : []
+    const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && image ? [image] : []
+    if (params.length > 0) {
       const lastIdx = params.length - 1
       const lm = params[lastIdx]
-      if (
-        lm.role === 'user' &&
-        typeof lm.content === 'string' &&
-        (imageIsAttachment || VISION_INTENT.test(lm.content))
-      ) {
-        const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
-        params[lastIdx] = {
-          role: 'user',
-          content: [
-            ...apiCam.map((f) => ({
-              type: 'image' as const,
-              source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: strip(f) },
-            })),
-            { type: 'text', text: lm.content },
-          ],
+      if (lm.role === 'user' && typeof lm.content === 'string') {
+        const toSend =
+          attachedPhoto.length > 0
+            ? attachedPhoto
+            : camView.length > 0 && VISION_INTENT.test(lm.content)
+              ? camView
+              : []
+        if (toSend.length > 0) {
+          const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
+          params[lastIdx] = {
+            role: 'user',
+            content: [
+              ...toSend.map((f) => ({
+                type: 'image' as const,
+                source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: strip(f) },
+              })),
+              { type: 'text', text: lm.content },
+            ],
+          }
         }
       }
     }
@@ -1277,8 +1305,31 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
       for (const p of params) {
-        const content = typeof p.content === 'string' ? p.content : ''
-        if (content) orMsgs.push({ role: p.role === 'assistant' ? 'assistant' : 'user', content })
+        const role = p.role === 'assistant' ? 'assistant' : 'user'
+        if (typeof p.content === 'string') {
+          if (p.content) orMsgs.push({ role, content: p.content })
+          continue
+        }
+        // VĂZUL (Adrian, 24 iul: „îi încarc o poză dar nu o vede... nu apelează
+        // camera"): blocurile de imagine erau în format Anthropic și rândul ăsta
+        // ARUNCA tot mesajul (content non-string → ''). Acum convertim la formatul
+        // OpenAI multimodal (image_url cu data URL) — modelul chiar vede poza și
+        // cadrele camerei; textul turei se păstrează.
+        const parts: { type: string; [k: string]: unknown }[] = []
+        for (const b of p.content as unknown as Array<Record<string, unknown>>) {
+          if (b.type === 'text' && typeof b.text === 'string') {
+            parts.push({ type: 'text', text: b.text })
+          } else if (b.type === 'image') {
+            const src = b.source as { media_type?: string; data?: string } | undefined
+            if (src?.data) {
+              parts.push({
+                type: 'image_url',
+                image_url: { url: `data:${src.media_type ?? 'image/jpeg'};base64,${src.data}` },
+              })
+            }
+          }
+        }
+        if (parts.length) orMsgs.push({ role, content: parts })
       }
       let callN = 0
       const execTool = async (name: string, argsJson: string): Promise<string> => {

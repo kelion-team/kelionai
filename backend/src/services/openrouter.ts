@@ -117,7 +117,9 @@ export async function resolveModel(tier: ModelTier, wanted?: string | null): Pro
 
 export interface OrMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  // String pentru text simplu; array pentru multimodal în format OpenAI
+  // (blocuri {type:'text'|'image_url'}) — așa VĂD modelele pozele/camera.
+  content: string | { type: 'text'; text: string }[] | { type: string; [k: string]: unknown }[]
   // Pentru tura de tool: legătura cu apelul cerut de model.
   tool_call_id?: string
   tool_calls?: OrToolCall[]
