@@ -123,12 +123,35 @@ export async function openaiRealtimeAnswer(
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
 
+  // Codul ISO-639-1 (2 litere) al limbii userului — dat ca INDICIU transcrierii,
+  // ca „detecția" să nu mai confunde limba (mai ales pe cuvinte scurte/zgomot).
+  const iso = (lang || 'ro').slice(0, 2).toLowerCase()
+
   const session = {
     type: 'realtime',
     model: config.openai.realtimeModel,
     audio: {
-      // Fără input.transcription, GA nu emite NICIODATĂ transcriptul userului.
-      input: { transcription: { model: 'gpt-4o-mini-transcribe' } },
+      // ── DETECȚIE AUDIO ULTRA-PERFORMANTĂ (Adrian, 24 iul: „detecția audio
+      // defectă") ──────────────────────────────────────────────────────────
+      input: {
+        // Reducere de zgomot ambiental (microfon aproape de gură) → VAD-ul și
+        // transcrierea nu se mai încurcă în fundal, cameră, ecou.
+        noise_reduction: { type: 'near_field' },
+        // Transcrierea vorbirii userului cu modelul MARE (nu „mini") + indiciul
+        // de limbă → transcript exact, afișat corect în chat. Fără asta, GA nu
+        // emite NICIODATĂ transcriptul userului.
+        transcription: { model: config.openai.realtimeTranscribeModel, language: iso },
+        // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
+        // (nu pe tăcere brută) → nu-l mai taie la jumătatea propoziției și nu-l
+        // mai ignoră la cuvinte scurte. `create_response` pornește răspunsul
+        // singur, `interrupt_response` îl lasă pe user să întrerupă (full-duplex).
+        turn_detection: {
+          type: 'semantic_vad',
+          eagerness: config.openai.realtimeVadEagerness,
+          create_response: true,
+          interrupt_response: true,
+        },
+      },
       output: { voice: config.openai.realtimeVoice },
     },
     instructions: realtimeInstructions(lang, meserie),

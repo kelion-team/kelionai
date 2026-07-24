@@ -29,6 +29,7 @@ import {
   setDisabledGestures,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
+import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { screenshotUrl } from '../services/browser.js'
@@ -177,17 +178,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Creierul e 100% OpenRouter (0 Kimi, 0 GLM). Butonul de fond din bara de admin:
-  // arată dacă cheia OpenRouter e configurată + fondul REAL al adminului
-  // (loaded − cost real), nu nelimitat, cu link direct spre alimentare.
+  // arată SOLDUL REAL, EXACT din contul OpenRouter — „punga lui Kelion" din care
+  // se alimentează creierul CENTRAL (Adrian, 24 iul: „OpenRouter = valoarea
+  // exactă din OpenRouter"). Plus fondul intern al adminului (loaded − cost real)
+  // și un semnal `low` când e nevoie să depună bani. STRICT admin (userii nu văd).
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const pool = await getAdminAccount()
+    const [pool, orBalance] = await Promise.all([getAdminAccount(), getOpenRouterBalance()])
     return reply.send({
       active: 'openrouter',
       openrouter: {
         ok: Boolean(config.openrouter.key),
         topup: 'https://openrouter.ai/credits',
+        // Soldul REAL din OpenRouter (USD), exact ca pe pagina lor.
+        balance: orBalance.balance,
+        totalCredits: orBalance.totalCredits,
+        totalUsage: orBalance.totalUsage,
+        currency: orBalance.currency,
+        low: orBalance.low,
+        threshold: orBalance.threshold,
+        live: orBalance.ok,
+        error: orBalance.error,
       },
       pool,
     })
@@ -199,10 +211,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [stripe, account, costs] = await Promise.all([
+    const [stripe, account, costs, orBalance] = await Promise.all([
       getStripeBalance(),
       getAdminAccount(),
       getCostSummary(),
+      getOpenRouterBalance(),
     ])
     return reply.send({
       stripe,
@@ -214,6 +227,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       byKind: costs.byKind,
       // Consumat AZI (USD, real) — pentru cardul „Consumat azi" din tabul Bani.
       today: costs.today,
+      // „Punga lui Kelion" = soldul REAL, EXACT din contul OpenRouter (USD) din
+      // care se alimentează creierul CENTRAL (Adrian: „valoarea exactă din
+      // OpenRouter"). Doar adminul vede acest tab; userii nu ajung aici.
+      openrouter: {
+        balance: orBalance.balance,
+        low: orBalance.low,
+        threshold: orBalance.threshold,
+        live: orBalance.ok,
+        topup: orBalance.topup,
+      },
     })
   })
 

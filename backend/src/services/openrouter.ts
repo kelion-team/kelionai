@@ -84,6 +84,56 @@ export async function getCatalog(force = false): Promise<Catalog> {
   return cache
 }
 
+// ── SOLDUL REAL AL CONTULUI OPENROUTER = „punga lui Kelion" (Adrian, 24 iul) ──
+// Creierul (OpenRouter) e alimentat CENTRAL din contul lui Kelion, nu de fiecare
+// user separat. Adminul trebuie să vadă VALOAREA EXACTĂ rămasă (ca pe pagina
+// openrouter.ai/credits: „$5,83") ca să știe când să depună bani. Userii NU văd
+// asta niciodată (ruta e admin-only). Endpoint oficial: GET /credits →
+// { data: { total_credits, total_usage } }; rămas = total_credits − total_usage.
+export interface OpenRouterBalance {
+  ok: boolean
+  balance: number // USD rămași, exact (total_credits − total_usage)
+  totalCredits: number
+  totalUsage: number
+  currency: 'usd'
+  low: boolean // sub prag → adminul trebuie să depună bani
+  threshold: number
+  topup: string
+  error?: string
+}
+
+const OR_LOW_THRESHOLD = Math.max(0, Number(process.env.OPENROUTER_LOW_USD ?? '10') || 10)
+let orBalCache: { at: number; val: OpenRouterBalance } | null = null
+
+export async function getOpenRouterBalance(force = false): Promise<OpenRouterBalance> {
+  const base: OpenRouterBalance = {
+    ok: false, balance: 0, totalCredits: 0, totalUsage: 0, currency: 'usd',
+    low: true, threshold: OR_LOW_THRESHOLD, topup: 'https://openrouter.ai/credits',
+  }
+  if (!config.openrouter.key) return { ...base, error: 'not_configured' }
+  if (!force && orBalCache && Date.now() - orBalCache.at < 60_000) return orBalCache.val
+  try {
+    const r = await fetch(`${OR_BASE}/credits`, {
+      headers: { Authorization: `Bearer ${config.openrouter.key}` },
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (!r.ok) return { ...base, error: `http_${r.status}` }
+    const j = (await r.json().catch(() => ({}))) as {
+      data?: { total_credits?: number; total_usage?: number }
+    }
+    const totalCredits = Number(j.data?.total_credits ?? 0)
+    const totalUsage = Number(j.data?.total_usage ?? 0)
+    const balance = Math.round((totalCredits - totalUsage) * 100) / 100
+    const val: OpenRouterBalance = {
+      ...base, ok: true, balance, totalCredits, totalUsage, low: balance < OR_LOW_THRESHOLD,
+    }
+    orBalCache = { at: Date.now(), val }
+    return val
+  } catch (e) {
+    return { ...base, error: String(e).slice(0, 120) }
+  }
+}
+
 // Dificultatea cerută de sarcină (0-100), pur euristic din text (0 cost/latență).
 // Semnale: lungime, raționament/analiză, cod/depanare, multi-pas. Pe baza ei
 // ESCALADĂM chat→creier (Adrian: „legate, escaladează singur").

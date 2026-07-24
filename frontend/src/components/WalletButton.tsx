@@ -87,14 +87,25 @@ export function WalletButton({
       void refresh()
     }
     window.addEventListener('kelion:paywall', onPaywall)
+    // CREDIT ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
+    // real, valoarea reală"): reîmprospătăm la fiecare 15s, imediat ce fereastra
+    // redevine activă (revii în tab) ȘI la orice semnal că s-a consumat/creditat.
+    const onChanged = (): void => void refresh()
+    window.addEventListener('kelion:credits-changed', onChanged)
+    const onVisible = (): void => { if (!document.hidden) void refresh() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onChanged)
     // Returned from a successful top-up — refresh and clean the URL.
     if (new URLSearchParams(window.location.search).get('topup') === 'success') {
       window.history.replaceState({}, '', window.location.pathname)
       setTimeout(() => void refresh(), 1500)
     }
-    const poll = window.setInterval(() => void refresh(), 60_000) // keep % fresh
+    const poll = window.setInterval(() => void refresh(), 15_000) // sold LIVE
     return () => {
       window.removeEventListener('kelion:paywall', onPaywall)
+      window.removeEventListener('kelion:credits-changed', onChanged)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onChanged)
       clearInterval(poll)
     }
   }, [])
