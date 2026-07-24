@@ -38,18 +38,17 @@ export const LANGS: readonly SpeechLang[] = [
   { code: 'vi-VN', label: 'Tiếng Việt' },
 ]
 
-// Pick the best starting language: an exact tag match for the browser locale,
-// else a base-language match, else English.
+// Limba de pornire a recognizer-ului (regula finală, Adrian 24 iul: „default
+// ENGLEZĂ; după identificarea limbii se aplică procedura existentă"). FĂRĂ
+// ghicit din limba browserului: pornim de la limba IDENTIFICATĂ (uiLang vine
+// din oglinda serverului), altfel engleză. Comutarea ulterioară o face frame-ul
+// {lang} de la server (applyLang), nu noi aici.
 export function defaultSpeechLang(uiLang: string): string {
-  const nav = typeof navigator !== 'undefined' ? navigator.language : uiLang
-  const candidates = [nav, uiLang]
-  for (const c of candidates) {
-    const lc = c.toLowerCase()
-    const exact = LANGS.find((l) => l.code.toLowerCase() === lc)
-    if (exact) return exact.code
-    const base = lc.split('-')[0]
-    const byBase = LANGS.find((l) => l.code.toLowerCase().startsWith(base + '-'))
-    if (byBase) return byBase.code
-  }
+  const lc = (uiLang || 'en').toLowerCase()
+  const exact = LANGS.find((l) => l.code.toLowerCase() === lc)
+  if (exact) return exact.code
+  const base = lc.split('-')[0]
+  const byBase = LANGS.find((l) => l.code.toLowerCase().startsWith(base + '-'))
+  if (byBase) return byBase.code
   return 'en-US'
 }

@@ -28,7 +28,8 @@ export function WalletButton({
   // alimentarea, dar fără sâcâiala „Te rog reîncarcă" (nu e blocat niciodată).
   readonly isAdmin?: boolean
 }): React.JSX.Element {
-  const langKey = resolveLang(loadLocalLang() ?? navigator.language)
+  // Default ENGLEZĂ până la identificarea limbii (nu limba browserului).
+  const langKey = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(langKey)
   const ro = langKey.slice(0, 2).toLowerCase() === 'ro'
   const [credits, setCredits] = useState<number | null>(null)
