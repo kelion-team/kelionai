@@ -1,5 +1,6 @@
 import { config } from '../config.js'
-import { topUpUser } from '../db.js'
+import { topUpUser, revokeTopUpForRefund } from '../db.js'
+import { hasRefund } from './stripe.js'
 
 // ── RECONCILIEREA AUTOMATĂ A PLĂȚILOR (Adrian, 24 iul: „nu e de joacă cu banii
 // userilor") ─────────────────────────────────────────────────────────────────
@@ -46,6 +47,8 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     const amount = (s.amount_total ?? 0) / 100
     const ref = s.payment_intent ?? s.id ?? ''
     if (!email || !(amount > 0) || !ref) continue
+    // RAMBURSATĂ = NU se creditează (incident real: £25 rambursată dar creditată).
+    if (await hasRefund(ref)) continue
     // Idempotent: dacă stripe_ref există deja în billing_events, topUpUser
     // întoarce false și nu se creditează nimic în plus.
     const ok = await topUpUser(email, amount, s.currency ?? config.stripe.currency, ref)
@@ -71,8 +74,29 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     const email = pi.metadata?.email ?? pi.receipt_email ?? ''
     const amount = (pi.amount ?? 0) / 100
     if (!email || !(amount > 0) || !pi.id) continue
+    // RAMBURSATĂ = NU se creditează.
+    if (await hasRefund(pi.id)) continue
     const ok = await topUpUser(email, amount, pi.currency ?? config.stripe.currency, pi.id)
     if (ok) credited++
+  }
+
+  // 3) REFUND-uri recente → RETRAGEM creditele acordate (plasa inversă — banii
+  // care s-au întors pe card nu pot rămâne credite). Idempotent pe <ref>:refund.
+  // Fereastra e mai LARGĂ (30 zile): un refund poate veni la săptămâni după plată.
+  try {
+    const r = await fetch(
+      `https://api.stripe.com/v1/refunds?limit=100&created[gte]=${Math.floor(Date.now() / 1000) - 30 * 86_400}`,
+      { headers, signal: AbortSignal.timeout(15_000) },
+    )
+    if (r.ok) {
+      const refunds = ((await r.json()) as { data?: { payment_intent?: string; status?: string }[] }).data ?? []
+      for (const rf of refunds) {
+        if (rf.status !== 'succeeded' || !rf.payment_intent) continue
+        await revokeTopUpForRefund(rf.payment_intent)
+      }
+    }
+  } catch {
+    /* best-effort — reîncearcă ora următoare */
   }
   return { scanned: sessions.length + pis.length, credited }
 }

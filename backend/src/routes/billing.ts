@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge } from '../db.js'
+import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund } from '../db.js'
 import { createCheckout, createPaymentIntent, verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -161,6 +161,14 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
       if (email && pi.id && amount > 0) {
         await topUpUserFromPaymentIntent(email, amount, pi.currency ?? config.stripe.currency, pi.id)
       }
+    }
+
+    // REFUND = CREDIT RETRAS (incident real 24 iul: plată rambursată dar
+    // creditată). Când Stripe anunță rambursarea, retragem creditele acordate
+    // pentru acea plată — idempotent, cu urmă în registru.
+    if (event.type === 'charge.refunded') {
+      const ch = event.data.object as { payment_intent?: string }
+      if (ch.payment_intent) await revokeTopUpForRefund(ch.payment_intent)
     }
 
     if (event.type === 'payment_intent.payment_failed') {

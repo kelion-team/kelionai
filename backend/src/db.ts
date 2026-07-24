@@ -1401,6 +1401,59 @@ export async function topUpUserFromPaymentIntent(
   }
 }
 
+/** RETRAGEREA creditelor la REFUND (incident real 24 iul: plată rambursată pe
+ *  card dar creditată în portofel = credite pentru bani inexistenți). Găsește
+ *  alimentarea după stripe_ref, scade creditul userului din portofel, marchează
+ *  tranzacția `refunded` și lasă urma `refund` în registru. Idempotent pe
+ *  `<ref>:refund` — un refund retras o dată nu se mai retrage a doua oară. */
+export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> {
+  if (!dbEnabled() || !stripeRef) return false
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    const t = await client.query<{ user_email: string; amount: string }>(
+      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'topup'`,
+      [stripeRef],
+    )
+    if (!t.rows[0]) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [
+      `${stripeRef}:refund`,
+    ])
+    if ((seen.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    const email = t.rows[0].user_email
+    const userCredit = Number(t.rows[0].amount)
+    await client.query(
+      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+       VALUES (lower($1), 'refund', $2, $3, 'plată rambursată pe card — credit retras')`,
+      [email, userCredit, `${stripeRef}:refund`],
+    )
+    await client.query(
+      `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE user_email = lower($1)`,
+      [email, userCredit],
+    )
+    await client.query(`UPDATE transactions SET status = 'refunded' WHERE stripe_payment_intent_id = $1`, [
+      stripeRef,
+    ])
+    await client.query('COMMIT')
+    return true
+  } catch {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    return false
+  } finally {
+    client.release()
+  }
+}
+
 /** Wallet balance + the last-top-up reference, for the low-credit % alerts. */
 export async function getWalletStatus(email: string): Promise<{ balance: number; topupRef: number }> {
   if (!dbEnabled()) return { balance: 0, topupRef: 0 }

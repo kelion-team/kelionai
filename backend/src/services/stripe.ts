@@ -223,6 +223,24 @@ export function verifyWebhook(raw: string, sigHeader: string): StripeEvent | nul
 // e API-ul Stripe autentificat, nu payload-ul webhook.
 export type VerifiedTopup = { email: string; amount: number; currency: string; ref: string } | null
 
+// PLĂȚILE RAMBURSATE NU SE CREDITEAZĂ (incident real 24 iul: plata de £25 din
+// iunie fusese RAMBURSATĂ integral pe card, dar plasa a creditat-o — „bani"
+// care nu mai existau). Întrebăm Stripe dacă există vreun refund pe PI.
+export async function hasRefund(paymentIntentId: string): Promise<boolean> {
+  if (!config.stripe.secretKey || !paymentIntentId.startsWith('pi_')) return false
+  try {
+    const r = await fetch(`${API}/refunds?payment_intent=${paymentIntentId}&limit=1`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!r.ok) return false
+    const j = (await r.json()) as { data?: unknown[] }
+    return (j.data?.length ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
   let ev: StripeEvent
   try {
@@ -255,6 +273,7 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
     const amount = Number(s.amount_total ?? 0) / 100
     const ref = String(s.payment_intent ?? s.id ?? id)
     if (!email || !(amount > 0)) return null
+    if (await hasRefund(ref)) return null // rambursată → NU se creditează
     return { email, amount, currency: String(s.currency ?? config.stripe.currency), ref }
   }
 
@@ -264,6 +283,7 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
     const email = (pi.metadata as { email?: string } | undefined)?.email ?? String(pi.receipt_email ?? '')
     const amount = Number(pi.amount ?? 0) / 100
     if (!email || !(amount > 0)) return null
+    if (await hasRefund(id)) return null // rambursată → NU se creditează
     return { email, amount, currency: String(pi.currency ?? config.stripe.currency), ref: id }
   }
 
