@@ -34,7 +34,22 @@ export interface RealtimeVoiceOpts {
    * vorbind. Fără handler, vocea rămâne fără unelte (doar conversație).
    */
   onToolCall?: (name: string, argsJson: string) => Promise<string>
+  /**
+   * COMANDĂ DE DISPOZITIV DIN VOCE (cameră/ecran): serverul interpretează
+   * transcriptul userului cu ACELAȘI interpretor ca în scris și întoarce comanda;
+   * clientul o execută (comută camera față/spate, închide monitorul etc.).
+   */
+  onDevice?: (device: DeviceCommandFrame) => void
+  /** GPS live de pe dispozitiv — băgat în contextul sesiunii (vreme/„unde sunt"). */
+  coords?: { lat: number; lon: number }
   signal?: AbortSignal
+}
+
+// Forma comenzii de dispozitiv întoarsă de server (identică cu {device} din SSE-ul
+// chatului scris) — clientul o mapează pe handleControl({ device }).
+export interface DeviceCommandFrame {
+  camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
+  screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
 }
 
 // Salvează o tură în istoric (memorie + continuitate între sesiuni). Best-effort.
@@ -42,6 +57,7 @@ function persistTranscript(
   role: 'user' | 'assistant',
   text: string,
   onCommittedLang?: (lang: string) => void,
+  onDevice?: (device: DeviceCommandFrame) => void,
 ): void {
   const t = text.trim()
   if (!t) return
@@ -54,8 +70,10 @@ function persistTranscript(
     .then(async (r) => {
       // Serverul a COMIS limba detectată (2 mesaje consecutive) → ancorăm
       // sesiunea live pe ea (vezi apelantul) — transcrierea nu mai ghicește.
-      const j = (await r.json().catch(() => null)) as { lang?: string } | null
+      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame } | null
       if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
+      // Comanda verbală de cameră/ecran → clientul o execută pe loc.
+      if (j?.device && onDevice) onDevice(j.device)
     })
     .catch(() => {})
 }
@@ -99,7 +117,7 @@ try {
 export async function startRealtimeVoice(
   opts: RealtimeVoiceOpts = {},
 ): Promise<RealtimeVoiceHandle> {
-  const { onState, onUserTranscript, onAssistantTranscript, onToolCall, signal } = opts
+  const { onState, onUserTranscript, onAssistantTranscript, onToolCall, onDevice, signal } = opts
   onState?.('connecting')
 
   // Orice sesiune anterioară din ACEST tab moare înainte să pornească alta.
@@ -313,27 +331,34 @@ export async function startRealtimeVoice(
         // sistem la FIECARE frază — zgâlțâia sesiunea audio în plin răspuns.
         // Limba nu se schimbă frază de frază; ancorăm o dată și re-ancorăm
         // numai când serverul comite ALTĂ limbă.
-        persistTranscript('user', t, (lang) => {
-          if (lang === anchoredLang) return
-          anchoredLang = lang
-          send({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
-            },
-          })
-          const names: Record<string, string> = { ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese', it: 'Italian', de: 'German' }
-          const nm = names[lang] ?? 'English'
-          send({
-            type: 'conversation.item.create',
-            item: {
-              type: 'message',
-              role: 'system',
-              content: [{ type: 'input_text', text: `Reminder: reply ONLY in ${nm}. Never switch language. If you heard only noise or silence, stay silent.` }],
-            },
-          })
-        })
+        persistTranscript(
+          'user',
+          t,
+          (lang) => {
+            if (lang === anchoredLang) return
+            anchoredLang = lang
+            send({
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
+              },
+            })
+            const names: Record<string, string> = { ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese', it: 'Italian', de: 'German' }
+            const nm = names[lang] ?? 'English'
+            send({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'system',
+                content: [{ type: 'input_text', text: `Reminder: reply ONLY in ${nm}. Never switch language. If you heard only noise or silence, stay silent.` }],
+              },
+            })
+          },
+          // COMANDĂ VERBALĂ DE CAMERĂ/ECRAN (25 iul): serverul a interpretat
+          // transcriptul → o executăm în client (comută camera, închide monitorul).
+          onDevice,
+        )
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)
@@ -405,7 +430,7 @@ export async function startRealtimeVoice(
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       signal,
-      body: JSON.stringify({ sdp: pc.localDescription?.sdp ?? '', language: opts.language }),
+      body: JSON.stringify({ sdp: pc.localDescription?.sdp ?? '', language: opts.language, coords: opts.coords }),
     })
     if (!res.ok) {
       const note = res.status === 401 ? 'trebuie să fii logat' : `realtime ${res.status}`

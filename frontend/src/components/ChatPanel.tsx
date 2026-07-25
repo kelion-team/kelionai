@@ -976,6 +976,12 @@ export default function ChatPanel({
         try {
           const rv = await startRealtimeVoice({
             language: speechLangRef.current,
+            // GPS DE PE DISPOZITIV (25 iul): la pornirea sesiunii trimitem poziția
+            // curentă → serverul o bagă în contextul vocii (vreme/„unde sunt").
+            coords: coordsRef.current ?? undefined,
+            // COMANDĂ VERBALĂ DE CAMERĂ/ECRAN (25 iul): serverul interpretează
+            // vorbirea și întoarce comanda; o executăm pe calea SSE obișnuită.
+            onDevice: (device) => handleControl({ device }),
             // SCRISUL însoțește vorbirea (Adrian, 24 iul: „nu afișează ce zice,
             // doar vorbește"): parțialele curg pe banda live, iar transcriptul
             // FINAL al fiecărei ture intră în CHAT ca mesaj vizibil.
@@ -1043,6 +1049,18 @@ export default function ChatPanel({
                   ? (latestFrameRef.current ?? captureRef.current?.() ?? '')
                   : ''
                 if (frame) (args as Record<string, unknown>).image = frame
+              }
+              // GPS DE PE DISPOZITIV ÎN VOCE (Adrian, 25 iul: „nu vede gps de pe
+              // dispozitiv"). Pentru vreme fără loc numit, injectăm exact
+              // coordonatele reale ale dispozitivului (ca în scris) → „vremea de
+              // aici" merge, nu mai ghicește modelul un oraș.
+              if (name === 'get_weather' && coordsRef.current) {
+                const hasLoc = String(args.location ?? '').trim() !== ''
+                const hasLatLon = Number.isFinite(args.lat as number) && Number.isFinite(args.lon as number)
+                if (!hasLoc && !hasLatLon) {
+                  args.lat = coordsRef.current.lat
+                  args.lon = coordsRef.current.lon
+                }
               }
               if (name === 'show_on_screen') {
                 const url = String(args.url ?? '').trim()
