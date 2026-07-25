@@ -50,6 +50,10 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/contacts',
+  // Skill-uri noi (Adrian, 25 iul): Sheets/Docs merg deja prin scope-ul Drive;
+  // Photos + YouTube au nevoie de scope propriu → intră la re-conectare.
+  'https://www.googleapis.com/auth/photoslibrary.readonly',
+  'https://www.googleapis.com/auth/youtube.readonly',
 ].join(' ')
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
