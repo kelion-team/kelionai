@@ -36,6 +36,22 @@ function decodeIdToken(idToken: string): { email?: string; email_verified?: bool
   return JSON.parse(json)
 }
 
+// LOGIN = TOTUL (Adrian, 25 iul, 0 bariere): aceleași scope-uri grele ca la
+// „Connect Google", cerute direct la login. Definit înaintea rutelor ca să fie
+// folosit și de /login, și de /connect (aceeași listă, o singură sursă).
+const FULL_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/tasks',
+  'https://www.googleapis.com/auth/contacts',
+].join(' ')
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   // Step 1 — kick off Google OAuth
   app.get('/auth/google/login', async (_req, reply) => {
@@ -51,13 +67,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      // DOAR IDENTITATE la login (Adrian, 24 iul: „Google hasn't verified this
-      // app — îmi sperie clienții"). Aceste 3 scope-uri sunt NON-sensibile, deci
-      // Google NU afișează ecranul roșu de avertisment — orice vizitator se poate
-      // loga liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
-      // rămân OPȚIONALE, cerute la nevoie prin „Conectează Gmail & Calendar"
-      // (doar cine le vrea trece prin consimțământ, nu toți userii la login).
-      scope: 'openid email profile',
+      // LOGIN PRIN GMAIL DEBLOCHEAZĂ TOT (Adrian, 25 iul, ordin direct — 0 bariere):
+      // un singur login cere TOATE scope-urile (Gmail, Calendar, Drive, Tasks,
+      // Contacts) → skill-urile Google merg IMEDIAT după login, fără pasul separat
+      // „Connect Google". access_type=offline + prompt=consent → refresh token, ca
+      // uneltele să funcționeze și după prima oră. (Nota veche „scope minim ca să
+      // nu sperie clienții" e ANULATĂ de acest ordin.)
+      scope: FULL_SCOPES,
+      access_type: 'offline',
+      include_granted_scopes: 'true',
+      prompt: 'consent',
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
@@ -69,18 +88,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // refresh token so the skills keep working long-term. The state is prefixed
   // "c." so the shared callback knows to KEEP the current identity and merely
   // attach the freshly granted tokens.
-  const CONNECT_SCOPES = [
-    'openid',
-    'email',
-    'profile',
-    'https://www.googleapis.com/auth/calendar.events',
-    'https://www.googleapis.com/auth/calendar.readonly',
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.send',
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/contacts',
-  ].join(' ')
+  const CONNECT_SCOPES = FULL_SCOPES // aceeași listă — o singură sursă
   app.get('/auth/google/connect', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) {
