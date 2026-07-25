@@ -86,6 +86,7 @@ async function selectedBrainModel(
   email: string,
   text: string,
   kvRaw?: string | null,
+  needsVision = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
   if (!config.openrouter.key) return null
   let sel: { chat?: string; work?: string } = {}
@@ -113,7 +114,17 @@ async function selectedBrainModel(
   // „rulează", „publică", „scrie cod"...); revine SINGUR la treapta ieftină
   // la următoarea replică obișnuită (heavy se calculează per-tură din textul
   // curent, nu rămâne agățat).
-  const heavy = taskDifficulty(text) >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  // COMPATIBILITATE MODEL↔FUNCȚIE (Adrian, 25 iul: „modelele selectate să fie
+  // compatibile cu toate funcțiile aplicației"): implicitul ieftin de chat
+  // (`openai/gpt-oss-20b:free`) NU are vedere (catalogul îl marchează
+  // vision:false) — un cadru de cameră trimis către el ar fi ignorat/ar pica.
+  // Când tura ACTUAL trimite o imagine (poză atașată sau cadru de cameră pe
+  // „ce vezi?"), escaladăm forțat la treapta work — TOATE modelele work
+  // candidate (Fable 5, Sonnet 5, GPT-5, Haiku 4.5) au vision:true confirmat.
+  const heavy =
+    needsVision ||
+    taskDifficulty(text) >= ESCALATE_AT ||
+    (roleFor(email) === 'admin' && hasActionIntent(text))
   const model = heavy ? await resolveModel('work', sel.work) : await resolveModel('chat', sel.chat)
   return { model, heavy }
 }
@@ -1465,6 +1476,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     //      ceva vizual (VISION_INTENT: „mă vezi", „ce vezi", „descrie" etc.).
     const attachedPhoto = imageIsAttachment && image ? [image] : []
     const camView = camFrames.length > 0 ? camFrames : !imageIsAttachment && image ? [image] : []
+    // Citit de selectedBrainModel — forțează treapta cu vedere reală (vezi acolo).
+    let turnHasImage = false
     if (params.length > 0) {
       const lastIdx = params.length - 1
       const lm = params[lastIdx]
@@ -1476,6 +1489,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
               ? camView
               : []
         if (toSend.length > 0) {
+          turnHasImage = true
           const strip = (s: string): string => (s.includes(',') ? s.slice(s.indexOf(',') + 1) : s)
           params[lastIdx] = {
             role: 'user',
@@ -1558,7 +1572,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
     // el greu; pe treapta WORK nu (ar fi recursiv — el ESTE creierul).
-    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv)
+    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
 
