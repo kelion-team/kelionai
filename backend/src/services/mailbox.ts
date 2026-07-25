@@ -5,7 +5,18 @@ import { config } from '../config.js'
 import { mailEnabled, sendMail, royalLetterHtml, makeRef, letterDate } from './mail.js'
 import { brainComplete } from './brain.js'
 import { saveInboundEmail, setInboundReplied } from '../db.js'
-import { detectLang } from './lang.js'
+import { detectLang, langLabel } from './lang.js'
+
+// ORGANIZAREA CUTIEI (Adrian, 25 iul: „să organizeze emailurile"). După ce
+// procesează un mesaj, Kelion îl MUTĂ într-un folder IMAP dedicat, ca inboxul să
+// rămână curat și adminul să vadă dintr-o privire ce a fost răspuns, ce așteaptă
+// răspuns manual și ce e mail-mașină. Nume ASCII, fără spații/diacritice, ca să
+// nu se lovească de delimitatorii de ierarhie/UTF-7 ai serverului. Reversibil
+// (se mută înapoi oricând) și oprit instant din env dacă owner-ul nu-l vrea.
+const ORGANIZE = (process.env.MAIL_ORGANIZE ?? '1') !== '0'
+const FOLDER_ANSWERED = 'Kelion-Answered' // client căruia i-am răspuns automat
+const FOLDER_MANUAL = 'Kelion-ToAnswer' // om real, dar n-am putut răspunde → tu
+const FOLDER_AUTO = 'Kelion-Automated' // mail-mașină (bounce, alerte, liste)
 
 // ROW 19 — the contact@ mailbox reader. Polls IMAP for new messages; for each,
 // was answered. Everything is gated by mailEnabled() and best-effort — a mail
@@ -71,20 +82,59 @@ export function isInternalSender(from: string): boolean {
   return false
 }
 
-// Ask the Secretary (the brain, DIRECT — Kimi/GLM) to draft the reply body. First
-// line = the salutation ("Dear John," / "Stimate Ion,"), the rest = paragraphs.
-// Returns null if the brain is unreachable — the caller then just forwards to the
-// admin. Zero external-provider dependency: Kimi/GLM direct.
-async function draftReply(from: string, subject: string, body: string): Promise<string | null> {
+// Ask the Secretary (the brain, DIRECT) to draft the reply body. First line =
+// the salutation ("Dear John," / "Stimate Ion,"), the rest = paragraphs. Returns
+// null if the brain is unreachable — the caller then just forwards to the admin.
+// `langName` = limba DETECTATĂ din mesajul clientului (ex. „Romanian", „German"),
+// dată EXPLICIT modelului: răspunsul iese GARANTAT în limba primită (Adrian, 25
+// iul), nu lăsat la nimereala auto-detecției din corpul răspunsului.
+async function draftReply(from: string, subject: string, body: string, langName: string): Promise<string | null> {
   const prompt =
     'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +
-    'Redactează DOAR corpul unui răspuns politicos, cald și profesionist, ÎN LIMBA clientului ' +
-    '(detecteaz-o din mesajul lui). Prima linie = salutul (ex: „Dear John," sau „Stimate domnule Ion,"). ' +
+    `Redactează DOAR corpul unui răspuns politicos, cald și profesionist, OBLIGATORIU în limba ${langName} ` +
+    '(limba în care a scris clientul — răspunde în ACEEAȘI limbă, nu în alta). ' +
+    'Prima linie = salutul (ex: „Dear John," sau „Stimate domnule Ion,"). ' +
     'Apoi 1–3 paragrafe scurte, la obiect. NU adăuga antet, semnătură sau „Kelionai" — se pun automat. ' +
     'Nu inventa promisiuni pe care nu le putem ține.\n\n' +
     `De la: ${from}\nSubiect: ${subject}\n\nMesaj:\n${body.slice(0, 4000)}`
   const draft = await brainComplete(prompt, 1024)
   return draft && draft.trim() ? draft.trim() : null
+}
+
+// Creează (best-effort) folderele de organizare o singură dată per conexiune.
+// „already exists" aruncă → îl înghițim; orice altă eroare nu blochează pollul.
+async function ensureFolders(client: ImapFlow): Promise<void> {
+  if (!ORGANIZE) return
+  for (const path of [FOLDER_ANSWERED, FOLDER_MANUAL, FOLDER_AUTO]) {
+    try {
+      await client.mailboxCreate(path)
+    } catch {
+      /* există deja — normal */
+    }
+  }
+}
+
+// Mută mesajul (după UID) din INBOX în folderul potrivit. Best-effort: dacă mutarea
+// eșuează, cade pe marcarea „citit" ca mesajul să nu fie reprocesat la infinit.
+async function fileInto(
+  client: ImapFlow,
+  uid: number,
+  dest: string,
+  extraFlags: string[] = [],
+): Promise<void> {
+  if (extraFlags.length) {
+    await client.messageFlagsAdd({ uid }, extraFlags, { uid: true }).catch(() => {})
+  }
+  if (!ORGANIZE) {
+    await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }).catch(() => {})
+    return
+  }
+  try {
+    await client.messageMove({ uid }, dest, { uid: true })
+  } catch (e) {
+    console.error(`[mailbox] move→${dest} failed:`, (e as Error).message)
+    await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }).catch(() => {})
+  }
 }
 
 async function processOne(client: ImapFlow, uid: number, source: Buffer, alreadySeen = false): Promise<void> {
@@ -101,7 +151,8 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   // nu client — nu primește NICIODATĂ auto-reply și nici forward (adminul o are
   // deja direct de la alertă).
   if (isAutomated(parsed.headers, fromAddr) || isInternalSender(fromAddr)) {
-    await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }).catch(() => {})
+    // Mail-mașină → dosarul „Automated" (organizare), niciodată răspuns/forward.
+    await fileInto(client, uid, FOLDER_AUTO)
     return
   }
 
@@ -115,8 +166,10 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   })
   if (!isNew) return
 
-  const draft = await draftReply(fromAddr, subject, body)
+  // Detectăm limba ÎNAINTE de a redacta și o dăm EXPLICIT modelului → răspunsul
+  // iese garantat în limba primită (Adrian, 25 iul: „răspunde în limba primită").
   const lang = detectLang(body) || 'en'
+  const draft = await draftReply(fromAddr, subject, body, langLabel(lang))
 
   // Adevărul pentru admin (25 iul): forward-ul de mai jos declara „răspuns
   // trimis" pe baza EXISTENȚEI draftului, nu a trimiterii — dacă SMTP-ul pica
@@ -160,10 +213,16 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
     text: `De la: ${fromName} <${fromAddr}>\nSubiect: ${subject}\n\n${body}\n\n---\n${replySent ? draft : '(fără răspuns automat — răspunde tu)'}`,
   })
 
-  // Mark seen so it isn't picked up again, but only if it wasn't already seen
-  // by another client (e.g. Outlook). Otherwise we leave the mailbox state alone.
-  if (!alreadySeen) {
-    await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true })
+  // ORGANIZARE (Adrian, 25 iul): mutăm mesajul în folderul potrivit, ca inboxul
+  // să rămână curat și adminul să vadă dintr-o privire starea fiecărui mesaj:
+  //  • răspuns automat trimis → „Kelion-Answered" (+ flag \Answered, semantica IMAP)
+  //  • om real fără răspuns (creier picat / SMTP eșuat) → „Kelion-ToAnswer" (tu)
+  // `alreadySeen` nu mai contează pentru mutare — mesajul iese oricum din INBOX;
+  // fileInto marchează \Seen doar în fallback (când mutarea nu reușește).
+  if (replySent) {
+    await fileInto(client, uid, FOLDER_ANSWERED, ['\\Seen', '\\Answered'])
+  } else {
+    await fileInto(client, uid, FOLDER_MANUAL, ['\\Seen'])
   }
 }
 

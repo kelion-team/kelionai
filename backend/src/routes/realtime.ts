@@ -8,7 +8,8 @@ import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
-import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
+import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
+import { interpretDeviceCommand } from '../services/commands.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 import { recallMemories } from '../services/agents.js'
@@ -26,7 +27,7 @@ import { SYSTEM_PROMPT } from './chat.js'
 // test, userii cumpără să probeze"). Vocea de prezentare de pe landing (fără
 // login, plătită din contul admin) e tratată separat, în alt endpoint.
 export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { sdp?: string; language?: string } }>(
+  app.post<{ Body: { sdp?: string; language?: string; coords?: { lat?: number; lon?: number } } }>(
     '/api/realtime/session',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -82,11 +83,27 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         .filter((m) => m.content && m.content.trim())
         .map((m) => `${m.role === 'assistant' ? 'Kelion' : 'Utilizatorul'}: ${m.content.slice(0, 400)}`)
         .join('\n')
+      // GPS DE PE DISPOZITIV ÎN VOCE (Adrian, 25 iul: „nu vede gps de pe
+      // dispozitiv"). Chatul scris injecta poziția în context (skill-urile de
+      // vreme/hărți/„unde sunt" o foloseau), dar vocea NU o primea niciodată →
+      // Kelion vorbea „orb" la locație. Acum clientul trimite coords la pornirea
+      // sesiunii; le băgăm în context EXACT ca în scris, plus localitatea (reverse
+      // geocode din cache — fără așteptare pe calea audio).
+      const c = req.body?.coords
+      let gpsBlock = ''
+      if (c && Number.isFinite(c.lat) && Number.isFinite(c.lon)) {
+        const place = reverseGeocodeCached(c.lat as number, c.lon as number)
+        gpsBlock =
+          `\n\nLOCAȚIA CURENTĂ A UTILIZATORULUI (GPS live de pe dispozitiv): latitudine ${(c.lat as number).toFixed(5)}, longitudine ${(c.lon as number).toFixed(5)}` +
+          (place ? ` (aproximativ ${place})` : '') +
+          `. Când spune „aici", „lângă mine", „unde sunt", sau întreabă de vreme/locuri/direcții fără să numească un loc, folosește ACEASTĂ poziție. Pentru vremea locală, pasează exact acești lat/lon la get_weather.`
+      }
       const contextBlock =
         (memRecall || '') +
         (history
           ? `\n\nCONVERSAȚIA DE PÂNĂ ACUM (continu-o firesc, ține minte ce s-a spus):\n${history}`
-          : '')
+          : '') +
+        gpsBlock
 
       // hardLock = adminul (Adrian) — română MEREU, fără comutare pe italiană.
       const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock)
@@ -271,6 +288,13 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const text = String(req.body?.text ?? '').trim()
       const role = req.body?.role === 'assistant' ? 'assistant' : 'user'
       if (text) await saveMessage(user.email, role, text)
+
+      // COMUTAREA VERBALĂ A CAMEREI/ECRANULUI ÎN VOCE (Adrian, 25 iul: „comutarea
+      // verbală a camerelor e funcțională?" — NU era, doar în scris). Chatul scris
+      // trece fiecare replică prin interpretDeviceCommand; vocea nu o făcea deloc.
+      // Rulăm ACELAȘI interpretor determinist pe transcriptul userului și
+      // întoarcem comanda → clientul o execută (handleControl), la fel ca în scris.
+      const device = role === 'user' && text ? interpretDeviceCommand(text) : null
       // DETECȚIA LIMBII DIN VOCE (audit 24 iul, P4 — Adrian: „nu depistează
       // limba vorbită"). Chatul scris persista limba prin trackSpeechLang, dar
       // vocea NU o făcea niciodată → sesiunea următoare pornea iar de la zero.
@@ -282,7 +306,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const isAdmin = user.email.toLowerCase() === config.adminEmail
       // ADMIN: ancorăm sesiunea live pe română la FIECARE tură (clientul face
       // session.update) — transcrierea nu mai poate aluneca spre altă limbă.
-      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro' })
+      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', device: device ?? undefined })
       if (text && role === 'user' && !isAdmin) {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)
@@ -292,9 +316,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // frază independent (româna iese spaniolă/franceză la întâmplare) și
         // otrăvește detecția. Întoarcem limba comisă → clientul o fixează PE
         // LOC în sesiunea Realtime (session.update), fără repornire.
-        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase() })
+        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), device: device ?? undefined })
       }
-      return reply.send({ ok: true })
+      return reply.send({ ok: true, device: device ?? undefined })
     },
   )
 }

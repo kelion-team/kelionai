@@ -35,6 +35,9 @@ export interface ChatControl {
   // A readable text deliverable from an agent (email, translation, findings),
   // shown as a copyable panel on the monitor.
   doc?: { title: string; text: string }
+  // O pagină web COMPLETĂ scrisă de Kelion (run_web_app) — rulează live pe
+  // monitor într-un cadru izolat (srcdoc + sandbox) și se poate salva ca .html.
+  app?: { title: string; html: string }
   // A device command the SERVER interpreted (camera / monitor tabs) — the
   // regexes moved off the browser; the client just executes what this says.
   device?: {

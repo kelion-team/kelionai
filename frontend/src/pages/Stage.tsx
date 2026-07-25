@@ -27,6 +27,36 @@ import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 
+// SALVAREA CONȚINUTULUI DE PE MONITOR (Adrian, 25 iul: „nu se poate salva ce e pe
+// monitor"). Descarcă un text/HTML ca fișier local — un nume curat din titlu.
+function downloadContent(name: string, content: string, mime: string): void {
+  try {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
+  } catch {
+    /* best-effort — descărcarea nu trebuie să spargă monitorul */
+  }
+}
+
+// Nume de fișier sigur din titlul panoului (diacritice/spații → cratime).
+function safeFileName(title: string, ext: string): string {
+  const base = (title || 'kelion')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'kelion'
+  return `${base}.${ext}`
+}
+
 export default function Stage({ user }: { user: User }) {
   // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
   // LIMBA UI (regula finală, Adrian 24 iul: „default ENGLEZĂ pentru toți; după
@@ -411,7 +441,27 @@ export default function Stage({ user }: { user: User }) {
                 </button>
               )}
             </div>
-            {ws.text ? (
+            {ws.html ? (
+              // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
+              // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
+              // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.
+              <div className="workspace-doc">
+                <button
+                  type="button"
+                  className="doc-copy"
+                  onClick={() => downloadContent(safeFileName(ws.title, 'html'), ws.html ?? '', 'text/html')}
+                  title="Salvează pagina (.html)"
+                >
+                  Salvează
+                </button>
+                <iframe
+                  title={ws.title}
+                  srcDoc={ws.html}
+                  className="workspace-frame"
+                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
+                />
+              </div>
+            ) : ws.text ? (
               <div className="workspace-doc">
                 <button
                   type="button"
@@ -420,6 +470,15 @@ export default function Stage({ user }: { user: User }) {
                   title="Copiază"
                 >
                   Copiază
+                </button>
+                <button
+                  type="button"
+                  className="doc-copy"
+                  style={{ right: '6.5rem' }}
+                  onClick={() => downloadContent(safeFileName(ws.title, 'txt'), ws.text ?? '', 'text/plain')}
+                  title="Salvează (.txt)"
+                >
+                  Salvează
                 </button>
                 <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{ws.text}</pre>
               </div>

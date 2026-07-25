@@ -18,6 +18,7 @@ import {
   openWorkspace,
   openWorkspaceCard,
   openWorkspaceDoc,
+  openWorkspaceApp,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -366,6 +367,11 @@ export default function ChatPanel({
       openWorkspaceDoc(c.doc.title || t.monitorTitle, c.doc.text)
       return
     }
+    // PLAYGROUND: pagina scrisă de Kelion rulează live pe monitor (cadru izolat).
+    if (c.app && c.app.html.trim()) {
+      openWorkspaceApp(c.app.title || t.monitorTitle, c.app.html)
+      return
+    }
     if (c.card && c.card.items.length > 0) {
       openWorkspaceCard(c.card.title, c.card)
       return
@@ -611,12 +617,34 @@ export default function ChatPanel({
     addImageFiles(files.filter((f) => f.type.startsWith('image/')))
     void addDocFiles(files.filter((f) => !f.type.startsWith('image/')))
   }
-  // Paste an image straight into the chat (Ctrl+V) or drag-and-drop a file.
+  // Paste an image/file straight into the chat (Ctrl+V) or drag-and-drop a file.
+  // PRINTSCREEN DIRECT (Adrian, 25 iul: „nu primește printscreenuri direct").
+  // Un screenshot lipit (Win+Shift+S, „Copy image") ajunge de multe ori NU în
+  // clipboardData.files, ci în clipboardData.items (kind:'file', type:image/*).
+  // Citim AMBELE surse → captura lipită e prinsă de fiecare dată. Dedup pe
+  // (nume+dimensiune) ca să nu adăugăm de două ori aceeași imagine.
   function onPasteFiles(e: ReactClipboardEvent): void {
-    const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
-    if (imgs.length > 0) {
+    const seen = new Set<string>()
+    const collected: File[] = []
+    for (const f of e.clipboardData.files) {
+      const key = `${f.name}:${f.size}`
+      if (!seen.has(key)) { seen.add(key); collected.push(f) }
+    }
+    for (const it of e.clipboardData.items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile()
+        if (f) {
+          const key = `${f.name}:${f.size}`
+          if (!seen.has(key)) { seen.add(key); collected.push(f) }
+        }
+      }
+    }
+    const imgs = collected.filter((f) => f.type.startsWith('image/'))
+    const docs = collected.filter((f) => !f.type.startsWith('image/'))
+    if (imgs.length > 0 || docs.length > 0) {
       e.preventDefault()
-      addImageFiles(imgs)
+      if (imgs.length > 0) addImageFiles(imgs)
+      if (docs.length > 0) void addDocFiles(docs)
     }
   }
   function onDropFiles(e: ReactDragEvent): void {
@@ -976,6 +1004,12 @@ export default function ChatPanel({
         try {
           const rv = await startRealtimeVoice({
             language: speechLangRef.current,
+            // GPS DE PE DISPOZITIV (25 iul): la pornirea sesiunii trimitem poziția
+            // curentă → serverul o bagă în contextul vocii (vreme/„unde sunt").
+            coords: coordsRef.current ?? undefined,
+            // COMANDĂ VERBALĂ DE CAMERĂ/ECRAN (25 iul): serverul interpretează
+            // vorbirea și întoarce comanda; o executăm pe calea SSE obișnuită.
+            onDevice: (device) => handleControl({ device }),
             // SCRISUL însoțește vorbirea (Adrian, 24 iul: „nu afișează ce zice,
             // doar vorbește"): parțialele curg pe banda live, iar transcriptul
             // FINAL al fiecărei ture intră în CHAT ca mesaj vizibil.
@@ -1044,12 +1078,32 @@ export default function ChatPanel({
                   : ''
                 if (frame) (args as Record<string, unknown>).image = frame
               }
+              // GPS DE PE DISPOZITIV ÎN VOCE (Adrian, 25 iul: „nu vede gps de pe
+              // dispozitiv"). Pentru vreme fără loc numit, injectăm exact
+              // coordonatele reale ale dispozitivului (ca în scris) → „vremea de
+              // aici" merge, nu mai ghicește modelul un oraș.
+              if (name === 'get_weather' && coordsRef.current) {
+                const hasLoc = String(args.location ?? '').trim() !== ''
+                const hasLatLon = Number.isFinite(args.lat as number) && Number.isFinite(args.lon as number)
+                if (!hasLoc && !hasLatLon) {
+                  args.lat = coordsRef.current.lat
+                  args.lon = coordsRef.current.lon
+                }
+              }
               if (name === 'show_on_screen') {
                 const url = String(args.url ?? '').trim()
                 const title = String(args.title ?? '') || 'Ecran'
                 if (url) handleControl({ monitor: { url, title } })
                 else closeAllTasks()
                 return JSON.stringify({ shown: true, url })
+              }
+              // PLAYGROUND ÎN VOCE (paritate cu scrisul): pagina scrisă de Kelion
+              // rulează live pe monitor (cadru izolat), se poate salva.
+              if (name === 'run_web_app') {
+                const title = String(args.title ?? '') || 'Aplicație'
+                const html = String(args.html ?? '')
+                if (html.trim()) handleControl({ app: { title, html } })
+                return JSON.stringify({ running: Boolean(html.trim()), title, savable: true })
               }
               // ACCES REAL LA APLICAȚIE (Adrian, 24 iul): Kelion deschide panourile
               // proprii ale aplicației prin voce. Se execută în client (e UI-ul lui):
@@ -1877,7 +1931,10 @@ export default function ChatPanel({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.html,.htm,.json,.xml,.rtf,.epub"
+          // ORICE TIP DE FIȘIER (Adrian, 25 iul: „nu poate analiza ce trimit,
+          // orice tip de fișier"): fără listă restrictivă la picker — imaginile
+          // merg la vedere, restul prin MarkItDown (PDF/Word/Excel/PPT/HTML/…) →
+          // text pentru creier; ce nu se poate converti, la admin merge brut.
           multiple
           hidden
           onChange={onFilesPicked}

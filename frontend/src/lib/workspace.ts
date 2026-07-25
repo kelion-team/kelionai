@@ -13,11 +13,12 @@ import type { SkillCard } from './chat'
 // throughout, Kelion works inside whichever task is active.
 export interface WorkspaceTask {
   readonly id: string
-  readonly kind: string // 'map' | 'youtube' | 'weather' | 'image' | 'web' | 'doc' | card.type
+  readonly kind: string // 'map' | 'youtube' | 'weather' | 'image' | 'web' | 'doc' | 'app' | card.type
   readonly title: string
   readonly url: string
   readonly card: SkillCard | null
   readonly text?: string // a readable text deliverable (agent result), rendered as a panel
+  readonly html?: string // a complete web page Kelion WROTE, run live in a sandboxed frame ('app')
 }
 
 export interface WorkspaceState {
@@ -30,6 +31,7 @@ export interface WorkspaceState {
   readonly url: string
   readonly card: SkillCard | null
   readonly text?: string
+  readonly html?: string
 }
 
 const EMPTY: WorkspaceState = { open: false, tasks: [], activeId: '', kind: '', title: '', url: '', card: null }
@@ -51,6 +53,7 @@ function setTasks(tasks: WorkspaceTask[], activeId: string): void {
     url: active ? active.url : '',
     card: active ? active.card : null,
     text: active ? active.text : undefined,
+    html: active ? active.html : undefined,
   }
   emit()
 }
@@ -120,6 +123,15 @@ export function openWorkspaceCard(title: string, card: SkillCard): void {
 // result — an email, a translation, findings) that the user can read and copy.
 export function openWorkspaceDoc(title: string, text: string): void {
   upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text })
+}
+
+// PLAYGROUND DE COD (Adrian, 25 iul: „Kelion trebuie să testeze în browser
+// softul scris, să-l poată salva"). Kelion scrie o pagină web COMPLETĂ (HTML +
+// CSS + JS inline) și o RULEAZĂ live pe monitor, într-un iframe izolat (srcdoc,
+// sandbox), fără gazdă externă — deci fără X-Frame-Options și fără „pagina nu
+// poate fi afișată aici". Userul o vede rulând și o poate salva (buton pe monitor).
+export function openWorkspaceApp(title: string, html: string): void {
+  upsert({ id: 'app', kind: 'app', title, url: '', card: null, html })
 }
 
 // Close the ACTIVE task (back-compat for the single-close / voice-command paths).
