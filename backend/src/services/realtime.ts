@@ -133,6 +133,22 @@ export function realtimeTools(
       },
     },
     {
+      // PLAYGROUND DE COD ÎN VOCE (Adrian, 25 iul): Kelion scrie o pagină web
+      // completă și o rulează live pe monitor (cadru izolat), userul o poate salva.
+      type: 'function',
+      name: 'run_web_app',
+      description:
+        "Write a COMPLETE standalone web page (HTML with inline CSS+JS) and run it LIVE on the user's monitor, in a sandboxed frame. Use to build/test a small working thing on the spot: a clock, calculator, to-do list, chart, form, mini-game, animation, demo. The user sees it running and can save it. Prefer this over show_on_screen whenever the user asks you to build/make/test a page, app, widget, clock, calculator or game — never embed an external site for these. Self-contained (no network-loaded scripts).",
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short panel title / save file name.' },
+          html: { type: 'string', description: 'The FULL self-contained HTML document (inline CSS + JS).' },
+        },
+        required: ['title', 'html'],
+      },
+    },
+    {
       // ACCES REAL LA APLICAȚIE (Adrian, 24 iul: „în full-duplex Kelion trebuie
       // să poată intra în orice tab al aplicației, real"). Deschide panourile
       // proprii ale aplicației prin voce — clientul execută direct (e UI-ul lui).

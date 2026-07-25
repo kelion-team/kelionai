@@ -18,6 +18,7 @@ import {
   openWorkspace,
   openWorkspaceCard,
   openWorkspaceDoc,
+  openWorkspaceApp,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -364,6 +365,11 @@ export default function ChatPanel({
     if (c.image?.url) setChatImage(c.image.url)
     if (c.doc && c.doc.text.trim()) {
       openWorkspaceDoc(c.doc.title || t.monitorTitle, c.doc.text)
+      return
+    }
+    // PLAYGROUND: pagina scrisă de Kelion rulează live pe monitor (cadru izolat).
+    if (c.app && c.app.html.trim()) {
+      openWorkspaceApp(c.app.title || t.monitorTitle, c.app.html)
       return
     }
     if (c.card && c.card.items.length > 0) {
@@ -1068,6 +1074,14 @@ export default function ChatPanel({
                 if (url) handleControl({ monitor: { url, title } })
                 else closeAllTasks()
                 return JSON.stringify({ shown: true, url })
+              }
+              // PLAYGROUND ÎN VOCE (paritate cu scrisul): pagina scrisă de Kelion
+              // rulează live pe monitor (cadru izolat), se poate salva.
+              if (name === 'run_web_app') {
+                const title = String(args.title ?? '') || 'Aplicație'
+                const html = String(args.html ?? '')
+                if (html.trim()) handleControl({ app: { title, html } })
+                return JSON.stringify({ running: Boolean(html.trim()), title, savable: true })
               }
               // ACCES REAL LA APLICAȚIE (Adrian, 24 iul): Kelion deschide panourile
               // proprii ale aplicației prin voce. Se execută în client (e UI-ul lui):

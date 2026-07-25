@@ -196,6 +196,26 @@ const SHOW_DOCUMENT_TOOL: Tool = {
   },
 }
 
+// PLAYGROUND DE COD (Adrian, 25 iul: „Kelion să testeze în browser softul scris,
+// să-l poată salva"). Kelion scrie o pagină web COMPLETĂ și o rulează live pe
+// monitor, într-un cadru izolat — fără gazdă externă, deci fără „pagina nu poate
+// fi afișată aici". Înlocuiește încercările de a înghesui site-uri externe într-un
+// iframe (ex. un „ceas analogic" de pe alt site care refuză embed-ul): în loc să
+// arate ceva rupt, Kelion SCRIE ceasul/aplicația și o rulează el.
+const RUN_WEB_TOOL: Tool = {
+  name: 'run_web_app',
+  description:
+    "Write a COMPLETE, standalone web page (HTML with inline <style> and <script>) and RUN it live on the user's monitor, in a sandboxed frame. Use this to TEST code you wrote, or to build a small working thing on the spot: an analog clock, a calculator, a to-do list, a chart, a form, a mini-game, an animation, a demo of an idea. The user sees it running immediately and can SAVE it to disk with one click. ALWAYS prefer this over show_on_screen when the user asks you to build/make/test a page, app, widget, clock, calculator, game, or any piece of software — never try to embed some external site for these (most refuse to load). Write the whole document yourself; it must be self-contained (no external scripts/styles that need the network).",
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Short title for the panel header / save file name.' },
+      html: { type: 'string', description: 'The FULL HTML document (with inline CSS and JS). Self-contained.' },
+    },
+    required: ['title', 'html'],
+  },
+}
+
 // Lets Kelion create an image from a text description and put it straight on the
 // user's monitor. Used when the user asks to draw / generate / imagine a picture.
 const IMAGE_TOOL: Tool = {
@@ -1608,8 +1628,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1882,6 +1902,15 @@ async function runTool(
       const title = String(args.title ?? '')
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url, title } })}${CTRL}`)
       return JSON.stringify({ shown: true, url, title })
+    }
+
+    case 'run_web_app': {
+      const title = String(args.title ?? 'Aplicație')
+      const html = String(args.html ?? '')
+      if (!html.trim()) return JSON.stringify({ error: 'empty_html' })
+      // Rulează în client, într-un cadru izolat (srcdoc + sandbox) — vezi Stage.
+      reply.raw.write(`${CTRL}${JSON.stringify({ app: { title, html } })}${CTRL}`)
+      return JSON.stringify({ running: true, title, savable: true })
     }
 
     // GESTURI PE CONTEXT (audit 24 iul, plângerea lui Adrian: „nu are creier să
