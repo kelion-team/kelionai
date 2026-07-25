@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { validateRunbook, RUNBOOKS } from './runbooks.js'
-import { isValidBranch } from './github.js'
+import { isValidBranch, normalizeBranch } from './github.js'
 
 // FĂRĂ RESTRICȚII (ordinul lui Adrian, 25 iul): nu există aprobare, plafoane
 // sau blocări — gărzile rămase sunt pur TEHNICE (nume valide), nu de politică.
@@ -23,6 +23,20 @@ describe('validateRunbook', () => {
   it('registrul conține doar workflow-uri reale, cu comenzi fixe', () => {
     const allowed = new Set(['deploy.yml', 'vps-diag.yml', 'sentinel.yml', 'vps-run.yml'])
     for (const rb of Object.values(RUNBOOKS)) expect(allowed.has(rb.workflow)).toBe(true)
+  })
+})
+
+describe('normalizeBranch (incident: diacriticele blocau livrarea fixului)', () => {
+  it('transformă diacriticele și spațiile în forme sigure git', () => {
+    expect(normalizeBranch('kelion/sincronizare-gură-audio')).toBe('kelion/sincronizare-gura-audio')
+    expect(normalizeBranch('kelion/fix animație țeapănă')).toBe('kelion/fix-animatie-teapana')
+  })
+  it('numele deja curate rămân neschimbate', () => {
+    expect(normalizeBranch('kelion/fix-microfon')).toBe('kelion/fix-microfon')
+  })
+  it('master rămâne respins și după normalizare', () => {
+    expect(isValidBranch(normalizeBranch('master'))).toBe(false)
+    expect(isValidBranch(normalizeBranch('măstér'))).toBe(false)
   })
 })
 
