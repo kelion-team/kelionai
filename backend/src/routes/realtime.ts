@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref } from '../db.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -173,6 +173,34 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
+      }
+
+      // PARITATE VOCE↔CHAT (25 iul): notițe, rol, gesturi — apelabile din voce.
+      if (name === 'save_note') {
+        const text = String(args.text ?? '').trim()
+        if (!text) return reply.send({ output: JSON.stringify({ error: 'empty' }) })
+        const id = await saveNote(user.email, text)
+        return reply.send({ output: JSON.stringify({ saved: true, id }) })
+      }
+      if (name === 'list_notes') {
+        const notes = await listNotes(user.email, 50)
+        return reply.send({ output: JSON.stringify({ notes }) })
+      }
+      if (name === 'delete_note') {
+        const id = Number((args as { id?: number }).id ?? 0)
+        const ok = await deleteNote(user.email, id)
+        return reply.send({ output: JSON.stringify({ deleted: ok }) })
+      }
+      if (name === 'set_active_role') {
+        const id = Number((args as { id?: number }).id ?? 0)
+        await setMeserieActivaPref(user.email, id > 0 ? id : null)
+        return reply.send({ output: JSON.stringify({ role: id > 0 ? getMeserie(id)?.nume ?? null : null }) })
+      }
+      // Gesturile se execută în CLIENT (avatarul e al browserului) — întoarcem
+      // valoarea, iar clientul o pune pe frame-ul {gesture}, ca la open_app_view.
+      if (name === 'play_avatar_gesture') {
+        const gesture = String((args as { gesture?: string }).gesture ?? '').trim()
+        return reply.send({ output: JSON.stringify({ gesture }) })
       }
 
       if (name === 'generate_image') {

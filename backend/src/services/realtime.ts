@@ -189,6 +189,38 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
         required: ['request'],
       },
     },
+    // PARITATE VOCE↔CHAT (Adrian, 25 iul: „tot activat, Kelion să le poată folosi"):
+    // notițe, memorie, gesturi, rol — apelabile și din voce, ca în scris.
+    {
+      type: 'function',
+      name: 'save_note',
+      description: 'Save a short note for the user to remember later.',
+      parameters: { type: 'object', properties: { text: { type: 'string', description: 'The note text.' } }, required: ['text'] },
+    },
+    {
+      type: 'function',
+      name: 'list_notes',
+      description: "List the user's saved notes.",
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+    {
+      type: 'function',
+      name: 'delete_note',
+      description: 'Delete a saved note by its id.',
+      parameters: { type: 'object', properties: { id: { type: 'number', description: 'The note id to delete.' } }, required: ['id'] },
+    },
+    {
+      type: 'function',
+      name: 'play_avatar_gesture',
+      description: 'Make the avatar perform a short gesture (e.g. salut, aprobare, entuziasm, plecaciune, dans) when it fits the moment.',
+      parameters: { type: 'object', properties: { gesture: { type: 'string', description: 'Gesture name.' } }, required: ['gesture'] },
+    },
+    {
+      type: 'function',
+      name: 'set_active_role',
+      description: "Set or clear the user's active professional role (meserie). Pass id 0 to clear.",
+      parameters: { type: 'object', properties: { id: { type: 'number', description: 'Role id, or 0 to clear.' } }, required: ['id'] },
+    },
   ]
 }
 

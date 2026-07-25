@@ -1056,6 +1056,13 @@ export default function ChatPanel({
                 window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: { view, section } }))
                 return JSON.stringify({ opened: view || 'home', section: section || null })
               }
+              // GESTURI ÎN VOCE (25 iul, paritate cu chatul): avatarul e al
+              // browserului → executăm gestul aici, pe frame-ul {gesture}.
+              if (name === 'play_avatar_gesture') {
+                const gesture = String(args.gesture ?? '').trim()
+                if (gesture) handleControl({ gesture })
+                return JSON.stringify({ gesture })
+              }
               try {
                 const r = await fetch('/api/realtime/tool', {
                   method: 'POST',
