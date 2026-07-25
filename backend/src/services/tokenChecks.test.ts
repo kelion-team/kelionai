@@ -21,7 +21,6 @@ describe('Token checks', () => {
     expect(names).toContain('Gemini API key')
     expect(names).toContain('Mail SMTP')
     expect(names).toContain('Mail IMAP')
-    expect(names).toContain('LiveKit API key/secret')
     expect(names).toContain('PostgreSQL')
     expect(names).toContain('Google OAuth (login)')
     expect(names).toContain('SESSION_SECRET')

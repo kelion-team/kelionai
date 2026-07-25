@@ -109,11 +109,6 @@ export const config = {
     .filter(Boolean),
   adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
   bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
-  livekit: {
-    url: (process.env.LIVEKIT_URL ?? '').trim(),
-    apiKey: (process.env.LIVEKIT_API_KEY ?? '').trim(),
-    apiSecret: (process.env.LIVEKIT_API_SECRET ?? '').trim(),
-  },
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',

@@ -35,7 +35,6 @@ import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
-import { livekitRoutes } from './routes/livekit.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
@@ -233,7 +232,6 @@ await app.register(greetRoutes)
 await app.register(meseriiRoutes)
 await app.register(voiceprintRoutes)
 await app.register(clientErrorRoutes)
-await app.register(livekitRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 

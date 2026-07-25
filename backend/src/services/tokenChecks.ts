@@ -209,23 +209,6 @@ async function checkMailImap(): Promise<TokenCheck> {
   }
 }
 
-// 9. LiveKit self-hosted
-async function checkLiveKit(): Promise<TokenCheck> {
-  const { url, apiKey, apiSecret } = config.livekit
-  if (!url || !apiKey || !apiSecret) {
-    return { name: 'LiveKit API key/secret', status: 'not_configured', requiredScope: 'RoomService + token generate' }
-  }
-  try {
-    const { RoomServiceClient } = await import('livekit-server-sdk')
-    const httpHost = url.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:')
-    const client = new RoomServiceClient(httpHost, apiKey, apiSecret)
-    await timed(15_000, () => client.listRooms())
-    return { name: 'LiveKit API key/secret', status: 'ok', detail: `server ${url}`, requiredScope: 'RoomService + token generate' }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { name: 'LiveKit API key/secret', status: 'fail', detail: msg, requiredScope: 'RoomService + token generate' }
-  }
-}
 
 // 11. Session secret — nu e token extern, dar e critic pentru securitate
 function checkSessionSecret(): TokenCheck {
@@ -239,7 +222,7 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, stripe, googleSa, googleTts, openai, gemini, smtp, imap, livekit, db, googleOauth, session] = await Promise.all([
+  const [brain, stripe, googleSa, googleTts, openai, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
     checkStripe(),
     checkGoogleServiceAccount(),
@@ -248,7 +231,6 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     checkGemini(),
     checkMailSmtp(),
     checkMailImap(),
-    checkLiveKit(),
     checkDb(),
     Promise.resolve(checkGoogleOAuth()),
     Promise.resolve(checkSessionSecret()),
@@ -262,7 +244,6 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     gemini,
     smtp,
     imap,
-    livekit,
     db,
     googleOauth,
     session,
