@@ -39,8 +39,10 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `îți arată ceva, îți cere să te uiți sau să citești ceva, ori vrea descrisă ` +
     `scena/un obiect — cheamă unealta „look" și spune ce vezi.` +
     ` Pentru cereri GRELE (analiză, cod, matematică, raționament lung, planificare, ` +
-    `explicații aprofundate) NU improviza: cheamă unealta „ask_brain" cu întrebarea ` +
-    `completă și rostește natural răspunsul expertului. Cererile simple le răspunzi direct.` +
+    `explicații aprofundate) NU improviza și NU vorbi între timp: cheamă DIRECT unealta ` +
+    `„ask_brain" cu întrebarea completă, TACI cât lucrează expertul (nu spune „stai să ` +
+    `verific", nu umple tăcerea), apoi rostește NATURAL răspunsul expertului — o singură ` +
+    `voce, fără să te suprapui. Cererile simple le răspunzi direct.` +
     rol
   // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
@@ -95,7 +97,9 @@ const VOICE_TOOL_NAMES = new Set([
   'get_drive_files', 'get_tasks', 'add_task', 'search_contacts', 'add_contact',
 ])
 
-export function realtimeTools(): { type: 'function'; name: string; description: string; parameters: unknown }[] {
+export function realtimeTools(
+  dynamic: { name: string; description: string; input_schema: unknown }[] = [],
+): { type: 'function'; name: string; description: string; parameters: unknown }[] {
   const fromGoogle = googleTools
     .filter((t) => VOICE_TOOL_NAMES.has(t.name))
     .map((t) => ({
@@ -104,8 +108,16 @@ export function realtimeTools(): { type: 'function'; name: string; description: 
       description: t.description ?? '',
       parameters: t.input_schema,
     }))
+  // AUTO-EXTINDERE: uneltele dinamice aprobate, disponibile și în voce.
+  const fromDynamic = dynamic.map((t) => ({
+    type: 'function' as const,
+    name: t.name,
+    description: t.description,
+    parameters: t.input_schema,
+  }))
   return [
     ...fromGoogle,
+    ...fromDynamic,
     {
       type: 'function',
       name: 'show_on_screen',
@@ -238,6 +250,10 @@ export async function openaiRealtimeAnswer(
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
 
+  // Uneltele dinamice aprobate (auto-extindere) — și în voce.
+  const { dynamicToolDefs } = await import('./dynamicTools.js')
+  const dynamic = await dynamicToolDefs().catch(() => [])
+
   // Codul ISO-639-1 al limbii userului — INDICIU pentru transcriere DOAR când
   // limba e CUNOSCUTĂ (persistată). Când nu e (user nou), NU fixăm nimic —
   // transcrierea detectează singură limba vorbită (altfel am fi împins-o greșit
@@ -282,7 +298,7 @@ export async function openaiRealtimeAnswer(
     // session.update — era exact dublura.
     instructions: realtimeInstructions(lang, meserie, hardLock) + (contextBlock || ''),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
-    tools: realtimeTools(),
+    tools: realtimeTools(dynamic),
     tool_choice: 'auto',
   }
 

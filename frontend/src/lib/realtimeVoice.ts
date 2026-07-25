@@ -336,10 +336,15 @@ export async function startRealtimeVoice(
         const name = String(m.name ?? toolNames.get(callId) ?? '')
         toolNames.delete(callId)
         const argsJson = String(m.arguments ?? '{}')
+        // ANTI-„2 VOCI" LA ESCALADARE (Adrian, 25 iul): dacă modelul rostea deja
+        // ceva când a cerut unealta (ex. „stai să verific"), `response.create` de
+        // mai jos pornea o A DOUA rostire PESTE prima → două voci suprapuse.
+        // Tăiem orice răspuns în curs ÎNAINTE de a rosti rezultatul uneltei.
         if (name && onToolCall) {
           void onToolCall(name, argsJson)
             .catch((e) => JSON.stringify({ error: String(e).slice(0, 200) }))
             .then((output) => {
+              send({ type: 'response.cancel' })
               send({
                 type: 'conversation.item.create',
                 item: { type: 'function_call_output', call_id: callId, output: String(output ?? '{}') },
@@ -349,6 +354,7 @@ export async function startRealtimeVoice(
         } else {
           // Nume nerezolvabil (sau fără handler): răspundem totuși — altfel
           // modelul rămâne agățat așteptând rezultatul funcției.
+          send({ type: 'response.cancel' })
           send({
             type: 'conversation.item.create',
             item: { type: 'function_call_output', call_id: callId, output: '{"error":"unknown_tool"}' },

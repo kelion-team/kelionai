@@ -27,6 +27,8 @@ import {
   listInboundEmails,
   getDisabledGestures,
   setDisabledGestures,
+  listKelionTools,
+  decideKelionTool,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
@@ -316,6 +318,24 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const list = Array.isArray(req.body?.disabled) ? req.body.disabled : []
     await setDisabledGestures(list)
     return reply.send({ ok: true, disabled: await getDisabledGestures() })
+  })
+
+  // AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul): uneltele pe care Kelion și le-a
+  // PROPUS singur. Owner-ul le vede și aprobă/respinge cu UN CLICK — o unealtă
+  // aprobată devine activă instant, fără redeploy. „Independent până la deploy,
+  // cu aprobarea mea" — exact poarta cerută.
+  app.get('/api/admin/kelion-tools', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ tools: await listKelionTools() })
+  })
+  app.post<{ Body: { id?: number; approve?: boolean } }>('/api/admin/kelion-tools', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.body?.id ?? 0)
+    if (!id) return reply.code(400).send({ error: 'bad_request' })
+    const ok = await decideKelionTool(id, req.body?.approve === true)
+    return reply.send({ ok, tools: await listKelionTools() })
   })
 
   // VERIFICARE VIZUALĂ din ADMIN (Adrian, 13 iul: „nu se dă la admin dacă nu e

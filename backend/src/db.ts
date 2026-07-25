@@ -231,6 +231,27 @@ export async function initDb(): Promise<void> {
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triage TEXT;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triaged_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
+    -- AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul: „Kelion să-și poată instala
+    -- singur unelte, independent, până la deploy — cu aprobarea mea"). Kelion
+    -- PROPUNE o unealtă nouă (un apel HTTP, ca dată, nu cod arbitrar): nume, ce
+    -- face, parametri, metodă+URL. Owner-ul o APROBĂ cu un click în admin → devine
+    -- ACTIVĂ instant, fără redeploy. Siguranță: doar HTTPS, fără IP-uri interne,
+    -- fără cod executabil — Kelion nu poate rula decât unelte aprobate de admin.
+    CREATE TABLE IF NOT EXISTS kelion_tools (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      params_json TEXT NOT NULL DEFAULT '{}',
+      http_method TEXT NOT NULL DEFAULT 'GET',
+      http_url TEXT NOT NULL,
+      http_headers TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'pending',
+      proposed_by TEXT NOT NULL DEFAULT 'kelion',
+      rationale TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      decided_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_kelion_tools_status ON kelion_tools (status, created_at DESC);
     -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
     -- memories table: memories are auto-learned facts Kelion recalls silently;
     -- notes are things the user deliberately asked to save and can list/delete.
@@ -2459,6 +2480,79 @@ export async function deleteNote(email: string, id: number): Promise<boolean> {
   if (!dbEnabled()) return false
   try {
     const r = await getPool().query('DELETE FROM notes WHERE id = $1 AND user_email = $2', [id, email])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+// ── AUTO-EXTINDEREA LUI KELION — unelte propuse de el, aprobate de owner ──────
+export interface KelionTool {
+  id: number
+  name: string
+  description: string
+  paramsJson: string
+  httpMethod: string
+  httpUrl: string
+  httpHeaders: string
+  status: string
+  rationale: string | null
+  createdAt: string
+}
+
+/** Kelion propune o unealtă nouă (rămâne 'pending' până aprobă owner-ul). */
+export async function proposeKelionTool(t: {
+  name: string
+  description: string
+  paramsJson: string
+  httpMethod: string
+  httpUrl: string
+  httpHeaders?: string
+  rationale?: string
+}): Promise<number | null> {
+  if (!dbEnabled()) return null
+  const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
+  if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // doar HTTPS
+  try {
+    const r = await getPool().query<{ id: number }>(
+      `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')
+       ON CONFLICT (name) DO UPDATE SET description=$2, params_json=$3, http_method=$4, http_url=$5, http_headers=$6, rationale=$7, status='pending', created_at=now(), decided_at=NULL
+       RETURNING id`,
+      [name, t.description.slice(0, 500), t.paramsJson || '{}', (t.httpMethod || 'GET').toUpperCase(), t.httpUrl, t.httpHeaders || '{}', t.rationale?.slice(0, 500) ?? null],
+    )
+    return r.rows[0]?.id ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Uneltele lui Kelion după status ('pending' | 'approved' | 'rejected'). */
+export async function listKelionTools(status?: string): Promise<KelionTool[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = status
+      ? await getPool().query('SELECT * FROM kelion_tools WHERE status=$1 ORDER BY created_at DESC', [status])
+      : await getPool().query('SELECT * FROM kelion_tools ORDER BY created_at DESC')
+    return r.rows.map((row: Record<string, unknown>) => ({
+      id: Number(row.id), name: String(row.name), description: String(row.description),
+      paramsJson: String(row.params_json), httpMethod: String(row.http_method), httpUrl: String(row.http_url),
+      httpHeaders: String(row.http_headers), status: String(row.status),
+      rationale: (row.rationale as string) ?? null, createdAt: String(row.created_at),
+    }))
+  } catch {
+    return []
+  }
+}
+
+/** Owner-ul aprobă/respinge o unealtă propusă (un click în admin). */
+export async function decideKelionTool(id: number, approve: boolean): Promise<boolean> {
+  if (!dbEnabled()) return false
+  try {
+    const r = await getPool().query(
+      `UPDATE kelion_tools SET status=$2, decided_at=now() WHERE id=$1`,
+      [id, approve ? 'approved' : 'rejected'],
+    )
     return (r.rowCount ?? 0) > 0
   } catch {
     return false

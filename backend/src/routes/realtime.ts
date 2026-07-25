@@ -12,6 +12,7 @@ import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 import { recallMemories } from '../services/agents.js'
+import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
@@ -201,6 +202,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (name === 'play_avatar_gesture') {
         const gesture = String((args as { gesture?: string }).gesture ?? '').trim()
         return reply.send({ output: JSON.stringify({ gesture }) })
+      }
+      // UNEALTĂ DINAMICĂ APROBATĂ (auto-extindere) — și în voce.
+      if ((await dynamicToolNames().catch(() => new Set<string>())).has(name)) {
+        const out = await runDynamicTool(name, args as Record<string, unknown>)
+        return reply.send({ output: out })
       }
 
       if (name === 'generate_image') {

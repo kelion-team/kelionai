@@ -42,11 +42,13 @@ import {
   saveFaceprint,
   faceDistance,
   loadKv,
+  proposeKelionTool,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { brainComplete } from '../services/brain.js'
+import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
@@ -213,6 +215,31 @@ const LOG_GAP_TOOL: Tool = {
       reason: { type: 'string', description: 'Why it is not possible right now (e.g. "no taxi-booking integration").' },
     },
     required: ['request'],
+  },
+}
+
+// AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul: „Kelion să-și instaleze singur
+// unelte, independent, până la deploy — cu aprobarea mea"). Când Kelion vede că-i
+// lipsește o capacitate care s-ar rezolva printr-un apel la un API public, își
+// PROPUNE o unealtă nouă (definiție HTTP, nu cod). Owner-ul o aprobă cu un click
+// în admin → devine activă instant, fără redeploy. Kelion NU o poate folosi până
+// nu e aprobată.
+const PROPOSE_TOOL: Tool = {
+  name: 'propose_tool',
+  description:
+    "When you realize you're missing a capability that a PUBLIC HTTPS API could provide, propose a new tool for yourself. The owner approves it with one click, then you can use it. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Only propose when genuinely useful; never for something you can already do.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'snake_case tool name (e.g. get_crypto_price).' },
+      description: { type: 'string', description: 'What the tool does, one sentence.' },
+      params_schema: { type: 'object', description: 'JSON-schema object for the parameters (type:object, properties, required).' },
+      http_method: { type: 'string', description: 'GET or POST.' },
+      http_url: { type: 'string', description: 'HTTPS URL with {param} placeholders substituted from arguments.' },
+      http_headers: { type: 'object', description: 'Optional headers (values may use {param}).' },
+      rationale: { type: 'string', description: 'Why you need this (shown to the owner).' },
+    },
+    required: ['name', 'description', 'http_url'],
   },
 }
 
@@ -1436,9 +1463,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     ]
     // ask_brain DOAR pe treapta chat — pe work ar fi recursiv (el ESTE creierul).
     const escalationTools = heavyTurn ? [] : [ASK_BRAIN_TOOL]
+    // AUTO-EXTINDEREA: uneltele dinamice APROBATE de owner (active instant, fără
+    // redeploy) + `propose_tool` ca să-și poată propune altele noi.
+    const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
+    const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1509,6 +1540,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (name === 'generate_image') {
           usage.usd += IMAGE_USD_PER_CALL
           void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
+        }
+        // AUTO-EXTINDERE: Kelion își propune o unealtă nouă (rămâne 'pending'
+        // până o aprobă owner-ul cu un click în admin → activă instant).
+        if (name === 'propose_tool') {
+          const p = input as { name?: string; description?: string; params_schema?: unknown; http_method?: string; http_url?: string; http_headers?: unknown; rationale?: string }
+          const id = await proposeKelionTool({
+            name: String(p.name ?? ''),
+            description: String(p.description ?? ''),
+            paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
+            httpMethod: String(p.http_method ?? 'GET'),
+            httpUrl: String(p.http_url ?? ''),
+            httpHeaders: JSON.stringify(p.http_headers ?? {}),
+            rationale: String(p.rationale ?? ''),
+          })
+          return JSON.stringify(id ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' } : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
+        }
+        // UNEALTĂ DINAMICĂ APROBATĂ: execuție generică prin apel HTTP sigur.
+        if (dynNames.has(name)) {
+          return await runDynamicTool(name, input as Record<string, unknown>)
         }
         // ESCALADAREA DECISĂ DE MODEL: aceeași cale ca în voce — persona
         // completă + limba turei, răspuns de la creierul cu raționament intern.
