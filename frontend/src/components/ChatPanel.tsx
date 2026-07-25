@@ -180,6 +180,14 @@ export default function ChatPanel({
   // reușită (`live`) resetează contorul. Așa un eșec pasager nu mai omoară duplexul.
   const realtimeFailCountRef = useRef(0)
   const REALTIME_MAX_FAILS = 3
+  // RECUPERARE AUTOMATĂ (25 iul — cauza reală „vocea e robotică"): odată latch-uit
+  // pe rezerva TTS (robotică), `realtimeOffRef` rămânea true PENTRU TOTDEAUNA în
+  // acel tab — chiar și după ce sesiunea era reparată pe server, userul auzea
+  // robotul până la un reload TARE, pe care nu avea de unde să-l știe. Acum
+  // latch-ul e pe timp: după `REALTIME_RECOVER_MS` reîncercăm vocea REALĂ, iar
+  // contorul de eșecuri se resetează — un deploy reparat își revine singur.
+  const realtimeOffAtRef = useRef(0)
+  const REALTIME_RECOVER_MS = 90_000
   // SEMI-DUPLEX LA ESCALADARE (Adrian: „când escaladează se folosește aceeași
   // voce și trece în semiduplex când gândește, revine la normal după ce se
   // rezolvă"). Când vocea live cheamă creierul greu (`ask_brain`), gândirea +
@@ -953,6 +961,12 @@ export default function ChatPanel({
       // OpenAI (creierul de voce), care redă singur răspunsul + are barge-in/anti-
       // ecou nativ. Transcriptul curge pe bandă și se salvează pe server. Dacă nu
       // e disponibilă (fără cheie / eșec), cădem O DATĂ pe STT→creier→TTS.
+      // Kelion își reia SINGUR vocea reală: dacă a fost latch-uit pe rezervă dar
+      // a trecut fereastra de recuperare, deblochează și reîncearcă full-duplex.
+      if (realtimeOffRef.current && Date.now() - realtimeOffAtRef.current > REALTIME_RECOVER_MS) {
+        realtimeOffRef.current = false
+        realtimeFailCountRef.current = 0
+      }
       if (!realtimeOffRef.current) {
         try {
           const rv = await startRealtimeVoice({
@@ -1082,7 +1096,7 @@ export default function ChatPanel({
                     `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
                     note ?? 'fără detalii',
                   )
-                  if (giveUp) realtimeOffRef.current = true
+                  if (giveUp) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now() }
                 }
                 if (micRef.current) {
                   // Curăță sesiunea Realtime dacă mai există (mic + WebRTC),
@@ -1130,7 +1144,7 @@ export default function ChatPanel({
           // fel: 3 șanse înainte de a latch-ui pe STT — un eșec pasager la pornire
           // nu mai stinge full-duplex-ul pentru toată sesiunea.
           realtimeFailCountRef.current += 1
-          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) realtimeOffRef.current = true
+          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now() }
         }
       }
 
