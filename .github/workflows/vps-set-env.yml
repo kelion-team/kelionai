@@ -39,6 +39,9 @@ jobs:
           GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_KEY }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_PASS: ${{ secrets.MAIL_PASS }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           RESTART: ${{ inputs.restart }}
         run: |
           set -euo pipefail
@@ -52,7 +55,7 @@ jobs:
           # trăiesc în memoria runner-ului, mascate de GitHub). Le trimitem prin
           # STDIN unui script remote care face upsert în /root/kelion/kelionai.env.
           {
-            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY; do
+            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET; do
               val="${!name:-}"
               [ -n "$val" ] && printf '%s=%s\n' "$name" "$val"
             done
