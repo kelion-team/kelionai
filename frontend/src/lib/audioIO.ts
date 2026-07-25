@@ -958,11 +958,47 @@ function clearGapTimer(): void {
   }
 }
 
+// ── VOLUM UNIC PENTRU VOCEA LUI KELION (25 iul — Adrian: „volumul audio
+// incontrolabil") ────────────────────────────────────────────────────────────
+// Până azi aplicația NU avea NICIO comandă de volum: elementul audio Realtime
+// și cel de TTS porneau fix pe 1.0. O singură valoare, persistată, aplicată pe
+// TOATE elementele vocii (Realtime + TTS) — sliderul din ChatPanel o mișcă live.
+const VOL_KEY = 'kelion:voice-volume'
+let voiceVolume = ((): number => {
+  const v = Number(localStorage.getItem(VOL_KEY) ?? '1')
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 1
+})()
+const voiceElements = new Set<HTMLAudioElement>()
+
+export function getVoiceVolume(): number {
+  return voiceVolume
+}
+
+export function setVoiceVolume(v: number): void {
+  voiceVolume = Math.min(1, Math.max(0, v))
+  try {
+    localStorage.setItem(VOL_KEY, String(voiceVolume))
+  } catch {
+    /* privat/plin — volumul rămâne pe sesiune */
+  }
+  for (const el of voiceElements) el.volume = voiceVolume
+}
+
+/** Înscrie un element audio al vocii ca să urmeze volumul global (și acum, și la schimbări). */
+export function registerVoiceAudioElement(el: HTMLAudioElement): () => void {
+  el.volume = voiceVolume
+  voiceElements.add(el)
+  return () => voiceElements.delete(el)
+}
+
 function playNow(base64Mp3: string): void {
   try {
     const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`)
+    audio.volume = voiceVolume
+    voiceElements.add(audio)
     curVoice = audio
     const done = (): void => {
+      voiceElements.delete(audio)
       if (curVoice === audio) curVoice = null
       stopLevelLoop()
       playNextQueued()

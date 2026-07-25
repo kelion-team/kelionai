@@ -36,6 +36,8 @@ import {
   hasVoiceprint,
   getPendingVoiceFeatures,
   clearPendingVoiceFeatures,
+  getVoiceVolume,
+  setVoiceVolume,
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
@@ -141,6 +143,8 @@ export default function ChatPanel({
   const [busy, setBusy] = useState(false)
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front”.
   const [listening, setListening] = useState(false)
+  // VOLUMUL VOCII (25 iul): valoarea persistată din audioIO, oglindită în slider.
+  const [voiceVol, setVoiceVolState] = useState(() => getVoiceVolume())
   // DICTARE LIVE: fraza curentă, cuvânt cu cuvânt, cu efect cinematografic pe
   // bandă cât vorbește Adrian; se golește când fraza pleacă la creier.
   const [liveVoice, setLiveVoice] = useState('')
@@ -1762,6 +1766,24 @@ export default function ChatPanel({
           >
             {listening ? '●' : '🎤'}
           </button>
+          {/* VOLUMUL VOCII (25 iul — Adrian: „volumul audio incontrolabil"):
+              o singură comandă pentru TOATĂ vocea lui Kelion (Realtime + TTS),
+              persistată; până azi nu exista niciun control de volum în aplicație. */}
+          <input
+            type="range"
+            className="composer-volume"
+            min={0}
+            max={100}
+            value={Math.round(voiceVol * 100)}
+            onChange={(e) => {
+              const v = Number(e.target.value) / 100
+              setVoiceVolState(v)
+              setVoiceVolume(v)
+            }}
+            aria-label="Volumul vocii lui Kelion"
+            title={`Volum voce: ${Math.round(voiceVol * 100)}%`}
+            style={{ width: 64, accentColor: 'var(--accent, #7aa2ff)', alignSelf: 'center' }}
+          />
           <button
             type="button"
             className={`composer-send ${queueing ? 'queueing' : ''}`}

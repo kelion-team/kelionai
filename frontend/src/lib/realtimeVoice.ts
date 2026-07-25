@@ -8,7 +8,7 @@
 // Cheia OpenAI NU e niciodată aici — o ține backendul. Modelul + vocea + limba
 // se injectează server-side; clientul trimite doar limba curentă ca hint.
 
-import { driveVoiceLevelFromElement } from './audioIO'
+import { driveVoiceLevelFromElement, registerVoiceAudioElement } from './audioIO'
 
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
@@ -131,6 +131,10 @@ export async function startRealtimeVoice(
     audioEl.autoplay = true
     audioEl.style.display = 'none'
     document.body.appendChild(audioEl)
+    // VOLUM CONTROLABIL (25 iul): vocea Realtime urmează volumul global al
+    // aplicației (sliderul din chat) — până azi pornea fix pe 1.0, nereglabil.
+    const unregisterVol = registerVoiceAudioElement(audioEl)
+    cleanups.push(unregisterVol)
     cleanups.push(() => audioEl.remove())
     let stopLip: (() => void) | null = null
     pc.ontrack = (ev) => {
@@ -214,6 +218,8 @@ export async function startRealtimeVoice(
     // Textul parțial pe id-uri, ca să salvăm turele complete în istoric.
     const userText = new Map<string, string>()
     const asstText = new Map<string, string>()
+    // Ultima limbă ANCORATĂ în sesiunea live — re-ancorăm doar la schimbare.
+    let anchoredLang = ''
     // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
     // function_call_arguments.done — legate prin call_id.
     const toolNames = new Map<string, string>()
@@ -236,9 +242,15 @@ export async function startRealtimeVoice(
         userText.delete(itemId)
         onUserTranscript?.(t, true)
         // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
-        // (session.update, fără repornire) — „limba aleatoare" dispare: de-acum
-        // fiecare frază e transcrisă în limba stabilită, nu ghicită de la zero.
+        // (session.update, fără repornire) — „limba aleatoare" dispare.
+        // DOAR LA SCHIMBARE (25 iul — testul live al lui Adrian: „sacadat, voci
+        // necontrolate"): înainte, ancora rula session.update + injecție de
+        // sistem la FIECARE frază — zgâlțâia sesiunea audio în plin răspuns.
+        // Limba nu se schimbă frază de frază; ancorăm o dată și re-ancorăm
+        // numai când serverul comite ALTĂ limbă.
         persistTranscript('user', t, (lang) => {
+          if (lang === anchoredLang) return
+          anchoredLang = lang
           send({
             type: 'session.update',
             session: {
@@ -246,9 +258,6 @@ export async function startRealtimeVoice(
               audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
             },
           })
-          // RE-ANCORARE PER-TURĂ (25 iul: Kelion aluneca în rusă chiar și fără
-          // vorbire): pe lângă transcriere, injectăm un reminder de SISTEM în
-          // conversație — modelul e re-legat de limbă la FIECARE replică.
           const names: Record<string, string> = { ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese', it: 'Italian', de: 'German' }
           const nm = names[lang] ?? 'English'
           send({
