@@ -28,17 +28,6 @@ export interface RealtimeVoiceOpts {
   /** Transcriptul lui Kelion: (text, final). */
   onAssistantTranscript?: (text: string, final: boolean) => void
   /**
-   * RĂSPUNSUL COMPLET s-a terminat (evenimentul `response.done` al OpenAI —
-   * NU `output_audio_transcript.done`, care marchează doar sfârșitul UNUI
-   * segment/item de transcript, nu al întregului răspuns). Bug real 25 iul:
-   * „vocea pe frază" folosea `output_audio_transcript.done` ca semnal de
-   * închidere → un răspuns cu mai multe segmente/unelte tăia vocea după
-   * primele câteva cuvinte (restul rămânea doar scris). Folosește ACEST
-   * callback, nu `onAssistantTranscript(_, true)`, ca să știi sigur când să
-   * închizi sesiunea plătită.
-   */
-  onResponseDone?: () => void
-  /**
    * AUTONOMIA VOCII: modelul cere o unealtă (hărți/vreme/web/Gmail/afișare pe
    * ecran...). Handler-ul o execută (de regulă prin POST /api/realtime/tool)
    * și întoarce rezultatul ca string — trimis înapoi modelului, care continuă
@@ -80,16 +69,11 @@ function persistTranscript(
 let activeVoice: { stop: () => void } | null = null
 const VOICE_BC = 'kelion-voice'
 // ELEMENT AUDIO PERSISTENT (25 iul — Adrian: „în setarea actuală nu are
-// audio"): „vocea pe frază" (închide după fiecare schimb, redeschide singură
-// la vorbire — vezi speechWake.ts) înseamnă că sesiunea se recreează des, FĂRĂ
-// niciun clic direct al userului (redeschiderea vine din detecția locală de
-// vorbire, nu dintr-un gest). Un `<audio>` NOU la fiecare redeschidere repornea
-// de la zero blocajul de autoplay al browserului — primul `.play()` reușea
-// (pornit dintr-un clic real), dar elementul acela se pierdea la stop() și
-// următoarea redeschidere lovea din nou blocajul, de data asta FĂRĂ gest la
-// îndemână ca să-l deblocheze → tăcere. Fix: UN SINGUR element, creat o
-// singură dată și REFOLOSIT la fiecare redeschidere — odată deblocat de un
-// gest real, rămâne deblocat (schimbăm doar `srcObject`, nu elementul).
+// audio"): un `<audio>` nou creat la fiecare (re)pornire a sesiunii poate lovi
+// blocajul de autoplay al browserului dacă pornirea aia nu vine dintr-un gest
+// direct al userului. Fix: UN SINGUR element, creat o singură dată și
+// REFOLOSIT la fiecare pornire — odată deblocat de un gest real, rămâne
+// deblocat (schimbăm doar `srcObject`, nu elementul).
 let sharedAudioEl: HTMLAudioElement | null = null
 function getSharedAudioEl(): HTMLAudioElement {
   if (sharedAudioEl && document.body.contains(sharedAudioEl)) return sharedAudioEl
@@ -115,7 +99,7 @@ try {
 export async function startRealtimeVoice(
   opts: RealtimeVoiceOpts = {},
 ): Promise<RealtimeVoiceHandle> {
-  const { onState, onUserTranscript, onAssistantTranscript, onResponseDone, onToolCall, signal } = opts
+  const { onState, onUserTranscript, onAssistantTranscript, onToolCall, signal } = opts
   onState?.('connecting')
 
   // Orice sesiune anterioară din ACEST tab moare înainte să pornească alta.
@@ -355,17 +339,10 @@ export async function startRealtimeVoice(
         asstText.set(itemId, t)
         onAssistantTranscript?.(t, false)
       } else if (type === 'response.output_audio_transcript.done') {
-        // Doar UN segment/item s-a terminat — poate fi urmat de altele în
-        // ACELAȘI răspuns (ex. apel de unealtă → continuare vorbită). NU
-        // închide sesiunea aici (vezi `response.done` mai jos).
         const t = String(m.transcript ?? asstText.get(itemId) ?? '')
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
-      } else if (type === 'response.done') {
-        // ÎNTREG răspunsul (toate segmentele/uneltele) s-a încheiat — ACUM e
-        // sigur să închidem sesiunea plătită („voce pe frază").
-        onResponseDone?.()
       } else if (type === 'response.output_item.added') {
         // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
         const item = (m.item as Record<string, unknown>) ?? {}
