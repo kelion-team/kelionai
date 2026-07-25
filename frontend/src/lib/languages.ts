@@ -8,10 +8,10 @@ export interface SpeechLang {
   readonly label: string
 }
 
-// DOAR cele 7 limbi ale aplicației (regula finală, Adrian: „gardat pe cele 7,
-// niciodată rusă"). Lista veche de 27 permitea alegerea rusei din Setări, care
-// devenea limbă persistată cu lock absolut — ocolind toată garda serverului.
-// Serverul respinge acum orice cod din afara celor 7 (routes/prefs.ts).
+// TOATE limbile rămân (ordinul lui Adrian, 25 iul: „îmi lași toate limbile,
+// nu mai scoți nimic"). Tăierea la 7 făcută mai devreme în aceeași zi a fost
+// GREȘITĂ — micșora produsul în loc să repare problema reală (deriva automată
+// a limbii, care e gardată separat în services/lang.ts pe server).
 export const LANGS: readonly SpeechLang[] = [
   { code: 'en-US', label: 'English' },
   { code: 'ro-RO', label: 'Română' },
@@ -20,6 +20,26 @@ export const LANGS: readonly SpeechLang[] = [
   { code: 'es-ES', label: 'Español' },
   { code: 'it-IT', label: 'Italiano' },
   { code: 'pt-BR', label: 'Português' },
+  { code: 'nl-NL', label: 'Nederlands' },
+  { code: 'pl-PL', label: 'Polski' },
+  { code: 'ru-RU', label: 'Русский' },
+  { code: 'uk-UA', label: 'Українська' },
+  { code: 'tr-TR', label: 'Türkçe' },
+  { code: 'ar-XA', label: 'العربية' },
+  { code: 'hi-IN', label: 'हिन्दी' },
+  { code: 'ja-JP', label: '日本語' },
+  { code: 'ko-KR', label: '한국어' },
+  { code: 'zh-CN', label: '中文' },
+  { code: 'sv-SE', label: 'Svenska' },
+  { code: 'da-DK', label: 'Dansk' },
+  { code: 'nb-NO', label: 'Norsk' },
+  { code: 'fi-FI', label: 'Suomi' },
+  { code: 'cs-CZ', label: 'Čeština' },
+  { code: 'el-GR', label: 'Ελληνικά' },
+  { code: 'hu-HU', label: 'Magyar' },
+  { code: 'id-ID', label: 'Indonesia' },
+  { code: 'th-TH', label: 'ไทย' },
+  { code: 'vi-VN', label: 'Tiếng Việt' },
 ]
 
 // Limba de pornire a recognizer-ului (regula finală, Adrian 24 iul: „default
