@@ -42,7 +42,9 @@ export function htmlToText(html: string): string {
 export function isAutomated(headers: Map<string, unknown>, fromAddr: string): boolean {
   const f = fromAddr.toLowerCase()
   if (f === config.mail.user.toLowerCase()) return true // our own address
-  if (/(^|[.@+])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|notifications?)([.@+]|$)/.test(f)) {
+  // Delimitatorii includ și cratima (25 iul): `billing-alert@`, `system-notification@`
+  // treceau de gardă (doar [.@+] era acceptat) și primeau scrisoare de client.
+  if (/(^|[.@+_-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|notifications?|alerts?)([.@+_-]|$)/.test(f)) {
     return true
   }
   const auto = String(headers.get('auto-submitted') ?? '').toLowerCase()
@@ -116,6 +118,11 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   const draft = await draftReply(fromAddr, subject, body)
   const lang = detectLang(body) || 'en'
 
+  // Adevărul pentru admin (25 iul): forward-ul de mai jos declara „răspuns
+  // trimis" pe baza EXISTENȚEI draftului, nu a trimiterii — dacă SMTP-ul pica
+  // la reply dar mergea la forward, adminul credea fals că clientul a primit.
+  let replySent = false
+
   if (draft) {
     // First line = salutation, the rest = the letter body.
     const nl = draft.indexOf('\n')
@@ -127,7 +134,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
       salutation: salutation || 'Dear correspondent,',
       body: letterBody,
     })
-    const replySent = await sendMail({
+    replySent = await sendMail({
       to: fromAddr,
       subject: `Re: ${subject}`,
       html,
@@ -147,8 +154,10 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
     html:
       `<p><b>De la:</b> ${esc(fromName)} &lt;${esc(fromAddr)}&gt;<br><b>Subiect:</b> ${esc(subject)}</p>` +
       `<hr><p style="white-space:pre-wrap">${esc(body)}</p>` +
-      (draft ? `<hr><p><b>Răspuns trimis automat de Kelion:</b></p><p style="white-space:pre-wrap">${esc(draft)}</p>` : '<hr><p><i>Puntea era jos — nu s-a trimis răspuns automat; răspunde tu.</i></p>'),
-    text: `De la: ${fromName} <${fromAddr}>\nSubiect: ${subject}\n\n${body}\n\n---\n${draft ?? '(fără răspuns automat)'}`,
+      (replySent
+        ? `<hr><p><b>Răspuns trimis automat de Kelion:</b></p><p style="white-space:pre-wrap">${esc(draft ?? '')}</p>`
+        : '<hr><p><i>NU s-a trimis răspuns automat (creier indisponibil sau eșec la trimitere) — răspunde tu.</i></p>'),
+    text: `De la: ${fromName} <${fromAddr}>\nSubiect: ${subject}\n\n${body}\n\n---\n${replySent ? draft : '(fără răspuns automat — răspunde tu)'}`,
   })
 
   // Mark seen so it isn't picked up again, but only if it wasn't already seen

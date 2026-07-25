@@ -24,6 +24,8 @@ export interface OrchestratorOpts {
   maxRounds?: number
   maxTokens?: number
   temperature?: number
+  /** Raționament intern pentru modelele cu gândire (Fable/Claude/GPT-o). */
+  reasoning?: 'low' | 'medium' | 'high'
   onText?: (text: string) => void
 }
 
@@ -57,10 +59,12 @@ export async function runOrchestrator(
       ? await openrouterChatStream(model, convo, tools, opts.onText, {
           maxTokens: opts.maxTokens,
           temperature: opts.temperature,
+          reasoning: opts.reasoning,
         })
       : await openrouterChat(model, convo, tools, {
           maxTokens: opts.maxTokens,
           temperature: opts.temperature,
+          reasoning: opts.reasoning,
         })
     totalCost += res.costUsd
     served = res.model

@@ -211,7 +211,7 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -223,6 +223,11 @@ export async function openrouterChatStream(
     usage: { include: true },
     stream_options: { include_usage: true },
   }
+  // RAȚIONAMENT REAL (Adrian, 25 iul: „să gândească la fiecare cerință =
+  // raționament adevărat"): modelele cu gândire internă (Fable/Claude/GPT-o)
+  // primesc buget explicit de raționament. Gândirea NU curge în text — doar
+  // răspunsul final ajunge la user; deltele de reasoning sunt separate în stream.
+  if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
     body.tool_choice = 'auto'
@@ -312,7 +317,7 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -322,6 +327,8 @@ export async function openrouterChat(
     temperature: opts.temperature ?? 0.7,
     usage: { include: true },
   }
+  // Raționament real pentru modelele cu gândire internă (vezi nota din stream).
+  if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
     body.tool_choice = 'auto'

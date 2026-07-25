@@ -189,6 +189,10 @@ export async function* streamChat(
         break
       }
       const json = textBuf.slice(i + 1, j)
+      // desync se propagă ÎN AFARA try-ului (25 iul): aruncat înăuntru, era
+      // înghițit de catch-ul „malformed frame" și mecanismul de tură-proaspătă
+      // descris mai jos nu se declanșa niciodată.
+      let desynced = false
       try {
         const frame = JSON.parse(json) as ChatControl & { turn?: string; desync?: boolean }
         if (typeof frame.turn === 'string') {
@@ -199,7 +203,7 @@ export async function* streamChat(
         } else if (frame.desync) {
           // Server ring buffer overflowed: we can no longer resume this turn.
           turnId = null
-          throw new Error('desync')
+          desynced = true
         } else {
           onControl?.(frame)
         }
@@ -207,6 +211,7 @@ export async function* streamChat(
         /* malformed control frame — ignore */
       }
       textBuf = textBuf.slice(j + 1)
+      if (desynced) throw new Error('desync')
     }
     return out
   }

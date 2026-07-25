@@ -93,8 +93,11 @@ export async function brainComplete(
   onCost?: (usd: number) => void,
 ): Promise<string> {
   try {
+    // reasoning medium (25 iul): creierul de escaladare GÂNDEȘTE real înainte
+    // de răspuns (Fable 5) — cerința lui Adrian „raționament adevărat, complet".
     const r = await openrouterChat(workModel(), [{ role: 'user', content: prompt }], [], {
       maxTokens,
+      reasoning: 'medium',
     })
     if (onCost && r.costUsd > 0) onCost(r.costUsd)
     return r.text.trim()

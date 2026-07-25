@@ -37,6 +37,8 @@ describe('openrouter catalog', () => {
     // Fără cheie OpenRouter (mediul de test) catalogul e gol → orice cerere cade
     // pe implicitul tier-ului, niciodată pe un model neverificat.
     expect(await resolveModel('chat', 'ceva/inexistent')).toBe('openai/gpt-4.1-mini')
-    expect(await resolveModel('work', null)).toBe('anthropic/claude-sonnet-5')
+    // Implicitul work = Fable 5 (Adrian, 25 iul: „Kelion trebuie să folosească
+    // Fable 5") — cel mai capabil model, cu raționament intern.
+    expect(await resolveModel('work', null)).toBe('anthropic/claude-fable-5')
   })
 })

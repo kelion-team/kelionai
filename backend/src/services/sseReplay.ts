@@ -18,6 +18,9 @@ interface Event {
 interface ConversationBuffer {
   seq: number // last used sequence number
   events: Event[] // ring buffer, oldest at index 0
+  // Turele ÎNCHEIATE (25 iul): fără asta, resume-ul nu putea ști dacă tura mai
+  // produce evenimente — replay-a bufferul și ÎNCHIDEA, trunchiind răspunsul.
+  finished: Set<string>
 }
 
 const buffers = new Map<string, ConversationBuffer>()
@@ -34,7 +37,7 @@ function sweep(): void {
 function getBuffer(email: string): ConversationBuffer {
   let buf = buffers.get(email)
   if (!buf) {
-    buf = { seq: 0, events: [] }
+    buf = { seq: 0, events: [], finished: new Set() }
     buffers.set(email, buf)
   }
   return buf
@@ -108,6 +111,13 @@ export function finishTurn(email: string, turnId: string): void {
   // Refresh TTL on finish.
   const ev = buf.events[buf.events.length - 1]
   if (ev && ev.turnId === turnId) ev.ts = Date.now()
+  // Marchează tura ÎNCHEIATĂ — resume-ul (readTurnFrom) se poate opri curat.
+  buf.finished.add(turnId)
+  if (buf.finished.size > 32) {
+    // Nu creștem la nesfârșit; turele vechi ies oricum din ring/TTL.
+    const first = buf.finished.values().next().value
+    if (first !== undefined) buf.finished.delete(first)
+  }
 }
 
 /**
@@ -132,11 +142,28 @@ export async function* readTurnFrom(
     return
   }
 
-  for (const ev of buf.events) {
-    if (ev.seq < startSeq) continue
-    if (ev.turnId !== turnId) continue
-    if (ev.payload === '') continue // skip synthetic turn-start markers
-    yield formatSSE(ev.seq, ev.payload)
+  // LIVE-FOLLOW (25 iul — bug REAL de trunchiere): înainte, bucla replay-a doar
+  // ce era DEJA în buffer și se termina — dacă tura încă rula pe server (ex. o
+  // unealtă de 20s), clientul primea jumătate de răspuns prezentat ca întreg,
+  // fără nicio eroare. Acum: replay ce există, apoi URMĂREȘTE tura vie și cedează
+  // evenimentele noi pe măsură ce sosesc, până când tura e marcată încheiată
+  // (finishTurn) sau expiră TTL-ul — abia atunci stream-ul se închide.
+  let cursor = startSeq
+  const deadline = Date.now() + TTL_MS
+  for (;;) {
+    let emitted = false
+    for (const ev of buf.events) {
+      if (ev.seq < cursor) continue
+      if (ev.turnId !== turnId) continue
+      cursor = ev.seq + 1
+      if (ev.payload === '') continue // skip synthetic turn-start markers
+      emitted = true
+      yield formatSSE(ev.seq, ev.payload)
+    }
+    if (buf.finished.has(turnId)) return // tura e gata — tot ce era de dat s-a dat
+    if (Date.now() > deadline) return // plasă: nu ținem conexiunea la nesfârșit
+    // Tura încă rulează — așteaptă puțin și verifică iar (fără busy-loop).
+    if (!emitted) await new Promise((r) => setTimeout(r, 150))
   }
 }
 

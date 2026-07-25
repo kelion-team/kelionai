@@ -8,9 +8,12 @@ describe('realtimeInstructions', () => {
     expect(ro).toContain('consecvent')
 
     // Tag lung — ruta normalizează la 2 litere înainte; aici primim deja 'en'.
+    // NOTĂ (25 iul): „Romanian" apare LEGITIM și la userii englezi — în LISTA
+    // gărzii de limbi permise („only in: English, Romanian, ..."). Ce contează
+    // e limba STABILITĂ a userului, nu absența cuvântului din gardă.
     const en = realtimeInstructions('en')
-    expect(en).toContain('English')
-    expect(en).not.toContain('Romanian')
+    expect(en).toContain('limba stabilită a utilizatorului este English')
+    expect(en).not.toContain('limba stabilită a utilizatorului este Romanian')
   })
 
   it('limbă NEcunoscută (user nou): începe în engleză și OGLINDEȘTE limba vorbită', () => {

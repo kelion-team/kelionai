@@ -46,6 +46,7 @@ import {
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { brainComplete } from '../services/brain.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
@@ -76,7 +77,11 @@ import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
 // de user, altfel implicitul tier-ului chat (GPT). Întoarce NULL doar dacă lipsește
 // cheia OpenRouter → creierul nu poate porni (mesaj onest, nicio plasă Kimi/GLM).
-async function selectedBrainModel(email: string, text: string, kvRaw?: string | null): Promise<string | null> {
+async function selectedBrainModel(
+  email: string,
+  text: string,
+  kvRaw?: string | null,
+): Promise<{ model: string; heavy: boolean } | null> {
   if (!config.openrouter.key) return null
   let sel: { chat?: string; work?: string } = {}
   try {
@@ -87,11 +92,17 @@ async function selectedBrainModel(email: string, text: string, kvRaw?: string | 
   } catch {
     sel = {}
   }
-  // ESCALADARE automată CHAT → CREIER: cerere grea (raționament/cod/multi-pas)
-  // urcă la treapta CREIER (work, GPT/Claude); restul rămâne pe CHAT (GPT/Gemini).
+  // ESCALADARE automată CHAT → CREIER, pe DOUĂ căi (Adrian, 25 iul: „să
+  // gândească la fiecare cerință = raționament adevărat", nu doar regex):
+  // (1) pre-rutare rapidă: euristica taskDifficulty prinde cererile evident
+  //     grele și pornește direct pe modelul work, cu raționament intern;
+  // (2) judecata MODELULUI: pe treapta chat, modelul primește unealta
+  //     `ask_brain` (aceeași ca vocea) și escaladează SINGUR ce judecă el greu
+  //     — acoperă exact cererile scurte-dar-grele pe care regexul le rata.
   // Persona/voce/limbă/memorie/unelte sunt IDENTICE — se schimbă DOAR modelul.
   const heavy = taskDifficulty(text) >= ESCALATE_AT
-  return heavy ? resolveModel('work', sel.work) : resolveModel('chat', sel.chat)
+  const model = heavy ? await resolveModel('work', sel.work) : await resolveModel('chat', sel.chat)
+  return { model, heavy }
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -200,6 +211,23 @@ const LOG_GAP_TOOL: Tool = {
     properties: {
       request: { type: 'string', description: 'Short, clear description of the capability the user wanted (in English).' },
       reason: { type: 'string', description: 'Why it is not possible right now (e.g. "no taxi-booking integration").' },
+    },
+    required: ['request'],
+  },
+}
+
+// ESCALADAREA DECISĂ DE MODEL (Adrian, 25 iul: „să gândească la fiecare cerință
+// = raționament adevărat"): pe treapta CHAT, modelul rapid poate preda singur o
+// cerere grea CREIERULUI (modelul work cu raționament intern) — aceeași unealtă
+// ca în voce. Acoperă cererile scurte-dar-grele pe care euristica le rata.
+const ASK_BRAIN_TOOL: Tool = {
+  name: 'ask_brain',
+  description:
+    "HEAVY requests only — deep analysis, architecture, coding, math, long multi-step reasoning, anything that needs an expert brain. Pass the user's full request with context; you get back the expert's answer to deliver (rephrase naturally in the conversation's language, keep it complete).",
+  input_schema: {
+    type: 'object',
+    properties: {
+      request: { type: 'string', description: "The user's full request, with any needed context." },
     },
     required: ['request'],
   },
@@ -1381,6 +1409,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     const isAdmin = user.role === 'admin'
 
+    // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
+    // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
+    // el greu; pe treapta WORK nu (ar fi recursiv — el ESTE creierul).
+    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv)
+    const orChatModel = brainSel?.model ?? null
+    const heavyTurn = brainSel?.heavy ?? false
+
     // ── DRUM UNIC: CREIER DIRECT PENTRU TOȚI ───────────────────────────────
     // Orchestratorul OpenRouter (chat/creier, cu escaladare automată) răspunde
     // pentru TOȚI — admin, gratuiți și clienți plătitori (paywall garantat mai
@@ -1399,9 +1434,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_CLICK_AT_TOOL,
       BROWSER_CLOSE_TOOL,
     ]
+    // ask_brain DOAR pe treapta chat — pe work ar fi recursiv (el ESTE creierul).
+    const escalationTools = heavyTurn ? [] : [ASK_BRAIN_TOOL]
     const tools: Tool[] = isAdmin
-      ? [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
-      : [...googleTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1425,7 +1462,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // uneltele + persona + memoria identice indiferent de model; streaming → primul
     // cuvânt instant. Fără cheie OpenRouter = fără creier (nicio plasă Kimi/GLM,
     // scoase definitiv) → mesaj onest în catch.
-    const orChatModel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv)
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -1474,6 +1510,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           usage.usd += IMAGE_USD_PER_CALL
           void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
         }
+        // ESCALADAREA DECISĂ DE MODEL: aceeași cale ca în voce — persona
+        // completă + limba turei, răspuns de la creierul cu raționament intern.
+        // Costul REAL intră în usage → debitat la finalul turei ca orice apel.
+        if (name === 'ask_brain') {
+          const request = String((input as { request?: string }).request ?? '').trim()
+          if (!request) return JSON.stringify({ error: 'empty_request' })
+          const brainPrompt =
+            `${SYSTEM_PROMPT}\n\n` +
+            `CHAT ESCALATION: the fast chat model handed you a request it judged too hard. Answer it fully ` +
+            `and correctly${langName ? `, writing ONLY in ${langName}` : ''}. Plain conversational text, no markdown.\n\n${request}`
+          const answer = await brainComplete(brainPrompt, 4000, (usd) => {
+            usage.usd += usd
+            void recordCost(user.email, 'chat', usd)
+          })
+          return answer || JSON.stringify({ error: 'brain_unavailable' })
+        }
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email, usage,
@@ -1487,6 +1539,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         execTool,
         {
           maxTokens: 5000,
+          // RAȚIONAMENT REAL pe tura grea (25 iul): modelul work GÂNDEȘTE
+          // intern înainte de răspuns; gândirea nu curge în text — doar
+          // răspunsul final. Pe tura ușoară: fără, ca primul cuvânt să rămână
+          // instant (sub 1s, regula de latență).
+          reasoning: heavyTurn ? 'medium' : undefined,
           onText: (txt) => {
             noteFirstWord()
             reply.raw.write(txt)

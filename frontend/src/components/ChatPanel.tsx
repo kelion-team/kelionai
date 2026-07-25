@@ -447,22 +447,42 @@ export default function ChatPanel({
       // VOCEA CLIPULUI (QA 24 iul: scenariul aprobat nu era rostit NICIODATĂ la
       // înregistrare — clipul ieșea mut). Sintetizăm scriptul cu vocea unică
       // (ash, prin /api/tts) și îl redăm peste scenele care se derulează.
-      void fetch('/api/tts', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: p.script, lang: p.lang ?? 'ro-RO' }),
-      })
-        .then(async (r) => {
-          if (!r.ok) return
-          const buf = await r.arrayBuffer()
-          let bin = ''
-          const bytes = new Uint8Array(buf)
-          for (let i = 0; i < bytes.length; i += 0x8000)
-            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-          playVoice(btoa(bin))
-        })
-        .catch(() => {})
+      // PE BUCĂȚI (25 iul): /api/tts taie tăcut la 5000 de caractere — un clip
+      // de 5-10 minute rămânea fără voce de la jumătate. Împărțim scriptul pe
+      // fraze în bucăți ≤3500, le sintetizăm ÎN ORDINE și playVoice le pune în
+      // coadă (aceeași replică, fără tăieturi).
+      void (async () => {
+        const chunks: string[] = []
+        let cur = ''
+        for (const sentence of p.script.split(/(?<=[.!?…])\s+/)) {
+          if (cur && cur.length + sentence.length + 1 > 3500) {
+            chunks.push(cur)
+            cur = sentence
+          } else {
+            cur = cur ? `${cur} ${sentence}` : sentence
+          }
+        }
+        if (cur) chunks.push(cur)
+        for (const chunk of chunks) {
+          try {
+            const r = await fetch('/api/tts', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ text: chunk, lang: p.lang ?? 'ro-RO' }),
+            })
+            if (!r.ok) continue
+            const buf = await r.arrayBuffer()
+            let bin = ''
+            const bytes = new Uint8Array(buf)
+            for (let i = 0; i < bytes.length; i += 0x8000)
+              bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+            playVoice(btoa(bin))
+          } catch {
+            /* o bucată picată nu oprește restul narațiunii */
+          }
+        }
+      })()
       for (const s of p.scenes ?? []) {
         promoTimersRef.current.push(
           window.setTimeout(() => {
@@ -786,7 +806,11 @@ export default function ChatPanel({
     const face = getPendingFaceDescriptor()
 
     const next: ChatMessage[] = [...messages, { role: 'user', content: outgoing, ts: Date.now() }]
-    setMessages([...next, { role: 'assistant', content: '', ts: Date.now() }])
+    // ts STABIL pentru răspunsul-în-curs al ACESTEI ture — updater-ul funcțional
+    // de mai jos îl recunoaște și îl înlocuiește, fără să șteargă mesajele
+    // (ex. transcripte de voce) sosite între timp.
+    const turnTs = Date.now()
+    setMessages([...next, { role: 'assistant', content: '', ts: turnTs }])
     setChatImage(null) // a new turn clears any previously shown image
     // Controlerul de abandon al ACESTEI ture — „stop” îl abortează pe loc.
     const ac = new AbortController()
@@ -818,7 +842,17 @@ export default function ChatPanel({
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // primul cuvânt REAL
         acc += chunk
-        setMessages([...next, { role: 'assistant', content: acc, ts: Date.now() }])
+        // Updater FUNCȚIONAL, nu snapshot (25 iul): cu [...next, ...] fix, un
+        // transcript de VOCE sosit în timpul turei scrise era suprascris de
+        // următorul update și dispărea din chat. Păstrăm orice mesaj adăugat
+        // între timp și doar înlocuim/adăugăm răspunsul în curs al turei.
+        setMessages((cur) => {
+          const base = cur.length >= next.length && cur.slice(0, next.length).every((m, i) => m === next[i])
+            ? cur
+            : next
+          const rest = base.slice(next.length).filter((m) => !(m.role === 'assistant' && m.ts === turnTs))
+          return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
+        })
       }
       // Publică timpul REAL pe contor (doar dacă a venit text vizibil).
       if (firstAt) {
