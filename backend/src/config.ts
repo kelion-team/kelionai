@@ -71,7 +71,10 @@ export const config = {
     // Modele implicite per tier (editabile din env, fără deploy). Chat = rapid,
     // Work = raționament greu/tool-use.
     chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'openai/gpt-4.1-mini').trim(),
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'anthropic/claude-sonnet-5').trim(),
+    // Creierul de escaladare (Adrian, 25 iul: „Kelion trebuie să folosească
+    // Fable 5") — cel mai capabil model disponibil, pentru cererile grele
+    // (ask_brain din voce + tier-ul work din scris).
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'anthropic/claude-fable-5').trim(),
     // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
     // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
     imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),
