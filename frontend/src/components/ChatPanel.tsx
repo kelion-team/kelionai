@@ -45,7 +45,6 @@ import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice } from '../lib/realtimeVoice'
-import { startSpeechWake } from '../lib/speechWake'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
@@ -933,49 +932,11 @@ export default function ChatPanel({
   const micStartingRef = useRef(false)
   const micRetryRef = useRef<number | null>(null)
   const micBackoffRef = useRef(1000)
-  // VOCE PE FRAZĂ (Adrian, 25 iul, dovadă de cost reală: ~$21/oră arși cu
-  // sesiunea plătită deschisă degeaba): sesiunea OpenAI Realtime se ÎNCHIDE
-  // după fiecare schimb de replici; între timp ascultă analizorul LOCAL
-  // gratuit (speechWake) și redeschide sesiunea plătită DOAR când detectează
-  // vorbire reală. Zero cost în tăcere, full-duplex real cât timp se vorbește.
-  const voiceWakeRef = useRef<{ stop: () => void } | null>(null)
-  const stopVoiceWake = (): void => {
-    voiceWakeRef.current?.stop()
-    voiceWakeRef.current = null
-  }
-  // Închide sesiunea PLĂTITĂ chiar acum (schimbul de replici s-a încheiat) și
-  // ascultă GRATUIT, local, până la următoarea vorbire reală — atunci
-  // redeschide sesiunea plătită (ensureMic) automat, singur, fără buton.
-  // ensureMicRef e definit mai jos în componentă, dar funcția asta rulează
-  // abia la runtime (din callback-ul onAssistantTranscript), mult după ce
-  // ensureMicRef există deja — referință sigură prin closure.
-  const closeVoiceAfterExchange = (): void => {
-    if (micManualOffRef.current) return
-    const active = micRef.current
-    if (!active) return
-    active.stop()
-    micRef.current = null
-    setListening(false)
-    micStartingRef.current = false
-    stopVoiceWake()
-    void startSpeechWake(() => {
-      voiceWakeRef.current = null
-      void ensureMicRef.current()
-    })
-      .then((h) => {
-        // A apărut deja o sesiune activă (rar: cursă cu butonul) — nu mai asculta.
-        if (micManualOffRef.current || micRef.current) {
-          h.stop()
-          return
-        }
-        voiceWakeRef.current = h
-      })
-      .catch(() => {
-        // Fără microfon local disponibil acum (rar) — nu rămâne mut definitiv:
-        // reîncearcă direct calea normală.
-        void ensureMicRef.current()
-      })
-  }
+  // „VOCE PE FRAZĂ" — ÎNCERCATĂ ȘI RETRASĂ (25 iul): închidea sesiunea plătită
+  // după fiecare schimb + o redeschidea singură pe detecție locală de vorbire
+  // (`speechWake.ts`). Două regresii reale în aceeași zi (tăia fraza după 2
+  // cuvinte; apoi „aude dar nu vorbește") → Adrian: „revino la chat
+  // fullduplex". Sesiunea rămâne deschisă continuu, ca înainte de experiment.
 
   const onMicErr = (reason: string): void => {
     micRef.current = null
@@ -1033,17 +994,11 @@ export default function ChatPanel({
                 thinkingRef.current = false
               } else setLiveVoice(text)
             },
-            // VOCE PE FRAZĂ (Adrian, 25 iul — cost real: ~$21/oră cu sesiunea
-            // ținută degeaba deschisă). BUG REAL găsit (25 iul, „taie fraza după
-            // 2 cuvinte"): închiderea rula pe `onAssistantTranscript(_, true)`,
-            // care se declanșează la finalul UNUI SEGMENT de transcript — un
-            // răspuns cu mai multe segmente (ex. apel de unealtă → continuă
-            // vorbind) tăia vocea după primul segment scurt, restul rămânea
-            // doar scris. Fix: închide DOAR la `response.done` (întreg
-            // răspunsul, toate segmentele/uneltele, chiar s-a încheiat).
-            onResponseDone: () => {
-              closeVoiceAfterExchange()
-            },
+            // REVENIT LA FULL-DUPLEX (Adrian, 25 iul: „revino la chat
+            // fullduplex" — după 2 regresii reale în aceeași zi pe „voce pe
+            // frază": tăia fraza după 2 cuvinte, apoi „aude dar nu vorbește").
+            // Sesiunea rămâne DESCHISĂ continuu, ca înainte de experiment —
+            // fără închidere automată (fără `onResponseDone` aici).
             // AUTONOMIA VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi
             // lipsesc instrumente de a afișa pe ecran"): uneltele cerute de
             // modelul de voce se execută AICI — show_on_screen direct în client
@@ -1173,9 +1128,6 @@ export default function ChatPanel({
             return
           }
           micRef.current = rv as unknown as MicHandle
-          // Sesiunea plătită tocmai a pornit — nu mai are rost ascultătorul
-          // local gratuit (era pentru cazul în care nu exista nicio sesiune).
-          stopVoiceWake()
           // Stream-ul pre-încălzit e doar pentru calea STT; Realtime își deschide
           // propriul microfon — fără închiderea de aici, captura pre-warm rămânea
           // AGĂȚATĂ în paralel (mic dublu deschis) cât ținea sesiunea de voce.
@@ -1332,7 +1284,7 @@ export default function ChatPanel({
     // cât timp boot-ul era în zbor, iar dublu-click lăsa microfonul mereu
     // aprins. Acum: apăsat în timpul pornirii = OPRIRE (manualOff), iar
     // ensureMic verifică manualOff după fiecare await înainte să instaleze.
-    if (micRef.current || micStartingRef.current || voiceWakeRef.current) {
+    if (micRef.current || micStartingRef.current) {
       micManualOffRef.current = true
       // Eliberează și flagul de pornire: dacă boot-ul chiar e în zbor, vede
       // manualOff la final și se oprește singur; dacă flagul era agățat dintr-o
@@ -1340,9 +1292,6 @@ export default function ChatPanel({
       micStartingRef.current = false
       micRef.current?.stop()
       micRef.current = null
-      // Oprește și ascultătorul local (voce pe frază) — altfel apăsarea pe
-      // OFF cât timp Kelion aștepta tăcut o vorbă nouă n-ar opri nimic vizibil.
-      stopVoiceWake()
       // oprire intenționată: un fragment agățat NU trebuie trimis după teardown
       coalescerRef.current?.cancel()
       setListening(false)
@@ -1401,7 +1350,6 @@ export default function ChatPanel({
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       micRef.current?.stop()
       micRef.current = null
-      stopVoiceWake()
       coalescerRef.current?.cancel()
       stopVoice()
     }
