@@ -39,9 +39,11 @@ describe('openrouter catalog', () => {
     // Implicitul chat = un model REAL gratuit, testat live (tool-call curat +
     // vedere reală) — vezi config.ts pentru dovada testului.
     expect(await resolveModel('chat', 'ceva/inexistent')).toBe('google/gemma-4-26b-a4b-it:free')
-    // Implicitul work = Fable 5 (Adrian, 25 iul: „Kelion trebuie să folosească
-    // Fable 5") — cel mai capabil model, cu raționament intern.
-    expect(await resolveModel('work', null)).toBe('anthropic/claude-fable-5')
+    // LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la
+    // Fable"): implicitul work = ieftin-capabil; Fable 5 rămâne DOAR treapta
+    // 'top', rezervată dificultății extreme.
+    expect(await resolveModel('work', null)).toBe('openai/gpt-5-mini')
+    expect(await resolveModel('top', null)).toBe('anthropic/claude-fable-5')
   })
 
   it('hasActionIntent (25 iul — escaladare economică: ieftin implicit, greu doar pe cereri de acțiune reală)', () => {

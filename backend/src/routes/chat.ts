@@ -45,7 +45,7 @@ import {
   proposeKelionTool,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -121,12 +121,19 @@ async function selectedBrainModel(
   // Când tura ACTUAL trimite o imagine (poză atașată sau cadru de cameră pe
   // „ce vezi?"), escaladăm forțat la treapta work — TOATE modelele work
   // candidate (Fable 5, Sonnet 5, GPT-5, Haiku 4.5) au vision:true confirmat.
-  const heavy =
-    needsVision ||
-    taskDifficulty(text) >= ESCALATE_AT ||
-    (roleFor(email) === 'admin' && hasActionIntent(text))
-  const model = heavy ? await resolveModel('work', sel.work) : await resolveModel('chat', sel.chat)
-  return { model, heavy }
+  // LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la Fable"):
+  // gratuit (chat) → ieftin-capabil (work, implicit gpt-5-mini) → Fable 5
+  // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
+  // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
+  const difficulty = taskDifficulty(text)
+  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  const top = difficulty >= ESCALATE_TOP_AT
+  const model = top
+    ? await resolveModel('top')
+    : heavy
+      ? await resolveModel('work', sel.work)
+      : await resolveModel('chat', sel.chat)
+  return { model, heavy: heavy || top }
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
