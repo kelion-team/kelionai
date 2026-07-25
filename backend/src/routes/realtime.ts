@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory } from '../db.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -11,6 +11,7 @@ import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
+import { recallMemories } from '../services/agents.js'
 import { SYSTEM_PROMPT } from './chat.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
@@ -209,8 +210,28 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
     let meserieName: string | null = null
     const meserieId = await getMeserieActiva(user.email)
     if (meserieId != null) meserieName = getMeserie(meserieId)?.nume ?? null
+
+    // CONTEXT ÎN VOCE (Adrian, 25 iul: „chatul pierde context, nu e coerent").
+    // Cauza: sesiunea de voce pornea OARBĂ — persona + limbă, dar ZERO memorie și
+    // ZERO istoric. La fiecare pornire/reconectare Kelion uita tot. Acum îi dăm,
+    // exact ca la chatul scris: (1) memoria de lungă durată despre user, (2)
+    // ultimele replici ale conversației (scrise + vocale) ca istoric viu.
+    const [memRecall, recent] = await Promise.all([
+      recallMemories(user.email, 'kelion', '').catch(() => ''),
+      getRecentHistory(user.email, 20).catch(() => [] as { role: string; content: string }[]),
+    ])
+    const history = recent
+      .filter((m) => m.content && m.content.trim())
+      .map((m) => `${m.role === 'assistant' ? 'Kelion' : 'Utilizatorul'}: ${m.content.slice(0, 400)}`)
+      .join('\n')
+    const contextBlock =
+      (memRecall || '') +
+      (history
+        ? `\n\nCONVERSAȚIA DE PÂNĂ ACUM (continu-o firesc, ține minte ce s-a spus, nu o relua de la zero):\n${history}`
+        : '')
+
     return reply.send({
-      instructions: realtimeInstructions(lang, meserieName, isAdmin),
+      instructions: realtimeInstructions(lang, meserieName, isAdmin) + contextBlock,
       tools: realtimeTools(),
       voice: config.openai.realtimeVoice,
       lang,
