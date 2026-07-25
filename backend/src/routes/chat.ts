@@ -799,10 +799,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const rawMessages = req.body?.messages
     const image = req.body?.image
     // Cadrele multiple (max 4, doar imagini reale) — cad înapoi pe `image`
-    // singular dacă clientul e vechi.
+    // singular dacă clientul e vechi. slice(-4), nu (0,4) (25 iul): clientul
+    // trimite 8 cadre cu cel mai VECHI primul — păstram exact jumătatea veche
+    // și aruncam prezentul; Kelion vedea scena cu ~2 secunde în urmă.
     const camFrames = (Array.isArray(req.body?.images) ? req.body.images : [])
       .filter((s): s is string => typeof s === 'string' && s.startsWith('data:image'))
-      .slice(0, 4)
+      .slice(-4)
     const imageIsAttachment = req.body?.imageIsAttachment === true
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
@@ -823,6 +825,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
     if (messages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'no usable messages' })
+    }
+
+    // HANDLERUL DE STOP (25 iul — până azi NU exista, deși clientul îl chema):
+    // „stop" scris/vorbit venea aici și rula o TURĂ COMPLETĂ de creier (cost
+    // debitat + „stop" și un răspuns-fantomă salvate în istoric) pe un răspuns
+    // pe care clientul nu-l citea niciodată. Oglinda regex-ului STOP_CMD din
+    // client: confirmăm scurt, zero model, zero istoric.
+    const lastMsg = messages.at(-1)
+    const STOP_CMD =
+      /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
+    if (lastMsg?.role === 'user' && STOP_CMD.test(lastMsg.content)) {
+      return reply.send({ ok: true, stopped: true })
     }
 
     // The user's ESTABLISHED language (what they actually use), not their Google

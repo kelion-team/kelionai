@@ -963,20 +963,28 @@ export default function ChatPanel({
                 thinkingRef.current = true
                 micRef.current?.setMuted?.(true)
                 // Plasă de siguranță: dacă răspunsul nu mai sosește (eroare),
-                // reactivăm microfonul după 30s ca să nu rămână mut definitiv.
+                // reactivăm microfonul ca să nu rămână mut definitiv. 125s, nu
+                // 30s (25 iul): creierul are timeout 120s — cu 30s, plasa se
+                // deschidea ÎN TIMPUL gândirii la cereri grele de 40-60s și
+                // vorbirea userului pornea un răspuns paralel peste cel în lucru.
                 window.setTimeout(() => {
                   if (thinkingRef.current) {
                     thinkingRef.current = false
                     micRef.current?.setMuted?.(false)
                   }
-                }, 30000)
+                }, 125000)
               }
               // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"): la „look", capturăm
               // cadrul curent din camera userului și-l injectăm în apel, ca
               // serverul să-l dea modelului cu vedere. Fără cameră/cadru →
               // serverul întoarce „no_camera" și Kelion o spune firesc.
               if (name === 'look' || name === 'see') {
-                const frame = latestFrameRef.current ?? captureRef.current?.() ?? ''
+                // DOAR cu camera PORNITĂ (25 iul): cu camera închisă,
+                // latestFrameRef păstra ultimul cadru dinaintea opririi și
+                // Kelion „vedea" cu convingere o scenă veche de minute.
+                const frame = cameraOnRef.current
+                  ? (latestFrameRef.current ?? captureRef.current?.() ?? '')
+                  : ''
                 if (frame) (args as Record<string, unknown>).image = frame
               }
               if (name === 'show_on_screen') {
@@ -1385,8 +1393,10 @@ export default function ChatPanel({
       if (timer) globalThis.clearInterval(timer)
       if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId)
       // Cameră oprită → tamponul se golește (cadre vechi nu au voie să apară
-      // într-o tură de mai târziu, după repornire).
+      // într-o tură de mai târziu, după repornire). Și latestFrameRef (25 iul):
+      // rămânea plin și `look` din voce descria o scenă veche cu camera închisă.
       frameBufRef.current = []
+      latestFrameRef.current = null
     }
   }, [cameraOn])
 

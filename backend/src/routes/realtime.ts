@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost } from '../db.js'
+import { maybeAutoRecharge } from '../services/autorecharge.js'
+import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
@@ -27,6 +29,21 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
+
+      // PAYWALL PE VOCE (25 iul — gaură de bani REALĂ găsită la audit): chatul
+      // scris bloca la 0 credite, dar vocea pornea sesiuni nelimitat pe cheile
+      // platformei. Aceeași regulă ca în scris: fără credit → fără sesiune
+      // (cu ultima șansă de reîncărcare automată); adminul e scutit.
+      const isAdminPay = user.email.toLowerCase() === config.adminEmail
+      if (
+        config.stripe.secretKey &&
+        !isAdminPay &&
+        (await getBalance(user.email)) <= 0 &&
+        !(await maybeAutoRecharge(user.email, user.name)) &&
+        (await getBalance(user.email)) <= 0
+      ) {
+        return reply.code(402).send({ error: 'no_credit' })
+      }
 
       const raw = String(req.body?.sdp ?? '')
       if (!raw.trim()) return reply.code(400).send({ error: 'bad_request: sdp required' })
@@ -86,6 +103,18 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const args = (req.body?.args ?? {}) as Record<string, unknown>
       if (!name) return reply.code(400).send({ error: 'bad_request' })
 
+      // CONTABILITATE PE VOCE (25 iul): fiecare unealtă din voce costă bani REALI
+      // (creier, vedere, imagini, căutare) și până azi nu se debita NIMIC —
+      // spre deosebire de chatul scris (recordCost + debitWallet pe fiecare tură).
+      // settle() se cheamă înaintea fiecărui return care a consumat ceva.
+      const isAdminTool = user.email.toLowerCase() === config.adminEmail
+      let toolCostUsd = 0
+      const settle = (): void => {
+        if (toolCostUsd <= 0) return
+        void recordCost(user.email, 'voice', toolCostUsd)
+        if (!isAdminTool) void debitWallet(user.email, toolCostUsd, `voice:${name}`)
+      }
+
       // Token Google proaspăt (ca în chat) pentru uneltele Gmail/Calendar/etc.
       let token = user.googleAccessToken ?? ''
       if (user.googleRefreshToken && (user.googleTokenExp ?? 0) < Date.now() + 60_000) {
@@ -102,7 +131,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         if (!/^data:image\//.test(image)) {
           return reply.send({ output: JSON.stringify({ error: 'no_camera', hint: 'camera closed' }) })
         }
-        const seen = await describeScene(image, question)
+        const seen = await describeScene(image, question, (usd) => { toolCostUsd += usd })
+        settle()
         return reply.send({ output: seen || JSON.stringify({ error: 'vision_unavailable' }) })
       }
 
@@ -122,7 +152,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           `VOICE ESCALATION: the fast voice model handed you a request it judged too hard. Answer it fully ` +
           `but CONCISELY, as plain text to be SPOKEN aloud (no markdown, no lists). Speak ONLY in ` +
           `${langLabel(lang)} — never switch, regardless of the language mixed into the request below.\n\n${request}`
-        const answer = await brainComplete(prompt, 2000)
+        const answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
+        settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }
 
@@ -131,11 +162,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         if (!prompt) return reply.send({ output: JSON.stringify({ error: 'no_prompt' }) })
         const r = await generateImage(prompt)
         if ('error' in r) return reply.send({ output: JSON.stringify({ error: r.error }) })
+        toolCostUsd += IMAGE_USD_PER_CALL
+        settle()
         const url = `https://${req.headers.host ?? 'kelionai.app'}/api/image/${r.id}`
         return reply.send({ output: JSON.stringify({ shown: true, url }), screen: { url, title: 'Imagine' } })
       }
 
+      // Căutările au cost fix (ca în chatul scris); skill-urile Google (Gmail,
+      // Calendar...) sunt gratuite — rulează pe tokenul userului, nu pe cheile noastre.
+      if (name === 'web_search' || name === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
       const out = await runGoogleTool(name, args, token)
+      settle()
       // screen_url din rezultat → clientul deschide monitorul (ca în chat).
       let screen: { url: string; title: string } | undefined
       try {

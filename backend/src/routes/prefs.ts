@@ -10,6 +10,7 @@ import {
   loadKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
+import { SUPPORTED_LANGS } from '../services/lang.js'
 
 // ARANJAREA AVATARULUI (Adrian, 11 iul: „salvează mărimea actuală a lui
 // Kelion"): poziția (vw/vh) și scala colțului, salvate PE SERVER per
@@ -82,7 +83,10 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
 
     if (req.body?.speechLang !== undefined) {
       const lang = req.body.speechLang?.trim()
-      if (!lang || !/^[a-z]{2}(-[A-Z]{2})?$/.test(lang)) {
+      // Aceeași gardă ca detecția automată (25 iul): DOAR cele 7 limbi ale
+      // aplicației pot fi persistate — din Setări se putea alege rusa (sau
+      // oricare din 27), care devenea lock ABSOLUT și ocolea regula finală.
+      if (!lang || !/^[a-z]{2}(-[A-Z]{2})?$/.test(lang) || !SUPPORTED_LANGS.has(lang.slice(0, 2).toLowerCase())) {
         return reply.code(400).send({ error: 'bad_request' })
       }
       await setSpeechLangPref(user.email, lang)

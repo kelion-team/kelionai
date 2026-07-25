@@ -44,6 +44,11 @@ export async function runOrchestrator(
   const convo: OrMessage[] = [...messages]
   let totalCost = 0
   let served = model
+  // TOT textul rostit/afișat, pe toate rundele (25 iul): rundele intermediare
+  // („stai să verific...") curgeau prin onText și erau ROSTITE, dar doar runda
+  // finală intra în istoric → la reload lipseau bucăți din ce s-a spus, iar la
+  // epuizarea rundelor tura se încheia complet MUTĂ ('').
+  let allText = ''
 
   for (let round = 1; round <= maxRounds; round++) {
     // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
@@ -59,10 +64,11 @@ export async function runOrchestrator(
         })
     totalCost += res.costUsd
     served = res.model
+    if (res.text) allText = allText ? `${allText}\n${res.text}` : res.text
 
     if (res.toolCalls.length === 0) {
       // La streaming textul a curs deja prin onText; nu-l re-emitem.
-      return { text: res.text, costUsd: totalCost, model: served, rounds: round }
+      return { text: allText, costUsd: totalCost, model: served, rounds: round }
     }
 
     // Mesajul asistentului care CERE uneltele (păstrează tool_calls pentru legătură).
@@ -80,5 +86,5 @@ export async function runOrchestrator(
   }
 
   // Prea multe runde de unelte — întoarce ce avem, fără să blocăm userul.
-  return { text: '', costUsd: totalCost, model: served, rounds: maxRounds }
+  return { text: allText, costUsd: totalCost, model: served, rounds: maxRounds }
 }

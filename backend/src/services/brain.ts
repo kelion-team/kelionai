@@ -52,7 +52,11 @@ export const brain = {
 // Kelion n-avea ochi. Clientul capturează un cadru din cameră și-l trimite aici;
 // îl dăm unui model cu vedere (GPT/Gemini prin OpenRouter) și întoarcem o
 // descriere scurtă, naturală, de rostit cu voce. Gol la eșec — nu aruncă.
-export async function describeScene(imageDataUrl: string, question?: string): Promise<string> {
+export async function describeScene(
+  imageDataUrl: string,
+  question?: string,
+  onCost?: (usd: number) => void,
+): Promise<string> {
   try {
     const r = await openrouterChat(
       config.openrouter.chatDefault,
@@ -73,6 +77,7 @@ export async function describeScene(imageDataUrl: string, question?: string): Pr
       [],
       { maxTokens: 400 },
     )
+    if (onCost && r.costUsd > 0) onCost(r.costUsd)
     return r.text.trim()
   } catch {
     return ''
@@ -80,11 +85,18 @@ export async function describeScene(imageDataUrl: string, question?: string): Pr
 }
 
 // Un răspuns text scurt de la creier (mailbox, admin). Gol la eșec — nu aruncă.
-export async function brainComplete(prompt: string, maxTokens = 1024): Promise<string> {
+// onCost (25 iul): vocea trebuie să DEBITEZE costul real al escaladării — fără
+// callback, costul se pierdea și userul consuma creier gratis.
+export async function brainComplete(
+  prompt: string,
+  maxTokens = 1024,
+  onCost?: (usd: number) => void,
+): Promise<string> {
   try {
     const r = await openrouterChat(workModel(), [{ role: 'user', content: prompt }], [], {
       maxTokens,
     })
+    if (onCost && r.costUsd > 0) onCost(r.costUsd)
     return r.text.trim()
   } catch {
     return ''

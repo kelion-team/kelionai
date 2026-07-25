@@ -170,7 +170,10 @@ export function detectSpeechLang(text: string, previousLang?: string | null): st
 // românească era auzită ca RUSĂ, iar o comitere oarbă ar fi fixat „ru" pentru
 // user și ar fi otrăvit toate sesiunile. O transcriere aiurea (rusă, ucraineană
 // etc.) e ignorată; limba stabilită rămâne cea reală (sau engleza default).
-const SUPPORTED_LANGS = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
+// EXPORTAT (25 iul): și preferința EXPLICITĂ din Setări trece prin aceeași
+// gardă — până azi doar detecția automată era limitată la cele 7 limbi, iar
+// din UI se putea persista ORICE limbă (inclusiv rusa), ocolind regula finală.
+export const SUPPORTED_LANGS = new Set(['en', 'ro', 'fr', 'es', 'pt', 'it', 'de'])
 
 // Per-user "pending switch" state: a NEW language seen once, waiting for its
 // confirming second message. In-memory is fine — losing it merely re-asks for
