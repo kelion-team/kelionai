@@ -84,10 +84,13 @@ export const config = {
     // acțiune reală (taskDifficulty / hasActionIntent) — vezi selectedBrainModel
     // din chat.ts. Editabil din env dacă vrei alt model gratuit.
     chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
-    // Creierul de escaladare (Adrian, 25 iul: „Kelion trebuie să folosească
-    // Fable 5") — cel mai capabil model disponibil, pentru cererile grele
-    // (ask_brain din voce + tier-ul work din scris).
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'anthropic/claude-fable-5').trim(),
+    // LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la Fable"):
+    // treapta 'work' = ieftin-capabil, implicit pentru ORICE escaladare
+    // normală (acțiune reală / dificultate moderată) — nu mai e Fable 5 aici.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'openai/gpt-5-mini').trim(),
+    // Treapta FINALĂ 'top' — Fable 5, rezervat DOAR pentru dificultate extremă
+    // (peste ESCALATE_TOP_AT), nu userul o alege, e plasa de siguranță de sus.
+    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'anthropic/claude-fable-5').trim(),
     // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
     // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
     imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),

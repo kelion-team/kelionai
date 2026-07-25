@@ -9,7 +9,9 @@ import { config } from '../config.js'
 const OR_BASE = 'https://openrouter.ai/api/v1'
 const CATALOG_TTL_MS = 10 * 60 * 1000
 
-export type ModelTier = 'chat' | 'work'
+// 'top' = treapta finală a ladder-ului (Fable 5, doar dificultate extremă) —
+// validează pe ACELAȘI catalog filtrat vision+tools ca 'work', fallback diferit.
+export type ModelTier = 'chat' | 'work' | 'top'
 
 export interface CatalogModel {
   id: string
@@ -160,6 +162,12 @@ export function taskDifficulty(text: string): number {
 
 // Prag de escaladare: peste el, cererea urcă de la CHAT la CREIER.
 export const ESCALATE_AT = 60
+// LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la Fable"):
+// gratuit (chat) → ieftin-capabil (creier, implicit) → Fable 5 DOAR pe
+// dificultate cu adevărat extremă. Sub acest prag suplimentar, creierul
+// folosește modelul ieftin (workDefault/sel.work); peste el, urcă la
+// TOP_DEFAULT indiferent ce a ales userul — rezervat pentru cazurile chiar grele.
+export const ESCALATE_TOP_AT = 85
 
 // INTENȚIE DE EXECUȚIE (Adrian, 25 iul: „escaladarea se face de la cel mai
 // ieftin și capabil model până la sarcini cu adevărat grele, și se revine la
@@ -177,10 +185,11 @@ export function hasActionIntent(text: string): boolean {
 
 /** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
-  const fallback = tier === 'chat' ? config.openrouter.chatDefault : config.openrouter.workDefault
+  const fallback =
+    tier === 'chat' ? config.openrouter.chatDefault : tier === 'top' ? config.openrouter.topDefault : config.openrouter.workDefault
   if (!wanted) return fallback
   const cat = await getCatalog()
-  const list = tier === 'chat' ? cat.chat : cat.work
+  const list = tier === 'chat' ? cat.chat : cat.work // 'work' și 'top' validează pe același catalog (vision+tools)
   return list.some((m) => m.id === wanted) ? wanted : fallback
 }
 

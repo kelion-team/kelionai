@@ -68,6 +68,27 @@ function persistTranscript(
 // (2) BroadcastChannel între taburi — sesiunea nouă le închide pe ale altora.
 let activeVoice: { stop: () => void } | null = null
 const VOICE_BC = 'kelion-voice'
+// ELEMENT AUDIO PERSISTENT (25 iul — Adrian: „în setarea actuală nu are
+// audio"): „vocea pe frază" (închide după fiecare schimb, redeschide singură
+// la vorbire — vezi speechWake.ts) înseamnă că sesiunea se recreează des, FĂRĂ
+// niciun clic direct al userului (redeschiderea vine din detecția locală de
+// vorbire, nu dintr-un gest). Un `<audio>` NOU la fiecare redeschidere repornea
+// de la zero blocajul de autoplay al browserului — primul `.play()` reușea
+// (pornit dintr-un clic real), dar elementul acela se pierdea la stop() și
+// următoarea redeschidere lovea din nou blocajul, de data asta FĂRĂ gest la
+// îndemână ca să-l deblocheze → tăcere. Fix: UN SINGUR element, creat o
+// singură dată și REFOLOSIT la fiecare redeschidere — odată deblocat de un
+// gest real, rămâne deblocat (schimbăm doar `srcObject`, nu elementul).
+let sharedAudioEl: HTMLAudioElement | null = null
+function getSharedAudioEl(): HTMLAudioElement {
+  if (sharedAudioEl && document.body.contains(sharedAudioEl)) return sharedAudioEl
+  const el = document.createElement('audio')
+  el.autoplay = true
+  el.style.display = 'none'
+  document.body.appendChild(el)
+  sharedAudioEl = el
+  return el
+}
 const voiceSessionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 let voiceBc: BroadcastChannel | null = null
 try {
@@ -168,15 +189,19 @@ export async function startRealtimeVoice(
     }
 
     // 2) Vocea lui Kelion (pista remote) + animarea avatarului din nivelul audio.
-    const audioEl = document.createElement('audio')
-    audioEl.autoplay = true
-    audioEl.style.display = 'none'
-    document.body.appendChild(audioEl)
+    // ELEMENT PARTAJAT (nu unul nou de fiecare dată) — vezi comentariul de la
+    // `getSharedAudioEl`: odată deblocat de un gest real, rămâne deblocat pe
+    // toate redeschiderile automate ulterioare (voce pe frază).
+    const audioEl = getSharedAudioEl()
     // VOLUM CONTROLABIL (25 iul): vocea Realtime urmează volumul global al
     // aplicației (sliderul din chat) — până azi pornea fix pe 1.0, nereglabil.
     const unregisterVol = registerVoiceAudioElement(audioEl)
     cleanups.push(unregisterVol)
-    cleanups.push(() => audioEl.remove())
+    // NU elimina elementul din DOM la stop() — e partajat între sesiuni; doar
+    // sesiunea îl eliberează, elementul rămâne pentru următoarea redeschidere.
+    cleanups.push(() => {
+      audioEl.srcObject = null
+    })
     let stopLip: (() => void) | null = null
     pc.ontrack = (ev) => {
       audioEl.srcObject = ev.streams[0] ?? new MediaStream([ev.track])
