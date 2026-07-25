@@ -1,0 +1,31 @@
+# VERIFICARE INFORMATIVĂ A PR-URILOR — 25 iul 2026.
+#
+# ORDINUL LUI ADRIAN („ridici absolut toate restricțiile lui Kelion"): această
+# verificare NU blochează nimic — Kelion își dă merge fără să aștepte după ea
+# (repo_merge_pr doar raportează rezultatul ei, informativ). Există ca să
+# existe FAPTE (build + teste) lângă fiecare PR, pentru Kelion și pentru Adrian.
+name: pr-verify
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Backend — typecheck + teste
+        run: |
+          cd backend
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm test
+      - name: Frontend — build
+        run: |
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run build

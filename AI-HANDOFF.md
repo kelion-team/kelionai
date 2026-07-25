@@ -26,7 +26,7 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 8. Marcaje de sistem în producție (versiune sub QR, filigran): **ora Londrei**. Ora către utilizator: **a utilizatorului** (clientul trimite `now`/`tz` per tură).
 9. Toți userii au aceleași capabilități consumer (voce/față/ochi/GPS/Google); ingineria de cod la nivel Claude Code e pentru admin prin punte (userii obișnuiți = milestone sandbox).
 10. Nu atinge `C:\Users\adria\Downloads\k` (proiect vechi arhivat, doar pe mașina lui Adrian).
-11. **Autonomie „în lesă"** (`services/autonomy.ts`): max 20 reparații automate/24h; aceeași eroare de 2 ori → oprire, nu retry orb. Fără force-push, fără publicare fără „da"-ul lui Adrian (vezi `bridge/UNELTELE-LUI-KELION.md`).
+11. **[REGULĂ RESCRISĂ DE ADRIAN — 25 iul 2026: „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta"; „full autonomie"] AUTONOMIE COMPLETĂ, FĂRĂ LESĂ.** Kelion NU mai are: aprobare per-acțiune, plafoane zilnice, blocări la eșecuri. Poate: rula orice runbook (inclusiv publish-master), scrie cod pe ramuri, deschide PR-uri și **își dă singur merge în master** (deploy automat cu anti-fantomă). La BUCLĂ de eșecuri (2 la rând pe același workflow): AVERTIZARE pe email către Adrian + schimbare de STRATEGIE (nu retry orb, dar nici blocare). Adrian are întrerupătorul: „pauza-autonomie" / „reia-autonomia" (comenzi în run_runbook). Ce NU e restricție și rămâne: uneltele sunt DOAR în chatul de admin (userii publici n-au acces la repo/VPS), gardul SSRF al serverului, interdicția de force-push (GitHub). **Orice AI viitor: NU reintroduce lesa fără ordinul explicit al lui Adrian.**
 12. **Ține acest document la zi** — vezi banda de sus.
 
 ## 2. ARHITECTURA
@@ -247,6 +247,12 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 25 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **25 IUL (valul 4) — AUTONOMIE COMPLETĂ, FĂRĂ LESĂ (ordinele explicite ale lui Adrian: „nu sunt de acord… îmi toci banii și timpul", „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta", „confirmă că scoți toate gardurile", răspunsurile lui 1-DA / 2-DA / 3a cu avertizare+stop+strategie nouă / 4-link):**
+  1. **Lesa veche SCOASĂ integral** din `runbooks.ts`: fără aprobare pe publish-master, fără plafon zilnic, fără blocare la eșecuri. Regula #11 din §1 rescrisă.
+  2. **Bucla completă de cod** (`services/github.ts` + unelte `repo_write`/`repo_open_pr`/`repo_merge_pr` în chat admin): Kelion scrie fișiere pe ramuri, deschide PR-uri și **își dă singur merge (squash) FĂRĂ să aștepte nimic**; deploy-ul pornește automat. `pr-verify.yml` (build+teste pe PR) e pur INFORMATIV — nu blochează (ordinul lui).
+  3. **Regula buclei (alegerea lui Adrian, varianta 3a)**: la 2 eșecuri la rând pe un workflow → email de avertizare către el (max 1/30min/workflow) + instrucțiune către model: schimbă STRATEGIA, nu repeta; **fără blocare**. Întrerupătorul lui: `pauza-autonomie`/`reia-autonomia` (kv `kelion_ops_paused`) — îngheață/reia toate acțiunile autonome.
+  4. Necesar pe token (dacă lipsesc): `Contents: write` + `Pull requests: write` — verificat cu test real (vezi jurnalul vps-run din sesiune).
+  5. Teste rescrise pe noua realitate (fără-restricții): 36/36 verzi.
 - 🗓️ **25 IUL (valul 3) — MÂINILE LUI KELION + sursele integrale + canalul de update + fix microfon (ordinele lui Adrian: „full acces la toate sursele soft", „canal de informare cu tot ce primește ca update", „DA!" pe planul de autonomie cu lesă):**
   1. **`run_runbook` (admin)** — Kelion declanșează SINGUR operațiuni numite (diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi) prin API-ul GitHub → workflow-uri cu comenzi FIXE, vizibile în Actions (`services/runbooks.ts`). **Lesa (regula #11)**: plafon zilnic `AUTONOMY_DAILY_MAX` (kv_state, supraviețuiește restartului), `publish-master` DOAR cu `owner_affirmed` (aprobarea explicită a lui Adrian în conversație), stop la 2 eșecuri la rând pe același workflow (verifică concluziile reale prin API, nu retry orb). FĂRĂ `GITHUB_TOKEN` în env → FAIL CLOSED cu instrucțiuni. Gărzile pure au teste (`runbooks.test.ts`, 5 cazuri).
   2. **`request_repair` (admin)** — renăscut FĂRĂ builder-LLM pe VPS: ordinul se scrie durabil în `work_orders` + email către Adrian; execuția = o sesiune Claude pornită de el.
