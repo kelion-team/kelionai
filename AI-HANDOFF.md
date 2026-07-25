@@ -247,6 +247,12 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 25 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **25 IUL (valul 5) — INCIDENTUL „VORBEȘTE, NU EXECUTĂ" + curățarea instrucțiunilor anti-autonomie:**
+  1. **Incident real (13:38)**: Adrian i-a cerut lui Kelion o reparație; Kelion a scris DOAR ordinul (`wo-ms0apytl`) și a răspuns „echipa tehnică a fost notificată" — echipă inexistentă. Dovadă: interogare directă în DB (messages + work_orders). **Cauza-rădăcină**: instrucțiunea VECHE „OWNER — NEVER REFUSE… spune-i că ai trimis la construit" din chat.ts, scrisă ÎNAINTE ca Kelion să aibă unelte reale — îl învăța să promită, nu să execute.
+  2. **Fix**: blocul rescris în „OWNER — ACT, DON'T DEFER" (execută ACUM cu uneltele; narează concret fișier/ramură/PR/link; INTERZIS „echipa tehnică"/„am trimis la reparat"; log_unsupported_request doar la imposibil real) + EXCEPȚIE de owner adăugată în blocul general „WHEN YOU CAN'T DO SOMETHING YET" din SYSTEM_PROMPT (pentru owner, cu uneltele de builder, aproape nimic nu e „imposibil"). Audit complet: realtime.ts (vocea), orchestrator.ts, brain.ts — ZERO alt limbaj de amânare găsit.
+  3. **Urmă în jurnal la FIECARE unealtă chemată** (`[tool] nume (admin|user)` în runTool) — diagnosticul viitor nu mai cere interogarea bazei.
+  4. **Descoperire colaterală**: browserul lui Adrian rula un bundle VECHI din cache (sonda `/api/bridge/workorders`, rută moartă din 23 iul → 404 în buclă) — i s-a cerut hard refresh; posibil aceeași cauză pentru „butonul de microfon mort" (fixul era deja live).
+  5. Limită cunoscută, declarată onest: uneltele de cod/ops sunt în CHAT; vocea escaladează prin ask_brain, dar nu poartă direct repo_*/run_runbook.
 - 🗓️ **25 IUL (valul 4) — AUTONOMIE COMPLETĂ, FĂRĂ LESĂ (ordinele explicite ale lui Adrian: „nu sunt de acord… îmi toci banii și timpul", „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta", „confirmă că scoți toate gardurile", răspunsurile lui 1-DA / 2-DA / 3a cu avertizare+stop+strategie nouă / 4-link):**
   1. **Lesa veche SCOASĂ integral** din `runbooks.ts`: fără aprobare pe publish-master, fără plafon zilnic, fără blocare la eșecuri. Regula #11 din §1 rescrisă.
   2. **Bucla completă de cod** (`services/github.ts` + unelte `repo_write`/`repo_open_pr`/`repo_merge_pr` în chat admin): Kelion scrie fișiere pe ramuri, deschide PR-uri și **își dă singur merge (squash) FĂRĂ să aștepte nimic**; deploy-ul pornește automat. `pr-verify.yml` (build+teste pe PR) e pur INFORMATIV — nu blochează (ordinul lui).
