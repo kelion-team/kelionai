@@ -617,12 +617,34 @@ export default function ChatPanel({
     addImageFiles(files.filter((f) => f.type.startsWith('image/')))
     void addDocFiles(files.filter((f) => !f.type.startsWith('image/')))
   }
-  // Paste an image straight into the chat (Ctrl+V) or drag-and-drop a file.
+  // Paste an image/file straight into the chat (Ctrl+V) or drag-and-drop a file.
+  // PRINTSCREEN DIRECT (Adrian, 25 iul: „nu primește printscreenuri direct").
+  // Un screenshot lipit (Win+Shift+S, „Copy image") ajunge de multe ori NU în
+  // clipboardData.files, ci în clipboardData.items (kind:'file', type:image/*).
+  // Citim AMBELE surse → captura lipită e prinsă de fiecare dată. Dedup pe
+  // (nume+dimensiune) ca să nu adăugăm de două ori aceeași imagine.
   function onPasteFiles(e: ReactClipboardEvent): void {
-    const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
-    if (imgs.length > 0) {
+    const seen = new Set<string>()
+    const collected: File[] = []
+    for (const f of e.clipboardData.files) {
+      const key = `${f.name}:${f.size}`
+      if (!seen.has(key)) { seen.add(key); collected.push(f) }
+    }
+    for (const it of e.clipboardData.items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile()
+        if (f) {
+          const key = `${f.name}:${f.size}`
+          if (!seen.has(key)) { seen.add(key); collected.push(f) }
+        }
+      }
+    }
+    const imgs = collected.filter((f) => f.type.startsWith('image/'))
+    const docs = collected.filter((f) => !f.type.startsWith('image/'))
+    if (imgs.length > 0 || docs.length > 0) {
       e.preventDefault()
-      addImageFiles(imgs)
+      if (imgs.length > 0) addImageFiles(imgs)
+      if (docs.length > 0) void addDocFiles(docs)
     }
   }
   function onDropFiles(e: ReactDragEvent): void {
@@ -1909,7 +1931,10 @@ export default function ChatPanel({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.html,.htm,.json,.xml,.rtf,.epub"
+          // ORICE TIP DE FIȘIER (Adrian, 25 iul: „nu poate analiza ce trimit,
+          // orice tip de fișier"): fără listă restrictivă la picker — imaginile
+          // merg la vedere, restul prin MarkItDown (PDF/Word/Excel/PPT/HTML/…) →
+          // text pentru creier; ce nu se poate converti, la admin merge brut.
           multiple
           hidden
           onChange={onFilesPicked}
