@@ -124,12 +124,13 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // (creier, vedere, imagini, căutare) și până azi nu se debita NIMIC —
       // spre deosebire de chatul scris (recordCost + debitWallet pe fiecare tură).
       // settle() se cheamă înaintea fiecărui return care a consumat ceva.
-      const isAdminTool = user.email.toLowerCase() === config.adminEmail
       let toolCostUsd = 0
       const settle = (): void => {
         if (toolCostUsd <= 0) return
         void recordCost(user.email, 'voice', toolCostUsd)
-        if (!isAdminTool) void debitWallet(user.email, toolCostUsd, `voice:${name}`)
+        // TOȚI se debitează, inclusiv adminul (Adrian, 25 iul: „admin nu e
+        // scutit de realitate — trebuie să vadă real ce are").
+        void debitWallet(user.email, toolCostUsd, `voice:${name}`)
       }
 
       // Token Google proaspăt (ca în chat) pentru uneltele Gmail/Calendar/etc.

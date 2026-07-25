@@ -1597,17 +1597,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       void learnFromTurn(user.email, lastUserText, assistantText, 'kelion')
     }
 
-    // Debit real provider cost from the user's wallet (customers only; admin exempt).
-    // The cost model is in services/cost.ts; debitWallet is idempotent (safe to call
-    // multiple times for the same turn).
-    if (user.role !== 'admin') {
+    // Debit real provider cost from the wallet — PENTRU TOȚI, inclusiv ADMIN
+    // (Adrian, 25 iul: „admin nu e scutit de realitate — astea se consumă și
+    // admin trebuie să vadă real ce are"). Creditele adminului scad la fel de
+    // real ca ale clienților; DOAR blocarea la 0 (paywall) rămâne pe clienți —
+    // proprietarul nu se încuie afară din propria aplicație.
+    {
       const cost = usage.usd
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
-      // Proactiv, în fundal: dacă a coborât sub prag, reîncarcă din cardul salvat
-      // ÎNAINTE de a ajunge la 0 — userul nu se blochează în mijlocul sesiunii.
-      void maybeAutoRecharge(user.email, user.name)
+      // Proactiv, în fundal: reîncărcarea automată rămâne pe clienți (cardul salvat).
+      if (user.role !== 'admin') void maybeAutoRecharge(user.email, user.name)
     }
     },
   )
