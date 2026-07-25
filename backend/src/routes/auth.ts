@@ -67,16 +67,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      // LOGIN PRIN GMAIL DEBLOCHEAZĂ TOT (Adrian, 25 iul, ordin direct — 0 bariere):
-      // un singur login cere TOATE scope-urile (Gmail, Calendar, Drive, Tasks,
-      // Contacts) → skill-urile Google merg IMEDIAT după login, fără pasul separat
-      // „Connect Google". access_type=offline + prompt=consent → refresh token, ca
-      // uneltele să funcționeze și după prima oră. (Nota veche „scope minim ca să
-      // nu sperie clienții" e ANULATĂ de acest ordin.)
-      scope: FULL_SCOPES,
-      access_type: 'offline',
-      include_granted_scopes: 'true',
-      prompt: 'consent',
+      // DOAR IDENTITATE la login (Adrian, 25 iul — a văzut live ecranul roșu
+      // „Google hasn't verified this app" care sperie clienții). Aceste 3 scope-uri
+      // sunt NON-sensibile → Google NU arată niciun avertisment, orice vizitator se
+      // loghează liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
+      // rămân OPȚIONALE, cerute la nevoie prin „Connect Google" (doar cine le vrea
+      // trece prin ecranul de consimțământ). Singura cale ca loginul să ceară TOTUL
+      // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
+      // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
+      scope: 'openid email profile',
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
