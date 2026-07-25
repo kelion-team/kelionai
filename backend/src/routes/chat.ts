@@ -905,7 +905,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // rezultatul, deci nu are ce căuta pe drumul primului cuvânt.
     if (committedLang) void setSpeechLangPref(user.email, committedLang)
     // Clientului i se anunță DOAR comutarea detectată (recognizer-ul o urmează).
-    const announceLang = committedLang
     const speechPref = committedLang ?? storedPref
     // LIMBA (Adrian — regulă FINALĂ, obligatorie: „default pornirea engleză;
     // ADMIN = română mereu; restul detectează și menține per user"). Adminul
@@ -914,6 +913,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const isAdminUser = user.role === 'admin'
     const userLang = isAdminUser ? 'ro' : speechPref || 'en'
     const ro = userLang.toLowerCase().startsWith('ro')
+    // O SINGURĂ SURSĂ DE ADEVĂR PENTRU LIMBĂ (Adrian, 25 iul: „scrisul de help
+    // în ro și salutul în engleză — logica e alta"): serverul ANUNȚĂ limba
+    // autoritară la FIECARE tură (nu doar la comitere), iar clientul o oglindește
+    // în localStorage → placeholder, recognizer și UI rămân mereu în ACEEAȘI
+    // limbă cu răspunsurile. Adminul primește mereu ro-RO; restul limba stabilită.
+    const announceLang = isAdminUser ? 'ro-RO' : (committedLang ?? speechPref ?? null)
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop

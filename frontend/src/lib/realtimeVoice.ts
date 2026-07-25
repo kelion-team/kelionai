@@ -246,6 +246,19 @@ export async function startRealtimeVoice(
               audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
             },
           })
+          // RE-ANCORARE PER-TURĂ (25 iul: Kelion aluneca în rusă chiar și fără
+          // vorbire): pe lângă transcriere, injectăm un reminder de SISTEM în
+          // conversație — modelul e re-legat de limbă la FIECARE replică.
+          const names: Record<string, string> = { ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese', it: 'Italian', de: 'German' }
+          const nm = names[lang] ?? 'English'
+          send({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'system',
+              content: [{ type: 'input_text', text: `Reminder: reply ONLY in ${nm}. Never switch language. If you heard only noise or silence, stay silent.` }],
+            },
+          })
         })
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')

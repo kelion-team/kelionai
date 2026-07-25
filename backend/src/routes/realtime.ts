@@ -160,6 +160,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // limba din vorbire — altfel, dacă spune/aude italiană, sesiunea live ar
       // comuta pe italiană („2 voci: ro și italiană"). Rămâne blocat pe română.
       const isAdmin = user.email.toLowerCase() === config.adminEmail
+      // ADMIN: ancorăm sesiunea live pe română la FIECARE tură (clientul face
+      // session.update) — transcrierea nu mai poate aluneca spre altă limbă.
+      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro' })
       if (text && role === 'user' && !isAdmin) {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)

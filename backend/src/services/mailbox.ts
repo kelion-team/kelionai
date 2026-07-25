@@ -50,13 +50,22 @@ export function isAutomated(headers: Map<string, unknown>, fromAddr: string): bo
   const prec = String(headers.get('precedence') ?? '').toLowerCase()
   if (prec === 'bulk' || prec === 'auto_reply' || prec === 'list' || prec === 'junk') return true
   if (headers.has('list-id') || headers.has('list-unsubscribe')) return true // mailing list
-  if (headers.has('x-autoreply') || headers.has('x-autorespond')) {
-    return true
-  }
+  if (headers.has('x-autoreply') || headers.has('x-autorespond')) return true
   // NOTE: X-Auto-Response-Suppress is set by the SENDER (e.g. Exchange) to tell
   // recipients NOT to auto-reply; it does NOT mean this incoming message is
   // automated. Treating it as machine mail silently dropped legitimate customer
   // emails, so we deliberately do NOT check it here.
+  return false
+}
+
+// BUCLA DIN 25 IUL: alerta trimisă de la alerts@kelionai.app a aterizat în
+// contact@ și robotul i-a răspuns ca unui client („Stimate client..."). NU
+// răspundem NICIODATĂ automat expeditorilor din propriul domeniu sau adreselor
+// tehnice — doar oameni reali primesc auto-reply.
+export function isInternalSender(from: string): boolean {
+  const f = (from || '').toLowerCase()
+  if (f.includes('@kelionai.app')) return true
+  if (/(^|<)(alerts?|no-?reply|noreply|mailer-daemon|postmaster|bounce)[@.]/.test(f)) return true
   return false
 }
 
@@ -85,8 +94,11 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   if (!fromAddr) return
 
   // Loop guard: mark machine mail (bounces, auto-replies, lists, our own) seen
-  // and drop it — replying would start an endless mail ping-pong.
-  if (isAutomated(parsed.headers, fromAddr)) {
+  // and drop it — replying would start an endless mail ping-pong. isInternalSender
+  // acoperă BUCLA din 25 iul: orice adresă @kelionai.app (ex. alerts@) e sistem,
+  // nu client — nu primește NICIODATĂ auto-reply și nici forward (adminul o are
+  // deja direct de la alertă).
+  if (isAutomated(parsed.headers, fromAddr) || isInternalSender(fromAddr)) {
     await client.messageFlagsAdd({ uid }, ['\\Seen'], { uid: true }).catch(() => {})
     return
   }
