@@ -40,11 +40,19 @@ systemctl daemon-reload 2>/dev/null || true
 for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
   systemctl mask "$s" 2>/dev/null || true
 done
-# 3) timerele moarte (scripturile lor au dispărut din repo).
-for t in kelion-caiet-watch kelion-perpetuum kelion-qa-patrol; do
+# 3) timerele moarte (scripturile lor au dispărut din repo). kelion-repo-sync
+#    e AICI din 25 iul: scăpase din prima listă și sincroniza clona la 5 min —
+#    exact vectorul „phantom deploy".
+for t in kelion-caiet-watch kelion-perpetuum kelion-qa-patrol kelion-repo-sync; do
   systemctl stop "$t.timer" 2>/dev/null || true
   systemctl disable "$t.timer" 2>/dev/null || true
+  mv "/etc/systemd/system/$t.timer" "/etc/systemd/system/$t.service" /root/kelion/dead-units/ 2>/dev/null || true
 done
+systemctl daemon-reload 2>/dev/null || true
+# 4) PROCESELE deja pornite (lecția din 25 iul: mask-ul oprește doar REÎNVIEREA;
+#    repairer-pool + builder-server rulau NEÎNTRERUPT din 20 iul și unul din ele
+#    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
+pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux' 2>/dev/null || true
 
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
