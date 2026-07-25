@@ -95,8 +95,12 @@ export async function brainComplete(prompt: string, maxTokens = 1024): Promise<s
 export async function verifyModels(): Promise<Record<string, string>> {
   const ping = async (model: string): Promise<string> => {
     try {
+      // 64, nu 16: modelele cu raționament intern (ex. claude-fable-5) consumă
+      // tokeni din buget PE GÂNDIRE înainte de răspuns — dovadă live, 25 iul:
+      // cu 16 tokeni, 11 s-au dus pe „reasoning_tokens" și conținutul a ieșit gol
+      // (finish_reason:"length"), deci ping-ul raporta fals „fail" pe un model viu.
       const r = await openrouterChat(model, [{ role: 'user', content: 'Reply with the single word: ok' }], [], {
-        maxTokens: 16,
+        maxTokens: 64,
       })
       return r.text ? `ok (served by ${r.model})` : 'fail'
     } catch {

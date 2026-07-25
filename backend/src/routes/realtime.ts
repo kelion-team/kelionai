@@ -2,13 +2,14 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage } from '../db.js'
-import { trackSpeechLang } from '../services/lang.js'
+import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
+import { SYSTEM_PROMPT } from './chat.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -105,14 +106,23 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         return reply.send({ output: seen || JSON.stringify({ error: 'vision_unavailable' }) })
       }
 
-      // ESCALADAREA ÎN VOCE: cererile grele merg la CREIER (modelul work).
+      // ESCALADAREA ÎN VOCE: cererile grele merg la CREIER (modelul work). PÂNĂ pe
+      // 25 iul asta era o A DOUA persona, hardcodată în română pentru toți userii,
+      // fără memorie — divergentă de escaladarea din scris (Adrian: „softul are
+      // dubluri de versiuni"). Acum pornește din ACEEAȘI personă (SYSTEM_PROMPT)
+      // și limba REALĂ a userului, ca escaladarea din scris.
       if (name === 'ask_brain') {
         const request = String(args.request ?? '').trim()
         if (!request) return reply.send({ output: JSON.stringify({ error: 'empty_request' }) })
-        const answer = await brainComplete(
-          `Ești Kelion (creierul de lucru). Răspunde complet dar CONCIS, ca text simplu de rostit cu voce (fără markdown):\n\n${request}`,
-          2000,
-        )
+        const isAdmin = user.email.toLowerCase() === config.adminEmail
+        let lang = isAdmin ? 'ro' : String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
+        if (!/^[a-z]{2}$/.test(lang)) lang = 'en'
+        const prompt =
+          `${SYSTEM_PROMPT}\n\n` +
+          `VOICE ESCALATION: the fast voice model handed you a request it judged too hard. Answer it fully ` +
+          `but CONCISELY, as plain text to be SPOKEN aloud (no markdown, no lists). Speak ONLY in ` +
+          `${langLabel(lang)} — never switch, regardless of the language mixed into the request below.\n\n${request}`
+        const answer = await brainComplete(prompt, 2000)
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }
 
