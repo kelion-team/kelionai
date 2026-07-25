@@ -36,7 +36,9 @@ describe('openrouter catalog', () => {
   it('resolveModel cade pe implicit când modelul cerut nu e în tier', async () => {
     // Fără cheie OpenRouter (mediul de test) catalogul e gol → orice cerere cade
     // pe implicitul tier-ului, niciodată pe un model neverificat.
-    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('openai/gpt-4.1-mini')
+    // Implicitul chat = un model REAL gratuit (Adrian, 25 iul: „free default,
+    // dacă e o întrebare de free nu trebuie să consume nimic").
+    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('openai/gpt-oss-20b:free')
     // Implicitul work = Fable 5 (Adrian, 25 iul: „Kelion trebuie să folosească
     // Fable 5") — cel mai capabil model, cu raționament intern.
     expect(await resolveModel('work', null)).toBe('anthropic/claude-fable-5')
