@@ -76,6 +76,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 import { runRunbook, requestRepair } from '../services/runbooks.js'
+import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -203,21 +204,60 @@ const LIST_UPDATES_TOOL: Tool = {
   description: "ADMIN ONLY. List the updates you received — the commits that shipped in recent deploys, newest first (each line: sha | date | subject). Use when the owner asks what's new, what changed, or what update you got.",
   input_schema: { type: 'object', properties: {} },
 }
-// ── MÂINILE LUI KELION PE OPERAȚIUNI (Adrian, 25 iul: „DA!") ─────────────────
-// Kelion recunoaște „asta e operațiune" și declanșează runbook-ul NUMIT —
-// execuția e un workflow GitHub cu comenzi fixe, vizibil în Actions. Lesa e în
-// services/runbooks.ts (plafon zilnic, affirm pe publish, stop la 2 eșecuri).
+// ── MÂINILE LUI KELION — FĂRĂ RESTRICȚII (Adrian, 25 iul: „ridici absolut
+// toate restricțiile lui Kelion"; „full autonomie") ──────────────────────────
+// Operațiuni: runbook NUMIT → workflow GitHub cu comenzi fixe, vizibil în
+// Actions. Fără aprobare, fără plafoane (ordinul lui Adrian).
 const RUN_RUNBOOK_TOOL: Tool = {
   name: 'run_runbook',
   description:
-    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production — REQUIRES the owner's explicit approval in THIS conversation), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. Use when the owner asks for an operation these cover. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
+    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. You are fully autonomous — run these freely whenever the owner's request calls for them. If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
   input_schema: {
     type: 'object',
     properties: {
       name: { type: 'string', description: "Runbook name, exactly one of: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi." },
-      owner_affirmed: { type: 'boolean', description: "Set true ONLY if the owner explicitly approved THIS action in this conversation (e.g. 'da', 'publică'). Required for publish-master." },
     },
     required: ['name'],
+  },
+}
+// Bucla completă de cod — Kelion scrie, deschide PR și ÎȘI DĂ SINGUR merge;
+// deploy-ul pornește automat pe push-ul în master (anti-fantomă rămâne dovada).
+const REPO_WRITE_TOOL: Tool = {
+  name: 'repo_write',
+  description:
+    "ADMIN ONLY. Write ONE file on a branch of your own repo (creates the branch from master if missing). Content is the COMPLETE new file text, not a diff. Read the current file first (read_source) so you rewrite it correctly. Use the same branch for related files of one change, then repo_open_pr + repo_merge_pr.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string', description: "Branch name, e.g. 'kelion/fix-microfon'. Never 'master'." },
+      path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." },
+      content: { type: 'string', description: 'The complete new content of the file.' },
+      message: { type: 'string', description: 'Short commit message (Romanian, what & why).' },
+    },
+    required: ['branch', 'path', 'content', 'message'],
+  },
+}
+const REPO_OPEN_PR_TOOL: Tool = {
+  name: 'repo_open_pr',
+  description: 'ADMIN ONLY. Open a pull request from your branch into master. Title + body in Romanian: what you changed and why.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string', description: 'The branch you wrote with repo_write.' },
+      title: { type: 'string' },
+      body: { type: 'string' },
+    },
+    required: ['branch', 'title', 'body'],
+  },
+}
+const REPO_MERGE_PR_TOOL: Tool = {
+  name: 'repo_merge_pr',
+  description:
+    'ADMIN ONLY. Merge your pull request into master IMMEDIATELY (squash) — you are fully autonomous, nothing gates you. The result reports (informationally) the pr-verify build/test status. Master push auto-deploys to production with the anti-phantom proof.',
+  input_schema: {
+    type: 'object',
+    properties: { pr: { type: 'number', description: 'Pull request number.' } },
+    required: ['pr'],
   },
 }
 // request_repair renăscut: ordinul se SCRIE (work_orders) + semnal pe email;
@@ -1517,7 +1557,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, REQUEST_REPAIR_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1748,11 +1788,23 @@ async function runTool(
     }
     case 'run_runbook': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return runRunbook(String(args.name ?? ''), args.owner_affirmed === true)
+      return runRunbook(String(args.name ?? ''))
     }
     case 'request_repair': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
+    }
+    case 'repo_write': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
+    }
+    case 'repo_open_pr': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
+    }
+    case 'repo_merge_pr': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return repoMergePR(Number(args.pr ?? 0))
     }
 
     case 'show_document': {

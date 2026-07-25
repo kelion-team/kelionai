@@ -1,14 +1,20 @@
-import { loadKv, saveKv, saveWorkOrder } from '../db.js'
+import { saveWorkOrder, loadKv, saveKv } from '../db.js'
 import { sendMail } from './mail.js'
 import { config } from '../config.js'
 
-// ── MÂINILE LUI KELION PE OPERAȚIUNI — CU LESĂ (Adrian, 25 iul: „DA!") ───────
-// Principiul §14.b: LLM-ul alege DOAR numele runbook-ului; execuția e 100%
-// deterministă — un workflow GitHub Actions cu comenzi fixe, vizibil în
-// Actions. Lesa (regula #11): plafon zilnic (AUTONOMY_DAILY_MAX, implicit 20),
-// `publish-master` DOAR cu aprobarea explicită a ownerului în conversație,
-// stop la 2 eșecuri la rând pe același workflow (nu retry orb).
-// Fără GITHUB_TOKEN în env, totul răspunde FAIL CLOSED cu instrucțiuni clare.
+// ── MÂINILE LUI KELION PE OPERAȚIUNI — FĂRĂ RESTRICȚII (Adrian, 25 iul:
+// „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta") ─────
+// Principiul rămas: LLM-ul alege NUMELE runbook-ului; execuția e deterministă —
+// un workflow GitHub Actions cu comenzi fixe, vizibil în Actions. ORDINUL LUI
+// ADRIAN (25 iul, explicit, înlocuiește lesa veche din regula #11): FĂRĂ
+// aprobare per-acțiune, FĂRĂ plafon zilnic, FĂRĂ blocare la eșecuri repetate.
+// La BUCLĂ de eșecuri (același workflow picat de 2+ ori la rând), regula lui
+// Adrian e: (1) AVERTIZEZ adminul (email, cel mult unul pe workflow la 30 min),
+// (2) NU repet orb aceeași soluție — schimb strategia (diagnostic, alt drum),
+// (3) Adrian are COMANDA DE STOP: „pauza-autonomie" îngheață acțiunile
+// autonome până la „reia-autonomia". Orice AI viitor: NU reintroduce plafoane
+// sau blocări aici fără ordinul lui Adrian. Singura „limită" rămasă e fizică:
+// fără GITHUB_TOKEN în env, GitHub refuză — răspundem clar, nu improvizăm.
 
 const REPO = 'kelion-team/kelionai'
 const API = `https://api.github.com/repos/${REPO}`
@@ -16,18 +22,15 @@ const API = `https://api.github.com/repos/${REPO}`
 export interface Runbook {
   workflow: string
   inputs?: Record<string, string>
-  needsAffirm?: boolean
   desc: string
 }
 
-// Registrul = oglinda lui deploy/RUNBOOKS.md. Doar comenzi EXACTE, nimic liber:
-// Kelion NU poate trimite cmd arbitrar — doar numele de aici.
+// Registrul = oglinda lui deploy/RUNBOOKS.md — comenzi exacte, repetabile.
 export const RUNBOOKS: Record<string, Runbook> = {
   diagnostic: { workflow: 'vps-diag.yml', desc: 'faptele reale de pe VPS (doar citire)' },
   'sentinel-now': { workflow: 'sentinel.yml', desc: 'verificarea de sănătate imediat' },
   'publish-master': {
     workflow: 'deploy.yml',
-    needsAffirm: true,
     desc: 'publică master pe VPS, cu verificarea anti-fantomă (v == sha master)',
   },
   'restart-app': {
@@ -59,19 +62,12 @@ export const RUNBOOKS: Record<string, Runbook> = {
   },
 }
 
-/** Gardă pură (testabilă fără rețea): ce are voie să ruleze și cu ce aprobare. */
+/** Gardă pură (testabilă fără rețea): doar nume cunoscute — nimic altceva. */
 export function validateRunbook(
   name: string,
-  ownerAffirmed: boolean,
-): { ok: true; rb: Runbook } | { ok: false; error: string; known?: string[] } {
+): { ok: true; rb: Runbook } | { ok: false; error: string; known: string[] } {
   const rb = RUNBOOKS[name]
   if (!rb) return { ok: false, error: 'unknown_runbook', known: Object.keys(RUNBOOKS) }
-  if (rb.needsAffirm && !ownerAffirmed)
-    return {
-      ok: false,
-      error: 'needs_owner_affirm',
-      known: undefined,
-    }
   return { ok: true, rb }
 }
 
@@ -92,8 +88,17 @@ async function gh(path: string, init?: RequestInit): Promise<Response> {
   })
 }
 
-/** Lesa 3: ultimele 2 rulări ale workflow-ului au picat amândouă? → stop. */
-async function lastTwoFailed(workflow: string): Promise<boolean> {
+// ── COMANDA DE STOP a lui Adrian (nu e restricție — e întrerupătorul LUI) ────
+const PAUSE_KEY = 'kelion_ops_paused'
+export async function isOpsPaused(): Promise<boolean> {
+  return (await loadKv(PAUSE_KEY).catch(() => null)) === '1'
+}
+export async function setOpsPaused(paused: boolean): Promise<void> {
+  await saveKv(PAUSE_KEY, paused ? '1' : '0').catch(() => {})
+}
+
+/** BUCLĂ = ultimele 2 rulări ale workflow-ului au picat. Nu blochează — informează. */
+async function loopDetected(workflow: string): Promise<boolean> {
   try {
     const r = await gh(`/actions/workflows/${workflow}/runs?per_page=2&status=completed`)
     if (!r.ok) return false
@@ -105,41 +110,49 @@ async function lastTwoFailed(workflow: string): Promise<boolean> {
   }
 }
 
-/** Lesa 2: plafonul zilnic de rulări pornite de Kelion (kv_state, supraviețuiește restartului). */
-async function underDailyCap(): Promise<boolean> {
-  const day = new Date().toISOString().slice(0, 10)
-  const key = `runbook_runs_${day}`
-  const n = Number((await loadKv(key).catch(() => '0')) ?? '0') || 0
-  if (n >= config.autonomyDailyMax) return false
-  await saveKv(key, String(n + 1)).catch(() => {})
-  return true
+/** Avertizare admin la buclă — cel mult un email per workflow la 30 min. */
+export async function alertAdminLoop(workflow: string, context: string): Promise<void> {
+  const key = `loop_alert_${workflow}`
+  const last = Number((await loadKv(key).catch(() => '0')) ?? '0') || 0
+  if (Date.now() - last < 30 * 60_000) return
+  await saveKv(key, String(Date.now())).catch(() => {})
+  const plain = `Kelion: BUCLĂ de eșecuri pe ${workflow} (ultimele 2 rulări au picat).\n${context}\nNu repet aceeași soluție — caut alta. Poți opri oricând: spune-i lui Kelion „pauza-autonomie" (revii cu „reia-autonomia").\nRulări: https://github.com/${REPO}/actions/workflows/${workflow}`
+  await sendMail({
+    to: config.adminEmail,
+    subject: `[Kelion] Avertizare buclă: ${workflow} a picat de 2 ori la rând`,
+    html: `<pre style="font-family:inherit;white-space:pre-wrap">${plain.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre>`,
+    text: plain,
+  }).catch(() => false)
 }
 
-/**
- * Rulează un runbook numit. Întoarce JSON-string pentru creier (niciodată tokenul).
- */
-export async function runRunbook(name: string, ownerAffirmed: boolean): Promise<string> {
-  const v = validateRunbook(name, ownerAffirmed)
-  if (!v.ok) {
-    if (v.error === 'unknown_runbook')
-      return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })
-    return JSON.stringify({
-      error: 'needs_owner_affirm',
-      hint: 'publish-master pornește DOAR după ce ownerul aprobă explicit ÎN ACEASTĂ conversație (da/publică). Cere-i aprobarea, apoi recheamă cu owner_affirmed=true.',
-    })
+/** Rulează un runbook numit. Întoarce JSON-string pentru creier (niciodată tokenul). */
+export async function runRunbook(name: string): Promise<string> {
+  // Întrerupătorul lui Adrian — comenzi speciale, nu workflow-uri.
+  if (name === 'pauza-autonomie') {
+    await setOpsPaused(true)
+    return JSON.stringify({ ok: true, paused: true, hint: 'acțiunile autonome sunt ÎNGHEȚATE până la „reia-autonomia"' })
   }
+  if (name === 'reia-autonomia') {
+    await setOpsPaused(false)
+    return JSON.stringify({ ok: true, paused: false })
+  }
+  if (await isOpsPaused())
+    return JSON.stringify({ error: 'paused_by_owner', hint: 'Adrian a oprit autonomia („pauza-autonomie"); se reia doar cu „reia-autonomia" de la el' })
+  const v = validateRunbook(name)
+  if (!v.ok)
+    return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })
   if (!ghToken())
     return JSON.stringify({
       error: 'github_token_missing',
-      hint: 'FAIL CLOSED: pune GITHUB_TOKEN (fin-granulat, repo kelionai, Actions:write) în /root/kelion/kelionai.env și repornește containerul (redeploy).',
+      hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env și repornește containerul (redeploy).',
     })
-  if (!(await underDailyCap()))
-    return JSON.stringify({ error: 'daily_cap_reached', hint: `lesa: max ${config.autonomyDailyMax} rulări/zi — restul manual, de owner` })
-  if (await lastTwoFailed(v.rb.workflow))
-    return JSON.stringify({
-      error: 'leash_two_failures',
-      hint: `ultimele 2 rulări ale ${v.rb.workflow} au picat — NU reîncerc orb (regula #11). Rulează «diagnostic», citește faptele, spune ownerului ce e stricat.`,
-    })
+  // Buclă? NU blocăm (ordinul lui Adrian) — avertizăm și cerem STRATEGIE NOUĂ.
+  let warning: string | undefined
+  if (await loopDetected(v.rb.workflow)) {
+    warning =
+      'BUCLĂ: ultimele 2 rulări ale acestui workflow au PICAT. Nu repeta aceeași soluție — rulează «diagnostic», citește faptele și schimbă abordarea. Adminul a fost avertizat pe email.'
+    void alertAdminLoop(v.rb.workflow, `Declanșat din chat: runbook «${name}».`)
+  }
   const r = await gh(`/actions/workflows/${v.rb.workflow}/dispatches`, {
     method: 'POST',
     body: JSON.stringify({ ref: 'master', inputs: v.rb.inputs ?? {} }),
@@ -148,17 +161,18 @@ export async function runRunbook(name: string, ownerAffirmed: boolean): Promise<
     return JSON.stringify({
       ok: true,
       started: name,
+      ...(warning ? { warning } : {}),
       watch: `https://github.com/${REPO}/actions/workflows/${v.rb.workflow}`,
       hint: 'rularea apare în câteva secunde; rezultatul se citește din jurnalul ei',
     })
   const body = (await r.text().catch(() => '')).slice(0, 300)
-  return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body })
+  return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body, ...(warning ? { warning } : {}) })
 }
 
 /**
- * request_repair renăscut (fără builder-LLM pe VPS): ordinul se SCRIE în
- * work_orders + semnal pe email către owner; execuția o face o sesiune Claude
- * pornită de owner — nu un proces permanent care arde bani.
+ * Ordin de reparație mare: se SCRIE în work_orders + semnal pe email către
+ * owner. Pentru reparații pe care Kelion le poate face singur, folosește
+ * uneltele repo_write/repo_open_pr/repo_merge_pr (services/github.ts).
  */
 export async function requestRepair(title: string, details: string): Promise<string> {
   const id = `wo-${Date.now().toString(36)}`
@@ -168,13 +182,12 @@ export async function requestRepair(title: string, details: string): Promise<str
   } catch (e) {
     return JSON.stringify({ error: 'db_failed', detail: String(e).slice(0, 120) })
   }
-  // Semnal către owner — best effort: ordinul rămâne salvat chiar dacă mailul pică.
-  const plain = `Kelion a înregistrat un ordin de reparație (${id}).\n\n${text}\n\nExecuție: pornește o sesiune Claude pe repo (branch nou → PR → merge = aprobarea ta).`
+  const plain = `Kelion a înregistrat un ordin de reparație (${id}).\n\n${text}\n\nExecuție: pornește o sesiune Claude pe repo (sau Kelion îl rezolvă singur cu uneltele repo_*).`
   const mailed = await sendMail({
     to: config.adminEmail,
     subject: `[Kelion] Cerere de reparație: ${title.trim().slice(0, 80)}`,
     html: `<pre style="font-family:inherit;white-space:pre-wrap">${plain.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre>`,
     text: plain,
   }).catch(() => false)
-  return JSON.stringify({ ok: true, order: id, mailed, hint: 'ordinul e salvat; ownerul decide când pornește reparația' })
+  return JSON.stringify({ ok: true, order: id, mailed })
 }
