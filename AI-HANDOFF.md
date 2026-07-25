@@ -242,6 +242,15 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 22 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **25 IUL (dimineața, valul 2) — RAȚIONAMENT REAL + 15 REPARAȚII QA, toate LIVE (deploy `04:48:49Z`, raport complet în `RAPORT-QA-2026-07-25.md`):**
+  1. **Creierul de escaladare = `anthropic/claude-fable-5`** cu **raționament intern activat** (`reasoning:{effort}` prin OpenRouter — openrouter.ts/orchestrator.ts/brain.ts); pe tura ușoară fără reasoning (primul cuvânt sub 1s).
+  2. **Escaladarea decisă de MODEL, unificată scris+voce**: `ask_brain` există acum și în chatul scris (doar pe treapta chat; execuția = aceeași persona `SYSTEM_PROMPT` exportată + limba turei); euristica `taskDifficulty` rămâne doar pre-rutare rapidă.
+  3. **Gaura de bani închisă**: vocea are paywall (402 fără credit, cu auto-recharge ultimă șansă) + debitare reală pe fiecare unealtă din voce (settle → recordCost 'voice' + debitWallet).
+  4. **„Stop" nu mai arde creier**: handler real pe server (STOP_CMD → răspuns imediat, zero model, zero istoric-fantomă).
+  5. **Resume fără trunchiere**: sseReplay cu `finished` + live-follow — reconectarea la mijlocul turei urmărește tura vie până la capăt.
+  6. **Alte reparații live**: istoric complet la ture cu unelte (orchestrator acumulează toate rundele), vederea pe cadrele noi (slice(-4)), `look` fără cadre vechi cu camera închisă, transcriptele de voce păstrate în timpul turei scrise (updater funcțional), mailbox onest (forward pe `replySent`, gardă expeditori cu cratimă), desync propagat corect, vocea clipurilor promo pe bucăți ≤3500 car., semi-duplex 125s, verifyModels cu buget 64 tokeni.
+  7. **TOATE cele 27 de limbi PĂSTRATE** (ordinul lui Adrian: „îmi lași toate limbile") — alegerea explicită din Setări acceptă orice limbă; garda pe 7 limbi rămâne DOAR pe detecția automată (anti-derivă). Confirmate în bundle-ul live.
+  8. **NEREPARATE încă (onest)**: mesajele de sistem paywall/erori doar ro/en; `checkLang` neconectat (lock-ul de limbă e doar în prompt); rutele voiceprint fără apeluri din frontend (enrolarea merge pe alt drum); Stripe Issuing așteaptă aprobarea externă.
 - 🗓️ **25 IUL (dimineața) — DOUĂ CRIZE LIVE + rădăcinile lor (PR #386):**
   1. **Bucla de email** (dovezi: 04:32 + 04:38, „[Kelion] Credit OpenRouter SCĂZUT" de la `alerts@kelionai.app` → auto-reply „Stimate client" din contact@): expeditorul NU e în repo — erau **procesele-zombie încă VII din 20 iul** (`kelion-repairer-pool.mjs` PID 827 + `kelion-builder-server.mjs` PID 1121, rulând din fișiere șterse). Lecția: mask-ul din 24 iul a oprit doar REÎNVIEREA serviciilor, nu procesele deja pornite. Omorâte cu `kill -9` + `pkill` (dovadă: „niciun proces"); `deploy.sh` pas 0 face acum și `pkill` la fiecare deploy. În aplicație: `mailbox.ts` `isInternalSender()` — orice expeditor `@kelionai.app`/adresă tehnică nu primește NICIODATĂ auto-reply sau forward.
   2. **Timer scăpat**: `kelion-repo-sync.timer` (la 5 min, sincroniza clona VPS = vectorul „phantom deploy") nu fusese în lista din 24 iul — oprit + mutat în dead-units + mascat; adăugat permanent în deploy.sh pas 0.
