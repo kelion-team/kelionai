@@ -77,8 +77,13 @@ export async function getCatalog(force = false): Promise<Catalog> {
   const data = ((await r.json().catch(() => ({}))) as { data?: RawModel[] }).data ?? []
   const models = data.map(toModel).filter((m): m is CatalogModel => m != null)
   // Chat = GPT + Gemini (rapide, conversație). Work = GPT + Claude (raționament greu).
+  // COMPATIBILITATE 100% (Adrian, 25 iul: „păstrăm în liste doar cele
+  // compatibile 100% la voce și creier, vedere etc."): un cadru de cameră care
+  // ajunge la creier PE VEDERE (needsVision forțează escaladarea aici — vezi
+  // chat.ts) trebuie servit de un model care CHIAR vede — altfel poza ar fi
+  // ignorată/ar pica. Filtru REAL pe catalogul live, nu presupunere.
   const chat = models.filter((m) => m.provider === 'openai' || m.provider === 'google')
-  const work = models.filter((m) => m.provider === 'openai' || m.provider === 'anthropic')
+  const work = models.filter((m) => (m.provider === 'openai' || m.provider === 'anthropic') && m.vision)
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   cache = { chat: chat.sort(byId), work: work.sort(byId), fetchedAt: Date.now() }
   return cache

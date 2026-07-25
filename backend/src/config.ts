@@ -70,14 +70,20 @@ export const config = {
     key: (process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY ?? '').trim(),
     // Modele implicite per tier (editabile din env, fără deploy). Chat = rapid,
     // Work = raționament greu/tool-use.
-    // GRATUIT IMPLICIT (Adrian, 25 iul: „trece pe free default cu creștere pe
-    // nivel de greutate, dar dacă e o întrebare de free nu trebuie să consume
-    // nimic"): treapta chat pornește pe un model REAL gratuit (`:free` la
-    // OpenRouter → usage.cost = 0, garantat de furnizor, nu doar „ieftin").
+    // GRATUIT IMPLICIT, TESTAT REAL (Adrian, 25 iul: „free default cu creștere
+    // pe nivel de greutate"; „păstrăm în liste doar cele compatibile 100% la
+    // voce și creier, vedere etc."): testat live pe OpenRouter cu apel de
+    // unealtă real — `openai/gpt-oss-20b:free` chema unealta corect DAR scurgea
+    // „gândire" internă murdară în content (`<|end|>` și fragmente incoerente),
+    // și NU are vedere (catalogul: vision=false). `google/gemma-4-26b-a4b-it:free`
+    // a ieșit CURAT (content gol, tool_call corect) ȘI are vedere reală — poze/
+    // cadre de cameră merg direct pe treapta gratuită, fără escaladare.
+    // (`google/gemma-4-31b-it:free`, testat în paralel, a picat pe 429 rate-limit
+    // upstream chiar în timpul testului — evitat ca implicit din acest motiv.)
     // Escaladarea la treapta work (plătită) rămâne DOAR pe cereri grele/de
     // acțiune reală (taskDifficulty / hasActionIntent) — vezi selectedBrainModel
     // din chat.ts. Editabil din env dacă vrei alt model gratuit.
-    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'openai/gpt-oss-20b:free').trim(),
+    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
     // Creierul de escaladare (Adrian, 25 iul: „Kelion trebuie să folosească
     // Fable 5") — cel mai capabil model disponibil, pentru cererile grele
     // (ask_brain din voce + tier-ul work din scris).
