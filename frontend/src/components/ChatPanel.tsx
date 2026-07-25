@@ -1138,7 +1138,35 @@ export default function ChatPanel({
               void ensureMicRef.current()
             }
           }, 55 * 60_000)
-          const origStop = rv.stop.bind(rv)
+          // TAXAREA VOCII PE MINUT (Adrian, 25 iul): cât timp vocea e activă,
+          // pulsăm la 20s → serverul debitează secundele din credite. La „stop"
+          // din server (fără credit) oprim vocea; la orice oprire, timerul moare.
+          let lastTick = Date.now()
+          const voiceTick = window.setInterval(() => {
+            const secs = Math.round((Date.now() - lastTick) / 1000)
+            lastTick = Date.now()
+            void fetch('/api/realtime/tick', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ seconds: secs }),
+            })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((j: { stop?: boolean } | null) => {
+                window.dispatchEvent(new CustomEvent('kelion:credits-changed'))
+                if (j?.stop) {
+                  rv.stop()
+                  micRef.current = null
+                  setListening(false)
+                }
+              })
+              .catch(() => {})
+          }, 20_000)
+          const rotStop = rv.stop.bind(rv)
+          const origStop = () => {
+            clearInterval(voiceTick)
+            rotStop()
+          }
           rv.stop = () => {
             clearTimeout(rotateTimer)
             origStop()

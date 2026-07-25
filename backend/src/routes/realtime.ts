@@ -3,7 +3,7 @@ import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref } from '../db.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
-import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
+import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
@@ -239,6 +239,27 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         /* rezultat non-JSON — doar text pentru model */
       }
       return reply.send({ output: out.slice(0, 6000), screen })
+    },
+  )
+
+  // TAXAREA VOCII PE MINUT (Adrian, 25 iul): cât timp vocea e activă, clientul
+  // „pulsează" la ~20s; serverul debitează secundele REAL conectate din credite.
+  // Așa userul plătește și timpul de vorbit (cea mai scumpă componentă OpenAI
+  // Realtime), nu doar uneltele. Plafon 60s/puls (anti-abuz dacă vine un salt).
+  app.post<{ Body: { seconds?: number } }>(
+    '/api/realtime/tick',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const seconds = Math.max(0, Math.min(60, Number(req.body?.seconds ?? 0)))
+      if (seconds <= 0) return reply.send({ ok: true, charged: 0 })
+      const cost = (seconds / 60) * VOICE_USD_PER_MINUTE
+      void recordCost(user.email, 'voice_minutes', cost)
+      // TOȚI se debitează, inclusiv adminul (regula din 25 iul).
+      void debitWallet(user.email, cost, `voice_min:${Math.round(seconds)}s`)
+      const bal = await getBalance(user.email)
+      // Semnalăm clientului dacă a rămas fără credit → oprește vocea.
+      return reply.send({ ok: true, charged: cost, balance: bal, stop: config.stripe.secretKey && user.role !== 'admin' && bal <= 0 })
     },
   )
 

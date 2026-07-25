@@ -37,3 +37,9 @@ export const SERPER_USD_PER_CALL = 0.001
 
 export const IMAGE_USD_PER_CALL = 0.04
 
+// TAXAREA VOCII PE MINUT (Adrian, 25 iul: „când userii folosesc voce/extra plăți,
+// să le ia costurile din credite"). Audio-ul live OpenAI Realtime e cea mai
+// scumpă componentă (STT+model+TTS pe minut). Clientul „pulsează" cât timp vocea
+// e activă; serverul debitează pe secunde REAL conectate. Editabil din env.
+export const VOICE_USD_PER_MINUTE = Number(process.env.VOICE_USD_PER_MINUTE ?? 0.35)
+
