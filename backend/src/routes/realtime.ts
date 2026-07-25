@@ -71,8 +71,24 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       const meserieId = await getMeserieActiva(user.email)
       if (meserieId != null) meserieName = getMeserie(meserieId)?.nume ?? null
 
+      // CONTEXT (memorie + ultimele replici) — o SINGURĂ dată, în sesiunea
+      // inițială, ca vocea să fie coerentă și să nu piardă firul.
+      const [memRecall, recent] = await Promise.all([
+        recallMemories(user.email, 'kelion', '').catch(() => ''),
+        getRecentHistory(user.email, 20).catch(() => [] as { role: string; content: string }[]),
+      ])
+      const history = recent
+        .filter((m) => m.content && m.content.trim())
+        .map((m) => `${m.role === 'assistant' ? 'Kelion' : 'Utilizatorul'}: ${m.content.slice(0, 400)}`)
+        .join('\n')
+      const contextBlock =
+        (memRecall || '') +
+        (history
+          ? `\n\nCONVERSAȚIA DE PÂNĂ ACUM (continu-o firesc, ține minte ce s-a spus):\n${history}`
+          : '')
+
       // hardLock = adminul (Adrian) — română MEREU, fără comutare pe italiană.
-      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin)
+      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock)
       if (!res.ok) {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
@@ -190,53 +206,6 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ output: out.slice(0, 6000), screen })
     },
   )
-
-  // CONFIGUL SESIUNII PENTRU CLIENT (25 iul — plasă de siguranță după
-  // descoperirea că multipart-ul „session" era IGNORAT de OpenAI): clientul o
-  // cere la deschiderea dataChannel-ului și o aplică prin `session.update` —
-  // calea DOCUMENTATĂ, garantată. Chiar dacă multipart-ul pică iar, sesiunea
-  // primește instrucțiunile/uneltele/limba în prima secundă.
-  app.get('/api/realtime/config', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    const isAdmin = user.email.toLowerCase() === config.adminEmail
-    let lang: string
-    if (isAdmin) {
-      lang = 'ro'
-    } else {
-      lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
-      if (!/^[a-z]{2}$/.test(lang)) lang = ''
-    }
-    let meserieName: string | null = null
-    const meserieId = await getMeserieActiva(user.email)
-    if (meserieId != null) meserieName = getMeserie(meserieId)?.nume ?? null
-
-    // CONTEXT ÎN VOCE (Adrian, 25 iul: „chatul pierde context, nu e coerent").
-    // Cauza: sesiunea de voce pornea OARBĂ — persona + limbă, dar ZERO memorie și
-    // ZERO istoric. La fiecare pornire/reconectare Kelion uita tot. Acum îi dăm,
-    // exact ca la chatul scris: (1) memoria de lungă durată despre user, (2)
-    // ultimele replici ale conversației (scrise + vocale) ca istoric viu.
-    const [memRecall, recent] = await Promise.all([
-      recallMemories(user.email, 'kelion', '').catch(() => ''),
-      getRecentHistory(user.email, 20).catch(() => [] as { role: string; content: string }[]),
-    ])
-    const history = recent
-      .filter((m) => m.content && m.content.trim())
-      .map((m) => `${m.role === 'assistant' ? 'Kelion' : 'Utilizatorul'}: ${m.content.slice(0, 400)}`)
-      .join('\n')
-    const contextBlock =
-      (memRecall || '') +
-      (history
-        ? `\n\nCONVERSAȚIA DE PÂNĂ ACUM (continu-o firesc, ține minte ce s-a spus, nu o relua de la zero):\n${history}`
-        : '')
-
-    return reply.send({
-      instructions: realtimeInstructions(lang, meserieName, isAdmin) + contextBlock,
-      tools: realtimeTools(),
-      voice: config.openai.realtimeVoice,
-      lang,
-    })
-  })
 
   app.post<{ Body: { role?: string; text?: string } }>(
     '/api/realtime/transcript',

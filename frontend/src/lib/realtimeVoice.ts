@@ -247,28 +247,10 @@ export async function startRealtimeVoice(
         onState?.('error', 'dc-closed')
       }
     }
-    // PLASĂ DE SIGURANȚĂ (25 iul — dovedit cu experiment A/B: multipart-ul
-    // „session" trimis ca Blob era IGNORAT de OpenAI → NICIO instrucțiune nu
-    // s-a aplicat vreodată: de-aia rusa, de-aia „nu vede/nu escaladează").
-    // Pe lângă fixul din server (string, nu Blob), aplicăm instrucțiunile și
-    // AICI, prin session.update pe dataChannel — calea documentată, garantată.
-    dc.onopen = () => {
-      void fetch('/api/realtime/config', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((cfg: { instructions?: string; tools?: unknown[] } | null) => {
-          if (!cfg?.instructions || dc.readyState !== 'open') return
-          send({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              instructions: cfg.instructions,
-              tools: cfg.tools ?? [],
-              tool_choice: 'auto',
-            },
-          })
-        })
-        .catch(() => {})
-    }
+    // O SINGURĂ injecție (25 iul — Adrian: „injectezi de o mie de ori, dublezi").
+    // Instrucțiunile + uneltele + contextul vin ACUM în sesiunea inițială de pe
+    // server (multipart string, acceptat de OpenAI cu 201). NU mai dublăm aici
+    // prin session.update — era exact stratul redundant.
     const send = (obj: unknown): void => {
       if (dc.readyState === 'open') {
         try {

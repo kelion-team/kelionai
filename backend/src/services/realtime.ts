@@ -202,6 +202,7 @@ export async function openaiRealtimeAnswer(
   lang: string,
   meserie?: string | null,
   hardLock = false,
+  contextBlock = '',
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
 
@@ -243,7 +244,11 @@ export async function openaiRealtimeAnswer(
       },
       output: { voice: config.openai.realtimeVoice },
     },
-    instructions: realtimeInstructions(lang, meserie, hardLock),
+    // O SINGURĂ injecție (25 iul — Adrian: „injectezi a mia oară, dublezi").
+    // Instrucțiuni + context (memorie + istoric) intră AICI, în sesiunea inițială,
+    // care e ACCEPTATĂ de OpenAI (201). Nu mai există al doilea strat prin
+    // session.update — era exact dublura.
+    instructions: realtimeInstructions(lang, meserie, hardLock) + (contextBlock || ''),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
     tools: realtimeTools(),
     tool_choice: 'auto',
