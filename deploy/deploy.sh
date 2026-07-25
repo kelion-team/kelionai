@@ -15,6 +15,15 @@
 # Idempotent: rerulabil oricând (reconstruiește + repornește curat).
 set -euo pipefail
 
+# GARDĂ ANTI-AUTO-RESCRIERE: pasul 1 face `git checkout` peste ACEST fișier în
+# timp ce bash îl citește progresiv — dacă master aduce un deploy.sh diferit,
+# execuția continuă din mijlocul fișierului NOU (corupție). De aceea scriptul
+# se rulează întotdeauna dintr-o COPIE în /tmp, niciodată din clonă.
+if [ "${KELION_DEPLOY_COPY:-0}" != 1 ]; then
+  cp "$0" /tmp/kelion-deploy-run.sh
+  KELION_DEPLOY_COPY=1 exec bash /tmp/kelion-deploy-run.sh "$@"
+fi
+
 REPO=/root/kelion/repo
 ENVFILE=/root/kelion/kelionai.env
 BRANCH="${1:-master}"
@@ -31,13 +40,16 @@ crontab -l 2>/dev/null | grep -vE 'watchdog\.sh|paznic-chat\.sh' | crontab - 2>/
 # 2) serviciile: stop + disable + unit-file mutat + mask (mask-ul eșuează cât
 #    timp unit-file-ul real există — de-aia întâi îl mutăm în dead-units/);
 mkdir -p /root/kelion/dead-units
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+# kelion-repairer-pool + kelion-voice adăugate 25 iul: scăpaseră din prima listă
+# și rămăseseră în buclă „activating auto-restart" (scripturile lor din bridge/
+# sunt șterse din 23 iul — systemd reîncerca la nesfârșit un fișier inexistent).
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
   systemctl stop "$s" 2>/dev/null || true
   systemctl disable "$s" 2>/dev/null || true
   mv "/etc/systemd/system/$s.service" /root/kelion/dead-units/ 2>/dev/null || true
 done
 systemctl daemon-reload 2>/dev/null || true
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
   systemctl mask "$s" 2>/dev/null || true
 done
 # 3) timerele moarte (scripturile lor au dispărut din repo). kelion-repo-sync
@@ -52,7 +64,7 @@ systemctl daemon-reload 2>/dev/null || true
 # 4) PROCESELE deja pornite (lecția din 25 iul: mask-ul oprește doar REÎNVIEREA;
 #    repairer-pool + builder-server rulau NEÎNTRERUPT din 20 iul și unul din ele
 #    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
-pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux' 2>/dev/null || true
+pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|kelion-voice-agent' 2>/dev/null || true
 
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
@@ -73,9 +85,13 @@ docker build -t kelionai:latest "$REPO"
 
 echo "== 4. Pornesc aplicația (:8080, network host, env-file) =="
 docker rm -f kelionai-app 2>/dev/null || true
+# GIT_COMMIT_SHA intră în container ca /api/version să întoarcă EXACT sha-ul
+# publicat (backend/src/index.ts îl suportă deja) — verificarea anti-fantomă
+# devine „live == master", nu doar „s-a schimbat ceva".
 docker run -d --name kelionai-app --restart unless-stopped \
   --network host --env-file "$ENVFILE" \
   -e PORT=8080 -e NODE_ENV=production \
+  -e GIT_COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD)" \
   kelionai:latest
 
 echo "== 5. (Re)pornesc Caddy cu Caddyfile-ul aplicației =="
@@ -92,7 +108,17 @@ echo "== 6. Backup criptat zilnic (cron) =="
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
-echo "== 7. Verific LIVE (versiunea trebuie să răspundă) =="
-sleep 6
-curl -s -m 8 http://127.0.0.1:8080/api/version || echo "(încă pornește — verifică 'docker logs kelionai-app')"
-echo; echo "✅ Deploy rulat. Verifică kelionai.app după ce Cloudflare pointează pe VPS."
+echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
+SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
+V=""
+for _ in $(seq 1 12); do
+  sleep 5
+  V=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
+  [ "$V" = "$SHA" ] && break
+done
+if [ "$V" = "$SHA" ]; then
+  echo "✅ LIVE = $SHA (anti-fantomă TRECE). Verifică și https://kelionai.app/api/version."
+else
+  echo "❌ ANTI-FANTOMĂ PICĂ: local v='$V', așteptat '$SHA' — vezi 'docker logs kelionai-app'."
+  exit 1
+fi
