@@ -251,10 +251,14 @@ export async function openaiRealtimeAnswer(
 
   const form = new FormData()
   form.append('sdp', offerSdp)
-  form.append(
-    'session',
-    new Blob([JSON.stringify(session)], { type: 'application/json' }),
-  )
+  // CA STRING, NU CA BLOB (25 iul — al 3-lea incident „vorbește rusă" + „nu
+  // vede/nu escaladează în voce"): Blob-ul intra în form-data ca FIȘIER
+  // (filename="blob") și parserul OpenAI îl IGNORA — de-aia „missing_model"
+  // cerea modelul în URL deși era în JSON: sesiunea NU era citită DELOC. Deci
+  // nici instrucțiunile, nici vocea, nici limba, nici uneltele nu se aplicau
+  // vreodată — modelul rula pe DEFAULT (oglindea limba percepută, răspundea la
+  // zgomot). String simplu = câmp de formular normal, parsat.
+  form.append('session', JSON.stringify(session))
 
   let r: Response
   try {

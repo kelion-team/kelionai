@@ -6,7 +6,7 @@ import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
-import { openaiRealtimeAnswer } from '../services/realtime.js'
+import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken } from '../services/google.js'
 import { generateImage } from '../services/image.js'
@@ -189,6 +189,33 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ output: out.slice(0, 6000), screen })
     },
   )
+
+  // CONFIGUL SESIUNII PENTRU CLIENT (25 iul — plasă de siguranță după
+  // descoperirea că multipart-ul „session" era IGNORAT de OpenAI): clientul o
+  // cere la deschiderea dataChannel-ului și o aplică prin `session.update` —
+  // calea DOCUMENTATĂ, garantată. Chiar dacă multipart-ul pică iar, sesiunea
+  // primește instrucțiunile/uneltele/limba în prima secundă.
+  app.get('/api/realtime/config', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const isAdmin = user.email.toLowerCase() === config.adminEmail
+    let lang: string
+    if (isAdmin) {
+      lang = 'ro'
+    } else {
+      lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
+      if (!/^[a-z]{2}$/.test(lang)) lang = ''
+    }
+    let meserieName: string | null = null
+    const meserieId = await getMeserieActiva(user.email)
+    if (meserieId != null) meserieName = getMeserie(meserieId)?.nume ?? null
+    return reply.send({
+      instructions: realtimeInstructions(lang, meserieName, isAdmin),
+      tools: realtimeTools(),
+      voice: config.openai.realtimeVoice,
+      lang,
+    })
+  })
 
   app.post<{ Body: { role?: string; text?: string } }>(
     '/api/realtime/transcript',

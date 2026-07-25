@@ -60,6 +60,22 @@ function persistTranscript(
     .catch(() => {})
 }
 
+// ── O SINGURĂ SESIUNE DE VOCE, PE TOATE TABURILE (25 iul — Adrian: „rusa vine
+// peste chatul live, mai e un canal") ────────────────────────────────────────
+// Două sesiuni Realtime în paralel (tab vechi rămas deschis, repornire în
+// cursă) = două voci suprapuse, iar cea veche fără config → rusă. Gardă dublă:
+// (1) singleton pe tab — pornirea unei sesiuni o OPREȘTE pe cea dinainte;
+// (2) BroadcastChannel între taburi — sesiunea nouă le închide pe ale altora.
+let activeVoice: { stop: () => void } | null = null
+const VOICE_BC = 'kelion-voice'
+const voiceSessionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+let voiceBc: BroadcastChannel | null = null
+try {
+  voiceBc = new BroadcastChannel(VOICE_BC)
+} catch {
+  voiceBc = null /* browser vechi — rămâne garda pe tab */
+}
+
 /**
  * Pornește o sesiune de voce full-duplex prin OpenAI Realtime.
  * Aruncă dacă microfonul e refuzat sau sesiunea backend eșuează.
@@ -70,6 +86,13 @@ export async function startRealtimeVoice(
   const { onState, onUserTranscript, onAssistantTranscript, onToolCall, signal } = opts
   onState?.('connecting')
 
+  // Orice sesiune anterioară din ACEST tab moare înainte să pornească alta.
+  activeVoice?.stop()
+  activeVoice = null
+  // Anunță celelalte taburi: sesiunea de voce e AICI de-acum.
+  const myId = voiceSessionId()
+  voiceBc?.postMessage({ takeover: myId })
+
   let closed = false
   const cleanups: (() => void)[] = []
   const pc = new RTCPeerConnection()
@@ -77,6 +100,7 @@ export async function startRealtimeVoice(
   const stop = (): void => {
     if (closed) return
     closed = true
+    if (activeVoice === handleShell) activeVoice = null
     for (const c of cleanups) {
       try {
         c()
@@ -95,6 +119,23 @@ export async function startRealtimeVoice(
       /* ignore */
     }
     onState?.('closed')
+  }
+
+  // Handle-ul „umbră" pentru singleton: există înainte de return, ca stop()-ul
+  // să poată curăța referința globală pe orice drum (eroare inclusă).
+  const handleShell = { stop }
+  activeVoice = handleShell
+  // Alt tab a pornit o sesiune → a noastră se închide (o singură voce, mereu).
+  if (voiceBc) {
+    const onTakeover = (ev: MessageEvent): void => {
+      const d = ev.data as { takeover?: string } | null
+      if (d?.takeover && d.takeover !== myId && !closed) {
+        stop()
+        onState?.('error', 'preluat-de-alt-tab')
+      }
+    }
+    voiceBc.addEventListener('message', onTakeover)
+    cleanups.push(() => voiceBc?.removeEventListener('message', onTakeover))
   }
 
   if (signal) {
@@ -205,6 +246,28 @@ export async function startRealtimeVoice(
         stop()
         onState?.('error', 'dc-closed')
       }
+    }
+    // PLASĂ DE SIGURANȚĂ (25 iul — dovedit cu experiment A/B: multipart-ul
+    // „session" trimis ca Blob era IGNORAT de OpenAI → NICIO instrucțiune nu
+    // s-a aplicat vreodată: de-aia rusa, de-aia „nu vede/nu escaladează").
+    // Pe lângă fixul din server (string, nu Blob), aplicăm instrucțiunile și
+    // AICI, prin session.update pe dataChannel — calea documentată, garantată.
+    dc.onopen = () => {
+      void fetch('/api/realtime/config', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((cfg: { instructions?: string; tools?: unknown[] } | null) => {
+          if (!cfg?.instructions || dc.readyState !== 'open') return
+          send({
+            type: 'session.update',
+            session: {
+              type: 'realtime',
+              instructions: cfg.instructions,
+              tools: cfg.tools ?? [],
+              tool_choice: 'auto',
+            },
+          })
+        })
+        .catch(() => {})
     }
     const send = (obj: unknown): void => {
       if (dc.readyState === 'open') {
