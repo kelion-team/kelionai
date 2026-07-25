@@ -40,13 +40,16 @@ crontab -l 2>/dev/null | grep -vE 'watchdog\.sh|paznic-chat\.sh' | crontab - 2>/
 # 2) serviciile: stop + disable + unit-file mutat + mask (mask-ul eșuează cât
 #    timp unit-file-ul real există — de-aia întâi îl mutăm în dead-units/);
 mkdir -p /root/kelion/dead-units
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+# kelion-repairer-pool + kelion-voice adăugate 25 iul: scăpaseră din prima listă
+# și rămăseseră în buclă „activating auto-restart" (scripturile lor din bridge/
+# sunt șterse din 23 iul — systemd reîncerca la nesfârșit un fișier inexistent).
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
   systemctl stop "$s" 2>/dev/null || true
   systemctl disable "$s" 2>/dev/null || true
   mv "/etc/systemd/system/$s.service" /root/kelion/dead-units/ 2>/dev/null || true
 done
 systemctl daemon-reload 2>/dev/null || true
-for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer; do
+for s in kelion-bridge kelion-builder kelion-paznic kelion-deployer kelion-repairer-pool kelion-voice; do
   systemctl mask "$s" 2>/dev/null || true
 done
 # 3) timerele moarte (scripturile lor au dispărut din repo). kelion-repo-sync
@@ -61,7 +64,7 @@ systemctl daemon-reload 2>/dev/null || true
 # 4) PROCESELE deja pornite (lecția din 25 iul: mask-ul oprește doar REÎNVIEREA;
 #    repairer-pool + builder-server rulau NEÎNTRERUPT din 20 iul și unul din ele
 #    trimitea alertele-fantomă de la alerts@ — buclă cu auto-reply-ul din contact@).
-pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux' 2>/dev/null || true
+pkill -9 -f 'kelion-repairer-pool|kelion-builder-server|kelion-bridge-linux|kelion-voice-agent' 2>/dev/null || true
 
 echo "== 1. Aduc codul ($BRANCH) =="
 cd "$REPO"
