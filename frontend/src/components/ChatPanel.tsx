@@ -1031,12 +1031,18 @@ export default function ChatPanel({
                 const t = text.trim()
                 if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
                 thinkingRef.current = false
-                // VOCE PE FRAZĂ (Adrian, 25 iul — cost real: ~$21/oră cu sesiunea
-                // ținută degeaba deschisă): schimbul s-a încheiat — închide
-                // sesiunea plătită ACUM, ascultă gratuit local până la
-                // următoarea vorbire reală.
-                closeVoiceAfterExchange()
               } else setLiveVoice(text)
+            },
+            // VOCE PE FRAZĂ (Adrian, 25 iul — cost real: ~$21/oră cu sesiunea
+            // ținută degeaba deschisă). BUG REAL găsit (25 iul, „taie fraza după
+            // 2 cuvinte"): închiderea rula pe `onAssistantTranscript(_, true)`,
+            // care se declanșează la finalul UNUI SEGMENT de transcript — un
+            // răspuns cu mai multe segmente (ex. apel de unealtă → continuă
+            // vorbind) tăia vocea după primul segment scurt, restul rămânea
+            // doar scris. Fix: închide DOAR la `response.done` (întreg
+            // răspunsul, toate segmentele/uneltele, chiar s-a încheiat).
+            onResponseDone: () => {
+              closeVoiceAfterExchange()
             },
             // AUTONOMIA VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi
             // lipsesc instrumente de a afișa pe ecran"): uneltele cerute de
