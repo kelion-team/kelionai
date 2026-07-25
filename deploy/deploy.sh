@@ -80,6 +80,16 @@ for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL OPENR
 done
 [ "${MISS:-0}" = 1 ] && { echo "Opresc: env incomplet."; exit 1; }
 
+echo "== 2b. Canalul de update al lui Kelion (ce primește la ACEST deploy) =="
+# Adrian, 25 iul: „canal de informare a lui cu tot ce primește ca update".
+# Scriem git log-ul recent în contextul de build; Dockerfile îl copiază în
+# imagine (COPY . .), iar backend-ul (services/updates.ts) îl servește lui
+# Kelion în prompt + prin unealta list_updates. Fișierul e în .gitignore.
+{
+  echo "# Update-urile lui Kelion — generat la deploy ($(TZ=Europe/London date +'%Y-%m-%d %H:%M %Z')), cele mai noi primele"
+  git -C "$REPO" log -40 --date=format:'%Y-%m-%d %H:%M' --pretty='%h | %ad | %s'
+} > "$REPO/deploy/last-updates.txt"
+
 echo "== 3. Construiesc imaginea =="
 docker build -t kelionai:latest "$REPO"
 

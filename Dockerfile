@@ -23,6 +23,15 @@ RUN cd backend && npm install
 COPY backend ./backend
 RUN cd backend && npm run build
 
+# ACCES INTEGRAL LA SURSE (Adrian, 25 iul: „full acces la toate sursele soft"):
+# tot repo-ul intră în imagine (deploy/, .github/, docs, scripturi — ce exclude
+# .dockerignore rămâne afară: .git, node_modules, dist, .env). Uneltele
+# list/read/search_source ale lui Kelion văd astfel TOT softul, nu doar
+# backend+frontend; iar deploy/last-updates.txt (scris de deploy.sh înainte de
+# build) devine canalul lui de update. Stratul e ultimul → nu strică cache-ul
+# build-urilor de mai sus.
+COPY . .
+
 ENV NODE_ENV=production
 ENV FRONTEND_DIST=/app/frontend/dist
 EXPOSE 8080
