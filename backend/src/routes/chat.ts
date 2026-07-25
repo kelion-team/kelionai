@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { config } from '../config.js'
+import { config, roleFor } from '../config.js'
 import type {
   Tool,
   Message,
@@ -105,7 +105,12 @@ async function selectedBrainModel(
   //     `ask_brain` (aceeași ca vocea) și escaladează SINGUR ce judecă el greu
   //     — acoperă exact cererile scurte-dar-grele pe care regexul le rata.
   // Persona/voce/limbă/memorie/unelte sunt IDENTICE — se schimbă DOAR modelul.
-  const heavy = taskDifficulty(text) >= ESCALATE_AT
+  // ADMINUL PRIMEȘTE ÎNTOTDEAUNA CREIERUL MARE (25 iul — dovadă din jurnal:
+  // cu autonomia completă live, modelul mic de chat a chemat ZERO unelte la
+  // cererile de execuție ale lui Adrian; vorbea, nu lucra. Ordinele
+  // proprietarului cer creierul care DUCE lanțuri de unelte, nu conversație
+  // rapidă — latența turei de admin e preț acceptat, decizia lui).
+  const heavy = roleFor(email) === 'admin' || taskDifficulty(text) >= ESCALATE_AT
   const model = heavy ? await resolveModel('work', sel.work) : await resolveModel('chat', sel.chat)
   return { model, heavy }
 }
