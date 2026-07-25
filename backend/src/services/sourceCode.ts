@@ -70,7 +70,12 @@ export async function readSource(rel: string): Promise<string> {
   if (!p) return JSON.stringify({ error: 'bad_path' })
   try {
     const raw = await fs.readFile(p, 'utf8')
-    const clipped = raw.length > 60_000 ? raw.slice(0, 60_000) + '\n…(tăiat la 60KB)' : raw
+    // DIETA DE COST (25 iul — Adrian: „chat imens", dovadă: o tură cu unelte a
+    // costat $4.24): 60KB pline de cod intrau în FIECARE rundă ulterioară a
+    // aceleiași ture (fiecare apel de unealtă retrimite tot ce s-a citit până
+    // atunci). Coborât la 24KB — suficient pentru majoritatea fișierelor mici/
+    // medii; pentru unul mare, search_source găsește linia exactă înainte.
+    const clipped = raw.length > 24_000 ? raw.slice(0, 24_000) + '\n…(tăiat la 24KB — folosește search_source ca să găsești linia exactă întâi)' : raw
     // Numere de linie — ca referințele („fișier:linie") să fie precise.
     return clipped
       .split('\n')

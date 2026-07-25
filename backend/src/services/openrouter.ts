@@ -156,6 +156,20 @@ export function taskDifficulty(text: string): number {
 // Prag de escaladare: peste el, cererea urcă de la CHAT la CREIER.
 export const ESCALATE_AT = 60
 
+// INTENȚIE DE EXECUȚIE (Adrian, 25 iul: „escaladarea se face de la cel mai
+// ieftin și capabil model până la sarcini cu adevărat grele, și se revine la
+// chat live") — analiza reală a arătat că modelul ieftin de chat pur și simplu
+// NU chema unelte la ordinele de execuție ale proprietarului (le vorbea, nu le
+// făcea), în timp ce forțarea creierului mare pe FIECARE tură de admin a ars
+// $23+/oră doar pe conversație obișnuită. Soluția corectă: rămâi ieftin
+// implicit, escaladează DOAR pe cererile de acțiune reală — și revii automat
+// la treapta ieftină la următoarea replică (heavy se calculează per-tură, din
+// textul curent, nu se ține agățat).
+const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa]-mi|diagnostic)/i
+export function hasActionIntent(text: string): boolean {
+  return ACTION_INTENT.test(text || '')
+}
+
 /** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
   const fallback = tier === 'chat' ? config.openrouter.chatDefault : config.openrouter.workDefault

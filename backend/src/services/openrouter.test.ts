@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, toolsToOpenAI } from './openrouter.js'
+import { toModel, resolveModel, toolsToOpenAI, hasActionIntent } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
@@ -40,5 +40,13 @@ describe('openrouter catalog', () => {
     // Implicitul work = Fable 5 (Adrian, 25 iul: „Kelion trebuie să folosească
     // Fable 5") — cel mai capabil model, cu raționament intern.
     expect(await resolveModel('work', null)).toBe('anthropic/claude-fable-5')
+  })
+
+  it('hasActionIntent (25 iul — escaladare economică: ieftin implicit, greu doar pe cereri de acțiune reală)', () => {
+    expect(hasActionIntent('repară animația gurii')).toBe(true)
+    expect(hasActionIntent('rulează diagnostic te rog')).toBe(true)
+    expect(hasActionIntent('publică fixul în producție')).toBe(true)
+    expect(hasActionIntent('bună, ce mai faci?')).toBe(false)
+    expect(hasActionIntent('mulțumesc pentru ajutor')).toBe(false)
   })
 })

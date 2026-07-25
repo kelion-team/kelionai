@@ -45,7 +45,7 @@ import {
   proposeKelionTool,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -105,12 +105,15 @@ async function selectedBrainModel(
   //     `ask_brain` (aceeași ca vocea) și escaladează SINGUR ce judecă el greu
   //     — acoperă exact cererile scurte-dar-grele pe care regexul le rata.
   // Persona/voce/limbă/memorie/unelte sunt IDENTICE — se schimbă DOAR modelul.
-  // ADMINUL PRIMEȘTE ÎNTOTDEAUNA CREIERUL MARE (25 iul — dovadă din jurnal:
-  // cu autonomia completă live, modelul mic de chat a chemat ZERO unelte la
-  // cererile de execuție ale lui Adrian; vorbea, nu lucra. Ordinele
-  // proprietarului cer creierul care DUCE lanțuri de unelte, nu conversație
-  // rapidă — latența turei de admin e preț acceptat, decizia lui).
-  const heavy = roleFor(email) === 'admin' || taskDifficulty(text) >= ESCALATE_AT
+  // ESCALADARE ECONOMICĂ (25 iul — corectat după ce forțarea creierului mare pe
+  // FIECARE tură de admin a ars $23+/oră chiar și pe conversație obișnuită;
+  // Adrian: „pentru o comandă să repare animația gurii, e enorm"). Regula
+  // corectă: cel mai ieftin model capabil implicit; escaladează DOAR pe
+  // cereri de acțiune reală a proprietarului (hasActionIntent — „repară",
+  // „rulează", „publică", „scrie cod"...); revine SINGUR la treapta ieftină
+  // la următoarea replică obișnuită (heavy se calculează per-tură din textul
+  // curent, nu rămâne agățat).
+  const heavy = taskDifficulty(text) >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
   const model = heavy ? await resolveModel('work', sel.work) : await resolveModel('chat', sel.chat)
   return { model, heavy }
 }
@@ -976,11 +979,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // hundreds of messages) would blow the token limit and make EVERY turn fail
     // with a "connection error" — especially when a big pasted page is added.
     // Long-term continuity comes from the memory agent, not the raw transcript.
-    // Raised from 24 → 60: the models have a 1M-token context, and 24 was cutting
-    // off important earlier context inside a single working session (the user
-    // reported losing information mid-conversation). 60 keeps far more context
-    // while staying well clear of any limit.
-    const MAX_HISTORY = 60
+    // DIETA DE ISTORIC (25 iul — Adrian: „chat de asemenea imens", dovadă reală:
+    // o singură tură cu unelte a costat $4.24): coborât de la 60 la 24. 60 fusese
+    // urcat de la 24 pentru context mai lung într-o sesiune de lucru, dar analiza
+    // costurilor a arătat că fiecare mesaj retrimis se plătește la FIECARE tură —
+    // memoria pe termen lung vine oricum din agentul de memorie, nu din transcript.
+    const MAX_HISTORY = 24
     if (messages.length > MAX_HISTORY) {
       messages = messages.slice(-MAX_HISTORY)
       while (messages.length > 0 && messages[0].role !== 'user') messages.shift()
