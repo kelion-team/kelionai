@@ -40,7 +40,22 @@ const PAUSED = JSON.stringify({
   hint: 'Adrian a oprit autonomia („pauza-autonomie"); se reia doar cu „reia-autonomia" de la el',
 })
 
-/** Nume de ramură valid (git): fără spații/caractere periculoase. Gardă tehnică, nu de politică. */
+/**
+ * Normalizează numele de ramură în forma sigură git (incident 25 iul: Kelion,
+ * lucrând în română, a numit ramura cu DIACRITICE și garda strictă i-a blocat
+ * livrarea fixului — „defectul de validare a ramurii". Nu respingem: reparăm).
+ */
+export function normalizeBranch(name: string): string {
+  const ascii = name.normalize('NFKD').replace(/[̀-ͯ]/g, '')
+  return ascii
+    .replace(/[^A-Za-z0-9._/-]+/g, '-')
+    .replace(/\.\.+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-/.]+|[-/.]+$/g, '')
+    .slice(0, 120)
+}
+
+/** Nume de ramură valid DUPĂ normalizare. Gardă tehnică, nu de politică. */
 export function isValidBranch(name: string): boolean {
   return /^[A-Za-z0-9._/-]{1,120}$/.test(name) && !name.includes('..') && name !== 'master'
 }
@@ -73,6 +88,7 @@ export async function repoWrite(
 ): Promise<string> {
   if (!ghToken()) return NO_TOKEN
   if (await isOpsPaused()) return PAUSED
+  branch = normalizeBranch(branch)
   if (!isValidBranch(branch))
     return JSON.stringify({ error: 'invalid_branch', hint: "folosește un nume simplu, ex. 'kelion/fix-microfon' (nu master)" })
   const err = await ensureBranch(branch)
@@ -102,6 +118,7 @@ export async function repoWrite(
 export async function repoOpenPR(branch: string, title: string, body: string): Promise<string> {
   if (!ghToken()) return NO_TOKEN
   if (await isOpsPaused()) return PAUSED
+  branch = normalizeBranch(branch)
   const r = await gh('/pulls', {
     method: 'POST',
     body: JSON.stringify({
