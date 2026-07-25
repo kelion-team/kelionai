@@ -1,8 +1,14 @@
-# DIAGNOSTIC DETERMINIST VPS — rezolvă Problema 2 (Adrian, 12 iul: „diagnostichează
-# din memorie, nu din dovezi"). La ORICE eșec, în loc de „presupun că...", rulează
-# ASTA: adună FAPTELE reale (starea serviciilor, ultimele loguri, containerele
-# docker, sănătatea endpoint-urilor, dacă procesul viu rulează codul din repo).
-# Determinist, fără LLM. Ieșirea e dovada pe care se ia decizia.
+# DIAGNOSTIC DETERMINIST VPS — RESCRIS 25 iul 2026 pentru stack-ul REAL de azi:
+# aplicația în Docker (kelionai-app) + Caddy (kelion-caddy) pe VPS 164.68.120.87.
+#
+# Versiunea veche era MOARTĂ de două ori: (1) SSH cu parolă prin sshpass —
+# dezactivată pe VPS din 22 iul („Permission denied (publickey)"); (2) verifica
+# servicii și chei care nu mai există în cod (kelion-builder/bridge, Kimi/GLM —
+# puntea a fost ștearsă pe 23 iul, creierul e pe OpenRouter din 24 iul).
+#
+# Rolul (AI-HANDOFF §14.b B): la ORICE eșec, ÎNTÂI faptele — rulezi asta și decizi
+# pe ce tipărește, nu „din memorie". Determinist, fără LLM, doar citire (nu
+# repornește și nu modifică nimic).
 name: vps-diag
 
 on:
@@ -12,99 +18,58 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     steps:
-      - name: Adună faptele de pe VPS (SSH)
+      - name: Adună faptele de pe VPS (SSH cu cheie)
         env:
-          VPS_PASS: ${{ secrets.VPS_ROOT_PASS }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "$VPS_PASS" ]; then
-            echo "::error::Lipsește secretul VPS_ROOT_PASS."; exit 1
+          if [ -z "$KEY" ]; then
+            echo "::error::Lipsește secretul VPS_SSH_KEY."; exit 1
           fi
-          VPS_HOST=164.68.120.87
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
-          export SSHPASS="$VPS_PASS"
-          SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1"
-
-          sshpass -e ssh $SSHOPTS root@"$VPS_HOST" 'bash -s' <<'EOS'
+          umask 077
+          printf '%s\n' "$KEY" > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87 'bash -s' <<'EOS'
           set +e
-          echo "==================== SERVICII (systemctl is-active) ===================="
-          for s in kelion-builder kelion-bridge kelion-paznic kelion-deployer docker; do
-            printf '%-18s ' "$s"; systemctl is-active "$s" 2>/dev/null
-          done
+          echo "==================== CONTAINERE (docker ps -a) ===================="
+          docker ps -a --format '{{.Names}}  {{.Status}}  {{.Image}}' | head -20
           echo
-          echo "==================== COD RULAT vs REPO (md5) ===================="
-          REPO=/root/kelion/repo; [ -d "$REPO" ] || REPO=/root/kelion
-          for pair in "kelion-builder:bridge/kelion-builder-server.mjs" "kelion-bridge:bridge/kelion-bridge-linux.mjs"; do
-            SVC="${pair%%:*}"; SRC="${pair##*:}"
-            EXEC=$(systemctl show "$SVC" -p ExecStart --value | grep -oE '/[^ ]*[.]mjs' | head -1)
-            if [ -n "$EXEC" ] && [ -f "$EXEC" ] && [ -f "$REPO/$SRC" ]; then
-              A=$(md5sum "$EXEC" | awk '{print $1}'); B=$(md5sum "$REPO/$SRC" | awk '{print $1}')
-              [ "$A" = "$B" ] && echo "$SVC: COD LA ZI" || echo "$SVC: COD VECHI (rulat != repo) -> ruleaza vps-auto-restart"
-            else echo "$SVC: nu pot compara ($EXEC)"; fi
-          done
+          echo "==================== APP: ultimele 60 linii (docker logs) ===================="
+          docker logs --tail 60 kelionai-app 2>&1
           echo
-          echo "==================== DOCKER (ps -a) ===================="
-          docker ps -a --format '{{.Names}}  {{.Status}}  {{.Ports}}' 2>/dev/null | head -20
+          echo "==================== CADDY: ultimele 15 linii ===================="
+          docker logs --tail 15 kelion-caddy 2>&1
           echo
-          echo "==================== LOGURI kelion-livekit (docker, 15) ===================="
-          docker logs --tail 15 kelion-livekit 2>&1 | head -20
-          echo
-          echo "==================== journalctl kelion-builder (90) ===================="
-          journalctl -u kelion-builder -n 90 --no-pager 2>/dev/null | tail -90
-          echo
-          echo "==================== journalctl kelion-bridge (40) — CHAT ===================="
-          journalctl -u kelion-bridge -n 40 --no-pager 2>/dev/null | tail -40
-          echo
-          echo "==================== CREIER LIVE — COTA REALA (Kimi/GLM, cod HTTP acum) ===================="
-          KIMI_KEY=$(cat /root/kelion/kimi-key.txt 2>/dev/null | tr -d '\r\n' || true)
-          GLM_KEY=$(cat /root/kelion/glm-key.txt 2>/dev/null | tr -d '\r\n' || true)
-          if [ -n "$KIMI_KEY" ]; then
-            printf 'Kimi  HTTP: '
-            curl -s -o /tmp/kimi.out -w '%{http_code}\n' --max-time 20 -X POST https://api.kimi.com/coding/v1/messages \
-              -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
-              -d '{"model":"kimi-for-coding","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
-            echo "Kimi  body: $(head -c 260 /tmp/kimi.out 2>/dev/null)"
-            # PROBĂ: ce întoarce endpointul pentru model=kimi-k2-thinking (îl servește sau îl remapează?)
-            printf 'Kimi(k2-thinking) HTTP: '
-            curl -s -o /tmp/kimi_k2.out -w '%{http_code}\n' --max-time 20 -X POST https://api.kimi.com/coding/v1/messages \
-              -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
-              -d '{"model":"kimi-k2-thinking","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
-            echo "Kimi(k2-thinking) body: $(head -c 260 /tmp/kimi_k2.out 2>/dev/null)"
-          else echo "Kimi: LIPSA CHEIE (/root/kelion/kimi-key.txt)"; fi
-          if [ -n "$GLM_KEY" ]; then
-            printf 'GLM   HTTP: '
-            curl -s -o /tmp/glm.out -w '%{http_code}\n' --max-time 20 -X POST https://api.z.ai/api/anthropic/v1/messages \
-              -H "x-api-key: $GLM_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
-              -d '{"model":"glm-4.6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
-            echo "GLM   body: $(head -c 260 /tmp/glm.out 2>/dev/null)"
-            # PROBĂ: răspunde glm-5.2 (topul) real? (nu doar listat)
-            printf 'GLM(5.2) HTTP: '
-            curl -s -o /tmp/glm52.out -w '%{http_code}\n' --max-time 20 -X POST https://api.z.ai/api/anthropic/v1/messages \
-              -H "x-api-key: $GLM_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
-              -d '{"model":"glm-5.2","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' || echo "curl-fail"
-            echo "GLM(5.2) body: $(head -c 260 /tmp/glm52.out 2>/dev/null)"
-          else echo "GLM: LIPSA CHEIE (/root/kelion/glm-key.txt)"; fi
-          echo
-          echo "==================== MODELE DISPONIBILE (Kimi /v1/models) ===================="
-          if [ -n "$KIMI_KEY" ]; then
-            curl -s --max-time 20 https://api.kimi.com/coding/v1/models \
-              -H "Authorization: Bearer $KIMI_KEY" -H "x-api-key: $KIMI_KEY" -H 'anthropic-version: 2023-06-01' \
-              | head -c 800; echo
-          fi
-          echo "==================== MODELE DISPONIBILE (GLM /v1/models) — care e topul? ===================="
-          if [ -n "$GLM_KEY" ]; then
-            curl -s --max-time 20 https://api.z.ai/api/anthropic/v1/models \
-              -H "Authorization: Bearer $GLM_KEY" -H "x-api-key: $GLM_KEY" -H 'anthropic-version: 2023-06-01' \
-              | head -c 1200; echo
-            echo "--- fallback (endpoint z.ai openai-style) ---"
-            curl -s --max-time 20 https://api.z.ai/api/paas/v4/models -H "Authorization: Bearer $GLM_KEY" | head -c 1200; echo
+          echo "==================== COD RULAT vs MASTER (anti-fantomă) ===================="
+          cd /root/kelion/repo 2>/dev/null && git fetch -q origin master 2>/dev/null
+          MASTER=$(git rev-parse origin/master 2>/dev/null | cut -c1-7)
+          CLONA=$(git rev-parse HEAD 2>/dev/null | cut -c1-7)
+          RULAT=$(docker exec kelionai-app printenv GIT_COMMIT_SHA 2>/dev/null | cut -c1-7)
+          echo "origin/master=$MASTER   clona-VPS=$CLONA (branch $(git rev-parse --abbrev-ref HEAD 2>/dev/null))   container=${RULAT:-<GIT_COMMIT_SHA neinjectat — deploy de dinainte de 25 iul>}"
+          printf 'local :8080 /api/version : '; curl -s -m 8 http://127.0.0.1:8080/api/version; echo
+          if [ -n "$RULAT" ] && [ -n "$MASTER" ]; then
+            [ "$RULAT" = "$MASTER" ] && echo "VERDICT: COD LA ZI (container == origin/master)" \
+                                     || echo "VERDICT: COD VECHI — container $RULAT != master $MASTER → rulează workflow-ul «deploy»"
           fi
           echo
-          echo "==================== SĂNĂTATE ENDPOINT-URI ===================="
-          printf 'kelionai.app/api/version : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 https://kelionai.app/api/version
-          printf 'livekit local :7880      : '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://localhost:7880/ 2>/dev/null || echo "port inchis"
+          echo "==================== PUBLIC (prin Cloudflare + Caddy) ===================="
+          printf 'kelionai.app/api/version : '; curl -s -m 10 https://kelionai.app/api/version; echo
+          printf 'kelionai.app/health      : '; curl -s -o /dev/null -w '%{http_code}\n' -m 10 https://kelionai.app/health
           echo
-          echo "==================== INCARCARE ===================="
-          uptime; echo "disc:"; df -h / | tail -1
+          echo "==================== ZOMBI (nimic din astea nu are voie să fie viu) ===================="
+          pgrep -af 'kelion-(repairer|builder|bridge|paznic|deployer)' || echo "(niciun proces-zombie)"
+          systemctl list-units --all 'kelion-*' --no-legend 2>/dev/null | head -15
+          systemctl list-timers 'kelion-*' --no-legend 2>/dev/null | head -10
+          echo
+          echo "==================== CRON ===================="
+          crontab -l 2>/dev/null || echo "(gol)"
+          echo
+          echo "==================== POSTGRES ===================="
+          systemctl is-active postgresql 2>/dev/null || echo "unitatea postgresql nu răspunde"
+          echo
+          echo "==================== RESURSE ===================="
+          uptime
+          df -h / | tail -1
+          free -h | head -2
           EOS

@@ -15,8 +15,11 @@ rulează deja pe VPS; aici adăugăm containerul **aplicației** + Caddy.
    - **`STRIPE_WEBHOOK_SECRET`** — din Stripe → Webhooks (endpoint `https://kelionai.app/api/stripe/webhook`).
    - opțional: LiveKit, Google TTS/Serper/Maps/Gemini, Mail.
 
-2. **Rulează deploy-ul** pe VPS: `bash /root/kelion/repo/deploy/deploy.sh master`
-   (construiește imaginea, pornește app pe :8080, (re)pornește Caddy).
+2. **Rulează deploy-ul** — calea canonică (25 iul): GitHub → Actions → workflow
+   **`deploy`** → Run workflow (rulează și AUTOMAT la fiecare push pe master).
+   Face totul singur prin SSH + verifică anti-fantoma (live `v` == sha master).
+   Manual, prin SSH: vezi `deploy/RUNBOOKS.md` („Publicare manuală") — nu rula
+   `deploy.sh` direct din clonă, folosește forma cu copia din `/tmp`.
 
 3. **Repointează Cloudflare**: în panoul Cloudflare, recordul A/AAAA pentru
    `kelionai.app` → **164.68.120.87**. Până atunci domeniul lovește originea veche.
