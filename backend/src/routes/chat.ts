@@ -75,7 +75,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
-import { runRunbook, requestRepair } from '../services/runbooks.js'
+import { runRunbook, requestRepair, runbookStatus, runbookLog } from '../services/runbooks.js'
 import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
@@ -222,6 +222,26 @@ const RUN_RUNBOOK_TOOL: Tool = {
 }
 // Bucla completă de cod — Kelion scrie, deschide PR și ÎȘI DĂ SINGUR merge;
 // deploy-ul pornește automat pe push-ul în master (anti-fantomă rămâne dovada).
+// Ochii lui pe procese: starea rulărilor + jurnalul lor complet, la cerere.
+const RUNBOOK_STATUS_TOOL: Tool = {
+  name: 'runbook_status',
+  description:
+    "ADMIN ONLY. See YOUR OWN internal processes: the latest runs of your workflows (deploy, vps-run, vps-diag, sentinel, pr-verify) with status/conclusion/run id/url. Call it after starting anything (run_runbook, repo_merge_pr) to WATCH your work progress, and whenever the owner asks what's happening. Then SHOW it to the owner on the monitor with show_document.",
+  input_schema: {
+    type: 'object',
+    properties: { name: { type: 'string', description: 'Optional runbook name to filter (e.g. diagnostic); omit for all workflows.' } },
+  },
+}
+const RUNBOOK_LOG_TOOL: Tool = {
+  name: 'runbook_log',
+  description:
+    "ADMIN ONLY. Read the REAL log of one of your runs (by run id from runbook_status). This is how you see results — the diagnostic output, the deploy proof, the failure reason. Read it, reason on it, and show the relevant part to the owner (show_document). Never guess an outcome you can read.",
+  input_schema: {
+    type: 'object',
+    properties: { run_id: { type: 'number', description: 'The run id from runbook_status.' } },
+    required: ['run_id'],
+  },
+}
 const REPO_WRITE_TOOL: Tool = {
   name: 'repo_write',
   description:
@@ -1280,7 +1300,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // exact anti-comportamentul). Acum: EXECUTĂ, nu promite.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance.`
+        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them.`
       // CANALUL DE UPDATE: Kelion știe din prompt CE a primit la ultimul deploy
       // (fișier local, cache pe prima citire — zero cost pe latență).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -1558,7 +1578,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1793,6 +1813,14 @@ async function runTool(
     case 'run_runbook': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return runRunbook(String(args.name ?? ''))
+    }
+    case 'runbook_status': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return runbookStatus(args.name ? String(args.name) : undefined)
+    }
+    case 'runbook_log': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return runbookLog(Number(args.run_id ?? 0))
     }
     case 'request_repair': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })

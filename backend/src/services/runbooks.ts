@@ -169,6 +169,63 @@ export async function runRunbook(name: string): Promise<string> {
   return JSON.stringify({ error: `dispatch_failed_${r.status}`, detail: body, ...(warning ? { warning } : {}) })
 }
 
+// ── OCHII LUI KELION PE PROPRIILE PROCESE (Adrian, 25 iul: „raportează că nu
+// vede procesele interne — ce autonomie este asta?") ─────────────────────────
+// După ce pornește ceva, Kelion CITEȘTE singur starea și jurnalul rulărilor —
+// nu ghicește, nu promite. GitHub-ul se apelează cu cheia, nu se „vizitează".
+
+const ALL_WORKFLOWS = ['deploy.yml', 'vps-run.yml', 'vps-diag.yml', 'sentinel.yml', 'pr-verify.yml']
+
+/** Starea ultimelor rulări (toate workflow-urile sau doar al unui runbook). */
+export async function runbookStatus(name?: string): Promise<string> {
+  if (!ghToken())
+    return JSON.stringify({ error: 'github_token_missing' })
+  const flows = name && RUNBOOKS[name] ? [RUNBOOKS[name].workflow] : ALL_WORKFLOWS
+  const out: unknown[] = []
+  for (const wf of flows) {
+    try {
+      const r = await gh(`/actions/workflows/${wf}/runs?per_page=3`)
+      if (!r.ok) {
+        out.push({ workflow: wf, error: `status_${r.status}` })
+        continue
+      }
+      const j = (await r.json()) as {
+        workflow_runs?: { id?: number; status?: string; conclusion?: string | null; run_started_at?: string; display_title?: string; html_url?: string }[]
+      }
+      out.push({
+        workflow: wf,
+        runs: (j.workflow_runs ?? []).map((w) => ({
+          id: w.id,
+          status: w.status,
+          conclusion: w.conclusion,
+          started: w.run_started_at,
+          title: (w.display_title ?? '').slice(0, 80),
+          url: w.html_url,
+        })),
+      })
+    } catch (e) {
+      out.push({ workflow: wf, error: String(e).slice(0, 120) })
+    }
+  }
+  return JSON.stringify(out)
+}
+
+/** Jurnalul REAL al unei rulări — coada lui (rezultatul e acolo, nu în presupuneri). */
+export async function runbookLog(runId: number): Promise<string> {
+  if (!ghToken()) return JSON.stringify({ error: 'github_token_missing' })
+  if (!Number.isInteger(runId) || runId <= 0) return JSON.stringify({ error: 'invalid_run_id' })
+  const jr = await gh(`/actions/runs/${runId}/jobs`)
+  if (!jr.ok) return JSON.stringify({ error: `jobs_failed_${jr.status}` })
+  const jobs = ((await jr.json()) as { jobs?: { id?: number; name?: string; status?: string; conclusion?: string | null }[] }).jobs ?? []
+  const job = jobs[jobs.length - 1]
+  if (!job?.id) return JSON.stringify({ error: 'no_jobs_yet', hint: 'rularea abia pornește — reîncearcă în câteva secunde' })
+  const lr = await gh(`/actions/jobs/${job.id}/logs`)
+  if (!lr.ok) return JSON.stringify({ error: `log_failed_${lr.status}`, job: job.name, status: job.status })
+  const text = await lr.text().catch(() => '')
+  const tail = text.length > 8000 ? `…(început tăiat)\n${text.slice(-8000)}` : text
+  return JSON.stringify({ run: runId, job: job.name, status: job.status, conclusion: job.conclusion, log: tail })
+}
+
 /**
  * Ordin de reparație mare: se SCRIE în work_orders + semnal pe email către
  * owner. Pentru reparații pe care Kelion le poate face singur, folosește
