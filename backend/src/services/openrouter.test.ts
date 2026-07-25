@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, toolsToOpenAI } from './openrouter.js'
+import { toModel, resolveModel, toolsToOpenAI, hasActionIntent } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
@@ -36,9 +36,19 @@ describe('openrouter catalog', () => {
   it('resolveModel cade pe implicit când modelul cerut nu e în tier', async () => {
     // Fără cheie OpenRouter (mediul de test) catalogul e gol → orice cerere cade
     // pe implicitul tier-ului, niciodată pe un model neverificat.
-    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('openai/gpt-4.1-mini')
+    // Implicitul chat = un model REAL gratuit (Adrian, 25 iul: „free default,
+    // dacă e o întrebare de free nu trebuie să consume nimic").
+    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('openai/gpt-oss-20b:free')
     // Implicitul work = Fable 5 (Adrian, 25 iul: „Kelion trebuie să folosească
     // Fable 5") — cel mai capabil model, cu raționament intern.
     expect(await resolveModel('work', null)).toBe('anthropic/claude-fable-5')
+  })
+
+  it('hasActionIntent (25 iul — escaladare economică: ieftin implicit, greu doar pe cereri de acțiune reală)', () => {
+    expect(hasActionIntent('repară animația gurii')).toBe(true)
+    expect(hasActionIntent('rulează diagnostic te rog')).toBe(true)
+    expect(hasActionIntent('publică fixul în producție')).toBe(true)
+    expect(hasActionIntent('bună, ce mai faci?')).toBe(false)
+    expect(hasActionIntent('mulțumesc pentru ajutor')).toBe(false)
   })
 })
