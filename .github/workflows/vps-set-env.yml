@@ -12,6 +12,9 @@
 #        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
 #        GOOGLE_API_KEY        (o cheie Google Cloud care poate acoperi TTS/Gemini)
 #        GOOGLE_MAPS_KEY       (opțional; harta merge și fără, pe OSM)
+#        GITHUB_TOKEN          (fin-granulat, DOAR repo kelionai, Actions:write —
+#                               mâinile lui Kelion pe runbook-uri; + Contents/PR
+#                               write dacă vrei să și scrie cod pe ramuri)
 #   2. Actions → „vps-set-env" → Run workflow. Scrie DOAR secretele setate,
 #      apoi repornește containerul ca să le încarce. Restul rămâne neatins.
 #   Necesită și secretul VPS_SSH_KEY (deja pus).
@@ -42,6 +45,7 @@ jobs:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_PASS: ${{ secrets.MAIL_PASS }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.KELION_GITHUB_TOKEN }}
           RESTART: ${{ inputs.restart }}
         run: |
           set -euo pipefail
@@ -55,7 +59,7 @@ jobs:
           # trăiesc în memoria runner-ului, mascate de GitHub). Le trimitem prin
           # STDIN unui script remote care face upsert în /root/kelion/kelionai.env.
           {
-            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET; do
+            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET GITHUB_TOKEN; do
               val="${!name:-}"
               [ -n "$val" ] && printf '%s=%s\n' "$name" "$val"
             done
@@ -85,9 +89,14 @@ jobs:
             $SSH '
               set -e
               docker rm -f kelionai-app >/dev/null 2>&1 || true
+              # GIT_COMMIT_SHA se păstrează și la repornirea de aici (clona
+              # `deploy` = codul imaginii) — altfel /api/version recădea pe ora
+              # bootului și verificarea anti-fantomă orbea.
               docker run -d --name kelionai-app --restart unless-stopped \
                 --network host --env-file /root/kelion/kelionai.env \
-                -e PORT=8080 -e NODE_ENV=production kelionai:latest >/dev/null
+                -e PORT=8080 -e NODE_ENV=production \
+                -e GIT_COMMIT_SHA="$(git -C /root/kelion/repo rev-parse HEAD 2>/dev/null || true)" \
+                kelionai:latest >/dev/null
               sleep 4
               code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/version || echo 000)
               echo "app repornit — /api/version HTTP $code"

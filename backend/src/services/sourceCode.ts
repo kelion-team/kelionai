@@ -2,9 +2,11 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 // ── ACCES INTEGRAL LA CODUL SURSĂ (Adrian, 24 iul: „Kelion trebuie să aibă
-// acces la codul sursă integral cu full acces") ──────────────────────────────
-// Imaginea Docker COPIAZĂ sursele în /app (backend/ + frontend/), deci Kelion
-// își poate CITI propriul cod în producție. Unelte read-only, doar pentru
+// acces la codul sursă integral cu full acces"; 25 iul: „full acces la TOATE
+// sursele soft") ─────────────────────────────────────────────────────────────
+// Imaginea Docker COPIAZĂ de pe 25 iul ÎNTREG repo-ul în /app (backend/,
+// frontend/, deploy/, .github/, docs — vezi `COPY . .` din Dockerfile), deci
+// Kelion își poate CITI tot softul în producție. Unelte read-only, doar pentru
 // admin: list (arbore), read (fișier cu numere de linie), search (grep).
 // Scrierea/deploy-ul rămân pe fluxul git→PR→VPS — nu edităm containerul viu.
 

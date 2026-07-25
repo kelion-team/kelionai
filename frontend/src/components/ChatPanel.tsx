@@ -1123,6 +1123,10 @@ export default function ChatPanel({
             return
           }
           micRef.current = rv as unknown as MicHandle
+          // Stream-ul pre-încălzit e doar pentru calea STT; Realtime își deschide
+          // propriul microfon — fără închiderea de aici, captura pre-warm rămânea
+          // AGĂȚATĂ în paralel (mic dublu deschis) cât ținea sesiunea de voce.
+          preWarmedStream?.getTracks().forEach((t) => t.stop())
           // Dacă TTS-ul de rezervă încă redă în momentul instalării, pornim MUT
           // (anti-ecou), ca pe căile STT — unmute-ul vine de la stopVoice/onEnd.
           if (isVoicePlaying()) rv.setMuted(true)
@@ -1305,6 +1309,14 @@ export default function ChatPanel({
             micStartingRef.current = false
             return
           }
+          // PREDĂM ȘTAFETA (25 iul — Adrian: „după ce opresc microfonul nu-l mai
+          // pot porni"): ensureMic are gardă pe micStartingRef și ieșea IMEDIAT
+          // cât timp flagul nostru de pre-warm era încă true → pornirea de la
+          // buton murea în gol, iar flagul rămânea agățat pe true și fiecare
+          // apăsare următoare cădea alternativ pe oprire/naimic. Eliberăm flagul
+          // chiar înainte de predare — secțiunea e sincronă, ensureMic și-l ia
+          // singur înapoi la intrare, deci fereastra de cursă e zero.
+          micStartingRef.current = false
           await ensureMicRef.current(stream)
           if (!micRef.current) {
             stream.getTracks().forEach((t) => t.stop())

@@ -74,6 +74,8 @@ import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
+import { updatesList, latestUpdateSummary } from '../services/updates.js'
+import { runRunbook, requestRepair } from '../services/runbooks.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -190,8 +192,48 @@ const IMAGE_TOOL: Tool = {
 // cod din container (read-only) — la „repară X" se uită în COD, nu ghicește.
 const LIST_SOURCE_TOOL: Tool = {
   name: 'list_source',
-  description: "ADMIN ONLY. List your own source code tree (backend/ + frontend/). Use to orient before reading files.",
+  description: "ADMIN ONLY. List your own source code tree — the WHOLE repo: backend/, frontend/, deploy/, .github/workflows/, docs. Use to orient before reading files.",
   input_schema: { type: 'object', properties: { dir: { type: 'string', description: "Subdirectory (e.g. 'backend/src/routes'); default root." } } },
+}
+// CANALUL DE UPDATE (Adrian, 25 iul: „canal de informare a lui cu tot ce
+// primește ca update") — la fiecare deploy, imaginea aduce git log-ul recent
+// (deploy/last-updates.txt); Kelion răspunde din el, nu din memorie.
+const LIST_UPDATES_TOOL: Tool = {
+  name: 'list_updates',
+  description: "ADMIN ONLY. List the updates you received — the commits that shipped in recent deploys, newest first (each line: sha | date | subject). Use when the owner asks what's new, what changed, or what update you got.",
+  input_schema: { type: 'object', properties: {} },
+}
+// ── MÂINILE LUI KELION PE OPERAȚIUNI (Adrian, 25 iul: „DA!") ─────────────────
+// Kelion recunoaște „asta e operațiune" și declanșează runbook-ul NUMIT —
+// execuția e un workflow GitHub cu comenzi fixe, vizibil în Actions. Lesa e în
+// services/runbooks.ts (plafon zilnic, affirm pe publish, stop la 2 eșecuri).
+const RUN_RUNBOOK_TOOL: Tool = {
+  name: 'run_runbook',
+  description:
+    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production — REQUIRES the owner's explicit approval in THIS conversation), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. Use when the owner asks for an operation these cover. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: "Runbook name, exactly one of: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi." },
+      owner_affirmed: { type: 'boolean', description: "Set true ONLY if the owner explicitly approved THIS action in this conversation (e.g. 'da', 'publică'). Required for publish-master." },
+    },
+    required: ['name'],
+  },
+}
+// request_repair renăscut: ordinul se SCRIE (work_orders) + semnal pe email;
+// execuția o face o sesiune Claude pornită de owner — nu un LLM permanent.
+const REQUEST_REPAIR_TOOL: Tool = {
+  name: 'request_repair',
+  description:
+    "ADMIN ONLY. File a CODE-repair order (a bug or change that needs code written — NOT an ops task; ops go through run_runbook). Writes the order durably and emails the owner. A Claude coding session executes it later, on the owner's go. Include what's broken, where you saw it (file:line if you looked with read_source), and how to reproduce.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Short title of the repair (one line).' },
+      details: { type: 'string', description: 'Everything a coder needs: symptom, evidence, suspected file:line, reproduction.' },
+    },
+    required: ['title', 'details'],
+  },
 }
 const READ_SOURCE_TOOL: Tool = {
   name: 'read_source',
@@ -1198,6 +1240,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (user.role === 'admin') {
       systemPrompt +=
         `\n\nOWNER — NEVER REFUSE: you are talking to Adrian, your owner. You must NEVER tell him "I can't do that" or "I don't have access". If it is something you can do, do it. If it is something that needs building or fixing in the app, tell him plainly that you are taking care of it / have sent it to be built (and silently log_unsupported_request so it reaches his developer) — but frame it as handled, never as a refusal. Always give him a real, helpful spoken answer; never a dead end.`
+      // CANALUL DE UPDATE: Kelion știe din prompt CE a primit la ultimul deploy
+      // (fișier local, cache pe prima citire — zero cost pe latență).
+      const upd = await latestUpdateSummary().catch(() => '')
+      if (upd) {
+        systemPrompt +=
+          `\n\nYOUR LATEST UPDATES (the newest commits you received at the most recent deploy, newest first):\n${upd}\nWhen the owner asks what's new, what changed, or what update you received, answer from this list — and call list_updates for the fuller recent history. Never claim you don't know what your updates were.`
+      }
       systemPrompt +=
         `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes, then ask for authorization. Do NOT call any tool yet. Step 2: ONLY when the owner explicitly approves (da / yes / autorizez): if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the approved script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
     }
@@ -1468,7 +1517,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, REQUEST_REPAIR_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1689,6 +1738,21 @@ async function runTool(
     case 'search_source': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return searchSource(String(args.query ?? ''))
+    }
+    case 'list_updates': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const raw = await updatesList()
+      return raw
+        ? raw.slice(0, 20_000)
+        : JSON.stringify({ error: 'no_updates_file', hint: 'apare începând cu primul deploy făcut prin deploy.sh de pe 25 iul' })
+    }
+    case 'run_runbook': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return runRunbook(String(args.name ?? ''), args.owner_affirmed === true)
+    }
+    case 'request_repair': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
     }
 
     case 'show_document': {
