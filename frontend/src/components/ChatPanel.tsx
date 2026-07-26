@@ -1218,8 +1218,18 @@ export default function ChatPanel({
           // TAXAREA VOCII PE MINUT (Adrian, 25 iul): cât timp vocea e activă,
           // pulsăm la 20s → serverul debitează secundele din credite. La „stop"
           // din server (fără credit) oprim vocea; la orice oprire, timerul moare.
+          // REALIMENTARE GPS (Adrian, 26 iul: „nu primește coordonatele reale
+          // permanent"): pe același puls de 20s, dacă poziția reală s-a mutat cu
+          // peste 150 m față de ce știe sesiunea, îi trimitem vocii noii lat/lon
+          // — altfel o sesiune lungă, în mișcare, rămânea pe locul de la pornire.
+          let lastGps = coordsRef.current ? { ...coordsRef.current } : null
           let lastTick = Date.now()
           const voiceTick = window.setInterval(() => {
+            const cc = coordsRef.current
+            if (cc && (!lastGps || metersBetween(lastGps.lat, lastGps.lon, cc.lat, cc.lon) > 150)) {
+              lastGps = { ...cc }
+              rv.updateCoords(cc)
+            }
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {

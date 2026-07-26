@@ -17,6 +17,15 @@ export interface RealtimeVoiceHandle {
   setMuted: (muted: boolean) => void
   /** Întrerupe imediat vorbirea lui Kelion (barge-in manual). */
   interrupt: () => void
+  /**
+   * REALIMENTARE GPS (Adrian, 26 iul: „nu primește coordonatele reale
+   * permanent — trebuie acces în realimentare la ele"): poziția intra în
+   * contextul vocii O SINGURĂ DATĂ, la pornirea sesiunii — într-o sesiune
+   * lungă, în mișcare, „aici"/„unde sunt"/vremea rămâneau pe locul vechi.
+   * Clientul cheamă asta când poziția reală se schimbă; sesiunea primește un
+   * item de sistem cu noii lat/lon și îi folosește de-acum încolo.
+   */
+  updateCoords: (c: { lat: number; lon: number }) => void
 }
 
 export interface RealtimeVoiceOpts {
@@ -449,6 +458,24 @@ export async function startRealtimeVoice(
       },
       // Barge-in manual: cerem modelului să taie răspunsul curent.
       interrupt: () => send({ type: 'response.cancel' }),
+      // Poziția s-a schimbat → un item de SISTEM cu noii lat/lon (nu dublăm
+      // instrucțiunile prin session.update — regula „o singură injecție").
+      updateCoords: (c: { lat: number; lon: number }) =>
+        send({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'system',
+            content: [
+              {
+                type: 'input_text',
+                text:
+                  `ACTUALIZARE GPS LIVE: poziția CURENTĂ a utilizatorului este ACUM latitudine ${c.lat.toFixed(5)}, longitudine ${c.lon.toFixed(5)}. ` +
+                  'De acum, „aici", „lângă mine", „unde sunt" și vremea locală folosesc ACEASTĂ poziție (cea veche nu mai e valabilă); la get_weather pasează exact acești lat/lon.',
+              },
+            ],
+          },
+        }),
     }
   } catch (e) {
     stop()
