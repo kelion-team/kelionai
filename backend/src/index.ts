@@ -25,6 +25,7 @@ import { demoRoutes } from './routes/demo.js'
 import { mapviewRoutes } from './routes/mapview.js'
 import { ingestRoutes } from './routes/ingest.js'
 import { browserRoutes } from './routes/browser.js'
+import { opsRoutes } from './routes/ops.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { triageGaps } from './services/gapsTriage.js'
@@ -227,6 +228,7 @@ await app.register(demoRoutes)
 await app.register(mapviewRoutes)
 await app.register(ingestRoutes)
 await app.register(browserRoutes)
+await app.register(opsRoutes)
 await app.register(contactRoutes)
 await app.register(greetRoutes)
 await app.register(meseriiRoutes)
