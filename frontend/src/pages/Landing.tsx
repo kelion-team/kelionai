@@ -12,10 +12,13 @@ import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/upd
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
-  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png' },
-  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png' },
-  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png' },
-  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png' },
+  // `href` = ținta de INSTALARE (Adrian, 26 iul: „sub fiecare cod trebuie să fie
+  // install care te duce la pagina de instalare") — același loc în care duce și
+  // scanarea codului, dar pe click, pentru cine e deja pe dispozitivul țintă.
+  { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png', href: '/dl/Kelionai-Setup.exe' },
+  { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png', href: '/dl/Kelionai-linux.zip' },
+  { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png', href: 'https://apps.apple.com/app/id6786766714' },
+  { key: 'android', label: '🤖 Android', img: '/dl/qr-apk.png', href: '/dl/Kelionai.apk' },
 ] as const
 type QrCode = (typeof QR_CODES)[number]
 
@@ -235,6 +238,9 @@ export default function Landing({ error }: { error?: string | null }) {
                   {/* Numărul din filigram, sub FIECARE cod — același ca în browser;
                       dovedește că aplicația instalată e exact versiunea live. */}
                   <span className="qr-version">{versionLabel(srv)}</span>
+                  <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
+                    Install
+                  </a>
                 </figure>
               ))}
             </div>
