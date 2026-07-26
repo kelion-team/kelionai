@@ -170,6 +170,20 @@ app.addHook('onSend', async (req, reply) => {
     reply.header('Cache-Control', 'no-store')
     return
   }
+  // HTML-UL PRINCIPAL: MEREU proaspăt (Adrian, 26 iul: „aplicațiile de sub
+  // codul de bare nu preiau automat ultimul update... nu preiau funcțiile de pe
+  // pagina web"). Aceeași boală ca la sw.js, rămasă nerezolvată la index.html:
+  // Cloudflare îl ținea la edge până la 4 ore, deci SHELL-urile instalate
+  // (exe/APK/TWA — toate deschid site-ul live la kelionai.app/) primeau HTML-ul
+  // VECHI cu bundle-urile vechi. Browserele scăpau prin rutina „/?_v=timestamp";
+  // coaja care deschide simplu „/" rămânea lipită de versiunea veche. no-store
+  // pe ORICE răspuns text/html (/, /login, /credite, fallback SPA) = fiecare
+  // deschidere ia pagina nouă; bundle-urile cu hash rămân cache-uite normal.
+  const ct = String(reply.getHeader('content-type') ?? '')
+  if (ct.includes('text/html')) {
+    reply.header('Cache-Control', 'no-store')
+    return
+  }
   if (!u.startsWith('/dl/')) return
   reply.header('Cache-Control', 'no-store')
   if (
