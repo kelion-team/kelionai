@@ -227,13 +227,17 @@ export default function Landing({ error }: { error?: string | null }) {
               .exe self-updates. Store targets get swapped in the moment a
               listing goes public (MS Store, Play, App Store). */}
           <div className="landing-qr">
-            <span className="landing-qr-hint">Scan to install — click a code to enlarge it</span>
+            <span className="landing-qr-hint">Tap a code to install — or scan it (🔍 enlarges)</span>
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
-                  <button type="button" className="qr-btn" onClick={() => setQrZoom(q)}>
+                  {/* CODUL E BUTON DE INSTALARE (Adrian, 26 iul: „când apeși pe
+                      codul win se instalează aplicația win... la fiecare după
+                      sistemul lui"). Click/tap pe cod → instalarea platformei
+                      respective; mărirea pentru scanat rămâne pe butonul 🔍. */}
+                  <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={`Install — ${q.label}`}>
                     <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
-                  </button>
+                  </a>
                   <figcaption>{q.label}</figcaption>
                   {/* Numărul din filigram, sub FIECARE cod — același ca în browser;
                       dovedește că aplicația instalată e exact versiunea live. */}
@@ -241,6 +245,9 @@ export default function Landing({ error }: { error?: string | null }) {
                   <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
                     Install
                   </a>
+                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title="Mărește codul pentru scanare">
+                    🔍
+                  </button>
                 </figure>
               ))}
             </div>
