@@ -80,6 +80,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
       // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
       scope: 'openid email profile',
+      // PROCEDURA COMPLETĂ LA LOGIN (Adrian, 26 iul: „nu trebuie automat,
+      // trebuie să facă procedura completă, să întrebe user și pass").
+      // Fără astea, un browser cu sesiune Google activă sărea DIRECT în cont:
+      //  • select_account → Google arată MEREU alegerea contului;
+      //  • max_age=0 → Google cere RE-AUTENTIFICAREA (user + parolă/pin),
+      //    nu se mulțumește cu sesiunea veche.
+      // Cine NU are cont Google: ecranul Google are propriul „Create account" —
+      // își face contul chiar în flux; alt login nu există (aplicația e
+      // Google-only prin decizie).
+      prompt: 'select_account',
+      max_age: '0',
       state,
     })
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
