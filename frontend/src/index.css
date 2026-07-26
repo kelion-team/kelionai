@@ -3743,3 +3743,60 @@ a.card-item:hover {
   font-size: 12px;
   cursor: pointer;
 }
+
+/* ── Pagina dedicată /login (26 iul) ─────────────────────────────────────── */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #07090d;
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 18px;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text, #e8ecf4);
+}
+.login-brand { font-size: 22px; font-weight: 800; color: var(--accent, #7aa2ff); text-decoration: none; }
+.login-title { margin: 4px 0 8px; font-size: 18px; }
+.login-google {
+  display: block; text-align: center; padding: 10px; border-radius: 12px;
+  background: var(--accent, #7aa2ff); color: #0b0d12; font-weight: 700; text-decoration: none;
+}
+.login-sep { text-align: center; font-size: 12px; color: var(--muted, #9aa3b5); margin: 4px 0; }
+.login-input {
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border, rgba(255,255,255,0.15));
+  background: rgba(0,0,0,0.3); color: var(--text, #e8ecf4); font-size: 15px; outline: none;
+}
+.login-submit {
+  margin-top: 4px; padding: 10px; border: none; border-radius: 12px;
+  background: #3ecf72; color: #06280f; font-weight: 800; font-size: 15px; cursor: pointer;
+}
+.login-submit:disabled { opacity: 0.6; }
+.login-note { font-size: 13px; color: #ffd27a; }
+.login-links { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.login-links button {
+  background: none; border: none; color: var(--accent, #7aa2ff);
+  font-size: 13px; cursor: pointer; text-align: left; padding: 2px 0;
+}
+.login-legal { margin-top: 8px; font-size: 12px; color: var(--muted, #9aa3b5); }
+.login-legal a { color: inherit; }
+
+/* Pagina publică /credite (26 iul) — pachetele pe cardul de login. */
+.credits-blurb { font-size: 13.5px; color: var(--muted, #9aa3b5); margin: 0 0 6px; }
+.credits-pack {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border, rgba(255,255,255,0.15));
+  background: rgba(255,255,255,0.05); color: var(--text, #e8ecf4); cursor: pointer; font-size: 15px;
+}
+.credits-pack:hover { border-color: var(--accent, #7aa2ff); }
+.credits-pack-n { font-weight: 700; }
+.credits-pack-price { color: var(--accent, #7aa2ff); font-weight: 800; }

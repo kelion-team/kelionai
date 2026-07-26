@@ -397,6 +397,28 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_messages (created_at DESC);
+    -- CONTURI LOCALE (Adrian, 26 iul: „alte soluții de logare non-Gmail... da,
+    -- pornește, inclusiv să poată crea"). Identitatea = emailul, exact ca la
+    -- Google — portofel/istoric/memorie/amprentă sunt deja legate de email,
+    -- deci un cont local are AUTOMAT toate funcțiile (mai puțin skill-urile pe
+    -- datele Google personale, imposibile fără cont Google). Parola: scrypt
+    -- (node:crypto), formatul "sare:hash" hex — zero dependențe noi.
+    CREATE TABLE IF NOT EXISTS local_accounts (
+      email TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      pass_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Linkuri de unică folosință (link magic + resetare parolă): păstrăm DOAR
+    -- hash-ul tokenului (un dump de DB nu poate loga pe nimeni), cu expirare.
+    CREATE TABLE IF NOT EXISTS login_tokens (
+      token_hash TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     -- CONECTAREA GOOGLE PERSISTENTĂ (Adrian, 10 iul: „iar îmi dai să loghez
     -- Google? reparată de 10 ori"). Cauza recurenței: refresh-token-ul trăia DOAR
     -- în cookie-ul de sesiune, deci orice re-logare/expirare/re-emitere îl pierdea.
@@ -1000,6 +1022,47 @@ export async function setReleaseStatus(id: string, status: string): Promise<void
 
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
 // (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
+
+// ── CONTURI LOCALE (email + parolă / link magic) ─────────────────────────────
+export interface LocalAccount {
+  email: string
+  name: string
+  pass_hash: string
+}
+export async function getLocalAccount(email: string): Promise<LocalAccount | null> {
+  if (!dbEnabled()) return null
+  const r = await getPool().query<LocalAccount>(
+    'SELECT email, name, pass_hash FROM local_accounts WHERE email=$1',
+    [email.toLowerCase().trim()],
+  )
+  return r.rows[0] ?? null
+}
+export async function upsertLocalAccount(email: string, name: string, passHash: string): Promise<void> {
+  if (!dbEnabled()) throw new Error('db_unavailable')
+  await getPool().query(
+    `INSERT INTO local_accounts (email, name, pass_hash) VALUES ($1,$2,$3)
+     ON CONFLICT (email) DO UPDATE SET name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE local_accounts.name END, pass_hash = EXCLUDED.pass_hash`,
+    [email.toLowerCase().trim(), name.slice(0, 120), passHash],
+  )
+}
+export async function saveLoginToken(tokenHash: string, email: string, purpose: 'magic' | 'reset', ttlMin: number): Promise<void> {
+  if (!dbEnabled()) throw new Error('db_unavailable')
+  await getPool().query(
+    `INSERT INTO login_tokens (token_hash, email, purpose, expires_at) VALUES ($1,$2,$3, now() + ($4 || ' minutes')::interval)`,
+    [tokenHash, email.toLowerCase().trim(), purpose, String(ttlMin)],
+  )
+}
+/** Consumă tokenul (o singură folosire, neexpirat) → emailul lui, altfel null. */
+export async function consumeLoginToken(tokenHash: string, purpose: 'magic' | 'reset'): Promise<string | null> {
+  if (!dbEnabled()) return null
+  const r = await getPool().query<{ email: string }>(
+    `UPDATE login_tokens SET used = true
+     WHERE token_hash=$1 AND purpose=$2 AND used=false AND expires_at > now()
+     RETURNING email`,
+    [tokenHash, purpose],
+  )
+  return r.rows[0]?.email ?? null
+}
 
 export async function saveKv(key: string, value: string): Promise<void> {
   if (!dbEnabled()) return
