@@ -118,6 +118,13 @@ echo "== 6. Backup criptat zilnic (cron) =="
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
+echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) =="
+# Adrian, 26 iul: „verificare automată dar să nu coste". Determinist, fără AI:
+# repornește containerul mort (2 ratări la rând) + pulsul intern (DB/disc/erori)
+# cu email DOAR la anomalie. Idempotent, ca backup-ul de mai sus.
+install -m 700 "$REPO/deploy/sentinela-locala.sh" /root/kelion/sentinela-locala.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/sentinela-locala.sh' ; echo '*/3 * * * * /root/kelion/sentinela-locala.sh >> /root/kelion/sentinela.log 2>&1' ) | crontab -
+
 echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
 SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
 V=""

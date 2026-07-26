@@ -247,6 +247,10 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 26 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **26 IUL (valul 14) — PULSUL LUI KELION (Adrian: „toate punctele" pentru autonomie deplină; regula lui: verificare automată FĂRĂ cost):**
+  1. **Sentinela locală** (`deploy/sentinela-locala.sh`, instalată idempotent de deploy.sh la pasul 6b, cron la 3 min pe VPS): `/health` mort de 2 ori LA RÂND (≥6 min — un deploy normal nu declanșează fals) → `docker restart kelionai-app` + raport prin pulse; `/health` viu → bate pulsul intern. Zero AI, zero cost. Numele scriptului NU se schimbă în watchdog/paznic-chat — deploy.sh șterge exact acele nume din crontab (zombii vechi).
+  2. **`POST /api/ops/pulse`** (`routes/ops.ts`, auth `x-bridge-secret` = BRIDGE_SECRET, ca browser.ts): verificări DETERMINISTE — DB (`SELECT 1`), disc ≥90%, val de erori client (>20/oră), plus raportarea repornirii automate. Email către admin DOAR la anomalie, cu prag anti-spam per subiect în kv (`ops_alert_*`): restart 30 min, DB 1h, erori 3h, disc 6h.
+  3. **Rămân de făcut din lista „autonomie deplină"**: unelte de SCRIS pe Google (Docs/Sheets — atenție: cer scope OAuth nou → reconectare Google a userului), circuitul banilor (Issuing/Revolut — decizia lui Adrian „revin"), cheia Stripe Account:Read (dashboardul lui), permisiunile cameră/locație de pe telefonul lui.
 - 🗓️ **26 IUL (valul 13) — PANA „săgeata de trimis nu se vede pe telefon" + „iar ai stricat audio" (aceeași cauză!):**
   1. **Cauza tehnică**: `.composer-input` (flex:1) fără `min-width:0` NU se strânge sub lățimea placeholder-ului → pe ecran îngust, ultimul element din rând — butonul de trimis `↑` — era împins în afara ecranului. În locul lui rămânea vizibil SLIDERUL DE VOLUM (64px, „pastila" albastră din captura lui Adrian).
   2. **Efectul în lanț asupra AUDIO**: apăsările de „trimite" aterizau pe slider → volumul (comanda UNICĂ pentru toată vocea, PERSISTATĂ) ajungea la ~0 → „nu se aude nimic" deși sesiunea de voce mergea perfect (dovadă: transcripturi curgând în loguri, zero erori realtime). Nu era o pană de audio — era volumul memorat pe mut.
