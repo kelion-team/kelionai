@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
 import Landing from './pages/Landing'
+import Login from './pages/Login'
+import Credits from './pages/Credits'
 import Stage from './pages/Stage'
 import {
   watchForUpdate,
@@ -81,7 +83,17 @@ export default function App() {
 
   return (
     <>
-      {user ? <Stage user={user} /> : <Landing error={error} />}
+      {/* Pagina dedicată /login (Adrian, 26 iul) — un user deja logat e trimis
+          înapoi în aplicație. */}
+      {user ? (
+        <Stage user={user} />
+      ) : window.location.pathname === '/login' ? (
+        <Login />
+      ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
+        <Credits />
+      ) : (
+        <Landing error={error} />
+      )}
       {/* Filigran versiune + dată update — dovada vizibilă că ultima versiune e
           instalată (Adrian, 7 iul). Acum include și ștampila DEPLOY-ului de pe
           server (10 iul): se schimbă la ORICE publicare, nu doar la build de
