@@ -45,7 +45,7 @@ import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
-import { startRealtimeVoice } from '../lib/realtimeVoice'
+import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 
@@ -100,6 +100,12 @@ const TAKE_STOP = /\b(stop|stai|opre[șs]te|opreste|t[ăa]iem|taie)\b/i
 // "Reluăm" — redo the SAME approved take without re-asking for the script.
 const RETAKE =
   /(relu[ăa]m\b|retake|reia (dubla|clipul|[îi]nregistrarea)|înc[ăa] o dubl[ăa]|inca o dubla|din nou (dubla|clipul))/i
+// Intenție de LOCAȚIE în mesajul scris — doar atunci se citește GPS-ul real
+// (Adrian, 26 iul: „doar când se folosesc aplicații GPS sau e necesară
+// detecția locației"). Acoperă română + engleză: vreme, hărți, poziție, trasee.
+const LOC_INTENT =
+  /\b(vreme(a|me)?|meteo|prognoz\w*|weather|forecast|unde (sunt|m[ăa] aflu)|where am i|l[âa]ng[ăa] mine|near me|aproape de mine|[îi]n zon[ăa]|hart[ăa]|h[ăa]r[țt]i|maps?|traseu|rut[ăa]|drum(ul)? (spre|p[âa]n[ăa])|direc[țt]ii|directions|navig\w*|loca[țt]ia (mea|curent[ăa])|locul meu|pozi[țt]ia mea|coordonate(le)? mele|gps)\b/i
+
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -249,6 +255,9 @@ export default function ChatPanel({
   // nu e continuă”). Tampon circular; la fiecare tură pleacă TOATE 4.
   const frameBufRef = useRef<string[]>([])
   const coordsRef = useRef<Coords | null>(null)
+  // Sesiunea de voce LIVE (dacă există) — folosită de uneltele de locație ca
+  // să-i împrospăteze poziția exact când e nevoie (updateCoords, la cerere).
+  const rvLiveRef = useRef<RealtimeVoiceHandle | null>(null)
   const busyRef = useRef(busy)
   busyRef.current = busy
   // Controlerul de abandon al turei în curs — „stop” îl abortează pe loc.
@@ -872,10 +881,15 @@ export default function ChatPanel({
       const screen = wsNow.open
         ? wsNow.tasks.map((tk) => ({ kind: tk.kind, title: tk.title, active: tk.id === wsNow.activeId }))
         : undefined
+      // GPS DOAR LA NEVOIE: citim poziția REALĂ exact acum, o singură dată,
+      // DOAR dacă mesajul chiar cere locația (vreme/hărți/„unde sunt"/traseu).
+      // Altfel nu detectăm nimic — pleacă cel mult ultima poziție cunoscută.
+      const locTurn = LOC_INTENT.test(msg)
+      const turnCoords = locTurn ? await getFreshCoords() : coordsRef.current
       for await (const chunk of streamChat(
         next,
         image ?? undefined,
-        coordsRef.current ?? undefined,
+        turnCoords ?? undefined,
         handleControl,
         screen,
         ac.signal,
@@ -1087,16 +1101,21 @@ export default function ChatPanel({
                   : ''
                 if (frame) (args as Record<string, unknown>).image = frame
               }
-              // GPS DE PE DISPOZITIV ÎN VOCE (Adrian, 25 iul: „nu vede gps de pe
-              // dispozitiv"). Pentru vreme fără loc numit, injectăm exact
-              // coordonatele reale ale dispozitivului (ca în scris) → „vremea de
-              // aici" merge, nu mai ghicește modelul un oraș.
-              if (name === 'get_weather' && coordsRef.current) {
-                const hasLoc = String(args.location ?? '').trim() !== ''
-                const hasLatLon = Number.isFinite(args.lat as number) && Number.isFinite(args.lon as number)
-                if (!hasLoc && !hasLatLon) {
-                  args.lat = coordsRef.current.lat
-                  args.lon = coordsRef.current.lon
+              // GPS DOAR LA NEVOIE, DAR REAL (Adrian, 26 iul): exact în
+              // momentul în care vocea folosește o unealtă de locație
+              // (vreme/hărți/trasee) citim poziția REALĂ a dispozitivului — o
+              // singură interogare, nu flux permanent — și o dăm și sesiunii
+              // (updateCoords), ca „aici"/„de aici" să însemne locul de ACUM.
+              if (name === 'get_weather' || name === 'maps_search' || name === 'maps_directions') {
+                const fresh = await getFreshCoords()
+                if (fresh) rvLiveRef.current?.updateCoords(fresh)
+                if (name === 'get_weather' && fresh) {
+                  const hasLoc = String(args.location ?? '').trim() !== ''
+                  const hasLatLon = Number.isFinite(args.lat as number) && Number.isFinite(args.lon as number)
+                  if (!hasLoc && !hasLatLon) {
+                    args.lat = fresh.lat
+                    args.lon = fresh.lon
+                  }
                 }
               }
               if (name === 'show_on_screen') {
@@ -1196,6 +1215,7 @@ export default function ChatPanel({
           // nici nu se mai sintetizează pe server (serverVoiceOff la trimitere).
           ;(rv as unknown as { isRealtime?: boolean }).isRealtime = true
           micRef.current = rv as unknown as MicHandle
+          rvLiveRef.current = rv
           // Stream-ul pre-încălzit e doar pentru calea STT; Realtime își deschide
           // propriul microfon — fără închiderea de aici, captura pre-warm rămânea
           // AGĂȚATĂ în paralel (mic dublu deschis) cât ținea sesiunea de voce.
@@ -1218,18 +1238,12 @@ export default function ChatPanel({
           // TAXAREA VOCII PE MINUT (Adrian, 25 iul): cât timp vocea e activă,
           // pulsăm la 20s → serverul debitează secundele din credite. La „stop"
           // din server (fără credit) oprim vocea; la orice oprire, timerul moare.
-          // REALIMENTARE GPS (Adrian, 26 iul: „nu primește coordonatele reale
-          // permanent"): pe același puls de 20s, dacă poziția reală s-a mutat cu
-          // peste 150 m față de ce știe sesiunea, îi trimitem vocii noii lat/lon
-          // — altfel o sesiune lungă, în mișcare, rămânea pe locul de la pornire.
-          let lastGps = coordsRef.current ? { ...coordsRef.current } : null
+          // (GPS-ul NU se mai împinge pe pulsul ăsta — Adrian, 26 iul: „doar
+          // când se folosesc aplicații GPS sau e necesară detecția locației".
+          // Poziția se citește la cerere, în uneltele de locație — vezi
+          // onToolCall + getFreshCoords.)
           let lastTick = Date.now()
           const voiceTick = window.setInterval(() => {
-            const cc = coordsRef.current
-            if (cc && (!lastGps || metersBetween(lastGps.lat, lastGps.lon, cc.lat, cc.lon) > 150)) {
-              lastGps = { ...cc }
-              rv.updateCoords(cc)
-            }
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {
@@ -1260,6 +1274,7 @@ export default function ChatPanel({
             // (manual, rotire, fără credit) — chiar dacă micRef se curăță mai
             // târziu, vocea Chirp a chatului nu rămâne blocată pe mut.
             ;(rv as unknown as { isRealtime?: boolean }).isRealtime = false
+            if (rvLiveRef.current === rv) rvLiveRef.current = null
             origStop()
           }
           micBackoffRef.current = 1000
@@ -1510,20 +1525,26 @@ export default function ChatPanel({
     if (cameraSupported()) setCameraOn(true)
   }, [])
 
-  // Permanent device GPS for the location-aware skills. Runs independently of the
-  // camera so "weather/where am I/near me" works even with the camera off. The
-  // latest fix is sent with each chat turn; the backend resolves the place name.
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
-      },
-      () => undefined,
-      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 10_000 },
-    )
-    return () => navigator.geolocation.clearWatch(id)
-  }, [])
+  // GPS DOAR LA NEVOIE (Adrian, 26 iul: „doar când se folosesc aplicații GPS
+  // sau e necesară detecția locației" — a respins explicit fluxul permanent).
+  // NU mai ținem watchPosition pornit non-stop: poziția se citește PE LOC, cu
+  // o singură interogare, în momentul în care tura/unealta chiar are nevoie de
+  // ea (vreme, hărți, „unde sunt"). `coordsRef` păstrează doar ultima citire
+  // legitimă, ca memorie — nu se împrospătează singur niciodată.
+  const getFreshCoords = (): Promise<Coords | null> =>
+    new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(coordsRef.current)
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const c = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+          coordsRef.current = c
+          resolve(c)
+        },
+        // Refuz/eșec → rămânem pe ultima poziție cunoscută (poate fi null).
+        () => resolve(coordsRef.current),
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 5_000 },
+      )
+    })
 
   // Captură la 4 cadre/s PERMANENT (Adrian, 11 iul — vechiul ritm de 1 fps pe
   // loc lăsa vederea discontinuă; GPS-ul în casă nu detectează mișcare, deci

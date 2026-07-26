@@ -18,12 +18,12 @@ export interface RealtimeVoiceHandle {
   /** Întrerupe imediat vorbirea lui Kelion (barge-in manual). */
   interrupt: () => void
   /**
-   * REALIMENTARE GPS (Adrian, 26 iul: „nu primește coordonatele reale
-   * permanent — trebuie acces în realimentare la ele"): poziția intra în
-   * contextul vocii O SINGURĂ DATĂ, la pornirea sesiunii — într-o sesiune
-   * lungă, în mișcare, „aici"/„unde sunt"/vremea rămâneau pe locul vechi.
-   * Clientul cheamă asta când poziția reală se schimbă; sesiunea primește un
-   * item de sistem cu noii lat/lon și îi folosește de-acum încolo.
+   * GPS LA CERERE (Adrian, 26 iul: „doar când se folosesc aplicații GPS sau e
+   * necesară detecția locației" — fluxul permanent a fost respins explicit).
+   * Poziția intră în context o dată, la pornire; când o unealtă de locație
+   * (vreme/hărți/trasee) citește poziția REALĂ a momentului, clientul o dă și
+   * sesiunii prin metoda asta — un item de sistem cu noii lat/lon, ca „aici"
+   * să însemne locul de acum, nu cel de la pornire. Nu se apelează periodic.
    */
   updateCoords: (c: { lat: number; lon: number }) => void
 }
