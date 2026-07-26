@@ -96,7 +96,14 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         gpsBlock =
           `\n\nLOCAȚIA CURENTĂ A UTILIZATORULUI (GPS live de pe dispozitiv): latitudine ${(c.lat as number).toFixed(5)}, longitudine ${(c.lon as number).toFixed(5)}` +
           (place ? ` (aproximativ ${place})` : '') +
-          `. Când spune „aici", „lângă mine", „unde sunt", sau întreabă de vreme/locuri/direcții fără să numească un loc, folosește ACEASTĂ poziție. Pentru vremea locală, pasează exact acești lat/lon la get_weather.`
+          `. Când spune „aici", „lângă mine", „unde sunt", sau întreabă de vreme/locuri/direcții fără să numească un loc, folosește ACEASTĂ poziție. Pentru vremea locală, pasează exact acești lat/lon la get_weather. Dacă răspunsul depinde de poziția de ACUM și utilizatorul s-ar fi putut mișca între timp, cheamă get_location pentru poziția reală a momentului.`
+      } else {
+        // FĂRĂ poziție la pornire (normal după regula „GPS doar la nevoie" —
+        // nu mai există watcher permanent). Vocea NU refuză întrebările de
+        // locație: le rezolvă LA CERERE prin get_location (pana din 26 iul:
+        // fără instrucțiunea asta răspundea „nu am acces la GPS").
+        gpsBlock =
+          `\n\nNU ai încă poziția utilizatorului. Când cere ceva legat de locul lui — „aici", „lângă mine", „unde sunt", vremea locală, locuri din zonă, trasee de aici — cheamă ÎNTÂI get_location (citește GPS-ul real al dispozitivului în acel moment) și folosește coordonatele întoarse. NU spune niciodată că nu ai acces la locație fără să fi încercat get_location.`
       }
       const contextBlock =
         (memRecall || '') +

@@ -38,3 +38,16 @@ describe('realtimeInstructions', () => {
     expect(t).toContain('gentleman')
   })
 })
+
+// GPS LA CERERE (pana din 26 iul: fără flux permanent, vocea rămânea fără nicio
+// cale spre poziție și zicea „nu am acces la GPS"). Unealta get_location TREBUIE
+// să existe în sesiunea de voce — regresia ei ar orbi din nou vocea la locație.
+describe('realtimeTools', () => {
+  it('include get_location (citirea GPS la cerere, executată în browser)', async () => {
+    const { realtimeTools } = await import('./realtime.js')
+    const names = realtimeTools().map((t) => t.name)
+    expect(names).toContain('get_location')
+    expect(names).toContain('get_weather')
+    expect(names).toContain('show_on_screen')
+  })
+})

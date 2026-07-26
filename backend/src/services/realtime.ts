@@ -119,6 +119,18 @@ export function realtimeTools(
     ...fromGoogle,
     ...fromDynamic,
     {
+      // GPS LA CERERE (pana din 26 iul: după scoaterea fluxului permanent —
+      // regula lui Adrian „doar când e necesară detecția locației" — vocea NU
+      // avea NICIO cale să afle poziția → „GPS nu e accesibil". Unealta asta se
+      // execută ÎN BROWSER (clientul citește GPS-ul real al dispozitivului pe
+      // loc), nu prin /api/realtime/tool.
+      type: 'function',
+      name: 'get_location',
+      description:
+        "Read the user's REAL current position from the device GPS, right now. Call it whenever the user asks where they are, says \"here\"/\"near me\", or an answer needs their current location and you don't have FRESH coordinates. Returns lat/lon. Never guess or refuse a location question without calling this first.",
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+    {
       type: 'function',
       name: 'show_on_screen',
       description:
