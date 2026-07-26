@@ -247,6 +247,11 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 26 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **26 IUL (valul 13) — PANA „săgeata de trimis nu se vede pe telefon" + „iar ai stricat audio" (aceeași cauză!):**
+  1. **Cauza tehnică**: `.composer-input` (flex:1) fără `min-width:0` NU se strânge sub lățimea placeholder-ului → pe ecran îngust, ultimul element din rând — butonul de trimis `↑` — era împins în afara ecranului. În locul lui rămânea vizibil SLIDERUL DE VOLUM (64px, „pastila" albastră din captura lui Adrian).
+  2. **Efectul în lanț asupra AUDIO**: apăsările de „trimite" aterizau pe slider → volumul (comanda UNICĂ pentru toată vocea, PERSISTATĂ) ajungea la ~0 → „nu se aude nimic" deși sesiunea de voce mergea perfect (dovadă: transcripturi curgând în loguri, zero erori realtime). Nu era o pană de audio — era volumul memorat pe mut.
+  3. **Fix**: `min-width:0` pe input (regula flexbox), lățimea sliderului mutată din inline în `.composer-volume` cu variantă îngustă (38px) sub 540px.
+  4. **De verificat pe telefonul lui Adrian (numai el poate)**: Chrome → Site settings → kelionai.app → permisiunile de CAMERĂ (logat azi „NotAllowedError: Permission denied") și LOCAȚIE probabil blocate — fără ele camera și GPS-ul rămân moarte indiferent de cod; plus ridicarea sliderului de volum înapoi.
 - 🗓️ **26 IUL (valul 10) — REGULA VOCII UNICE (bug real raportat de Adrian: „a intrat o a doua voce în același timp… în același timp nu are voie niciodată 2 voci, trebuie unică"):**
   1. **Scenariul**: sesiunea de voce full-duplex (OpenAI Realtime) activă; Adrian trimite o poză prin chatul scris → răspunsul turei scrise vine cu cadre `{audio}` (vocea Chirp sintetizată de server pentru ORICE tură de chat) → clientul le reda necondiționat → DOUĂ voci simultan.
   2. **Fix pe ambele capete**: (a) handle-ul sesiunii Realtime e marcat `isRealtime` (marcajul cade în stop-ul împachetat, pe orice drum de oprire); cât e instalat, `ChatPanel` ARUNCĂ cadrele `{audio}` ale chatului scris; (b) clientul trimite `serverVoiceOff: true` în corpul `/api/chat` → serverul NICI NU SINTETIZEAZĂ (stub în loc de `createVoiceStream`) — zero cost Chirp pe audio care s-ar fi aruncat. Calea STT de rezervă (fără Realtime) rămâne neatinsă — acolo vocea Chirp E vocea.
