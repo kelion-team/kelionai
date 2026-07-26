@@ -118,6 +118,14 @@ echo "== 6. Backup criptat zilnic (cron) =="
 install -m 700 "$REPO/deploy/backup.sh" /root/kelion/backup.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/backup.sh' ; echo '15 3 * * * /root/kelion/backup.sh >> /root/kelion/backup.log 2>&1' ) | crontab -
 
+echo "== 6c. Auto-publicarea de pe server (cron la 3 min — master ajunge live SINGUR) =="
+# Adrian, 26 iul („de ce nu le publici? de ce trebuie să-ți zic eu?"), în plină
+# pană GitHub Actions: serverul își compară singur live-ul cu vârful lui master
+# (API GitHub, nu runneri) și, dacă e în urmă, rulează CHIAR acest deploy.sh.
+# GitHub Actions nu mai e pe drumul critic al publicării.
+install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '*/3 * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
+
 echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) =="
 # Adrian, 26 iul: „verificare automată dar să nu coste". Determinist, fără AI:
 # repornește containerul mort (2 ratări la rând) + pulsul intern (DB/disc/erori)
