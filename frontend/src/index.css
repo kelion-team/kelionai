@@ -3729,3 +3729,17 @@ a.card-item:hover {
   text-decoration: none;
 }
 .qr-install:hover { filter: brightness(1.1); }
+
+/* Lupa de lângă Install — mărește codul pentru scanat de pe alt dispozitiv
+   (codul însuși e acum buton de INSTALARE, per ordinul din 26 iul). */
+.qr-zoom-btn {
+  margin-top: 4px;
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
