@@ -3714,3 +3714,18 @@ a.card-item:hover {
   letter-spacing: 0.5px;
   pointer-events: none;
 }
+
+/* Linkul „Install" de sub fiecare cod QR (Adrian, 26 iul) — click direct la
+   instalare pentru cine e deja pe dispozitivul țintă; scanarea rămâne la fel. */
+.qr-install {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 14px;
+  border-radius: 12px;
+  background: var(--accent, #7aa2ff);
+  color: #0b0d12;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.qr-install:hover { filter: brightness(1.1); }

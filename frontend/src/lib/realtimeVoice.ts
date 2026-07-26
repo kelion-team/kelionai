@@ -8,7 +8,7 @@
 // Cheia OpenAI NU e niciodată aici — o ține backendul. Modelul + vocea + limba
 // se injectează server-side; clientul trimite doar limba curentă ca hint.
 
-import { driveVoiceLevelFromElement, registerVoiceAudioElement } from './audioIO'
+import { driveVoiceLevelFromElement, registerVoiceAudioElement, buildVoiceFeatures, estimateEnergy, estimateF0, estimateZcr, estimateCentroid, estimateRolloff, type VoiceFeatures } from './audioIO'
 
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
@@ -61,6 +61,13 @@ export interface DeviceCommandFrame {
   screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
 }
 
+// TIMBRUL PE VOCEA PRINCIPALĂ (Adrian, 26 iul): robinetul de amprentă al
+// sesiunii ACTIVE (o singură sesiune — garantat de singleton). finalize()
+// întoarce amprenta frazei tocmai rostite și golește tamponul. liveInject
+// bagă un mesaj de SISTEM în sesiune (avertismentul de voce străină).
+let liveVoiceTap: { finalize: () => VoiceFeatures | null } | null = null
+let liveInject: ((text: string) => void) | null = null
+
 // Salvează o tură în istoric (memorie + continuitate între sesiuni). Best-effort.
 function persistTranscript(
   role: 'user' | 'assistant',
@@ -74,12 +81,24 @@ function persistTranscript(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ role, text: t }),
+    body: JSON.stringify({
+      role,
+      text: t,
+      // Amprenta frazei tocmai rostite (numai pe turele userului) — serverul o
+      // compară cu referința titularului, ca în chatul scris.
+      voiceFeatures: role === 'user' ? (liveVoiceTap?.finalize() ?? undefined) : undefined,
+    }),
   })
     .then(async (r) => {
       // Serverul a COMIS limba detectată (2 mesaje consecutive) → ancorăm
       // sesiunea live pe ea (vezi apelantul) — transcrierea nu mai ghicește.
-      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame } | null
+      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean } | null
+      // VOCE STRĂINĂ (timbrul nu se potrivește cu titularul): sesiunea primește
+      // pe loc regula de protecție — nimic administrativ până la confirmare.
+      if (j?.foreignVoice)
+        liveInject?.(
+          'ATENȚIE (verificare de timbru): vocea curentă NU se potrivește cu amprenta titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive până când titularul nu confirmă ÎN SCRIS în chat.',
+        )
       if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
       // Comanda verbală de cameră/ecran → clientul o execută pe loc.
       if (j?.device && onDevice) onDevice(j.device)
@@ -195,6 +214,50 @@ export async function startRealtimeVoice(
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
     cleanups.push(() => mic.getTracks().forEach((t) => t.stop()))
+    // Robinetul de amprentă: analizor paralel pe ACELAȘI microfon (nu atinge
+    // WebRTC). Colectează cadre doar când e energie de vorbire; amprenta se
+    // finalizează per frază (la transcriptul final) — ca pe calea STT.
+    try {
+      const tapCtx = new AudioContext()
+      const tapSrc = tapCtx.createMediaStreamSource(mic)
+      const tapAn = tapCtx.createAnalyser()
+      tapAn.fftSize = 2048
+      tapSrc.connect(tapAn)
+      const tBuf = new Float32Array(tapAn.fftSize)
+      const fBuf = new Float32Array(tapAn.frequencyBinCount)
+      const f0s: number[] = []
+      const energies: number[] = []
+      let cSum = 0, cN = 0, rSum = 0, zSum = 0, eSum = 0, frames = 0
+      const tick = window.setInterval(() => {
+        tapAn.getFloatTimeDomainData(tBuf)
+        const e = estimateEnergy(tBuf)
+        if (e < 0.004) return // liniște/zgomot — nu poluăm amprenta
+        energies.push(e); eSum += e; zSum += estimateZcr(tBuf)
+        const f0 = estimateF0(tBuf, tapCtx.sampleRate)
+        if (f0 > 0) f0s.push(f0)
+        tapAn.getFloatFrequencyData(fBuf)
+        const c = estimateCentroid(fBuf, tapCtx.sampleRate, tapAn.fftSize)
+        if (c > 0) { cSum += c; cN++ }
+        rSum += estimateRolloff(fBuf, tapCtx.sampleRate, tapAn.fftSize)
+        frames++
+      }, 150)
+      liveVoiceTap = {
+        finalize: () => {
+          if (frames < 8) return null // prea puțin semnal — fără amprentă
+          const out = buildVoiceFeatures(f0s.slice(), energies.slice(), cN ? cSum / cN : 0, rSum / frames, zSum / frames, eSum / frames)
+          f0s.length = 0; energies.length = 0; cSum = 0; cN = 0; rSum = 0; zSum = 0; eSum = 0; frames = 0
+          return out
+        },
+      }
+      cleanups.push(() => {
+        window.clearInterval(tick)
+        liveVoiceTap = null
+        liveInject = null
+        void tapCtx.close().catch(() => {})
+      })
+    } catch {
+      /* fără robinet de amprentă — vocea merge normal, timbrul rămâne pe STT */
+    }
     for (const track of mic.getTracks()) {
       pc.addTrack(track, mic)
       // Dacă pistele de intrare se termină brusc (device scos), semnalăm eroare.
@@ -315,6 +378,9 @@ export async function startRealtimeVoice(
     // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
     // function_call_arguments.done — legate prin call_id.
     const toolNames = new Map<string, string>()
+    // Injecția de sistem devine disponibilă odată cu canalul de evenimente.
+    liveInject = (text: string) =>
+      send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } })
     dc.onmessage = (ev) => {
       let m: Record<string, unknown>
       try {

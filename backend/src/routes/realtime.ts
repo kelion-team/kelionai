@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance } from '../db.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -10,6 +10,7 @@ import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../se
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
+import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 import { recallMemories } from '../services/agents.js'
@@ -287,7 +288,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  app.post<{ Body: { role?: string; text?: string } }>(
+  app.post<{ Body: { role?: string; text?: string; voiceFeatures?: VoiceFeatures } }>(
     '/api/realtime/transcript',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -311,9 +312,40 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // limba din vorbire — altfel, dacă spune/aude italiană, sesiunea live ar
       // comuta pe italiană („2 voci: ro și italiană"). Rămâne blocat pe română.
       const isAdmin = user.email.toLowerCase() === config.adminEmail
+      // TIMBRUL PE VOCEA PRINCIPALĂ (Adrian, 26 iul: „de ce nu e finalizată
+      // recunoașterea de timbru?"). Până azi amprenta se verifica DOAR pe calea
+      // STT de rezervă — în full-duplex nu rula deloc. Clientul extrage acum
+      // amprenta din microfonul sesiunii Realtime și o trimite cu fiecare tură
+      // vorbită; aici o comparăm cu referința titularului (ACEEAȘI logică și
+      // prag ca în chat.ts). Voce străină → clientul injectează avertisment în
+      // sesiune (fără comenzi de owner până la confirmare scrisă).
+      let foreignVoice: boolean | undefined
+      const vf = req.body?.voiceFeatures
+      if (role === 'user' && vf?.vector?.length && vf?.meta) {
+        try {
+          const stored = await getVoiceprint(user.email)
+          const hasRef = !!stored?.features?.length
+          const dist = hasRef ? vectorDistance(vf.vector, stored!.features) : Infinity
+          const isHolder = dist < 0.38
+          if (!hasRef || isHolder) {
+            void saveVoiceprint({
+              email: user.email,
+              name: user.name || stored?.name || user.email.split('@')[0],
+              gender: inferGender(vf.meta.pitchMean),
+              isAdmin,
+              features: vf.vector,
+              featureMeta: vf.meta,
+              audioClip: '',
+            })
+          }
+          foreignVoice = hasRef && !isHolder ? true : undefined
+        } catch {
+          /* amprenta nu blochează niciodată transcriptul */
+        }
+      }
       // ADMIN: ancorăm sesiunea live pe română la FIECARE tură (clientul face
       // session.update) — transcrierea nu mai poate aluneca spre altă limbă.
-      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', device: device ?? undefined })
+      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', device: device ?? undefined, foreignVoice })
       if (text && role === 'user' && !isAdmin) {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)
@@ -323,9 +355,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // frază independent (româna iese spaniolă/franceză la întâmplare) și
         // otrăvește detecția. Întoarcem limba comisă → clientul o fixează PE
         // LOC în sesiunea Realtime (session.update), fără repornire.
-        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), device: device ?? undefined })
+        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), device: device ?? undefined, foreignVoice })
       }
-      return reply.send({ ok: true, device: device ?? undefined })
+      return reply.send({ ok: true, device: device ?? undefined, foreignVoice })
     },
   )
 }
