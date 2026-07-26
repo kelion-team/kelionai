@@ -88,7 +88,9 @@ export function isInternalSender(from: string): boolean {
 // `langName` = limba DETECTATĂ din mesajul clientului (ex. „Romanian", „German"),
 // dată EXPLICIT modelului: răspunsul iese GARANTAT în limba primită (Adrian, 25
 // iul), nu lăsat la nimereala auto-detecției din corpul răspunsului.
-async function draftReply(from: string, subject: string, body: string, langName: string): Promise<string | null> {
+// `langName` = null când detectorul local nu e sigur pe limbă → modelul o
+// identifică singur din mesaj și răspunde în ea (orice limbă, nu doar cele 7).
+async function draftReply(from: string, subject: string, body: string, langName: string | null): Promise<string | null> {
   const prompt =
     'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +
     // FAPTE REALE (26 iul, testul lui Adrian: creierul a inventat „travel
@@ -98,8 +100,10 @@ async function draftReply(from: string, subject: string, body: string, langName:
     'un avatar 3D cu care vorbești prin voce sau scris, care vede prin cameră, caută pe web, ' +
     'știe hărți/vreme/Google și răspunde mereu în limba clientului. Începi simplu: intri pe kelionai.app ' +
     'și te conectezi cu contul Google. ' +
-    `Redactează DOAR corpul unui răspuns politicos, cald și profesionist, OBLIGATORIU în limba ${langName} ` +
-    '(limba în care a scris clientul — răspunde în ACEEAȘI limbă, nu în alta). ' +
+    'Redactează DOAR corpul unui răspuns politicos, cald și profesionist, ' +
+    (langName
+      ? `OBLIGATORIU în limba ${langName} (limba în care a scris clientul — răspunde în ACEEAȘI limbă, nu în alta). `
+      : 'OBLIGATORIU în ACEEAȘI limbă în care e scris mesajul clientului de mai jos — identific-o singur din text, ORICARE ar fi (poloneză, rusă, olandeză, turcă, orice) — NICIODATĂ în altă limbă decât a clientului. ') +
     'Prima linie = salutul (ex: „Dear John," sau „Stimate domnule Ion,"). ' +
     'Apoi 1–3 paragrafe scurte, la obiect. NU adăuga antet, semnătură sau „Kelionai" — se pun automat. ' +
     'Nu inventa promisiuni pe care nu le putem ține.\n\n' +
@@ -187,8 +191,14 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
 
   // Detectăm limba ÎNAINTE de a redacta și o dăm EXPLICIT modelului → răspunsul
   // iese garantat în limba primită (Adrian, 25 iul: „răspunde în limba primită").
-  const lang = detectLang(body) || 'en'
-  const draft = await draftReply(fromAddr, subject, body, langLabel(lang))
+  // ORICE LIMBĂ (Adrian, 26 iul: „primit în germană se răspunde în germană? sau
+  // orice limbă?"): detectorul local știe sigur doar 7 limbi — înainte, orice
+  // altceva (poloneză, rusă, olandeză…) cădea pe ENGLEZĂ. Acum, când detectorul
+  // nu e sigur, NU mai forțăm engleza: creierul primește ordinul să identifice
+  // singur limba mesajului și să răspundă exact în ea (modelele recunosc orice
+  // limbă mult mai bine decât lista noastră de cuvinte).
+  const lang = detectLang(body)
+  const draft = await draftReply(fromAddr, subject, body, lang ? langLabel(lang) : null)
 
   // Adevărul pentru admin (25 iul): forward-ul de mai jos declara „răspuns
   // trimis" pe baza EXISTENȚEI draftului, nu a trimiterii — dacă SMTP-ul pica
@@ -214,7 +224,7 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
       replyTo: config.mail.user,
     })
     if (replySent) {
-      await setInboundReplied(String(uid), draft, lang)
+      await setInboundReplied(String(uid), draft, lang ?? 'auto')
     }
   }
 
