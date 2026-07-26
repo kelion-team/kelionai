@@ -1450,12 +1450,31 @@ body {
 }
 .composer-input {
   flex: 1;
+  /* PANA „săgeata de trimis nu se vede pe telefon" (Adrian, 26 iul, captură):
+     fără min-width:0, inputul flex NU se strânge sub lățimea placeholder-ului
+     („Scrie-i lui Kelion — începe cu „K") → pe ecran îngust împingea afară
+     ultimul element din rând — chiar butonul de trimis. Regula flexbox: un
+     flex-item are min-width:auto implicit; aici trebuie explicit 0. */
+  min-width: 0;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text);
   font-size: 15px;
   padding: 6px 4px;
+}
+/* Volumul vocii: lățimea stă AICI (nu inline), ca telefonul să primească o
+   variantă îngustă — altfel slider-ul + micul mâncau tot rândul composer-ului. */
+.composer-volume {
+  width: 64px;
+  flex: 0 0 auto;
+  align-self: center;
+  accent-color: var(--accent, #7aa2ff);
+}
+@media (max-width: 540px) {
+  .composer-volume {
+    width: 38px;
+  }
 }
 .composer-input::placeholder {
   color: var(--muted);

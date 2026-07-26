@@ -1972,7 +1972,6 @@ export default function ChatPanel({
             }}
             aria-label="Volumul vocii lui Kelion"
             title={`Volum voce: ${Math.round(voiceVol * 100)}%`}
-            style={{ width: 64, accentColor: 'var(--accent, #7aa2ff)', alignSelf: 'center' }}
           />
           <button
             type="button"
