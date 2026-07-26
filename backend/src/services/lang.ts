@@ -9,7 +9,12 @@
 // a reply it isn't confident about.
 
 const STOPWORDS: Record<string, string[]> = {
-  ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră'],
+  // ROMÂNA FĂRĂ DIACRITICE (26 iul, testul poștei: „Buna ziua… multumesc" a
+  // ieșit null → fallback engleză, încălcând regula „răspuns în limba primită").
+  // Românii scriu frecvent fără diacritice — adăugăm variantele fără semne care
+  // NU se confundă cu alte limbi de aici (nu „si"/„la"/„in", care sunt și
+  // spaniolă/italiană/franceză/engleză).
+  ro: ['și', 'este', 'sunt', 'pentru', 'nu', 'că', 'cu', 'la', 'în', 'te', 'să', 'ție', 'poți', 'mulțumesc', 'bună', 'salut', 'acum', 'aici', 'ești', 'așa', 'către', 'dumneavoastră', 'buna', 'ziua', 'multumesc', 'stiu', 'poti', 'esti', 'catre', 'dumneavoastra', 'dori', 'rog', 'incepe', 'servicii'],
   es: ['el', 'la', 'los', 'las', 'que', 'para', 'con', 'una', 'por', 'usted', 'gracias', 'hola', 'está', 'puedo', 'ahora', 'aquí', 'buenos', 'días', 'tarea', 'listo', 'desarrollador'],
   pt: ['você', 'não', 'para', 'com', 'uma', 'obrigado', 'olá', 'está', 'agora', 'aqui', 'bom', 'dia', 'posso', 'coisa', 'então', 'boa', 'noite'],
   fr: ['le', 'la', 'les', 'des', 'que', 'pour', 'avec', 'une', 'vous', 'merci', 'bonjour', 'est', 'maintenant', 'ici', 'je', 'suis', 'nous'],
@@ -21,7 +26,8 @@ const STOPWORDS: Record<string, string[]> = {
 // Strong single-word language signals. When a short utterance contains one of
 // these, we commit immediately instead of waiting for a full sentence.
 const CLEAR_KEYWORDS: Record<string, string[]> = {
-  ro: ['bună', 'salut', 'mulțumesc', 'noroc', 'salutare', 'ție', 'poți', 'ești', 'așa', 'către'],
+  // + variantele fără diacritice care rămân clar românești (vezi nota de sus).
+  ro: ['bună', 'salut', 'mulțumesc', 'noroc', 'salutare', 'ție', 'poți', 'ești', 'așa', 'către', 'buna', 'multumesc', 'ziua', 'poti', 'esti'],
   es: ['hola', 'gracias', 'claro', 'buenos', 'días', 'está', 'puedo', 'listo', 'tarea'],
   pt: ['olá', 'obrigado', 'bom', 'dia', 'boa', 'noite', 'você', 'então', 'coisa'],
   fr: ['bonjour', 'merci', 'suis', 'nous', 'maintenant', 'bonsoir', 'salut'],

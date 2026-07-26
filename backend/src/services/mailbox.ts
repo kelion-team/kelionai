@@ -91,6 +91,13 @@ export function isInternalSender(from: string): boolean {
 async function draftReply(from: string, subject: string, body: string, langName: string): Promise<string | null> {
   const prompt =
     'Ești Secretarul biroului Kelionai. Un client a scris la contact@kelionai.app. ' +
+    // FAPTE REALE (26 iul, testul lui Adrian: creierul a inventat „travel
+    // companion app" — fără context factual, modelul improvizează ce e firma).
+    // Răspunsul folosește DOAR faptele de aici, nimic inventat despre produs.
+    'CE ESTE Kelionai (folosește DOAR faptele astea, nu inventa altele): un asistent AI live pe kelionai.app — ' +
+    'un avatar 3D cu care vorbești prin voce sau scris, care vede prin cameră, caută pe web, ' +
+    'știe hărți/vreme/Google și răspunde mereu în limba clientului. Începi simplu: intri pe kelionai.app ' +
+    'și te conectezi cu contul Google. ' +
     `Redactează DOAR corpul unui răspuns politicos, cald și profesionist, OBLIGATORIU în limba ${langName} ` +
     '(limba în care a scris clientul — răspunde în ACEEAȘI limbă, nu în alta). ' +
     'Prima linie = salutul (ex: „Dear John," sau „Stimate domnule Ion,"). ' +
