@@ -1101,6 +1101,22 @@ export default function ChatPanel({
                   : ''
                 if (frame) (args as Record<string, unknown>).image = frame
               }
+              // GPS LA CERERE, unealtă dedicată (pana din 26 iul: „gps nu e
+              // accesibil" — după scoaterea fluxului permanent, vocea nu avea
+              // NICIO cale să afle poziția la „unde sunt"/„aici"). Se execută
+              // AICI, în browser: citește GPS-ul real al dispozitivului acum,
+              // împrospătează și sesiunea (updateCoords), întoarce lat/lon.
+              if (name === 'get_location') {
+                const fresh = await getFreshCoords()
+                if (fresh) {
+                  rvLiveRef.current?.updateCoords(fresh)
+                  return JSON.stringify({ lat: fresh.lat, lon: fresh.lon })
+                }
+                return JSON.stringify({
+                  error: 'location_unavailable',
+                  hint: 'Permisiunea de locație e refuzată sau nu există semnal — spune-i userului sincer și cere-i să activeze locația.',
+                })
+              }
               // GPS DOAR LA NEVOIE, DAR REAL (Adrian, 26 iul): exact în
               // momentul în care vocea folosește o unealtă de locație
               // (vreme/hărți/trasee) citim poziția REALĂ a dispozitivului — o
@@ -1542,7 +1558,12 @@ export default function ChatPanel({
         },
         // Refuz/eșec → rămânem pe ultima poziție cunoscută (poate fi null).
         () => resolve(coordsRef.current),
-        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 5_000 },
+        // PANA „GPS inaccesibil" (26 iul): prima variantă cerea precizie ÎNALTĂ
+        // (satelit) cu timeout 5s — la o citire RECE, fără watcher permanent,
+        // fixul GPS durează des peste 5s → eșua mai mereu. Acum: precizia
+        // standard (rețea/wifi — răspunde în 1-3s, suficientă pentru vreme/
+        // hărți/„unde sunt"), timeout 10s, cache 2 min.
+        { enableHighAccuracy: false, maximumAge: 120_000, timeout: 10_000 },
       )
     })
 
