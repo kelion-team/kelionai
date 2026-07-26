@@ -123,6 +123,9 @@ export async function* streamChat(
   // e pornită. Declanșat de voce, fără buton, off-hot-path.
   faceDescriptor?: number[],
   facePhoto?: string,
+  // REGULA VOCII UNICE (Adrian, 26 iul): sesiunea de voce full-duplex e activă →
+  // serverul nu sintetizează vocea Chirp pentru tura asta (nici cost, nici cadre).
+  serverVoiceOff?: boolean,
 ): AsyncGenerator<string> {
   // BUG FINANCIAR REPARAT (audit 24 iul): aici mai exista un POST /api/chat al
   // cărui răspuns NU era citit niciodată — openStream() de mai jos deschidea AL
@@ -249,6 +252,7 @@ export async function* streamChat(
             voiceFeatures,
             faceDescriptor,
             facePhoto,
+            serverVoiceOff,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }),

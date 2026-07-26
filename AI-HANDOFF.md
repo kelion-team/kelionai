@@ -247,6 +247,10 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 26 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **26 IUL (valul 10) — REGULA VOCII UNICE (bug real raportat de Adrian: „a intrat o a doua voce în același timp… în același timp nu are voie niciodată 2 voci, trebuie unică"):**
+  1. **Scenariul**: sesiunea de voce full-duplex (OpenAI Realtime) activă; Adrian trimite o poză prin chatul scris → răspunsul turei scrise vine cu cadre `{audio}` (vocea Chirp sintetizată de server pentru ORICE tură de chat) → clientul le reda necondiționat → DOUĂ voci simultan.
+  2. **Fix pe ambele capete**: (a) handle-ul sesiunii Realtime e marcat `isRealtime` (marcajul cade în stop-ul împachetat, pe orice drum de oprire); cât e instalat, `ChatPanel` ARUNCĂ cadrele `{audio}` ale chatului scris; (b) clientul trimite `serverVoiceOff: true` în corpul `/api/chat` → serverul NICI NU SINTETIZEAZĂ (stub în loc de `createVoiceStream`) — zero cost Chirp pe audio care s-ar fi aruncat. Calea STT de rezervă (fără Realtime) rămâne neatinsă — acolo vocea Chirp E vocea.
+  3. **Regulă permanentă pentru orice AI viitor: NICIODATĂ două voci simultan.** Vocea activă e a sesiunii Realtime când există; altfel Chirp (STT fallback / clipuri promo). Orice sursă audio nouă trebuie să respecte gate-ul ăsta.
 - 🗓️ **26 IUL (valul 9) — POȘTA contact@ REPARATĂ: MAIL_PASS pe VPS + bug `vps-set-env` (pipefail):**
   1. **Simptom** (din 24 iul): pollerul IMAP pica la fiecare ~6 min cu `Socket timeout ETIMEOUT` / „Connection not available" — cutia contact@ moartă. Cauză de mediu: `MAIL_PASS` lipsea din env-ul containerului de pe VPS.
   2. **Adrian a pus secretul `MAIL_PASS` și a rulat `vps-set-env` → jobul a EȘUAT (run 30190681677, exit 1 în 9s)**, dar înșelător: cheile FUSESERĂ scrise în `/root/kelion/kelionai.env` (log: „MAIL_PASS: scris (13 caractere)"); a murit doar pasul de REPORNIRE, care n-a mai rulat.
