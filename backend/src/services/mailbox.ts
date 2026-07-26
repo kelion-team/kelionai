@@ -4,7 +4,7 @@ import { simpleParser } from 'mailparser'
 import { config } from '../config.js'
 import { mailEnabled, sendMail, royalLetterHtml, makeRef, letterDate } from './mail.js'
 import { brainComplete } from './brain.js'
-import { saveInboundEmail, setInboundReplied } from '../db.js'
+import { saveInboundEmail, setInboundReplied, knownInboundUids } from '../db.js'
 import { detectLang, langLabel } from './lang.js'
 
 // ORGANIZAREA CUTIEI (Adrian, 25 iul: „să organizeze emailurile"). După ce
@@ -166,6 +166,18 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   })
   if (!isNew) return
 
+  // Mesajele mai vechi de 7 zile (backlogul rămas dintr-o pană, ca cea din
+  // 24–26 iul) NU primesc răspuns automat și NU se mai forwardează în rafală —
+  // un „bun venit" sosit la săptămâni după mesaj face mai mult rău decât
+  // tăcerea. Se salvează în DB (mai sus) și merg în Kelion-ToAnswer, unde
+  // adminul le vede și decide. Mailul PROASPĂT își păstrează fluxul complet.
+  const ageMs = parsed.date ? Date.now() - parsed.date.getTime() : 0
+  if (ageMs > 7 * 24 * 3600_000) {
+    console.log(`[mailbox] backlog vechi (>7 zile), fără auto-reply: ${subject}`)
+    await fileInto(client, uid, FOLDER_MANUAL, ['\\Seen'])
+    return
+  }
+
   // Detectăm limba ÎNAINTE de a redacta și o dăm EXPLICIT modelului → răspunsul
   // iese garantat în limba primită (Adrian, 25 iul: „răspunde în limba primită").
   const lang = detectLang(body) || 'en'
@@ -240,22 +252,44 @@ async function poll(): Promise<void> {
     await client.connect()
     const lock = await client.getMailboxLock('INBOX')
     try {
-      // ROW 19 fix: the old code only searched UNSEEN messages. If a human client
-      // (Outlook, phone, webmail) read the message first, it became SEEN and the
-      // poller never saw it again — so it was never saved, forwarded, or answered.
-      // We now scan the last 100 messages regardless of Seen status and dedupe by
-      // IMAP UID. Already-seen messages are left untouched (no flag change).
-      const mb = client.mailbox
-      const total = mb ? mb.exists : 0
-      if (total > 0) {
-        const start = Math.max(1, total - 99)
-        for await (const msg of client.fetch(`${start}:*`, { source: true, flags: true }, { uid: true })) {
-          try {
-            if (msg && msg.source) {
-              await processOne(client, msg.uid, msg.source, msg.flags?.has('\\Seen') ?? false)
+      // ROW 19, rescris 26 iul (pana „Socket timeout"). Varianta veche descărca
+      // CORPUL COMPLET al ultimelor 100 de mesaje la FIECARE poll (fetch cu
+      // {source:true} pe interval); pe un inbox de sute de mesaje transferul
+      // depășea timeout-ul socketului imapflow → „Socket timeout" + „poll
+      // failed: Connection not available" la FIECARE ciclu și niciun mail
+      // procesat vreodată (login-ul direct mergea instant — doar fetch-ul masiv
+      // murea). Acum: întâi DOAR UID-urile (o comandă ieftină), le comparăm cu
+      // ce e deja în DB și descărcăm corpul DOAR pentru mesajele noi — de
+      // regulă 0–2 pe ciclu. Dedupe rămâne pe UID în DB, mesajele citite rămân
+      // neatinse (fără schimbare de flaguri), exact ca înainte.
+      const uids = await client.search({ all: true }, { uid: true })
+      if (uids && Array.isArray(uids) && uids.length > 0) {
+        uids.sort((a, b) => b - a)
+        const recent = uids.slice(0, 100)
+        const known = await knownInboundUids(recent.map(String))
+        const fresh = recent.filter((u) => !known.has(String(u)))
+        // Plasă de siguranță după o pană lungă: cel mult 25 de mesaje pe ciclu
+        // (restul, la ciclurile următoare) — un backlog acumulat nu are voie să
+        // declanșeze zeci de răspunsuri și forwarduri deodată.
+        const batch = fresh.slice(0, 25)
+        if (fresh.length > batch.length) {
+          console.log(`[mailbox] backlog: ${fresh.length} mesaje neprocesate, iau ${batch.length} acum`)
+        }
+        if (batch.length > 0) {
+          // Fix separat, găsit la același test: ensureFolders exista dar NU era
+          // apelată nicăieri → folderele de organizare nu se creau niciodată și
+          // fiecare mutare pica pe fallback. O apelăm când chiar avem de mutat.
+          await ensureFolders(client)
+          batch.sort((a, b) => a - b) // procesăm cronologic
+          for (const uid of batch) {
+            try {
+              const msg = await client.fetchOne(String(uid), { source: true, flags: true }, { uid: true })
+              if (msg && msg.source) {
+                await processOne(client, uid, msg.source, msg.flags?.has('\\Seen') ?? false)
+              }
+            } catch (e) {
+              console.error('[mailbox] one failed:', (e as Error).message)
             }
-          } catch (e) {
-            console.error('[mailbox] one failed:', (e as Error).message)
           }
         }
       }

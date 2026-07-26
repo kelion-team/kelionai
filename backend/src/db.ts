@@ -2594,6 +2594,22 @@ export async function saveInboundEmail(m: {
   }
 }
 
+// Care dintre aceste UID-uri sunt DEJA în inbound_emails. Pre-filtrul
+// pollerului (26 iul): îi permite să descarce corpul DOAR pentru mesajele noi,
+// nu pentru toate ultimele 100 — descărcarea în masă era cauza timeout-urilor
+// care au ținut cutia moartă. La orice eroare întoarcem mulțimea goală:
+// pollerul descarcă atunci cel mult lotul plafonat și dedupe-ul din
+// saveInboundEmail (ON CONFLICT) tot împiedică orice răspuns dublu.
+export async function knownInboundUids(uids: string[]): Promise<Set<string>> {
+  if (!dbEnabled() || uids.length === 0) return new Set()
+  try {
+    const r = await getPool().query('SELECT uid FROM inbound_emails WHERE uid = ANY($1)', [uids])
+    return new Set(r.rows.map((x: { uid: string }) => String(x.uid)))
+  } catch {
+    return new Set()
+  }
+}
+
 // Mark an inbound email answered, storing the reply text + detected language.
 export async function setInboundReplied(uid: string, reply: string, lang: string): Promise<void> {
   if (!dbEnabled()) return
