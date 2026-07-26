@@ -221,6 +221,21 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
       }
       out.payoutsInterval = a.settings?.payouts?.schedule?.interval ?? 'unknown'
       out.issuingStatus = a.capabilities?.card_issuing ?? 'inactive'
+    } else {
+      // „unknown" MUT era o minciună prin omisiune (Adrian, 26 iul: „datele de
+      // aici nu sunt reale"). Verificat live: cheia din env e RESTRICȚIONATĂ
+      // (rk_live_…) și /v1/account răspunde 403 more_permissions_required —
+      // aplicația nu ARE VOIE să citească setările contului. Spunem exact asta
+      // și ce e de făcut (Stripe Dashboard → Developers → API keys → cheia
+      // restricționată → Edit → Account: Read), nu lăsăm „unknown" fără motiv.
+      const body = (await acc.json().catch(() => null)) as { error?: { code?: string } } | null
+      const reason =
+        acc.status === 403 || body?.error?.code === 'more_permissions_required'
+          ? 'fara_permisiune_cheie'
+          : `http_${acc.status}`
+      out.payoutsInterval = reason
+      out.issuingStatus = reason
+      out.error = `Stripe /v1/account: ${acc.status} (${body?.error?.code ?? 'eroare'}) — cheia restricționată nu poate citi contul; dă-i permisiunea Account:Read în Dashboard → API keys.`
     }
     const bal = await fetch(`${API}/balance`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
     if (bal.ok) {

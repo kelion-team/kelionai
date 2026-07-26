@@ -145,7 +145,9 @@ export function WalletButton({
   // more often the lower the credit gets (30% → rare, 10% → frequent). Never a
   // blocking popup.
   useEffect(() => {
-    if (credits === null || percent > 30) {
+    // Owner-ul nu cumpără credite → nu primește NICIODATĂ „mai ai puțin
+    // credit" (Adrian, 26 iul: „afișează corect creditele la admin").
+    if (isAdmin || credits === null || percent > 30) {
       setToast(false)
       return
     }
@@ -164,20 +166,33 @@ export function WalletButton({
     }
   }, [percent, credits])
 
-  const critical = percent <= 5 // stays blinking red at the very end
+  const critical = !isAdmin && percent <= 5 // stays blinking red at the very end
   return (
     <div className="wallet">
       {/* Pastila = SOLDUL curent (creditele pe care le AI), nu „cumpără X".
           Adrian, 24 iul: „e greșită comunicarea — am 150 credite sau cumpăr
-          150?". Icon portofel + număr = clar sold; adăugarea e în meniu. */}
+          150?". Icon portofel + număr = clar sold; adăugarea e în meniu.
+          ADMIN (Adrian, 26 iul: „afișează corect creditele la admin"): owner-ul
+          nu cumpără credite, deci soldul lui din registru iese NEGATIV pe
+          măsură ce consumă — un „-324 credite" roșu e fals ca mesaj (nu
+          datorează nimic). La admin pastila arată „nelimitat"; consumul REAL,
+          pe componente, rămâne în Admin → Bani. Registrele NU se ating. */}
       <button
         type="button"
         className={`ghost wallet-badge ${critical ? 'blink-red' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={ro ? 'Creditele tale disponibile — apasă pentru a adăuga' : 'Your available credits — click to add more'}
+        title={
+          isAdmin
+            ? ro
+              ? 'Cont owner — credite nelimitate; consumul real e în Admin → Bani'
+              : 'Owner account — unlimited credits; real usage is in Admin → Money'
+            : ro
+              ? 'Creditele tale disponibile — apasă pentru a adăuga'
+              : 'Your available credits — click to add more'
+        }
       >
         <span aria-hidden style={{ marginRight: 5 }}>💳</span>
-        {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
+        {isAdmin ? (ro ? 'nelimitat' : 'unlimited') : credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
       </button>
       {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
           absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
