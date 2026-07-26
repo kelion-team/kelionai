@@ -1053,6 +1053,15 @@ body {
      complet, nimic nu mai rămâne ascuns în spatele casetei. */
   padding: 56px 16px 150px;
 }
+/* PE TELEFON bara de sus (fixă) se împachetează pe 2-3 rânduri (insigne +
+   butoane admin) și ajunge mult sub 56px — titlul panoului și butoanele lui
+   (A−/100%/A+) intrau SUB insigne (captura lui Adrian, 26 iul: „butoanele
+   îngrămădite"). Degajarea de sus crește cât bara împachetată. */
+@media (max-width: 640px) {
+  .workspace-inner {
+    padding-top: 195px;
+  }
+}
 .workspace-head {
   display: flex;
   align-items: center;
@@ -1471,9 +1480,13 @@ body {
   align-self: center;
   accent-color: var(--accent, #7aa2ff);
 }
+/* PE TELEFON sliderul de volum DISPARE (Adrian, 26 iul: „ascunde pe telefon
+   buton volum și în loc să fie săgeata trimite" + captura cu butoanele
+   îngrămădite) — rămân doar micul și săgeata, cu loc de atins. Volumul se
+   reglează de pe telefon sau de pe desktop (valoarea e persistată). */
 @media (max-width: 540px) {
   .composer-volume {
-    width: 38px;
+    display: none;
   }
 }
 .composer-input::placeholder {
