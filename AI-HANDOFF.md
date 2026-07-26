@@ -246,7 +246,12 @@ node --check bridge/kelion-bridge-linux.mjs
 # ramură → commit → push → PR → merge în master → deploy automat → VERIFICĂ LIVE
 ```
 
-## 13. STAREA LA 25 IULIE 2026 + CE URMEAZĂ
+## 13. STAREA LA 26 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **26 IUL (valul 9) — POȘTA contact@ REPARATĂ: MAIL_PASS pe VPS + bug `vps-set-env` (pipefail):**
+  1. **Simptom** (din 24 iul): pollerul IMAP pica la fiecare ~6 min cu `Socket timeout ETIMEOUT` / „Connection not available" — cutia contact@ moartă. Cauză de mediu: `MAIL_PASS` lipsea din env-ul containerului de pe VPS.
+  2. **Adrian a pus secretul `MAIL_PASS` și a rulat `vps-set-env` → jobul a EȘUAT (run 30190681677, exit 1 în 9s)**, dar înșelător: cheile FUSESERĂ scrise în `/root/kelion/kelionai.env` (log: „MAIL_PASS: scris (13 caractere)"); a murit doar pasul de REPORNIRE, care n-a mai rulat.
+  3. **Bug-ul real în workflow**: bucla care emite `KEY=VALUE` folosea `[ -n "$val" ] && printf …` — când ULTIMUL nume din listă (`GITHUB_TOKEN` ← secretul `KELION_GITHUB_TOKEN`, gol la acel moment) e nesetat, grupul iese cu cod 1, iar `set -euo pipefail` omoară jobul deși scrierea remote a reușit. Fix: `if [ -n "$val" ]; then … fi` (comentariu în workflow cu run-ul dovadă). NU reordona lista de secrete ca „fix" — forma `if` e cea corectă.
+  4. **Remediere imediată fără a aștepta merge-ul**: container recreat prin `vps-run` cu rețeta standard (`--env-file kelionai.env` + `GIT_COMMIT_SHA` din clona deploy) → env-ul nou încărcat; verificat în logs că pollerul IMAP se conectează (dovada în raportul din chat).
 - 🗓️ **25 IUL (ramura `claude/reia-l9l2qx`, rebazată peste valurile de autonomie 4–8) — PARITATE VOCE↔SCRIS + PLAYGROUND + POȘTĂ + FIȘIERE:**
   1. **Poșta contact@ — răspuns în limba primită + organizare pe foldere** (`mailbox.ts`): limba e detectată și dată EXPLICIT modelului (`langLabel`) → răspunsul iese garantat în limba clientului. Organizare automată (`MAIL_ORGANIZE`, implicit pornit): fiecare mesaj procesat e mutat în folder IMAP — `Kelion-Answered` (răspuns automat trimis, +`\Answered`), `Kelion-ToAnswer` (om real fără răspuns → admin), `Kelion-Automated` (mail-mașină). Best-effort, reversibil, oprit din env.
   2. **Voce: comutare verbală cameră/ecran** (paritate cu scrisul): `/api/realtime/transcript` rulează ACELAȘI `interpretDeviceCommand` pe transcriptul userului și întoarce `{device}`; clientul îl execută prin `handleControl` (comută camera față/spate/switch, închide monitorul). Înainte mergea DOAR în chatul scris.
