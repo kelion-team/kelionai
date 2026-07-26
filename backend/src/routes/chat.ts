@@ -980,6 +980,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // pornită. Declanșat de voce, fără buton. `facePhoto` = miniatură base64.
       faceDescriptor?: number[]
       facePhoto?: string
+      // REGULA VOCII UNICE (Adrian, 26 iul: „în același timp nu are voie
+      // niciodată 2 voci"): clientul are sesiunea de voce full-duplex ACTIVĂ,
+      // deci vocea turei ăsteia e a sesiunii — serverul NU sintetizează Chirp
+      // (nu doar că nu s-ar reda: nici nu plătim sinteză pentru audio aruncat).
+      serverVoiceOff?: boolean
     }
   }>(
     '/api/chat',
@@ -1633,7 +1638,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
-    const voice = createVoiceStream(reply, userLang)
+    // REGULA VOCII UNICE (Adrian, 26 iul): dacă clientul are sesiunea full-duplex
+    // activă, tura scrisă rămâne DOAR scrisă — zero sinteză, zero cadre {audio}.
+    const voice =
+      req.body?.serverVoiceOff === true
+        ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
+        : createVoiceStream(reply, userLang)
     let assistantText = ''
     // CEASUL CREIERULUI (admin): primul cuvânt real măsoară viteza; bara trece pe
     // „Compun răspunsul". O singură dată pe tură, doar pentru admin (telemetria lui).

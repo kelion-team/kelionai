@@ -321,6 +321,12 @@ export default function ChatPanel({
     // Cât vorbește, microfonul nu trimite (anti-ecou), dar rămâne de veghe:
     // vocea lui Adrian taie redarea pe loc (barge-in, vezi ensureMic).
     if (c.audio) {
+      // REGULA VOCII UNICE (Adrian, 26 iul, bug real: a trimis o poză în timpul
+      // sesiunii de voce și „a intrat o a doua voce în același timp"): cât timp
+      // sesiunea Realtime e instalată, EA e singura voce — cadrele {audio} ale
+      // chatului scris se aruncă. Plasă și pentru cadrele deja sintetizate de o
+      // tură pornită înainte de flag (serverVoiceOff oprește sursa, asta scurge).
+      if ((micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true) return
       playVoice(
         c.audio,
         () => micRef.current?.setMuted(true),
@@ -879,6 +885,9 @@ export default function ChatPanel({
         voiceFeatures,
         face?.descriptor,
         face?.photo,
+        // REGULA VOCII UNICE: cu sesiunea Realtime activă, tura scrisă nu
+        // primește voce Chirp de la server (sesiunea rămâne singura voce).
+        (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // primul cuvânt REAL
         acc += chunk
@@ -1181,6 +1190,11 @@ export default function ChatPanel({
             rv.stop()
             return
           }
+          // REGULA VOCII UNICE (Adrian, 26 iul: „în același timp nu are voie
+          // niciodată 2 voci"): marcăm handle-ul ca sesiune Realtime — cât e
+          // instalat, vocea Chirp a chatului scris NU se redă (vezi c.audio) și
+          // nici nu se mai sintetizează pe server (serverVoiceOff la trimitere).
+          ;(rv as unknown as { isRealtime?: boolean }).isRealtime = true
           micRef.current = rv as unknown as MicHandle
           // Stream-ul pre-încălzit e doar pentru calea STT; Realtime își deschide
           // propriul microfon — fără închiderea de aici, captura pre-warm rămânea
@@ -1232,6 +1246,10 @@ export default function ChatPanel({
           }
           rv.stop = () => {
             clearTimeout(rotateTimer)
+            // Sesiunea s-a oprit → marcajul cade IMEDIAT, pe orice drum de stop
+            // (manual, rotire, fără credit) — chiar dacă micRef se curăță mai
+            // târziu, vocea Chirp a chatului nu rămâne blocată pe mut.
+            ;(rv as unknown as { isRealtime?: boolean }).isRealtime = false
             origStop()
           }
           micBackoffRef.current = 1000
