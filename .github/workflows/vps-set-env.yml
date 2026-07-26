@@ -58,10 +58,15 @@ jobs:
           # Construim liniile KEY=VALUE DOAR pentru secretele setate (valorile
           # trăiesc în memoria runner-ului, mascate de GitHub). Le trimitem prin
           # STDIN unui script remote care face upsert în /root/kelion/kelionai.env.
+          # ATENȚIE la forma buclei: cu `[ -n ] && printf` scurt, dacă ULTIMUL
+          # secret din listă e gol, bucla iese cu cod 1 și `pipefail` omoară
+          # jobul DUPĂ scriere dar ÎNAINTE de repornire (exact pana din
+          # 26 iul, run 30190681677 — cheile scrise, containerul nerepornit).
+          # De-aia e `if`, nu `&&`.
           {
             for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET GITHUB_TOKEN; do
               val="${!name:-}"
-              [ -n "$val" ] && printf '%s=%s\n' "$name" "$val"
+              if [ -n "$val" ]; then printf '%s=%s\n' "$name" "$val"; fi
             done
           } | $SSH '
             set -e
