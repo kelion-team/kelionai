@@ -16,6 +16,7 @@ import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
 import { asrStreamRoutes } from './routes/asr-stream.js'
+import { correctRoutes } from './routes/correct.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
 import { billingRoutes } from './routes/billing.js'
@@ -34,6 +35,8 @@ import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { autoFundIssuing } from './services/stripe.js'
+import { greetRoutes } from './routes/greet.js'
+import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { realtimeRoutes } from './routes/realtime.js'
@@ -43,7 +46,6 @@ import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddi
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
-import { makeLogTee } from './services/logbuffer.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -63,10 +65,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
 // payloads — covers audio buffers, documents and camera frames. The /api/chat
 // route raises its own limit to 100MB per-route for camera frames (see chat.ts).
-// F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele trebuie să ajungă la Kelion ca
-// și F12"): logger-ul scrie tot pe stdout (docker logs neatins) ȘI reține
-// erorile/avertismentele într-un inel de memorie citit de unealta server_logs.
-const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
+const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
 // fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
@@ -85,6 +84,9 @@ await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
   credentials: true,
+  // The landing greeting returns the spoken line in this header so the client
+  // can drive the avatar's mouth; expose it for cross-origin reads.
+  exposedHeaders: ['X-Greet-Text'],
 })
 
 // RATE LIMITING — the first line of defence against cost-abuse and DoS. Keyed on
@@ -112,6 +114,9 @@ await app.register(rateLimit, {
       u === '/api/asr-stream' ||
       u === '/health' ||
       u === '/api/version' || // sondat la 45s de fiecare client pentru rutina de update
+      u === '/api/dev/status' ||
+      u === '/api/dev/heartbeat' ||
+      u === '/api/chat/incoming' ||
       u === '/api/visit/ping'
     )
   },
@@ -240,6 +245,8 @@ app.get('/api/version', async (_req, reply) => {
   return { v: DEPLOY_V, at: BOOT_AT }
 })
 
+// Test/verification endpoint for the SDK constructor
+app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
 
 
 await app.register(authRoutes)
@@ -249,6 +256,7 @@ await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
 await app.register(asrStreamRoutes)
+await app.register(correctRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
 await app.register(billingRoutes)
@@ -261,6 +269,8 @@ await app.register(opsRoutes)
 await app.register(constructorRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
+await app.register(greetRoutes)
+await app.register(meseriiRoutes)
 await app.register(voiceprintRoutes)
 await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)
@@ -270,21 +280,11 @@ await app.register(pingRoutes)
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
 
-// Schema DB e VITALĂ când baza e configurată (audit securitate 27 iul):
-// initDb rulează totul într-o singură tranzacție implicită — dacă ORICE
-// statement pică, pică TOT, inclusiv indexul unic anti-dublă-creditare
-// (uniq_billing_ref). Înainte doar logam și mergeam mai departe = plățile
-// puteau fi creditate de două ori în tăcere. Acum: DB configurată dar schema
-// picată → procesul iese (gazda îl repornește; mai bine o repornire vizibilă
-// decât bani dublați invizibil). Fără DATABASE_URL rămâne pornire normală.
+// Create tables if a database is configured (non-fatal if it isn't / is down).
 try {
   await initDb()
   await initAppFiles() // load installer masters (uploaded from Linux) into cache
 } catch (err) {
-  if (config.databaseUrl) {
-    app.log.error({ err }, 'initDb EȘUAT cu DB configurată — ies (protecția banilor cere schema completă)')
-    process.exit(1)
-  }
   app.log.error({ err }, 'initDb failed — chat persistence disabled')
 }
 

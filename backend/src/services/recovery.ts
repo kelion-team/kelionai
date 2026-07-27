@@ -116,3 +116,96 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
     return { ok: false, error: String((e as Error).message ?? e) }
   }
 }
+
+// ── RESTAURAREA REALĂ (Adrian, 27 iul: „pune și butoanele de selecție în admin,
+// să se poată selecta") ──────────────────────────────────────────────────────
+// Aduce master EXACT la starea commitului din spatele unui tag de backup, cu un
+// commit NOU (arborele vechi, părinte = vârful curent) — deci ÎNAINTE, nu prin
+// rescrierea istoriei: invariantul „producția = master" rămâne intact, iar
+// publicarea pe VPS pornește singură din push-ul pe master.
+export async function restoreToPoint(
+  tag: string,
+): Promise<{ ok: boolean; sha?: string; via?: 'push' | 'pr'; error?: string }> {
+  const token = (process.env.GITHUB_TOKEN ?? '').trim()
+  if (!token) return { ok: false, error: 'github_token_missing' }
+  if (!/^backup-[A-Za-z0-9._-]+$/.test(tag)) return { ok: false, error: 'tag_invalid' }
+  const j = async (r: Response): Promise<Record<string, unknown>> =>
+    (await r.json()) as Record<string, unknown>
+  const t = (ms: number): AbortSignal => AbortSignal.timeout(ms)
+  try {
+    // 1. Tag-ul → commitul lui (tag adnotat → dereferențiere la commit).
+    const rr = await fetch(`${API}/git/ref/tags/${tag}`, { headers: ghHeaders(), signal: t(12_000) })
+    if (!rr.ok) return { ok: false, error: `tag_negasit_${rr.status}` }
+    const refObj = (await j(rr)).object as { sha: string; type: string }
+    let commitSha = refObj.sha
+    if (refObj.type === 'tag') {
+      const tr = await fetch(`${API}/git/tags/${refObj.sha}`, { headers: ghHeaders(), signal: t(12_000) })
+      if (!tr.ok) return { ok: false, error: `tag_obiect_${tr.status}` }
+      commitSha = ((await j(tr)).object as { sha: string }).sha
+    }
+    // 2. Arborele commitului salvat + vârful curent al lui master.
+    const [cr, mr] = await Promise.all([
+      fetch(`${API}/git/commits/${commitSha}`, { headers: ghHeaders(), signal: t(12_000) }),
+      fetch(`${API}/git/refs/heads/master`, { headers: ghHeaders(), signal: t(12_000) }),
+    ])
+    if (!cr.ok) return { ok: false, error: `commit_${cr.status}` }
+    if (!mr.ok) return { ok: false, error: `master_${mr.status}` }
+    const treeSha = ((await j(cr)).tree as { sha: string }).sha
+    const headSha = ((await j(mr)).object as { sha: string }).sha
+    if (headSha === commitSha) return { ok: true, sha: commitSha.slice(0, 7), via: 'push' }
+    // 3. Commitul de restaurare: arborele salvat, părinte = vârful curent.
+    const nc = await fetch(`${API}/git/commits`, {
+      method: 'POST',
+      headers: ghHeaders(),
+      body: JSON.stringify({
+        message: `RESTAURARE: aplicatia adusa la starea ${tag} (din panoul Recuperare)`,
+        tree: treeSha,
+        parents: [headSha],
+      }),
+      signal: t(15_000),
+    })
+    if (!nc.ok) return { ok: false, error: `commit_nou_${nc.status}: ${(await nc.text()).slice(0, 200)}` }
+    const newSha = String((await j(nc)).sha)
+    // 4. Împinge master la commitul nou (fast-forward). Dacă ramura e protejată
+    //    la push direct, calea de rezervă: ramură + PR + merge — același rezultat.
+    const up = await fetch(`${API}/git/refs/heads/master`, {
+      method: 'PATCH',
+      headers: ghHeaders(),
+      body: JSON.stringify({ sha: newSha, force: false }),
+      signal: t(15_000),
+    })
+    if (up.ok) return { ok: true, sha: newSha.slice(0, 7), via: 'push' }
+    const branch = `restore/${tag}-${Date.now().toString(36)}`
+    const br = await fetch(`${API}/git/refs`, {
+      method: 'POST',
+      headers: ghHeaders(),
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: newSha }),
+      signal: t(12_000),
+    })
+    if (!br.ok) return { ok: false, error: `ramura_${br.status}: ${(await br.text()).slice(0, 200)}` }
+    const pr = await fetch(`${API}/pulls`, {
+      method: 'POST',
+      headers: ghHeaders(),
+      body: JSON.stringify({
+        title: `RESTAURARE la ${tag}`,
+        head: branch,
+        base: 'master',
+        body: `Restaurare comandată din panoul Recuperare: master adus la starea ${tag}.`,
+      }),
+      signal: t(15_000),
+    })
+    if (!pr.ok) return { ok: false, error: `pr_${pr.status}: ${(await pr.text()).slice(0, 200)}` }
+    const prNum = Number((await j(pr)).number)
+    const mg = await fetch(`${API}/pulls/${prNum}/merge`, {
+      method: 'PUT',
+      headers: ghHeaders(),
+      body: JSON.stringify({ merge_method: 'merge' }),
+      signal: t(20_000),
+    })
+    if (!mg.ok) return { ok: false, error: `merge_${mg.status}: ${(await mg.text()).slice(0, 200)}` }
+    const merged = String(((await j(mg)) as { sha?: string }).sha ?? newSha)
+    return { ok: true, sha: merged.slice(0, 7), via: 'pr' }
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message ?? e) }
+  }
+}

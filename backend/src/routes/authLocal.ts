@@ -35,11 +35,6 @@ function verifyPassword(pass: string, stored: string): boolean {
 }
 const sha256 = (s: string): string => crypto.createHash('sha256').update(s).digest('hex')
 const validEmail = (e: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)
-// GAURĂ CRITICĂ ÎNCHISĂ (auditul de securitate, 27 iul): oricine putea să-și
-// facă un CONT LOCAL cu emailul ownerului — roleFor(email) îi dădea sesiune de
-// ADMIN pe 30 de zile, fără nicio verificare că e chiar el. Ownerul intră DOAR
-// cu Google; contul lui nu are ce căuta pe calea locală, pe niciuna din rute.
-const isOwnerEmail = (e: string): boolean => e.toLowerCase() === config.adminEmail.toLowerCase()
 
 function signIn(reply: Parameters<typeof setSession>[0], email: string, name: string): void {
   setSession(reply, {
@@ -78,7 +73,6 @@ export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
       const email = String(req.body?.email ?? '').toLowerCase().trim()
       const pass = String(req.body?.password ?? '')
       if (!validEmail(email)) return reply.code(400).send({ error: 'email_invalid' })
-      if (isOwnerEmail(email)) return reply.code(403).send({ error: 'cont_google_obligatoriu' })
       if (pass.length < 8) return reply.code(400).send({ error: 'parola_scurta' })
       if (await getLocalAccount(email)) return reply.code(409).send({ error: 'cont_existent' })
       await upsertLocalAccount(email, String(req.body?.name ?? '').trim(), hashPassword(pass))
@@ -92,7 +86,6 @@ export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
     rl,
     async (req, reply) => {
       const email = String(req.body?.email ?? '').toLowerCase().trim()
-      if (isOwnerEmail(email)) return reply.code(403).send({ error: 'cont_google_obligatoriu' })
       const acc = await getLocalAccount(email)
       if (!acc || !verifyPassword(String(req.body?.password ?? ''), acc.pass_hash))
         return reply.code(401).send({ error: 'date_gresite' })
@@ -104,7 +97,7 @@ export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
   // Link magic: răspuns GENERIC mereu; contul se creează din zbor la click.
   app.post<{ Body: { email?: string } }>('/auth/local/magic', rl, async (req, reply) => {
     const email = String(req.body?.email ?? '').toLowerCase().trim()
-    if (validEmail(email) && !isOwnerEmail(email)) void sendLink(email, 'magic').catch(() => {})
+    if (validEmail(email)) void sendLink(email, 'magic').catch(() => {})
     return reply.send({ ok: true })
   })
 
@@ -112,7 +105,6 @@ export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
     const token = String(req.query?.token ?? '')
     const email = token ? await consumeLoginToken(sha256(token), 'magic') : null
     if (!email) return reply.redirect(`${config.frontendOrigin}/login?error=link_expirat`)
-    if (isOwnerEmail(email)) return reply.redirect(`${config.frontendOrigin}/login?error=cont_google_obligatoriu`)
     const acc = await getLocalAccount(email)
     if (!acc) await upsertLocalAccount(email, '', hashPassword(crypto.randomBytes(24).toString('hex')))
     signIn(reply, email, acc?.name ?? '')

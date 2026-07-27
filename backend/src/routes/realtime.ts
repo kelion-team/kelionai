@@ -4,7 +4,7 @@ import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
-import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
+import { grantUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -371,15 +371,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           const hasRef = !!stored?.features?.length
           const dist = hasRef ? vectorDistance(vf.vector, stored!.features) : Infinity
           const isHolder = dist < 0.38
-          // GAURĂ ÎNCHISĂ (auditul de securitate, 27 iul): cu lacătul ARMAT,
-          // un cookie de sesiune furat putea să-și ÎNROLEZE propriul vector ca
-          // „referință" (fără referință existentă) și, la a doua cerere
-          // identică, dist=0 → deblocare. Prima înrolare a REFERINȚEI de admin
-          // se acceptă acum DOAR dintr-o sesiune deja deblocată (secretul
-          // tastat) sau cu lacătul nearmat; potrivirea pe referință existentă
-          // rămâne neschimbată (aia e chiar deblocarea prin voce).
-          const enrolAllowed = !isAdmin || !(await isArmed()) || hasUnlock(req, user.email)
-          if ((!hasRef && enrolAllowed) || (hasRef && isHolder)) {
+          if (!hasRef || isHolder) {
             void saveVoiceprint({
               email: user.email,
               name: user.name || stored?.name || user.email.split('@')[0],

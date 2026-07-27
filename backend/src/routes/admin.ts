@@ -29,18 +29,15 @@ import {
   setDisabledGestures,
   listKelionTools,
   decideKelionTool,
-  listBuildJobs,
-  getPool,
-  dbEnabled,
 } from '../db.js'
-import { systemHealth } from '../services/health.js'
-import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
-import { listRecoveryPoints, createRecoveryPoint } from '../services/recovery.js'
+import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
+import { screenshotUrl } from '../services/browser.js'
+import { geminiVision } from '../services/google.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
@@ -140,6 +137,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
   })
+  // RESTAURAREA dintr-un punct salvat (Adrian, 27 iul: butoane de selecție în
+  // admin). Aduce master la starea tag-ului cu un commit nou → publicarea pe
+  // VPS pornește singură. Acțiune grea → confirmarea e în UI, dublă.
+  app.post<{ Body: { tag?: string } }>('/api/admin/backups/restore', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const r = await restoreToPoint(String(req.body?.tag ?? ''))
+    if (!r.ok) return reply.code(500).send(r)
+    return reply.send(r)
+  })
 
   // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).
   app.get('/api/admin/inbound', async (req, reply) => {
@@ -207,45 +214,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
-  })
-
-  // AUDITUL COMPLET AL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
-  // auditurile și toate căzutele"): tabul Cereri neacoperite arată, pe lângă
-  // gaps, TOT ce a căzut — erorile de server (F12-ul de server), erorile de
-  // client (F12-ul browserului), ordinele de construcție eșuate și problemele
-  // de sănătate (live vs master, rulări roșii, disc, DB, sold creier).
-  app.get('/api/admin/audit', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [healthRaw, jobs, clientErrors] = await Promise.all([
-      systemHealth().catch(() => '{}'),
-      listBuildJobs(12).catch(() => []),
-      dbEnabled()
-        ? getPool()
-            .query<{ created_at: string; user_email: string | null; message: string; n: string }>(
-              `SELECT max(created_at) AS created_at, user_email, left(message, 200) AS message, count(*) AS n
-               FROM client_errors WHERE created_at > now() - interval '48 hours'
-               GROUP BY user_email, left(message, 200)
-               ORDER BY max(created_at) DESC LIMIT 30`,
-            )
-            .then((r) => r.rows)
-            .catch(() => [])
-        : Promise.resolve([]),
-    ])
-    let health: unknown = {}
-    try {
-      health = JSON.parse(healthRaw)
-    } catch {
-      /* sănătatea indisponibilă — restul auditului rămâne */
-    }
-    return reply.send({
-      health,
-      serverErrors: recentLogs(40, 60),
-      clientErrors,
-      failedJobs: jobs
-        .filter((j) => j.status === 'failed')
-        .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
-    })
   })
 
   // TRIAJUL AUTONOM (Adrian, 24 iul): Kelion decide singur pe fiecare gap —
@@ -434,6 +402,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, tools: await listKelionTools() })
   })
 
+  // VERIFICARE VIZUALĂ din ADMIN (Adrian, 13 iul: „nu se dă la admin dacă nu e
+  // 200"): admin-ul poate rula visual-check prin SESIUNE (nu prin secretul VPS)
+  // — screenshot + Gemini judecă dacă rezultatul cerut se vede. 403 dacă nu-i admin.
+  app.post<{ Body: { url?: string; criteria?: string; fullPage?: boolean } }>(
+    '/api/admin/visual-check',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const url = String(req.body?.url ?? 'https://kelionai.app').trim()
+      const criteria = String(req.body?.criteria ?? '').trim()
+      if (!criteria) return reply.code(400).send({ error: 'bad_request', note: 'criteria required' })
+      const shot = await screenshotUrl(url, { fullPage: req.body?.fullPage === true })
+      if ('error' in shot) return reply.send({ ok: false, verdict: 'necunoscut', note: `screenshot: ${shot.error}` })
+      const question =
+        `Verifici VIZUAL un screenshot al aplicației web kelionai.app. Rezultatul cerut: "${criteria}". ` +
+        `Răspunde STRICT: prima linie "VIZUAL: DA" dacă se vede clar, sau "VIZUAL: NU" dacă nu. Apoi o propoziție cu ce vezi.`
+      const answer = await geminiVision(shot.jpegBase64, question)
+      if (!answer) return reply.send({ ok: false, verdict: 'necunoscut', note: 'gemini_vision_indisponibil' })
+      const m = answer.match(/VIZUAL:\s*(DA|NU)/i)
+      return reply.send({ ok: true, verdict: m ? (m[1].toUpperCase() === 'DA' ? 'DA' : 'NU') : 'necunoscut', detail: answer.slice(0, 800) })
+    },
+  )
 
   // Record money the owner ADDS to or WITHDRAWS from the provider-credit pool
   // (admin only). direction 'withdraw' takes money out; anything else adds.

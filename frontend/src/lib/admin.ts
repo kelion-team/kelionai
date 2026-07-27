@@ -522,29 +522,6 @@ export async function runGapsTriage(): Promise<{ triaged: number; kept: number; 
   }
 }
 
-// AUDITUL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate auditurile și
-// toate căzutele") — agregatul de pe /api/admin/audit, afișat sub gaps.
-export interface AuditReport {
-  health?: {
-    ok?: boolean
-    info?: Record<string, unknown>
-    probleme?: { id: string; grav: string; desc: string; reparabil: string }[]
-  }
-  serverErrors?: { t: string; level: number; msg: string }[]
-  clientErrors?: { created_at: string; user_email: string | null; message: string; n: string }[]
-  failedJobs?: { id: number; order: string; updated: string }[]
-}
-
-export async function fetchAudit(): Promise<AuditReport | null> {
-  try {
-    const r = await fetch('/api/admin/audit', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as AuditReport
-  } catch {
-    return null
-  }
-}
-
 export async function fetchGaps(all = false): Promise<CapabilityGap[]> {
   try {
     const r = await fetch(`/api/admin/gaps${all ? '?all=1' : ''}`, { credentials: 'include' })

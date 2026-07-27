@@ -175,14 +175,6 @@ export default function Landing({ error }: { error?: string | null }) {
               </svg>
               {t.signIn}
             </button>
-            {/* PAGINILE ORFANE, LEGATE (27 iul — construite la ordinul din 26
-                iul dar niciodată legate din landing; auditul le-a găsit
-                neatinse de niciun link): intrarea cu email + prețurile publice. */}
-            <div className="landing-alt-links">
-              <a href="/login">Intră cu email</a>
-              <span aria-hidden>·</span>
-              <a href="/credite">Credite &amp; prețuri</a>
-            </div>
           </div>
 
           <div className="landing-lead">

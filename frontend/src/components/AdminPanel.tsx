@@ -55,8 +55,6 @@ import {
   type VoiceprintRow,
   fetchTokenChecks,
   type TokenChecksResult,
-  fetchAudit,
-  type AuditReport,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -148,7 +146,6 @@ export default function AdminPanel({
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
-  const [vLoading, setVLoading] = useState(false)
   const [vreply, setVreply] = useState('')
   const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
@@ -162,8 +159,6 @@ export default function AdminPanel({
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [triaging, setTriaging] = useState(false)
-  // AUDITUL CĂZUTELOR (Adrian, 27 iul): tot ce a căzut, în același tab cu gaps.
-  const [audit, setAudit] = useState<AuditReport | null>(null)
   const [finance, setFinance] = useState<Finance | null>(null)
   // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
@@ -206,6 +201,9 @@ export default function AdminPanel({
   const [recoveryLoading, setRecoveryLoading] = useState(false)
   const [recoveryNote, setRecoveryNote] = useState('')
   const [recoveryMsg, setRecoveryMsg] = useState('')
+  // Restaurarea CU BUTON (Adrian, 27 iul: „să se poată selecta de admin").
+  // Cât timp o restaurare rulează, toate butoanele de restaurare sunt blocate.
+  const [restoringTag, setRestoringTag] = useState<string | null>(null)
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
   // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
   // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
@@ -302,44 +300,8 @@ export default function AdminPanel({
   // that reached a successful deploy DISPARE singură din listă (auto-rezolvat).
   useEffect(() => {
     if (tab !== 'gaps') return
-    // Auditul căzutelor se încarcă la deschiderea tabului și se reîmprospătează
-    // împreună cu gaps — un singur loc unde vezi TOT ce a picat.
-    void fetchAudit().then(setAudit)
-    const id = window.setInterval(() => {
-      void fetchGaps().then(setGaps)
-      void fetchAudit().then(setAudit)
-    }, 15_000)
+    const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
     return () => window.clearInterval(id)
-  }, [tab])
-
-  // SINCRONIZARE CU NAVIGAREA DIN VOCE (auditul de fluiditate 27 iul, defectul
-  // 7): initialTab era doar valoarea de pornire — dacă panoul era DEJA deschis
-  // și Kelion primea „deschide admin → vizitatori", tab-ul nu se schimba deloc.
-  useEffect(() => {
-    if (initialTab) setTab(initialTab)
-  }, [initialTab])
-
-  // ÎNCĂRCARE PE TAB, NU PE CLICK (defectul 6): stores/inbox/tokenuri își
-  // încărcau datele DOAR din onClick-ul butonului — deschise prin voce sau
-  // initialTab rămâneau permanent goale („Se verifică magazinele live…" etern).
-  useEffect(() => {
-    if (tab === 'stores') {
-      void fetchStores().then(setStores)
-    } else if (tab === 'inbox') {
-      void fetchInbound().then(setInbound)
-      void fetchContactMessages().then(setContactMsgs)
-      setMailboxLoading(true)
-      void fetchMailboxLive().then((m) => {
-        setMailboxLive(m)
-        setMailboxLoading(false)
-      })
-    } else if (tab === 'tokenuri') {
-      setTokenChecksLoading(true)
-      void fetchTokenChecks().then((r) => {
-        setTokenChecks(r)
-        setTokenChecksLoading(false)
-      })
-    }
   }, [tab])
 
   // BANI ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
@@ -384,11 +346,7 @@ export default function AdminPanel({
     vLastId.id = 0
     setVsel(conv)
     setVmsgs([])
-    // OCUPAT VIZIBIL (auditul de fluiditate 27 iul, defectul 10): firul se
-    // golea și rămânea ALB cât se aducea conversația — părea stricat.
-    setVLoading(true)
     const rows = await fetchVisitorChat(conv, 0)
-    setVLoading(false)
     vLastId.id = rows.length ? rows[rows.length - 1].id : 0
     setVmsgs(rows)
   }
@@ -488,6 +446,41 @@ export default function AdminPanel({
         loadRecovery()
       })
       .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
+  }
+
+  // Restaurează aplicația la un punct salvat: confirmare dublă (acțiune grea —
+  // producția se schimbă), apoi serverul aduce master la starea tag-ului și
+  // publicarea pornește singură. Butonul arată mersul și rezultatul cu dovadă.
+  const restoreFromPoint = (p: RecoveryRow): void => {
+    const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
+    if (!window.confirm(`Restaurezi aplicația la versiunea din ${when} (${p.sha})?`)) return
+    if (
+      !window.confirm(
+        `SIGUR? Producția va fi adusă EXACT la starea „${p.note.split('\n')[0].slice(0, 80) || p.tag}" și se republică automat. Modificările de după acest punct dispar din aplicație (rămân doar în istoricul git).`,
+      )
+    )
+      return
+    setRestoringTag(p.tag)
+    setRecoveryMsg(`Restaurez la ${p.tag}…`)
+    void fetch('/api/admin/backups/restore', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag: p.tag }),
+    })
+      .then((r) => r.json().then((j: { ok?: boolean; sha?: string; error?: string }) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        setRestoringTag(null)
+        if (ok && j.ok)
+          setRecoveryMsg(
+            `Restaurat ✓ master e acum la ${j.sha ?? p.sha} — publicarea pe server pornește singură (1-2 min).`,
+          )
+        else setRecoveryMsg(`Restaurarea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
+      })
+      .catch(() => {
+        setRestoringTag(null)
+        setRecoveryMsg('Restaurarea a eșuat — verifică conexiunea și reîncearcă.')
+      })
   }
 
   // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
@@ -623,14 +616,26 @@ export default function AdminPanel({
             <button
               type="button"
               className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
-              onClick={() => setTab('stores')}
+              onClick={() => {
+                setTab('stores')
+                void fetchStores().then(setStores)
+              }}
             >
               Magazine
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
-              onClick={() => setTab('inbox')}
+              onClick={() => {
+                setTab('inbox')
+                void fetchInbound().then(setInbound)
+                void fetchContactMessages().then(setContactMsgs)
+                setMailboxLoading(true)
+                void fetchMailboxLive().then((m) => {
+                  setMailboxLive(m)
+                  setMailboxLoading(false)
+                })
+              }}
             >
               Inbox
             </button>
@@ -651,7 +656,14 @@ export default function AdminPanel({
             <button
               type="button"
               className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
-              onClick={() => setTab('tokenuri')}
+              onClick={() => {
+                setTab('tokenuri')
+                setTokenChecksLoading(true)
+                void fetchTokenChecks().then((r) => {
+                  setTokenChecks(r)
+                  setTokenChecksLoading(false)
+                })
+              }}
             >
               Tokenuri
             </button>
@@ -1284,12 +1296,23 @@ export default function AdminPanel({
                     <code>{p.sha}</code>
                     {p.note ? <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{p.note.split('\n')[0].slice(0, 140)}</div> : null}
                   </span>
-                  <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={restoringTag !== null}
+                      onClick={() => restoreFromPoint(p)}
+                    >
+                      {restoringTag === p.tag ? 'Restaurez…' : 'Restaurează'}
+                    </button>
+                  </span>
                 </div>
               ))}
               <div className="chat-hint">
-                Recuperare: pe serverul Linux, <code>git checkout &lt;tag&gt;</code> sau din bundle-ul
-                salvat (<code>/root/kelion/backups/&lt;tag&gt;.bundle</code>). Spune-mi tag-ul și o fac eu.
+                „Restaurează" aduce aplicația EXACT la versiunea aleasă (commit nou pe master —
+                nimic nu se pierde din istoric) și republică automat pe server. Rezerve manuale:
+                bundle-urile din <code>/root/kelion/backups/</code>.
               </div>
             </div>
           </section>
@@ -1749,7 +1772,6 @@ export default function AdminPanel({
               {vsel && (
                 <>
                   <div className="vchat-admin-log">
-                    {vLoading && <p className="chat-hint">Se încarcă…</p>}
                     {vmsgs.map((m) => (
                       <div
                         key={m.id}
@@ -1906,66 +1928,6 @@ export default function AdminPanel({
                 </div>
               </div>
             ))}
-
-            {/* AUDITUL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
-                auditurile și toate căzutele"): sănătate + erori server + erori
-                client + ordine eșuate — TOT ce a picat, în acest tab. */}
-            <h3 style={{ marginTop: 22, marginBottom: 6 }}>
-              Audit — toate căzutele{' '}
-              <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.7 }}>
-                (sănătate sistem · erori server · erori F12 · construcții eșuate)
-              </span>
-            </h3>
-            {!audit && <p className="chat-hint">Se încarcă auditul…</p>}
-            {audit && (
-              <>
-                {(audit.health?.probleme?.length ?? 0) === 0 &&
-                  (audit.serverErrors?.length ?? 0) === 0 &&
-                  (audit.clientErrors?.length ?? 0) === 0 &&
-                  (audit.failedJobs?.length ?? 0) === 0 && (
-                    <p className="chat-hint">Nimic căzut acum: sănătatea e verde, zero erori de server, zero erori de client, zero construcții eșuate.</p>
-                  )}
-                {(audit.health?.probleme ?? []).map((p) => (
-                  <div key={`h-${p.id}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: p.grav === 'critic' ? '#ff7a7a' : '#ffb86b' }}>
-                        [{p.grav.toUpperCase()}] {p.desc}
-                      </span>
-                      <span className="admin-gap-meta">reparabil: {p.reparabil}</span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.serverErrors ?? []).slice(-15).reverse().map((e, i) => (
-                  <div key={`s-${i}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: e.level >= 50 ? '#ff7a7a' : '#ffb86b' }}>
-                        [server {e.level >= 50 ? 'EROARE' : 'avert.'}] {e.msg}
-                      </span>
-                      <span className="admin-gap-meta">{new Date(e.t).toLocaleTimeString('ro-RO')}</span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.clientErrors ?? []).slice(0, 15).map((e, i) => (
-                  <div key={`c-${i}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: '#ffb86b' }}>[F12 client] {e.message}</span>
-                      <span className="admin-gap-meta">
-                        {Number(e.n) > 1 ? `de ${e.n} ori · ` : ''}
-                        {e.user_email ?? 'anonim'} · {new Date(e.created_at).toLocaleString('ro-RO')}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {(audit.failedJobs ?? []).map((j) => (
-                  <div key={`j-${j.id}`} className="admin-gap">
-                    <div className="admin-gap-main">
-                      <span className="admin-gap-req" style={{ color: '#ff7a7a' }}>[constructor EȘUAT] #{j.id} — {j.order}</span>
-                      <span className="admin-gap-meta">{new Date(j.updated).toLocaleString('ro-RO')}</span>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
           </section>
         )}
         <div className="admin-body" style={tab !== 'history' ? { display: 'none' } : undefined}>
