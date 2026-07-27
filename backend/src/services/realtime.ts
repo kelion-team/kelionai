@@ -50,6 +50,17 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `e pentru „ce e pe monitor/ecran?", „ce mi-ai afișat?" — citește ce e afișat ` +
     `chiar acum și vorbește despre AIA. Să răspunzi cu camera la o întrebare ` +
     `despre monitor e greșeală gravă.` +
+    // COMENZILE DE AFIȘARE (Adrian, 27 iul, dovadă live: „deschide pe monitor
+    // youtube" → „nu e nimic pe monitor" în loc de execuție; apoi pagina
+    // youtube deschisă ca embed — fără redare). Regula: ordinul se EXECUTĂ.
+    ` COMENZI DE AFIȘARE: „deschide/pune/arată pe monitor X" e ORDIN — deschide ` +
+    `X ACUM cu unealta potrivită; nu e întrebare despre monitor: NU chema ` +
+    `get_monitor înainte și NU răspunde „nu e nimic pe monitor" (gol e starea ` +
+    `normală de pornire). YOUTUBE/MUZICĂ/VIDEO: singura cale care REDĂ cu sunet ` +
+    `e youtube_search (playerul încorporat pornește singur). NU deschide ` +
+    `NICIODATĂ youtube.com cu show_on_screen — pagina refuză încadrarea și nu ` +
+    `poate reda. Dacă ți se cere YouTube fără o piesă anume, întreabă într-o ` +
+    `propoziție scurtă ce să pui, apoi cheamă youtube_search cu răspunsul.` +
     ` GESTURILE PE CONTEXT: când conținutul o cere firesc — un salut la salut, ` +
     `arătatul spre monitor când afișezi ceva, o expresie la o veste — cheamă ` +
     `play_avatar_gesture cu gestul potrivit, cumpătat, ca un gentleman: rar și ` +
