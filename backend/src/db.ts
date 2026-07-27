@@ -1029,6 +1029,26 @@ export function getAppFile(name: string): { buf: Buffer; type: string } | null {
   return appFileCache.get(name) ?? null
 }
 
+// STUDIOUL (Adrian, 27 iul: „Kelion să-și înregistreze propriile filmulețe"):
+// episoadele filmate se salvează AICI (supraviețuiesc redeploy-urilor, se
+// servesc prin /dl/<nume>) — aceeași cale ca instalatoarele.
+export async function saveAppFile(name: string, buf: Buffer, type: string): Promise<void> {
+  appFileCache.set(name, { buf, type })
+  if (!dbEnabled()) return
+  await getPool().query(
+    `INSERT INTO app_files (name, content, content_type) VALUES ($1, $2, $3)
+     ON CONFLICT (name) DO UPDATE SET content = $2, content_type = $3`,
+    [name, buf, type],
+  )
+}
+
+/** Episoadele din studio (nume + mărime), pentru listare în chat/admin. */
+export function listStudioFiles(): { name: string; bytes: number }[] {
+  return [...appFileCache.entries()]
+    .filter(([n]) => n.startsWith('episod-'))
+    .map(([n, v]) => ({ name: n, bytes: v.buf.length }))
+}
+
 // ── Installer download log (who downloaded what, from our own /dl) ─────────
 
 export async function recordDownload(
