@@ -146,6 +146,13 @@ echo "== 6c. Auto-publicarea de pe server (cron la 3 min — master ajunge live 
 install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '*/3 * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
 
+echo "== 6f. Materializarea punctelor de recuperare pe VPS (cron la 10 min) =="
+# Adrian, 27 iul: „salvarea trebuie pe serverul Linux". Fiecare tag backup-*
+# (creat din meniul Recovery al adminului) primește o copie fizică pe VPS
+# (.bundle + .tar.gz), ca recuperarea să nu depindă doar de GitHub. Idempotent.
+install -m 700 "$REPO/deploy/backup-versiuni.sh" /root/kelion/backup-versiuni.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/backup-versiuni.sh' ; echo '*/10 * * * * /root/kelion/backup-versiuni.sh >> /root/kelion/backup-versiuni.log 2>&1' ) | crontab -
+
 echo "== 6d. Constructorul (cron la 2 min — Kelion construiește soft la ordin) =="
 # Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi cere admin".
 # Job-uri scurte cu flock + timeout (NU demonii vechi care ardeau abonamentul):

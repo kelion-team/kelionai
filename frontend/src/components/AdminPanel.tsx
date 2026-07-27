@@ -127,10 +127,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
   >(initialTab ?? 'finance')
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
@@ -190,6 +190,17 @@ export default function AdminPanel({
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
+  // RECUPERARE (Adrian, 27 iul): versiunile salvate + salvarea versiunii curente.
+  interface RecoveryRow {
+    tag: string
+    sha: string
+    date: string
+    note: string
+  }
+  const [recoveryPoints, setRecoveryPoints] = useState<RecoveryRow[]>([])
+  const [recoveryLoading, setRecoveryLoading] = useState(false)
+  const [recoveryNote, setRecoveryNote] = useState('')
+  const [recoveryMsg, setRecoveryMsg] = useState('')
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
   // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
   // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
@@ -400,6 +411,40 @@ export default function AdminPanel({
       .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
   }
 
+  // Tab „Recuperare" deschis → încarcă punctele de recuperare salvate.
+  const loadRecovery = (): void => {
+    setRecoveryLoading(true)
+    fetch('/api/admin/backups', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { points?: RecoveryRow[] } | null) => {
+        if (j?.points) setRecoveryPoints(j.points)
+        setRecoveryLoading(false)
+      })
+      .catch(() => setRecoveryLoading(false))
+  }
+  useEffect(() => {
+    if (tab !== 'recuperare') return
+    loadRecovery()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  const saveRecoveryNow = (): void => {
+    setRecoveryMsg('Salvez versiunea curentă…')
+    void fetch('/api/admin/backups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ note: recoveryNote.trim() }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
+      .then((j: { tag?: string }) => {
+        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''}`)
+        setRecoveryNote('')
+        loadRecovery()
+      })
+      .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
+  }
+
   // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
   useEffect(() => {
     if (tab !== 'voiceprints') return
@@ -590,6 +635,13 @@ export default function AdminPanel({
               onClick={() => setTab('constructor')}
             >
               Constructor
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'recuperare' ? 'sel' : ''}`}
+              onClick={() => setTab('recuperare')}
+            >
+              Recuperare
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -1152,6 +1204,66 @@ export default function AdminPanel({
               <div className="chat-hint">
                 Odată armat: intrarea în admin cere vocea ta recunoscută în sesiune sau secretul
                 tastat. Vocea străină nu poate deschide panoul, chiar logată pe contul tău.
+              </div>
+            </div>
+          </section>
+        )}
+        {tab === 'recuperare' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Recuperare — versiunile salvate ale aplicației (tag-uri git, oglindite pe serverul
+                Linux ca .bundle + .tar.gz). Fiecare e recuperabilă integral.
+              </div>
+              <form
+                className="fin-row"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveRecoveryNow()
+                }}
+              >
+                <input
+                  value={recoveryNote}
+                  onChange={(e) => setRecoveryNote(e.target.value)}
+                  placeholder="Notă (opțional): ce e această versiune"
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button type="submit" className="ghost">
+                  Salvează versiunea curentă
+                </button>
+              </form>
+              {recoveryMsg && <div className="chat-hint">{recoveryMsg}</div>}
+            </div>
+            <div className="fin-breakdown" style={{ marginTop: 12 }}>
+              <div className="fin-breakdown-head">Versiuni salvate ({recoveryPoints.length})</div>
+              {recoveryLoading && recoveryPoints.length === 0 && <div className="chat-hint">Se încarcă…</div>}
+              {!recoveryLoading && recoveryPoints.length === 0 && (
+                <div className="chat-hint">Nicio versiune salvată încă.</div>
+              )}
+              {recoveryPoints.map((p) => (
+                <div className="fin-row" key={p.tag}>
+                  <span>
+                    <strong>
+                      {p.date
+                        ? new Date(p.date).toLocaleString('ro-RO', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : p.tag}
+                    </strong>
+                    {' · '}
+                    <code>{p.sha}</code>
+                    {p.note ? <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{p.note.split('\n')[0].slice(0, 140)}</div> : null}
+                  </span>
+                  <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                </div>
+              ))}
+              <div className="chat-hint">
+                Recuperare: pe serverul Linux, <code>git checkout &lt;tag&gt;</code> sau din bundle-ul
+                salvat (<code>/root/kelion/backups/&lt;tag&gt;.bundle</code>). Spune-mi tag-ul și o fac eu.
               </div>
             </div>
           </section>
