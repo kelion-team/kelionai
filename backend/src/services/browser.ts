@@ -45,11 +45,6 @@ function isPrivateIPv4(ip: string): boolean {
 }
 function isPrivateIPv6(ip: string): boolean {
   const low = ip.toLowerCase()
-  // IPv4 MAPAT ÎN IPv6 (audit securitate 27 iul): `::ffff:169.254.169.254`
-  // trecea de filtre — net.isIP îl vede ca IPv6, dar e o adresă IPv4 privată
-  // deghizată. O despachetăm și o judecăm cu regulile IPv4.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(low)
-  if (mapped) return isPrivateIPv4(mapped[1])
   return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80')
 }
 async function assertPublicUrl(raw: string): Promise<URL> {

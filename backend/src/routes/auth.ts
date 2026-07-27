@@ -280,4 +280,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
+  // DIAGNOSTIC conectare Google (admin) — deschide kelionai.app/auth/google/status
+  // DUPĂ ce apeși „Connect Google". Arată EXACT unde pică: a venit refresh de la
+  // Google? exista sesiune la callback? s-a salvat în DB? are sesiunea/DB token acum?
+  app.get('/auth/google/status', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const dbToken = await getGoogleRefreshToken(user.email)
+    return reply.send({
+      email: user.email,
+      sessionHasRefresh: Boolean(user.googleRefreshToken),
+      dbHasRefresh: Boolean(dbToken),
+      lastConnectAttempt: lastConnectDiag,
+    })
+  })
 }

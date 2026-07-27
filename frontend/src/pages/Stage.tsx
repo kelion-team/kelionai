@@ -504,23 +504,6 @@ export default function Stage({ user }: { user: User }) {
   // (hartă, pagină, doc, imagine) — avatarul se micșorează în colț cât timp e ceva
   // pe ecran, altfel e prim-plan.
   const monitorOn = ws.open
-  // ÎNCHIDERE SINCRONĂ CU FADE-UL (fluiditate #7, 27 iul: „conținutul dispare
-  // instant, panoul negru mai persistă 500ms"): pe durata stingerii (500ms în
-  // CSS) randăm O POZĂ a ultimei stări — panoul se stinge CU conținutul în el,
-  // nu gol. Sursele cu sunet nu se randează din poză (ar reporni clipul).
-  const lastWsRef = useRef(ws)
-  if (ws.open) lastWsRef.current = ws
-  const [wsFading, setWsFading] = useState(false)
-  useEffect(() => {
-    if (ws.open) {
-      setWsFading(false)
-      return
-    }
-    setWsFading(true)
-    const id = window.setTimeout(() => setWsFading(false), 520)
-    return () => window.clearTimeout(id)
-  }, [ws.open])
-  const wsv = ws.open ? ws : lastWsRef.current
   // Tell the chat when the monitor is busy so it collapses to the slim black
   // speech bar (Adrian's rule) când e o suprafață deschisă.
   useEffect(() => {
@@ -533,15 +516,15 @@ export default function Stage({ user }: { user: User }) {
       {recording && <div className="rec-watermark">kelionai.app</div>}
       {/* Skill monitor mode: the workspace surface behind the avatar. */}
       <div className={`workspace-bg ${monitorOn ? 'open' : ''}`}>
-        {(wsv.open || wsFading) && (
+        {ws.open && (
           <div className="workspace-inner">
             <div className="workspace-head">
               <div className="workspace-tabs">
-                {wsv.tasks.map((task) => (
+                {ws.tasks.map((task) => (
                   <button
                     key={task.id}
                     type="button"
-                    className={`ws-tab ${task.id === wsv.activeId ? 'active' : ''}`}
+                    className={`ws-tab ${task.id === ws.activeId ? 'active' : ''}`}
                     onClick={() => switchToId(task.id)}
                     title={task.title}
                   >
@@ -569,7 +552,7 @@ export default function Stage({ user }: { user: User }) {
                   A+
                 </button>
               </div>
-              {wsv.tasks.length > 1 && (
+              {ws.tasks.length > 1 && (
                 <button
                   type="button"
                   className="ghost"
@@ -580,156 +563,141 @@ export default function Stage({ user }: { user: User }) {
                 </button>
               )}
             </div>
-            {/* TAB-URI VII (fluiditate #6, 27 iul: „tab-urile monitorului
-                reîncarcă pagina de la zero la fiecare comutare"): toate
-                suprafețele rămân MONTATE — comutarea doar le ascunde/arată,
-                fără reîncărcare, fără pierderea derulării/stării. EXCEPȚIE:
-                sursele cu SUNET (youtube/video/audio) se montează DOAR active,
-                altfel un clip ascuns ar cânta peste vocea lui Kelion. */}
-            {wsv.tasks.map((task) => {
-              const active = task.id === wsv.activeId
-              const sonor = task.kind === 'youtube' || task.kind === 'video' || task.kind === 'audio'
-              if (sonor && (!active || !ws.open)) return null
-              return (
-                <div key={task.id} style={active ? { display: 'contents' } : { display: 'none' }}>
-                {task.html ? (
-                  // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
-                  // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
-                  // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.
-                  <div className="workspace-doc">
-                    <button
-                      type="button"
-                      className="doc-copy"
-                      onClick={() => saveDocToKelion(task.title, task.html ?? '', safeFileName(task.title, 'html'), 'text/html')}
-                      title="Salvează în memoria lui Kelion + descarcă (.html)"
-                    >
-                      {docSaved ? 'Salvat ✓' : 'Salvează'}
-                    </button>
-                    <iframe
-                      title={task.title}
-                      srcDoc={task.html}
-                      className="workspace-frame"
-                      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
-                    />
-                  </div>
-                ) : task.text ? (
-                  <div className="workspace-doc">
-                    <button
-                      type="button"
-                      className="doc-copy"
-                      onClick={() => void navigator.clipboard?.writeText(task.text ?? '')}
-                      title="Copiază"
-                    >
-                      Copiază
-                    </button>
-                    <button
-                      type="button"
-                      className="doc-copy"
-                      style={{ right: '6.5rem' }}
-                      onClick={() => saveDocToKelion(task.title, task.text ?? '', safeFileName(task.title, 'txt'), 'text/plain')}
-                      title="Salvează în memoria lui Kelion + descarcă (.txt)"
-                    >
-                      {docSaved ? 'Salvat ✓' : 'Salvează'}
-                    </button>
-                    <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{task.text}</pre>
-                  </div>
-                ) : task.card ? (
-                  <CardView card={task.card} />
-                ) : task.url && task.kind === 'image' ? (
-                  // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
-                  // onLoad/onError → starea reală, ca Kelion s-o vadă faptic.
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
-                    <img
-                      src={task.url}
-                      alt={task.title}
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                      onLoad={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
-                ) : task.url && task.kind === 'video' ? (
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                    <video
-                      src={task.url}
-                      controls
-                      style={{ maxWidth: '100%', maxHeight: '100%' }}
-                      onLoadedData={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
-                ) : task.url && task.kind === 'audio' ? (
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-                    <audio
-                      src={task.url}
-                      controls
-                      style={{ width: '100%', maxWidth: 520 }}
-                      onLoadedData={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
-                ) : task.url && task.kind === 'pdf' ? (
-                  // PDF: vizorul nativ al browserului, în cadru.
-                  <iframe
-                    title={task.title}
-                    src={task.url}
-                    className="workspace-frame"
-                    style={{ background: '#fff' }}
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
-                  />
-                ) : task.url && task.kind === 'office' ? (
-                  // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
-                  // să fie la un URL public — cele servite de kelionai.app sunt).
-                  <iframe
-                    title={task.title}
-                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(task.url)}`}
-                    className="workspace-frame"
-                    style={{ background: '#fff' }}
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
-                  />
-                ) : task.url && task.kind === 'textfile' ? (
-                  // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
-                  <MonitorTextFile url={task.url} zoom={monZoom} taskId={task.id} />
-                ) : task.url && task.kind === 'archive' ? (
-                  // Arhive: browserul nu le poate deschide în pagină — oferim
-                  // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
-                  <div className="workspace-blocked">
-                    <p>Arhivă ({task.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
-                    <a href={task.url} download className="composer-send">Descarcă arhiva ↓</a>
-                  </div>
-                ) : task.url && isEmbeddable(task.url) ? (
-                  <iframe
-                    title={task.title}
-                    src={normalizeEmbedUrl(task.url)}
-                    className="workspace-frame"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
-                    // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
-                    // only a YouTube clip the user chose to watch may play sound. The
-                    // route map gets geolocation (no audio) so it can follow the car.
-                    allow={
-                      task.kind === 'youtube'
-                        ? 'autoplay; encrypted-media; picture-in-picture; fullscreen'
-                        : task.kind === 'map'
-                          ? 'geolocation'
-                          : ''
-                    }
-                  />
-                ) : task.url ? (
-                  <div className="workspace-blocked">
-                    <p>Această pagină nu poate fi afișată aici.</p>
-                    {/^https?:\/\//i.test(task.url) && (
-                      <a href={task.url} target="_blank" rel="noreferrer" className="composer-send">
-                        Deschide într-un tab nou ↗
-                      </a>
-                    )}
-                  </div>
-                ) : null}
-                </div>
-              )
-            })}
+            {ws.html ? (
+              // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
+              // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
+              // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.
+              <div className="workspace-doc">
+                <button
+                  type="button"
+                  className="doc-copy"
+                  onClick={() => saveDocToKelion(ws.title, ws.html ?? '', safeFileName(ws.title, 'html'), 'text/html')}
+                  title="Salvează în memoria lui Kelion + descarcă (.html)"
+                >
+                  {docSaved ? 'Salvat ✓' : 'Salvează'}
+                </button>
+                <iframe
+                  title={ws.title}
+                  srcDoc={ws.html}
+                  className="workspace-frame"
+                  sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
+                />
+              </div>
+            ) : ws.text ? (
+              <div className="workspace-doc">
+                <button
+                  type="button"
+                  className="doc-copy"
+                  onClick={() => void navigator.clipboard?.writeText(ws.text ?? '')}
+                  title="Copiază"
+                >
+                  Copiază
+                </button>
+                <button
+                  type="button"
+                  className="doc-copy"
+                  style={{ right: '6.5rem' }}
+                  onClick={() => saveDocToKelion(ws.title, ws.text ?? '', safeFileName(ws.title, 'txt'), 'text/plain')}
+                  title="Salvează în memoria lui Kelion + descarcă (.txt)"
+                >
+                  {docSaved ? 'Salvat ✓' : 'Salvează'}
+                </button>
+                <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{ws.text}</pre>
+              </div>
+            ) : ws.card ? (
+              <CardView card={ws.card} />
+            ) : ws.url && ws.kind === 'image' ? (
+              // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
+              // onLoad/onError → starea reală, ca Kelion s-o vadă faptic.
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
+                <img
+                  src={ws.url}
+                  alt={ws.title}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
+              </div>
+            ) : ws.url && ws.kind === 'video' ? (
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                <video
+                  src={ws.url}
+                  controls
+                  style={{ maxWidth: '100%', maxHeight: '100%' }}
+                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
+              </div>
+            ) : ws.url && ws.kind === 'audio' ? (
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                <audio
+                  src={ws.url}
+                  controls
+                  style={{ width: '100%', maxWidth: 520 }}
+                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
+              </div>
+            ) : ws.url && ws.kind === 'pdf' ? (
+              // PDF: vizorul nativ al browserului, în cadru.
+              <iframe
+                title={ws.title}
+                src={ws.url}
+                className="workspace-frame"
+                style={{ background: '#fff' }}
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
+              />
+            ) : ws.url && ws.kind === 'office' ? (
+              // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
+              // să fie la un URL public — cele servite de kelionai.app sunt).
+              <iframe
+                title={ws.title}
+                src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(ws.url)}`}
+                className="workspace-frame"
+                style={{ background: '#fff' }}
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
+              />
+            ) : ws.url && ws.kind === 'textfile' ? (
+              // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
+              <MonitorTextFile url={ws.url} zoom={monZoom} taskId={ws.activeId} />
+            ) : ws.url && ws.kind === 'archive' ? (
+              // Arhive: browserul nu le poate deschide în pagină — oferim
+              // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
+              <div className="workspace-blocked">
+                <p>Arhivă ({ws.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
+                <a href={ws.url} download className="composer-send">Descarcă arhiva ↓</a>
+              </div>
+            ) : ws.url && isEmbeddable(ws.url) ? (
+              <iframe
+                title={ws.title}
+                src={normalizeEmbedUrl(ws.url)}
+                className="workspace-frame"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
+                // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
+                // only a YouTube clip the user chose to watch may play sound. The
+                // route map gets geolocation (no audio) so it can follow the car.
+                allow={
+                  ws.kind === 'youtube'
+                    ? 'autoplay; encrypted-media; picture-in-picture; fullscreen'
+                    : ws.kind === 'map'
+                      ? 'geolocation'
+                      : ''
+                }
+              />
+            ) : ws.url ? (
+              <div className="workspace-blocked">
+                <p>Această pagină nu poate fi afișată aici.</p>
+                {/^https?:\/\//i.test(ws.url) && (
+                  <a href={ws.url} target="_blank" rel="noreferrer" className="composer-send">
+                    Deschide într-un tab nou ↗
+                  </a>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

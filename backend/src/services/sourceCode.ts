@@ -30,20 +30,12 @@ const ROOT = sourceRoot()
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage'])
 const TEXT_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.yml', '.yaml', '.sh', '.txt', '.sql'])
 
-/** Rezolvă o cale relativă SIGUR în interiorul rădăcinii (fără ../ evadări).
- *  Audit securitate 27 iul: startsWith(ROOT) lăsa să treacă frații rădăcinii
- *  (ROOT=/app accepta /appdata) — containment corect e prin path.relative. */
+/** Rezolvă o cale relativă SIGUR în interiorul rădăcinii (fără ../ evadări). */
 function safePath(rel: string): string | null {
   const p = path.resolve(ROOT, rel.replace(/^\/+/, ''))
-  const r = path.relative(ROOT, p)
-  if (r.startsWith('..') || path.isAbsolute(r)) return null
+  if (!p.startsWith(ROOT)) return null
   return p
 }
-
-// SECRETELE NU PLEACĂ LA MODEL (audit 27 iul): read_source putea întoarce
-// .env/chei/certificate — care apoi mergeau VERBATIM la modelul extern în runda
-// următoare. Codul sursă da; secretele niciodată.
-const SECRET_FILE_RE = /(^|\/)\.env[^/]*$|\.(pem|key|p12|pfx|crt)$|(^|\/)(id_rsa|id_ed25519)[^/]*$/i
 
 export async function listSource(rel = '.'): Promise<string> {
   const dir = safePath(rel)
@@ -76,7 +68,6 @@ export async function listSource(rel = '.'): Promise<string> {
 export async function readSource(rel: string): Promise<string> {
   const p = safePath(rel)
   if (!p) return JSON.stringify({ error: 'bad_path' })
-  if (SECRET_FILE_RE.test(p)) return JSON.stringify({ error: 'fisier_secret', nota: 'Fișierele de secrete (.env, chei, certificate) nu se citesc niciodată prin unealta asta.' })
   try {
     const raw = await fs.readFile(p, 'utf8')
     // DIETA DE COST (25 iul — Adrian: „chat imens", dovadă: o tură cu unelte a

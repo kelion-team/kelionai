@@ -5,11 +5,6 @@ import {
   type OrMessage,
   type OrToolCall,
 } from './openrouter.js'
-import {
-  GEMINI_DIRECT_PREFIX,
-  geminiDirectChat,
-  geminiDirectChatStream,
-} from './geminiDirect.js'
 
 // ── ORCHESTRATORUL — un creier, orice model ─────────────────────────────────
 // Rulează o conversație CU tool-use printr-un model ales (GPT/Gemini/Claude prin
@@ -32,19 +27,7 @@ export interface OrchestratorOpts {
   /** Raționament intern pentru modelele cu gândire (Fable/Claude/GPT-o). */
   reasoning?: 'low' | 'medium' | 'high'
   onText?: (text: string) => void
-  /** POARTA FAPTEI (Adrian, 27 iul): dacă modelul AFIRMĂ o acțiune fără să fi
-   *  chemat vreo unealtă, îl obligăm mecanic să execute sau să retragă. */
-  deedGate?: boolean
-  /** Pe PRIMA rundă forțează modelul să cheme o unealtă (tool_choice:'required')
-   *  — pentru turele de ACȚIUNE ale ownerului, ca să execute, nu să nareze.
-   *  Rundele următoare revin la 'auto' (altfel ar chema unelte la infinit). */
-  forceToolsFirstRound?: boolean
 }
-
-// Detectează o afirmație de ACȚIUNE („am trimis/salvat/deschis/reparat...") —
-// lucruri care ar trebui făcute prin unealtă, nu doar spuse.
-const DEED_CLAIM_RE =
-  /\b(?:am|l-?am|le-?am|ți-?am|ti-?am)\s+(?:trimis|salvat|deschis|reparat|publicat|cre[ia]at|pornit|activat|afi[șs]at|ad[ăa]ugat|[șs]ters|configurat|instalat|rulat|executat|setat|actualizat|modificat|[îi]nchis)\b|\bi['’]?ve\s+(?:sent|saved|opened|created|fixed|published|started|deleted|done|updated|set)\b|\bhave\s+(?:sent|saved|opened|created|fixed|published)\b|(?:\b(?:m[ăa]\s+ocup|m[ăa]\s+apuc|[îi][țt]i\s+(?:deschid|ar[ăa]t|trimit|salvez|caut|pornesc|pun)|o\s+s[ăa]\s+(?:deschid|caut|trimit|salvez|pornesc|rulez|verific)|imediat\s+(?:deschid|caut|pornesc)|deschid\s+acum|pornesc\s+acum|caut\s+acum)\b)/i
 
 /**
  * @param model      id OpenRouter (ex: openai/gpt-4.1-mini, anthropic/claude-sonnet-5)
@@ -68,66 +51,30 @@ export async function runOrchestrator(
   // finală intra în istoric → la reload lipseau bucăți din ce s-a spus, iar la
   // epuizarea rundelor tura se încheia complet MUTĂ ('').
   let allText = ''
-  let deedGateUsed = false
-  let anyToolCalled = false
 
   for (let round = 1; round <= maxRounds; round++) {
     // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
     // apel simplu (ex: agenți în fundal care nu difuzează).
-    // Forțarea uneltei DOAR pe prima rundă (dacă cerută) și doar dacă avem
-    // unelte de oferit; altfel 'required' fără tools ar fi respins de API.
-    const toolChoice: 'required' | undefined =
-      opts.forceToolsFirstRound && round === 1 && tools.length ? 'required' : undefined
-    const callOpts = {
-      maxTokens: opts.maxTokens,
-      temperature: opts.temperature,
-      reasoning: opts.reasoning,
-      toolChoice,
-    }
-    // CREIERUL PRINCIPAL GEMINI (Adrian, 27 iul): modelele cu prefixul
-    // google-direct/ merg pe API-ul Google (cheia gratuită), nu pe OpenRouter —
-    // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
-    const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
-    const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
     const res = opts.onText
-      ? gemini
-        ? await geminiDirectChatStream(gModel, convo, tools, opts.onText, callOpts)
-        : await openrouterChatStream(model, convo, tools, opts.onText, callOpts)
-      : gemini
-        ? await geminiDirectChat(gModel, convo, tools, callOpts)
-        : await openrouterChat(model, convo, tools, callOpts)
+      ? await openrouterChatStream(model, convo, tools, opts.onText, {
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+          reasoning: opts.reasoning,
+        })
+      : await openrouterChat(model, convo, tools, {
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+          reasoning: opts.reasoning,
+        })
     totalCost += res.costUsd
     served = res.model
     if (res.text) allText = allText ? `${allText}\n${res.text}` : res.text
 
     if (res.toolCalls.length === 0) {
-      // POARTA FAPTEI (Adrian, 27 iul): dacă modelul spune că A FĂCUT o acțiune
-      // („am trimis/salvat/reparat...") dar n-a chemat NICIODATĂ vreo unealtă în
-      // toată tura, nu e o faptă — e vorbă goală. Îl obligăm o dată să execute
-      // sau să retragă sincer. O singură dată, ca să nu intre în buclă.
-      if (
-        opts.deedGate &&
-        !deedGateUsed &&
-        !anyToolCalled &&
-        DEED_CLAIM_RE.test(res.text || '')
-      ) {
-        deedGateUsed = true
-        convo.push({ role: 'assistant', content: res.text ?? '' })
-        convo.push({
-          role: 'user',
-          content:
-            'POARTA FAPTEI: ai afirmat că ai făcut o acțiune, dar nu ai chemat ' +
-            'NICIO unealtă — deci acțiunea NU s-a întâmplat. Ori cheamă ACUM ' +
-            'unealta care execută cu adevărat, ori retrage sincer afirmația și ' +
-            'spune clar ce anume nu poți face și de ce.',
-        })
-        continue
-      }
       // La streaming textul a curs deja prin onText; nu-l re-emitem.
       return { text: allText, costUsd: totalCost, model: served, rounds: round }
     }
 
-    anyToolCalled = true
     // Mesajul asistentului care CERE uneltele (păstrează tool_calls pentru legătură).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
     // Execută fiecare unealtă și adaugă rezultatul ca mesaj role:'tool'.

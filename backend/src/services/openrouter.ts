@@ -16,7 +16,7 @@ export type ModelTier = 'chat' | 'work' | 'top'
 export interface CatalogModel {
   id: string
   name: string
-  provider: 'openai' | 'google' | 'anthropic' | 'nvidia' | 'cohere'
+  provider: 'openai' | 'google' | 'anthropic'
   vision: boolean
   contextLength: number
 }
@@ -41,11 +41,6 @@ function providerOf(id: string): CatalogModel['provider'] | null {
   if (id.startsWith('openai/')) return 'openai'
   if (id.startsWith('google/')) return 'google'
   if (id.startsWith('anthropic/')) return 'anthropic'
-  // CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0): nvidia (nemotron
-  // omni/ultra) și cohere (north-mini-code) intră în catalog DOAR pentru
-  // variantele lor gratuite cu tools — vezi filtrarea pe liste mai jos.
-  if (id.startsWith('nvidia/')) return 'nvidia'
-  if (id.startsWith('cohere/')) return 'cohere'
   return null
 }
 
@@ -89,15 +84,8 @@ export async function getCatalog(force = false): Promise<Catalog> {
   // ajunge la creier PE VEDERE (needsVision forțează escaladarea aici — vezi
   // chat.ts) trebuie servit de un model care CHIAR vede — altfel poza ar fi
   // ignorată/ar pica. Filtru REAL pe catalogul live, nu presupunere.
-  // nvidia/cohere apar DOAR pe gratuit (:free) — restul providerilor noi ar
-  // dilua listele; cele plătite rămân pe openai/google/anthropic ca până acum.
-  const freeOnly = (m: CatalogModel): boolean =>
-    (m.provider === 'nvidia' || m.provider === 'cohere') ? m.id.endsWith(':free') : true
-  const chat = models.filter((m) => (m.provider === 'openai' || m.provider === 'google' || m.provider === 'nvidia' || m.provider === 'cohere') && freeOnly(m))
-  // CREIERUL FULL FREE (Adrian, 27 iul): treapta work acceptă și modelele
-  // GRATUITE cu vedere+tools (gemma :free, nemotron omni/vl :free) — nucleul
-  // implicit e acum gratuit, iar adminul le poate alege și manual din listă.
-  const work = models.filter((m) => m.vision && (m.provider === 'openai' || m.provider === 'anthropic' || (m.id.endsWith(':free') && freeOnly(m))))
+  const chat = models.filter((m) => m.provider === 'openai' || m.provider === 'google')
+  const work = models.filter((m) => (m.provider === 'openai' || m.provider === 'anthropic') && m.vision)
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   cache = { chat: chat.sort(byId), work: work.sort(byId), fetchedAt: Date.now() }
   return cache
@@ -190,11 +178,7 @@ export const ESCALATE_TOP_AT = 85
 // implicit, escaladează DOAR pe cererile de acțiune reală — și revii automat
 // la treapta ieftină la următoarea replică (heavy se calculează per-tură, din
 // textul curent, nu se ține agățat).
-// LĂRGIT (Adrian, 27 iul seara: „nu știe ce să facă, doar spune că face" —
-// comenzile de zi cu zi: „deschide youtube", „pune o melodie", „caută X",
-// „fă un audit" NU erau recunoscute ca ordine → rămâneau pe modelul de
-// conversație, care doar povestește. Orice verb de comandă = tura de EXECUȚIE.)
-const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa](-mi)?\b|diagnostic|deschide|porne[șs]te|opre[șs]te|\bpune\b|caut[ăa]|c[âa]nt[ăa]|salveaz[ăa]|trimite|cite[șs]te|verific[ăa]|uit[ăa]-te|ascult[ăa]|deseneaz[ăa]|genereaz[ăa]|construie[șs]te|\bf[ăa]\b|\baudit\b|raporteaz[ăa]|\braport\b|noteaz[ăa]|programeaz[ăa]|tradu\b|calculeaz[ăa]|rezerv[ăa]|comand[ăa]|monitorizeaz[ăa])/i
+const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa]-mi|diagnostic)/i
 export function hasActionIntent(text: string): boolean {
   return ACTION_INTENT.test(text || '')
 }
@@ -255,7 +239,7 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -274,9 +258,7 @@ export async function openrouterChatStream(
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
-    // 'required' = modelul TREBUIE să cheme o unealtă (Adrian, 27 iul: „creierul
-    // forțat să cheme unelte" pe turele de acțiune) — altfel 'auto'.
-    body.tool_choice = opts.toolChoice ?? 'auto'
+    body.tool_choice = 'auto'
   }
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
@@ -363,7 +345,7 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -377,7 +359,7 @@ export async function openrouterChat(
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
-    body.tool_choice = opts.toolChoice ?? 'auto'
+    body.tool_choice = 'auto'
   }
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',

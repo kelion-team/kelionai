@@ -32,6 +32,7 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
+  getSharedMemory,
   getMemories,
   deleteMemory,
   getVoiceprint,
@@ -48,9 +49,8 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
-import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -74,8 +74,6 @@ import {
   browserClose,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
-import { recentLogs } from '../services/logbuffer.js'
-import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -133,31 +131,20 @@ async function selectedBrainModel(
   // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
   // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
   const difficulty = taskDifficulty(text)
-  // SPLIT ECONOMIC ȘI CINSTIT (Adrian, 27 iul: „pe chat de 2 lei ok, dar unde
-  // necesită răspuns gândit trimiți prin creier"): vorba simplă → model ieftin
-  // (rapid, aproape gratis); CÂND e nevoie de gândit SAU de o ACȚIUNE (owner
-  // cere „repară/publică/arată/deschide/construiește...") → creierul care chiar
-  // EXECUTĂ, nu narează. „Mereu Fable 5" a fost scos: ardea creditul (OpenRouter
-  // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
-  // extremă.
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
-  // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
-  // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
-  // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
-  const top = difficulty >= ESCALATE_TOP_AT && !needsVision
-  // GEMINI PRINCIPAL, NEMOTRON SECUNDAR (Adrian, 27 iul: „comută la celălalt
-  // free... gemini... principal, și ce e acum secundar"): când cheia gratuită
-  // Google există, nucleul de lucru e gemini direct (vede + unelte + gândire,
-  // peste orice :free din OpenRouter, $0). Alegerea manuală din Admin→Modele
-  // (sel.work) rămâne respectată; căderea pe secundar la cotă epuizată e la
-  // locul apelului (retry în handler). Vocea NU trece pe aici — rămâne cum e.
-  const geminiWork = !sel.work && geminiDirectAvailable()
+  // OWNER = MEREU CREIERUL DE VÂRF, CONSISTENT (Adrian, 27 iul: „prima dată a
+  // mers, a doua nu" — cauza dovedită: modelul oscila între Fable 5 (top, când
+  // scorul de dificultate ≥ 85) și gpt-5-mini (work, sub 85), deci a doua tură,
+  // punctată mai jos, cădea pe creierul mai slab). Regula anti-buclă (§1.14):
+  // pe drumul ownerului NU mai există scor care să-l coboare — Fable 5 la
+  // FIECARE mesaj, raționament, toate uneltele. Fără oscilație = fără „prima a
+  // mers a doua nu". Userii publici păstrează scara de cost.
+  const isOwner = roleFor(email) === 'admin'
+  const heavy = isOwner || needsVision || difficulty >= ESCALATE_AT
+  const top = isOwner || difficulty >= ESCALATE_TOP_AT
   const model = top
     ? await resolveModel('top')
     : heavy
-      ? geminiWork
-        ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-        : await resolveModel('work', sel.work)
+      ? await resolveModel('work', sel.work)
       : await resolveModel('chat', sel.chat)
   return { model, heavy: heavy || top }
 }
@@ -169,9 +156,6 @@ async function selectedBrainModel(
 // DIRECTE ale lui Adrian („salută", „dansează") NU trec pe aici — execută mereu.
 const GESTURE_COOLDOWN_MS = 25_000
 const gestureGates = new Map<string, { last: string; at: number }>()
-// Ture de chat SIMULTANE per user plătitor (audit securitate 27 iul — anti
-// „check-then-charge": vezi plafonul din handler, înainte de paywall).
-const turnsInFlight = new Map<string, number>()
 function allowAutoGesture(email: string, name: string): boolean {
   if (!name) return false
   const now = Date.now()
@@ -385,22 +369,6 @@ const SYSTEM_HEALTH_TOOL: Tool = {
   description:
     "ADMIN ONLY. See your OWN health: publication sync (live vs master), red workflow runs (48h), failed build orders, client-error spikes, disk, database, brain balance. CALL THIS at the START of a conversation with the owner (his first message of a session) and whenever he asks about problems or health. If problems exist: list them BRIEFLY (x, y, z) and ASK whether you should repair them — never repair on your own initiative; wait for his explicit yes, then use your tools (repo_write, build_software, run_runbook, db_query).",
   input_schema: { type: 'object', properties: {} },
-}
-// F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele astea trebuie obligatoriu să
-// ajungă la Kelion ca și F12"): jurnalele aplicației (pino) trăiau doar în
-// docker logs, unde Kelion nu ajunge. Inelul din services/logbuffer.ts le
-// reține, iar unealta asta i le dă nativ — perechea de server a erorilor F12.
-const SERVER_LOGS_TOOL: Tool = {
-  name: 'server_logs',
-  description:
-    "ADMIN ONLY. Read YOUR OWN server logs (the backend's live log stream — the server-side F12): errors, warnings, failed requests, crashes, tool failures. Use this WHENEVER something froze, failed or behaved strangely — for you or for the owner — to see the real error before guessing. Pair with db_query on client_errors (the browser-side F12) for the full picture.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      errorsOnly: { type: 'boolean', description: 'true (default) = only warnings+errors; false = all retained entries.' },
-      limit: { type: 'number', description: 'Max entries, default 60.' },
-    },
-  },
 }
 // ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
 // de stocare permanentă... acces la orice bază de date a aplicației"): vederea
@@ -944,17 +912,6 @@ over show_on_screen whenever the user wants to actually browse, read inside,
 search within, or click through a real website — show_on_screen only displays a
 static page and cannot click, type or read it back to you.
 
-CLICKING IS MANDATORY — NEVER SAY YOU CANNOT PRESS A BUTTON. When the user asks
-you to click/press/play/select ANYTHING on what is displayed ("dă play", "apasă
-butonul", "click pe..."): if the content is currently a plain embed shown with
-show_on_screen (where clicking is technically impossible), you IMMEDIATELY
-reopen that same URL with browser_open — the live browser — find the requested
-button in the numbered list (or on the screenshot) and click it with
-browser_click / browser_click_at. That is the required path, not an excuse:
-embed → reopen live → click. Refusing to click is a failure; the only honest
-refusal is when the click would perform a payment or destructive action you were
-not explicitly ordered to do.
-
 CRITICAL — SHOWING THINGS: You can put something on the user's monitor ONLY by
 calling a tool. If the user asks to SEE, SHOW, or display a place, a route, a
 video, the weather, or an image, you MUST call the matching tool (maps_search,
@@ -1257,22 +1214,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // în localStorage → placeholder, recognizer și UI rămân mereu în ACEEAȘI
     // limbă cu răspunsurile. Adminul primește mereu ro-RO; restul limba stabilită.
     const announceLang = isAdminUser ? 'ro-RO' : (committedLang ?? speechPref ?? null)
-
-    // ANTI „40 DE TURE CU 1 BAN" (audit securitate 27 iul): paywall-ul era
-    // verifică-apoi-taxează — 40 de POST-uri paralele treceau toate de citirea
-    // soldului și debitau abia la final, adânc în minus. Plafon dur de ture
-    // SIMULTANE per user plătitor (2 e generos pentru un om real); adminul e
-    // scutit. Contorul se eliberează în finally-ul turei.
-    if (user.role !== 'admin') {
-      const inFlight = (turnsInFlight.get(user.email) ?? 0)
-      if (inFlight >= 2) return reply.code(429).send({ error: 'prea_multe_ture_simultane' })
-      turnsInFlight.set(user.email, inFlight + 1)
-      reply.raw.on('close', () => {
-        const n = (turnsInFlight.get(user.email) ?? 1) - 1
-        if (n <= 0) turnsInFlight.delete(user.email)
-        else turnsInFlight.set(user.email, n)
-      })
-    }
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop
@@ -1725,13 +1666,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
-    // LACĂTUL ADMIN ACOPERĂ ȘI UNELTELE DIN CHAT (auditul de securitate, 27
-    // iul): gate-ul global păzea doar /api/admin/*, dar uneltele DISTRUCTIVE
-    // (repo_merge_pr, db_query, run_runbook, build_software...) trăiesc în
-    // /api/chat — un cookie de sesiune furat le folosea fără al 2-lea factor.
-    // Odată ARMAT lacătul, sesiunea nedeblocată vorbește cu Kelion ca un user
-    // obișnuit, fără uneltele de admin.
-    const isAdmin = user.role === 'admin' && (!(await isArmed()) || hasUnlock(req, user.email))
+    const isAdmin = user.role === 'admin'
 
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
@@ -1765,7 +1700,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1884,25 +1819,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
-      // PRIMUL CUVÂNT SUB 1s ȘI PE TURELE DE ACȚIUNE (Adrian, 27 iul, dovadă
-      // live: 37s până la primul cuvânt — poarta faptei îl punea să execute
-      // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
-      // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
-      if (isAdmin && heavyTurn) {
-        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
-        noteFirstWord()
-        reply.raw.write(appendTurn(user.email, turnId, ackText))
-        voice.feed(ackText)
-        assistantText += ackText
-      }
-      // GEMINI PRINCIPAL → NEMOTRON SECUNDAR (Adrian, 27 iul): dacă nucleul
-      // gemini pică pe cotă/serviciu (429/503/RESOURCE_EXHAUSTED), NU omorâm
-      // tura — reluăm O DATĂ pe secundarul :free din OpenRouter. Retry-ul e
-      // sigur doar dacă nu a curs încă text spre user (alfel s-ar dubla).
-      let orchestratorModel = orChatModel
-      let textFlowed = false
-      const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
-        orchestratorModel,
+      const r = await runOrchestrator(
+        orChatModel,
         orMsgs,
         tools as unknown as AnthropicTool[],
         execTool,
@@ -1912,46 +1830,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // intern înainte de răspuns; gândirea nu curge în text — doar
           // răspunsul final. Pe tura ușoară: fără, ca primul cuvânt să rămână
           // instant (sub 1s, regula de latență).
-          // ÎNGHEȚUL PE CREIERUL GRATUIT (Adrian, 27 iul: „i-am cerut o acțiune
-          // și îngheață"): dovada de pe server a arătat că modelul :free MERGE
-          // (răspuns + tool-call corecte), dar gândește ÎN TĂCERE zeci de
-          // secunde înainte de primul cuvânt → pare mort. Pe :free forțăm
-          // gândirea SCURTĂ ('low'); pe plătite rămâne 'medium'.
-          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
-          // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
-          // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
-          // sau să retragă — nu mai rămâne la stadiul declarativ.
-          deedGate: isAdmin,
-          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
-          // de ACȚIUNE a ownerului (heavyTurn = hasActionIntent) prima rundă
-          // e obligată să aleagă o unealtă — execută, nu narează. Runda 2+ liberă.
-          forceToolsFirstRound: isAdmin && heavyTurn,
+          reasoning: heavyTurn ? 'medium' : undefined,
           onText: (txt) => {
-            textFlowed = true
             noteFirstWord()
             reply.raw.write(txt)
             voice.feed(txt)
           },
         },
       )
-      let r
-      try {
-        r = await runBrainOnce()
-      } catch (ge) {
-        if (
-          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) &&
-          isGeminiQuotaError(ge) &&
-          !textFlowed
-        ) {
-          // Cota gratuită Google s-a terminat pe ziua/minutul ăsta — secundarul
-          // preia tura fără ca userul să vadă vreo ruptură.
-          orchestratorModel = await resolveModel('work', null)
-          console.log(`[brain] gemini indisponibil (${String(ge).slice(0, 80)}) → secundar ${orchestratorModel}`)
-          r = await runBrainOnce()
-        } else {
-          throw ge
-        }
-      }
       assistantText += r.text
       usage.usd += r.costUsd
       // CONTABILITATE REALĂ (audit QA 24 iul, A1): costul CREIERULUI intră în
@@ -1980,10 +1866,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
       console.error('[CHAT ERROR]', errMsg)
-      // BANII NU SE PIERD LA EROARE (audit 27 iul): uneltele deja rulate în
-      // tura asta (căutări, imagini, ask_brain) au COSTAT — return-ul de aici
-      // sărea peste debit și userul consuma pe gratis, repetabil.
-      if (usage.usd > 0) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
       return
     }
 
@@ -2105,17 +1987,6 @@ async function runTool(
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return systemHealth()
-    }
-    case 'server_logs': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const minLevel = args.errorsOnly === false ? 0 : 40
-      const entries = recentLogs(minLevel, Math.min(Math.max(Number(args.limit) || 60, 1), 200))
-      return JSON.stringify({
-        entries,
-        note: entries.length
-          ? 'Jurnalele serverului (F12-ul de server). level: 40=warn, 50=error, 60=fatal.'
-          : 'Nicio eroare/avertisment reținut de la ultimul restart — serverul e curat pe fereastra actuală.',
-      })
     }
     case 'db_tables': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })

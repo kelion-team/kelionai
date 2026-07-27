@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
+import { config } from '../config.js'
 import {
+  saveVoiceprint,
   getVoiceprint,
   getVoiceprintAudio,
+  identifyVoiceprint,
   listVoiceprints,
   deleteVoiceprint,
   type VoiceFeatureMeta,
@@ -22,16 +25,65 @@ export interface VoiceFeatures {
   clip?: string
 }
 
-// Rutele /save și /identify au fost SCOASE (auditul din 27 iul: zero apelanți —
-// înrolarea și potrivirea se fac inline pe server, în chat.ts și realtime.ts).
+const IDENTIFY_THRESHOLD = 0.38 // distanță euclidiană normalizată sub care e considerat match
 
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
+  // Salvează / actualizează amprenta vocală a userului logat.
+  app.post<{ Body: { name?: string; features?: VoiceFeatures } }>(
+    '/api/voiceprint/save',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const features = req.body?.features
+      if (!features?.vector?.length || !features?.meta) {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      const name = (req.body?.name ?? user.name ?? user.email.split('@')[0]).slice(0, 120)
+      const gender = inferGender(features.meta.pitchMean)
+      const isAdmin = user.email.toLowerCase() === config.adminEmail.toLowerCase()
+      await saveVoiceprint({
+        email: user.email,
+        name,
+        gender,
+        isAdmin,
+        features: features.vector,
+        featureMeta: features.meta,
+        audioClip: typeof features.clip === 'string' ? features.clip : '',
+      })
+      return reply.send({ ok: true, gender, isAdmin })
+    },
+  )
+
   // Întoarce amprenta userului logat (sau null dacă nu s-a înrolat încă).
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const v = await getVoiceprint(user.email)
     return reply.send({ voiceprint: v })
+  })
+
+  // Identifică un speaker după features primite.
+  app.post<{ Body: { features?: VoiceFeatures } }>('/api/voiceprint/identify', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const features = req.body?.features
+    if (!features?.vector?.length || !features?.meta) {
+      return reply.code(400).send({ error: 'bad_request' })
+    }
+    const match = await identifyVoiceprint(features.vector, IDENTIFY_THRESHOLD)
+    const gender = inferGender(features.meta.pitchMean)
+    return reply.send({
+      gender,
+      match: match
+        ? {
+            email: match.email,
+            name: match.name,
+            gender: match.gender,
+            isAdmin: match.isAdmin,
+            distance: match.distance,
+          }
+        : null,
+    })
   })
 
   // Lista tuturor amprentelor — doar admin.

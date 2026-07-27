@@ -130,42 +130,14 @@ VERIFICARE OBLIGATORIE înainte de finish: "npm --prefix backend ci" apoi "npm -
 Bugetul de pași/tokeni e limitat: fii chirurgical, nu reciti fișiere mari degeaba.
 La final: finish cu titlu + corp de PR în română (ce, de ce, dovada verificării).`
 
-// REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
-// „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
-// la rate-limit și agentul crăpa pe r.json() fără nicio reîncercare). Acum:
-// corp gol, JSON rupt, 429 sau 5xx → reîncearcă cu pauze crescătoare; abia
-// după 4 încercări ratate jobul pică de-adevăratelea.
 async function llm(messages) {
-  let lastErr = ''
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
-      })
-      const text = await r.text()
-      if (!r.ok) {
-        lastErr = `OpenRouter ${r.status}: ${text.slice(0, 300)}`
-        if (r.status === 429 || r.status >= 500) throw new Error(lastErr) // tranzitoriu → retry
-        throw Object.assign(new Error(lastErr), { fatal: true }) // 4xx real → fără retry
-      }
-      if (!text.trim()) throw new Error('corp gol de la OpenRouter')
-      try {
-        return JSON.parse(text)
-      } catch {
-        throw new Error(`JSON rupt de la OpenRouter (${text.length} caractere)`)
-      }
-    } catch (e) {
-      if (e?.fatal) throw e
-      lastErr = String(e?.message ?? e)
-      if (attempt === 4) break
-      const wait = attempt * 15_000 // 15s, 30s, 45s — modelele free respiră greu
-      log(`llm încercarea ${attempt} a picat (${lastErr.slice(0, 120)}) — reîncerc în ${wait / 1000}s`)
-      await new Promise((res) => setTimeout(res, wait))
-    }
-  }
-  throw new Error(lastErr || 'OpenRouter indisponibil după 4 încercări')
+  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+  })
+  if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`)
+  return r.json()
 }
 
 async function main() {
@@ -203,31 +175,7 @@ async function main() {
       if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
       const msg = resp.choices?.[0]?.message
       if (!msg) throw new Error('răspuns gol de la model')
-      // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
-      // „invalid message at index 9: must have non-empty content or tool
-      // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
-      // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
-      // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
-      // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
-      const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
-      if (msg.tool_calls?.length) {
-        // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
-        // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
-        // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
-        // Normalizăm: orice nu parsează ca obiect devine '{}'.
-        clean.tool_calls = msg.tool_calls.map((c) => {
-          let a = c.function?.arguments
-          try {
-            const p = JSON.parse(a || '{}')
-            a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
-          } catch {
-            a = '{}'
-          }
-          return { ...c, function: { ...c.function, arguments: a } }
-        })
-      }
-      if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
-      messages.push(clean)
+      messages.push(msg)
       const calls = msg.tool_calls ?? []
       if (!calls.length) {
         // modelul a vorbit fără unealtă — îl împingem înapoi la lucru
