@@ -3851,3 +3851,40 @@ a.card-item:hover {
 .credits-pack:hover { border-color: var(--accent, #7aa2ff); }
 .credits-pack-n { font-weight: 700; }
 .credits-pack-price { color: var(--accent, #7aa2ff); font-weight: 800; }
+
+/* ── MODUL 3 (rescrierea pe module, 27 iul) — fluiditatea monitorului ─────── */
+/* Cipul de viteză reală — dovada „primul cuvânt sub 1s", discret lângă chat. */
+.latency-chip {
+  position: absolute;
+  top: -26px;
+  right: 10px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #7ee2a8;
+  background: rgba(10, 16, 28, 0.75);
+  border: 1px solid rgba(126, 226, 168, 0.35);
+  border-radius: 999px;
+  padding: 2px 9px;
+  pointer-events: none;
+}
+/* FLUIDITATE #9: teletextul final nu se mai termină pe GOL — bucla continuă
+   (textul reintră prin dreapta, ca un teletext adevărat). */
+.ticker-text { animation-iteration-count: infinite; }
+/* Culorile benzilor se aplică și cozii fixe (dictare/👤/🧠 au trecut pe
+   speech-tail — fluiditate #9). */
+.voice-live .speech-tail-text { color: #7dffc0; text-shadow: 0 0 6px rgba(90, 255, 180, 0.5); }
+.heard-band .speech-tail-text { color: #ffd9a0; text-shadow: 0 0 6px rgba(255, 200, 120, 0.35); }
+.user-band .speech-tail-text { color: #d9ffe9; }
+/* FLUIDITATE #8: benzile compozerului INTRĂ crescând (180ms), nu prin salt de
+   38-46px al întregii coloane de chat. */
+.voice-live, .heard-band, .queued-band, .composer-atts {
+  animation: band-in 0.18s ease-out;
+}
+@keyframes band-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-live, .heard-band, .queued-band, .composer-atts { animation: none; }
+  .ticker-text { animation-iteration-count: 1; }
+}
