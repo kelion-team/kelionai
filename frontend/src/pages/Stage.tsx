@@ -111,7 +111,7 @@ export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'>('finance')
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde, nici
   // butonul admin nu trebuie să se activeze"). armed = secretul e setat (în
   // Admin→Amprente vocale); unlocked = amprenta vocală s-a potrivit în sesiunea
@@ -254,7 +254,7 @@ export default function Stage({ user }: { user: User }) {
             // Secțiune VALIDATĂ (audit 24 iul): un string liber de la model
             // („bani", „finanțe") seta un tab inexistent → panou gol. Doar
             // secțiunile reale trec; altfel rămâne tabul curent.
-            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'] as const
+            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()

@@ -32,6 +32,7 @@ import {
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
+import { listRecoveryPoints, createRecoveryPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -119,6 +120,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     await setLockSecret(secret)
     grantUnlock(reply, user.email, 'secret') // browserul care armează rămâne deblocat
     return reply.send({ ok: true })
+  })
+
+  // PUNCTE DE RECUPERARE (Adrian, 27 iul): meniul „Recuperare" din admin —
+  // versiunile salvate (tag-uri git, oglindite pe VPS ca .bundle/.tar.gz) cu
+  // detalii clare, + buton de salvare a versiunii curente.
+  app.get('/api/admin/backups', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ points: await listRecoveryPoints() })
+  })
+  app.post<{ Body: { note?: string } }>('/api/admin/backups', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const r = await createRecoveryPoint(String(req.body?.note ?? ''))
+    if (!r.ok) return reply.code(500).send(r)
+    return reply.send(r)
   })
 
   // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).

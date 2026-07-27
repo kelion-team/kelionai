@@ -519,7 +519,7 @@ const OPEN_APP_VIEW_TOOL: Tool = {
       },
       section: {
         type: 'string',
-        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'],
+        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'],
         description: 'Optional admin section (only when view=admin).',
       },
     },
