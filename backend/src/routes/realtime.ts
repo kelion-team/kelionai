@@ -11,12 +11,12 @@ import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
-import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
+import { googleTools, runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
-import { hasActionIntent } from '../services/openrouter.js'
+import { hasActionIntent, ACTION_INTENT } from '../services/openrouter.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -132,8 +132,18 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const code = res.status === 503 ? 503 : 502
         return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
       }
+      // REGULA FAPTEI, TRIMISĂ VOCII (Adrian, 27 iul: „autonomia lui nu e
+      // reală"). Vocea trebuie să știe ce e ORDIN ca să forțeze unealta EXACT pe
+      // tura aia. Decizia se ia în browser — acolo e transcriptul, în același
+      // tick cu response.create, deci zero latență adăugată pe calea audio —
+      // dar regula NU se rescrie acolo: ar diverge de chatul scris. O trimitem
+      // pe ACEST răspuns, care se face oricum o dată, la pornirea sesiunii.
+      // URL-encodată: regexul are diacritice, antetele HTTP sunt ASCII.
       // Clientul citește răspunsul ca text (answer SDP) → setRemoteDescription.
-      return reply.header('content-type', 'application/sdp').send(res.sdp)
+      return reply
+        .header('x-kelion-action-intent', encodeURIComponent(ACTION_INTENT.source))
+        .header('content-type', 'application/sdp')
+        .send(res.sdp)
     },
   )
 
@@ -252,11 +262,51 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           if (tname === 'system_health') return systemHealth()
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
-        const answer = introspectionTools.length
-          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd }, forceFirstRound: hasActionIntent(prompt) })
-          : await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
+        // CREIER CU BRAȚE ȘI PENTRU CEILALȚI (audit 27 iul): userul care nu e
+        // ownerul cădea pe `brainComplete` — un „expert" FĂRĂ nicio unealtă,
+        // care poate doar să vorbească. De-aia „îți caut", „îți pun melodia"
+        // rămâneau vorbe și în escaladare. Acum creierul primește exact brațele
+        // de acțiune ale userului (aceleași unelte Google/căutare pe care le are
+        // și vocea), iar ownerul le are pe deasupra pe cele de construcție.
+        let brainScreen: { url: string; title: string } | undefined
+        const actionTools = googleTools.map((t) => ({
+          name: t.name,
+          description: t.description ?? '',
+          input_schema: t.input_schema as Record<string, unknown>,
+        }))
+        const actionNames = new Set(actionTools.map((t) => t.name))
+        const execBrainTool = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
+          if (!actionNames.has(tname)) return execIntrospection(tname, targs)
+          if (tname === 'web_search' || tname === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
+          const out = await runGoogleTool(tname, targs, token)
+          // ECRANUL CERUT DE CREIER ajunge la client — altfel creierul „găsea"
+          // melodia dar nu o punea nimeni pe monitor: faptă fără efect vizibil.
+          try {
+            const j = JSON.parse(out) as { screen_url?: string }
+            if (j.screen_url && !brainScreen) {
+              brainScreen = {
+                url: /^https?:/i.test(j.screen_url) ? j.screen_url : `https://${req.headers.host ?? 'kelionai.app'}${j.screen_url}`,
+                title: tname.replace(/_/g, ' '),
+              }
+            }
+          } catch {
+            /* rezultat non-JSON — doar text pentru model */
+          }
+          return out.slice(0, 6000)
+        }
+        // FORȚARE PE CEREREA REALĂ, NU PE PROMPTUL ÎNTREG (bug găsit la auditul
+        // din 27 iul): `prompt` = SYSTEM_PROMPT + antet + cerere, iar
+        // SYSTEM_PROMPT conține „PR", „merge" și „fix" → ACTION_INTENT se
+        // potrivea MEREU. Deci forțarea rundei 1 era pornită la FIECARE
+        // escaladare, inclusiv la „explică-mi X" — exact tiparul care face
+        // modelul să bifeze o unealtă și apoi să povestească. Testăm cererea.
+        const answer = await brainCompleteWithTools(prompt, [...actionTools, ...introspectionTools], execBrainTool, {
+          maxTokens: 2000,
+          onCost: (usd) => { toolCostUsd += usd },
+          forceFirstRound: hasActionIntent(request),
+        })
         settle()
-        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
+        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen })
       }
 
       // PARITATE VOCE↔CHAT (25 iul): notițe, rol, gesturi — apelabile din voce.

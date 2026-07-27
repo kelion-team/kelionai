@@ -2,6 +2,7 @@ import {
   openrouterChat,
   openrouterChatStream,
   type AnthropicTool,
+  type OrChatResult,
   type OrMessage,
   type OrToolCall,
 } from './openrouter.js'
@@ -33,13 +34,22 @@ export interface OrchestratorOpts {
   reasoning?: 'low' | 'medium' | 'high'
   onText?: (text: string) => void
   /** POARTA FAPTEI (Adrian, 27 iul): dacă modelul AFIRMĂ o acțiune fără să fi
-   *  chemat vreo unealtă, îl obligăm mecanic să execute sau să retragă. */
+   *  chemat vreo unealtă de ACȚIUNE, îl obligăm mecanic să execute sau să retragă. */
   deedGate?: boolean
-  /** Pe PRIMA rundă forțează modelul să cheme o unealtă (tool_choice:'required')
-   *  — pentru turele de ACȚIUNE ale ownerului, ca să execute, nu să nareze.
-   *  Rundele următoare revin la 'auto' (altfel ar chema unelte la infinit). */
-  forceToolsFirstRound?: boolean
+  /** UNELTELE PASIVE — cele care doar CITESC/raportează (read_source, db_query,
+   *  system_health, ask_brain...). A le chema NU e o faptă: nu dezarmează poarta
+   *  și nu oprește forțarea. Orice unealtă care nu e aici e considerată ACȚIUNE. */
+  passiveTools?: Set<string>
+  /** Ține tool_choice:'required' până când chiar RULEAZĂ o unealtă de acțiune
+   *  (plafonat la FORCE_MAX_ROUNDS) — pentru turele de ORDIN: execută, nu nara. */
+  forceToolsUntilAction?: boolean
 }
+
+// Cât timp poate ține forțarea de la începutul turei. Peste asta, dacă modelul
+// tot n-a făcut nimic, îl lăsăm să vorbească (poarta faptei rămâne de pază).
+const FORCE_MAX_ROUNDS = 3
+// De câte ori poate interveni poarta faptei într-o tură (plafon anti-buclă).
+const DEED_GATE_MAX = 2
 
 // Detectează o afirmație de ACȚIUNE („am trimis/salvat/deschis/reparat...") —
 // lucruri care ar trebui făcute prin unealtă, nu doar spuse.
@@ -68,58 +78,88 @@ export async function runOrchestrator(
   // finală intra în istoric → la reload lipseau bucăți din ce s-a spus, iar la
   // epuizarea rundelor tura se încheia complet MUTĂ ('').
   let allText = ''
-  let deedGateUsed = false
-  let anyToolCalled = false
+  let deedGatesUsed = 0
+  // FAPTA = o unealtă care chiar SCHIMBĂ ceva sau produce un rezultat real.
+  // Cititul (read_source, db_query, system_health) NU e faptă — vezi passiveTools.
+  const passive = opts.passiveTools ?? new Set<string>()
+  let anyActionToolCalled = false
+  // Runda de după poarta faptei se cere FORȚATĂ: altfel modelul „corectat"
+  // răspundea tot pe 'auto' și repeta minciuna cu alte cuvinte.
+  let forceNextRound = false
 
   for (let round = 1; round <= maxRounds; round++) {
     // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
     // apel simplu (ex: agenți în fundal care nu difuzează).
-    // Forțarea uneltei DOAR pe prima rundă (dacă cerută) și doar dacă avem
-    // unelte de oferit; altfel 'required' fără tools ar fi respins de API.
-    const toolChoice: 'required' | undefined =
-      opts.forceToolsFirstRound && round === 1 && tools.length ? 'required' : undefined
-    const callOpts = {
-      maxTokens: opts.maxTokens,
-      temperature: opts.temperature,
-      reasoning: opts.reasoning,
-      toolChoice,
-    }
+    // FORȚAREA PÂNĂ LA FAPTĂ (Adrian, 27 iul: „autonomia lui nu e reală").
+    // Varianta veche forța DOAR runda 1: modelul o satisfăcea cu o unealtă
+    // PASIVĂ (system_health, read_source), apoi rundele următoare reveneau la
+    // 'auto' și NARA restul — exact comportamentul reclamat, identic pe orice
+    // model. Măsurat live pe creierul gratuit (27 iul, gemma :free, 61 unelte +
+    // prompt de 10k): pe 'auto' execută 0/2 (răspuns GOL), forțat execută 2/2.
+    // Deci forțarea ține până când chiar rulează o unealtă de ACȚIUNE.
+    const forcedNow =
+      tools.length > 0 &&
+      ((opts.forceToolsUntilAction && !anyActionToolCalled && round <= FORCE_MAX_ROUNDS) || forceNextRound)
+    forceNextRound = false
     // CREIERUL PRINCIPAL GEMINI (Adrian, 27 iul): modelele cu prefixul
     // google-direct/ merg pe API-ul Google (cheia gratuită), nu pe OpenRouter —
     // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
     const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
     const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
-    const res = opts.onText
-      ? gemini
-        ? await geminiDirectChatStream(gModel, convo, tools, opts.onText, callOpts)
-        : await openrouterChatStream(model, convo, tools, opts.onText, callOpts)
-      : gemini
-        ? await geminiDirectChat(gModel, convo, tools, callOpts)
-        : await openrouterChat(model, convo, tools, callOpts)
+    const askModel = (toolChoice: 'required' | undefined): Promise<OrChatResult> => {
+      const callOpts = {
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+        reasoning: opts.reasoning,
+        toolChoice,
+      }
+      return opts.onText
+        ? gemini
+          ? geminiDirectChatStream(gModel, convo, tools, opts.onText, callOpts)
+          : openrouterChatStream(model, convo, tools, opts.onText, callOpts)
+        : gemini
+          ? geminiDirectChat(gModel, convo, tools, callOpts)
+          : openrouterChat(model, convo, tools, callOpts)
+    }
+    let res: OrChatResult
+    try {
+      res = await askModel(forcedNow ? 'required' : undefined)
+    } catch (e) {
+      // FORȚAREA NU ARE VOIE SĂ OMOARE ORDINUL: unii furnizori resping
+      // tool_choice:'required' (400). Reluăm runda liber — mai bine execută
+      // poate decât să pice tura cu eroare. Fără forțare, eroarea urcă normal.
+      if (!forcedNow) throw e
+      res = await askModel(undefined)
+    }
     totalCost += res.costUsd
     served = res.model
     if (res.text) allText = allText ? `${allText}\n${res.text}` : res.text
 
     if (res.toolCalls.length === 0) {
       // POARTA FAPTEI (Adrian, 27 iul): dacă modelul spune că A FĂCUT o acțiune
-      // („am trimis/salvat/reparat...") dar n-a chemat NICIODATĂ vreo unealtă în
-      // toată tura, nu e o faptă — e vorbă goală. Îl obligăm o dată să execute
-      // sau să retragă sincer. O singură dată, ca să nu intre în buclă.
+      // („am trimis/salvat/reparat...") dar n-a chemat nicio unealtă de ACȚIUNE
+      // în toată tura, nu e o faptă — e vorbă goală. Îl obligăm să execute sau
+      // să retragă sincer, cu runda de corecție FORȚATĂ.
+      // Condiția era `!anyToolCalled`, iar forțarea rundei 1 garanta că o unealtă
+      // rulase → poarta nu mai putea declanșa NICIODATĂ exact pe turele de
+      // acțiune pentru care fusese făcută. Acum contează doar faptele reale.
       if (
         opts.deedGate &&
-        !deedGateUsed &&
-        !anyToolCalled &&
+        deedGatesUsed < DEED_GATE_MAX &&
+        !anyActionToolCalled &&
         DEED_CLAIM_RE.test(res.text || '')
       ) {
-        deedGateUsed = true
+        deedGatesUsed++
+        forceNextRound = tools.length > 0
         convo.push({ role: 'assistant', content: res.text ?? '' })
         convo.push({
           role: 'user',
           content:
             'POARTA FAPTEI: ai afirmat că ai făcut o acțiune, dar nu ai chemat ' +
-            'NICIO unealtă — deci acțiunea NU s-a întâmplat. Ori cheamă ACUM ' +
-            'unealta care execută cu adevărat, ori retrage sincer afirmația și ' +
-            'spune clar ce anume nu poți face și de ce.',
+            'nicio unealtă care să o execute — deci acțiunea NU s-a întâmplat. ' +
+            'Ori cheamă ACUM unealta care execută cu adevărat, ori retrage sincer ' +
+            'afirmația și spune clar ce anume nu poți face și de ce. (A citi sau a ' +
+            'raporta o stare NU înseamnă a face.)',
         })
         continue
       }
@@ -127,11 +167,11 @@ export async function runOrchestrator(
       return { text: allText, costUsd: totalCost, model: served, rounds: round }
     }
 
-    anyToolCalled = true
     // Mesajul asistentului care CERE uneltele (păstrează tool_calls pentru legătură).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
     // Execută fiecare unealtă și adaugă rezultatul ca mesaj role:'tool'.
     for (const call of res.toolCalls as OrToolCall[]) {
+      if (!passive.has(call.function.name)) anyActionToolCalled = true
       let out = ''
       try {
         out = await execTool(call.function.name, call.function.arguments || '{}')

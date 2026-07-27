@@ -422,6 +422,31 @@ export async function startRealtimeVoice(
     // ieșit „Elioncevaci"): acceptăm și variantele fără consoana de început
     // (elion/eleon), lipite de cuvântul următor.
     const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
+    // ── POARTA FAPTEI ÎN VOCE (Adrian, 27 iul: „vorbește în loc să execute") ──
+    // Poarta numelui decide CINE primește răspuns. Asta decide CUM: pe turele de
+    // ORDIN răspunsul se generează cu unealta FORȚATĂ, nu la mila modelului.
+    // Măsurat live pe creierul gratuit: cu încărcătura reală a aplicației, pe
+    // 'auto' execută 0/2; forțat, 2/2. Forțarea e strict PER RĂSPUNS — pe
+    // sesiune ar băga modelul în buclă de unelte (vezi services/realtime.ts).
+    // Regula de „ce e ordin" NU se scrie aici: vine de la server, pe antetul
+    // x-kelion-action-intent, și e EXACT regula chatului scris.
+    let actionIntentRe: RegExp | null = null
+    // PIN PE UNEALTA EXACTĂ, pentru ordinele fără ambiguitate: 'required' singur
+    // îl obligă să cheme CEVA, dar îl lasă să bifeze o unealtă de citit și apoi
+    // să povestească — exact bug-ul reparat în orchestrator. Când ordinul e
+    // clar, numim funcția și nu mai are unde fugi.
+    const PIN_RULES: { re: RegExp; name: string }[] = [
+      { re: /(youtube|melodi|c[âa]ntec|muzic[ăa]|pies[ăa]|videoclip)/i, name: 'youtube_search' },
+      { re: /(m[ăa] vezi|uit[ăa]-te|prin camer[ăa]|ce ai [îi]n fa[țt][ăa])/i, name: 'look' },
+      { re: /(ce (e|este|ai|se vede) pe (monitor|ecran)|ce mi-ai afi[șs]at)/i, name: 'get_monitor' },
+      { re: /(unde (sunt|m[ăa] aflu)|loca[țt]ia mea)/i, name: 'get_location' },
+    ]
+    // null = tură de conversație → response.create rămâne GOL, exact ca înainte.
+    const forcedToolChoice = (text: string): 'required' | { type: 'function'; name: string } | null => {
+      if (!actionIntentRe || !actionIntentRe.test(text)) return null
+      for (const r of PIN_RULES) if (r.re.test(text)) return { type: 'function', name: r.name }
+      return 'required'
+    }
     // Plasa anti-„nu mă aude": dacă VAD-ul a închis fraza dar transcriptul nu
     // mai vine (transcrierea a picat), în conversație ACTIVĂ răspundem oricum.
     let speechStopTimer: number | null = null
@@ -494,7 +519,20 @@ export async function startRealtimeVoice(
           const engaged = Date.now() < gateUntil
           if (named || engaged) {
             gateUntil = Date.now() + GATE_WINDOW_MS
-            send({ type: 'response.create' })
+            // TURA DE ORDIN = tura în care se EXECUTĂ, nu se povestește.
+            // Override DOAR pe răspunsul ăsta; următorul revine singur la 'auto'.
+            // Pe conversație simplă `choice` e null → se trimite exact
+            // response.create-ul dinainte: zero regresie pe vorbitul obișnuit.
+            // Celelalte trei response.create din fișier (plasa anti-surzenie și
+            // continuarea DUPĂ rezultatul uneltei) rămân NEFORȚATE intenționat:
+            // altfel s-ar închide bucla forțat → unealtă → forțat, la infinit.
+            const choice = forcedToolChoice(t)
+            if (choice) {
+              console.info('[realtime] tură de ACȚIUNE → tool_choice forțat:', choice)
+              send({ type: 'response.create', response: { tool_choice: choice } })
+            } else {
+              send({ type: 'response.create' })
+            }
           }
         }
         // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
@@ -622,6 +660,21 @@ export async function startRealtimeVoice(
       const note = res.status === 401 ? 'trebuie să fii logat' : `realtime ${res.status}`
       throw new Error(note)
     }
+    // REGULA FAPTEI, DE LA SERVER — o singură sursă de adevăr: backendul trimite
+    // chiar regula chatului scris, URL-encodată (are diacritice; antetele HTTP
+    // sunt ASCII). Călătorește pe răspunsul SDP care se face oricum: niciun apel
+    // de rețea în plus. Fără antet NU forțăm nimic — vocea se poartă exact ca
+    // înainte, cu avertisment în consolă: degradare curată, nu stricare tăcută.
+    const intentHdr = res.headers.get('x-kelion-action-intent')
+    if (intentHdr) {
+      try {
+        actionIntentRe = new RegExp(decodeURIComponent(intentHdr), 'i')
+      } catch {
+        actionIntentRe = null
+      }
+    }
+    if (!actionIntentRe)
+      console.warn('[realtime] lipsește x-kelion-action-intent — vocea rămâne pe tool_choice auto')
     const answer = await res.text()
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })
     if (closed || signal?.aborted) throw new DOMException('ended-before-live', 'AbortError')

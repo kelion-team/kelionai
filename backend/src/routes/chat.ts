@@ -792,6 +792,32 @@ const PROMO_TOOL: Tool = {
   },
 }
 
+// ── UNELTELE PASIVE — ce NU e o faptă (Adrian, 27 iul: „autonomia lui nu e
+// reală") ────────────────────────────────────────────────────────────────────
+// Astea doar CITESC sau raportează o stare: a le chema nu schimbă nimic în lume.
+// Orchestratorul le folosește ca să nu se lase păcălit — vechea forțare cerea
+// „o unealtă" pe prima rundă, iar modelul o bifa cu un system_health și apoi
+// povestea restul. Acum forțarea ține până când rulează o unealtă de ACȚIUNE,
+// iar poarta faptei rămâne armată dacă s-a citit dar nu s-a făcut.
+// Lista e INVERSATĂ intenționat: orice unealtă NOUĂ e considerată acțiune, deci
+// o unealtă adăugată mâine nu poate dezarma poarta din greșeală.
+const PASSIVE_TOOLS = new Set<string>([
+  'read_source', 'search_source', 'list_source', 'list_updates',
+  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs',
+  // db_tables citește doar schema. db_query NU e aici INTENȚIONAT: rulează SQL
+  // arbitrar, cu COMMIT — un DELETE e o faptă în toată regula, iar dacă l-am
+  // socoti „citire", poarta faptei i-ar putea cere modelului să-l execute încă
+  // o dată. Mai bine îl tratăm ca acțiune și pierdem puțină strictețe.
+  'db_tables',
+  'list_notes', 'list_memories',
+  'get_real_cost', 'log_unsupported_request',
+  'play_avatar_gesture',
+  'browser_read',
+  // ask_brain nu e faptă: e o întrebare pusă altui creier. Dacă modelul
+  // escaladează în loc să execute, forțarea trebuie să continue.
+  'ask_brain',
+])
+
 // U+001F (unit separator) brackets a JSON control frame the frontend strips out
 // of the text stream (never shown, never spoken), e.g.
 // \x1f{"monitor":{"url":"...","title":"..."}}\x1f
@@ -1485,7 +1511,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // exact anti-comportamentul). Acum: EXECUTĂ, nu promite.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and ASK whether to repair them — repair ONLY after his explicit yes, with your own tools. If everything is healthy, don't bring it up unless he asks. INSTALL SKILLS ON DEMAND — DON'T DESCRIBE, INSTALL: when the owner asks you to install/import/add a NEW skill, tool or capability you don't have yet (e.g. "instalează-ți un skill de prețuri cripto/știri/acțiuni"), you MUST call propose_tool RIGHT NOW with a concrete PUBLIC HTTPS API — for the owner it auto-installs instantly and is usable from the next message. NEVER just describe what the tool would do or say you'll do it — CALL propose_tool this turn. If you don't know the exact API, use a well-known public one (crypto → api.coingecko.com; weather → wttr.in; news → a public RSS/JSON feed; npm → registry.npmjs.org). Saying you installed a skill without calling propose_tool is the forbidden empty-talk.`
+        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). REPORT ONLY WHAT A TOOL RETURNED: a file path, a line number, a branch name, a PR number, an Actions link may be stated ONLY if a tool result you got THIS TURN contains that exact value. If you do not have the tool result, do not state the value and do not describe the step as if it happened — call the tool instead. Never write a plan in the shape of a report. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and ASK whether to repair them — repair ONLY after his explicit yes, with your own tools. If everything is healthy, don't bring it up unless he asks. INSTALL SKILLS ON DEMAND — DON'T DESCRIBE, INSTALL: when the owner asks you to install/import/add a NEW skill, tool or capability you don't have yet (e.g. "instalează-ți un skill de prețuri cripto/știri/acțiuni"), you MUST call propose_tool RIGHT NOW with a concrete PUBLIC HTTPS API — for the owner it auto-installs instantly and is usable from the next message. NEVER just describe what the tool would do or say you'll do it — CALL propose_tool this turn. If you don't know the exact API, use a well-known public one (crypto → api.coingecko.com; weather → wttr.in; news → a public RSS/JSON feed; npm → registry.npmjs.org). Saying you installed a skill without calling propose_tool is the forbidden empty-talk.`
       // CANALUL DE UPDATE: Kelion știe din prompt CE a primit la ultimul deploy
       // (fișier local, cache pe prima citire — zero cost pe latență).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -1731,6 +1757,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
+    // TURA DE ORDIN = tura în care se EXECUTĂ, nu se povestește („deschide",
+    // „instalează", „caută", „repară", „trimite"...). Se calculează pe textul
+    // ACESTEI ture, deci se stinge singură la replica următoare.
+    const actionTurn = hasActionIntent(lastUserText)
     // BARGRAF LA INTRAREA ÎN CREIER — UN SINGUR {heard} pentru TOȚI (admin, demo,
     // public, plătitori): serverul confirmă exact textul predat creierului la
     // această tură, banda din UI îl afișează. Nu e ecou local — dacă banda nu se
@@ -1810,7 +1840,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // scoase definitiv) → mesaj onest în catch.
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
-      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
+      // REGULA FAPTEI, ULTIMUL LUCRU CITIT (Adrian, 27 iul). Măsurat live pe
+      // creierul gratuit: cu 61 de unelte și un prompt de 10k, instrucțiunile de
+      // la început se diluează și modelul nu mai execută (0/2, răspuns gol).
+      // Poziția finală e cea mai puternică, iar regula e scurtă și imperativă —
+      // exact opusul paragrafelor lungi care se contrazic între ele.
+      const DEED_RULE_LAST =
+        '\n\n=== REGULA FINALĂ, MAI PRESUS DE ORICE DE MAI SUS ===\n' +
+        'Dacă mesajul userului conține un ORDIN (deschide, pune, caută, instalează, repară, ' +
+        'trimite, publică, arată, construiește, șterge, salvează...), primul lucru pe care îl faci ' +
+        'în tura asta este să CHEMI UNEALTA care execută. Nu descrii, nu anunți, nu promiți.\n' +
+        'Nu ai voie să spui că ai făcut ceva, sau că urmează să faci ceva, fără rezultatul uneltei ' +
+        'în mână. A citi sau a raporta o stare NU înseamnă a face.\n' +
+        'Dacă nu ai unealta potrivită, spune-o simplu și direct — asta e onest. A povesti o faptă ' +
+        'care nu s-a întâmplat nu e.'
+      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt + DEED_RULE_LAST }]
       for (const p of params) {
         const role = p.role === 'assistant' ? 'assistant' : 'user'
         if (typeof p.content === 'string') {
@@ -1916,7 +1960,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // live: 37s până la primul cuvânt — poarta faptei îl punea să execute
       // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
       // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
-      if (isAdmin && heavyTurn) {
+      // OBLIGATORIU ODATĂ CU FORȚAREA, PENTRU TOȚI: pe o rundă forțată modelul
+      // întoarce DOAR apelul de unealtă, fără text (Gemini în mod ANY nici nu
+      // produce text) — fără confirmarea asta userul ar aștepta MUT până termină
+      // uneltele. Se aplică pe orice tură de ordin, nu doar la owner.
+      if (actionTurn || (isAdmin && heavyTurn)) {
         const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
         noteFirstWord()
         reply.raw.write(appendTurn(user.email, turnId, ackText))
@@ -1948,11 +1996,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.
-          deedGate: isAdmin,
-          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
-          // de ACȚIUNE a ownerului prima rundă e obligată să aleagă o unealtă —
-          // execută, nu narează. Runda 2+ liberă.
-          forceToolsFirstRound: isAdmin && heavyTurn,
+          // POARTA FAPTEI PENTRU TOȚI (27 iul): o faptă declarată fără unealtă e
+          // vorbă goală indiferent cine e la celălalt capăt. Nu mai e doar a lui.
+          deedGate: true,
+          passiveTools: PASSIVE_TOOLS,
+          // CREIERUL FORȚAT SĂ EXECUTE (Adrian, 27 iul: „autonomia lui nu e
+          // reală"). Dovada live pe creierul gratuit, cu încărcătura REALĂ a
+          // aplicației (61 unelte, prompt de 10k): pe 'auto' execută 0/2 și
+          // răspunde GOL; forțat execută 2/2. Forțarea ține până când chiar
+          // rulează o unealtă de ACȚIUNE — o unealtă de citit nu o oprește.
+          // Pornește pe ORICE tură de ordin, a oricui, nu doar a ownerului.
+          forceToolsUntilAction: actionTurn,
           onText: (txt) => {
             textFlowed = true
             noteFirstWord()
