@@ -2902,6 +2902,19 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
+// Șterge un ordin din coadă (Adrian, 27 iul: „buton la fiecare de ștergere
+// ordine"). Un ordin în lucru chiar acum (running) NU se șterge — l-am rupe
+// sub picioarele lucrătorului; abia după ce termină sau e abandonat.
+export async function deleteBuildJob(id: number): Promise<{ ok: boolean; reason?: string }> {
+  if (!dbEnabled()) return { ok: false, reason: 'db_indisponibil' }
+  const r = await getPool().query(
+    "DELETE FROM build_jobs WHERE id = $1 AND status <> 'running'",
+    [id],
+  )
+  if (r.rowCount === 0) return { ok: false, reason: 'in_lucru_sau_inexistent' }
+  return { ok: true }
+}
+
 // Lucrătorul ia UN ordin: cel mai vechi „queued", sau un „running" înțepenit
 // (>40 min — agentul a fost omorât de timeout). Peste 2 încercări → failed,
 // ca un ordin imposibil să nu blocheze coada la nesfârșit.
