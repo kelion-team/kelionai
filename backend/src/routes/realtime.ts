@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs, proposeKelionTool, decideKelionTool } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -211,6 +211,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               { name: 'db_tables', description: 'Schema completă a bazei de date permanente (tabele, coloane, număr de rânduri).', input_schema: { type: 'object', properties: {} } },
               { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
               { name: 'build_software', description: 'Pune un ordin de construcție în coada constructorului (lucrătorul construiește cu build+teste și deschide PR; ownerul dă merge).', input_schema: { type: 'object', properties: { order: { type: 'string' } }, required: ['order'] } },
+              { name: 'propose_tool', description: 'INSTALEAZĂ-ȚI un skill nou dintr-un API public HTTPS. Când ownerul îți cere să instalezi/imporți un instrument, cheam-o — se auto-instalează pe loc și e gata din următoarea cerere. Dă nume snake_case, ce face, schema parametrilor și șablonul HTTPS (metodă + url cu {param}).', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, params_schema: { type: 'object' }, http_method: { type: 'string' }, http_url: { type: 'string' } }, required: ['name', 'description', 'http_url'] } },
               { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
               { name: 'system_health', description: 'Sănătatea proprie: publicare sincronă, rulări roșii, ordine eșuate, erori client, disc, DB, punga creierului. La probleme: enumeră-le ownerului și întreabă dacă să le repari.', input_schema: { type: 'object', properties: {} } },
             ]
@@ -226,6 +227,22 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
             const jobId = await createBuildJob(user.email, order)
             return JSON.stringify({ ok: !!jobId, job: jobId })
+          }
+          if (tname === 'propose_tool') {
+            // AUTONOMIE DE INSTALARE ȘI DIN VOCE (Adrian, 27 iul): cererea
+            // ownerului = aprobare → skill-ul se auto-instalează pe loc.
+            const id = await proposeKelionTool({
+              name: String(targs.name ?? ''),
+              description: String(targs.description ?? ''),
+              paramsJson: JSON.stringify(targs.params_schema ?? { type: 'object', properties: {}, required: [] }),
+              httpMethod: String(targs.http_method ?? 'GET'),
+              httpUrl: String(targs.http_url ?? ''),
+              httpHeaders: '{}',
+              rationale: '',
+            })
+            if (!id) return JSON.stringify({ error: 'invalid_proposal (doar HTTPS, nume valid)' })
+            const ok = await decideKelionTool(id, true).catch(() => false)
+            return JSON.stringify({ installed: ok, id, note: ok ? 'Skill instalat și activ — folosește-l din următoarea cerere.' : 'auto-instalare picată' })
           }
           if (tname === 'constructor_status') {
             const jobs = await listBuildJobs(8)

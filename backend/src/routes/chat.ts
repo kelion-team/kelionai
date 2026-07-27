@@ -42,6 +42,7 @@ import {
   faceDistance,
   loadKv,
   proposeKelionTool,
+  decideKelionTool,
   createBuildJob,
   listBuildJobs,
   dbTablesOverview,
@@ -470,7 +471,7 @@ const LOG_GAP_TOOL: Tool = {
 const PROPOSE_TOOL: Tool = {
   name: 'propose_tool',
   description:
-    "When you realize you're missing a capability that a PUBLIC HTTPS API could provide, propose a new tool for yourself. The owner approves it with one click, then you can use it. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Only propose when genuinely useful; never for something you can already do.",
+    "INSTALL A NEW SKILL FOR YOURSELF from any PUBLIC HTTPS API. This is how you gain new capabilities on your own. When the OWNER asks you to install/import a skill or tool (or you realize you're missing one while serving him), call this — for the owner it AUTO-INSTALLS instantly (his request IS the approval) and becomes usable from the next message, no admin click needed. For non-owner users it stays pending until the owner approves. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Use it freely whenever the owner wants a new skill; for building actual SOFTWARE/code use build_software (the constructor) instead.",
   input_schema: {
     type: 'object',
     properties: {
@@ -1855,8 +1856,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           usage.usd += IMAGE_USD_PER_CALL
           void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
         }
-        // AUTO-EXTINDERE: Kelion își propune o unealtă nouă (rămâne 'pending'
-        // până o aprobă owner-ul cu un click în admin → activă instant).
+        // AUTONOMIE TOTALĂ DE INSTALARE (Adrian, 27 iul: „autonomie totală în
+        // a-și instala instrumente/skill-uri/softuri când îi cer"): Kelion își
+        // propune o unealtă nouă. Când CERE OWNER-UL (admin), cererea lui ESTE
+        // aprobarea → unealta se AUTO-INSTALEAZĂ pe loc (status='approved') și e
+        // gata de folosit din următoarea cerere, fără niciun click în admin.
+        // Pentru alți useri rămâne 'pending' până o aprobă owner-ul (securitate).
         if (name === 'propose_tool') {
           const p = input as { name?: string; description?: string; params_schema?: unknown; http_method?: string; http_url?: string; http_headers?: unknown; rationale?: string }
           const id = await proposeKelionTool({
@@ -1868,7 +1873,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             httpHeaders: JSON.stringify(p.http_headers ?? {}),
             rationale: String(p.rationale ?? ''),
           })
-          return JSON.stringify(id ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' } : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
+          if (!id) return JSON.stringify({ error: 'invalid_proposal (doar HTTPS, nume valid)' })
+          if (isAdmin) {
+            const ok = await decideKelionTool(id, true).catch(() => false)
+            return JSON.stringify({
+              installed: ok,
+              id,
+              note: ok
+                ? `Unealta „${String(p.name ?? '')}" e INSTALATĂ și activă acum (cererea owner-ului = aprobare). O poți folosi din următoarea cerere.`
+                : 'Propusă, dar auto-instalarea a picat — o poți aproba în Admin → Unelte Kelion.',
+            })
+          }
+          return JSON.stringify({ proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' })
         }
         // UNEALTĂ DINAMICĂ APROBATĂ: execuție generică prin apel HTTP sigur.
         if (dynNames.has(name)) {
