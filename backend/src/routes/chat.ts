@@ -131,16 +131,16 @@ async function selectedBrainModel(
   // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
   // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
   const difficulty = taskDifficulty(text)
-  // OWNER = CREIER CARE GÂNDEȘTE, MEREU (Adrian, 27 iul: „mai multe bucle, dar
-  // niciuna nu face real ce trebuie" — cauza: pe conversația obișnuită a
-  // ownerului rula modelul IEFTIN fără raționament, deci bucla era condusă de
-  // un creier prost). Ownerul primește ACUM implicit treapta WORK cu raționament
-  // la FIECARE mesaj (gpt-5-mini, nu vârful Fable — evităm arderea de $23/h din
-  // 25 iul, dar scăpăm de modelul-jucărie). Vârful (top) rămâne doar pe
-  // dificultate extremă. Userii publici păstrează scara ieftină de cost.
+  // OWNER = MEREU CREIERUL DE VÂRF, CONSISTENT (Adrian, 27 iul: „prima dată a
+  // mers, a doua nu" — cauza dovedită: modelul oscila între Fable 5 (top, când
+  // scorul de dificultate ≥ 85) și gpt-5-mini (work, sub 85), deci a doua tură,
+  // punctată mai jos, cădea pe creierul mai slab). Regula anti-buclă (§1.14):
+  // pe drumul ownerului NU mai există scor care să-l coboare — Fable 5 la
+  // FIECARE mesaj, raționament, toate uneltele. Fără oscilație = fără „prima a
+  // mers a doua nu". Userii publici păstrează scara de cost.
   const isOwner = roleFor(email) === 'admin'
   const heavy = isOwner || needsVision || difficulty >= ESCALATE_AT
-  const top = difficulty >= ESCALATE_TOP_AT
+  const top = isOwner || difficulty >= ESCALATE_TOP_AT
   const model = top
     ? await resolveModel('top')
     : heavy
