@@ -137,6 +137,10 @@ const VOICE_TOOL_NAMES = new Set([
   'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
   'get_calendar_events', 'get_recent_emails', 'send_email', 'create_calendar_event',
   'get_drive_files', 'get_tasks', 'add_task', 'search_contacts', 'add_contact',
+  // IMPORTUL COMPLET GOOGLE (Adrian, 27 iul: „toate skill-urile google, automat
+  // și activate") — aceleași unelte și în voce, nu doar în scris.
+  'read_email', 'read_drive_file', 'get_photos', 'my_youtube',
+  'delete_calendar_event', 'complete_task',
 ])
 
 export function realtimeTools(
@@ -405,22 +409,43 @@ export async function openaiRealtimeAnswer(
   // zgomot). String simplu = câmp de formular normal, parsat.
   form.append('session', JSON.stringify(session))
 
-  let r: Response
-  try {
-    // FIX FINAL VOCE (dovadă live 24 iul: OpenAI „missing_model"): API-ul Realtime
-    // GA cere modelul ca PARAMETRU ÎN URL, nu doar în JSON-ul de sesiune.
-    const callsUrl = `${OPENAI_CALLS}?model=${encodeURIComponent(config.openai.realtimeModel)}`
-    r = await fetch(callsUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.openai.key}` },
-      body: form,
-      signal: AbortSignal.timeout(20_000),
-    })
-  } catch (e) {
-    return { ok: false, status: 502, error: `upstream_unreachable: ${String(e).slice(0, 120)}` }
+  // FIX FINAL VOCE (dovadă live 24 iul: OpenAI „missing_model"): API-ul Realtime
+  // GA cere modelul ca PARAMETRU ÎN URL, nu doar în JSON-ul de sesiune.
+  const callsUrl = `${OPENAI_CALLS}?model=${encodeURIComponent(config.openai.realtimeModel)}`
+  // REÎNCERCAREA (27 iul, dovadă live: două 504 trecătoare de la marginea
+  // OpenAI — pagină HTML Cloudflare după ~15s — au lăsat vocea MOARTĂ, deși
+  // reproducerea aceleiași cereri, cu aceeași sesiune de 26KB și 31 de unelte,
+  // a întors 201 în 0,4s de 3/3 ori imediat după). Un eșec trecător nu are
+  // voie să însemne „vocea nu merge": la 5xx sau rețea căzută mai încercăm o
+  // dată, cu pauză scurtă. La 4xx nu reîncercăm — aia e o cerere greșită.
+  let lastErr = ''
+  let lastStatus = 502
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let r: Response
+    try {
+      r = await fetch(callsUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.openai.key}` },
+        body: form,
+        signal: AbortSignal.timeout(20_000),
+      })
+    } catch (e) {
+      lastErr = `upstream_unreachable: ${String(e).slice(0, 120)}`
+      if (attempt === 1) {
+        await new Promise((res) => setTimeout(res, 900))
+        continue
+      }
+      return { ok: false, status: 502, error: lastErr }
+    }
+    const text = await r.text().catch(() => '')
+    if (r.ok) return { ok: true, sdp: text }
+    lastStatus = r.status
+    lastErr = text.slice(0, 300)
+    if (attempt === 1 && r.status >= 500) {
+      await new Promise((res) => setTimeout(res, 900))
+      continue
+    }
+    break
   }
-
-  const text = await r.text().catch(() => '')
-  if (!r.ok) return { ok: false, status: r.status, error: text.slice(0, 300) }
-  return { ok: true, sdp: text }
+  return { ok: false, status: lastStatus, error: lastErr }
 }
