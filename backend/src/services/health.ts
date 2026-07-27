@@ -55,22 +55,39 @@ export async function systemHealth(): Promise<string> {
     /* GitHub inaccesibil — nu inventăm probleme */
   }
 
-  // 2. Rulările roșii din ultimele 48h (deploy + restul workflow-urilor).
+  // 2. Rulările roșii ACTUALE (Adrian, 27 iul: „de ce nu vede sistemul de
+  // vindecare, repară?" — auditul îi arăta roșii ISTORICE: comenzi punctuale
+  // vechi, deja depășite de rulări verzi ale aceluiași workflow; alea nu se
+  // „repară", sunt istorie). Un workflow e o PROBLEMĂ doar dacă ULTIMA lui
+  // rulare încheiată e roșie — adică e stricat ACUM.
   try {
     if ((process.env.GITHUB_TOKEN ?? '').trim()) {
-      const r = await fetch(`${GH}/actions/runs?status=failure&per_page=10`, {
-        headers: ghHeaders(),
-        signal: AbortSignal.timeout(10_000),
-      })
-      const data = (await r.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string; html_url?: string }[] }
+      const [rFail, rAll] = await Promise.all([
+        fetch(`${GH}/actions/runs?status=failure&per_page=15`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+        fetch(`${GH}/actions/runs?per_page=40`, { headers: ghHeaders(), signal: AbortSignal.timeout(10_000) }),
+      ])
+      const fail = (await rFail.json()) as { workflow_runs?: { name?: string; run_number?: number; created_at?: string }[] }
+      const all = (await rAll.json()) as { workflow_runs?: { name?: string; status?: string; conclusion?: string | null; created_at?: string }[] }
+      // Ultima rulare ÎNCHEIATĂ a fiecărui workflow (lista vine descrescător).
+      const latest = new Map<string, string>()
+      for (const w of all.workflow_runs ?? []) {
+        if (w.status !== 'completed' || !w.name) continue
+        if (!latest.has(w.name)) latest.set(w.name, w.conclusion ?? '')
+      }
       const cutoff = Date.now() - 48 * 3600_000
-      const red = (data.workflow_runs ?? []).filter((w) => Date.parse(w.created_at ?? '') > cutoff)
+      const red = (fail.workflow_runs ?? []).filter(
+        (w) => Date.parse(w.created_at ?? '') > cutoff && latest.get(w.name ?? '') === 'failure',
+      )
+      const historic = (fail.workflow_runs ?? []).filter(
+        (w) => Date.parse(w.created_at ?? '') > cutoff && latest.get(w.name ?? '') !== 'failure',
+      ).length
+      info.rosiiIstorice = historic // vizibile în audit ca istorie, nu ca probleme
       if (red.length)
         problems.push({
           id: 'rulari_rosii',
           grav: 'mediu',
-          desc: `${red.length} rulări roșii în ultimele 48h: ${red.map((w) => `${w.name} #${w.run_number}`).join(', ')}`,
-          reparabil: 'vindecătorul le rerulează singur când live==master; altfel investighează cu runbook_log',
+          desc: `${red.length} workflow-uri stricate ACUM (ultima rulare roșie): ${red.map((w) => `${w.name} #${w.run_number}`).join(', ')}`,
+          reparabil: 'vindecătorul rerulează deploy-urile singur; pe celelalte investighează cu runbook_log/server_logs',
         })
     }
   } catch {

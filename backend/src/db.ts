@@ -3179,6 +3179,31 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
   }
 }
 
+// VINDECARE AUTOMATĂ A ORDINELOR CĂZUTE PE BANI (Adrian, 27 iul: „de ce nu vede
+// sistemul de vindecare, repară? — automat?"): un ordin eșuat pentru că creierul
+// n-avea credit (402/credits) nu e un ordin imposibil — e un ordin PICAT PE
+// SĂRĂCIE. Când punga redevine pozitivă, îl repunem SINGURI în coadă, o singură
+// dată (marcaj în log ca să nu ciclăm), cu contorul de încercări resetat.
+export async function requeueMoneyFailedBuildJobs(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ id: string | number }>(
+      `UPDATE build_jobs
+         SET status='queued', attempts=0,
+             log = COALESCE(log,'') || E'\\n[vindecător: repus în coadă — eșuase pe lipsă de credit, punga e iar plină]',
+             updated_at = now()
+       WHERE status='failed'
+         AND updated_at > now() - interval '72 hours'
+         AND log ~* '(402|requires more credits|insufficient credits)'
+         AND log NOT LIKE '%[vindecător: repus în coadă%'
+       RETURNING id`,
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
+  }
+}
+
 // ── OCHII LUI KELION PE STOCAREA PERMANENTĂ (Adrian, 27 iul: „acces la orice
 // bază de date a aplicației") — schema completă + SQL direct, pentru uneltele
 // de admin db_tables/db_query din chat. Plafoane: 200 rânduri la ieșire și

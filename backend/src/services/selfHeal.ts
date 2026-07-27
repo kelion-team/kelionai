@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
-import { recurringClientErrors, createBuildJob, loadKv, saveKv } from '../db.js'
+import { recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
+import { getOpenRouterBalance } from './openrouter.js'
 
 // ── AUTO-VINDECAREA LUI KELION (Adrian, 27 iul: „Kelion trebuie să poată culege
 // err apărute sub fiecare user automat și să le remedieze, dând versiunea
@@ -32,6 +33,21 @@ function signature(message: string): string {
 
 export async function runSelfHeal(): Promise<{ filed: number }> {
   if (await isOpsPaused()) return { filed: 0 }
+
+  // VINDECAREA ORDINELOR CĂZUTE PE BANI (Adrian, 27 iul: „de ce nu vede
+  // sistemul de vindecare, repară? — automat?"): dacă punga creierului e iar
+  // pozitivă, ordinele constructorului eșuate pe 402/credit se repun SINGURE
+  // în coadă (o singură dată per ordin — marcaj în log).
+  try {
+    const bal = await getOpenRouterBalance()
+    if (bal.ok && bal.balance > 0) {
+      const requeued = await requeueMoneyFailedBuildJobs()
+      if (requeued) console.log(`[self-heal] ${requeued} ordin(e) eșuat(e) pe lipsă de credit, repus(e) în coadă — punga e iar plină`)
+    }
+  } catch {
+    /* punga indisponibilă — încercăm la rularea următoare */
+  }
+
   const errors = await recurringClientErrors(24, 5, 2)
   if (!errors.length) return { filed: 0 }
 
