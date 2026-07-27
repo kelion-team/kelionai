@@ -32,7 +32,6 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
-  getSharedMemory,
   getMemories,
   deleteMemory,
   getVoiceprint,
