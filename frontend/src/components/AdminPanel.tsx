@@ -55,6 +55,8 @@ import {
   type VoiceprintRow,
   fetchTokenChecks,
   type TokenChecksResult,
+  fetchAudit,
+  type AuditReport,
 } from '../lib/admin'
 
 // "cât a stat" — human-readable duration from seconds: 45s / 7m / 2h 13m.
@@ -159,6 +161,8 @@ export default function AdminPanel({
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [triaging, setTriaging] = useState(false)
+  // AUDITUL CĂZUTELOR (Adrian, 27 iul): tot ce a căzut, în același tab cu gaps.
+  const [audit, setAudit] = useState<AuditReport | null>(null)
   const [finance, setFinance] = useState<Finance | null>(null)
   // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
@@ -297,7 +301,13 @@ export default function AdminPanel({
   // that reached a successful deploy DISPARE singură din listă (auto-rezolvat).
   useEffect(() => {
     if (tab !== 'gaps') return
-    const id = window.setInterval(() => void fetchGaps().then(setGaps), 15_000)
+    // Auditul căzutelor se încarcă la deschiderea tabului și se reîmprospătează
+    // împreună cu gaps — un singur loc unde vezi TOT ce a picat.
+    void fetchAudit().then(setAudit)
+    const id = window.setInterval(() => {
+      void fetchGaps().then(setGaps)
+      void fetchAudit().then(setAudit)
+    }, 15_000)
     return () => window.clearInterval(id)
   }, [tab])
 
@@ -1879,6 +1889,66 @@ export default function AdminPanel({
                 </div>
               </div>
             ))}
+
+            {/* AUDITUL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
+                auditurile și toate căzutele"): sănătate + erori server + erori
+                client + ordine eșuate — TOT ce a picat, în acest tab. */}
+            <h3 style={{ marginTop: 22, marginBottom: 6 }}>
+              Audit — toate căzutele{' '}
+              <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.7 }}>
+                (sănătate sistem · erori server · erori F12 · construcții eșuate)
+              </span>
+            </h3>
+            {!audit && <p className="chat-hint">Se încarcă auditul…</p>}
+            {audit && (
+              <>
+                {(audit.health?.probleme?.length ?? 0) === 0 &&
+                  (audit.serverErrors?.length ?? 0) === 0 &&
+                  (audit.clientErrors?.length ?? 0) === 0 &&
+                  (audit.failedJobs?.length ?? 0) === 0 && (
+                    <p className="chat-hint">Nimic căzut acum: sănătatea e verde, zero erori de server, zero erori de client, zero construcții eșuate.</p>
+                  )}
+                {(audit.health?.probleme ?? []).map((p) => (
+                  <div key={`h-${p.id}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: p.grav === 'critic' ? '#ff7a7a' : '#ffb86b' }}>
+                        [{p.grav.toUpperCase()}] {p.desc}
+                      </span>
+                      <span className="admin-gap-meta">reparabil: {p.reparabil}</span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.serverErrors ?? []).slice(-15).reverse().map((e, i) => (
+                  <div key={`s-${i}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: e.level >= 50 ? '#ff7a7a' : '#ffb86b' }}>
+                        [server {e.level >= 50 ? 'EROARE' : 'avert.'}] {e.msg}
+                      </span>
+                      <span className="admin-gap-meta">{new Date(e.t).toLocaleTimeString('ro-RO')}</span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.clientErrors ?? []).slice(0, 15).map((e, i) => (
+                  <div key={`c-${i}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: '#ffb86b' }}>[F12 client] {e.message}</span>
+                      <span className="admin-gap-meta">
+                        {Number(e.n) > 1 ? `de ${e.n} ori · ` : ''}
+                        {e.user_email ?? 'anonim'} · {new Date(e.created_at).toLocaleString('ro-RO')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {(audit.failedJobs ?? []).map((j) => (
+                  <div key={`j-${j.id}`} className="admin-gap">
+                    <div className="admin-gap-main">
+                      <span className="admin-gap-req" style={{ color: '#ff7a7a' }}>[constructor EȘUAT] #{j.id} — {j.order}</span>
+                      <span className="admin-gap-meta">{new Date(j.updated).toLocaleString('ro-RO')}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </section>
         )}
         <div className="admin-body" style={tab !== 'history' ? { display: 'none' } : undefined}>
