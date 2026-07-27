@@ -575,7 +575,12 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
       (s.customer_details as { email?: string } | undefined)?.email ??
       ''
     const amount = Number(s.amount_total ?? 0) / 100
-    const ref = String(s.payment_intent ?? s.id ?? id)
+    // FĂRĂ fallback pe cs_ (audit 27 iul): aceeași plată cheiată o dată pe
+    // cs_… și apoi pe pi_… trecea de dedup DE DOUĂ ORI (calea semnată a scos
+    // fallback-ul încă din iulie — asta rămăsese). Fără payment_intent → nu
+    // creditați aici; reconcilierea o prinde pe cheia pi_ corectă.
+    if (!s.payment_intent) return null
+    const ref = String(s.payment_intent)
     if (!email || !(amount > 0)) return null
     if (await hasRefund(ref)) return null // rambursată → NU se creditează
     const saleCredits = Number((s.metadata as { sale_credits?: string } | undefined)?.sale_credits ?? 0)

@@ -76,6 +76,7 @@ import {
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
+import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -169,6 +170,9 @@ async function selectedBrainModel(
 // DIRECTE ale lui Adrian („salută", „dansează") NU trec pe aici — execută mereu.
 const GESTURE_COOLDOWN_MS = 25_000
 const gestureGates = new Map<string, { last: string; at: number }>()
+// Ture de chat SIMULTANE per user plătitor (audit securitate 27 iul — anti
+// „check-then-charge": vezi plafonul din handler, înainte de paywall).
+const turnsInFlight = new Map<string, number>()
 function allowAutoGesture(email: string, name: string): boolean {
   if (!name) return false
   const now = Date.now()
@@ -1261,6 +1265,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // limbă cu răspunsurile. Adminul primește mereu ro-RO; restul limba stabilită.
     const announceLang = isAdminUser ? 'ro-RO' : (committedLang ?? speechPref ?? null)
 
+    // ANTI „40 DE TURE CU 1 BAN" (audit securitate 27 iul): paywall-ul era
+    // verifică-apoi-taxează — 40 de POST-uri paralele treceau toate de citirea
+    // soldului și debitau abia la final, adânc în minus. Plafon dur de ture
+    // SIMULTANE per user plătitor (2 e generos pentru un om real); adminul e
+    // scutit. Contorul se eliberează la închiderea răspunsului.
+    if (user.role !== 'admin') {
+      const inFlight = (turnsInFlight.get(user.email) ?? 0)
+      if (inFlight >= 2) return reply.code(429).send({ error: 'prea_multe_ture_simultane' })
+      turnsInFlight.set(user.email, inFlight + 1)
+      reply.raw.on('close', () => {
+        const n = (turnsInFlight.get(user.email) ?? 1) - 1
+        if (n <= 0) turnsInFlight.delete(user.email)
+        else turnsInFlight.set(user.email, n)
+      })
+    }
+
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop
     // in the user's language + a paywall frame so the UI shows the top-up link.
@@ -1718,7 +1738,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
-    const isAdmin = user.role === 'admin'
+    // LACĂTUL ADMIN ACOPERĂ ȘI UNELTELE DIN CHAT (auditul de securitate, 27
+    // iul): gate-ul global păzea doar /api/admin/*, dar uneltele DISTRUCTIVE
+    // (repo_merge_pr, db_query, run_runbook, build_software...) trăiesc în
+    // /api/chat — un cookie de sesiune furat le folosea fără al 2-lea factor.
+    // Odată ARMAT lacătul, sesiunea nedeblocată vorbește cu Kelion ca un user
+    // obișnuit, fără uneltele de admin.
+    const isAdmin = user.role === 'admin' && (!(await isArmed()) || hasUnlock(req, user.email))
 
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
@@ -1966,6 +1992,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
       console.error('[CHAT ERROR]', errMsg)
+      // BANII NU SE PIERD LA EROARE (audit 27 iul): uneltele deja rulate în
+      // tura asta (căutări, imagini, ask_brain) au COSTAT — return-ul de aici
+      // sărea peste debit și userul consuma pe gratis, repetabil.
+      if (usage.usd > 0) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
       return
     }
 

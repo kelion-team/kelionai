@@ -1329,8 +1329,11 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
       `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
       [email, -amount, meta],
     )
-  } catch {
-    // Never break the chat because metering failed.
+  } catch (e) {
+    // Nu rupem chatul dacă taxarea pică — dar NICIODATĂ în tăcere (audit 27
+    // iul: exact catch-ul ăsta gol a mai ascuns o dată „userii consumă fără să
+    // fie taxați"). Eroarea intră în jurnal → server_logs → auditul din admin.
+    console.error(`[bani] debitWallet EȘUAT pentru ${email}, suma ${amount}: ${String(e).slice(0, 200)}`)
   }
 }
 
@@ -1468,8 +1471,13 @@ export async function updateTransactionStatus(
 ): Promise<void> {
   if (!dbEnabled() || !stripePaymentIntentId) return
   try {
+    // ORDINEA WEBHOOK-URILOR NU E GARANTATĂ (audit 27 iul): un
+    // `payment_failed` livrat DUPĂ `succeeded` marca pe veci o plată REUȘITĂ
+    // ca „failed" în istoricul userului și în tabul de tranzacții. O stare
+    // finală bună nu mai poate fi retrogradată.
     await getPool().query(
-      'UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now()) WHERE stripe_payment_intent_id = $1',
+      `UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now())
+       WHERE stripe_payment_intent_id = $1 AND status NOT IN ('succeeded', 'paid', 'refunded')`,
       [stripePaymentIntentId, status],
     )
   } catch {
@@ -1677,6 +1685,22 @@ export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> 
       `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE user_email = lower($1)`,
       [email, userCredit],
     )
+    // ȘI PROFITUL SE REVERSEAZĂ (audit 27 iul): la alimentare, 25% intra ca
+    // rând 'profit' — la refund rămânea pe veci în cărți, umflând profitul
+    // raportat în Admin→Bani la fiecare rambursare. Rând compensator negativ,
+    // idempotent pe cheia :profit-refund.
+    const p = await client.query<{ user_email: string; amount: string }>(
+      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'profit'`,
+      [`${stripeRef}:profit`],
+    )
+    if (p.rows[0]) {
+      await client.query(
+        `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+         VALUES (lower($1), 'profit', $2, $3, 'reversare profit — plată rambursată')
+         ON CONFLICT DO NOTHING`,
+        [p.rows[0].user_email, -Number(p.rows[0].amount), `${stripeRef}:profit-refund`],
+      )
+    }
     await client.query(`UPDATE transactions SET status = 'refunded' WHERE stripe_payment_intent_id = $1`, [
       stripeRef,
     ])
