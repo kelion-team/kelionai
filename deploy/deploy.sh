@@ -29,6 +29,14 @@ ENVFILE=/root/kelion/kelionai.env
 BRANCH="${1:-master}"
 CADDY_DIR=/root/kelion-caddy
 
+# LACĂT GLOBAL DE PUBLICARE (27 iul: deploy #493 roșu pe „container name already
+# in use" — Actions și auto-publicarea rulau deploy.sh ÎN PARALEL pe același
+# master; al doilea `docker run` lovea containerul tocmai pornit de primul).
+# O singură publicare odată: al doilea AȘTEAPTĂ aici, apoi (pasul 1) iese
+# devreme dacă exact sha-ul țintă e deja live — verde, fără muncă dublă.
+exec 8>/root/kelion/publicare.lock
+flock 8
+
 echo "== 0. Blochez ecosistemul-zombie (puntea/constructorul, șters din cod pe 23 iul) =="
 # Lanț complet descoperit la audit (24 iul): serviciile kelion-bridge/builder/
 # paznic/deployer loveau endpointuri șterse și ardeau abonamentul cu procese
@@ -71,6 +79,14 @@ cd "$REPO"
 git fetch origin --prune
 git checkout -B deploy "origin/$BRANCH"
 git log --oneline -1
+# Ieșire devreme sub lacăt: dacă alt publicator tocmai a dus live EXACT sha-ul
+# țintă cât am așteptat la flock, nu mai reconstruim nimic — verde, gata.
+TARGET=$(git rev-parse HEAD | cut -c1-7)
+LIVE_NOW=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
+if [ "$LIVE_NOW" = "$TARGET" ]; then
+  echo "== Deja publicat exact $TARGET (alt publicator a terminat primul) — nimic de făcut =="
+  exit 0
+fi
 
 echo "== 2. Verific env-ul =="
 for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL OPENROUTER_API_KEY OPENAI_API_KEY; do
