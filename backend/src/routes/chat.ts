@@ -139,7 +139,10 @@ async function selectedBrainModel(
   // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
   // extremă.
   const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
-  const top = difficulty >= ESCALATE_TOP_AT
+  // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
+  // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
+  // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
+  const top = difficulty >= ESCALATE_TOP_AT && !needsVision
   const model = top
     ? await resolveModel('top')
     : heavy

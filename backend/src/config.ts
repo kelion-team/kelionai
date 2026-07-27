@@ -84,19 +84,26 @@ export const config = {
     // acțiune reală (taskDifficulty / hasActionIntent) — vezi selectedBrainModel
     // din chat.ts. Editabil din env dacă vrei alt model gratuit.
     chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
-    // LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la Fable"):
-    // treapta 'work' = ieftin-capabil, implicit pentru ORICE escaladare
-    // normală (acțiune reală / dificultate moderată) — nu mai e Fable 5 aici.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'openai/gpt-5-mini').trim(),
-    // Treapta FINALĂ 'top' — Fable 5, rezervat DOAR pentru dificultate extremă
-    // (peste ESCALATE_TOP_AT), nu userul o alege, e plasa de siguranță de sus.
-    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'anthropic/claude-fable-5').trim(),
+    // ── CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0 — creierul întreg
+    // pe modele gratuite; plătită rămâne DOAR vocea OpenAI, care n-are alternativă
+    // gratuită nicăieri, dovedit pe toate cele 345 de modele din catalog). ──────
+    // Treapta 'work' = NUCLEUL OMNI gratuit: text+audio+imagine+video la intrare,
+    // raționament intern și tool-calling — verificat în catalogul live. Limita
+    // cinstită (i-a fost spusă): :free are ~50–1000 cereri/zi și poate încetini
+    // la ore de vârf; revenirea la plătit = o variabilă de env, fără deploy.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free').trim(),
+    // Treapta FINALĂ 'top' — gândirea grea GRATUITĂ: 550B parametri, 1M context,
+    // raționament + tools. ATENȚIE: nu are vedere — turele cu imagini rămân pe
+    // nucleul omni (vezi selectedBrainModel din chat.ts, garda !needsVision).
+    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
     // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
     // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
     imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),
     // Căutare web prin OpenRouter: modelul de chat + plugin-ul `web` (orice model
     // îl acceptă). Fără cheie Serper. Model editabil din env.
-    searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'openai/gpt-4.1-mini').trim(),
+    // FULL FREE (27 iul): modelul care rezumă căutarea e gratuit — costul rămas
+    // e doar al plugin-ului web (per căutare), nu al modelului.
+    searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
   },
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
