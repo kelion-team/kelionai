@@ -29,7 +29,12 @@ import {
   setDisabledGestures,
   listKelionTools,
   decideKelionTool,
+  listBuildJobs,
+  getPool,
+  dbEnabled,
 } from '../db.js'
+import { systemHealth } from '../services/health.js'
+import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint } from '../services/recovery.js'
@@ -204,6 +209,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
+  })
+
+  // AUDITUL COMPLET AL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
+  // auditurile și toate căzutele"): tabul Cereri neacoperite arată, pe lângă
+  // gaps, TOT ce a căzut — erorile de server (F12-ul de server), erorile de
+  // client (F12-ul browserului), ordinele de construcție eșuate și problemele
+  // de sănătate (live vs master, rulări roșii, disc, DB, sold creier).
+  app.get('/api/admin/audit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const [healthRaw, jobs, clientErrors] = await Promise.all([
+      systemHealth().catch(() => '{}'),
+      listBuildJobs(12).catch(() => []),
+      dbEnabled()
+        ? getPool()
+            .query<{ created_at: string; user_email: string | null; message: string; n: string }>(
+              `SELECT max(created_at) AS created_at, user_email, left(message, 200) AS message, count(*) AS n
+               FROM client_errors WHERE created_at > now() - interval '48 hours'
+               GROUP BY user_email, left(message, 200)
+               ORDER BY max(created_at) DESC LIMIT 30`,
+            )
+            .then((r) => r.rows)
+            .catch(() => [])
+        : Promise.resolve([]),
+    ])
+    let health: unknown = {}
+    try {
+      health = JSON.parse(healthRaw)
+    } catch {
+      /* sănătatea indisponibilă — restul auditului rămâne */
+    }
+    return reply.send({
+      health,
+      serverErrors: recentLogs(40, 60),
+      clientErrors,
+      failedJobs: jobs
+        .filter((j) => j.status === 'failed')
+        .map((j) => ({ id: j.id, order: j.orderText.slice(0, 160), updated: j.updatedAt })),
+    })
   })
 
   // TRIAJUL AUTONOM (Adrian, 24 iul): Kelion decide singur pe fiecare gap —

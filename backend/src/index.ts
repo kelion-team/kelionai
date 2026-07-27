@@ -46,6 +46,7 @@ import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddi
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
+import { makeLogTee } from './services/logbuffer.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
 const DL_TYPES: Record<string, string> = {
@@ -65,7 +66,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
 // payloads — covers audio buffers, documents and camera frames. The /api/chat
 // route raises its own limit to 100MB per-route for camera frames (see chat.ts).
-const app = Fastify({ logger: true, bodyLimit: 25_000_000 })
+// F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele trebuie să ajungă la Kelion ca
+// și F12"): logger-ul scrie tot pe stdout (docker logs neatins) ȘI reține
+// erorile/avertismentele într-un inel de memorie citit de unealta server_logs.
+const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
 
 // PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
 // fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
