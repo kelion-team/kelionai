@@ -36,9 +36,24 @@ SHORT=$(printf '%s' "$MASTER" | cut -c1-7)
 LIVE=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
 [ "$LIVE" = "$SHORT" ] || exit 0   # publicarea reală nu e sincronă — nu atingem istoricul
 
-# Rulările eșuate recente ale deploy-ului (ultimele 15).
-RUNS=$(gh "$API/actions/workflows/deploy.yml/runs?status=failure&per_page=15" \
-  | grep -o '"id": *[0-9]*' | grep -o '[0-9]*' | head -15)
+# Rulările eșuate RECENTE (48h) ale deploy-ului. Parsare cu python3, nu grep:
+# JSON-ul conține zeci de câmpuri „id" străine (check_suite, actor...) — la
+# prima rulare grep-ul a prins id-uri false și a rerulat/alertat aiurea.
+RUNS=$(gh "$API/actions/workflows/deploy.yml/runs?status=failure&per_page=15" | python3 -c '
+import sys, json, datetime
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=48)
+for r in data.get("workflow_runs", []):
+    try:
+        at = datetime.datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+        if at >= cutoff:
+            print(r["id"])
+    except Exception:
+        pass
+' 2>/dev/null | head -15)
 
 for RID in $RUNS; do
   N=$(grep -c "^$RID:" "$STATE" || true)
