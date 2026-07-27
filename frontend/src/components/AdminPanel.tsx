@@ -493,6 +493,33 @@ export default function AdminPanel({
       .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
   }
 
+  // Șterge un punct salvat (butonul roșu — Adrian, 27 iul): eticheta dispare
+  // din listă; commit-ul rămâne în istoricul git (nimic ireversibil pierdut).
+  const deletePoint = (p: RecoveryRow): void => {
+    const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
+    if (!window.confirm(`Ștergi punctul de salvare din ${when} (${p.sha})? Nu va mai apărea în listă.`)) return
+    setRestoringTag(p.tag)
+    setRecoveryMsg(`Șterg ${p.tag}…`)
+    void fetch('/api/admin/backups/delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag: p.tag }),
+    })
+      .then((r) => r.json().then((j: { ok?: boolean; error?: string }) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        setRestoringTag(null)
+        if (ok && j.ok) {
+          setRecoveryMsg(`Șters ✓ ${p.tag}`)
+          loadRecovery()
+        } else setRecoveryMsg(`Ștergerea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
+      })
+      .catch(() => {
+        setRestoringTag(null)
+        setRecoveryMsg('Ștergerea a eșuat — verifică conexiunea și reîncearcă.')
+      })
+  }
+
   // Restaurează aplicația la un punct salvat: confirmare dublă (acțiune grea —
   // producția se schimbă), apoi serverul aduce master la starea tag-ului și
   // publicarea pornește singură. Butonul arată mersul și rezultatul cu dovadă.
@@ -1324,6 +1351,15 @@ export default function AdminPanel({
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ color: '#ff7a7a', borderColor: 'rgba(255, 122, 122, 0.55)' }}
+                      disabled={restoringTag !== null}
+                      onClick={() => deletePoint(p)}
+                    >
+                      Șterge
+                    </button>
                     <button
                       type="button"
                       className="ghost"

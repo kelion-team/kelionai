@@ -117,6 +117,28 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
   }
 }
 
+// ── ȘTERGEREA UNUI PUNCT (Adrian, 27 iul: „la stânga de restaurează, buton
+// roșu șterge") ──────────────────────────────────────────────────────────────
+// Șterge tag-ul de pe GitHub (sursa de adevăr a listei). Commit-ul rămâne în
+// istoricul git — doar eticheta de backup dispare din meniu; oglinda .bundle
+// de pe VPS o curăță cronul de backup la următoarea trecere.
+export async function deleteRecoveryPoint(tag: string): Promise<{ ok: boolean; error?: string }> {
+  const token = (process.env.GITHUB_TOKEN ?? '').trim()
+  if (!token) return { ok: false, error: 'github_token_missing' }
+  if (!/^backup-[A-Za-z0-9._-]+$/.test(tag)) return { ok: false, error: 'tag_invalid' }
+  try {
+    const r = await fetch(`${API}/git/refs/tags/${tag}`, {
+      method: 'DELETE',
+      headers: ghHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (!r.ok && r.status !== 404) return { ok: false, error: `sterge_${r.status}: ${(await r.text()).slice(0, 150)}` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String((e as Error).message ?? e) }
+  }
+}
+
 // ── RESTAURAREA REALĂ (Adrian, 27 iul: „pune și butoanele de selecție în admin,
 // să se poată selecta") ──────────────────────────────────────────────────────
 // Aduce master EXACT la starea commitului din spatele unui tag de backup, cu un
