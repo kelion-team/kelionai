@@ -71,24 +71,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       client_id: config.google.clientId,
       redirect_uri: config.google.redirectUri,
       response_type: 'code',
-      // DOAR IDENTITATE la login (Adrian, 25 iul — a văzut live ecranul roșu
-      // „Google hasn't verified this app" care sperie clienții). Aceste 3 scope-uri
-      // sunt NON-sensibile → Google NU arată niciun avertisment, orice vizitator se
-      // loghează liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
-      // rămân OPȚIONALE, cerute la nevoie prin „Connect Google" (doar cine le vrea
-      // trece prin ecranul de consimțământ). Singura cale ca loginul să ceară TOTUL
-      // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
-      // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
-      scope: 'openid email profile',
-      // PROCEDURA COMPLETĂ LA LOGIN (Adrian, 26 iul: „nu trebuie automat,
-      // trebuie să facă procedura completă, să întrebe user și pass").
-      // Fără astea, un browser cu sesiune Google activă sărea DIRECT în cont:
-      //  • select_account → Google arată MEREU alegerea contului;
-      //  • max_age=0 → Google cere RE-AUTENTIFICAREA (user + parolă/pin),
-      //    nu se mulțumește cu sesiunea veche.
-      // Cine NU are cont Google: ecranul Google are propriul „Create account" —
-      // își face contul chiar în flux; alt login nu există (aplicația e
-      // Google-only prin decizie).
+      // INTERCONECTARE GOOGLE AUTOMATĂ LA LOGIN (Adrian, 27 iul: „interconectarea
+      // cu Google trebuie să se facă automat la logarea cu emailul Google").
+      // Loginul cere ACUM toate scope-urile grele (Gmail/Calendar/Drive/Tasks/
+      // Contacts/Photos/YouTube) dintr-o dată → skill-urile Google merg imediat
+      // ce intri, fără al doilea pas „Connect Google". `access_type=offline` +
+      // primul consimțământ aduc refresh token-ul (persistat în DB de callback),
+      // deci logările următoare NU mai cer consimțământ — doar alegerea contului.
+      // COMPROMISUL, spus lui Adrian și acceptat (opțiunea 2): până când Google
+      // VERIFICĂ aplicația (proces extern în Cloud Console — pașii în AI-HANDOFF),
+      // prima autorizare arată ecranul „Google hasn't verified this app". După
+      // verificare dispare permanent și rămâne doar automatul curat.
+      scope: FULL_SCOPES,
+      access_type: 'offline',
+      include_granted_scopes: 'true',
+      // select_account = Google arată mereu alegerea contului (procedura completă
+      // cerută de Adrian pe 26 iul); cine NU are cont Google folosește „Create
+      // account" din chiar ecranul Google. max_age=0 = re-autentificare (user+parolă).
       prompt: 'select_account',
       max_age: '0',
       state,
