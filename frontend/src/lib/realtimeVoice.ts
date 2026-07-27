@@ -261,19 +261,46 @@ export async function startRealtimeVoice(
     } catch {
       /* fără robinet de amprentă — vocea merge normal, timbrul rămâne pe STT */
     }
-    for (const track of mic.getTracks()) {
-      pc.addTrack(track, mic)
-      // Dacă pistele de intrare se termină brusc (device scos), semnalăm eroare.
+    // VINDECAREA AUZULUI ÎN LOC (Adrian, 27 iul: „sunt buguri multiple pe auzul
+    // lui"; F12 arăta `input-ended` — pista microfonului MOARE la schimbarea
+    // device-ului/suspendarea browserului). Înainte, un track încheiat omora
+    // TOATĂ sesiunea (stop + eroare + reconectare completă = secunde de surzenie
+    // + un „eșec" numărat spre căderea pe vocea robotică). Acum: RE-CERE
+    // microfonul și înlocuiește pista PE LOC (replaceTrack) — sesiunea WebRTC
+    // rămâne vie, auzul revine în sub o secundă. Doar dacă re-cererea pică
+    // (permisiune retrasă, fără device) declarăm eroarea, ca înainte.
+    const bindMicTrack = (track: MediaStreamTrack, sender: RTCRtpSender): void => {
       track.addEventListener(
         'ended',
         () => {
-          if (!closed) {
-            stop()
-            onState?.('error', 'input-ended')
-          }
+          if (closed) return
+          void navigator.mediaDevices
+            .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+            .then(async (fresh) => {
+              if (closed) {
+                fresh.getTracks().forEach((t) => t.stop())
+                return
+              }
+              const newTrack = fresh.getAudioTracks()[0]
+              if (!newTrack) throw new Error('no_audio_track')
+              await sender.replaceTrack(newTrack)
+              cleanups.push(() => fresh.getTracks().forEach((t) => t.stop()))
+              bindMicTrack(newTrack, sender) // și noua pistă se vindecă la fel
+              console.log('[realtime] microfon reînnoit în loc (input-ended vindecat, sesiunea a rămas vie)')
+            })
+            .catch(() => {
+              if (!closed) {
+                stop()
+                onState?.('error', 'input-ended')
+              }
+            })
         },
         { once: true },
       )
+    }
+    for (const track of mic.getTracks()) {
+      const sender = pc.addTrack(track, mic)
+      bindMicTrack(track, sender)
     }
 
     // 2) Vocea lui Kelion (pista remote) + animarea avatarului din nivelul audio.
