@@ -88,14 +88,9 @@ export const config = {
     // treapta 'work' = ieftin-capabil, implicit pentru ORICE escaladare
     // normală (acțiune reală / dificultate moderată) — nu mai e Fable 5 aici.
     workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'openai/gpt-5-mini').trim(),
-    // Treapta FINALĂ 'top' — rezervată DOAR dificultății extreme (peste
-    // ESCALATE_TOP_AT); nu o alege userul, e plasa de siguranță de sus.
-    // ECONOMIE (Adrian, 27 iul: „cea mai ieftină soluție care respectă
-    // cerințele — toate funcțiile active"): Sonnet 5 ($2/$10 per M) în loc de
-    // Fable 5 ($10/$50 per M) — aceleași unelte+vedere+raționament, −80% cost.
-    // Fable rămâne o comandă de env distanță (OPENROUTER_TOP_MODEL) dacă vreodată
-    // e nevoie de vârful absolut.
-    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'anthropic/claude-sonnet-5').trim(),
+    // Treapta FINALĂ 'top' — Fable 5, rezervat DOAR pentru dificultate extremă
+    // (peste ESCALATE_TOP_AT), nu userul o alege, e plasa de siguranță de sus.
+    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'anthropic/claude-fable-5').trim(),
     // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
     // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
     imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),
