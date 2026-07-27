@@ -3,6 +3,7 @@ import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
+import { systemHealth } from '../services/health.js'
 import { grantUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
@@ -211,6 +212,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
               { name: 'build_software', description: 'Pune un ordin de construcție în coada constructorului (lucrătorul construiește cu build+teste și deschide PR; ownerul dă merge).', input_schema: { type: 'object', properties: { order: { type: 'string' } }, required: ['order'] } },
               { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
+              { name: 'system_health', description: 'Sănătatea proprie: publicare sincronă, rulări roșii, ordine eșuate, erori client, disc, DB, punga creierului. La probleme: enumeră-le ownerului și întreabă dacă să le repari.', input_schema: { type: 'object', properties: {} } },
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
@@ -229,6 +231,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const jobs = await listBuildJobs(8)
             return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, pr: j.prUrl })) })
           }
+          if (tname === 'system_health') return systemHealth()
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
         const answer = introspectionTools.length
