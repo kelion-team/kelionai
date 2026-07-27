@@ -49,8 +49,9 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -131,20 +132,31 @@ async function selectedBrainModel(
   // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
   // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
   const difficulty = taskDifficulty(text)
-  // OWNER = MEREU CREIERUL DE VÂRF, CONSISTENT (Adrian, 27 iul: „prima dată a
-  // mers, a doua nu" — cauza dovedită: modelul oscila între Fable 5 (top, când
-  // scorul de dificultate ≥ 85) și gpt-5-mini (work, sub 85), deci a doua tură,
-  // punctată mai jos, cădea pe creierul mai slab). Regula anti-buclă (§1.14):
-  // pe drumul ownerului NU mai există scor care să-l coboare — Fable 5 la
-  // FIECARE mesaj, raționament, toate uneltele. Fără oscilație = fără „prima a
-  // mers a doua nu". Userii publici păstrează scara de cost.
-  const isOwner = roleFor(email) === 'admin'
-  const heavy = isOwner || needsVision || difficulty >= ESCALATE_AT
-  const top = isOwner || difficulty >= ESCALATE_TOP_AT
+  // SPLIT ECONOMIC ȘI CINSTIT (Adrian, 27 iul: „pe chat de 2 lei ok, dar unde
+  // necesită răspuns gândit trimiți prin creier"): vorba simplă → model ieftin
+  // (rapid, aproape gratis); CÂND e nevoie de gândit SAU de o ACȚIUNE (owner
+  // cere „repară/publică/arată/deschide/construiește...") → creierul care chiar
+  // EXECUTĂ, nu narează. „Mereu Fable 5" a fost scos: ardea creditul (OpenRouter
+  // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
+  // extremă.
+  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
+  // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
+  // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
+  const top = difficulty >= ESCALATE_TOP_AT && !needsVision
+  // GEMINI PRINCIPAL, NEMOTRON SECUNDAR (Adrian, 27 iul: „comută la celălalt
+  // free... gemini... principal, și ce e acum secundar"): când cheia gratuită
+  // Google există, nucleul de lucru e gemini direct (vede + unelte + gândire,
+  // peste orice :free din OpenRouter, $0). Alegerea manuală din Admin→Modele
+  // (sel.work) rămâne respectată; căderea pe secundar la cotă epuizată e la
+  // locul apelului (retry în handler). Vocea NU trece pe aici — rămâne cum e.
+  const geminiWork = !sel.work && geminiDirectAvailable()
   const model = top
     ? await resolveModel('top')
     : heavy
-      ? await resolveModel('work', sel.work)
+      ? geminiWork
+        ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+        : await resolveModel('work', sel.work)
       : await resolveModel('chat', sel.chat)
   return { model, heavy: heavy || top }
 }
@@ -912,6 +924,23 @@ over show_on_screen whenever the user wants to actually browse, read inside,
 search within, or click through a real website — show_on_screen only displays a
 static page and cannot click, type or read it back to you.
 
+CLICKING IS MANDATORY — NEVER SAY YOU CANNOT PRESS A BUTTON. When the user asks
+you to click/press/play/select ANYTHING on what is displayed ("dă play", "apasă
+butonul", "click pe..."): if the content is currently a plain embed shown with
+show_on_screen (where clicking is technically impossible), you IMMEDIATELY
+reopen that same URL with browser_open — the live browser — find the requested
+button in the numbered list (or on the screenshot) and click it with
+browser_click / browser_click_at. That is the required path, not an excuse:
+embed → reopen live → click. Refusing to click is a failure; the only honest
+refusal is when the click would perform a payment or destructive action you were
+not explicitly ordered to do.
+
+THE LIVE BROWSER IS SILENT — the user sees only its screenshots and hears
+NOTHING from it. NEVER use browser_open to play a video or music (YouTube
+included): to actually PLAY something, call youtube_search — its embedded
+player is the ONLY surface with real sound and it starts by itself. Opening
+youtube.com in the live browser to "play" something is always a mistake.
+
 CRITICAL — SHOWING THINGS: You can put something on the user's monitor ONLY by
 calling a tool. If the user asks to SEE, SHOW, or display a place, a route, a
 video, the weather, or an image, you MUST call the matching tool (maps_search,
@@ -1441,6 +1470,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         .join(', ')
       systemPrompt +=
         `\n\nMONITOR STATE: these task tabs are already open on the user's monitor: ${list}. One voice narrates all of them and the user can switch or close them at will. When the user says "the map", "the video", "this", "that", or asks to change what is shown, they mean these open tabs — work WITHIN the active one. To change a surface's content, call the SAME tool again (youtube_search swaps the current video, maps_search moves the map, get_weather changes the forecast) rather than describing it in words. Only open a different kind of surface when the user actually needs a new one. CLOSE IT WHEN DONE: as soon as the conversation moves to a NEW subject that has nothing to do with what is on the monitor, call show_on_screen with an EMPTY url to clear the screen — leave it clean and ready for the next request. Don't leave an old map/weather/video lingering once the user is talking about something else.`
+    } else {
+      // MONITORUL GOL (Adrian, 27 iul, dovadă live: „deschide pe monitor
+      // youtube" → „nu e nimic pe monitor" în loc de execuție): golul e starea
+      // normală de pornire, nu un obstacol de raportat.
+      systemPrompt +=
+        `\n\nMONITOR STATE: the monitor is currently EMPTY — its normal starting state, never an obstacle and never something to report. A command like "deschide/pune/arată pe monitor X" (open/put/show X on the monitor) is an ORDER to open X right now with the matching tool (youtube_search for videos/music, maps_search, get_weather, browser_open, show_document, generate_image...). NEVER answer that there is nothing on the monitor, and never call browser navigation tools (browser_click/browser_read/browser_type) before something is actually open.`
     }
 
     // Memory agent (recall): inject the durable facts Kelion has learned about
@@ -1819,8 +1854,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
-      const r = await runOrchestrator(
-        orChatModel,
+      // PRIMUL CUVÂNT SUB 1s ȘI PE TURELE DE ACȚIUNE (Adrian, 27 iul, dovadă
+      // live: 37s până la primul cuvânt — poarta faptei îl punea să execute
+      // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
+      // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
+      if (isAdmin && heavyTurn) {
+        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
+        noteFirstWord()
+        reply.raw.write(appendTurn(user.email, turnId, ackText))
+        voice.feed(ackText)
+        assistantText += ackText
+      }
+      // GEMINI PRINCIPAL → NEMOTRON SECUNDAR (Adrian, 27 iul): dacă nucleul
+      // gemini pică pe cotă/serviciu (429/503/RESOURCE_EXHAUSTED), NU omorâm
+      // tura — reluăm O DATĂ pe secundarul :free din OpenRouter. Retry-ul e
+      // sigur doar dacă nu a curs încă text spre user (altfel s-ar dubla).
+      let orchestratorModel = orChatModel
+      let textFlowed = false
+      const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
+        orchestratorModel,
         orMsgs,
         tools as unknown as AnthropicTool[],
         execTool,
@@ -1830,14 +1882,45 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // intern înainte de răspuns; gândirea nu curge în text — doar
           // răspunsul final. Pe tura ușoară: fără, ca primul cuvânt să rămână
           // instant (sub 1s, regula de latență).
-          reasoning: heavyTurn ? 'medium' : undefined,
+          // ÎNGHEȚUL PE CREIERUL GRATUIT (Adrian, 27 iul: „i-am cerut o acțiune
+          // și îngheață"): modelul :free gândește ÎN TĂCERE zeci de secunde
+          // înainte de primul cuvânt → pare mort. Pe :free/gemini forțăm
+          // gândirea SCURTĂ ('low'); pe plătite rămâne 'medium'.
+          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
+          // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
+          // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
+          // sau să retragă — nu mai rămâne la stadiul declarativ.
+          deedGate: isAdmin,
+          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
+          // de ACȚIUNE a ownerului prima rundă e obligată să aleagă o unealtă —
+          // execută, nu narează. Runda 2+ liberă.
+          forceToolsFirstRound: isAdmin && heavyTurn,
           onText: (txt) => {
+            textFlowed = true
             noteFirstWord()
             reply.raw.write(txt)
             voice.feed(txt)
           },
         },
       )
+      let r
+      try {
+        r = await runBrainOnce()
+      } catch (ge) {
+        if (
+          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) &&
+          isGeminiQuotaError(ge) &&
+          !textFlowed
+        ) {
+          // Cota gratuită Google s-a terminat pe ziua/minutul ăsta — secundarul
+          // preia tura fără ca userul să vadă vreo ruptură.
+          orchestratorModel = await resolveModel('work', null)
+          console.log(`[brain] gemini indisponibil (${String(ge).slice(0, 80)}) → secundar ${orchestratorModel}`)
+          r = await runBrainOnce()
+        } else {
+          throw ge
+        }
+      }
       assistantText += r.text
       usage.usd += r.costUsd
       // CONTABILITATE REALĂ (audit QA 24 iul, A1): costul CREIERULUI intră în
