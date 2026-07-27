@@ -19,6 +19,13 @@ export interface WorkspaceTask {
   readonly card: SkillCard | null
   readonly text?: string // a readable text deliverable (agent result), rendered as a panel
   readonly html?: string // a complete web page Kelion WROTE, run live in a sandboxed frame ('app')
+  // STAREA REALĂ DE RANDARE (Adrian, 27 iul: „Kelion trebuie să vadă nativ real
+  // ce afișează monitorul faptic, și să repare până apare ce zice că face").
+  // 'loading' = pornit, încă nu s-a confirmat; 'ok' = chiar s-a randat;
+  // 'error' = a picat (fișier inaccesibil, site care refuză încorporarea…).
+  // Randorul din Stage o setează din onLoad/onError; get_monitor o citește, deci
+  // Kelion vede FAPTIC ce e pe ecran, nu doar ce a cerut.
+  readonly status?: 'loading' | 'ok' | 'error'
 }
 
 export interface WorkspaceState {
@@ -32,6 +39,7 @@ export interface WorkspaceState {
   readonly card: SkillCard | null
   readonly text?: string
   readonly html?: string
+  readonly status?: 'loading' | 'ok' | 'error'
 }
 
 const EMPTY: WorkspaceState = { open: false, tasks: [], activeId: '', kind: '', title: '', url: '', card: null }
@@ -54,8 +62,15 @@ function setTasks(tasks: WorkspaceTask[], activeId: string): void {
     card: active ? active.card : null,
     text: active ? active.text : undefined,
     html: active ? active.html : undefined,
+    status: active ? active.status : undefined,
   }
   emit()
+}
+
+// Randorul (Stage) confirmă starea REALĂ a unei suprafețe după onLoad/onError.
+export function setTaskStatus(id: string, status: 'loading' | 'ok' | 'error'): void {
+  const tasks = state.tasks.map((t) => (t.id === id ? { ...t, status } : t))
+  setTasks(tasks, state.activeId)
 }
 
 export function getWorkspace(): WorkspaceState {
@@ -148,19 +163,22 @@ function upsert(task: WorkspaceTask): void {
 
 export function openWorkspace(title: string, url = ''): void {
   const kind = kindForUrl(url)
-  upsert({ id: kind, kind, title, url, card: null })
+  // Arhiva randează un panou de descărcare (mereu ok); restul pornesc 'loading'
+  // și se confirmă din onLoad/onError — așa Kelion vede faptic dacă a apărut.
+  const status = kind === 'archive' ? 'ok' : 'loading'
+  upsert({ id: kind, kind, title, url, card: null, status })
 }
 
 // Open the workspace showing a structured skill card (no iframe).
 export function openWorkspaceCard(title: string, card: SkillCard): void {
   const kind = card.type || 'card'
-  upsert({ id: kind, kind, title, url: '', card })
+  upsert({ id: kind, kind, title, url: '', card, status: 'ok' })
 }
 
 // Open the workspace showing a readable text deliverable (an agent's written
 // result — an email, a translation, findings) that the user can read and copy.
 export function openWorkspaceDoc(title: string, text: string): void {
-  upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text })
+  upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text, status: 'ok' })
 }
 
 // PLAYGROUND DE COD (Adrian, 25 iul: „Kelion trebuie să testeze în browser
@@ -169,7 +187,7 @@ export function openWorkspaceDoc(title: string, text: string): void {
 // sandbox), fără gazdă externă — deci fără X-Frame-Options și fără „pagina nu
 // poate fi afișată aici". Userul o vede rulând și o poate salva (buton pe monitor).
 export function openWorkspaceApp(title: string, html: string): void {
-  upsert({ id: 'app', kind: 'app', title, url: '', card: null, html })
+  upsert({ id: 'app', kind: 'app', title, url: '', card: null, html, status: 'ok' })
 }
 
 // Close the ACTIVE task (back-compat for the single-close / voice-command paths).

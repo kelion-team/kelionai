@@ -224,7 +224,7 @@ export function realtimeTools(
       type: 'function',
       name: 'get_monitor',
       description:
-        "Read what is displayed on YOUR MONITOR right now (the screen surface: documents, web pages, maps, videos, apps you opened). Call this when the user asks what's on the monitor/screen ('ce e pe monitor?', 'ce mi-ai afișat?') or refers to the shown content. This is NOT the camera — the physical world goes through look.",
+        "See what is FACTUALLY on YOUR MONITOR right now — the surface AND its real render state (stareReala: 'ok' rendered, 'error' failed, 'loading'). Call it when the user asks what's on screen, AND right after you show something to confirm it truly appeared. If stareReala is 'error', do NOT say you showed it — try another way and repeat until 'ok'. This is NOT the camera — the physical world goes through look.",
       parameters: { type: 'object', properties: {} },
     },
     {

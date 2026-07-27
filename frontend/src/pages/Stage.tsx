@@ -21,6 +21,7 @@ import {
   normalizeEmbedUrl,
   isEmbeddable,
   setMonitorWorking,
+  setTaskStatus,
 } from '../lib/workspace'
 import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
@@ -48,7 +49,7 @@ function downloadContent(name: string, content: string, mime: string): void {
 // Vizor de cod/text pe monitor (Adrian, 27 iul): aduce conținutul fișierului
 // (cod, json, csv, log…) și-l afișează citibil, monospațiat. Fetch simplu; la
 // eșec (cross-origin / fișier privat) oferă linkul de deschidere.
-function MonitorTextFile({ url, zoom }: { url: string; zoom: number }) {
+function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
   const [text, setText] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -58,13 +59,21 @@ function MonitorTextFile({ url, zoom }: { url: string; zoom: number }) {
     fetch(url)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
       .then((t) => {
-        if (alive) setText(t.slice(0, 500_000))
+        if (alive) {
+          setText(t.slice(0, 500_000))
+          setTaskStatus(taskId, 'ok')
+        }
       })
-      .catch(() => alive && setFailed(true))
+      .catch(() => {
+        if (alive) {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }
+      })
     return () => {
       alive = false
     }
-  }, [url])
+  }, [url, taskId])
   if (failed)
     return (
       <div className="workspace-blocked">
@@ -599,20 +608,46 @@ export default function Stage({ user }: { user: User }) {
               <CardView card={ws.card} />
             ) : ws.url && ws.kind === 'image' ? (
               // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
+              // onLoad/onError → starea reală, ca Kelion s-o vadă faptic.
               <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
-                <img src={ws.url} alt={ws.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                <img
+                  src={ws.url}
+                  alt={ws.title}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
               </div>
             ) : ws.url && ws.kind === 'video' ? (
               <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                <video src={ws.url} controls style={{ maxWidth: '100%', maxHeight: '100%' }} />
+                <video
+                  src={ws.url}
+                  controls
+                  style={{ maxWidth: '100%', maxHeight: '100%' }}
+                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
               </div>
             ) : ws.url && ws.kind === 'audio' ? (
               <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-                <audio src={ws.url} controls style={{ width: '100%', maxWidth: 520 }} />
+                <audio
+                  src={ws.url}
+                  controls
+                  style={{ width: '100%', maxWidth: 520 }}
+                  onLoadedData={() => setTaskStatus(ws.activeId, 'ok')}
+                  onError={() => setTaskStatus(ws.activeId, 'error')}
+                />
               </div>
             ) : ws.url && ws.kind === 'pdf' ? (
               // PDF: vizorul nativ al browserului, în cadru.
-              <iframe title={ws.title} src={ws.url} className="workspace-frame" style={{ background: '#fff' }} />
+              <iframe
+                title={ws.title}
+                src={ws.url}
+                className="workspace-frame"
+                style={{ background: '#fff' }}
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
+              />
             ) : ws.url && ws.kind === 'office' ? (
               // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
               // să fie la un URL public — cele servite de kelionai.app sunt).
@@ -621,10 +656,12 @@ export default function Stage({ user }: { user: User }) {
                 src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(ws.url)}`}
                 className="workspace-frame"
                 style={{ background: '#fff' }}
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
               />
             ) : ws.url && ws.kind === 'textfile' ? (
               // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
-              <MonitorTextFile url={ws.url} zoom={monZoom} />
+              <MonitorTextFile url={ws.url} zoom={monZoom} taskId={ws.activeId} />
             ) : ws.url && ws.kind === 'archive' ? (
               // Arhive: browserul nu le poate deschide în pagină — oferim
               // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
@@ -638,6 +675,8 @@ export default function Stage({ user }: { user: User }) {
                 src={normalizeEmbedUrl(ws.url)}
                 className="workspace-frame"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                onLoad={() => setTaskStatus(ws.activeId, 'ok')}
+                onError={() => setTaskStatus(ws.activeId, 'error')}
                 // ONE voice — Kelion's. Surfaces stay SILENT (no autoplay audio):
                 // only a YouTube clip the user chose to watch may play sound. The
                 // route map gets geolocation (no audio) so it can follow the car.
