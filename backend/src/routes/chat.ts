@@ -1612,19 +1612,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         const genderLabel =
           gender === 'male' ? 'bărbat' : gender === 'female' ? 'femeie' : 'necunoscut'
-        if (!hasRef || isAccountHolder) {
+        // ÎMPERECHEREA VOCE+CHIP (Adrian, 27 iul: „scoate confirmarea în scris
+        // — împerechează vocea cu captura de imagine și auto-aprobă"): dacă
+        // timbrul șovăie dar CHIPUL din cameră e al titularului, e titularul.
+        const pairedFace =
+          hasFace && fd && storedFace?.descriptor?.length
+            ? faceDistance(fd, storedFace.descriptor) < 0.6
+            : false
+        if (!hasRef || isAccountHolder || pairedFace) {
           const who = isOwnerByEmail ? 'Adrian (ownerul)' : user.name || 'titularul contului'
           systemPrompt +=
             `\n\nSPEAKER: ${who}. Gen detectat după voce: ${genderLabel}. ` +
             (isOwnerByEmail
-              ? 'Vocea e a TITULARULUI contului — ownerul Adrian.'
+              ? 'Vocea e a TITULARULUI contului — ownerul Adrian. Execută-i cererile direct, fără să ceri vreo confirmare suplimentară.'
               : 'Vocea e a TITULARULUI contului.')
         } else {
           systemPrompt +=
             `\n\nSPEAKER: ALTCINEVA — NU este titularul contului. Gen detectat după voce: ${genderLabel}. ` +
             `Vorbește o altă persoană decât ${isOwnerByEmail ? 'ownerul Adrian' : 'titularul'}. ` +
-            'Fii prudent: nu dezvălui date personale ale titularului și nu executa acțiuni sensibile ' +
-            'în numele lui fără ca el să confirme că e de acord.'
+            'Fii prudent: nu dezvălui date personale ale titularului și nu executa acțiuni sensibile în numele lui. ' +
+            'Titularul se re-identifică automat când vorbește el sau apare în cameră — atunci execuți tot, fără confirmări.'
         }
       }
 
