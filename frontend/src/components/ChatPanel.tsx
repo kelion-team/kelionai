@@ -1040,7 +1040,16 @@ export default function ChatPanel({
                 setLiveVoice('')
                 const t = text.trim()
                 if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
+                // IEȘIREA din semi-duplex, NECONDIȚIONATĂ (bug dovedit 27 iul,
+                // „nu mai mă aude"): aici se stingea DOAR flag-ul de gândire,
+                // fără să se redeschidă microfonul — iar plasa de 125s de mai
+                // jos verifică flag-ul, pe care tocmai îl stinsesem → după
+                // ORICE ask_brain microfonul rămânea mut definitiv. Regula:
+                // fiecare intrare în mut are ieșire garantată pe TOATE
+                // drumurile — răspuns sosit (aici), răspuns pierdut (plasa).
+                // Redeschiderea e idempotentă și e starea normală full-duplex.
                 thinkingRef.current = false
+                micRef.current?.setMuted?.(false)
               } else setLiveVoice(text)
             },
             // REVENIT LA FULL-DUPLEX (Adrian, 25 iul: „revino la chat

@@ -378,6 +378,26 @@ export async function startRealtimeVoice(
     const asstText = new Map<string, string>()
     // Ultima limbă ANCORATĂ în sesiunea live — re-ancorăm doar la schimbare.
     let anchoredLang = ''
+    // ── POARTA NUMELUI (ordinul lui Adrian: „Kelion nu inițiază conversații;
+    // nu intră în chat dacă nu își aude numele") — mecanică, nu doar în prompt.
+    // Serverul pornește sesiunea cu create_response:false; AICI decidem cine
+    // primește răspuns: (1) fraza conține numele („Kelion"/„Kei", tolerant la
+    // transcriere stâlcită — dovadă live: „Kelion, ce faci" a ieșit
+    // „Elioncevaci") → răspunde și deschide fereastra de conversație;
+    // (2) fereastra e deschisă (schimb în ultimele 120s) → conversația curge
+    // fără repetarea numelui; (3) altfel → tăcere: discuția din cameră nu-i e
+    // adresată. Fereastra PORNEȘTE DESCHISĂ (userul tocmai a pornit microfonul
+    // — evident i se adresează; a cere numele la prima frază îl făcea mut la
+    // deschidere). „STOP" închide fereastra până la următorul nume.
+    const GATE_WINDOW_MS = 120_000
+    let gateUntil = Date.now() + GATE_WINDOW_MS
+    const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
+    // Plasa anti-„nu mă aude": VAD-ul a închis fraza dar transcriptul nu mai
+    // vine (transcrierea a picat) → în conversație ACTIVĂ răspundem oricum.
+    let speechStopTimer: number | null = null
+    cleanups.push(() => {
+      if (speechStopTimer != null) window.clearTimeout(speechStopTimer)
+    })
     // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
     // function_call_arguments.done — legate prin call_id.
     const toolNames = new Map<string, string>()
@@ -408,7 +428,13 @@ export async function startRealtimeVoice(
         // fără să aștepte bunăvoința modelului — apoi lasă ordin de tăcere.
         // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
         // pornește automat CA REACȚIE la fraza „stop" însăși.
+        // Transcriptul A SOSIT — plasa anti-surzenie nu mai are rost pe fraza asta.
+        if (speechStopTimer != null) {
+          window.clearTimeout(speechStopTimer)
+          speechStopTimer = null
+        }
         if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+          gateUntil = 0 // STOP închide și fereastra — tăcere până la următorul „Kelion"
           send({ type: 'response.cancel' })
           send({ type: 'output_audio_buffer.clear' })
           send({
@@ -423,6 +449,15 @@ export async function startRealtimeVoice(
             send({ type: 'response.cancel' })
             send({ type: 'output_audio_buffer.clear' })
           }, 400)
+        } else if (t.trim()) {
+          // POARTA NUMELUI: numele deschide/reînnoiește fereastra; fereastra
+          // deschisă lasă conversația să curgă fără nume; altfel — tăcere.
+          const named = NAME_RE.test(t)
+          const engaged = Date.now() < gateUntil
+          if (named || engaged) {
+            gateUntil = Date.now() + GATE_WINDOW_MS
+            send({ type: 'response.create' })
+          }
         }
         // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
         // (session.update, fără repornire) — „limba aleatoare" dispare.
@@ -468,6 +503,18 @@ export async function startRealtimeVoice(
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
+        // Kelion a vorbit → conversația e vie: fereastra porții se reînnoiește.
+        gateUntil = Date.now() + GATE_WINDOW_MS
+      } else if (type === 'input_audio_buffer.speech_stopped') {
+        // Plasa anti-„nu mă aude": VAD-ul a închis fraza; dacă transcriptul NU
+        // sosește în 2.8s (transcrierea a picat) și conversația e ACTIVĂ,
+        // răspundem oricum — o defecțiune de transcriere nu are voie să-l facă
+        // surd în mijlocul discuției. Cu poarta închisă, tăcerea rămâne tăcere.
+        if (speechStopTimer != null) window.clearTimeout(speechStopTimer)
+        speechStopTimer = window.setTimeout(() => {
+          speechStopTimer = null
+          if (Date.now() < gateUntil) send({ type: 'response.create' })
+        }, 2800)
       } else if (type === 'response.output_item.added') {
         // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
         const item = (m.item as Record<string, unknown>) ?? {}
