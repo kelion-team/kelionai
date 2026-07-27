@@ -249,6 +249,7 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **27 IUL (valul 24) — propunere RESPINSĂ de Adrian**: treapta 'top' → Sonnet 5 în loc de Fable 5 (−80% cost, aceleași funcții tools+vedere; PR #438). Adrian a zis „renunți 438" — PR închis nemergeuit, commit revertat. `topDefault` rămâne `anthropic/claude-fable-5`. Nu re-propune aceeași schimbare fără cerere explicită nouă.
 - 🗓️ **27 IUL (valul 23) — „1,2,3": Kelion EXECUTĂ, nu narează (Adrian, repetat: „când Kelion zice că face ceva, trebuie să și facă; rămâne doar declarativ"):**
   1. **POARTA FAPTEI (`deedGate`)** în `services/orchestrator.ts`: pe turele adminului, dacă modelul AFIRMĂ o faptă (`am trimis/salvat/reparat/publicat/deschis...` — `DEED_CLAIM_RE`) DAR nu a chemat NICIO unealtă în toată tura, e oprit mecanic O DATĂ și obligat: „ori cheamă ACUM unealta care execută, ori retrage sincer afirmația". Nu mai poate minți că a făcut ceva ce n-a făcut.
   2. **CREIERUL FORȚAT SĂ CHEME UNELTE (`forceToolsFirstRound`)**: pe tura de ACȚIUNE a ownerului (`heavyTurn` = `hasActionIntent`), prima rundă trece prin `tool_choice:'required'` (opțiune nouă în `openrouter.ts`, ambele variante) — modelul TREBUIE să aleagă o unealtă, deci execută în loc să nareze; rundele 2+ revin la `'auto'` ca să nu bucleze.
