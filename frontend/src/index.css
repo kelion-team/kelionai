@@ -3903,3 +3903,18 @@ a.card-item:hover {
     animation: none;
   }
 }
+
+/* Cipul de viteză reală — dovada „primul cuvânt sub 1s", discret lângă chat. */
+.latency-chip {
+  position: absolute;
+  top: -26px;
+  right: 10px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #7ee2a8;
+  background: rgba(10, 16, 28, 0.75);
+  border: 1px solid rgba(126, 226, 168, 0.35);
+  border-radius: 999px;
+  padding: 2px 9px;
+  pointer-events: none;
+}

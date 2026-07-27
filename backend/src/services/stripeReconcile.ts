@@ -46,7 +46,9 @@ export async function reconcileStripePayments(): Promise<ReconcileResult> {
     if (s.metadata?.owner_deposit === '1') continue // depunere owner — fără credite
     const email = s.metadata?.email ?? s.customer_details?.email ?? ''
     const amount = (s.amount_total ?? 0) / 100
-    const ref = s.payment_intent ?? s.id ?? ''
+    // FĂRĂ fallback pe cs_ (audit 27 iul): cheiat pe cs_ aici + pe pi_ la
+    // secțiunea 2 a ACELEIAȘI rulări = două creditări pentru o plată.
+    const ref = s.payment_intent ?? ''
     if (!email || !(amount > 0) || !ref) continue
     // RAMBURSATĂ = NU se creditează (incident real: £25 rambursată dar creditată).
     if (await hasRefund(ref)) continue

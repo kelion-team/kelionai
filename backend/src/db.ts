@@ -1329,8 +1329,11 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
       `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
       [email, -amount, meta],
     )
-  } catch {
-    // Never break the chat because metering failed.
+  } catch (e) {
+    // Nu rupem chatul dacă taxarea pică — dar NICIODATĂ în tăcere (audit 27
+    // iul: exact catch-ul ăsta gol a mai ascuns o dată „userii consumă fără să
+    // fie taxați"). Eroarea intră în jurnal → server_logs → auditul din admin.
+    console.error(`[bani] debitWallet EȘUAT pentru ${email}, suma ${amount}: ${String(e).slice(0, 200)}`)
   }
 }
 
@@ -1468,8 +1471,13 @@ export async function updateTransactionStatus(
 ): Promise<void> {
   if (!dbEnabled() || !stripePaymentIntentId) return
   try {
+    // ORDINEA WEBHOOK-URILOR NU E GARANTATĂ (audit 27 iul): un
+    // `payment_failed` livrat DUPĂ `succeeded` marca pe veci o plată REUȘITĂ
+    // ca „failed" în istoricul userului și în tabul de tranzacții. O stare
+    // finală bună nu mai poate fi retrogradată.
     await getPool().query(
-      'UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now()) WHERE stripe_payment_intent_id = $1',
+      `UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now())
+       WHERE stripe_payment_intent_id = $1 AND status NOT IN ('succeeded', 'paid', 'refunded')`,
       [stripePaymentIntentId, status],
     )
   } catch {
