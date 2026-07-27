@@ -43,7 +43,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
-import { setRealLatency } from '../lib/latency'
+import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
@@ -1705,6 +1705,8 @@ export default function ChatPanel({
   // case the chat collapses to the slim black bar above the composer so nothing
   // covers the monitor (Adrian's rule). `working` follows the live-work console.
   const monitorBusy = useSyncExternalStore(subscribeWorkspace, isMonitorWorking)
+  // Latența REALĂ măsurată în browser — afișată ca dovadă, nu aruncată.
+  const realLatency = useSyncExternalStore(subscribeRealLatency, getRealLatency)
   const monitorMode = wsOpen || monitorBusy
   // Show the CURRENT exchange in writing: the user's request (so he sees it
   // arrived correctly the instant he types) AND Kelion's reply, which updates
@@ -1743,6 +1745,14 @@ export default function ChatPanel({
         </div>
       )}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
+      {/* VITEZA REALĂ (auditul 27 iul: latența se măsura la fiecare tură și se
+          ARUNCA — cititorii nu erau chemați de nimeni). Dovada regulii „primul
+          cuvânt sub 1s", discretă, doar proaspătă (sub 2 min de la măsurare). */}
+      {realLatency && Date.now() - realLatency.at < 120_000 && (
+        <span className="latency-chip" title="trimis → primul cuvânt / răspuns complet">
+          ⚡ {(realLatency.firstMs / 1000).toFixed(1)}s · {(realLatency.totalMs / 1000).toFixed(1)}s
+        </span>
+      )}
       {isAdmin && scenarioOpen && (
         <div className="scenario-panel">
           <div className="scenario-head">

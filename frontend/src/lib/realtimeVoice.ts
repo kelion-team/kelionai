@@ -403,6 +403,24 @@ export async function startRealtimeVoice(
     // Textul parțial pe id-uri, ca să salvăm turele complete în istoric.
     const userText = new Map<string, string>()
     const asstText = new Map<string, string>()
+    // ── POARTA NUMELUI, MECANICĂ (Adrian, 27 iul: „nu intră în chat dacă nu
+    // își aude numele — e deja făcut dar nu merge") ─────────────────────────
+    // Serverul a oprit răspunsul automat (create_response:false); AICI se
+    // decide cine primește răspuns: (1) fraza conține numele („Kelion"/„Kei",
+    // tolerant la variații de transcriere) → răspunde și DESCHIDE fereastra de
+    // conversație; (2) fereastra e deschisă (schimb recent) → conversația curge
+    // liber, fără să repeți numele — exact ce lipsea porții vechi din 24 iul,
+    // care cerea numele la FIECARE frază și părea surdă; (3) altfel → tăcere:
+    // discuția din cameră nu-i e adresată. „STOP" închide fereastra.
+    const GATE_WINDOW_MS = 120_000
+    let gateUntil = 0
+    const NAME_RE = /\b[ck]h?el[iy]?[oa]ne?\b|\bkelion\b|\bkei\b/i
+    // Plasa anti-„nu mă aude": dacă VAD-ul a închis fraza dar transcriptul nu
+    // mai vine (transcrierea a picat), în conversație ACTIVĂ răspundem oricum.
+    let speechStopTimer: number | null = null
+    cleanups.push(() => {
+      if (speechStopTimer != null) clearTimeout(speechStopTimer)
+    })
     // Ultima limbă ANCORATĂ în sesiunea live — re-ancorăm doar la schimbare.
     let anchoredLang = ''
     // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
@@ -429,6 +447,11 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? userText.get(itemId) ?? '')
         userText.delete(itemId)
         onUserTranscript?.(t, true)
+        // Transcriptul a sosit — plasa pe „transcript lipsă" nu mai e necesară.
+        if (speechStopTimer != null) {
+          clearTimeout(speechStopTimer)
+          speechStopTimer = null
+        }
         // COMANDA „STOP" (Adrian, 27 iul: „kelion nu ascultă comanda stop"):
         // rostită SINGURĂ („stop", „taci", „gata", „oprește-te"...), taie PE
         // LOC și generarea și sunetul deja produs — determinist, în client,
@@ -436,6 +459,7 @@ export async function startRealtimeVoice(
         // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
         // pornește automat CA REACȚIE la fraza „stop" însăși.
         if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+          gateUntil = 0 // STOP închide și fereastra — până la următorul „Kelion"
           send({ type: 'response.cancel' })
           send({ type: 'output_audio_buffer.clear' })
           send({
@@ -450,6 +474,16 @@ export async function startRealtimeVoice(
             send({ type: 'response.cancel' })
             send({ type: 'output_audio_buffer.clear' })
           }, 400)
+        } else if (t.trim()) {
+          // POARTA NUMELUI: cine primește răspuns. Numele deschide/reînnoiește
+          // fereastra; fereastra deschisă lasă conversația să curgă fără nume;
+          // altfel — tăcere (discuția nu-i e adresată; numele îl recheamă).
+          const named = NAME_RE.test(t)
+          const engaged = Date.now() < gateUntil
+          if (named || engaged) {
+            gateUntil = Date.now() + GATE_WINDOW_MS
+            send({ type: 'response.create' })
+          }
         }
         // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
         // (session.update, fără repornire) — „limba aleatoare" dispare.
@@ -495,6 +529,19 @@ export async function startRealtimeVoice(
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
+        // Kelion a vorbit → conversația e vie: fereastra porții se reînnoiește.
+        gateUntil = Date.now() + GATE_WINDOW_MS
+      } else if (type === 'input_audio_buffer.speech_stopped') {
+        // Plasa anti-„nu mă aude" (cauza scoaterii porții vechi, 24 iul): VAD-ul
+        // a închis fraza; dacă transcriptul NU sosește în 2.8s (transcrierea a
+        // picat) și conversația e ACTIVĂ, răspundem oricum — o defecțiune de
+        // transcriere nu are voie să-l facă surd în mijlocul discuției. În
+        // afara conversației (poarta închisă), tăcerea rămâne tăcere.
+        if (speechStopTimer != null) clearTimeout(speechStopTimer)
+        speechStopTimer = window.setTimeout(() => {
+          speechStopTimer = null
+          if (Date.now() < gateUntil) send({ type: 'response.create' })
+        }, 2800)
       } else if (type === 'response.output_item.added') {
         // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
         const item = (m.item as Record<string, unknown>) ?? {}

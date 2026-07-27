@@ -76,6 +76,7 @@ import {
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
+import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -1706,7 +1707,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
-    const isAdmin = user.role === 'admin'
+    // LACĂTUL ADMIN ACOPERĂ ȘI UNELTELE DIN CHAT (auditul de securitate, 27
+    // iul): gate-ul global păzea doar /api/admin/*, dar uneltele DISTRUCTIVE
+    // (repo_merge_pr, db_query, run_runbook, build_software...) trăiesc în
+    // /api/chat — un cookie de sesiune furat le folosea fără al 2-lea factor.
+    // Odată ARMAT lacătul, sesiunea nedeblocată vorbește cu Kelion ca un user
+    // obișnuit, fără uneltele de admin.
+    const isAdmin = user.role === 'admin' && (!(await isArmed()) || hasUnlock(req, user.email))
 
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
@@ -1944,6 +1951,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
       console.error('[CHAT ERROR]', errMsg)
+      // BANII NU SE PIERD LA EROARE (audit 27 iul): uneltele deja rulate în
+      // tura asta (căutări, imagini, ask_brain) au COSTAT — return-ul de aici
+      // sărea peste debit și userul consuma pe gratis, repetabil.
+      if (usage.usd > 0) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
       return
     }
 
