@@ -127,10 +127,10 @@ export default function AdminPanel({
   initialTab,
 }: {
   readonly onClose: () => void
-  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
+  readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
 }) {
   const [tab, setTab] = useState<
-    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'
+    'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'
   >(initialTab ?? 'finance')
   // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
   const [gestOff, setGestOff] = useState<string[]>([])
@@ -175,6 +175,21 @@ export default function AdminPanel({
   const [stores, setStores] = useState<StoresData | null>(null)
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  // CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi
+  // cere admin"): ordine noi + coada cu starea lor (lucrătorul de pe VPS le
+  // execută și deschide PR-uri; merge-ul e al lui Adrian).
+  interface BuildJobRow {
+    id: number
+    status: 'queued' | 'running' | 'done' | 'failed'
+    orderText: string
+    branch: string | null
+    prUrl: string | null
+    tokens: number
+    updatedAt: string
+  }
+  const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
+  const [buildOrder, setBuildOrder] = useState('')
+  const [buildMsg, setBuildMsg] = useState('')
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
   // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
   // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
@@ -346,6 +361,44 @@ export default function AdminPanel({
     const id = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(id)
   }, [tab])
+
+  // Tab „Constructor" deschis → coada ordinelor, reîmprospătată la 10s.
+  useEffect(() => {
+    if (tab !== 'constructor') return
+    const load = (): void => {
+      fetch('/api/admin/constructor', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { jobs?: BuildJobRow[] } | null) => {
+          if (j?.jobs) setBuildJobs(j.jobs)
+        })
+        .catch(() => {})
+    }
+    load()
+    const id = window.setInterval(load, 10_000)
+    return () => window.clearInterval(id)
+  }, [tab])
+
+  const sendBuildOrder = (): void => {
+    const order = buildOrder.trim()
+    if (order.length < 8) {
+      setBuildMsg('Scrie ordinul complet (ce construiește, unde, cum verifici).')
+      return
+    }
+    void fetch('/api/admin/constructor', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ order }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { id?: number } | null) => {
+        if (j?.id) {
+          setBuildOrder('')
+          setBuildMsg(`Ordin #${j.id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`)
+        } else setBuildMsg('Nu s-a putut trimite — reîncearcă.')
+      })
+      .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
+  }
 
   // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
   useEffect(() => {
@@ -530,6 +583,13 @@ export default function AdminPanel({
               }}
             >
               Tokenuri
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${tab === 'constructor' ? 'sel' : ''}`}
+              onClick={() => setTab('constructor')}
+            >
+              Constructor
             </button>
           </div>
           <button type="button" className="ghost" onClick={onClose}>
@@ -1093,6 +1153,60 @@ export default function AdminPanel({
                 Odată armat: intrarea în admin cere vocea ta recunoscută în sesiune sau secretul
                 tastat. Vocea străină nu poate deschide panoul, chiar logată pe contul tău.
               </div>
+            </div>
+          </section>
+        )}
+        {tab === 'constructor' && (
+          <section className="admin-finance">
+            <div className="fin-breakdown">
+              <div className="fin-breakdown-head">
+                Constructorul — dai ordinul, Kelion construiește pe server (build + teste), deschide
+                PR-ul, iar merge-ul îl dai tu. Poți ordona și prin voce/chat: „Kelion, construiește…".
+              </div>
+              <form
+                className="fin-row"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  sendBuildOrder()
+                }}
+              >
+                <input
+                  value={buildOrder}
+                  onChange={(e) => setBuildOrder(e.target.value)}
+                  placeholder="Ordinul de construcție: ce, unde, cum se verifică"
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button type="submit" className="ghost">
+                  Trimite ordinul
+                </button>
+              </form>
+              {buildMsg && <div className="chat-hint">{buildMsg}</div>}
+            </div>
+            <div className="fin-breakdown" style={{ marginTop: 12 }}>
+              <div className="fin-breakdown-head">Coada ordinelor</div>
+              {buildJobs.length === 0 && <div className="chat-hint">Niciun ordin încă.</div>}
+              {buildJobs.map((j) => (
+                <div className="fin-row" key={j.id}>
+                  <span>
+                    <strong>#{j.id}</strong>{' '}
+                    <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
+                      {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'GATA' : 'eșuat'}
+                    </span>{' '}
+                    {j.orderText.slice(0, 90)}
+                    {j.orderText.length > 90 ? '…' : ''}
+                  </span>
+                  <span>
+                    {j.prUrl && (
+                      <a href={j.prUrl} target="_blank" rel="noreferrer">
+                        PR ↗
+                      </a>
+                    )}
+                    {j.tokens > 0 && ` · ${Math.round(j.tokens / 1000)}k tok`}
+                    {' · '}
+                    {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
             </div>
           </section>
         )}

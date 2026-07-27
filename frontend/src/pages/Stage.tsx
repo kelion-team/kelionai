@@ -66,7 +66,7 @@ export default function Stage({ user }: { user: User }) {
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'>('finance')
+  const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor'>('finance')
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde, nici
   // butonul admin nu trebuie să se activeze"). armed = secretul e setat (în
   // Admin→Amprente vocale); unlocked = amprenta vocală s-a potrivit în sesiunea
@@ -79,6 +79,27 @@ export default function Stage({ user }: { user: User }) {
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockCode, setUnlockCode] = useState('')
   const [unlockErr, setUnlockErr] = useState('')
+  // „Salvează" pe documentele de pe monitor (Adrian, 27 iul: „butonul salvează
+  // nu e funcțional" — descărca tăcut un fișier, fără urmă în Kelion). Acum:
+  // documentul intră în STOCAREA PERMANENTĂ (notes, DB — Kelion îl regăsește
+  // cu uneltele lui) + descărcare locală + confirmare vizibilă pe buton.
+  const [docSaved, setDocSaved] = useState(false)
+  const saveDocToKelion = (title: string, content: string, fileName: string, mime: string): void => {
+    downloadContent(fileName, content, mime)
+    void fetch('/api/notes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ title, content }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          setDocSaved(true)
+          window.setTimeout(() => setDocSaved(false), 3000)
+        }
+      })
+      .catch(() => {})
+  }
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -188,7 +209,7 @@ export default function Stage({ user }: { user: User }) {
             // Secțiune VALIDATĂ (audit 24 iul): un string liber de la model
             // („bani", „finanțe") seta un tab inexistent → panou gol. Doar
             // secțiunile reale trec; altfel rămâne tabul curent.
-            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'] as const
+            const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
             openAdmin()
@@ -505,10 +526,10 @@ export default function Stage({ user }: { user: User }) {
                 <button
                   type="button"
                   className="doc-copy"
-                  onClick={() => downloadContent(safeFileName(ws.title, 'html'), ws.html ?? '', 'text/html')}
-                  title="Salvează pagina (.html)"
+                  onClick={() => saveDocToKelion(ws.title, ws.html ?? '', safeFileName(ws.title, 'html'), 'text/html')}
+                  title="Salvează în memoria lui Kelion + descarcă (.html)"
                 >
-                  Salvează
+                  {docSaved ? 'Salvat ✓' : 'Salvează'}
                 </button>
                 <iframe
                   title={ws.title}
@@ -531,10 +552,10 @@ export default function Stage({ user }: { user: User }) {
                   type="button"
                   className="doc-copy"
                   style={{ right: '6.5rem' }}
-                  onClick={() => downloadContent(safeFileName(ws.title, 'txt'), ws.text ?? '', 'text/plain')}
-                  title="Salvează (.txt)"
+                  onClick={() => saveDocToKelion(ws.title, ws.text ?? '', safeFileName(ws.title, 'txt'), 'text/plain')}
+                  title="Salvează în memoria lui Kelion + descarcă (.txt)"
                 >
-                  Salvează
+                  {docSaved ? 'Salvat ✓' : 'Salvează'}
                 </button>
                 <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{ws.text}</pre>
               </div>

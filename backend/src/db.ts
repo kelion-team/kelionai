@@ -320,6 +320,25 @@ export async function initDb(): Promise<void> {
       content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft
+    -- îi cere admin"). Coada ordinelor de construcție: Kelion (sau adminul din
+    -- panou) pune ordinul aici; lucrătorul de pe VPS (cron, job-uri scurte, NU
+    -- demoni) îl ia, construiește în atelier (clonă separată), rulează build +
+    -- teste și deschide PR-ul. Merge-ul rămâne la Adrian (regula lui, 27 iul).
+    CREATE TABLE IF NOT EXISTS build_jobs (
+      id BIGSERIAL PRIMARY KEY,
+      ordered_by TEXT NOT NULL,
+      order_text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      attempts INT NOT NULL DEFAULT 0,
+      branch TEXT,
+      pr_url TEXT,
+      tokens BIGINT NOT NULL DEFAULT 0,
+      log TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_build_jobs_status ON build_jobs (status, created_at);
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -2986,5 +3005,163 @@ export async function listFaceprints(limit = 200): Promise<FaceprintRow[]> {
     return r.rows.map(rowToFaceprint)
   } catch {
     return []
+  }
+}
+
+// ── CONSTRUCTORUL — coada ordinelor de construcție (Adrian, 27 iul) ─────────
+export interface BuildJob {
+  id: number
+  orderedBy: string
+  orderText: string
+  status: 'queued' | 'running' | 'done' | 'failed'
+  attempts: number
+  branch: string | null
+  prUrl: string | null
+  tokens: number
+  log: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface BuildJobDbRow {
+  id: string | number
+  ordered_by: string
+  order_text: string
+  status: string
+  attempts: number
+  branch: string | null
+  pr_url: string | null
+  tokens: string | number
+  log: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+function rowToBuildJob(r: BuildJobDbRow): BuildJob {
+  return {
+    id: Number(r.id),
+    orderedBy: r.ordered_by,
+    orderText: r.order_text,
+    status: (['queued', 'running', 'done', 'failed'].includes(r.status) ? r.status : 'failed') as BuildJob['status'],
+    attempts: r.attempts,
+    branch: r.branch,
+    prUrl: r.pr_url,
+    tokens: Number(r.tokens),
+    log: r.log,
+    createdAt: r.created_at.toISOString(),
+    updatedAt: r.updated_at.toISOString(),
+  }
+}
+
+export async function createBuildJob(orderedBy: string, orderText: string): Promise<number> {
+  if (!dbEnabled()) return 0
+  const r = await getPool().query<{ id: string | number }>(
+    'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
+    [orderedBy.toLowerCase(), orderText],
+  )
+  return Number(r.rows[0]?.id ?? 0)
+}
+
+// Lucrătorul ia UN ordin: cel mai vechi „queued", sau un „running" înțepenit
+// (>40 min — agentul a fost omorât de timeout). Peste 2 încercări → failed,
+// ca un ordin imposibil să nu blocheze coada la nesfârșit.
+export async function claimNextBuildJob(): Promise<BuildJob | null> {
+  if (!dbEnabled()) return null
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandonat: 3 încercări epuizate]', updated_at = now()
+       WHERE status='running' AND updated_at < now() - interval '40 minutes' AND attempts >= 3`,
+    )
+    const r = await client.query<BuildJobDbRow>(
+      `UPDATE build_jobs SET status='running', attempts = attempts + 1, updated_at = now()
+       WHERE id = (
+         SELECT id FROM build_jobs
+         WHERE status='queued' OR (status='running' AND updated_at < now() - interval '40 minutes')
+         ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+       )
+       RETURNING *`,
+    )
+    await client.query('COMMIT')
+    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
+  } catch {
+    await client.query('ROLLBACK').catch(() => {})
+    return null
+  } finally {
+    client.release()
+  }
+}
+
+export async function reportBuildJob(
+  id: number,
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string },
+): Promise<void> {
+  if (!dbEnabled()) return
+  await getPool().query(
+    `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
+       tokens = tokens + $5, log = $6, updated_at = now() WHERE id = $1`,
+    [id, fields.status, fields.branch ?? null, fields.prUrl ?? null, fields.tokens ?? 0, (fields.log ?? '').slice(-20000) || null],
+  )
+}
+
+export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    return r.rows.map(rowToBuildJob)
+  } catch {
+    return []
+  }
+}
+
+// ── OCHII LUI KELION PE STOCAREA PERMANENTĂ (Adrian, 27 iul: „acces la orice
+// bază de date a aplicației") — schema completă + SQL direct, pentru uneltele
+// de admin db_tables/db_query din chat. Plafoane: 200 rânduri la ieșire și
+// statement_timeout 10s, ca o interogare grea să nu sugrume aplicația vie.
+export async function dbTablesOverview(): Promise<string> {
+  if (!dbEnabled()) return JSON.stringify({ error: 'db_indisponibil' })
+  try {
+    const cols = await getPool().query<{ table_name: string; column_name: string; data_type: string }>(
+      `SELECT table_name, column_name, data_type FROM information_schema.columns
+       WHERE table_schema = 'public' ORDER BY table_name, ordinal_position`,
+    )
+    const counts = await getPool().query<{ relname: string; n: string }>(
+      `SELECT relname, n_live_tup AS n FROM pg_stat_user_tables ORDER BY relname`,
+    )
+    const nByTable = new Map(counts.rows.map((r) => [r.relname, Number(r.n)]))
+    const tables: Record<string, { rows: number; columns: string[] }> = {}
+    for (const c of cols.rows) {
+      tables[c.table_name] ??= { rows: nByTable.get(c.table_name) ?? 0, columns: [] }
+      tables[c.table_name].columns.push(`${c.column_name} ${c.data_type}`)
+    }
+    return JSON.stringify({ database: 'postgres (aplicația)', tables })
+  } catch (e) {
+    return JSON.stringify({ error: String((e as Error).message ?? e) })
+  }
+}
+
+export async function dbQuery(sql: string): Promise<string> {
+  if (!dbEnabled()) return JSON.stringify({ error: 'db_indisponibil' })
+  const text = sql.trim()
+  if (!text) return JSON.stringify({ error: 'sql_gol' })
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`SET LOCAL statement_timeout = '10s'`)
+    const r = await client.query(text)
+    await client.query('COMMIT')
+    const rows = (r.rows ?? []).slice(0, 200)
+    return JSON.stringify({
+      command: r.command,
+      rowCount: r.rowCount ?? rows.length,
+      rows,
+      truncated: (r.rows?.length ?? 0) > 200 ? true : undefined,
+    })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    return JSON.stringify({ error: String((e as Error).message ?? e) })
+  } finally {
+    client.release()
   }
 }

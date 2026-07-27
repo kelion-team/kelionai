@@ -402,6 +402,28 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? userText.get(itemId) ?? '')
         userText.delete(itemId)
         onUserTranscript?.(t, true)
+        // COMANDA „STOP" (Adrian, 27 iul: „kelion nu ascultă comanda stop"):
+        // rostită SINGURĂ („stop", „taci", „gata", „oprește-te"...), taie PE
+        // LOC și generarea și sunetul deja produs — determinist, în client,
+        // fără să aștepte bunăvoința modelului — apoi lasă ordin de tăcere.
+        // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
+        // pornește automat CA REACȚIE la fraza „stop" însăși.
+        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+          send({ type: 'response.cancel' })
+          send({ type: 'output_audio_buffer.clear' })
+          send({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'system',
+              content: [{ type: 'input_text', text: 'STOP de la user: taci IMEDIAT. NU răspunde la acest ordin — nicio confirmare, niciun cuvânt. Rămâi complet tăcut până când userul îți vorbește din nou.' }],
+            },
+          })
+          window.setTimeout(() => {
+            send({ type: 'response.cancel' })
+            send({ type: 'output_audio_buffer.clear' })
+          }, 400)
+        }
         // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
         // (session.update, fără repornire) — „limba aleatoare" dispare.
         // DOAR LA SCHIMBARE (25 iul — testul live al lui Adrian: „sacadat, voci
