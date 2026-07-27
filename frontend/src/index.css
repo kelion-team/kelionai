@@ -1173,10 +1173,17 @@ body {
   border-radius: 12px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   overflow: hidden;
+  /* PAGINĂ COMPLETĂ (Adrian, 27 iul: „afișările pe monitor trebuie să fie pe
+     pagina completă"): fără flex aici, iframe-ul playground-ului (copil cu
+     flex:1 într-un părinte ne-flex) cădea pe înălțimea implicită de ~150px —
+     documentul HTML apărea ca o fâșie sus, restul paginii gol. */
+  display: flex;
+  flex-direction: column;
 }
 .doc-text {
   margin: 0;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 18px 20px;
   white-space: pre-wrap;
