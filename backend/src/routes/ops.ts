@@ -91,4 +91,19 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({ ok: true, findings })
   })
+
+  // ALERTĂ GENERICĂ DE LA PAZNICII DETERMINIȘTI (27 iul, pentru vindecătorul
+  // de rulări roșii): orice script de pe VPS cu secretul punții poate cere un
+  // email către admin — tot prin alertOnce, deci cu prag anti-spam pe cheie
+  // (6h). Nu e pentru useri, nu e pentru AI — doar mașinăria internă.
+  app.post<{ Body: { key?: string; subject?: string; body?: string } }>('/api/ops/alert', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(403).send({ error: 'forbidden' })
+    const key = String(req.body?.key ?? '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
+    const subject = String(req.body?.subject ?? '').slice(0, 200)
+    const body = String(req.body?.body ?? '').slice(0, 4000)
+    if (!key || !subject) return reply.code(400).send({ error: 'key_sau_subiect_lipsa' })
+    const sent = await alertOnce(key, 6 * 3600_000, subject, body || subject)
+    return reply.send({ ok: true, sent })
+  })
 }
