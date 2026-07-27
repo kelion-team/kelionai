@@ -422,20 +422,39 @@ export default function AdminPanel({
   }, [tab])
 
   // Tab „Constructor" deschis → coada ordinelor, reîmprospătată la 10s.
+  const loadBuildJobs = (): void => {
+    fetch('/api/admin/constructor', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { jobs?: BuildJobRow[] } | null) => {
+        if (j?.jobs) setBuildJobs(j.jobs)
+      })
+      .catch(() => {})
+  }
   useEffect(() => {
     if (tab !== 'constructor') return
-    const load = (): void => {
-      fetch('/api/admin/constructor', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j: { jobs?: BuildJobRow[] } | null) => {
-          if (j?.jobs) setBuildJobs(j.jobs)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 10_000)
+    loadBuildJobs()
+    const id = window.setInterval(loadBuildJobs, 10_000)
     return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
+
+  // Șterge un ordin din coadă (Adrian, 27 iul: „buton la fiecare de ștergere
+  // ordine"). Un ordin care se construiește chiar acum e refuzat de server.
+  const deleteBuildOrder = (j: BuildJobRow): void => {
+    if (!window.confirm(`Ștergi ordinul #${j.id}? „${j.orderText.slice(0, 60)}…"`)) return
+    void fetch('/api/admin/constructor/delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ id: j.id }),
+    })
+      .then((r) => r.json().then((res: { ok?: boolean; reason?: string }) => ({ ok: r.ok, res })))
+      .then(({ ok, res }) => {
+        if (ok && res.ok) loadBuildJobs()
+        else setBuildMsg(res.reason === 'in_lucru_sau_inexistent' ? 'Nu pot șterge un ordin care se construiește chiar acum.' : `Ștergerea a eșuat: ${res.reason ?? ''}`)
+      })
+      .catch(() => setBuildMsg('Ștergerea a eșuat — reîncearcă.'))
+  }
 
   const sendBuildOrder = (): void => {
     const order = buildOrder.trim()
@@ -486,7 +505,7 @@ export default function AdminPanel({
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
       .then((j: { tag?: string }) => {
-        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''}`)
+        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''} (git + baza de date + serverul Linux)`)
         setRecoveryNote('')
         loadRecovery()
       })
@@ -1418,7 +1437,7 @@ export default function AdminPanel({
                     {j.orderText.slice(0, 90)}
                     {j.orderText.length > 90 ? '…' : ''}
                   </span>
-                  <span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {j.prUrl && (
                       <a href={j.prUrl} target="_blank" rel="noreferrer">
                         PR ↗
@@ -1427,6 +1446,16 @@ export default function AdminPanel({
                     {j.tokens > 0 && ` · ${Math.round(j.tokens / 1000)}k tok`}
                     {' · '}
                     {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {j.status !== 'running' && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ color: '#ff7a7a', borderColor: 'rgba(255, 122, 122, 0.55)', padding: '2px 8px', fontSize: 12 }}
+                        onClick={() => deleteBuildOrder(j)}
+                      >
+                        Șterge
+                      </button>
+                    )}
                   </span>
                 </div>
               ))}
