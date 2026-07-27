@@ -155,6 +155,13 @@ install -m 700 "$REPO/deploy/constructor-worker.sh" /root/kelion/constructor-wor
 install -m 700 "$REPO/deploy/constructor-agent.mjs" /root/kelion/constructor-agent.mjs
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab -
 
+echo "== 6e. Vindecătorul de rulări roșii (cron la 10 min — roșu → verde singur) =="
+# Adrian, 27 iul: „dacă are ceva roșu să escaladeze și să repare până ajunge
+# verde". Determinist: rulările de deploy eșuate se rerulează automat (max 2)
+# DOAR când live == master (publicarea reală e sănătoasă); altfel email.
+install -m 700 "$REPO/deploy/vindecator-rulari.sh" /root/kelion/vindecator-rulari.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/vindecator-rulari.sh' ; echo '*/10 * * * * /root/kelion/vindecator-rulari.sh >> /root/kelion/vindecator.log 2>&1' ) | crontab -
+
 echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) =="
 # Adrian, 26 iul: „verificare automată dar să nu coste". Determinist, fără AI:
 # repornește containerul mort (2 ratări la rând) + pulsul intern (DB/disc/erori)
