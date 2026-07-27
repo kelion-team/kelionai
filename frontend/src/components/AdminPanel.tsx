@@ -486,7 +486,7 @@ export default function AdminPanel({
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
       .then((j: { tag?: string }) => {
-        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''}`)
+        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''} (git + baza de date + serverul Linux)`)
         setRecoveryNote('')
         loadRecovery()
       })
