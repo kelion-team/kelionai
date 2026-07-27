@@ -97,13 +97,15 @@ export default function App() {
   return (
     <>
       {/* Pagina dedicată /login (Adrian, 26 iul) — un user deja logat e trimis
-          înapoi în aplicație. */}
-      {user ? (
+          înapoi în aplicație. /credite e PUBLICĂ pentru toți (fix 27 iul —
+          înainte, userul LOGAT nu putea ajunge la ea nici tastând adresa:
+          verificarea de user venea prima și-l arunca mereu în scenă). */}
+      {window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
+        <Credits />
+      ) : user ? (
         <Stage user={user} />
       ) : window.location.pathname === '/login' ? (
         <Login />
-      ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
-        <Credits />
       ) : (
         <Landing error={error} />
       )}
