@@ -81,10 +81,14 @@ git checkout -B deploy "origin/$BRANCH"
 git log --oneline -1
 # Ieșire devreme sub lacăt: dacă alt publicator tocmai a dus live EXACT sha-ul
 # țintă cât am așteptat la flock, nu mai reconstruim nimic — verde, gata.
+# KELION_DEPLOY_FORCE=1 sare peste scurtătură (27 iul, cazul real BRIDGE_SECRET:
+# schimbare DOAR de env, același sha — containerul trebuie repornit ca s-o ia,
+# altfel scurtătura ar declara „deja publicat" și env-ul nou n-ar intra nicicând).
 TARGET=$(git rev-parse HEAD | cut -c1-7)
 LIVE_NOW=$(curl -s -m 8 http://127.0.0.1:8080/api/version | grep -o '"v":"[^"]*"' | cut -d'"' -f4 || true)
-if [ "$LIVE_NOW" = "$TARGET" ]; then
+if [ "${KELION_DEPLOY_FORCE:-0}" != 1 ] && [ "$LIVE_NOW" = "$TARGET" ]; then
   echo "== Deja publicat exact $TARGET (alt publicator a terminat primul) — nimic de făcut =="
+  echo "   (pentru repornire forțată la același sha — ex. env schimbat — rulează cu KELION_DEPLOY_FORCE=1)"
   exit 0
 fi
 
