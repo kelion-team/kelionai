@@ -203,7 +203,12 @@ export default function AvatarModel() {
   // MOTORUL DE GESTURI (27 iul): urmele regiei — până când ține „vorbește"
   // după ultimul vârf de voce și când vine următoarea variație de repaus.
   const talkHold = useRef(0)
-  const nextVar = useRef(18)
+  const nextVar = useRef(30)
+  // SUBTILITATE (Adrian, 27 iul: „gestica mâinilor și a tuturor trebuie să fie
+  // mult mai subtile"): clipul de vorbit NU înlocuiește repausul — se așază
+  // PESTE el ca strat cu greutate mică (idle rămâne baza), deci doar o umbră
+  // de gesticulație, nu clipul întreg în forță.
+  const talkLayer = useRef<AnimationAction | null>(null)
   // Oasele brațelor/antebrațelor descoperite în scenă, pentru blocarea lor în
   // repaus în fiecare cadru (Adrian, 13 iul: oprire completă a gesturilor ample).
   const armBones = useRef<Record<string, Bone | null>>({})
@@ -226,7 +231,7 @@ export default function AvatarModel() {
     face.current = { label, t: 0 }
   })
 
-  const play = (name: string, once = false, fade = 0.35): void => {
+  const play = (name: string, once = false, fade = 0.35, timeScale = 1): void => {
     const lazy = lazyClips.current[name]
     const next = actions[name] ?? (lazy && root.current ? mixer.clipAction(lazy, root.current) : null)
     if (!next || next === current.current) return
@@ -237,6 +242,8 @@ export default function AvatarModel() {
     } else {
       next.setLoop(LoopRepeat, Infinity)
     }
+    next.setEffectiveWeight(1)
+    next.setEffectiveTimeScale(timeScale)
     next.fadeIn(fade).play()
     current.current?.fadeOut(fade)
     current.current = next
@@ -301,6 +308,10 @@ export default function AvatarModel() {
     const runGesture = (name: string, allowDisabled: boolean): void => {
       if (!allowDisabled && disabledG.current.has(name)) return // debifat → nu se joacă
       if (actions[name] || lazyClips.current[name]) {
+        // Stratul subtil de vorbit se stinge — gestul comandat (pe context, de
+        // la creier) are prioritate și rulează la expresivitate întreagă.
+        talkLayer.current?.fadeOut(0.3)
+        talkLayer.current = null
         state.current = 'gesture'
         play(name, true)
       }
@@ -376,18 +387,33 @@ export default function AvatarModel() {
     if (state.current !== 'gesture') {
       if (talking && state.current !== 'talking' && !disabledG.current.has('talk')) {
         state.current = 'talking'
-        play('talk')
+        // GENTLEMAN, NU GOLAN (Adrian, 27 iul: „dă așa din mâini... gesturi de
+        // gentleman"): idle rămâne baza; vorbitul e doar o UMBRĂ de strat —
+        // greutate 0.25, încetinit — brațele practic în repaus, viața se vede,
+        // teatrul nu. Expresivitatea vine NUMAI de la creier, pe context
+        // (play_avatar_gesture: arată spre monitor când prezintă etc.).
+        const lazy = lazyClips.current['talk']
+        const act = actions['talk'] ?? (lazy && root.current ? mixer.clipAction(lazy, root.current) : null)
+        if (act) {
+          act.reset()
+          act.setLoop(LoopRepeat, Infinity)
+          act.setEffectiveWeight(0.25)
+          act.setEffectiveTimeScale(0.85)
+          act.fadeIn(0.6).play()
+          talkLayer.current = act
+        }
       } else if (!talking && state.current === 'talking') {
         state.current = 'idle'
-        play('idle')
-        nextVar.current = t + 25 + Math.random() * 20
+        talkLayer.current?.fadeOut(0.6)
+        talkLayer.current = null
+        nextVar.current = t + 40 + Math.random() * 30
       } else if (!talking && state.current === 'idle' && t > nextVar.current) {
         const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
         if (pool.length) {
           state.current = 'gesture'
-          play(pool[Math.floor(Math.random() * pool.length)], true)
+          play(pool[Math.floor(Math.random() * pool.length)], true, 0.5, 0.9)
         }
-        nextVar.current = t + 25 + Math.random() * 20
+        nextVar.current = t + 40 + Math.random() * 30
       }
     }
 

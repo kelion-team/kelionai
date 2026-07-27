@@ -1098,6 +1098,25 @@ export default function ChatPanel({
               // NICIO cale să afle poziția la „unde sunt"/„aici"). Se execută
               // AICI, în browser: citește GPS-ul real al dispozitivului acum,
               // împrospătează și sesiunea (updateCoords), întoarce lat/lon.
+              // MONITORUL, NU CAMERA (Adrian, 27 iul: „când îl întreb ce e pe
+              // monitor se uită la cameră și spune ce îi dă camera"): unealta
+              // citește CHIAR starea monitorului — taburile deschise + ce e
+              // afișat acum — direct din store-ul workspace-ului, în client.
+              if (name === 'get_monitor') {
+                const w = getWorkspace()
+                if (!w.open)
+                  return JSON.stringify({ monitor: 'gol', hint: 'Nimic afișat acum pe monitor — spune-i userului sincer.' })
+                return JSON.stringify({
+                  activ: {
+                    tip: w.kind,
+                    titlu: w.title,
+                    url: w.url || undefined,
+                    text: (w.text ?? '').slice(0, 800) || undefined,
+                    paginaScrisaDeMine: w.html ? true : undefined,
+                  },
+                  taburiDeschise: w.tasks.map((tk) => ({ tip: tk.kind, titlu: tk.title })),
+                })
+              }
               if (name === 'get_location') {
                 const fresh = await getFreshCoords()
                 if (fresh) {
