@@ -247,6 +247,10 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **27 IUL (valul 22) — MOTORUL DE GESTURI UMANE, DECENTE (ultimul punct roșu al zilei; Adrian: „lipsește motorul/creierul de apelare gesturi — umane reale, decente"):**
+  1. **Regia REPORNITĂ** în AvatarModel.tsx (fusese oprită complet pe 13 iul — „nepotrivite pentru gentleman"), dar cu decența ca lege: **vorbește** (nivel REAL de voce >0.05) → clipul calm de conversație în buclă (cel reținut de Adrian); **tace** → repaus viu (`idle`) + o variație DOMOLĂ la 25–45s, DOAR din `CHAT_IDLE_CALM` (variatie/2/4/5/6/8 — dezmorțirile ample rămân la comandă); **gest comandat** (creier/viu grai) → prioritate absolută.
+  2. **Filtrul lui Adrian rămâne legea**: tot ce e debifat în Admin→Gesturi (`disabledG`, reîmprospătat la 30s) nu se joacă nici automat (inclusiv `talk`); clipuri = captură de mișcare Ready Player Me, crossfade 0.35s, zero animație de mână.
+  3. **Brațele blocate în repaus DOAR în idle** (decența din 13 iul păstrată); în vorbit și gesturi, clipurile au mâna liberă — altfel lacătul de brațe ar fi înghețat gesticulația de conversație.
 - 🗓️ **27 IUL (valul 21) — SĂNĂTATEA PROPRIE: Kelion își vede problemele și ÎNTREABĂ dacă să le repare (Adrian: „să poată comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să le repare"):**
   1. **`services/health.ts` — `systemHealth()`**: agregare deterministă — live vs master (GitHub API), rulări roșii 48h, ordine de construcție eșuate, val de erori client (>20/h), disc ≥90%, DB, sold OpenRouter sub prag. Fiecare problemă cu `grav` + `reparabil` (cum se repară).
   2. **Unealta `system_health`** (chat admin + ask_brain din voce): instrucțiunea din prompt îl pune să o cheme LA PRIMUL mesaj al ownerului dintr-o conversație; probleme → „am problemele: x, y, z — le repar?" și **așteaptă acordul explicit**; sănătos → tace.
