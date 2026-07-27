@@ -319,80 +319,6 @@ body {
   }
 }
 
-.landing-download {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.landing-download a {
-  display: inline-block;
-  padding: 9px 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 14px;
-  text-decoration: none;
-  transition: border-color 0.15s, background 0.15s;
-}
-.landing-download a:hover {
-  border-color: var(--accent);
-  background: rgba(134, 59, 255, 0.08);
-}
-.install-btn {
-  padding: 9px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: rgba(134, 59, 255, 0.14);
-  color: var(--text);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.install-btn:hover {
-  background: rgba(134, 59, 255, 0.26);
-}
-.ios-steps {
-  margin-top: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(134, 59, 255, 0.07);
-  font-size: 13.5px;
-  color: var(--text);
-}
-/* Auto-update notification bar — shown to installed users when a new version
-   ships. Sits above everything; a single tap upgrades. */
-.update-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 10px 16px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 14px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-}
-.update-bar button {
-  padding: 6px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.update-bar button:hover {
-  background: rgba(255, 255, 255, 0.28);
-}
-
 .landing-qr {
   margin-top: 18px;
 }
@@ -436,14 +362,6 @@ body {
   opacity: 0.75;
   word-break: break-word;
 }
-/* Live execution log line (brain steps on the monitor). */
-.builder-log-line {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #cdd3df;
-  padding: 1px 0;
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-}
 /* Gap sent-to-execution marker: stays visible until the admin cleans it. */
 .gap-sent {
   font-size: 12px;
@@ -480,43 +398,6 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-/* BECURILE CREDIT KIMI/GLM (Adrian, 13 iul): verde fix = are credit; verde
-   pâlpâind = motor ACTIV acum; roșu pâlpâind = fără credit. Click → alimentare. */
-.brain-pill {
-  margin: 0 8px;
-  padding: 4px 10px 4px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid rgba(53, 208, 127, 0.45);
-  color: #7fe0a0;
-}
-.brain-pill .pdot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #35d07f;
-  box-shadow: 0 0 6px #35d07f;
-}
-.brain-pill.active {
-  border-color: rgba(53, 208, 127, 0.85);
-  color: #9dffc0;
-  animation: brainBlinkGreen 1.1s ease-in-out infinite;
-}
-.brain-pill.no-credit {
-  border-color: rgba(255, 80, 80, 0.85);
-  color: #ff8f8f;
-  animation: brainBlinkRed 0.8s ease-in-out infinite;
-}
-.brain-pill.no-credit .pdot {
-  background: #ff4d4d;
-  box-shadow: 0 0 8px #ff4d4d;
 }
 @keyframes brainBlinkGreen {
   0%, 100% { opacity: 1; }
@@ -597,48 +478,6 @@ body {
   text-decoration: underline;
 }
 .store-missing {
-  color: var(--muted);
-}
-/* Four-platform download block: desktop tiles (Windows, Linux) + mobile QRs. */
-.landing-download {
-  margin-top: 18px;
-}
-.dl-desktop {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-.dl-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 128px;
-  padding: 12px 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.dl-tile:hover {
-  border-color: var(--accent);
-  background: rgba(134, 59, 255, 0.1);
-}
-.dl-ico {
-  font-size: 24px;
-  line-height: 1;
-}
-.dl-name {
-  margin-top: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.dl-sub {
-  margin-top: 2px;
-  font-size: 11.5px;
   color: var(--muted);
 }
 
@@ -957,49 +796,6 @@ body {
   background: #a32d2d;
 }
 
-/* ---------- free-trial (demo) ---------- */
-.trial-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #cfe0ff;
-  background: rgba(110, 168, 254, 0.16);
-  border: 1px solid rgba(110, 168, 254, 0.4);
-  white-space: nowrap;
-}
-.demo-over {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(6, 8, 12, 0.82);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
-.demo-over-card {
-  width: min(92vw, 420px);
-  padding: 36px 32px;
-  text-align: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-.demo-over-card h2 {
-  margin: 14px 0 10px;
-  font-size: 22px;
-  color: var(--text);
-}
-.demo-over-card p {
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1.5;
-  margin: 0 0 22px;
-}
-
 /* ---------- stage ---------- */
 .stage {
   position: fixed;
@@ -1048,29 +844,6 @@ body {
    trebuie să urmeze mâna instant), overlay care prinde gesturile. */
 .stage-canvas.editing {
   transition: none;
-}
-.avatar-edit-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  cursor: move;
-  touch-action: none;
-  outline: 3px dashed rgba(110, 168, 254, 0.85);
-  outline-offset: -3px;
-  border-radius: 14px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-.avatar-edit-hint {
-  margin-top: 10px;
-  padding: 6px 16px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.78);
-  color: #cfe0ff;
-  /* textul stă într-un element scalat (~0.42) — fontul mare rămâne lizibil */
-  font-size: 30px;
-  white-space: nowrap;
 }
 /* The workspace surface revealed behind the shrunken avatar. */
 .workspace-bg {
@@ -1282,79 +1055,6 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-}
-.cost-meter {
-  pointer-events: auto;
-  position: relative;
-}
-.cost-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 13px;
-  color: var(--muted);
-  cursor: pointer;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
-.cost-summary:hover {
-  border-color: var(--accent);
-}
-.cost-total {
-  color: #3ad29f;
-  font-weight: 700;
-}
-.cost-today {
-  color: var(--text);
-}
-.cost-caret {
-  opacity: 0.6;
-  font-size: 10px;
-}
-.cost-menu {
-  position: absolute;
-  top: 115%;
-  left: 0;
-  z-index: 45;
-  min-width: 240px;
-  background: #12151c;
-  border: 1px solid #2a2f3a;
-  border-radius: 12px;
-  padding: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-}
-.cost-menu-head {
-  display: flex;
-  justify-content: space-between;
-  font-weight: 600;
-  color: var(--text);
-  padding: 4px 8px 8px;
-  border-bottom: 1px solid #2a2f3a;
-  margin-bottom: 6px;
-}
-.cost-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 5px 8px;
-  font-size: 13px;
-  color: var(--muted);
-}
-.cost-row span:last-child {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.cost-row.total {
-  border-top: 1px solid #2a2f3a;
-  margin-top: 6px;
-  font-weight: 600;
-}
-.cost-row.muted {
-  opacity: 0.6;
 }
 
 /* Admin chat history — grouped newest-first by day */
@@ -1688,54 +1388,6 @@ body {
   margin: 0 0 6px;
   animation: rec 1.2s ease-in-out infinite;
 }
-/* "developer" indicator in the admin top bar: dim when idle, ORANGE + pulsing
-   while the laptop developer session is actively writing code. */
-.builder-ind {
-  font-size: 13px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.4);
-  white-space: nowrap;
-}
-/* THE LIGHT = THE BRIDGE: lit steady = the developer reachable; OFF (grey) = bridge
-   down; pulsing = writing code right now. Clicking the Bridge light opens or
-   hides the live-work monitor (it is never shown permanently). */
-.builder-ind.clickable {
-  pointer-events: auto;
-  cursor: pointer;
-}
-.builder-ind.on {
-  color: #ff9d2e;
-  border-color: rgba(255, 157, 46, 0.7);
-  background: rgba(255, 157, 46, 0.12);
-}
-.builder-ind.on.work {
-  animation: rec 1.2s ease-in-out infinite;
-}
-/* The builder's live work ON KELION'S MONITOR (the workspace surface — Kelion goes
-   to his corner exactly like in presentations). Each work item is one row:
-   text on the left, a 0→100% BARGRAPH neatly aligned on the right. Finished
-   items stay listed, ticked and dimmed. History is NOT carried here — it lives
-   in the admin panel ("Jurnal lucru"). */
-.builder-console {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.builder-console-head {
-  color: #ff9d2e;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  padding: 4px 2px 10px;
-  border-bottom: 1px solid rgba(255, 157, 46, 0.25);
-  animation: rec 1.2s ease-in-out infinite;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .live-dot {
   font-size: 10.5px;
   font-weight: 800;
@@ -1756,304 +1408,9 @@ body {
   0%, 100% { box-shadow: 0 0 6px rgba(53, 224, 127, 0.5); }
   50% { box-shadow: 0 0 16px rgba(53, 224, 127, 0.95); }
 }
-/* PROCESS PROGRESS 0→100% — the current job from intake to finish. One big
-   bar that glides forward as the process advances through its stages. */
-.owned-req {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  border-radius: 10px;
-  background: rgba(255, 157, 46, 0.1);
-  border: 1px solid rgba(255, 157, 46, 0.28);
-  font-size: 12.5px;
-  color: #ffe3c2;
-}
-.owned-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff9d2e;
-  box-shadow: 0 0 8px rgba(255, 157, 46, 0.8);
-  flex: none;
-  animation: owned-pulse 1.6s ease-in-out infinite;
-}
 @keyframes owned-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
-}
-.owned-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.owned-status {
-  color: #8fe9ff;
-}
-.proc-progress {
-  padding: 12px 2px 14px;
-  border-bottom: 1px solid rgba(255, 157, 46, 0.18);
-  margin-bottom: 10px;
-}
-.proc-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 7px;
-}
-.proc-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: #ffe3c2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.proc-file {
-  color: #8fe9ff;
-  font-weight: 600;
-}
-.proc-pct {
-  font-size: 20px;
-  font-weight: 800;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-.proc-track {
-  height: 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-.proc-fill {
-  height: 100%;
-  border-radius: 999px;
-  /* fluid glide toward each new percentage as stages complete */
-  transition: width 0.9s ease;
-  background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
-  box-shadow: 0 0 12px rgba(255, 157, 46, 0.5);
-}
-.proc-fill.done {
-  background: linear-gradient(90deg, #35e07f, #7dffb0);
-  box-shadow: 0 0 12px rgba(53, 224, 127, 0.6);
-}
-/* Click pe bară → detaliul analizei (ordinul 5 iul): CE analizează creierul —
-   cererea în lucru și ultimii pași din jurnal, sub bară, în același panou. */
-.proc-progress.clickable {
-  cursor: pointer;
-}
-.proc-progress.clickable:hover .proc-label {
-  color: #fff;
-}
-.proc-caret {
-  color: #ff9d2e;
-  margin-right: 6px;
-  font-size: 11px;
-}
-.proc-detail {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 157, 46, 0.3);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
-  cursor: default;
-  max-height: 32vh;
-  overflow-y: auto;
-}
-.proc-detail-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #ff9d2e;
-  margin: 8px 0 4px;
-}
-.proc-detail-title:first-child {
-  margin-top: 0;
-}
-/* Codul care se scrie, sub bară (Adrian, 11 iul) — bucăți live, monospace. */
-.proc-code {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.proc-code-block {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.45);
-  overflow: hidden;
-}
-.proc-code-file {
-  font-size: 10px;
-  font-weight: 700;
-  color: #8fb6ff;
-  padding: 4px 8px 0;
-}
-.proc-code-block pre {
-  margin: 0;
-  padding: 6px 8px 8px;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #d7e3ff;
-  max-height: 160px;
-  overflow-y: auto;
-}
-.proc-detail-req {
-  font-size: 13px;
-  color: #ffe3c2;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.proc-detail-line {
-  font-size: 12px;
-  color: #cfeaff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.builder-rows {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 12px 2px;
-  overflow-y: auto;
-}
-.builder-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.builder-row-text {
-  flex: 1;
-  min-width: 0;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.4;
-  color: #e6eefb;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.builder-row-bar {
-  flex: 0 0 220px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 157, 46, 0.15);
-  overflow: hidden;
-}
-.builder-row-fill {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ff9d2e, #ffd9a8);
-  transition: width 0.6s ease;
-}
-.builder-row-pct {
-  flex: 0 0 64px;
-  text-align: right;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12.5px;
-  color: #ffd9a8;
-  white-space: nowrap;
-}
-/* Done: stays on the list, ticked off — crossed out and dimmed. */
-.builder-row.done {
-  opacity: 0.5;
-}
-.builder-row.done .builder-row-text {
-  text-decoration: line-through;
-}
-.builder-row.done .builder-row-pct {
-  color: #7fd18b;
-}
-.builder-status {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 8px 2px 2px;
-}
-.builder-status-line {
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12.5px;
-  color: #93a5c0;
-}
-/* Admin → Release-uri: the approval gate. */
-.release-row {
-  padding: 12px 0;
-  border-top: 1px solid var(--border);
-}
-.release-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.release-title {
-  font-weight: 500;
-  font-size: 14px;
-  flex: 1;
-  min-width: 160px;
-}
-.release-badge {
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-.release-badge.b-pending {
-  color: #ffd9a8;
-  background: rgba(255, 157, 46, 0.14);
-  border: 1px solid rgba(255, 157, 46, 0.4);
-}
-.release-badge.b-approved,
-.release-badge.b-deployed {
-  color: #7ee2a8;
-  background: rgba(60, 200, 120, 0.14);
-  border: 1px solid rgba(60, 200, 120, 0.35);
-}
-.release-badge.b-rejected {
-  color: #ff8a8a;
-  background: rgba(255, 93, 93, 0.14);
-  border: 1px solid rgba(255, 93, 93, 0.35);
-}
-.release-badge.b-blocked {
-  color: #ffb4b4;
-  background: rgba(217, 48, 37, 0.18);
-  border: 1px solid rgba(217, 48, 37, 0.5);
-}
-.release-row.status-blocked .release-title {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-.release-row.status-blocked .release-actions {
-  display: none;
-}
-.release-time {
-  font-size: 12px;
-  color: var(--muted);
-}
-.release-detail {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #c5d2e6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 240px;
-  overflow-y: auto;
-}
-.release-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
 }
 /* Admin → Jurnal lucru: the full work history, newest first. */
 .devlog-line {
@@ -2067,9 +1424,6 @@ body {
   word-break: break-word;
 }
 @media (max-width: 900px) {
-  .builder-row-bar {
-    flex-basis: 120px;
-  }
 }
 .scenario-stop {
   pointer-events: auto;
@@ -2182,45 +1536,6 @@ body {
   width: 20px;
   text-align: center;
 }
-/* Mod full-duplex: butonul stă în meniul de funcții ca un fn-item, dar e propriul
-   buton (pornire/oprire sesiune LiveKit). Nu schimbă traseul de voce HTTP. */
-.fn-duplex {
-  cursor: default;
-}
-.fn-duplex:hover {
-  background: transparent;
-}
-.duplex-btn {
-  flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: transparent;
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: 10px;
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-}
-.duplex-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-.duplex-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.duplex-btn.live {
-  border-color: #35c46a;
-  color: #35c46a;
-  box-shadow: 0 0 0 1px rgba(53, 196, 106, 0.4) inset;
-}
-.duplex-btn.err {
-  border-color: #d9534f;
-  color: #e88;
-}
-/* Cuvânt de trezire armat: verde discret + punctul care pulsează (ca la cameră). */
-.fn-item.wake-armed {
-  color: #35c46a;
-}
 .fn-item .dot {
   margin-left: auto;
   width: 8px;
@@ -2269,38 +1584,6 @@ body {
   overflow-y: auto;
   min-height: 0;
 }
-.admin-token-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: #3a1515;
-  border-bottom: 1px solid #8a2626;
-  color: #ffd1d1;
-  font-size: 13px;
-}
-.admin-token-icon { font-size: 18px; flex-shrink: 0; }
-.admin-token-text { flex: 1; line-height: 1.4; }
-.admin-token-text code {
-  background: rgba(255,255,255,0.1);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.admin-token-since { opacity: 0.8; }
-.admin-token-btn {
-  flex-shrink: 0;
-  background: #d93025;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.admin-token-btn:hover:not(:disabled) { background: #b3261e; }
-.admin-token-btn:disabled { opacity: 0.6; cursor: wait; }
 .admin-head {
   display: flex;
   align-items: flex-start;
@@ -2581,29 +1864,6 @@ body {
   background: rgba(134, 59, 255, 0.08);
 }
 
-/* Native-app download links in the signed-in topbar */
-.app-dl {
-  display: inline-flex;
-  gap: 6px;
-  margin-right: 6px;
-}
-.app-dl a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  text-decoration: none;
-  font-size: 14px;
-  color: var(--text);
-  transition: border-color 0.15s;
-}
-.app-dl a:hover {
-  border-color: var(--accent);
-}
-
 .vis-badge.kind-visit {
   color: #9ecbff;
   background: rgba(90, 160, 255, 0.12);
@@ -2790,24 +2050,6 @@ body {
   50% {
     opacity: 0.35;
   }
-}
-.cost-total.low {
-  color: #ffb86b;
-}
-.cost-load {
-  display: flex;
-  gap: 6px;
-  padding: 6px 4px 2px;
-}
-.cost-load input {
-  flex: 1;
-  min-width: 0;
-  background: #0e1117;
-  border: 1px solid #2a2f3a;
-  border-radius: 8px;
-  color: var(--text);
-  padding: 5px 8px;
-  font-size: 13px;
 }
 /* Discreet low-credit reminder: a small pill that fades in briefly. */
 .wallet-toast {
@@ -3405,50 +2647,6 @@ a.card-item:hover {
   max-height: 52vh;
 }
 
-/* Badge de mod de lucru (Chat / Lucru / Raport). */
-.mode-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  margin-left: 8px;
-  border: 1px solid var(--border);
-}
-.mode-badge.mode-chat {
-  color: #8fb6ff;
-  border-color: rgba(143, 182, 255, 0.4);
-  background: rgba(143, 182, 255, 0.12);
-}
-.mode-badge.mode-lucru {
-  color: #f0b07a;
-  border-color: rgba(240, 176, 122, 0.4);
-  background: rgba(240, 176, 122, 0.12);
-}
-.mode-badge.mode-raport {
-  color: #7fe0a8;
-  border-color: rgba(127, 224, 168, 0.4);
-  background: rgba(127, 224, 168, 0.12);
-}
-/* VITEZA CREIERULUI: cronometrul turei / timpii ultimei ture (10 iul). */
-.speed-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  margin-left: 8px;
-  color: #b8c2cc;
-  border: 1px solid var(--border);
-  background: rgba(180, 194, 204, 0.08);
-  font-variant-numeric: tabular-nums;
-}
-.speed-badge.live {
-  color: #ffd27a;
-  border-color: rgba(255, 210, 122, 0.45);
-  background: rgba(255, 210, 122, 0.14);
-}
-
 /* DICTARE LIVE — efect cinematografic „AI din filme": bandă terminal, text
    monospace cu glow, cursor care clipește, punct roșu care pulsează. */
 /* REGULĂ FIXĂ (Adrian, 10 iul): orice bandă live e o SINGURĂ LINIE, înălțime
@@ -3623,147 +2821,14 @@ a.card-item:hover {
   0%, 50% { opacity: 1; }
   50.01%, 100% { opacity: 0; }
 }
-
-/* Banner persistent de release — anunț vizual separat de chat */
-.release-alert-banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 200;
-  background: linear-gradient(90deg, #1a1f2d 0%, #252b3d 100%);
-  border-bottom: 2px solid #ff9f43;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-  animation: release-banner-slide 0.35s ease;
-}
 @keyframes release-banner-slide {
   from {
     opacity: 0;
     transform: translateY(-100%);
   }
 }
-.release-alert-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 12px 16px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-.release-alert-icon {
-  font-size: 20px;
-  flex-shrink: 0;
-}
-.release-alert-text {
-  color: #fff;
-  font-size: 15px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.release-alert-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.release-alert-close {
-  position: absolute;
-  top: 6px;
-  right: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 210, 150, 0.85);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.release-alert-close:hover {
-  background: rgba(255, 159, 67, 0.18);
-  color: #fff;
-}
-.release-alert-btn {
-  background: transparent;
-  color: #ffcc88;
-  border: 1px solid #ff9f43;
-  border-radius: 8px;
-  padding: 7px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.release-alert-btn:hover {
-  background: rgba(255, 159, 67, 0.12);
-}
-.release-alert-btn.primary {
-  background: #ff9f43;
-  color: #12151c;
-  border-color: #ff9f43;
-  font-weight: 600;
-}
-.release-alert-btn.primary:hover {
-  background: #ffb574;
-}
 
 @media (max-width: 640px) {
-  .release-alert-content {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 10px;
-    padding: 10px 12px;
-  }
-  .release-alert-text {
-    white-space: normal;
-    flex: 1 1 100%;
-  }
-}
-
-/* ── QUOTA BAR verticală (Adrian, 15 iul) ────────────────────────────── */
-.quota-bar-wrap {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 28px;
-  margin: 0 6px;
-  vertical-align: middle;
-}
-.quota-bar {
-  position: relative;
-  width: 6px;
-  height: 24px;
-  background: rgba(255,255,255,0.08);
-  border-radius: 2px;
-  overflow: hidden;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: flex-end;
-}
-.quota-bar-fill {
-  display: block;
-  width: 100%;
-  border-radius: 0 0 2px 2px;
-  transition: height 0.4s ease, background 0.4s ease;
-}
-.quota-bar-label {
-  position: absolute;
-  bottom: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 8px;
-  color: var(--muted);
-  letter-spacing: 0.5px;
-  pointer-events: none;
 }
 
 /* Linkul „Install" de sub fiecare cod QR (Adrian, 26 iul) — click direct la
@@ -3918,3 +2983,41 @@ a.card-item:hover {
   padding: 2px 9px;
   pointer-events: none;
 }
+
+/* FLUIDITATE #9: teletextul final nu se mai termină pe GOL — bucla continuă
+   (textul reintră prin dreapta, ca un teletext adevărat). */
+.ticker-text { animation-iteration-count: infinite; }
+/* Culorile benzilor se aplică și cozii fixe (dictare/👤/🧠 au trecut pe
+   speech-tail — fluiditate #9). */
+.voice-live .speech-tail-text { color: #7dffc0; text-shadow: 0 0 6px rgba(90, 255, 180, 0.5); }
+.heard-band .speech-tail-text { color: #ffd9a0; text-shadow: 0 0 6px rgba(255, 200, 120, 0.35); }
+.user-band .speech-tail-text { color: #d9ffe9; }
+/* FLUIDITATE #8: benzile compozerului INTRĂ crescând (180ms), nu prin salt de
+   38-46px al întregii coloane de chat. */
+.voice-live, .heard-band, .queued-band, .composer-atts {
+  animation: band-in 0.18s ease-out;
+}
+@keyframes band-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-live, .heard-band, .queued-band, .composer-atts { animation: none; }
+  .ticker-text { animation-iteration-count: 1; }
+}
+
+/* Legăturile alternative de sub butonul Google (login email + prețuri publice). */
+.landing-alt-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13.5px;
+}
+.landing-alt-links a {
+  color: #9db8e8;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(157, 184, 232, 0.5);
+}
+.landing-alt-links a:hover { color: #cfe0ff; }
+.landing-alt-links span { color: #5c6478; }

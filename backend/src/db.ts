@@ -602,45 +602,6 @@ export interface TierEventRow {
   at: string
 }
 
-export async function saveTierEvent(e: {
-  worker: string
-  from?: string | null
-  to: string
-  action: string
-  reason?: string
-}): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      `INSERT INTO tier_events (worker, from_tier, to_tier, action, reason)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        String(e.worker).slice(0, 20),
-        e.from ? String(e.from).slice(0, 20) : null,
-        String(e.to).slice(0, 20),
-        String(e.action).slice(0, 20),
-        e.reason ? String(e.reason).slice(0, 500) : null,
-      ],
-    )
-  } catch {
-    /* non-fatal: nu blocăm worker-ul pentru un log */
-  }
-}
-
-export async function listTierEvents(n = 50): Promise<TierEventRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<TierEventRow>(
-      `SELECT id, worker, from_tier, to_tier, action, reason, at::text
-       FROM tier_events ORDER BY at DESC LIMIT $1`,
-      [Math.max(1, Math.min(300, n))],
-    )
-    return r.rows
-  } catch {
-    return []
-  }
-}
-
 // ── Conectarea Google persistentă (refresh token per cont) ──────────────────
 export async function saveGoogleRefreshToken(email: string, token: string): Promise<void> {
   if (!dbEnabled() || !email || !token) return
@@ -954,94 +915,6 @@ export async function saveWorkOrder(id: string, text: string): Promise<void> {
   await getPool().query('INSERT INTO work_orders (id, text) VALUES ($1,$2)', [id, text])
 }
 
-/** Atomic pull: pending → delivered, returned once — but never deleted. */
-export async function pullPendingWorkOrders(): Promise<WorkOrderRow[]> {
-  if (!dbEnabled()) return []
-  const r = await getPool().query<WorkOrderRow>(
-    `UPDATE work_orders SET status='delivered', delivered_at=now()
-     WHERE status='pending' RETURNING id, text, status, created_at, delivered_at`,
-  )
-  return r.rows
-}
-
-// POOL ELASTIC DE REPARATORI (Adrian, 12 iul: „mai mulți reparatori sincronizați
-// care se opresc când termină și repornesc când cresc sarcinile"). Revendică UN
-// SINGUR ordin, atomic și sigur pentru mai mulți workeri în paralel: `FOR UPDATE
-// SKIP LOCKED` face ca doi workeri să ia MEREU ordine diferite (al doilea sare
-// peste rândul blocat de primul), fără dublă-revendicare. Întoarce ordinul luat
-// sau null (coadă goală → workerul iese, nu consumă).
-export async function claimOneWorkOrder(): Promise<WorkOrderRow | null> {
-  if (!dbEnabled()) return null
-  const r = await getPool().query<WorkOrderRow>(
-    `UPDATE work_orders SET status='delivered', delivered_at=now()
-     WHERE id = (
-       SELECT id FROM work_orders WHERE status='pending'
-       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
-     )
-     RETURNING id, text, status, created_at, delivered_at`,
-  )
-  return r.rows[0] ?? null
-}
-
-// Câte ordine așteaptă (pentru supervizor: câți workeri să pornească).
-export async function countPendingWorkOrders(): Promise<number> {
-  if (!dbEnabled()) return 0
-  const r = await getPool().query<{ n: string }>(
-    `SELECT count(*)::int AS n FROM work_orders WHERE status='pending'`,
-  )
-  return Number(r.rows[0]?.n ?? 0)
-}
-
-export async function listWorkOrders(n = 50): Promise<WorkOrderRow[]> {
-  if (!dbEnabled()) return []
-  const r = await getPool().query<WorkOrderRow>(
-    'SELECT id, text, status, created_at, delivered_at FROM work_orders ORDER BY created_at DESC LIMIT $1',
-    [n],
-  )
-  return r.rows
-}
-
-// STADIU REAL PER ORDIN (Adrian, 6 iul: registrul arăta „în lucru" la infinit —
-// nu avansa după publicare). Acum stadiul se închide: delivered → published (200
-// live) → certified (tester PASS). Așa lista spune adevărul, nu „în lucru" pe veci.
-export async function setWorkOrderStatus(id: string, status: string): Promise<void> {
-  if (!dbEnabled() || !id) return
-  await getPool()
-    .query('UPDATE work_orders SET status=$2 WHERE id=$1', [id, status])
-    .catch(() => {})
-}
-
-// RECONCILIERE — închide ordinele blocate la „delivered" (Adrian, 8 iul: „procedura
-// e defectă dacă rămân în «preluat» pe veci; reparat, iar când e gata → finalizat;
-// până nu e reparat, nici vorbă să le ștergem"). CAUZA blocajului: doar UN ordin
-// (cel legat de cerința deținută) poate avansa la published/certified; toate
-// celelalte — lanțuri SUPERVIZOR reasignate, verificări auto (VERIFICARE PE
-// CERINȚĂ / LEGEA 200) care raportează verdict pe cerință dar nu pe rândul lor,
-// giveup-uri neînchise — rămâneau `delivered` la nesfârșit, fără cale spre terminal.
-// Această tură ia orice ordin `delivered` care NU e cel activ deținut acum și care
-// stă de mai mult de `staleMs` (abandonat/înlocuit/verificare-terminată) și îl
-// mută în terminalul onest `finalized` = „închis, nu mai e în lucru". NU șterge
-// nimic — doar închide stadiul, ca registrul să spună adevărul.
-export async function finalizeStaleWorkOrders(
-  activeOrderId: string | null,
-  staleMs = 30 * 60_000,
-): Promise<string[]> {
-  if (!dbEnabled()) return []
-  const cutoffSecs = Math.max(60, Math.floor(staleMs / 1000))
-  const r = await getPool()
-    .query<{ id: string }>(
-      `UPDATE work_orders
-         SET status='finalized'
-       WHERE status='delivered'
-         AND ($1::text IS NULL OR id <> $1)
-         AND COALESCE(delivered_at, created_at) < now() - ($2 * interval '1 second')
-       RETURNING id`,
-      [activeOrderId, cutoffSecs],
-    )
-    .catch(() => ({ rows: [] as { id: string }[] }))
-  return r.rows.map((x) => x.id)
-}
-
 // ── Staged releases (persistent approval gate) ──────────────────────────────
 
 export interface StagedReleaseRow {
@@ -1052,55 +925,6 @@ export interface StagedReleaseRow {
   status: string
   approved_at: string | null
   at: string
-}
-
-export async function saveStagedRelease(id: string, title: string, detail: string, branch = ''): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query('INSERT INTO staged_releases (id, title, detail, branch) VALUES ($1,$2,$3,$4)', [
-      id,
-      title,
-      detail,
-      branch,
-    ])
-  } catch {
-    // Un release nesalvat nu are voie să dărâme constructorul — Adrian
-    // pierde o aprobare, nu tot fluxul.
-  }
-}
-
-export async function listStagedReleases(n = 50): Promise<StagedReleaseRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<StagedReleaseRow>(
-      'SELECT id, title, detail, branch, status, approved_at, at FROM staged_releases ORDER BY at DESC LIMIT $1',
-      [n],
-    )
-    return r.rows
-  } catch {
-    return []
-  }
-}
-
-export async function setReleaseApproved(id: string): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      "UPDATE staged_releases SET status='approved', approved_at=now() WHERE id=$1",
-      [id],
-    )
-  } catch {
-    /* non-fatal */
-  }
-}
-
-export async function setReleaseStatus(id: string, status: string): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query('UPDATE staged_releases SET status=$2 WHERE id=$1', [id, status])
-  } catch {
-    /* non-fatal */
-  }
 }
 
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
@@ -1205,16 +1029,6 @@ export function getAppFile(name: string): { buf: Buffer; type: string } | null {
   return appFileCache.get(name) ?? null
 }
 
-export async function putAppFile(name: string, buf: Buffer, type: string): Promise<void> {
-  appFileCache.set(name, { buf, type }) // serve immediately, even before DB ack
-  if (!dbEnabled()) return
-  await getPool().query(
-    `INSERT INTO app_files (name, content, content_type, updated_at) VALUES ($1,$2,$3,now())
-     ON CONFLICT (name) DO UPDATE SET content=$2, content_type=$3, updated_at=now()`,
-    [name, buf, type],
-  )
-}
-
 // ── Installer download log (who downloaded what, from our own /dl) ─────────
 
 export async function recordDownload(
@@ -1256,45 +1070,10 @@ export async function getDownloadStats(): Promise<{
 
 // ── Shared memory: the common notebook both sides read + write ──
 
-export async function appendSharedMemory(source: string, content: string): Promise<void> {
-  if (!dbEnabled()) return
-  const c = content.trim()
-  if (!c) return
-  try {
-    await getPool().query(
-      'INSERT INTO shared_memory (source, content) VALUES ($1, $2)',
-      [source.slice(0, 40), c.slice(0, 8000)],
-    )
-    // Keep it bounded — the last 400 entries are plenty of shared context.
-    await getPool().query(
-      `DELETE FROM shared_memory WHERE id NOT IN
-         (SELECT id FROM shared_memory ORDER BY created_at DESC LIMIT 400)`,
-    )
-  } catch {
-    /* shared memory is best-effort, never breaks a turn */
-  }
-}
-
 export interface SharedMemoryRow {
   source: string
   content: string
   created_at: string
-}
-
-export async function getSharedMemory(limit = 30): Promise<SharedMemoryRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<SharedMemoryRow>(
-      `SELECT source, content, created_at FROM (
-         SELECT source, content, created_at FROM shared_memory
-         ORDER BY created_at DESC LIMIT $1
-       ) x ORDER BY created_at ASC`,
-      [limit],
-    )
-    return r.rows
-  } catch {
-    return []
-  }
 }
 
 // ── Prepaid wallet (Stripe credit) ──
@@ -1440,28 +1219,6 @@ export interface Transaction {
   status: string
   stripe_payment_intent_id: string | null
   created_at: string
-}
-
-/** Creează o tranzacție nouă (plasare PaymentIntent). */
-export async function createTransaction(
-  email: string,
-  amount: number,
-  credits: number,
-  stripePaymentIntentId: string,
-): Promise<number> {
-  if (!dbEnabled() || !email || !stripePaymentIntentId) return 0
-  try {
-    const r = await getPool().query<{ id: number }>(
-      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
-       VALUES ($1, $2, $3, 'pending', $4)
-       ON CONFLICT (stripe_payment_intent_id) DO NOTHING
-       RETURNING id`,
-      [email.toLowerCase(), amount, credits, stripePaymentIntentId],
-    )
-    return r.rows[0]?.id ?? 0
-  } catch {
-    return 0
-  }
 }
 
 /** Actualizează statusul unei tranzacții după ID-ul Stripe PaymentIntent. */
@@ -1685,6 +1442,22 @@ export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> 
       `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE user_email = lower($1)`,
       [email, userCredit],
     )
+    // ȘI PROFITUL SE REVERSEAZĂ (audit 27 iul): la alimentare, 25% intra ca
+    // rând 'profit' — la refund rămânea pe veci în cărți, umflând profitul
+    // raportat în Admin→Bani la fiecare rambursare. Rând compensator negativ,
+    // idempotent pe cheia :profit-refund.
+    const p = await client.query<{ user_email: string; amount: string }>(
+      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'profit'`,
+      [`${stripeRef}:profit`],
+    )
+    if (p.rows[0]) {
+      await client.query(
+        `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+         VALUES (lower($1), 'profit', $2, $3, 'reversare profit — plată rambursată')
+         ON CONFLICT DO NOTHING`,
+        [p.rows[0].user_email, -Number(p.rows[0].amount), `${stripeRef}:profit-refund`],
+      )
+    }
     await client.query(`UPDATE transactions SET status = 'refunded' WHERE stripe_payment_intent_id = $1`, [
       stripeRef,
     ])
@@ -2141,24 +1914,6 @@ export interface CostSummary {
   byKind: Record<string, number>
 }
 
-// Costul de AZI, pe motoare (Adrian, 11 iul, aprobat: „6 da" — raportul zilnic
-// de bani): doar evenimentele zilei curente, grupate pe fel, cele mai scumpe
-// primele. Abonamentele fixe (Kimi/GLM) nu trec pe aici — doar API-urile
-// plătite la consum (tts/asr/memory/chat-API/căutare/imagini).
-export async function getCostToday(): Promise<{ kind: string; sum: number }[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<{ kind: string; sum: string }>(
-      `SELECT kind, SUM(cost_usd) AS sum FROM cost_events
-        WHERE created_at >= date_trunc('day', now())
-        GROUP BY kind ORDER BY SUM(cost_usd) DESC`,
-    )
-    return r.rows.map((x) => ({ kind: x.kind, sum: Number(x.sum) }))
-  } catch {
-    return []
-  }
-}
-
 export async function getCostSummary(): Promise<CostSummary> {
   const empty: CostSummary = { total: 0, today: 0, byKind: {} }
   if (!dbEnabled()) return empty
@@ -2483,20 +2238,6 @@ export async function setGapTriage(id: number, triage: string, resolved: boolean
     await getPool().query(
       'UPDATE capability_gaps SET triage = $2, triaged_at = now(), resolved = $3 WHERE id = $1',
       [id, triage.slice(0, 500), resolved],
-    )
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/** Mark a gap as sent to the brain (escalated) — it stays visible, tagged, until
- * a successful deploy clears it automatically. */
-export async function markGapEscalated(id: number): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      'UPDATE capability_gaps SET escalated = true, escalated_at = now() WHERE id = $1',
-      [id],
     )
   } catch {
     /* non-fatal */
@@ -3053,30 +2794,6 @@ export async function getFaceprint(email: string): Promise<FaceprintRow | null> 
     return r.rows[0] ? rowToFaceprint(r.rows[0]) : null
   } catch {
     return null
-  }
-}
-
-export async function deleteFaceprint(email: string): Promise<boolean> {
-  if (!dbEnabled() || !email) return false
-  try {
-    await getPool().query('DELETE FROM faceprints WHERE user_email = $1', [email.toLowerCase()])
-    return true
-  } catch {
-    return false
-  }
-}
-
-export async function listFaceprints(limit = 200): Promise<FaceprintRow[]> {
-  if (!dbEnabled()) return []
-  try {
-    const r = await getPool().query<FaceprintDbRow>(
-      `SELECT user_email, name, is_admin, descriptor, photo, created_at, updated_at
-       FROM faceprints ORDER BY updated_at DESC LIMIT $1`,
-      [limit],
-    )
-    return r.rows.map(rowToFaceprint)
-  } catch {
-    return []
   }
 }
 
