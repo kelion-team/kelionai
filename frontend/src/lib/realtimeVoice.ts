@@ -9,6 +9,7 @@
 // se injectează server-side; clientul trimite doar limba curentă ca hint.
 
 import { driveVoiceLevelFromElement, registerVoiceAudioElement, buildVoiceFeatures, estimateEnergy, estimateF0, estimateZcr, estimateCentroid, estimateRolloff, type VoiceFeatures } from './audioIO'
+import { getPendingFaceDescriptor } from './faceprint'
 
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
@@ -87,6 +88,11 @@ function persistTranscript(
       // Amprenta frazei tocmai rostite (numai pe turele userului) — serverul o
       // compară cu referința titularului, ca în chatul scris.
       voiceFeatures: role === 'user' ? (liveVoiceTap?.finalize() ?? undefined) : undefined,
+      // ÎMPERECHEREA VOCE+CHIP (Adrian, 27 iul: „ia automat captura de imagine,
+      // le împerechează și auto-aprobă"): chipul proaspăt din camera pornită
+      // merge cu FIECARE tură vorbită — serverul îl compară cu specimenul și,
+      // dacă vocea șovăie dar chipul e al titularului, aprobă singur.
+      faceDescriptor: role === 'user' ? (getPendingFaceDescriptor()?.descriptor ?? undefined) : undefined,
     }),
   })
     .then(async (r) => {
@@ -95,9 +101,13 @@ function persistTranscript(
       const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean; adminUnlocked?: boolean } | null
       // VOCE STRĂINĂ (timbrul nu se potrivește cu titularul): sesiunea primește
       // pe loc regula de protecție — nimic administrativ până la confirmare.
+      // FĂRĂ „confirmă în scris" (ordinul lui Adrian, 27 iul): identitatea se
+      // face automat — vocea pe specimen + chipul din cameră, împerecheate pe
+      // server. Mesajul de prudență apare DOAR când nici vocea, nici chipul nu
+      // sunt ale titularului (străin real), și nu cere nimic în scris.
       if (j?.foreignVoice)
         liveInject?.(
-          'ATENȚIE (verificare de timbru): vocea curentă NU se potrivește cu amprenta titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive până când titularul nu confirmă ÎN SCRIS în chat.',
+          'ATENȚIE (verificare de identitate): nici vocea, nici chipul din cameră nu corespund titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive pentru această voce. Titularul se re-identifică automat de îndată ce vorbește el sau apare în cameră — atunci execuți tot, fără nicio confirmare.',
         )
       // LACĂTUL ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
       // deblocare; anunțăm UI-ul (Stage) să aprindă butonul Admin.
