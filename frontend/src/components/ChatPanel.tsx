@@ -1797,14 +1797,11 @@ export default function ChatPanel({
         {liveVoice && (
           <div className="voice-live" aria-live="polite">
             <span className="voice-live-dot" />
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={liveVoice}
-                style={{ '--ticker-dur': tickerDur(liveVoice) } as CSSProperties}
-              >
-                {liveVoice}
-              </span>
+            {/* COADĂ FIXĂ, nu teletext remontat (fluiditate #9): la dictare,
+                textul crește pe loc arătându-și coada — nu mai sare off-screen
+                la fiecare cuvânt nou. */}
+            <span className="speech-tail">
+              <span className="speech-tail-text">{liveVoice}</span>
             </span>
             <span className="voice-live-caret" />
           </div>
@@ -1821,27 +1818,15 @@ export default function ChatPanel({
         {busy && !delivered && lastUser?.content ? (
           <div className="heard-band user-band" aria-live="polite">
             <span className="heard-band-label" title="Tu — înspre creier">👤</span>
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={lastUser.content}
-                style={{ '--ticker-dur': tickerDur(lastUser.content) } as CSSProperties}
-              >
-                {lastUser.content.slice(0, 400)}
-              </span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">{lastUser.content.slice(0, 400)}</span>
             </span>
           </div>
         ) : busy && !lastAssistant?.content ? (
           <div className="heard-band" aria-live="polite">
             <span className="heard-band-label" title="Creierul a primit și gândește">🧠</span>
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={heard || '…'}
-                style={{ '--ticker-dur': tickerDur(heard || '…') } as CSSProperties}
-              >
-                {heard ? `„${heard}”` : '…'}
-              </span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">{heard ? `„${heard}”` : '…'}</span>
             </span>
           </div>
         ) : lastAssistant?.content || busy ? (

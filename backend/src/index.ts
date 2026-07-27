@@ -270,11 +270,21 @@ await app.register(pingRoutes)
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
 
-// Create tables if a database is configured (non-fatal if it isn't / is down).
+// Schema DB e VITALĂ când baza e configurată (audit securitate 27 iul):
+// initDb rulează totul într-o singură tranzacție implicită — dacă ORICE
+// statement pică, pică TOT, inclusiv indexul unic anti-dublă-creditare
+// (uniq_billing_ref). Înainte doar logam și mergeam mai departe = plățile
+// puteau fi creditate de două ori în tăcere. Acum: DB configurată dar schema
+// picată → procesul iese (gazda îl repornește; mai bine o repornire vizibilă
+// decât bani dublați invizibil). Fără DATABASE_URL rămâne pornire normală.
 try {
   await initDb()
   await initAppFiles() // load installer masters (uploaded from Linux) into cache
 } catch (err) {
+  if (config.databaseUrl) {
+    app.log.error({ err }, 'initDb EȘUAT cu DB configurată — ies (protecția banilor cere schema completă)')
+    process.exit(1)
+  }
   app.log.error({ err }, 'initDb failed — chat persistence disabled')
 }
 

@@ -32,7 +32,6 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
-  getSharedMemory,
   getMemories,
   deleteMemory,
   getVoiceprint,
@@ -170,6 +169,9 @@ async function selectedBrainModel(
 // DIRECTE ale lui Adrian („salută", „dansează") NU trec pe aici — execută mereu.
 const GESTURE_COOLDOWN_MS = 25_000
 const gestureGates = new Map<string, { last: string; at: number }>()
+// Ture de chat SIMULTANE per user plătitor (audit securitate 27 iul — anti
+// „check-then-charge": vezi plafonul din handler, înainte de paywall).
+const turnsInFlight = new Map<string, number>()
 function allowAutoGesture(email: string, name: string): boolean {
   if (!name) return false
   const now = Date.now()
@@ -1255,6 +1257,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // în localStorage → placeholder, recognizer și UI rămân mereu în ACEEAȘI
     // limbă cu răspunsurile. Adminul primește mereu ro-RO; restul limba stabilită.
     const announceLang = isAdminUser ? 'ro-RO' : (committedLang ?? speechPref ?? null)
+
+    // ANTI „40 DE TURE CU 1 BAN" (audit securitate 27 iul): paywall-ul era
+    // verifică-apoi-taxează — 40 de POST-uri paralele treceau toate de citirea
+    // soldului și debitau abia la final, adânc în minus. Plafon dur de ture
+    // SIMULTANE per user plătitor (2 e generos pentru un om real); adminul e
+    // scutit. Contorul se eliberează în finally-ul turei.
+    if (user.role !== 'admin') {
+      const inFlight = (turnsInFlight.get(user.email) ?? 0)
+      if (inFlight >= 2) return reply.code(429).send({ error: 'prea_multe_ture_simultane' })
+      turnsInFlight.set(user.email, inFlight + 1)
+      reply.raw.on('close', () => {
+        const n = (turnsInFlight.get(user.email) ?? 1) - 1
+        if (n <= 0) turnsInFlight.delete(user.email)
+        else turnsInFlight.set(user.email, n)
+      })
+    }
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
     // when Stripe isn't configured the app stays free/ungated. Clean binary stop

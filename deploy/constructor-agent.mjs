@@ -203,7 +203,16 @@ async function main() {
       if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
       const msg = resp.choices?.[0]?.message
       if (!msg) throw new Error('răspuns gol de la model')
-      messages.push(msg)
+      // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
+      // „invalid message at index 9: must have non-empty content or tool
+      // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
+      // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
+      // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
+      // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
+      const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
+      if (msg.tool_calls?.length) clean.tool_calls = msg.tool_calls
+      if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
+      messages.push(clean)
       const calls = msg.tool_calls ?? []
       if (!calls.length) {
         // modelul a vorbit fără unealtă — îl împingem înapoi la lucru
