@@ -60,9 +60,7 @@ export async function verifyLockSecret(email: string, secret: string): Promise<b
 }
 
 // Deblocarea: JWT propriu (scope dedicat, emailul titularului), cookie separat.
-// 'chip' = împerecherea voce+chip (Adrian, 27 iul): vocea a șovăit dar fața din
-// cameră e a titularului → aceeași deblocare ca vocea potrivită.
-export function grantUnlock(reply: FastifyReply, email: string, method: 'voce' | 'secret' | 'chip'): void {
+export function grantUnlock(reply: FastifyReply, email: string, method: 'voce' | 'secret'): void {
   const token = jwt.sign({ scope: 'admin-unlock', email, method }, config.sessionSecret, {
     expiresIn: UNLOCK_TTL_SEC,
   })

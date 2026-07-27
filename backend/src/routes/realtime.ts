@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, getFaceprint, faceDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -328,7 +328,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  app.post<{ Body: { role?: string; text?: string; voiceFeatures?: VoiceFeatures; faceDescriptor?: number[] } }>(
+  app.post<{ Body: { role?: string; text?: string; voiceFeatures?: VoiceFeatures } }>(
     '/api/realtime/transcript',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -397,27 +397,6 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           }
         } catch {
           /* amprenta nu blochează niciodată transcriptul */
-        }
-      }
-      // ÎMPERECHEREA VOCE+CHIP (Adrian, 27 iul: „scoate confirmarea în scris —
-      // identifică vocea cu specimenul, ia automat captura de imagine, le
-      // împerechează și auto-aprobă orice cerere"): timbrul variază (microfon,
-      // răceală, zgomot) — când vocea șovăie, CHIPUL din camera pornită decide.
-      // Fața titularului (pragul standard face-api 0.6, ca în chatul scris) →
-      // e titularul: nicio restricție, deblocare automată, zero „în scris".
-      const fdesc = req.body?.faceDescriptor
-      if (foreignVoice && Array.isArray(fdesc) && fdesc.length >= 64) {
-        try {
-          const fref = await getFaceprint(user.email)
-          if (fref?.descriptor?.length && faceDistance(fdesc, fref.descriptor) < 0.6) {
-            foreignVoice = undefined
-            if (isAdmin) {
-              grantUnlock(reply, user.email, 'chip')
-              adminUnlocked = true
-            }
-          }
-        } catch {
-          /* chipul nu blochează niciodată transcriptul */
         }
       }
       // ADMIN: ancorăm sesiunea live pe română la FIECARE tură (clientul face

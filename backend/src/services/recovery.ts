@@ -8,8 +8,6 @@
 const REPO = 'kelion-team/kelionai'
 const API = `https://api.github.com/repos/${REPO}`
 
-import { saveRecoveryRow, listRecoveryRows, deleteRecoveryRow } from '../db.js'
-
 function ghHeaders(): Record<string, string> {
   return {
     Authorization: `Bearer ${(process.env.GITHUB_TOKEN ?? '').trim()}`,
@@ -70,24 +68,9 @@ export async function listRecoveryPoints(): Promise<RecoveryPoint[]> {
         return { tag, sha: sha.slice(0, 7), date, note }
       }),
     )
-    // ȘI DIN BAZĂ (Adrian, 27 iul): rândurile din DB completează lista — dacă
-    // GitHub nu răspunde sau tag-ul a fost salvat doar local, punctul tot apare.
-    try {
-      const rows = await listRecoveryRows()
-      const seen = new Set(points.map((p) => p.tag))
-      for (const r of rows)
-        if (!seen.has(r.tag)) points.push({ tag: r.tag, sha: r.sha.slice(0, 7), date: r.created_at, note: r.note })
-    } catch {
-      /* baza indisponibilă — lista GitHub rămâne */
-    }
     return points.sort((a, b) => (a.date < b.date ? 1 : -1))
   } catch {
-    try {
-      const rows = await listRecoveryRows()
-      return rows.map((r) => ({ tag: r.tag, sha: r.sha.slice(0, 7), date: r.created_at, note: r.note }))
-    } catch {
-      return []
-    }
+    return []
   }
 }
 
@@ -128,33 +111,7 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
       signal: AbortSignal.timeout(12_000),
     })
     if (!rr.ok) return { ok: false, error: `ref_${rr.status}: ${(await rr.text()).slice(0, 200)}` }
-    // ȘI ÎN BAZA DE DATE (Adrian, 27 iul: „îl pune în baza de date") — a treia
-    // copie a evidenței, pe lângă tag-ul GitHub și oglinda .bundle de pe VPS.
-    void saveRecoveryRow(tag, short, message).catch(() => {})
     return { ok: true, tag }
-  } catch (e) {
-    return { ok: false, error: String((e as Error).message ?? e) }
-  }
-}
-
-// ── ȘTERGEREA UNUI PUNCT (Adrian, 27 iul: „la stânga de restaurează, buton
-// roșu șterge") ──────────────────────────────────────────────────────────────
-// Șterge tag-ul de pe GitHub (sursa de adevăr a listei). Commit-ul rămâne în
-// istoricul git — doar eticheta de backup dispare din meniu; oglinda .bundle
-// de pe VPS o curăță cronul de backup la următoarea trecere.
-export async function deleteRecoveryPoint(tag: string): Promise<{ ok: boolean; error?: string }> {
-  const token = (process.env.GITHUB_TOKEN ?? '').trim()
-  if (!token) return { ok: false, error: 'github_token_missing' }
-  if (!/^backup-[A-Za-z0-9._-]+$/.test(tag)) return { ok: false, error: 'tag_invalid' }
-  try {
-    const r = await fetch(`${API}/git/refs/tags/${tag}`, {
-      method: 'DELETE',
-      headers: ghHeaders(),
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (!r.ok && r.status !== 404) return { ok: false, error: `sterge_${r.status}: ${(await r.text()).slice(0, 150)}` }
-    void deleteRecoveryRow(tag).catch(() => {})
-    return { ok: true }
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) }
   }

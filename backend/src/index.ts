@@ -52,8 +52,6 @@ const DL_TYPES: Record<string, string> = {
   png: 'image/png',
   json: 'application/json',
   zip: 'application/zip',
-  // Episoadele STUDIOULUI (Kelion își filmează singur reclamele) — mp4 din /dl/.
-  mp4: 'video/mp4',
 }
 
 // Pachetul Linux nu e un binar depozitat, ci un lansator generat pe loc — mereu

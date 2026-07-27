@@ -422,39 +422,20 @@ export default function AdminPanel({
   }, [tab])
 
   // Tab „Constructor" deschis → coada ordinelor, reîmprospătată la 10s.
-  const loadBuildJobs = (): void => {
-    fetch('/api/admin/constructor', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[] } | null) => {
-        if (j?.jobs) setBuildJobs(j.jobs)
-      })
-      .catch(() => {})
-  }
   useEffect(() => {
     if (tab !== 'constructor') return
-    loadBuildJobs()
-    const id = window.setInterval(loadBuildJobs, 10_000)
+    const load = (): void => {
+      fetch('/api/admin/constructor', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { jobs?: BuildJobRow[] } | null) => {
+          if (j?.jobs) setBuildJobs(j.jobs)
+        })
+        .catch(() => {})
+    }
+    load()
+    const id = window.setInterval(load, 10_000)
     return () => window.clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
-
-  // Șterge un ordin din coadă (Adrian, 27 iul: „buton la fiecare de ștergere
-  // ordine"). Un ordin care se construiește chiar acum e refuzat de server.
-  const deleteBuildOrder = (j: BuildJobRow): void => {
-    if (!window.confirm(`Ștergi ordinul #${j.id}? „${j.orderText.slice(0, 60)}…"`)) return
-    void fetch('/api/admin/constructor/delete', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ id: j.id }),
-    })
-      .then((r) => r.json().then((res: { ok?: boolean; reason?: string }) => ({ ok: r.ok, res })))
-      .then(({ ok, res }) => {
-        if (ok && res.ok) loadBuildJobs()
-        else setBuildMsg(res.reason === 'in_lucru_sau_inexistent' ? 'Nu pot șterge un ordin care se construiește chiar acum.' : `Ștergerea a eșuat: ${res.reason ?? ''}`)
-      })
-      .catch(() => setBuildMsg('Ștergerea a eșuat — reîncearcă.'))
-  }
 
   const sendBuildOrder = (): void => {
     const order = buildOrder.trim()
@@ -505,38 +486,11 @@ export default function AdminPanel({
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fail'))))
       .then((j: { tag?: string }) => {
-        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''} (git + baza de date + serverul Linux)`)
+        setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag ?? ''}`)
         setRecoveryNote('')
         loadRecovery()
       })
       .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
-  }
-
-  // Șterge un punct salvat (butonul roșu — Adrian, 27 iul): eticheta dispare
-  // din listă; commit-ul rămâne în istoricul git (nimic ireversibil pierdut).
-  const deletePoint = (p: RecoveryRow): void => {
-    const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
-    if (!window.confirm(`Ștergi punctul de salvare din ${when} (${p.sha})? Nu va mai apărea în listă.`)) return
-    setRestoringTag(p.tag)
-    setRecoveryMsg(`Șterg ${p.tag}…`)
-    void fetch('/api/admin/backups/delete', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ tag: p.tag }),
-    })
-      .then((r) => r.json().then((j: { ok?: boolean; error?: string }) => ({ ok: r.ok, j })))
-      .then(({ ok, j }) => {
-        setRestoringTag(null)
-        if (ok && j.ok) {
-          setRecoveryMsg(`Șters ✓ ${p.tag}`)
-          loadRecovery()
-        } else setRecoveryMsg(`Ștergerea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
-      })
-      .catch(() => {
-        setRestoringTag(null)
-        setRecoveryMsg('Ștergerea a eșuat — verifică conexiunea și reîncearcă.')
-      })
   }
 
   // Restaurează aplicația la un punct salvat: confirmare dublă (acțiune grea —
@@ -1373,15 +1327,6 @@ export default function AdminPanel({
                     <button
                       type="button"
                       className="ghost"
-                      style={{ color: '#ff7a7a', borderColor: 'rgba(255, 122, 122, 0.55)' }}
-                      disabled={restoringTag !== null}
-                      onClick={() => deletePoint(p)}
-                    >
-                      Șterge
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
                       disabled={restoringTag !== null}
                       onClick={() => restoreFromPoint(p)}
                     >
@@ -1437,7 +1382,7 @@ export default function AdminPanel({
                     {j.orderText.slice(0, 90)}
                     {j.orderText.length > 90 ? '…' : ''}
                   </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>
                     {j.prUrl && (
                       <a href={j.prUrl} target="_blank" rel="noreferrer">
                         PR ↗
@@ -1446,16 +1391,6 @@ export default function AdminPanel({
                     {j.tokens > 0 && ` · ${Math.round(j.tokens / 1000)}k tok`}
                     {' · '}
                     {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    {j.status !== 'running' && (
-                      <button
-                        type="button"
-                        className="ghost"
-                        style={{ color: '#ff7a7a', borderColor: 'rgba(255, 122, 122, 0.55)', padding: '2px 8px', fontSize: 12 }}
-                        onClick={() => deleteBuildOrder(j)}
-                      >
-                        Șterge
-                      </button>
-                    )}
                   </span>
                 </div>
               ))}

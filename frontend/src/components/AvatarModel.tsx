@@ -4,7 +4,7 @@ import { useGLTF, useAnimations } from '@react-three/drei'
 import { LoopOnce, LoopRepeat, LoadingManager } from 'three'
 import { GLTFLoader } from 'three-stdlib'
 import type { Group, Bone, Mesh, SkinnedMesh, AnimationClip, AnimationAction } from 'three'
-import { getVoiceLevel, getMicBeatLevel } from '../lib/audioIO'
+import { getVoiceLevel } from '../lib/audioIO'
 import { useFacialQueue, type FacialLabel } from '../lib/facialQueue'
 import { fetchDisabledGestures } from '../lib/gestures'
 
@@ -204,14 +204,6 @@ export default function AvatarModel() {
   // după ultimul vârf de voce și când vine următoarea variație de repaus.
   const talkHold = useRef(0)
   const nextVar = useRef(30)
-  // DANSUL PE MUZICĂ (Adrian, 27 iul: „când e pe YouTube/muzică și îi cer, să
-  // sincronizeze muzica cu mișcările"): pornit prin evenimentul
-  // `kelion:dance-music` (on/off). Cât e pornit, avatarul rulează un clip de
-  // dans a cărui VITEZĂ e modulată de ritmul microfonului (getMicBeatLevel —
-  // microfonul aude muzica din difuzoare). Se oprește la „off", la STOP, sau
-  // singur dacă muzica tace ~4s.
-  const danceMusic = useRef(false)
-  const danceQuiet = useRef(0)
   // SUBTILITATE (Adrian, 27 iul: „gestica mâinilor și a tuturor trebuie să fie
   // mult mai subtile"): clipul de vorbit NU înlocuiește repausul — se așază
   // PESTE el ca strat cu greutate mică (idle rămâne baza), deci doar o umbră
@@ -331,29 +323,10 @@ export default function AvatarModel() {
     const onPreview = (e: Event): void => runGesture(String((e as CustomEvent).detail ?? ''), true)
     window.addEventListener('kelion-gesture', onGesture)
     window.addEventListener('kelion-gesture-preview', onPreview)
-    // DANSUL PE MUZICĂ — pornit/oprit din creier/comandă (ChatPanel emite
-    // evenimentul la unealta dance_to_music sau la comanda verbală).
-    const onDanceMusic = (e: Event): void => {
-      const on = String((e as CustomEvent).detail ?? 'on') !== 'off'
-      danceMusic.current = on
-      danceQuiet.current = 0
-      if (on) {
-        if (disabledG.current.has('dans')) return // respectă filtrul lui Adrian
-        talkLayer.current?.fadeOut(0.2)
-        talkLayer.current = null
-        state.current = 'gesture' // ține regia normală departe cât dansează
-        play('dans', false, 0.4) // buclă, nu o singură dată — dansează continuu
-      } else {
-        state.current = 'idle'
-        play('idle', false, 0.4)
-      }
-    }
-    window.addEventListener('kelion:dance-music', onDanceMusic)
     return () => {
       mixer.removeEventListener('finished', onFinished)
       window.removeEventListener('kelion-gesture', onGesture)
       window.removeEventListener('kelion-gesture-preview', onPreview)
-      window.removeEventListener('kelion:dance-music', onDanceMusic)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions, mixer])
@@ -401,24 +374,6 @@ export default function AvatarModel() {
   useFrame((state3, delta) => {
     const level = getVoiceLevel()
     const t = state3.clock.elapsedTime
-
-    // DANSUL PE MUZICĂ: cât e pornit, viteza clipului de dans urmează ritmul
-    // captat de microfon (muzica din difuzoare) — pe bătaie se mișcă energic,
-    // între bătăi mai lin. Muzică tăcută ~4s → se oprește singur, revine la idle.
-    if (danceMusic.current) {
-      const beat = getMicBeatLevel()
-      if (beat < 0.04) danceQuiet.current += delta
-      else danceQuiet.current = 0
-      if (danceQuiet.current > 4) {
-        danceMusic.current = false
-        state.current = 'idle'
-        play('idle', false, 0.5)
-      } else {
-        // 0.7x în liniște → ~1.5x pe bătaie tare: mișcarea „prinde" ritmul.
-        current.current?.setEffectiveTimeScale(0.7 + Math.min(beat, 1) * 0.8)
-      }
-      return // cât dansează, regia normală (talk/idle/variații) nu rulează
-    }
 
     // ── MOTORUL DE GESTURI (Adrian, 27 iul: „umane reale, decente") ──
     // Regia deterministă, pe ce face Kelion ACUM (nivelul REAL al vocii):

@@ -2,11 +2,9 @@
 FROM node:22-bookworm-slim
 WORKDIR /app
 
-# System deps: python for markitdown, curl for healthchecks, ffmpeg for the
-# promo STUDIO (Kelion își filmează singur episoadele: video Playwright +
-# narație TTS + subtitrări arse → mp4; vezi services/promoStudio.ts).
+# System deps: python for markitdown, curl for healthchecks
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip curl ffmpeg \
+    && apt-get install -y --no-install-recommends python3 python3-pip curl \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

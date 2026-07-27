@@ -314,16 +314,6 @@ export async function initDb(): Promise<void> {
     );
     -- App installers stored for delivery (master lives on the Linux server; the
     -- builder uploads the freshest bytes here so the QR always serves latest).
-    -- PUNCTELE DE RECUPERARE ȘI ÎN BAZĂ (Adrian, 27 iul: „creează backup când
-    -- îl apăs și îl pune în baza de date"): pe lângă eticheta git (sursa de
-    -- adevăr) și oglinda .bundle de pe VPS, fiecare punct are rând aici —
-    -- lista funcționează și când GitHub nu răspunde.
-    CREATE TABLE IF NOT EXISTS recovery_points (
-      tag TEXT PRIMARY KEY,
-      sha TEXT NOT NULL DEFAULT '',
-      note TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
     CREATE TABLE IF NOT EXISTS app_files (
       name TEXT PRIMARY KEY,
       content BYTEA NOT NULL,
@@ -1037,47 +1027,6 @@ export async function initAppFiles(): Promise<void> {
 
 export function getAppFile(name: string): { buf: Buffer; type: string } | null {
   return appFileCache.get(name) ?? null
-}
-
-// ── Punctele de recuperare, oglindite în DB (Adrian, 27 iul) ────────────────
-export async function saveRecoveryRow(tag: string, sha: string, note: string): Promise<void> {
-  if (!dbEnabled()) return
-  await getPool().query(
-    `INSERT INTO recovery_points (tag, sha, note) VALUES ($1, $2, $3)
-     ON CONFLICT (tag) DO UPDATE SET sha = $2, note = $3`,
-    [tag, sha, note],
-  )
-}
-export async function listRecoveryRows(): Promise<{ tag: string; sha: string; note: string; created_at: string }[]> {
-  if (!dbEnabled()) return []
-  const r = await getPool().query<{ tag: string; sha: string; note: string; created_at: string }>(
-    'SELECT tag, sha, note, created_at FROM recovery_points ORDER BY created_at DESC LIMIT 100',
-  )
-  return r.rows
-}
-export async function deleteRecoveryRow(tag: string): Promise<void> {
-  if (!dbEnabled()) return
-  await getPool().query('DELETE FROM recovery_points WHERE tag = $1', [tag])
-}
-
-// STUDIOUL (Adrian, 27 iul: „Kelion să-și înregistreze propriile filmulețe"):
-// episoadele filmate se salvează AICI (supraviețuiesc redeploy-urilor, se
-// servesc prin /dl/<nume>) — aceeași cale ca instalatoarele.
-export async function saveAppFile(name: string, buf: Buffer, type: string): Promise<void> {
-  appFileCache.set(name, { buf, type })
-  if (!dbEnabled()) return
-  await getPool().query(
-    `INSERT INTO app_files (name, content, content_type) VALUES ($1, $2, $3)
-     ON CONFLICT (name) DO UPDATE SET content = $2, content_type = $3`,
-    [name, buf, type],
-  )
-}
-
-/** Episoadele din studio (nume + mărime), pentru listare în chat/admin. */
-export function listStudioFiles(): { name: string; bytes: number }[] {
-  return [...appFileCache.entries()]
-    .filter(([n]) => n.startsWith('episod-'))
-    .map(([n, v]) => ({ name: n, bytes: v.buf.length }))
 }
 
 // ── Installer download log (who downloaded what, from our own /dl) ─────────
@@ -2900,19 +2849,6 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
     [orderedBy.toLowerCase(), orderText],
   )
   return Number(r.rows[0]?.id ?? 0)
-}
-
-// Șterge un ordin din coadă (Adrian, 27 iul: „buton la fiecare de ștergere
-// ordine"). Un ordin în lucru chiar acum (running) NU se șterge — l-am rupe
-// sub picioarele lucrătorului; abia după ce termină sau e abandonat.
-export async function deleteBuildJob(id: number): Promise<{ ok: boolean; reason?: string }> {
-  if (!dbEnabled()) return { ok: false, reason: 'db_indisponibil' }
-  const r = await getPool().query(
-    "DELETE FROM build_jobs WHERE id = $1 AND status <> 'running'",
-    [id],
-  )
-  if (r.rowCount === 0) return { ok: false, reason: 'in_lucru_sau_inexistent' }
-  return { ok: true }
 }
 
 // Lucrătorul ia UN ordin: cel mai vechi „queued", sau un „running" înțepenit

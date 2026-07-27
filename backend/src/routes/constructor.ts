@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, deleteBuildJob } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 
@@ -32,18 +32,6 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ jobs: await listBuildJobs(40) })
-  })
-
-  // Ștergerea unui ordin din coadă (Adrian, 27 iul: „buton la fiecare de
-  // ștergere ordine"). Un ordin care se construiește chiar acum nu se șterge.
-  app.post<{ Body: { id?: number } }>('/api/admin/constructor/delete', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.body?.id ?? 0)
-    if (!id) return reply.code(400).send({ error: 'id_lipsa' })
-    const r = await deleteBuildJob(id)
-    if (!r.ok) return reply.code(409).send(r)
-    return reply.send(r)
   })
 
   // ── Capătul lucrătorului de pe VPS (auth x-bridge-secret, ca ops/pulse) ──

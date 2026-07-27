@@ -37,7 +37,7 @@ import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
-import { listRecoveryPoints, createRecoveryPoint, restoreToPoint, deleteRecoveryPoint } from '../services/recovery.js'
+import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -147,14 +147,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await restoreToPoint(String(req.body?.tag ?? ''))
-    if (!r.ok) return reply.code(500).send(r)
-    return reply.send(r)
-  })
-  // ȘTERGEREA unui punct salvat (Adrian, 27 iul: butonul roșu „Șterge").
-  app.post<{ Body: { tag?: string } }>('/api/admin/backups/delete', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await deleteRecoveryPoint(String(req.body?.tag ?? ''))
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
   })

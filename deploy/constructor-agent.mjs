@@ -35,15 +35,8 @@ const BRIDGE = env.BRIDGE_SECRET ?? ''
 const ORKEY = env.OPENROUTER_API_KEY ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
 const MODEL = env.CONSTRUCTOR_MODEL || 'anthropic/claude-sonnet-4.5'
-const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
+const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 60)
 const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
-// FEREASTRA DE CONTEXT (audit 27 iul — cauza EȘECULUI pe ORICE model): bucla
-// re-trimitea TOT istoricul la fiecare pas, cu citiri de până la 120k caractere
-// păstrate pe veci → un job trivial ajungea la ~794k tokeni, unul greu spărgea
-// plafonul. Acum: rezultatele uneltelor vechi se comprimă la un ciot; doar
-// ultimele KEEP_VERBATIM schimburi rămân întregi. Liniar, nu pătratic.
-const KEEP_VERBATIM = Number(env.CONSTRUCTOR_KEEP_VERBATIM || 6)
-const READ_CAP = 6_000 // caractere pe o citire (era 120k — sursa exploziei)
 
 const logLines = []
 function log(s) {
@@ -81,32 +74,13 @@ function toolLs(dir) {
   }
   return out.sort().join('\n') || '(gol)'
 }
-// Citirea cu numere de linie ȘI interval opțional (from/to) — ca modelul să
-// tragă DOAR bucata de care are nevoie, nu tot fișierul (audit: citirile
-// întregi umpleau contextul). Fără interval: primele READ_CAP caractere.
-function toolRead(p, from, to) {
-  const lines = fs.readFileSync(safePath(p), 'utf8').split('\n')
-  const a = Number.isFinite(from) && from > 0 ? Math.floor(from) : 1
-  const b = Number.isFinite(to) && to >= a ? Math.floor(to) : lines.length
-  const slice = lines.slice(a - 1, b).map((l, i) => `${a + i}\t${l}`).join('\n')
-  if (slice.length > READ_CAP)
-    return `${slice.slice(0, READ_CAP)}\n...[trunchiat la ${READ_CAP} caractere — cere un interval de linii (from/to) pentru restul; fișierul are ${lines.length} linii]`
-  return slice
-}
-// GREP peste atelier (audit: fără căutare, modelul „spelunca" prin ls/read pas
-// cu pas ca să găsească fișierul). O singură căutare = fișierul + linia țintă.
-function toolGrep(pattern) {
-  const pat = String(pattern ?? '').trim()
-  if (!pat) return 'pattern gol'
-  try {
-    const out = sh(
-      `grep -rnI --exclude-dir={node_modules,.git,dist,build,coverage} -e ${JSON.stringify(pat)} . | head -60`,
-    )
-    return out.trim() || '(niciun rezultat)'
-  } catch (e) {
-    // grep întoarce exit 1 când nu găsește nimic — nu e eroare.
-    return e.status === 1 ? '(niciun rezultat)' : `EROARE grep: ${String(e.message).slice(0, 200)}`
-  }
+function toolRead(p) {
+  const t = fs.readFileSync(safePath(p), 'utf8')
+  if (t.length > 120_000) return `${t.slice(0, 120_000)}\n...[trunchiat: fișierul are ${t.length} caractere]`
+  return t
+    .split('\n')
+    .map((l, i) => `${i + 1}\t${l}`)
+    .join('\n')
 }
 function toolWrite(p, content) {
   const full = safePath(p)
@@ -138,52 +112,29 @@ function toolRun(cmd) {
 
 const TOOLS = [
   { type: 'function', function: { name: 'ls', description: 'Listează un director din repo (fără node_modules/.git/dist).', parameters: { type: 'object', properties: { dir: { type: 'string' } } } } },
-  { type: 'function', function: { name: 'grep', description: 'Caută un text/regex în tot repo-ul și întoarce fișier:linie:conținut (max 60). FOLOSEȘTE ASTA ca să găsești fișierul de modificat — nu explora cu ls/read pas cu pas.', parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] } } },
-  { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'read', description: 'Citește un fișier din repo, cu numere de linie.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff).', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă de verificare din lista permisă (npm ci/build/test pe backend/frontend, git status/diff).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Termină lucrarea: dai titlul + corpul PR-ului (română). Cheam-o DOAR după build verde (și teste verzi pe backend dacă l-ai atins).', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
 ]
 
-const SYSTEM = `Ești CONSTRUCTORUL lui Kelionai — lucrătorul de cod autonom, pe serverul proiectului.
-Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (scripturi VPS).
-
-PROCEDURA (ține-o STRICT — bugetul de pași e mic, ~24):
-1. Primul tău mesaj: UN PLAN de o linie — ce fișier(e) modifici. Fără unealtă încă.
-2. Găsește fișierul cu 'grep' (un pattern din ordin). NU explora cu ls/read pas cu pas.
-3. Citește DOAR fișierul pe care-l modifici, și DOAR intervalul relevant (read cu from/to). Nu citi de două ori același fișier. NU citi AI-HANDOFF.md (e uriaș) decât dacă ordinul cere explicit arhitectura.
-4. Scrie modificarea cu 'write' (conținutul COMPLET al fișierului, rescriere integrală, fără diff).
-5. Cheamă 'finish' IMEDIAT după ce ai scris. NU rula tu 'npm ci/build/test' — sistemul verifică singur după finish. Ținta: finish în ≤3 unelte după ce ai găsit fișierul.
-
-REGULILE CASEI:
-- Rescrii curat modulul responsabil — fără petice band-aid; potrivește stilul din jur (comentarii în română).
-- Schimbări STRICT în perimetrul ordinului — nimic „din zbor"; nu atingi contoare financiare, nu ștergi date.
-- finish: titlu + corp de PR în română (ce, de ce). Dacă sistemul îți spune că buildul a picat, repari și re-finish (ai un număr mic de runde).`
+const SYSTEM = `Ești CONSTRUCTORUL lui Kelionai — lucrătorul de cod autonom al proiectului, pe serverul lui.
+Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (scripturi VPS), bridge/ (istoric). AI-HANDOFF.md = sursa de adevăr; citește-l (măcar secțiunile relevante) înainte de orice lucrare netrivială.
+REGULILE CASEI (obligatorii):
+- Rescrii curat modulul responsabil — FĂRĂ petice band-aid.
+- write = conținutul COMPLET al fișierului; citește fișierul înainte să-l rescrii.
+- Stilul existent: comentarii în română, în stilul fișierului; potrivește idiomul codului din jur.
+- Calea chat/voce rămâne low-latency; nu atingi contoare financiare și nu ștergi date.
+- Schimbări STRICT în perimetrul ordinului — nimic „din zbor".
+VERIFICARE OBLIGATORIE înainte de finish: "npm --prefix backend ci" apoi "npm --prefix backend run build" (+ "npm --prefix backend test" dacă ai atins backend/); "npm --prefix frontend ci" + "npm --prefix frontend run build" dacă ai atins frontend/. Buildul picat = repari și reverifici, nu chemi finish.
+Bugetul de pași/tokeni e limitat: fii chirurgical, nu reciti fișiere mari degeaba.
+La final: finish cu titlu + corp de PR în română (ce, de ce, dovada verificării).`
 
 // REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
 // „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
 // la rate-limit și agentul crăpa pe r.json() fără nicio reîncercare). Acum:
 // corp gol, JSON rupt, 429 sau 5xx → reîncearcă cu pauze crescătoare; abia
 // după 4 încercări ratate jobul pică de-adevăratelea.
-// FEREASTRA GLISANTĂ pe istoric (audit 27 iul — fixul care taie explozia
-// pătratică de tokeni): rezultatele uneltelor mai vechi decât ultimele
-// KEEP_VERBATIM se înlocuiesc cu un ciot de o linie. Contextul rămâne mic și
-// aproape constant, indiferent câți pași durează jobul → merge și pe modelele
-// gratuite (care se sufocau la request-uri uriașe). Mesajele system+ordin și
-// apelurile de unealtă (assistant) rămân neatinse — doar CORPUL rezultatelor
-// vechi (role:'tool') se comprimă, ca modelul să nu-și piardă firul.
-function compactHistory(messages) {
-  const toolIdx = []
-  for (let i = 0; i < messages.length; i++) if (messages[i].role === 'tool') toolIdx.push(i)
-  const cutoff = toolIdx.length - KEEP_VERBATIM
-  for (let k = 0; k < cutoff; k++) {
-    const i = toolIdx[k]
-    const c = messages[i].content
-    if (typeof c === 'string' && c.length > 120 && !c.startsWith('[rezultat vechi'))
-      messages[i] = { ...messages[i], content: `[rezultat vechi elidat — ${c.length} caractere; cere din nou dacă îți trebuie]` }
-  }
-}
-
 async function llm(messages) {
   let lastErr = ''
   for (let attempt = 1; attempt <= 4; attempt++) {
@@ -307,8 +258,7 @@ async function main() {
         let result = ''
         try {
           if (c.function.name === 'ls') result = toolLs(String(args.dir ?? '.'))
-          else if (c.function.name === 'grep') result = toolGrep(String(args.pattern ?? ''))
-          else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
+          else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''))
           else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
           else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
           else if (c.function.name === 'finish') {
@@ -318,15 +268,9 @@ async function main() {
         } catch (e) {
           result = `EROARE: ${e.message}`
         }
-        if (c.function.name !== 'read') log(`pas ${step}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}`)
-        // Plafon per-rezultat mic (era 100k — sursa exploziei de context).
-        messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, READ_CAP) })
+        if (c.function.name !== 'read') log(`pas ${step}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? '').slice(0, 80)}`)
+        messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, 100_000) })
       }
-      // FEREASTRA GLISANTĂ (fixul structural, audit 27 iul): comprimă
-      // rezultatele uneltelor VECHI la un ciot de o linie — modelul păstrează
-      // firul (ce a făcut) fără să care conținutul integral al fiecărei citiri
-      // pe veci. Doar ultimele KEEP_VERBATIM rezultate rămân întregi.
-      compactHistory(messages)
     }
     if (!finish) throw new Error('plafon de pași atins fără finish')
 
