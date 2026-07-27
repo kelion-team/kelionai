@@ -383,6 +383,14 @@ export async function openaiRealtimeAnswer(
     instructions: realtimeInstructions(lang, meserie, hardLock) + (contextBlock || ''),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
     tools: realtimeTools(dynamic),
+    // NU URCA ASTA LA 'required' — regulă, nu preferință. La nivel de SESIUNE,
+    // 'required' obligă modelul să cheme o unealtă la FIECARE răspuns, inclusiv
+    // pe răspunsul care procesează rezultatul uneltei dinainte → buclă de unelte
+    // din care nu mai iese și Kelion nu mai vorbește deloc.
+    // Forțarea faptei se face PER RĂSPUNS, din client, doar pe turele de ordin:
+    // { type:'response.create', response:{ tool_choice:'required' | {type:'function',name} } }
+    // Tura următoare revine singură la 'auto', fără session.update. Vezi
+    // frontend/src/lib/realtimeVoice.ts (poarta faptei în voce).
     tool_choice: 'auto',
   }
 
