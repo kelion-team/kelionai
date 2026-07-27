@@ -247,6 +247,11 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **27 IUL (valul 21) — SĂNĂTATEA PROPRIE: Kelion își vede problemele și ÎNTREABĂ dacă să le repare (Adrian: „să poată comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să le repare"):**
+  1. **`services/health.ts` — `systemHealth()`**: agregare deterministă — live vs master (GitHub API), rulări roșii 48h, ordine de construcție eșuate, val de erori client (>20/h), disc ≥90%, DB, sold OpenRouter sub prag. Fiecare problemă cu `grav` + `reparabil` (cum se repară).
+  2. **Unealta `system_health`** (chat admin + ask_brain din voce): instrucțiunea din prompt îl pune să o cheme LA PRIMUL mesaj al ownerului dintr-o conversație; probleme → „am problemele: x, y, z — le repar?" și **așteaptă acordul explicit**; sănătos → tace.
+  3. **Descoperire critică pe drum (meritul lui Adrian, „401 greșit")**: `BRIDGE_SECRET` NU exista nici în env, nici în container — pulsul sentinelei era MORT TĂCUT de la instalare, constructorul nu putea lua ordine. Generat + redeploy (KELION_DEPLOY_FORCE există acum pentru cazul env-schimbat-același-sha); dovadă după: `/api/constructor/next` cu cheie = 200. Lecția: un „paznic" nedemonstrat cap-coadă cu 200 real NU e instalat.
+  4. **Vindecătorul DOVEDIT**: deploy #493 rerulat automat de vindecător → verde (attempt 2, success). Prima rulare a prins și id-uri false din JSON (grep) → reparat cu parsare python3 + fereastră 48h; cele 2 alerte false pe email — explicate lui Adrian.
 - 🗓️ **27 IUL (valul 20) — LACĂTUL GLOBAL DE PUBLICARE (deploy #493 roșu explicat + reparat definitiv):**
   1. **Cauza roșului**: după merge-ul #422, DOUĂ publicări au rulat deploy.sh în paralel pe același master — Actions (deploy.yml, push) și auto-publicarea de pe server (cron 3 min). Ambele au construit imaginea; al doilea `docker run` a picat pe „container name /kelionai-app already in use" (exit 125). **Publicarea reală reușise** (anti-fantomă verde la primul) — roșul era doar al dublurii.
   2. **Fixul**: `flock` global pe `/root/kelion/publicare.lock` chiar în deploy.sh (după garda de self-copy) — orice publicator așteaptă; + ieșire devreme la pasul 1 („deja publicat exact $TARGET") când celălalt a terminat primul. Ambele drumuri (Actions + cron) rămân, dar serializate — nu mai există cursă, nu mai există roșu fals.
