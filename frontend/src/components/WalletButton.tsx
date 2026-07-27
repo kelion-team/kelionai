@@ -48,6 +48,9 @@ export function WalletButton({
   const [custom, setCustom] = useState('')
   // Eroarea checkout-ului AFIȘATĂ, nu înghițită („apăs și nu se execută").
   const [payErr, setPayErr] = useState('')
+  // OCUPAT VIZIBIL (auditul de fluiditate 27 iul, defectul 10): drumul până la
+  // Stripe durează — fără semnal, butonul părea mort și userul apăsa iar.
+  const [payBusy, setPayBusy] = useState(false)
   // „CREDIT ADĂUGAT" (Adrian, 24 iul: „mesajul «adăugat credit» e suficient
   // pentru useri, restul în spate la mine automat"): când soldul CREȘTE între
   // două citiri (adminul a vândut/creditat), userul vede doar mesajul — nicio
@@ -65,12 +68,16 @@ export function WalletButton({
     return (ro ? 'Plata nu a pornit: ' : 'Payment failed to start: ') + code
   }
   const pay = (amount: number): void => {
+    if (payBusy) return // anti-dublu-click cât se deschide plata
     setPayErr('')
+    setPayBusy(true)
     void startCheckout(amount).then((err) => {
       if (err) {
+        setPayBusy(false)
         setPayErr(errText(err))
         console.error('checkout failed:', err) // ajunge și la Kelion (F12 → server)
       }
+      // succes → pagina navighează la Stripe; starea moare odată cu ea.
     })
   }
 
@@ -236,11 +243,14 @@ export function WalletButton({
               )}
               <div className="wallet-amounts">
                 {presets.map((a) => (
-                  <button key={a} type="button" className="ghost wallet-pack" onClick={() => pay(a)}>
+                  <button key={a} type="button" className="ghost wallet-pack" disabled={payBusy} onClick={() => pay(a)}>
                     <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
                   </button>
                 ))}
               </div>
+              {payBusy && (
+                <span className="wallet-menu-note">{ro ? 'Se deschide plata…' : 'Opening payment…'}</span>
+              )}
               <div className="wallet-custom">
                 <span aria-hidden>£</span>
                 <input
@@ -255,7 +265,7 @@ export function WalletButton({
                 <button
                   type="button"
                   className="ghost"
-                  disabled={customValid() === null}
+                  disabled={customValid() === null || payBusy}
                   onClick={() => {
                     const n = customValid()
                     if (n !== null) pay(n)

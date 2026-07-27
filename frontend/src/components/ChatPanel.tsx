@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -1666,9 +1667,15 @@ export default function ChatPanel({
   function switchCamera(): void {
     setFacing((f) => (f === 'user' ? 'environment' : 'user'))
   }
-  function onCameraError(): void {
+  // IDENTITATE STABILĂ (auditul de fluiditate 27 iul, defectul 4): ca funcție
+  // simplă, primea o identitate NOUĂ la fiecare render → efectul din CameraView
+  // (dependent de onError) se demonta/remonta CONTINUU: camera oprită-pornită
+  // de zeci de ori pe secundă în timpul streamingului, iar lanțul serial de
+  // eliberare (camera.ts, 450ms/oprire) creștea mai repede decât timpul real —
+  // vederea murea. useCallback([]) = o singură identitate pe viața componentei.
+  const onCameraError = useCallback((): void => {
     setCameraOn(false)
-  }
+  }, [])
 
   // Calibrare voiceprint: 3s de captat vocea lui Adrian, apoi profilul se
   // salvează local (audioIO.ts) și microfonul permanent începe să-l filtreze.

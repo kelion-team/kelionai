@@ -148,6 +148,7 @@ export default function AdminPanel({
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
+  const [vLoading, setVLoading] = useState(false)
   const [vreply, setVreply] = useState('')
   const vLastId = useState({ id: 0 })[0]
   const [inbound, setInbound] = useState<InboundEmail[]>([])
@@ -311,6 +312,36 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
+  // SINCRONIZARE CU NAVIGAREA DIN VOCE (auditul de fluiditate 27 iul, defectul
+  // 7): initialTab era doar valoarea de pornire — dacă panoul era DEJA deschis
+  // și Kelion primea „deschide admin → vizitatori", tab-ul nu se schimba deloc.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab)
+  }, [initialTab])
+
+  // ÎNCĂRCARE PE TAB, NU PE CLICK (defectul 6): stores/inbox/tokenuri își
+  // încărcau datele DOAR din onClick-ul butonului — deschise prin voce sau
+  // initialTab rămâneau permanent goale („Se verifică magazinele live…" etern).
+  useEffect(() => {
+    if (tab === 'stores') {
+      void fetchStores().then(setStores)
+    } else if (tab === 'inbox') {
+      void fetchInbound().then(setInbound)
+      void fetchContactMessages().then(setContactMsgs)
+      setMailboxLoading(true)
+      void fetchMailboxLive().then((m) => {
+        setMailboxLive(m)
+        setMailboxLoading(false)
+      })
+    } else if (tab === 'tokenuri') {
+      setTokenChecksLoading(true)
+      void fetchTokenChecks().then((r) => {
+        setTokenChecks(r)
+        setTokenChecksLoading(false)
+      })
+    }
+  }, [tab])
+
   // BANI ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
   // real, valoarea reală"): cât timp tabul Bani e deschis, reîmprospătăm soldul
   // OpenRouter, Stripe, profit și tranzacțiile la fiecare 15s — valori LIVE.
@@ -353,7 +384,11 @@ export default function AdminPanel({
     vLastId.id = 0
     setVsel(conv)
     setVmsgs([])
+    // OCUPAT VIZIBIL (auditul de fluiditate 27 iul, defectul 10): firul se
+    // golea și rămânea ALB cât se aducea conversația — părea stricat.
+    setVLoading(true)
     const rows = await fetchVisitorChat(conv, 0)
+    setVLoading(false)
     vLastId.id = rows.length ? rows[rows.length - 1].id : 0
     setVmsgs(rows)
   }
@@ -588,26 +623,14 @@ export default function AdminPanel({
             <button
               type="button"
               className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('stores')
-                void fetchStores().then(setStores)
-              }}
+              onClick={() => setTab('stores')}
             >
               Magazine
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('inbox')
-                void fetchInbound().then(setInbound)
-                void fetchContactMessages().then(setContactMsgs)
-                setMailboxLoading(true)
-                void fetchMailboxLive().then((m) => {
-                  setMailboxLive(m)
-                  setMailboxLoading(false)
-                })
-              }}
+              onClick={() => setTab('inbox')}
             >
               Inbox
             </button>
@@ -628,14 +651,7 @@ export default function AdminPanel({
             <button
               type="button"
               className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
-              onClick={() => {
-                setTab('tokenuri')
-                setTokenChecksLoading(true)
-                void fetchTokenChecks().then((r) => {
-                  setTokenChecks(r)
-                  setTokenChecksLoading(false)
-                })
-              }}
+              onClick={() => setTab('tokenuri')}
             >
               Tokenuri
             </button>
@@ -1733,6 +1749,7 @@ export default function AdminPanel({
               {vsel && (
                 <>
                   <div className="vchat-admin-log">
+                    {vLoading && <p className="chat-hint">Se încarcă…</p>}
                     {vmsgs.map((m) => (
                       <div
                         key={m.id}
