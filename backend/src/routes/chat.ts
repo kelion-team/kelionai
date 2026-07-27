@@ -371,6 +371,16 @@ const BUILD_SOFTWARE_TOOL: Tool = {
     required: ['order'],
   },
 }
+const CONSTRUCTOR_LOG_TOOL: Tool = {
+  name: 'constructor_log',
+  description:
+    "ADMIN ONLY. Read the FULL log of ONE constructor build job by id — every step it took and, if it failed, the REAL cause at the end. Call this whenever the owner asks whether the constructor works, why a build failed, or what it did. First call constructor_status to see the jobs and their ids, then constructor_log(id) for the one you care about. NEVER say you cannot see the constructor's logs — you have this tool.",
+  input_schema: {
+    type: 'object',
+    properties: { id: { type: 'number', description: 'The build job id (from constructor_status).' } },
+    required: ['id'],
+  },
+}
 const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
   description:
@@ -1836,7 +1846,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, FILM_EPISODE_TOOL, STUDIO_STATUS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_LOG_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, FILM_EPISODE_TOOL, STUDIO_STATUS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -2169,7 +2179,40 @@ async function runTool(
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const jobs = await listBuildJobs(12)
       return JSON.stringify({
-        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+        // JURNALUL LA KELION (Adrian, 27 iul: „Kelion nu poate vedea dacă
+        // constructorul merge, nu-i dă logurile"): fiecare job vine acum cu
+        // COADA jurnalului (ultimii ~600 caractere — acolo e ultimul pas și
+        // cauza eșecului). Pentru jurnalul COMPLET al unui job: constructor_log.
+        jobs: jobs.map((j) => ({
+          id: j.id,
+          status: j.status,
+          attempts: j.attempts,
+          order: j.orderText.slice(0, 160),
+          pr: j.prUrl,
+          branch: j.branch,
+          tokens: j.tokens,
+          updated: j.updatedAt,
+          logTail: (j.log ?? '').slice(-600),
+        })),
+      })
+    }
+    case 'constructor_log': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const id = Number(args.id ?? 0)
+      if (!id) return JSON.stringify({ error: 'id_lipsa' })
+      const jobs = await listBuildJobs(40)
+      const job = jobs.find((j) => j.id === id)
+      if (!job) return JSON.stringify({ error: 'job_negasit', id })
+      return JSON.stringify({
+        id: job.id,
+        status: job.status,
+        attempts: job.attempts,
+        order: job.orderText,
+        pr: job.prUrl,
+        branch: job.branch,
+        tokens: job.tokens,
+        // Jurnalul COMPLET al jobului (plafonat, ca răspunsul să nu explodeze).
+        log: (job.log ?? '(fără jurnal)').slice(-6000),
       })
     }
     case 'system_health': {
