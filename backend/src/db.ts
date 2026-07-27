@@ -528,6 +528,70 @@ export async function listClientErrors(n = 100): Promise<ClientErrorRow[]> {
   }
 }
 
+// AUTO-VINDECAREA (Adrian, 27 iul: „Kelion trebuie să poată culege err apărute
+// sub fiecare user automat și să le remedieze, dând versiunea reparată pentru
+// toți userii ulterior"). Grupăm erorile de client pe mesaj (primele 200 de
+// caractere) și întoarcem DOAR pe cele RECURENTE — apărute de multe ori, la mai
+// mulți utilizatori (ip-uri distincte) în fereastra dată. Astfel constructorul
+// nu se apucă de un incident izolat/ambiental, ci de un bug real, repetat.
+export interface RecurringError {
+  message: string
+  count: number
+  users: number
+  sampleStack: string | null
+  sampleUrl: string
+  firstSeen: string
+  lastSeen: string
+}
+export async function recurringClientErrors(hours = 24, minCount = 5, minUsers = 2): Promise<RecurringError[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<{
+      message: string
+      count: string
+      users: string
+      stack: string | null
+      url: string
+      first_seen: string
+      last_seen: string
+    }>(
+      `SELECT left(message, 200) AS message,
+              count(*) AS count,
+              count(DISTINCT ip) AS users,
+              (array_agg(stack ORDER BY created_at DESC))[1] AS stack,
+              (array_agg(url   ORDER BY created_at DESC))[1] AS url,
+              min(created_at)::text AS first_seen,
+              max(created_at)::text AS last_seen
+         FROM client_errors
+        WHERE created_at > now() - ($1 || ' hours')::interval
+          AND message <> ''
+          -- excludem zgomotul ne-reparabil din cod: erori cross-origin opace,
+          -- pene de rețea, extensii de browser.
+          AND message NOT ILIKE 'Script error%'
+          AND message NOT ILIKE '%NetworkError%'
+          AND message NOT ILIKE '%Failed to fetch%'
+          AND message NOT ILIKE '%Load failed%'
+          AND message NOT ILIKE '%ResizeObserver%'
+        GROUP BY left(message, 200)
+       HAVING count(*) >= $2 AND count(DISTINCT ip) >= $3
+        ORDER BY count(*) DESC
+        LIMIT 20`,
+      [hours, minCount, minUsers],
+    )
+    return r.rows.map((x) => ({
+      message: x.message,
+      count: Number(x.count),
+      users: Number(x.users),
+      sampleStack: x.stack,
+      sampleUrl: x.url,
+      firstSeen: x.first_seen,
+      lastSeen: x.last_seen,
+    }))
+  } catch {
+    return []
+  }
+}
+
 export interface TierEventRow {
   id: number
   worker: string

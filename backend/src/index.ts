@@ -33,6 +33,7 @@ import { startMailbox } from './services/mailbox.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
+import { runSelfHeal } from './services/selfHeal.js'
 import { autoFundIssuing } from './services/stripe.js'
 import { greetRoutes } from './routes/greet.js'
 import { meseriiRoutes } from './routes/meserii.js'
@@ -385,6 +386,13 @@ try {
       void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonom)')).catch(() => {})
     }, 24 * 60 * 60 * 1000)
   }, 60 * 60 * 1000)
+  // AUTO-VINDECAREA (Adrian, 27 iul): Kelion culege singur erorile RECURENTE ale
+  // userilor și le trimite constructorului spre reparare (PR → merge → toți
+  // userii primesc versiunea reparată). La 3 min după boot, apoi la fiecare 30 min.
+  setTimeout(() => {
+    void runSelfHeal().catch(() => {})
+    setInterval(() => { void runSelfHeal().catch(() => {}) }, 30 * 60 * 1000)
+  }, 3 * 60 * 1000)
 } catch (err) {
   app.log.error(err)
   process.exit(1)
