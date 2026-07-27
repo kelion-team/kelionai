@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { saveClientError, listClientErrors } from '../db.js'
+import { saveClientError } from '../db.js'
 
 // ── ERORILE DIN BROWSERUL USERULUI (F12) — ochii lui Kelion pe client ────────
 // Adrian (24 iul): „el trebuie să aibă acces la logurile F12". Frontend-ul
@@ -48,12 +48,4 @@ export async function clientErrorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Erorile F12 persistate, pentru admin + repararea autonomă (audit 24 iul):
-  // Kelion (admin) și bridge-ul pot citi simptomele TUTUROR userilor, nu doar
-  // pe ale sesiunii curente, și după restart.
-  app.get<{ Querystring: { n?: string } }>('/api/admin/client-errors', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ errors: await listClientErrors(Number(req.query?.n ?? 100) || 100) })
-  })
 }
