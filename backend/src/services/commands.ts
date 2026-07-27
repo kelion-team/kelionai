@@ -13,11 +13,22 @@ export interface ScreenTab {
   active: boolean
 }
 
-// What the client executes verbatim: a camera op, or a monitor-tab op.
+// What the client executes verbatim: a camera op, a monitor-tab op, or the
+// dance-to-music toggle (avatarul dansează pe ritmul auzit de microfon).
 export interface DeviceCommand {
   camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
   screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
+  dance?: 'on' | 'off'
 }
+
+// DANSUL PE MUZICĂ (Adrian, 27 iul: „când e pe YouTube/muzică și îi cer, să
+// sincronizeze muzica cu mișcările"). Fraze SPECIFICE (muzică/ritm/beat) ca să
+// nu se confunde cu gestul simplu „dansează". PORNIRE:
+const DANCE_ON_RE =
+  /(?<![\p{L}\p{N}])(danseaz[ăa]?\s+pe\s+(muzic|ritm|melodi)|mi[șs]c[ăa](-te)?\s+pe\s+(ritm|muzic|melodi)|sincronizeaz[ăa].*(muzic|ritm)|pe\s+ritmul\s+muzic|dance\s+to\s+the\s+(music|beat|song)|move\s+to\s+the\s+(music|beat)|dance\s+to\s+it)/iu
+// OPRIRE:
+const DANCE_OFF_RE =
+  /(?<![\p{L}\p{N}])(nu\s+mai\s+dansa|opre[șs]t[eiî].*dans|gata\s+cu\s+dansul|stop\s+dancing|stop\s+the\s+dance)/iu
 
 // NB: Unicode lookbehind, not \b — JS \b is ASCII-only and never matches
 // before "î", so the spoken "închide" (real diacritics from Chirp STT) would
@@ -77,6 +88,11 @@ export function interpretDeviceCommand(
   const camera = cameraOp(msg)
   if (camera) return { camera }
 
+  // Dansul pe muzică — nu depinde de un tab anume (muzica poate veni și din
+  // altă sursă pe care o aude microfonul), deci înaintea gărzii de tab-uri.
+  if (DANCE_OFF_RE.test(msg)) return { dance: 'off' }
+  if (DANCE_ON_RE.test(msg)) return { dance: 'on' }
+
   const open = Array.isArray(tabs) ? tabs : []
   if (open.length === 0) return null
 
@@ -103,6 +119,8 @@ export function interpretDeviceCommand(
 // itself is the feedback — exactly the behaviour the browser had). ro/en are
 // the two ack languages the UI ever had.
 export function deviceAck(cmd: DeviceCommand, ro: boolean): string {
+  if (cmd.dance === 'on') return ro ? 'Dansez pe muzică.' : 'Dancing to the music.'
+  if (cmd.dance === 'off') return ro ? 'Gata cu dansul.' : 'Done dancing.'
   switch (cmd.camera) {
     case 'off':
       return ro ? 'Am închis camera.' : 'Camera is off.'
