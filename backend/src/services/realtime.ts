@@ -344,16 +344,22 @@ export async function openaiRealtimeAnswer(
           ? { model: config.openai.realtimeTranscribeModel, language: iso }
           : { model: config.openai.realtimeTranscribeModel },
         // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
-        // (nu pe tăcere brută). `create_response:true` = Kelion răspunde când
-        // termini de vorbit (full-duplex RESPONSIV — auzul NU are voie să pice),
-        // `interrupt_response:true` = barge-in real. NOTĂ: cuvântul de trezire
-        // strict (`create_response:false` + gating pe „Kelion") a fost SCOS
-        // definitiv — dacă transcrierea nu prindea EXACT numele, Kelion nu mai
-        // răspundea deloc („nu mă aude"). Kelion răspunde când termini de vorbit.
+        // (nu pe tăcere brută). `interrupt_response:true` = barge-in real.
+        // POARTA NUMELUI, MECANICĂ (ordinul lui Adrian: „Kelion nu are voie să
+        // inițieze conversații; nu intră în chat dacă nu își aude numele").
+        // Regula doar în prompt pierdea mereu — cu `create_response:true`
+        // modelul primea cuvântul la ORICE frază. Acum răspunsul NU se mai
+        // creează automat: CLIENTUL (realtimeVoice.ts) îl creează DOAR dacă
+        // transcriptul conține numele („Kelion"/„Kei", regex tolerant la
+        // transcriere stâlcită) SAU conversația e deja activă (fereastră de
+        // 120s reînnoită la fiecare schimb, DESCHISĂ la pornirea sesiunii —
+        // lecția „nu mă aude" din 24/27 iul). Plase anti-surzenie în client:
+        // transcript lipsă după speech_stopped → răspunde oricum dacă e
+        // conversație activă. „STOP" închide fereastra până la următorul nume.
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
-          create_response: true,
+          create_response: false,
           interrupt_response: true,
         },
       },
