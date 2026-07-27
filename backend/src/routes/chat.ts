@@ -1884,6 +1884,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
+      // PRIMUL CUVÂNT SUB 1s ȘI PE TURELE DE ACȚIUNE (Adrian, 27 iul, dovadă
+      // live: 37s până la primul cuvânt — poarta faptei îl punea să execute
+      // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
+      // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
+      if (isAdmin && heavyTurn) {
+        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
+        noteFirstWord()
+        reply.raw.write(appendTurn(user.email, turnId, ackText))
+        voice.feed(ackText)
+        assistantText += ackText
+      }
       // GEMINI PRINCIPAL → NEMOTRON SECUNDAR (Adrian, 27 iul): dacă nucleul
       // gemini pică pe cotă/serviciu (429/503/RESOURCE_EXHAUSTED), NU omorâm
       // tura — reluăm O DATĂ pe secundarul :free din OpenRouter. Retry-ul e
