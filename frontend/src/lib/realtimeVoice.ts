@@ -413,8 +413,15 @@ export async function startRealtimeVoice(
     // care cerea numele la FIECARE frază și părea surdă; (3) altfel → tăcere:
     // discuția din cameră nu-i e adresată. „STOP" închide fereastra.
     const GATE_WINDOW_MS = 120_000
-    let gateUntil = 0
-    const NAME_RE = /\b[ck]h?el[iy]?[oa]ne?\b|\bkelion\b|\bkei\b/i
+    // FEREASTRA E DESCHISĂ LA PORNIREA SESIUNII (bug găsit live de Adrian,
+    // 27 iul, „parcă nu aude": userul tocmai a PORNIT microfonul — evident că
+    // i se adresează lui Kelion; a cere numele chiar la prima frază, cu o
+    // transcriere care îl stâlcește, îl făcea complet mut la deschidere).
+    let gateUntil = Date.now() + GATE_WINDOW_MS
+    // Regex TOLERANT la transcrierea reală (dovadă live: „Kelion, ce faci" a
+    // ieșit „Elioncevaci"): acceptăm și variantele fără consoana de început
+    // (elion/eleon), lipite de cuvântul următor.
+    const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
     // Plasa anti-„nu mă aude": dacă VAD-ul a închis fraza dar transcriptul nu
     // mai vine (transcrierea a picat), în conversație ACTIVĂ răspundem oricum.
     let speechStopTimer: number | null = null
