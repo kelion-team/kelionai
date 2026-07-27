@@ -700,6 +700,14 @@ export async function startMic(
     let sum = 0
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
     const rms = Math.sqrt(sum / buf.length)
+    // RITMUL DIN CAMERĂ (Adrian, 27 iul: „când e pe YouTube/muzică și îi cer,
+    // să sincronizeze muzica cu mișcările"): audio-ul din iframe-ul YouTube NU
+    // poate fi citit de pagină (cross-origin), DAR microfonul AUDE muzica din
+    // difuzoare. Expunem energia microfonului (chiar și cât e mut pentru voce —
+    // tot analizează) ca semnal de ritm pentru dansul avatarului. Anvelopă cu
+    // atac rapid / cădere lentă → pe bătaie sare, între bătăi coboară lin.
+    const inst = Math.min(1, rms * 8)
+    micBeatLevel = inst > micBeatLevel ? inst : micBeatLevel * 0.86 + inst * 0.14
     // podeaua de zgomot se adaptează lent când e liniște — dar NU cât redă
     // Kelion (restul de ecou ar urca podeaua și-ar surzi barge-in-ul)
     if (!recording && !muted) noiseFloor = noiseFloor * 0.95 + rms * 0.05
@@ -777,6 +785,14 @@ let voiceLevel = 0
 
 export function getVoiceLevel(): number {
   return voiceLevel
+}
+
+// RITMUL DIN MICROFON (dansul pe muzică): energia captată de microfon, ca
+// anvelopă de bătaie — avatarul o folosește ca să-și miște corpul pe muzica
+// pe care microfonul o aude din difuzoare. 0 când nu e microfon activ.
+let micBeatLevel = 0
+export function getMicBeatLevel(): number {
+  return micBeatLevel
 }
 
 function stopLevelLoop(): void {

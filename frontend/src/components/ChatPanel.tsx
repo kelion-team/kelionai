@@ -354,6 +354,9 @@ export default function ChatPanel({
       else if (scr?.op === 'close') closeWorkspace()
       else if (scr?.op === 'closeKind' && scr.kind) closeTasksByKind(scr.kind)
       else if (scr?.op === 'switchKind' && scr.kind) switchToKind(scr.kind)
+      // DANSUL PE MUZICĂ: pornește/oprește regia de dans sincron cu ritmul
+      // captat de microfon (avatarul se mișcă pe muzica din difuzoare).
+      if (c.device.dance) window.dispatchEvent(new CustomEvent('kelion:dance-music', { detail: c.device.dance }))
       return
     }
     // The server committed a speech-language switch (detected + persisted
