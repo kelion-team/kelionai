@@ -51,6 +51,7 @@ import {
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -144,10 +145,19 @@ async function selectedBrainModel(
   // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
   // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
   const top = difficulty >= ESCALATE_TOP_AT && !needsVision
+  // GEMINI PRINCIPAL, NEMOTRON SECUNDAR (Adrian, 27 iul: „comută la celălalt
+  // free... gemini... principal, și ce e acum secundar"): când cheia gratuită
+  // Google există, nucleul de lucru e gemini direct (vede + unelte + gândire,
+  // peste orice :free din OpenRouter, $0). Alegerea manuală din Admin→Modele
+  // (sel.work) rămâne respectată; căderea pe secundar la cotă epuizată e la
+  // locul apelului (retry în handler). Vocea NU trece pe aici — rămâne cum e.
+  const geminiWork = !sel.work && geminiDirectAvailable()
   const model = top
     ? await resolveModel('top')
     : heavy
-      ? await resolveModel('work', sel.work)
+      ? geminiWork
+        ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+        : await resolveModel('work', sel.work)
       : await resolveModel('chat', sel.chat)
   return { model, heavy: heavy || top }
 }
@@ -1849,8 +1859,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
-      const r = await runOrchestrator(
-        orChatModel,
+      // GEMINI PRINCIPAL → NEMOTRON SECUNDAR (Adrian, 27 iul): dacă nucleul
+      // gemini pică pe cotă/serviciu (429/503/RESOURCE_EXHAUSTED), NU omorâm
+      // tura — reluăm O DATĂ pe secundarul :free din OpenRouter. Retry-ul e
+      // sigur doar dacă nu a curs încă text spre user (alfel s-ar dubla).
+      let orchestratorModel = orChatModel
+      let textFlowed = false
+      const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
+        orchestratorModel,
         orMsgs,
         tools as unknown as AnthropicTool[],
         execTool,
@@ -1865,7 +1881,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // (răspuns + tool-call corecte), dar gândește ÎN TĂCERE zeci de
           // secunde înainte de primul cuvânt → pare mort. Pe :free forțăm
           // gândirea SCURTĂ ('low'); pe plătite rămâne 'medium'.
-          reasoning: heavyTurn ? (orChatModel.endsWith(':free') ? 'low' : 'medium') : undefined,
+          reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
           // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.
@@ -1875,12 +1891,31 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // e obligată să aleagă o unealtă — execută, nu narează. Runda 2+ liberă.
           forceToolsFirstRound: isAdmin && heavyTurn,
           onText: (txt) => {
+            textFlowed = true
             noteFirstWord()
             reply.raw.write(txt)
             voice.feed(txt)
           },
         },
       )
+      let r
+      try {
+        r = await runBrainOnce()
+      } catch (ge) {
+        if (
+          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) &&
+          isGeminiQuotaError(ge) &&
+          !textFlowed
+        ) {
+          // Cota gratuită Google s-a terminat pe ziua/minutul ăsta — secundarul
+          // preia tura fără ca userul să vadă vreo ruptură.
+          orchestratorModel = await resolveModel('work', null)
+          console.log(`[brain] gemini indisponibil (${String(ge).slice(0, 80)}) → secundar ${orchestratorModel}`)
+          r = await runBrainOnce()
+        } else {
+          throw ge
+        }
+      }
       assistantText += r.text
       usage.usd += r.costUsd
       // CONTABILITATE REALĂ (audit QA 24 iul, A1): costul CREIERULUI intră în
