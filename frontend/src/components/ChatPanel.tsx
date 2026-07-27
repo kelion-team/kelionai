@@ -1106,15 +1106,26 @@ export default function ChatPanel({
                 const w = getWorkspace()
                 if (!w.open)
                   return JSON.stringify({ monitor: 'gol', hint: 'Nimic afișat acum pe monitor — spune-i userului sincer.' })
+                // STAREA REALĂ (Adrian, 27 iul): 'ok' = chiar s-a randat; 'error'
+                // = a picat (fișier inaccesibil, site care refuză încorporarea);
+                // 'loading' = încă se încarcă (mai cheamă get_monitor peste 1-2s).
+                const st = w.status ?? 'loading'
                 return JSON.stringify({
                   activ: {
                     tip: w.kind,
                     titlu: w.title,
                     url: w.url || undefined,
+                    stareReala: st,
                     text: (w.text ?? '').slice(0, 800) || undefined,
                     paginaScrisaDeMine: w.html ? true : undefined,
                   },
-                  taburiDeschise: w.tasks.map((tk) => ({ tip: tk.kind, titlu: tk.title })),
+                  taburiDeschise: w.tasks.map((tk) => ({ tip: tk.kind, titlu: tk.title, stare: tk.status ?? 'loading' })),
+                  indicatie:
+                    st === 'error'
+                      ? 'SUPRAFAȚA ACTIVĂ A PICAT — NU spune userului că ai afișat-o. Încearcă altă cale (alt URL, adu datele cu o unealtă și afișează-le ca document, sau spune sincer că nu se poate) până apare cu adevărat.'
+                      : st === 'loading'
+                        ? 'Încă se încarcă — mai verifică peste 1-2 secunde înainte să confirmi.'
+                        : 'Randat cu succes.',
                 })
               }
               if (name === 'get_location') {
