@@ -31,6 +31,7 @@ import {
   decideKelionTool,
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
+import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -84,6 +85,42 @@ async function checkStores(): Promise<StoreCheck[]> {
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
+  // ── LACĂTUL ADMIN (Adrian, 27 iul) — rutele de deblocare. Gate-ul global din
+  // index.ts scutește /api/admin/unlock*; tot ce e aici cere însă sesiune de
+  // admin. Secretul e ales de Adrian în Admin→Securitate și trăiește doar ca
+  // hash scrypt în kv; amprenta vocală potrivită deblochează automat (vezi
+  // routes/realtime.ts). Starea — clientul decide ce arată pe buton.
+  app.get('/api/admin/unlock/status', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const armed = await isLockArmed()
+    return reply.send({ armed, unlocked: !armed || hasUnlock(req, user.email) })
+  })
+
+  app.post<{ Body: { secret?: string } }>('/api/admin/unlock', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const secret = String(req.body?.secret ?? '')
+    if (!secret || !(await verifyLockSecret(user.email, secret)))
+      return reply.code(401).send({ error: 'cod_gresit' })
+    grantUnlock(reply, user.email, 'secret')
+    return reply.send({ ok: true })
+  })
+
+  // Setarea/schimbarea secretului. Nearmat → oricând (prima armare); armat →
+  // doar dintr-o sesiune DEJA deblocată (panoul deschis implică asta).
+  app.post<{ Body: { secret?: string } }>('/api/admin/unlock/secret', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const armed = await isLockArmed()
+    if (armed && !hasUnlock(req, user.email)) return reply.code(423).send({ error: 'admin_locked' })
+    const secret = String(req.body?.secret ?? '').trim()
+    if (secret.length < 4) return reply.code(400).send({ error: 'secret_prea_scurt' })
+    await setLockSecret(secret)
+    grantUnlock(reply, user.email, 'secret') // browserul care armează rămâne deblocat
+    return reply.send({ ok: true })
+  })
+
   // ROW 19 — inbound contact@ emails + the Secretary's auto-replies (admin only).
   app.get('/api/admin/inbound', async (req, reply) => {
     const user = getSessionUser(req)

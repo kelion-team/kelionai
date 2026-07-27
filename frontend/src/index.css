@@ -687,6 +687,50 @@ body {
 }
 
 /* ---------- contact form (royal theme) ---------- */
+/* Lacătul butonului Admin (27 iul): fereastra de tastare a secretului. Peste
+   admin-overlay (z 90 > 80) ca să nu poată fi acoperită de nimic din scenă. */
+.unlock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.unlock-card {
+  width: min(420px, 96vw);
+  background: #fffdf8;
+  color: #1a1a24;
+  border: 1px solid #e6e0d2;
+  border-radius: 8px;
+  padding: 22px 30px 26px;
+}
+.unlock-card h3 {
+  margin: 0 0 8px;
+}
+.unlock-card p {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: #55544e;
+}
+.unlock-card form {
+  display: flex;
+  gap: 8px;
+}
+.unlock-card input {
+  flex: 1;
+  min-width: 0;
+}
+.unlock-err {
+  margin: 10px 0 0;
+  color: #b3261e;
+  font-size: 14px;
+}
+
 .contact-overlay {
   position: fixed;
   inset: 0;

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance } from '../db.js'
+import { grantUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -320,6 +321,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // prag ca în chat.ts). Voce străină → clientul injectează avertisment în
       // sesiune (fără comenzi de owner până la confirmare scrisă).
       let foreignVoice: boolean | undefined
+      // LACĂTUL ADMIN (Adrian, 27 iul): amprenta POTRIVITĂ pe o referință deja
+      // existentă deschide butonul Admin (cookie semnat) — prima enrolare NU
+      // deblochează (fără referință n-avem cu ce compara).
+      let adminUnlocked: boolean | undefined
       const vf = req.body?.voiceFeatures
       if (role === 'user' && vf?.vector?.length && vf?.meta) {
         try {
@@ -339,13 +344,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             })
           }
           foreignVoice = hasRef && !isHolder ? true : undefined
+          if (isAdmin && hasRef && isHolder) {
+            grantUnlock(reply, user.email, 'voce')
+            adminUnlocked = true
+          }
         } catch {
           /* amprenta nu blochează niciodată transcriptul */
         }
       }
       // ADMIN: ancorăm sesiunea live pe română la FIECARE tură (clientul face
       // session.update) — transcrierea nu mai poate aluneca spre altă limbă.
-      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', device: device ?? undefined, foreignVoice })
+      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', device: device ?? undefined, foreignVoice, adminUnlocked })
       if (text && role === 'user' && !isAdmin) {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)

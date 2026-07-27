@@ -92,13 +92,16 @@ function persistTranscript(
     .then(async (r) => {
       // Serverul a COMIS limba detectată (2 mesaje consecutive) → ancorăm
       // sesiunea live pe ea (vezi apelantul) — transcrierea nu mai ghicește.
-      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean } | null
+      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean; adminUnlocked?: boolean } | null
       // VOCE STRĂINĂ (timbrul nu se potrivește cu titularul): sesiunea primește
       // pe loc regula de protecție — nimic administrativ până la confirmare.
       if (j?.foreignVoice)
         liveInject?.(
           'ATENȚIE (verificare de timbru): vocea curentă NU se potrivește cu amprenta titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive până când titularul nu confirmă ÎN SCRIS în chat.',
         )
+      // LACĂTUL ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
+      // deblocare; anunțăm UI-ul (Stage) să aprindă butonul Admin.
+      if (j?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
       if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
       // Comanda verbală de cameră/ecran → clientul o execută pe loc.
       if (j?.device && onDevice) onDevice(j.device)

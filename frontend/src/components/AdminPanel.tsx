@@ -175,6 +175,12 @@ export default function AdminPanel({
   const [stores, setStores] = useState<StoresData | null>(null)
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
+  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
+  // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
+  // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
+  const [lockArmed, setLockArmed] = useState<boolean | null>(null)
+  const [lockSecret, setLockSecret] = useState('')
+  const [lockMsg, setLockMsg] = useState('')
   // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
   // acum ca să arătăm ⏸ și să nu pornim două deodată.
   const [playingVp, setPlayingVp] = useState<string | null>(null)
@@ -340,6 +346,39 @@ export default function AdminPanel({
     const id = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(id)
   }, [tab])
+
+  // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
+  useEffect(() => {
+    if (tab !== 'voiceprints') return
+    fetch('/api/admin/unlock/status', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { armed?: boolean } | null) => {
+        if (j) setLockArmed(!!j.armed)
+      })
+      .catch(() => {})
+  }, [tab])
+
+  const saveLockSecret = (): void => {
+    const s = lockSecret.trim()
+    if (s.length < 4) {
+      setLockMsg('Secretul trebuie să aibă minim 4 caractere.')
+      return
+    }
+    void fetch('/api/admin/unlock/secret', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ secret: s }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          setLockArmed(true)
+          setLockSecret('')
+          setLockMsg('Salvat ✓ — lacătul e armat: butonul Admin cere de-acum vocea ta sau secretul.')
+        } else setLockMsg('Nu s-a putut salva — reîncearcă.')
+      })
+      .catch(() => setLockMsg('Nu s-a putut salva — reîncearcă.'))
+  }
 
   // Tab „Gesturi" deschis → încarcă lista dezactivată.
   useEffect(() => {
@@ -1022,6 +1061,38 @@ export default function AdminPanel({
                   </span>
                 </div>
               ))}
+            </div>
+            <div className="fin-breakdown" style={{ marginTop: 12 }}>
+              <div className="fin-breakdown-head">
+                Lacătul butonului Admin —{' '}
+                {lockArmed
+                  ? 'ARMAT ✓: butonul se deschide doar cu amprenta ta vocală sau cu secretul'
+                  : 'nearmat: alege un secret ca să-l pornești'}
+              </div>
+              <form
+                className="fin-row"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveLockSecret()
+                }}
+              >
+                <input
+                  type="password"
+                  value={lockSecret}
+                  onChange={(e) => setLockSecret(e.target.value)}
+                  placeholder={lockArmed ? 'Secret nou (îl schimbă pe cel vechi)' : 'Secretul de activare (min. 4 caractere)'}
+                  autoComplete="new-password"
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button type="submit" className="ghost">
+                  {lockArmed ? 'Schimbă secretul' : 'Armează lacătul'}
+                </button>
+              </form>
+              {lockMsg && <div className="chat-hint">{lockMsg}</div>}
+              <div className="chat-hint">
+                Odată armat: intrarea în admin cere vocea ta recunoscută în sesiune sau secretul
+                tastat. Vocea străină nu poate deschide panoul, chiar logată pe contul tău.
+              </div>
             </div>
           </section>
         )}

@@ -67,6 +67,18 @@ export default function Stage({ user }: { user: User }) {
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri'>('finance')
+  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde, nici
+  // butonul admin nu trebuie să se activeze"). armed = secretul e setat (în
+  // Admin→Amprente vocale); unlocked = amprenta vocală s-a potrivit în sesiunea
+  // asta SAU s-a tastat secretul. Încuiat → butonul deschide fereastra de cod,
+  // nu panoul; serverul blochează oricum tot /api/admin/* (423) — butonul e
+  // doar oglinda, lacătul real e pe server.
+  const [adminLock, setAdminLock] = useState<{ armed: boolean; unlocked: boolean } | null>(null)
+  const adminLockRef = useRef(adminLock)
+  adminLockRef.current = adminLock
+  const [unlockOpen, setUnlockOpen] = useState(false)
+  const [unlockCode, setUnlockCode] = useState('')
+  const [unlockErr, setUnlockErr] = useState('')
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -91,6 +103,50 @@ export default function Stage({ user }: { user: User }) {
     stripe?: { available: number; pending: number; currency: string } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
   } | null>(null)
+  // Starea lacătului la intrare + deblocarea venită din voce (amprenta
+  // potrivită → realtimeVoice emite `kelion:admin-unlock`).
+  useEffect(() => {
+    if (user.role !== 'admin') return
+    fetch('/api/admin/unlock/status', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { armed?: boolean; unlocked?: boolean } | null) => {
+        if (j) setAdminLock({ armed: !!j.armed, unlocked: !!j.unlocked })
+      })
+      .catch(() => {})
+    const onUnlock = (): void =>
+      setAdminLock((s) => (s ? { ...s, unlocked: true } : { armed: true, unlocked: true }))
+    window.addEventListener('kelion:admin-unlock', onUnlock)
+    return () => window.removeEventListener('kelion:admin-unlock', onUnlock)
+  }, [user.role])
+  // Poarta UNICĂ spre panoul de admin: toate drumurile (buton, navigare din
+  // voce/chat, punga Stripe) trec pe aici — încuiat → fereastra de cod.
+  const openAdmin = (tab?: typeof adminTab): void => {
+    if (tab) setAdminTab(tab)
+    const l = adminLockRef.current
+    if (l?.armed && !l.unlocked) {
+      setUnlockErr('')
+      setUnlockCode('')
+      setUnlockOpen(true)
+      return
+    }
+    setAdminOpen(true)
+  }
+  const submitUnlock = (): void => {
+    void fetch('/api/admin/unlock', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ secret: unlockCode }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          setAdminLock((s) => (s ? { ...s, unlocked: true } : { armed: true, unlocked: true }))
+          setUnlockOpen(false)
+          setAdminOpen(true)
+        } else setUnlockErr(r.status === 401 ? 'Cod greșit — mai încearcă.' : 'Eroare — reîncearcă.')
+      })
+      .catch(() => setUnlockErr('Eroare de rețea — reîncearcă.'))
+  }
   useEffect(() => {
     if (user.role !== 'admin') return
     let alive = true
@@ -135,7 +191,7 @@ export default function Stage({ user }: { user: User }) {
             const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
-            setAdminOpen(true)
+            openAdmin()
           }
           break
         case 'home':
@@ -631,10 +687,7 @@ export default function Stage({ user }: { user: User }) {
               <button
                 type="button"
                 className={`ghost ${brainCredit.stripe.available <= 0 ? 'blink-red' : ''}`}
-                onClick={() => {
-                  setAdminTab('finance')
-                  setAdminOpen(true)
-                }}
+                onClick={() => openAdmin('finance')}
                 title={`Punga Stripe (banii userilor): disponibil £${brainCredit.stripe.available.toFixed(2)}, în tranzit £${brainCredit.stripe.pending.toFixed(2)} · click pentru circuitul banilor`}
               >
                 Stripe £{brainCredit.stripe.available.toFixed(2)}
@@ -672,8 +725,17 @@ export default function Stage({ user }: { user: User }) {
             </button>
           )}
           {user.role === 'admin' && (
-            <button type="button" className="ghost" onClick={() => setAdminOpen(true)}>
-              Admin
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => openAdmin()}
+              title={
+                adminLock?.armed && !adminLock.unlocked
+                  ? 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul'
+                  : undefined
+              }
+            >
+              {adminLock?.armed && !adminLock.unlocked ? '🔒 Admin' : 'Admin'}
             </button>
           )}
           {!user.googleConnected && (
@@ -697,6 +759,31 @@ export default function Stage({ user }: { user: User }) {
 
       <ChatPanel lang={lang} isAdmin={user.role === 'admin'} />
 
+      {unlockOpen && (
+        <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>
+          <div className="unlock-card" onClick={(e) => e.stopPropagation()}>
+            <h3>Panoul Admin e încuiat 🔒</h3>
+            <p>Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.</p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                submitUnlock()
+              }}
+            >
+              <input
+                type="password"
+                autoFocus
+                value={unlockCode}
+                onChange={(e) => setUnlockCode(e.target.value)}
+                placeholder="Secretul de activare"
+                autoComplete="current-password"
+              />
+              <button type="submit">Deblochează</button>
+            </form>
+            {unlockErr && <p className="unlock-err">{unlockErr}</p>}
+          </div>
+        </div>
+      )}
       {adminOpen && (
         <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
       )}

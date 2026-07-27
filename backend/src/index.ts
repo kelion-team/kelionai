@@ -41,6 +41,7 @@ import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
+import { isArmed, hasUnlock } from './services/adminLock.js'
 import { buildLinuxZip } from './services/linuxPackage.js'
 
 // Content types for the download endpoint (installers + QR images + manifest).
@@ -149,6 +150,24 @@ app.addHook('onRequest', async (_req, reply) => {
   reply.header('X-Frame-Options', 'SAMEORIGIN')
   reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)')
+})
+
+// LACĂTUL ADMIN — AL DOILEA FACTOR PE TOT /api/admin/* (Adrian, 27 iul: „dacă
+// amprenta nu corespunde, nici butonul admin nu trebuie să se activeze").
+// Un singur punct de strangulare, nu 40 de handler-e: odată ARMAT (secretul
+// setat), sesiunea de admin NU mai e de-ajuns — trebuie și deblocarea (amprenta
+// vocală potrivită sau secretul tastat → cookie semnat 12h). 423 = semnalul
+// distinct pentru client că panoul e încuiat (403 rămâne „nu ești admin").
+// Excepții: rutele de deblocare însele (altfel lacătul nu s-ar putea deschide).
+app.addHook('preHandler', async (req, reply) => {
+  const u = (req.raw.url ?? '').split('?')[0]
+  if (!u.startsWith('/api/admin/')) return
+  if (u.startsWith('/api/admin/unlock')) return
+  const user = getSessionUser(req)
+  if (!user || user.role !== 'admin') return // 403-ul din rută rămâne autoritatea
+  if (!(await isArmed())) return
+  if (hasUnlock(req, user.email)) return
+  return reply.code(423).send({ error: 'admin_locked' })
 })
 
 // Installers and the self-update manifest must ALWAYS be the latest version —
