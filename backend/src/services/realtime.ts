@@ -137,6 +137,10 @@ const VOICE_TOOL_NAMES = new Set([
   'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
   'get_calendar_events', 'get_recent_emails', 'send_email', 'create_calendar_event',
   'get_drive_files', 'get_tasks', 'add_task', 'search_contacts', 'add_contact',
+  // IMPORTUL COMPLET GOOGLE (Adrian, 27 iul: „toate skill-urile google, automat
+  // și activate") — aceleași unelte și în voce, nu doar în scris.
+  'read_email', 'read_drive_file', 'get_photos', 'my_youtube',
+  'delete_calendar_event', 'complete_task',
 ])
 
 export function realtimeTools(
