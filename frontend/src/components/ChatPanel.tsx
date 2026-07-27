@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -42,7 +43,7 @@ import {
   type MicHandle,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
-import { setRealLatency } from '../lib/latency'
+import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
@@ -1675,9 +1676,15 @@ export default function ChatPanel({
   function switchCamera(): void {
     setFacing((f) => (f === 'user' ? 'environment' : 'user'))
   }
-  function onCameraError(): void {
+  // IDENTITATE STABILĂ (auditul de fluiditate 27 iul, defectul 4): ca funcție
+  // simplă, primea o identitate NOUĂ la fiecare render → efectul din CameraView
+  // (dependent de onError) se demonta/remonta CONTINUU: camera oprită-pornită
+  // de zeci de ori pe secundă în timpul streamingului, iar lanțul serial de
+  // eliberare (camera.ts, 450ms/oprire) creștea mai repede decât timpul real —
+  // vederea murea. useCallback([]) = o singură identitate pe viața componentei.
+  const onCameraError = useCallback((): void => {
     setCameraOn(false)
-  }
+  }, [])
 
   // Calibrare voiceprint: 3s de captat vocea lui Adrian, apoi profilul se
   // salvează local (audioIO.ts) și microfonul permanent începe să-l filtreze.
@@ -1707,6 +1714,8 @@ export default function ChatPanel({
   // case the chat collapses to the slim black bar above the composer so nothing
   // covers the monitor (Adrian's rule). `working` follows the live-work console.
   const monitorBusy = useSyncExternalStore(subscribeWorkspace, isMonitorWorking)
+  // Latența REALĂ măsurată în browser — afișată ca dovadă, nu aruncată.
+  const realLatency = useSyncExternalStore(subscribeRealLatency, getRealLatency)
   const monitorMode = wsOpen || monitorBusy
   // Show the CURRENT exchange in writing: the user's request (so he sees it
   // arrived correctly the instant he types) AND Kelion's reply, which updates
@@ -1745,6 +1754,14 @@ export default function ChatPanel({
         </div>
       )}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
+      {/* VITEZA REALĂ (auditul 27 iul: latența se măsura la fiecare tură și se
+          ARUNCA — cititorii nu erau chemați de nimeni). Dovada regulii „primul
+          cuvânt sub 1s", discretă, doar proaspătă (sub 2 min de la măsurare). */}
+      {realLatency && Date.now() - realLatency.at < 120_000 && (
+        <span className="latency-chip" title="trimis → primul cuvânt / răspuns complet">
+          ⚡ {(realLatency.firstMs / 1000).toFixed(1)}s · {(realLatency.totalMs / 1000).toFixed(1)}s
+        </span>
+      )}
       {isAdmin && scenarioOpen && (
         <div className="scenario-panel">
           <div className="scenario-head">
@@ -1789,14 +1806,11 @@ export default function ChatPanel({
         {liveVoice && (
           <div className="voice-live" aria-live="polite">
             <span className="voice-live-dot" />
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={liveVoice}
-                style={{ '--ticker-dur': tickerDur(liveVoice) } as CSSProperties}
-              >
-                {liveVoice}
-              </span>
+            {/* COADĂ FIXĂ, nu teletext remontat (fluiditate #9): la dictare,
+                textul crește pe loc arătându-și coada — nu mai sare off-screen
+                la fiecare cuvânt nou. */}
+            <span className="speech-tail">
+              <span className="speech-tail-text">{liveVoice}</span>
             </span>
             <span className="voice-live-caret" />
           </div>
@@ -1813,27 +1827,15 @@ export default function ChatPanel({
         {busy && !delivered && lastUser?.content ? (
           <div className="heard-band user-band" aria-live="polite">
             <span className="heard-band-label" title="Tu — înspre creier">👤</span>
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={lastUser.content}
-                style={{ '--ticker-dur': tickerDur(lastUser.content) } as CSSProperties}
-              >
-                {lastUser.content.slice(0, 400)}
-              </span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">{lastUser.content.slice(0, 400)}</span>
             </span>
           </div>
         ) : busy && !lastAssistant?.content ? (
           <div className="heard-band" aria-live="polite">
             <span className="heard-band-label" title="Creierul a primit și gândește">🧠</span>
-            <span className="ticker">
-              <span
-                className="ticker-text"
-                key={heard || '…'}
-                style={{ '--ticker-dur': tickerDur(heard || '…') } as CSSProperties}
-              >
-                {heard ? `„${heard}”` : '…'}
-              </span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">{heard ? `„${heard}”` : '…'}</span>
             </span>
           </div>
         ) : lastAssistant?.content || busy ? (
