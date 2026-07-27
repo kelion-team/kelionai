@@ -246,7 +246,12 @@ node --check bridge/kelion-bridge-linux.mjs
 # ramură → commit → push → PR → merge în master → deploy automat → VERIFICĂ LIVE
 ```
 
-## 13. STAREA LA 26 IULIE 2026 + CE URMEAZĂ
+## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **27 IUL (dimineața, valul 17) — SAGA ISSUING LIVE: adevărul din API + cererea retrimisă:**
+  1. **De ce dashboardul îl tot arunca pe Adrian în sandbox la Issuing**: accesul LIVE nu e activ — Stripe nu are ce afișa pe live, așa că forțează test mode. Dovada din API cu `rk_live` de pe VPS (vps-run #256, `livemode:true`): **0 carduri, 0 cardholders pe live**, punga Issuing £0.00; sold −£9.76 disponibil / +£19.50 în decontare (plata de test de £20 din 21 iul, decontare 30 iul) = £9.74 net, exact ca în dashboard.
+  2. **Cererea din 24 iul („Thank you!") n-a primit NIMIC înapoi**: contact@ nu are niciun email de la Stripe (verificat în `inbound_emails`, vps-run #257 — singurele potriviri „stripe" sunt alertele interne de la alerts@), iar checklist-ul live arăta „**Contact sales to apply for live mode access — Required**" cu formularul „Use case" GOL. **Retrimisă azi de Adrian** cu use-case-ul dictat (1-2 carduri virtuale interne pentru plata OpenAI/OpenRouter din încasări, fără carduri către clienți, ~£50–500/lună). Răspunsul Stripe vine pe emailul contului, în ore–zile.
+  3. **La aprobarea Stripe** (Adrian anunță când vine mailul): creez cardholder + cardul virtual „Kelion AI" din API (cheia `rk_live` are Issuing Cards/Cardholders Write, verificat 24 iul), apoi cardul se introduce o dată la OpenAI/OpenRouter și circuitul banilor e complet. Până atunci, ❌ „Cardul Kelion AI: necreat" din Admin→Bani e REALITATEA, nu un bug.
+  4. Cardul ••••0005 din sandbox = fictiv (creat 10 iun în test mode) — se ignoră; nu se creează NICIUN card în sandbox.
 - 🗓️ **26 IUL (valul 14) — PULSUL LUI KELION (Adrian: „toate punctele" pentru autonomie deplină; regula lui: verificare automată FĂRĂ cost):**
   1. **Sentinela locală** (`deploy/sentinela-locala.sh`, instalată idempotent de deploy.sh la pasul 6b, cron la 3 min pe VPS): `/health` mort de 2 ori LA RÂND (≥6 min — un deploy normal nu declanșează fals) → `docker restart kelionai-app` + raport prin pulse; `/health` viu → bate pulsul intern. Zero AI, zero cost. Numele scriptului NU se schimbă în watchdog/paznic-chat — deploy.sh șterge exact acele nume din crontab (zombii vechi).
   2. **`POST /api/ops/pulse`** (`routes/ops.ts`, auth `x-bridge-secret` = BRIDGE_SECRET, ca browser.ts): verificări DETERMINISTE — DB (`SELECT 1`), disc ≥90%, val de erori client (>20/oră), plus raportarea repornirii automate. Email către admin DOAR la anomalie, cu prag anti-spam per subiect în kv (`ops_alert_*`): restart 30 min, DB 1h, erori 3h, disc 6h.
