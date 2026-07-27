@@ -16,7 +16,7 @@ export type ModelTier = 'chat' | 'work' | 'top'
 export interface CatalogModel {
   id: string
   name: string
-  provider: 'openai' | 'google' | 'anthropic'
+  provider: 'openai' | 'google' | 'anthropic' | 'nvidia' | 'cohere'
   vision: boolean
   contextLength: number
 }
@@ -41,6 +41,11 @@ function providerOf(id: string): CatalogModel['provider'] | null {
   if (id.startsWith('openai/')) return 'openai'
   if (id.startsWith('google/')) return 'google'
   if (id.startsWith('anthropic/')) return 'anthropic'
+  // CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0): nvidia (nemotron
+  // omni/ultra) și cohere (north-mini-code) intră în catalog DOAR pentru
+  // variantele lor gratuite cu tools — vezi filtrarea pe liste mai jos.
+  if (id.startsWith('nvidia/')) return 'nvidia'
+  if (id.startsWith('cohere/')) return 'cohere'
   return null
 }
 
@@ -84,8 +89,15 @@ export async function getCatalog(force = false): Promise<Catalog> {
   // ajunge la creier PE VEDERE (needsVision forțează escaladarea aici — vezi
   // chat.ts) trebuie servit de un model care CHIAR vede — altfel poza ar fi
   // ignorată/ar pica. Filtru REAL pe catalogul live, nu presupunere.
-  const chat = models.filter((m) => m.provider === 'openai' || m.provider === 'google')
-  const work = models.filter((m) => (m.provider === 'openai' || m.provider === 'anthropic') && m.vision)
+  // nvidia/cohere apar DOAR pe gratuit (:free) — restul providerilor noi ar
+  // dilua listele; cele plătite rămân pe openai/google/anthropic ca până acum.
+  const freeOnly = (m: CatalogModel): boolean =>
+    (m.provider === 'nvidia' || m.provider === 'cohere') ? m.id.endsWith(':free') : true
+  const chat = models.filter((m) => (m.provider === 'openai' || m.provider === 'google' || m.provider === 'nvidia' || m.provider === 'cohere') && freeOnly(m))
+  // CREIERUL FULL FREE (Adrian, 27 iul): treapta work acceptă și modelele
+  // GRATUITE cu vedere+tools (gemma :free, nemotron omni/vl :free) — nucleul
+  // implicit e acum gratuit, iar adminul le poate alege și manual din listă.
+  const work = models.filter((m) => m.vision && (m.provider === 'openai' || m.provider === 'anthropic' || (m.id.endsWith(':free') && freeOnly(m))))
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   cache = { chat: chat.sort(byId), work: work.sort(byId), fetchedAt: Date.now() }
   return cache
