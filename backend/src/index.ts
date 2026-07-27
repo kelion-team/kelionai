@@ -16,7 +16,6 @@ import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
 import { asrStreamRoutes } from './routes/asr-stream.js'
-import { correctRoutes } from './routes/correct.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
 import { billingRoutes } from './routes/billing.js'
@@ -35,8 +34,6 @@ import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { runSelfHeal } from './services/selfHeal.js'
 import { autoFundIssuing } from './services/stripe.js'
-import { greetRoutes } from './routes/greet.js'
-import { meseriiRoutes } from './routes/meserii.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { realtimeRoutes } from './routes/realtime.js'
@@ -88,9 +85,6 @@ await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
   credentials: true,
-  // The landing greeting returns the spoken line in this header so the client
-  // can drive the avatar's mouth; expose it for cross-origin reads.
-  exposedHeaders: ['X-Greet-Text'],
 })
 
 // RATE LIMITING — the first line of defence against cost-abuse and DoS. Keyed on
@@ -118,9 +112,6 @@ await app.register(rateLimit, {
       u === '/api/asr-stream' ||
       u === '/health' ||
       u === '/api/version' || // sondat la 45s de fiecare client pentru rutina de update
-      u === '/api/dev/status' ||
-      u === '/api/dev/heartbeat' ||
-      u === '/api/chat/incoming' ||
       u === '/api/visit/ping'
     )
   },
@@ -249,8 +240,6 @@ app.get('/api/version', async (_req, reply) => {
   return { v: DEPLOY_V, at: BOOT_AT }
 })
 
-// Test/verification endpoint for the SDK constructor
-app.get('/api/sdk-ping', async () => ({ ok: true, by: 'sdk-constructor' }))
 
 
 await app.register(authRoutes)
@@ -260,7 +249,6 @@ await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
 await app.register(asrStreamRoutes)
-await app.register(correctRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
 await app.register(billingRoutes)
@@ -273,8 +261,6 @@ await app.register(opsRoutes)
 await app.register(constructorRoutes)
 await app.register(authLocalRoutes)
 await app.register(contactRoutes)
-await app.register(greetRoutes)
-await app.register(meseriiRoutes)
 await app.register(voiceprintRoutes)
 await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)

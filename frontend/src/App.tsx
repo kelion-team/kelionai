@@ -42,10 +42,23 @@ export default function App() {
     }
   }, [error])
 
-  // RUTINA DE VERSIUNE (ordin, 10 iul): deploy nou detectat → reset curat
-  // AUTOMAT la ultima versiune (filigran nou, stare default, memoriile pe
-  // server rămân). Fără butoane, fără întrebări — mereu ultima versiune.
-  useEffect(() => watchForUpdate(() => void hardResetToLatest()), [])
+  // RUTINA DE VERSIUNE, ÎMBLÂNZITĂ (auditul de fluiditate, 27 iul — defectul
+  // nr. 1: reset-ul dur AUTOMAT tăia conversația/vocea în viu, fără avertisment
+  // — exact „se rupe pe undeva"). Regula rămâne „mereu ultima versiune", dar
+  // aplicarea nu mai calcă peste lucrul în desfășurare: deploy nou → bară
+  // vizibilă „Versiune nouă" cu buton; resetul dur se aplică AUTOMAT doar când
+  // tab-ul e ascuns (userul e plecat — nu simte nimic) sau la apăsarea lui.
+  const [updateReady, setUpdateReady] = useState(false)
+  useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
+  useEffect(() => {
+    if (!updateReady) return
+    const applyIfHidden = (): void => {
+      if (document.visibilityState === 'hidden') void hardResetToLatest()
+    }
+    applyIfHidden()
+    document.addEventListener('visibilitychange', applyIfHidden)
+    return () => document.removeEventListener('visibilitychange', applyIfHidden)
+  }, [updateReady])
 
   // FILIGRAN MEREU LA ZI (Adrian, 10 iul: „filigranul nou să apară automat la
   // orice update, în interiorul aplicațiilor" — e scris dar nu se reflecta:
@@ -84,13 +97,15 @@ export default function App() {
   return (
     <>
       {/* Pagina dedicată /login (Adrian, 26 iul) — un user deja logat e trimis
-          înapoi în aplicație. */}
-      {user ? (
+          înapoi în aplicație. /credite e PUBLICĂ pentru toți (fix 27 iul —
+          înainte, userul LOGAT nu putea ajunge la ea nici tastând adresa:
+          verificarea de user venea prima și-l arunca mereu în scenă). */}
+      {window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
+        <Credits />
+      ) : user ? (
         <Stage user={user} />
       ) : window.location.pathname === '/login' ? (
         <Login />
-      ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
-        <Credits />
       ) : (
         <Landing error={error} />
       )}
@@ -101,6 +116,16 @@ export default function App() {
       <div className="app-watermark" aria-hidden="true">
         {versionLabel(srv)}
       </div>
+      {/* BARA DE VERSIUNE NOUĂ (27 iul): vizibilă, nu intruzivă — userul decide
+          când se aplică; dacă pleacă din tab, se aplică singură, neobservat. */}
+      {updateReady && (
+        <div className="update-banner" role="status">
+          <span>Versiune nouă disponibilă</span>
+          <button type="button" onClick={() => void hardResetToLatest()}>
+            Actualizează acum
+          </button>
+        </div>
+      )}
     </>
   )
 }
