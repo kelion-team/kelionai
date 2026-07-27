@@ -40,6 +40,7 @@ import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
+import { pingRoutes } from './routes/ping.js'
 import { initDb, recordDownload, initAppFiles, getAppFile, backfillMemoryEmbeddings } from './db.js'
 import { getSessionUser } from './session.js'
 import { isArmed, hasUnlock } from './services/adminLock.js'
@@ -273,6 +274,7 @@ await app.register(voiceprintRoutes)
 await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
+await app.register(pingRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
