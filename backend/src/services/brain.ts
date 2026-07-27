@@ -116,15 +116,20 @@ export async function brainCompleteWithTools(
   prompt: string,
   tools: AnthropicTool[],
   execTool: (name: string, args: Record<string, unknown>) => Promise<string>,
-  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void } = {},
+  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void; forceFirstRound?: boolean } = {},
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
   try {
     for (let round = 0; round < maxRounds; round++) {
+      // FORȚAREA UNELTEI ȘI ÎN VOCE (Adrian, 27 iul: „inclusiv forțarea de
+      // unelte"): pe turele de acțiune ale ownerului (instalează/construiește/
+      // caută în sursă...), prima rundă e obligată să cheme o unealtă — execută,
+      // nu doar descrie. Rundele următoare revin la 'auto'.
       const r = await openrouterChat(workModel(), messages, tools, {
         maxTokens: opts.maxTokens ?? 2000,
         reasoning: 'medium',
+        toolChoice: opts.forceFirstRound && round === 0 && tools.length ? 'required' : undefined,
       })
       if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
       if (!r.toolCalls.length) return r.text.trim()
