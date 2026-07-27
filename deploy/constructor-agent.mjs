@@ -130,14 +130,56 @@ VERIFICARE OBLIGATORIE înainte de finish: "npm --prefix backend ci" apoi "npm -
 Bugetul de pași/tokeni e limitat: fii chirurgical, nu reciti fișiere mari degeaba.
 La final: finish cu titlu + corp de PR în română (ce, de ce, dovada verificării).`
 
+// REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
+// „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
+// la rate-limit și agentul crăpa pe r.json() fără nicio reîncercare). Acum:
+// corp gol, JSON rupt, 429 sau 5xx → reîncearcă cu pauze crescătoare; abia
+// după 4 încercări ratate jobul pică de-adevăratelea.
 async function llm(messages) {
-  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
-  })
-  if (!r.ok) throw new Error(`OpenRouter ${r.status}: ${(await r.text()).slice(0, 300)}`)
-  return r.json()
+  let lastErr = ''
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+      })
+      const text = await r.text()
+      if (!r.ok) {
+        lastErr = `OpenRouter ${r.status}: ${text.slice(0, 300)}`
+        if (r.status === 429 || r.status >= 500) throw new Error(lastErr) // tranzitoriu → retry
+        throw Object.assign(new Error(lastErr), { fatal: true }) // 4xx real → fără retry
+      }
+      if (!text.trim()) throw new Error('corp gol de la OpenRouter')
+      let parsed
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        throw new Error(`JSON rupt de la OpenRouter (${text.length} caractere)`)
+      }
+      // RĂSPUNS GOL VALID (jobul #2, 27 iul, a doua cauză reală din log:
+      // „EȘEC: răspuns gol de la model" — 200 cu JSON corect dar mesaj FĂRĂ
+      // content și FĂRĂ tool_calls; modelele free fac asta sub sarcină). E tot
+      // tranzitoriu → intră în aceeași scară de reîncercări, nu pică jobul.
+      const m0 = parsed?.choices?.[0]?.message
+      if (!m0 || (!String(m0.content ?? '').trim() && !m0.tool_calls?.length)) {
+        throw new Error(
+          parsed?.error
+            ? `eroare în corp: ${JSON.stringify(parsed.error).slice(0, 180)}`
+            : 'răspuns gol de la model (200 fără mesaj)',
+        )
+      }
+      return parsed
+    } catch (e) {
+      if (e?.fatal) throw e
+      lastErr = String(e?.message ?? e)
+      if (attempt === 4) break
+      const wait = attempt * 15_000 // 15s, 30s, 45s — modelele free respiră greu
+      log(`llm încercarea ${attempt} a picat (${lastErr.slice(0, 120)}) — reîncerc în ${wait / 1000}s`)
+      await new Promise((res) => setTimeout(res, wait))
+    }
+  }
+  throw new Error(lastErr || 'OpenRouter indisponibil după 4 încercări')
 }
 
 async function main() {
@@ -175,7 +217,31 @@ async function main() {
       if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
       const msg = resp.choices?.[0]?.message
       if (!msg) throw new Error('răspuns gol de la model')
-      messages.push(msg)
+      // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
+      // „invalid message at index 9: must have non-empty content or tool
+      // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
+      // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
+      // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
+      // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
+      const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
+      if (msg.tool_calls?.length) {
+        // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
+        // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
+        // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
+        // Normalizăm: orice nu parsează ca obiect devine '{}'.
+        clean.tool_calls = msg.tool_calls.map((c) => {
+          let a = c.function?.arguments
+          try {
+            const p = JSON.parse(a || '{}')
+            a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
+          } catch {
+            a = '{}'
+          }
+          return { ...c, function: { ...c.function, arguments: a } }
+        })
+      }
+      if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
+      messages.push(clean)
       const calls = msg.tool_calls ?? []
       if (!calls.length) {
         // modelul a vorbit fără unealtă — îl împingem înapoi la lucru
