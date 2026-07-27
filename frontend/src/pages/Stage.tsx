@@ -45,6 +45,42 @@ function downloadContent(name: string, content: string, mime: string): void {
   }
 }
 
+// Vizor de cod/text pe monitor (Adrian, 27 iul): aduce conținutul fișierului
+// (cod, json, csv, log…) și-l afișează citibil, monospațiat. Fetch simplu; la
+// eșec (cross-origin / fișier privat) oferă linkul de deschidere.
+function MonitorTextFile({ url, zoom }: { url: string; zoom: number }) {
+  const [text, setText] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setText(null)
+    setFailed(false)
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+      .then((t) => {
+        if (alive) setText(t.slice(0, 500_000))
+      })
+      .catch(() => alive && setFailed(true))
+    return () => {
+      alive = false
+    }
+  }, [url])
+  if (failed)
+    return (
+      <div className="workspace-blocked">
+        <p>Nu am putut aduce conținutul fișierului aici.</p>
+        <a href={url} target="_blank" rel="noreferrer" className="composer-send">Deschide fișierul ↗</a>
+      </div>
+    )
+  return (
+    <div className="workspace-doc">
+      <pre className="doc-text" style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: `${0.92 * zoom}em` }}>
+        {text ?? 'Se încarcă…'}
+      </pre>
+    </div>
+  )
+}
+
 // Nume de fișier sigur din titlul panoului (diacritice/spații → cratime).
 function safeFileName(title: string, ext: string): string {
   const base = (title || 'kelion')
@@ -561,6 +597,41 @@ export default function Stage({ user }: { user: User }) {
               </div>
             ) : ws.card ? (
               <CardView card={ws.card} />
+            ) : ws.url && ws.kind === 'image' ? (
+              // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
+                <img src={ws.url} alt={ws.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              </div>
+            ) : ws.url && ws.kind === 'video' ? (
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                <video src={ws.url} controls style={{ maxWidth: '100%', maxHeight: '100%' }} />
+              </div>
+            ) : ws.url && ws.kind === 'audio' ? (
+              <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                <audio src={ws.url} controls style={{ width: '100%', maxWidth: 520 }} />
+              </div>
+            ) : ws.url && ws.kind === 'pdf' ? (
+              // PDF: vizorul nativ al browserului, în cadru.
+              <iframe title={ws.title} src={ws.url} className="workspace-frame" style={{ background: '#fff' }} />
+            ) : ws.url && ws.kind === 'office' ? (
+              // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
+              // să fie la un URL public — cele servite de kelionai.app sunt).
+              <iframe
+                title={ws.title}
+                src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(ws.url)}`}
+                className="workspace-frame"
+                style={{ background: '#fff' }}
+              />
+            ) : ws.url && ws.kind === 'textfile' ? (
+              // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
+              <MonitorTextFile url={ws.url} zoom={monZoom} />
+            ) : ws.url && ws.kind === 'archive' ? (
+              // Arhive: browserul nu le poate deschide în pagină — oferim
+              // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
+              <div className="workspace-blocked">
+                <p>Arhivă ({ws.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
+                <a href={ws.url} download className="composer-send">Descarcă arhiva ↓</a>
+              </div>
             ) : ws.url && isEmbeddable(ws.url) ? (
               <iframe
                 title={ws.title}

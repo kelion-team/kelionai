@@ -85,17 +85,55 @@ export function isMonitorWorking(): boolean {
   return working
 }
 
-// Classify a URL into a task kind so same-kind surfaces share one tab (a new map
-// replaces the old map, a new video swaps the current one — "just swap the video").
+// Classify a URL/data into a task kind so the monitor RANDEAZĂ ORICE TIP DE
+// DATĂ nativ (Adrian, 27 iul: „pe monitor trebuie să poți deschide absolut
+// orice tip de date — xls, pdf, youtube, cod, arhive, orice"). Fiecare tip are
+// randorul lui în Stage: imagine→<img>, pdf→vizor, video→<video>, audio→
+// <audio>, office(xls/doc/ppt)→vizor Office online, cod/text/json/csv→text,
+// arhive→panou de descărcare. Același kind = același tab (un pdf nou îl
+// înlocuiește pe cel vechi).
+const EXT_KIND: Record<string, string> = {
+  // imagini
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', avif: 'image', ico: 'image',
+  // documente
+  pdf: 'pdf',
+  // video
+  mp4: 'video', webm: 'video', mov: 'video', ogv: 'video', mkv: 'video', avi: 'video', m4v: 'video',
+  // audio
+  mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio', flac: 'audio', aac: 'audio', opus: 'audio',
+  // office
+  xls: 'office', xlsx: 'office', doc: 'office', docx: 'office', ppt: 'office', pptx: 'office', ods: 'office', odt: 'office', odp: 'office',
+  // cod / text / date
+  txt: 'textfile', md: 'textfile', json: 'textfile', csv: 'textfile', tsv: 'textfile', xml: 'textfile', yml: 'textfile', yaml: 'textfile', log: 'textfile',
+  js: 'textfile', ts: 'textfile', tsx: 'textfile', jsx: 'textfile', py: 'textfile', java: 'textfile', c: 'textfile', cpp: 'textfile', h: 'textfile',
+  go: 'textfile', rs: 'textfile', rb: 'textfile', php: 'textfile', sh: 'textfile', sql: 'textfile', css: 'textfile', ini: 'textfile', conf: 'textfile',
+  // arhive
+  zip: 'archive', rar: 'archive', '7z': 'archive', tar: 'archive', gz: 'archive', bz2: 'archive', xz: 'archive', tgz: 'archive',
+}
+
 export function kindForUrl(raw: string): string {
+  const s = String(raw ?? '').trim()
+  // data: URI → clasificăm după MIME-ul din chiar antet.
+  if (s.startsWith('data:')) {
+    const mime = (s.slice(5).match(/^[^;,]*/)?.[0] ?? '').toLowerCase()
+    if (mime.startsWith('image/')) return 'image'
+    if (mime === 'application/pdf') return 'pdf'
+    if (mime.startsWith('video/')) return 'video'
+    if (mime.startsWith('audio/')) return 'audio'
+    if (mime.startsWith('text/') || mime.includes('json') || mime.includes('csv')) return 'textfile'
+    return 'web'
+  }
   try {
-    const u = new URL(raw, typeof location !== 'undefined' ? location.origin : 'http://x')
+    const u = new URL(s, typeof location !== 'undefined' ? location.origin : 'http://x')
     const host = u.hostname.replace(/^www\./, '')
     if (host.includes('youtube') || host === 'youtu.be') return 'youtube'
     if (host.includes('windy') || u.pathname.includes('weather')) return 'weather'
     if (u.pathname.startsWith('/api/image')) return 'image'
     if (u.pathname.startsWith('/api/route')) return 'map'
     if (host.includes('openstreetmap') || u.pathname.includes('/maps')) return 'map'
+    // După extensia fișierului (funcționează și cu ?query după ea).
+    const ext = (u.pathname.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
+    if (ext && EXT_KIND[ext]) return EXT_KIND[ext]
   } catch {
     /* relative or malformed — fall through */
   }
