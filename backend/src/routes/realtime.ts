@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
+import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { grantUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
@@ -13,7 +14,7 @@ import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '.
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
-import { brainComplete, describeScene } from '../services/brain.js'
+import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -197,7 +198,42 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           `VOICE ESCALATION: the fast voice model handed you a request it judged too hard. Answer it fully ` +
           `but CONCISELY, as plain text to be SPOKEN aloud (no markdown, no lists). Speak ONLY in ` +
           `${langLabel(lang)} — never switch, regardless of the language mixed into the request below.\n\n${request}`
-        const answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
+        // CU UNELTE (Adrian, 27 iul: „Kelion nu poate vedea tot codul sursă al
+        // lui, de ce?"): escaladarea din voce era un creier ORB — fără sursă,
+        // fără DB, fără constructor; nega accesul. Acum are aceleași brațe ca
+        // scrisul, pe partea de introspecție + construcție (doar admin).
+        const introspectionTools = isAdmin
+          ? [
+              { name: 'list_source', description: 'Listează arborele propriului cod sursă (director dat, relativ la rădăcina repo-ului).', input_schema: { type: 'object', properties: { dir: { type: 'string' } } } },
+              { name: 'read_source', description: 'Citește un fișier din propriul cod sursă, cu numere de linie.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+              { name: 'search_source', description: 'Caută un text/regex în tot codul sursă propriu.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+              { name: 'db_tables', description: 'Schema completă a bazei de date permanente (tabele, coloane, număr de rânduri).', input_schema: { type: 'object', properties: {} } },
+              { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
+              { name: 'build_software', description: 'Pune un ordin de construcție în coada constructorului (lucrătorul construiește cu build+teste și deschide PR; ownerul dă merge).', input_schema: { type: 'object', properties: { order: { type: 'string' } }, required: ['order'] } },
+              { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
+            ]
+          : []
+        const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
+          if (tname === 'list_source') return listSource(String(targs.dir ?? '.'))
+          if (tname === 'read_source') return readSource(String(targs.path ?? ''))
+          if (tname === 'search_source') return searchSource(String(targs.query ?? ''))
+          if (tname === 'db_tables') return dbTablesOverview()
+          if (tname === 'db_query') return dbQuery(String(targs.sql ?? ''))
+          if (tname === 'build_software') {
+            const order = String(targs.order ?? '').trim()
+            if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
+            const jobId = await createBuildJob(user.email, order)
+            return JSON.stringify({ ok: !!jobId, job: jobId })
+          }
+          if (tname === 'constructor_status') {
+            const jobs = await listBuildJobs(8)
+            return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, pr: j.prUrl })) })
+          }
+          return JSON.stringify({ error: 'unealtă necunoscută' })
+        }
+        const answer = introspectionTools.length
+          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd } })
+          : await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }

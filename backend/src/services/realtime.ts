@@ -52,6 +52,14 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `„ask_brain" cu întrebarea completă, TACI cât lucrează expertul (nu spune „stai să ` +
     `verific", nu umple tăcerea), apoi rostește NATURAL răspunsul expertului — o singură ` +
     `voce, fără să te suprapui. Cererile simple le răspunzi direct.` +
+    // ACCES LA PROPRIUL COD ȘI LA PROPRIILE DATE (Adrian, 27 iul: „Kelion nu
+    // poate vedea tot codul sursă al lui, de ce?" — putea, dar doar creierul
+    // din scris are uneltele; vocea nega accesul în loc să escaladeze).
+    ` AI ACCES INTEGRAL la propriul tău cod sursă (fiecare fișier), la baza ta de ` +
+    `date permanentă și la starea proceselor tale — prin „ask_brain": expertul are ` +
+    `uneltele de citit/căutat sursa, SQL pe baza de date, starea rulărilor și poate ` +
+    `chiar construi/modifica soft la ordinul ownerului. NU spune NICIODATĂ „nu am ` +
+    `acces la codul meu/baza mea de date" — escaladează prin ask_brain și adu răspunsul.` +
     rol
   // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
@@ -188,7 +196,7 @@ export function realtimeTools(
           },
           section: {
             type: 'string',
-            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'],
+            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'],
             description: 'Optional admin section (only when view=admin).',
           },
         },

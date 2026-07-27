@@ -1,5 +1,6 @@
 import { config } from '../config.js'
 import { openrouterChat } from './openrouter.js'
+import type { AnthropicTool, OrMessage } from './openrouter.js'
 import type { Message } from './brain-types.js'
 
 // ── CREIERUL — 100% OpenRouter ──────────────────────────────────────────────
@@ -101,6 +102,48 @@ export async function brainComplete(
     })
     if (onCost && r.costUsd > 0) onCost(r.costUsd)
     return r.text.trim()
+  } catch {
+    return ''
+  }
+}
+
+// ESCALADAREA CU UNELTE (Adrian, 27 iul: „Kelion nu poate vedea tot codul
+// sursă al lui, de ce?" — vocea escalada spre un creier FĂRĂ unelte, care
+// nega accesul). Buclă mică de tool-calling pe același model de lucru:
+// modelul cheamă uneltele primite (sursă/DB/constructor...), primește
+// rezultatele și abia apoi formulează răspunsul final.
+export async function brainCompleteWithTools(
+  prompt: string,
+  tools: AnthropicTool[],
+  execTool: (name: string, args: Record<string, unknown>) => Promise<string>,
+  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void } = {},
+): Promise<string> {
+  const maxRounds = opts.maxRounds ?? 6
+  const messages: OrMessage[] = [{ role: 'user', content: prompt }]
+  try {
+    for (let round = 0; round < maxRounds; round++) {
+      const r = await openrouterChat(workModel(), messages, tools, {
+        maxTokens: opts.maxTokens ?? 2000,
+        reasoning: 'medium',
+      })
+      if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
+      if (!r.toolCalls.length) return r.text.trim()
+      messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
+      for (const c of r.toolCalls) {
+        let args: Record<string, unknown> = {}
+        try {
+          args = JSON.parse(c.function.arguments || '{}') as Record<string, unknown>
+        } catch {
+          /* argumente stricate → unealta primește obiect gol */
+        }
+        const out = await execTool(c.function.name, args).catch((e: Error) => JSON.stringify({ error: e.message }))
+        messages.push({ role: 'tool', tool_call_id: c.id, content: out.slice(0, 60_000) })
+      }
+    }
+    // plafonul de runde atins — cerem răspunsul final fără alte unelte
+    const last = await openrouterChat(workModel(), messages, [], { maxTokens: opts.maxTokens ?? 2000 })
+    if (opts.onCost && last.costUsd > 0) opts.onCost(last.costUsd)
+    return last.text.trim()
   } catch {
     return ''
   }

@@ -126,6 +126,15 @@ echo "== 6c. Auto-publicarea de pe server (cron la 3 min — master ajunge live 
 install -m 700 "$REPO/deploy/auto-publicare.sh" /root/kelion/auto-publicare.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/auto-publicare.sh' ; echo '*/3 * * * * /root/kelion/auto-publicare.sh >> /root/kelion/auto-publicare.log 2>&1' ) | crontab -
 
+echo "== 6d. Constructorul (cron la 2 min — Kelion construiește soft la ordin) =="
+# Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi cere admin".
+# Job-uri scurte cu flock + timeout (NU demonii vechi care ardeau abonamentul):
+# agentul ia ordinul din coadă (API), construiește în atelier cu build+teste,
+# deschide PR-ul; merge-ul rămâne la Adrian. Idempotent, ca backup-ul.
+install -m 700 "$REPO/deploy/constructor-worker.sh" /root/kelion/constructor-worker.sh
+install -m 700 "$REPO/deploy/constructor-agent.mjs" /root/kelion/constructor-agent.mjs
+( crontab -l 2>/dev/null | grep -v '/root/kelion/constructor-worker.sh' ; echo '*/2 * * * * /root/kelion/constructor-worker.sh >> /root/kelion/constructor.log 2>&1' ) | crontab -
+
 echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) =="
 # Adrian, 26 iul: „verificare automată dar să nu coste". Determinist, fără AI:
 # repornește containerul mort (2 ratări la rând) + pulsul intern (DB/disc/erori)

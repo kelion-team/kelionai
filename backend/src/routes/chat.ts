@@ -43,6 +43,10 @@ import {
   faceDistance,
   loadKv,
   proposeKelionTool,
+  createBuildJob,
+  listBuildJobs,
+  dbTablesOverview,
+  dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
@@ -326,6 +330,46 @@ const REPO_MERGE_PR_TOOL: Tool = {
     required: ['pr'],
   },
 }
+// CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi
+// cere admin"): ordinul intră în coada build_jobs; lucrătorul de pe VPS îl
+// construiește în atelier (build + teste) și deschide PR-ul; Adrian dă merge.
+const BUILD_SOFTWARE_TOOL: Tool = {
+  name: 'build_software',
+  description:
+    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      order: { type: 'string', description: 'The complete build order, in Romanian: what to build/change, where, and how to verify it works.' },
+    },
+    required: ['order'],
+  },
+}
+const CONSTRUCTOR_STATUS_TOOL: Tool = {
+  name: 'constructor_status',
+  description:
+    'ADMIN ONLY. See the state of your build orders (queued/running/done/failed, PR link, tokens used). Call it when the owner asks how a build is going, then show the result with show_document.',
+  input_schema: { type: 'object', properties: {} },
+}
+// ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
+// de stocare permanentă... acces la orice bază de date a aplicației"): vederea
+// completă a schemei + SQL direct pe Postgres-ul aplicației. Admin only.
+const DB_TABLES_TOOL: Tool = {
+  name: 'db_tables',
+  description:
+    "ADMIN ONLY. See YOUR OWN permanent storage: every table in the application's Postgres database, with its columns and live row count. This is the real persisted state (users, wallets, transactions, messages, memories, voiceprints...). Call it before db_query when you need the exact table/column names.",
+  input_schema: { type: 'object', properties: {} },
+}
+const DB_QUERY_TOOL: Tool = {
+  name: 'db_query',
+  description:
+    "ADMIN ONLY. Run ONE SQL statement directly on the application's Postgres database — full access, SELECT or write. Results are capped at 200 rows. HOUSE RULES: destructive statements (DELETE/DROP/TRUNCATE/UPDATE on money tables: wallets, transactions, billing_events, cost_events, admin_pool) ONLY when the owner explicitly ordered that exact change in this conversation — never on your own initiative. Always look at db_tables first if unsure of names.",
+  input_schema: {
+    type: 'object',
+    properties: { sql: { type: 'string', description: 'The SQL statement to execute.' } },
+    required: ['sql'],
+  },
+}
 // request_repair renăscut: ordinul se SCRIE (work_orders) + semnal pe email;
 // execuția o face o sesiune Claude pornită de owner — nu un LLM permanent.
 const REQUEST_REPAIR_TOOL: Tool = {
@@ -464,7 +508,7 @@ const OPEN_APP_VIEW_TOOL: Tool = {
       },
       section: {
         type: 'string',
-        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri'],
+        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor'],
         description: 'Optional admin section (only when view=admin).',
       },
     },
@@ -1633,7 +1677,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -1897,6 +1941,33 @@ async function runTool(
     case 'repo_merge_pr': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return repoMergePR(Number(args.pr ?? 0))
+    }
+    case 'build_software': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const order = String(args.order ?? '').trim()
+      if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
+      const jobId = await createBuildJob(email, order)
+      if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+      return JSON.stringify({
+        ok: true,
+        job: jobId,
+        message: `Ordin #${jobId} în coadă. Lucrătorul îl ia în cel mult 2 minute, construiește cu build+teste și deschide PR-ul; ownerul primește email cu linkul de merge. Vezi starea cu constructor_status.`,
+      })
+    }
+    case 'constructor_status': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const jobs = await listBuildJobs(12)
+      return JSON.stringify({
+        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+      })
+    }
+    case 'db_tables': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return dbTablesOverview()
+    }
+    case 'db_query': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return dbQuery(String(args.sql ?? ''))
     }
 
     case 'show_document': {

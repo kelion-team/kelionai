@@ -8,6 +8,7 @@ import {
   getDisabledGestures,
   saveKv,
   loadKv,
+  saveNote,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 
@@ -42,6 +43,20 @@ function validAvatarBox(b: unknown): b is AvatarBox {
 // exists. Auth-gated to the session user — each user only ever reads/writes
 // their own.
 export async function prefsRoutes(app: FastifyInstance): Promise<void> {
+  // „SALVEAZĂ" DE PE MONITOR → STOCAREA PERMANENTĂ (Adrian, 27 iul: „butonul
+  // salvează nu e funcțional" — descărca doar un fișier local, fără nicio urmă
+  // în Kelion). Documentul intră în notes (DB) → Kelion îl regăsește oricând
+  // prin uneltele lui de notițe, pe orice dispozitiv.
+  app.post<{ Body: { title?: string; content?: string } }>('/api/notes', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const content = String(req.body?.content ?? '').trim()
+    const title = String(req.body?.title ?? '').trim() || undefined
+    if (!content) return reply.code(400).send({ error: 'continut_gol' })
+    const id = await saveNote(user.email, content.slice(0, 200_000), title)
+    if (!id) return reply.code(500).send({ error: 'db_indisponibil' })
+    return reply.send({ ok: true, id })
+  })
   // Starea gesturilor (lista dezactivată) — PUBLIC, ca avatarul ORICĂRUI user să
   // nu joace gesturile scoase de Adrian. Nu e sensibil (comportament cosmetic).
   app.get('/api/gestures/state', async (_req, reply) => {
