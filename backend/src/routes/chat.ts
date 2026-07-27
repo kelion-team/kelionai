@@ -49,7 +49,7 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -131,16 +131,15 @@ async function selectedBrainModel(
   // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
   // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
   const difficulty = taskDifficulty(text)
-  // OWNER = MEREU CREIERUL DE VÂRF, CONSISTENT (Adrian, 27 iul: „prima dată a
-  // mers, a doua nu" — cauza dovedită: modelul oscila între Fable 5 (top, când
-  // scorul de dificultate ≥ 85) și gpt-5-mini (work, sub 85), deci a doua tură,
-  // punctată mai jos, cădea pe creierul mai slab). Regula anti-buclă (§1.14):
-  // pe drumul ownerului NU mai există scor care să-l coboare — Fable 5 la
-  // FIECARE mesaj, raționament, toate uneltele. Fără oscilație = fără „prima a
-  // mers a doua nu". Userii publici păstrează scara de cost.
-  const isOwner = roleFor(email) === 'admin'
-  const heavy = isOwner || needsVision || difficulty >= ESCALATE_AT
-  const top = isOwner || difficulty >= ESCALATE_TOP_AT
+  // SPLIT ECONOMIC ȘI CINSTIT (Adrian, 27 iul: „pe chat de 2 lei ok, dar unde
+  // necesită răspuns gândit trimiți prin creier"): vorba simplă → model ieftin
+  // (rapid, aproape gratis); CÂND e nevoie de gândit SAU de o ACȚIUNE (owner
+  // cere „repară/publică/arată/deschide/construiește...") → creierul care chiar
+  // EXECUTĂ, nu narează. „Mereu Fable 5" a fost scos: ardea creditul (OpenRouter
+  // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
+  // extremă.
+  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  const top = difficulty >= ESCALATE_TOP_AT
   const model = top
     ? await resolveModel('top')
     : heavy
