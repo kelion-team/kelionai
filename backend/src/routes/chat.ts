@@ -1830,6 +1830,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // răspunsul final. Pe tura ușoară: fără, ca primul cuvânt să rămână
           // instant (sub 1s, regula de latență).
           reasoning: heavyTurn ? 'medium' : undefined,
+          // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
+          // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
+          // sau să retragă — nu mai rămâne la stadiul declarativ.
+          deedGate: isAdmin,
+          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
+          // de ACȚIUNE a ownerului (heavyTurn = hasActionIntent) prima rundă
+          // e obligată să aleagă o unealtă — execută, nu narează. Runda 2+ liberă.
+          forceToolsFirstRound: isAdmin && heavyTurn,
           onText: (txt) => {
             noteFirstWord()
             reply.raw.write(txt)

@@ -239,7 +239,7 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -258,7 +258,9 @@ export async function openrouterChatStream(
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
-    body.tool_choice = 'auto'
+    // 'required' = modelul TREBUIE să cheme o unealtă (Adrian, 27 iul: „creierul
+    // forțat să cheme unelte" pe turele de acțiune) — altfel 'auto'.
+    body.tool_choice = opts.toolChoice ?? 'auto'
   }
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
@@ -345,7 +347,7 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
@@ -359,7 +361,7 @@ export async function openrouterChat(
   if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
   if (tools.length) {
     body.tools = toolsToOpenAI(tools)
-    body.tool_choice = 'auto'
+    body.tool_choice = opts.toolChoice ?? 'auto'
   }
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
