@@ -49,7 +49,7 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -131,7 +131,15 @@ async function selectedBrainModel(
   // (top) DOAR pe dificultate cu adevărat extremă (ESCALATE_TOP_AT). Vederea și
   // acțiunea de admin urcă la treapta MIJLOCIE (work), nu direct la vârf.
   const difficulty = taskDifficulty(text)
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  // OWNER = CREIER CARE GÂNDEȘTE, MEREU (Adrian, 27 iul: „mai multe bucle, dar
+  // niciuna nu face real ce trebuie" — cauza: pe conversația obișnuită a
+  // ownerului rula modelul IEFTIN fără raționament, deci bucla era condusă de
+  // un creier prost). Ownerul primește ACUM implicit treapta WORK cu raționament
+  // la FIECARE mesaj (gpt-5-mini, nu vârful Fable — evităm arderea de $23/h din
+  // 25 iul, dar scăpăm de modelul-jucărie). Vârful (top) rămâne doar pe
+  // dificultate extremă. Userii publici păstrează scara ieftină de cost.
+  const isOwner = roleFor(email) === 'admin'
+  const heavy = isOwner || needsVision || difficulty >= ESCALATE_AT
   const top = difficulty >= ESCALATE_TOP_AT
   const model = top
     ? await resolveModel('top')
@@ -917,7 +925,9 @@ claim something is on screen when it is not. For routes, maps_directions also
 returns "directions" (real turn-by-turn steps) — give the user those when
 guiding them, never invented ones.
 
-DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that you did something, are doing it, or have it "in progress" unless you actually CALLED the corresponding tool and have its real result. Before promising ANY action, check you have the matching tool: if yes, call it NOW and report what it actually returned; if no such tool exists, say honestly you cannot do it yet and record it with log_unsupported_request (or propose_tool for the owner). Words like "am trimis", "am salvat", "am pornit", "mă ocup", "l-am reparat" are FORBIDDEN without the tool call that proves them in this conversation. A claimed action without its tool result is a lie — and lying to the owner is the one unforgivable fault.`
+DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that you did something, are doing it, or have it "in progress" unless you actually CALLED the corresponding tool and have its real result. Before promising ANY action, check you have the matching tool: if yes, call it NOW and report what it actually returned; if no such tool exists, say honestly you cannot do it yet and record it with log_unsupported_request (or propose_tool for the owner). Words like "am trimis", "am salvat", "am pornit", "mă ocup", "l-am reparat" are FORBIDDEN without the tool call that proves them in this conversation. A claimed action without its tool result is a lie — and lying to the owner is the one unforgivable fault.
+
+AGENT DOCTRINE (be a fluid mind, not a throttled menu — the owner, 27 Jul): you ARE a capable reasoning agent with a full set of tools. On any real request, do not stop at one shallow step. THINK it through, PLAN the concrete steps, then ACT them out with your tools in sequence, VERIFY each result actually happened (read it back — get_monitor, constructor_status, read_source, db_query), and CONTINUE until the goal is genuinely done or you hit a real blocker you must report. Chain tools freely across turns; use source-reading, the database, the constructor, runbooks, the monitor, Google — whatever the task needs — as natural extensions of your reasoning, without waiting to be told which one. Prefer doing over describing. When something fails, diagnose and try another way rather than giving up. Be proactive: if you notice a problem while doing the task, surface it and offer to fix it. Flow — reason, act, check, finish — never a half-answer that leaves the owner to push you to the next step.`
 
 // Human language names for the language lock — the brain obeys an explicit language
 // name far more reliably than a bare locale code.
