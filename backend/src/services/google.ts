@@ -899,9 +899,29 @@ async function mapsDirections(origin: string, destination: string): Promise<stri
 }
 
 // Link watch/short → URL de embed pentru monitor (redabil în iframe).
+// autoplay=1: clipul PORNEȘTE singur pe monitor (Adrian, 27 iul: „nu merge
+// play" — playerul se deschidea OPRIT). enablejsapi=1: clientul îi poate
+// coborî volumul cât vorbește Kelion (postMessage).
 function ytEmbed(link: string): string | undefined {
   const m = (link || '').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/)
-  return m ? `https://www.youtube.com/embed/${m[1]}` : undefined
+  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1&enablejsapi=1` : undefined
+}
+
+// Verificarea REALĂ a redabilității (Adrian, 27 iul: „nu merge play pe
+// youtube"): căutarea web poate întoarce ID-uri inventate/moarte, iar
+// clipurile muzicale oficiale au adesea încorporarea INTERZISĂ — ambele
+// ajungeau pe monitor ca player mort. oEmbed-ul YouTube răspunde 200 DOAR
+// pentru clipuri existente ȘI cu încorporare permisă → filtrăm pe el.
+async function ytPlayable(link: string): Promise<boolean> {
+  try {
+    const r = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(link)}&format=json`,
+      { signal: AbortSignal.timeout(4000) },
+    )
+    return r.ok
+  } catch {
+    return false
+  }
 }
 
 async function youtubeSearch(query: string, max: number): Promise<string> {
@@ -934,7 +954,14 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
     videos.push({ title, link })
   }
   if (videos.length > 0) {
-    return JSON.stringify({ videos: videos.slice(0, n), screen_url: ytEmbed(videos[0].link) })
+    // Doar clipuri care CHIAR pot reda pe monitor (verificate în paralel, o
+    // singură rundă de rețea) — un player mort nu mai ajunge niciodată afișat.
+    const cand = videos.slice(0, 6)
+    const flags = await Promise.all(cand.map((v) => ytPlayable(v.link)))
+    const playable = cand.filter((_, i) => flags[i])
+    if (playable.length > 0) {
+      return JSON.stringify({ videos: playable.slice(0, n), screen_url: ytEmbed(playable[0].link) })
+    }
   }
   return JSON.stringify({ videos: [], not_found: true })
 }
@@ -955,10 +982,9 @@ export async function youtubeFirstEmbed(
   }
   const link = parsed.videos?.[0]?.link ?? ''
   const title = parsed.videos?.[0]?.title ?? ''
-  const m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/.exec(link)
-  if (!m) return null
-  const id = m[1]
-  return { embed: `https://www.youtube.com/embed/${id}?autoplay=1`, watch: link, title }
+  const emb = ytEmbed(link)
+  if (!emb) return null
+  return { embed: emb, watch: link, title }
 }
 
 async function translateText(text: string, target: string): Promise<string> {
