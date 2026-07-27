@@ -44,9 +44,16 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `TACI și așteaptă; numele tău te recheamă imediat în conversație.` +
     // OCHI + ESCALADARE (Adrian: „de ce nu vede, de ce nu escaladează?"). Vocea
     // avea uneltele, dar nu i se spunea să le folosească → nu vedea, nu urca.
-    ` Ai OCHI: poți vedea prin camera utilizatorului. Când te întreabă ce vezi, ` +
-    `îți arată ceva, îți cere să te uiți sau să citești ceva, ori vrea descrisă ` +
-    `scena/un obiect — cheamă unealta „look" și spune ce vezi.` +
+    ` Ai OCHI, dar DOI diferiți — nu-i confunda (regula lui Adrian, 27 iul): ` +
+    `CAMERA („look") e DOAR pentru contextul clar de cameră — „mă vezi?", „ce vezi ` +
+    `pe cameră?", „uită-te la asta", „citește ce-ți arăt"; MONITORUL („get_monitor") ` +
+    `e pentru „ce e pe monitor/ecran?", „ce mi-ai afișat?" — citește ce e afișat ` +
+    `chiar acum și vorbește despre AIA. Să răspunzi cu camera la o întrebare ` +
+    `despre monitor e greșeală gravă.` +
+    ` GESTURILE PE CONTEXT: când conținutul o cere firesc — un salut la salut, ` +
+    `arătatul spre monitor când afișezi ceva, o expresie la o veste — cheamă ` +
+    `play_avatar_gesture cu gestul potrivit, cumpătat, ca un gentleman: rar și ` +
+    `cu rost, niciodată teatral.` +
     ` Pentru cereri GRELE (analiză, cod, matematică, raționament lung, planificare, ` +
     `explicații aprofundate) NU improviza și NU vorbi între timp: cheamă DIRECT unealta ` +
     `„ask_brain" cu întrebarea completă, TACI cât lucrează expertul (nu spune „stai să ` +
@@ -215,9 +222,16 @@ export function realtimeTools(
       // userului. Clientul injectează cadrul curent în `image` înainte de a
       // trimite apelul la server (vezi ChatPanel onToolCall).
       type: 'function',
+      name: 'get_monitor',
+      description:
+        "Read what is displayed on YOUR MONITOR right now (the screen surface: documents, web pages, maps, videos, apps you opened). Call this when the user asks what's on the monitor/screen ('ce e pe monitor?', 'ce mi-ai afișat?') or refers to the shown content. This is NOT the camera — the physical world goes through look.",
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      type: 'function',
       name: 'look',
       description:
-        "Look through the user's camera and see what is in front of them RIGHT NOW. Call this whenever the user asks what you see, asks you to look at or read something they show you, or to describe their surroundings or an object.",
+        "Look through the user's CAMERA at the physical world in front of them RIGHT NOW. Call this ONLY when the context clearly refers to the camera or the real space: 'mă vezi?', 'ce vezi pe cameră?', 'uită-te la asta', 'citește ce-ți arăt'. NEVER for questions about the MONITOR/screen content ('ce e pe monitor?', 'ce mi-ai afișat?') — for those call get_monitor instead; answering a monitor question with the camera is a serious mistake.",
       parameters: {
         type: 'object',
         properties: {
@@ -276,7 +290,8 @@ export function realtimeTools(
     {
       type: 'function',
       name: 'play_avatar_gesture',
-      description: 'Make the avatar perform a short gesture (e.g. salut, aprobare, entuziasm, plecaciune, dans) when it fits the moment.',
+      description:
+        "Make the avatar perform a short gesture — YOU direct the movement: bind it to the action in progress. Presenting something on the monitor (weather, map, document) → 'arata-inainte' (point with the right hand at the screen) WHILE you present it; greeting → 'salut'; thanks → 'multumire'; good news → 'entuziasm'; thinking → 'ganditor'; also: uimire, surpriza, aprobare, acord-discret, stai-putin, dezamagire, nedumerire, victorie, plecaciune, dans (only if explicitly asked). Composed gentleman: nothing on neutral replies, never the same gesture twice in a row.",
       parameters: { type: 'object', properties: { gesture: { type: 'string', description: 'Gesture name.' } }, required: ['gesture'] },
     },
     {
