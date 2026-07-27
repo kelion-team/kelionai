@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kelion Studio</title>
+<style>
+  /* Scena STUDIOULUI — pagina pe care Chromium-ul de pe server o filmează
+     (services/promoStudio.ts). Primește prin location.hash (base64url JSON)
+     { title, scenes:[{at,kind,text,url}], total } și redă cadrele programate.
+     Fără fonturi/scripturi externe — trebuie să randeze identic, offline. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #060a14; }
+  body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #e8eefc; }
+  .bg {
+    position: fixed; inset: 0;
+    background: radial-gradient(1200px 700px at 30% 20%, #101c38 0%, #060a14 60%),
+                radial-gradient(900px 500px at 80% 85%, #0c1830 0%, transparent 55%);
+  }
+  .scene { position: fixed; inset: 0; opacity: 0; transition: opacity 0.6s ease; display: flex; align-items: center; justify-content: center; }
+  .scene.on { opacity: 1; }
+  .scene iframe { width: 100%; height: 100%; border: 0; background: #0b0d12; }
+  .scene img { max-width: 92%; max-height: 88%; border-radius: 14px; box-shadow: 0 18px 60px rgba(0,0,0,0.55); }
+  .card { text-align: center; padding: 0 90px; }
+  .card .kicker { font-size: 22px; letter-spacing: 5px; text-transform: uppercase; color: #7ea0d8; margin-bottom: 18px; }
+  .card h1 { font-size: 54px; line-height: 1.15; font-weight: 700; text-wrap: balance; }
+  .watermark {
+    position: fixed; right: 22px; bottom: 16px; z-index: 50;
+    font-size: 15px; letter-spacing: 0.5px; color: rgba(210, 226, 255, 0.85);
+    background: rgba(6, 10, 20, 0.55); padding: 5px 12px; border-radius: 999px;
+    border: 1px solid rgba(120, 160, 220, 0.35);
+  }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div id="stage"></div>
+<div class="watermark">kelionai.app</div>
+<script>
+  let spec = { title: 'Kelion', scenes: [], total: 30 }
+  try {
+    spec = JSON.parse(atob(location.hash.slice(1).replace(/-/g, '+').replace(/_/g, '/')))
+  } catch (e) { /* fără spec → doar cardul de titlu */ }
+  const stage = document.getElementById('stage')
+  const nodes = []
+
+  function makeScene(s) {
+    const el = document.createElement('div')
+    el.className = 'scene'
+    if (s.kind === 'app') {
+      const f = document.createElement('iframe')
+      f.src = '/' // aplicația însăși — same-origin, deci încadrabilă
+      el.appendChild(f)
+    } else if (s.kind === 'web' && s.url) {
+      const f = document.createElement('iframe')
+      f.src = s.url
+      el.appendChild(f)
+    } else if (s.kind === 'image' && s.url) {
+      const i = document.createElement('img')
+      i.src = s.url
+      el.appendChild(i)
+    } else {
+      el.innerHTML = '<div class="card"><div class="kicker">Kelion — live AI assistant</div><h1></h1></div>'
+      el.querySelector('h1').textContent = s.text || spec.title || 'Kelion'
+    }
+    stage.appendChild(el)
+    return el
+  }
+
+  // Cardul de deschidere există mereu (secunda 0) dacă nicio scenă nu începe la 0.
+  const scenes = Array.isArray(spec.scenes) ? spec.scenes.filter((s) => s && Number.isFinite(+s.at)) : []
+  scenes.sort((a, b) => +a.at - +b.at)
+  if (!scenes.length || +scenes[0].at > 0.5) scenes.unshift({ at: 0, kind: 'title', text: spec.title })
+
+  scenes.forEach((s, i) => {
+    const el = makeScene(s)
+    nodes.push(el)
+    setTimeout(() => {
+      nodes.forEach((n) => n.classList.remove('on'))
+      el.classList.add('on')
+    }, Math.max(0, +s.at * 1000))
+  })
+</script>
+</body>
+</html>

@@ -76,6 +76,7 @@ import {
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { isArmed, hasUnlock } from '../services/adminLock.js'
+import { filmEpisode, studioStatus, type StudioSpec } from '../services/promoStudio.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -401,6 +402,55 @@ const SERVER_LOGS_TOOL: Tool = {
       limit: { type: 'number', description: 'Max entries, default 60.' },
     },
   },
+}
+// STUDIOUL (Adrian, 27 iul: „Kelion trebuie să poată da rec să-și înregistreze
+// propriile filmulețe... la comanda mea verbală dată scris sau audio"): filmarea
+// se face PE SERVER (browser + TTS + ffmpeg), fără butonul Rec — vezi
+// services/promoStudio.ts. Episoadele se salvează permanent, servite din /dl/.
+const FILM_EPISODE_TOOL: Tool = {
+  name: 'film_promo_episode',
+  description:
+    "ADMIN ONLY — YOUR OWN FILM STUDIO. Record a promo episode BY YOURSELF, end to end: you write the script, call this tool, the server films it (your own voice narrates, scenes appear on screen, subtitles are burned in) and SAVES the mp4 — no human pressing anything. LANGUAGE LAW (the owner's order): he commands in Romanian, but the CLIP is in ENGLISH; when a segment demonstrates another language, give its `en` translation — it becomes an English subtitle burned over that part only. Scenes: 'title' (big text card), 'app' (the live Kelionai app itself), 'web' (a URL), 'image' (an image URL) — timed with `at` seconds. The tool returns IMMEDIATELY; filming takes as long as the episode — follow up with studio_status and only claim it is done when status says done, then give the owner the /dl link.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: "Episode title, e.g. 'Episodul pilot'." },
+      segments: {
+        type: 'array',
+        description: 'The narration, in order. Each item: {lang, text, en?}. Clip default language is ENGLISH; non-English segments MUST include `en` (English subtitle).',
+        items: {
+          type: 'object',
+          properties: {
+            lang: { type: 'string', description: "Spoken language code: 'en' (default), 'ro', 'fr', 'es', 'de', 'it', 'pt'." },
+            text: { type: 'string', description: 'The spoken text of this segment.' },
+            en: { type: 'string', description: 'English translation — REQUIRED when lang is not en (burned as subtitle).' },
+          },
+          required: ['lang', 'text'],
+        },
+      },
+      scenes: {
+        type: 'array',
+        description: 'What is ON SCREEN and when: [{at: seconds, kind: title|app|web|image, text?, url?}].',
+        items: {
+          type: 'object',
+          properties: {
+            at: { type: 'number', description: 'Second at which this scene appears.' },
+            kind: { type: 'string', enum: ['title', 'app', 'web', 'image'] },
+            text: { type: 'string', description: 'For title cards: the text.' },
+            url: { type: 'string', description: 'For web/image: the URL.' },
+          },
+          required: ['at', 'kind'],
+        },
+      },
+    },
+    required: ['title', 'segments'],
+  },
+}
+const STUDIO_STATUS_TOOL: Tool = {
+  name: 'studio_status',
+  description:
+    'ADMIN ONLY. The film studio state: idle/filming/processing/done/failed, elapsed seconds, the note, and ALL saved episodes with their /dl links. Call it whenever the owner asks about a clip, and before claiming an episode is done.',
+  input_schema: { type: 'object', properties: {} },
 }
 // ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
 // de stocare permanentă... acces la orice bază de date a aplicației"): vederea
@@ -1493,6 +1543,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           `\n\nYOUR LATEST UPDATES (the newest commits you received at the most recent deploy, newest first):\n${upd}\nWhen the owner asks what's new, what changed, or what update you received, answer from this list — and call list_updates for the fuller recent history. Never claim you don't know what your updates were.`
       }
       systemPrompt +=
+        `\n\nYOUR FILM STUDIO (owner only — his order: you record your own promo episodes YOURSELF, at his spoken or written command): when the owner tells you to film ("filmează", "fă episodul pilot", "înregistrează un clip"), YOU do everything — write the script, plan the scenes, call film_promo_episode, follow it with studio_status, and give him the /dl link when status is done. No Rec button, no human hand. THE LANGUAGE LAW: the owner commands in Romanian, but the CLIP is narrated in ENGLISH; segments demonstrating other languages carry their "en" translation, burned in as English subtitles over those parts only. The PILOT episode is 3–5 minutes (about 450–750 spoken words) presenting who you are and what you can do, with scenes: title cards, the live app itself (kind "app"), and images. NEVER claim an episode is done without studio_status saying done — filming takes real minutes; say honestly that it is filming and check again when asked.`
+      systemPrompt +=
         `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes, then ask for authorization. Do NOT call any tool yet. Step 2: ONLY when the owner explicitly approves (da / yes / autorizez): if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the approved script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
     }
 
@@ -1777,7 +1829,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, FILM_EPISODE_TOOL, STUDIO_STATUS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -2116,6 +2168,15 @@ async function runTool(
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return systemHealth()
+    }
+    case 'film_promo_episode': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const spec = args as unknown as StudioSpec
+      return JSON.stringify(filmEpisode(spec))
+    }
+    case 'studio_status': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      return studioStatus()
     }
     case 'server_logs': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
