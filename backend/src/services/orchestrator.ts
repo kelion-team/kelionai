@@ -5,6 +5,11 @@ import {
   type OrMessage,
   type OrToolCall,
 } from './openrouter.js'
+import {
+  GEMINI_DIRECT_PREFIX,
+  geminiDirectChat,
+  geminiDirectChatStream,
+} from './geminiDirect.js'
 
 // ── ORCHESTRATORUL — un creier, orice model ─────────────────────────────────
 // Rulează o conversație CU tool-use printr-un model ales (GPT/Gemini/Claude prin
@@ -71,21 +76,26 @@ export async function runOrchestrator(
     // apel simplu (ex: agenți în fundal care nu difuzează).
     // Forțarea uneltei DOAR pe prima rundă (dacă cerută) și doar dacă avem
     // unelte de oferit; altfel 'required' fără tools ar fi respins de API.
-    const toolChoice =
+    const toolChoice: 'required' | undefined =
       opts.forceToolsFirstRound && round === 1 && tools.length ? 'required' : undefined
+    const callOpts = {
+      maxTokens: opts.maxTokens,
+      temperature: opts.temperature,
+      reasoning: opts.reasoning,
+      toolChoice,
+    }
+    // CREIERUL PRINCIPAL GEMINI (Adrian, 27 iul): modelele cu prefixul
+    // google-direct/ merg pe API-ul Google (cheia gratuită), nu pe OpenRouter —
+    // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
+    const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
+    const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
     const res = opts.onText
-      ? await openrouterChatStream(model, convo, tools, opts.onText, {
-          maxTokens: opts.maxTokens,
-          temperature: opts.temperature,
-          reasoning: opts.reasoning,
-          toolChoice,
-        })
-      : await openrouterChat(model, convo, tools, {
-          maxTokens: opts.maxTokens,
-          temperature: opts.temperature,
-          reasoning: opts.reasoning,
-          toolChoice,
-        })
+      ? gemini
+        ? await geminiDirectChatStream(gModel, convo, tools, opts.onText, callOpts)
+        : await openrouterChatStream(model, convo, tools, opts.onText, callOpts)
+      : gemini
+        ? await geminiDirectChat(gModel, convo, tools, callOpts)
+        : await openrouterChat(model, convo, tools, callOpts)
     totalCost += res.costUsd
     served = res.model
     if (res.text) allText = allText ? `${allText}\n${res.text}` : res.text
