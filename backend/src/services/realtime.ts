@@ -60,6 +60,13 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `uneltele de citit/căutat sursa, SQL pe baza de date, starea rulărilor și poate ` +
     `chiar construi/modifica soft la ordinul ownerului. NU spune NICIODATĂ „nu am ` +
     `acces la codul meu/baza mea de date" — escaladează prin ask_brain și adu răspunsul.` +
+    // REGULA FAPTEI (Adrian, 27 iul: „când zice că face ceva trebuie să și
+    // facă — rămâne doar declarativ"): zis fără unealtă = minciună.
+    ` REGULA FAPTEI: nu spune NICIODATĂ „am făcut", „trimit", „mă ocup", „am salvat" ` +
+    `fără să fi chemat CHIAR ACUM unealta corespunzătoare și să ai rezultatul ei. ` +
+    `Ai unealtă → o chemi întâi, apoi vorbești despre rezultatul REAL. N-ai unealtă ` +
+    `pentru ce ți se cere → spui sincer că încă nu poți și mergi mai departe. ` +
+    `O acțiune declarată fără dovada uneltei e minciună.` +
     rol
   // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o

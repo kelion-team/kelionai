@@ -915,7 +915,9 @@ containing "shown": true means it IS on the monitor; a result with an "error"
 means NOTHING was displayed — say plainly that it failed and why, and NEVER
 claim something is on screen when it is not. For routes, maps_directions also
 returns "directions" (real turn-by-turn steps) — give the user those when
-guiding them, never invented ones.`
+guiding them, never invented ones.
+
+DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that you did something, are doing it, or have it "in progress" unless you actually CALLED the corresponding tool and have its real result. Before promising ANY action, check you have the matching tool: if yes, call it NOW and report what it actually returned; if no such tool exists, say honestly you cannot do it yet and record it with log_unsupported_request (or propose_tool for the owner). Words like "am trimis", "am salvat", "am pornit", "mă ocup", "l-am reparat" are FORBIDDEN without the tool call that proves them in this conversation. A claimed action without its tool result is a lie — and lying to the owner is the one unforgivable fault.`
 
 // Human language names for the language lock — the brain obeys an explicit language
 // name far more reliably than a bare locale code.
