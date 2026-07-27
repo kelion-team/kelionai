@@ -465,7 +465,12 @@ export async function startRealtimeVoice(
         // fără să aștepte bunăvoința modelului — apoi lasă ordin de tăcere.
         // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
         // pornește automat CA REACȚIE la fraza „stop" însăși.
-        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+        // Fraze de OPRIRE (Adrian, 27 iul: „când i se spune să tacă, închide
+        // gura imediat"): acceptăm ȘI „gura / închide gura / taci din gură /
+        // tacă-ți gura / liniște / gura!" și NU mai cerem fraza rostită singură
+        // — prindem oriunde apare comanda (test pe fraza întreagă, nu doar la
+        // început), ca „taci din gură!" să taie pe loc, nu doar „taci." curat.
+        if (/^\W*(stop|stai|taci|gata|t[ăa]cere|lini[șs]te|opre[sș]te(?:-te)?|[îi]nchide\s+gura|tac[ăa]-[țt]i\s+gura|gura|shut\s?up|be\s+quiet|basta|zip\s+it)\b/i.test(t.trim())) {
           gateUntil = 0 // STOP închide și fereastra — până la următorul „Kelion"
           send({ type: 'response.cancel' })
           send({ type: 'output_audio_buffer.clear' })

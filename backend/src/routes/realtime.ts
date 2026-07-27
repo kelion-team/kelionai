@@ -16,6 +16,7 @@ import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
+import { hasActionIntent } from '../services/openrouter.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -252,7 +253,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
         const answer = introspectionTools.length
-          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd } })
+          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd }, forceFirstRound: hasActionIntent(prompt) })
           : await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
