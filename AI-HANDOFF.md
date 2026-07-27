@@ -249,6 +249,9 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **27 IUL (valul 31) — POARTA NUMELUI, MECANICĂ (Adrian: „nu intră în chat dacă nu își aude numele Kelion — e deja făcut dar NU merge, caută de ce"):**
+  1. **Cauza găsită**: regula exista DOAR în promptul vocii (realtime.ts:41-44), dar `create_response:true` pe VAD dădea modelului cuvântul la ORICE frază — promptul pierdea mereu. Poarta veche strictă fusese scoasă pe 24 iul pentru că cerea numele la FIECARE frază („nu mă aude").
+  2. **Fixul mecanic**: server `create_response:false`; CLIENTUL (realtimeVoice.ts) creează răspunsul DOAR dacă: (a) transcriptul conține numele (regex tolerant: Kelion/Kelyon/Chelion/Kei) → deschide fereastra de conversație (120s, reînnoită la fiecare schimb), sau (b) fereastra e deschisă → conversația curge FĂRĂ să repeți numele. Altfel: tăcere — discuția din cameră nu-i e adresată. „STOP" închide fereastra. Plasă anti-„nu mă aude": la speech_stopped fără transcript în 2.8s, în conversație ACTIVĂ răspunde oricum (defecțiunea de transcriere nu-l face surd la mijlocul discuției).
 - 🗓️ **27 IUL (valul 30) — FLUIDITATEA, partea 1 (auditul cu 3 agenți; Adrian: „audit complet pe fluiditatea trecerii în aplicație"):** 6 din 10 defecte reparate:
   1. **Defectul nr. 1 — auto-reload-ul care tăia lucrul în viu** (App.tsx + updateCheck): deploy nou NU mai dă reset dur automat peste conversație/voce; apare bara „Versiune nouă — Actualizează acum" (`.update-banner`), iar resetul se aplică automat DOAR când tab-ul e ascuns (userul plecat). Regula „mereu ultima versiune" rămâne, fără ruptură.
   2. **Camera omorâtă la fiecare render** (ChatPanel `onCameraError` → `useCallback([])`): efectul din CameraView nu se mai demontează continuu; lanțul serial de eliberare (450ms/oprire) nu mai crește la nesfârșit → vederea nu mai moare în streaming.
