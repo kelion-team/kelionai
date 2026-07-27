@@ -150,13 +150,14 @@ const LAZY_CLIP_FILES: Record<string, string> = {
   'dans-10': '/anim/M_Dances_011.glb',
 }
 
-// TAXONOMIA GESTURILOR (Adrian, 13 iul) — repaus DOMOL permis în chat vs
-// „dezmorțiri" ample INTERZISE în chat. Rotația automată din repaus alege DOAR
-// din setul domol (gentleman); dezmorțirile rămân disponibile doar la comandă.
-// OPRIT: animația procedurală a mâinilor este dezactivată complet — setul nu mai
-// este folosit.
-// const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
-// (interzise în rotația din chat: variatie-3, variatie-7, variatie-9, variatie-10)
+// TAXONOMIA GESTURILOR (Adrian, 13 iul) — repaus DOMOL permis vs „dezmorțiri"
+// ample interzise în rotația automată. REPORNITĂ pe 27 iul (Adrian: „lipsește
+// motorul/creierul de apelare gesturi — umane reale, decente"): regia de mai
+// jos alege singură, dar NUMAI din setul domol (gentleman); expresiile ample
+// și dansurile rămân DOAR la comandă explicită. Tot ce debifează Adrian în
+// Admin→Gesturi e exclus de peste tot (disabledG, reîmprospătat la 30s).
+const CHAT_IDLE_CALM = ['variatie', 'variatie-2', 'variatie-4', 'variatie-5', 'variatie-6', 'variatie-8']
+// (interzise în rotația automată: variatie-3, variatie-7, variatie-9, variatie-10)
 
 export default function AvatarModel() {
   const { scene } = useGLTF('/kelion-rpm.glb')
@@ -199,6 +200,10 @@ export default function AvatarModel() {
   const { actions, mixer } = useAnimations(clips, root)
   const current = useRef<AnimationAction | null>(null)
   const state = useRef<'idle' | 'talking' | 'gesture'>('idle')
+  // MOTORUL DE GESTURI (27 iul): urmele regiei — până când ține „vorbește"
+  // după ultimul vârf de voce și când vine următoarea variație de repaus.
+  const talkHold = useRef(0)
+  const nextVar = useRef(18)
   // Oasele brațelor/antebrațelor descoperite în scenă, pentru blocarea lor în
   // repaus în fiecare cadru (Adrian, 13 iul: oprire completă a gesturilor ample).
   const armBones = useRef<Record<string, Bone | null>>({})
@@ -277,14 +282,15 @@ export default function AvatarModel() {
   }, [])
 
   useEffect(() => {
-    // Oprire completă a animației procedurale a mâinilor (Adrian, 13 iul):
-    // nu mai pornim idle-ul automat; mâinile rămân în repaus static.
-    // play('idle')
+    // MOTORUL REPORNIT (27 iul, ordinul lui Adrian): repausul viu rulează din
+    // prima clipă — corpul respiră subtil; brațele rămân blocate în repaus de
+    // lacătul din useFrame (doar în idle), deci decența din 13 iul se păstrează.
+    play('idle')
     // La finalul unui clip „once" (variație/gest), înapoi lin la repaus.
     const onFinished = (): void => {
       state.current = 'idle'
       current.current = null
-      // play('idle')
+      play('idle')
       // Scena (Stage) află că gestul s-a terminat — de ex. revine din poziția
       // de dans înapoi în colțul lui Adrian.
       window.dispatchEvent(new Event('kelion-gesture-done'))
@@ -354,35 +360,40 @@ export default function AvatarModel() {
     }
   }, [])
 
-  useFrame((_state3, delta) => {
+  useFrame((state3, delta) => {
     const level = getVoiceLevel()
+    const t = state3.clock.elapsedTime
 
-    // ── Regia: alege mișcarea după ce face Kelion acum ──
-    // OPRITĂ COMPLET (Adrian, 13 iul): animația procedurală a mâinilor este
-    // dezactivată — mâinile rămân în repaus static. Gesturile comandate
-    // explicit (state === 'gesture') sunt lăsate să ruleze.
-    // if (level > 0.05) talkHold.current = t + 0.7
-    // const talking = t < talkHold.current
-    // if (state.current !== 'gesture') {
-    //   if (talking && state.current !== 'talking') {
-    //     state.current = 'talking'
-    //     play('talk')
-    //   } else if (!talking && state.current === 'talking') {
-    //     state.current = 'idle'
-    //     play('idle')
-    //     nextVar.current = t + 20 + Math.random() * 20
-    //   } else if (!talking && state.current === 'idle' && t > nextVar.current) {
-    //     const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
-    //     if (pool.length) {
-    //       state.current = 'gesture'
-    //       play(pool[Math.floor(Math.random() * pool.length)], true)
-    //     }
-    //     nextVar.current = t + 22 + Math.random() * 22
-    //   }
-    // }
-
-    // Blochează brațele/antebrațele în repaus static, exceptând gesturile comandate.
+    // ── MOTORUL DE GESTURI (Adrian, 27 iul: „umane reale, decente") ──
+    // Regia deterministă, pe ce face Kelion ACUM (nivelul REAL al vocii):
+    //   vorbește → clipul calm de conversație în buclă (gesticulație de
+    //   gentleman, clipul reținut de Adrian pe 13 iul);
+    //   tace → repaus viu + o variație DOMOLĂ rară (25–45s), din setul calm;
+    //   gest comandat (creier/viu grai) → prioritate absolută, nu-l atingem.
+    // Tot ce e debifat în Admin→Gesturi nu se joacă nici aici (disabledG).
+    if (level > 0.05) talkHold.current = t + 0.7
+    const talking = t < talkHold.current
     if (state.current !== 'gesture') {
+      if (talking && state.current !== 'talking' && !disabledG.current.has('talk')) {
+        state.current = 'talking'
+        play('talk')
+      } else if (!talking && state.current === 'talking') {
+        state.current = 'idle'
+        play('idle')
+        nextVar.current = t + 25 + Math.random() * 20
+      } else if (!talking && state.current === 'idle' && t > nextVar.current) {
+        const pool = CHAT_IDLE_CALM.filter((n) => !disabledG.current.has(n) && (actions[n] || lazyClips.current[n]))
+        if (pool.length) {
+          state.current = 'gesture'
+          play(pool[Math.floor(Math.random() * pool.length)], true)
+        }
+        nextVar.current = t + 25 + Math.random() * 20
+      }
+    }
+
+    // Brațele blocate în repaus DOAR în idle (decența din 13 iul): în vorbit
+    // și în gesturi, clipurile de captură de mișcare au mâna liberă.
+    if (state.current === 'idle') {
       for (const key of Object.keys(ARM_REST)) {
         const bone = armBones.current[key]
         const target = ARM_REST[key]
