@@ -210,7 +210,22 @@ async function main() {
       // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
       // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
       const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
-      if (msg.tool_calls?.length) clean.tool_calls = msg.tool_calls
+      if (msg.tool_calls?.length) {
+        // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
+        // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
+        // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
+        // Normalizăm: orice nu parsează ca obiect devine '{}'.
+        clean.tool_calls = msg.tool_calls.map((c) => {
+          let a = c.function?.arguments
+          try {
+            const p = JSON.parse(a || '{}')
+            a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
+          } catch {
+            a = '{}'
+          }
+          return { ...c, function: { ...c.function, arguments: a } }
+        })
+      }
       if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
       messages.push(clean)
       const calls = msg.tool_calls ?? []
