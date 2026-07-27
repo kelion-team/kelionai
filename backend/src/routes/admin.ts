@@ -32,7 +32,7 @@ import {
 } from '../db.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
-import { listRecoveryPoints, createRecoveryPoint } from '../services/recovery.js'
+import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -134,6 +134,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const r = await createRecoveryPoint(String(req.body?.note ?? ''))
+    if (!r.ok) return reply.code(500).send(r)
+    return reply.send(r)
+  })
+  // RESTAURAREA dintr-un punct salvat (Adrian, 27 iul: butoane de selecție în
+  // admin). Aduce master la starea tag-ului cu un commit nou → publicarea pe
+  // VPS pornește singură. Acțiune grea → confirmarea e în UI, dublă.
+  app.post<{ Body: { tag?: string } }>('/api/admin/backups/restore', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const r = await restoreToPoint(String(req.body?.tag ?? ''))
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
   })

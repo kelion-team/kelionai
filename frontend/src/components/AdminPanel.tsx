@@ -201,6 +201,9 @@ export default function AdminPanel({
   const [recoveryLoading, setRecoveryLoading] = useState(false)
   const [recoveryNote, setRecoveryNote] = useState('')
   const [recoveryMsg, setRecoveryMsg] = useState('')
+  // Restaurarea CU BUTON (Adrian, 27 iul: „să se poată selecta de admin").
+  // Cât timp o restaurare rulează, toate butoanele de restaurare sunt blocate.
+  const [restoringTag, setRestoringTag] = useState<string | null>(null)
   // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
   // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
   // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
@@ -443,6 +446,41 @@ export default function AdminPanel({
         loadRecovery()
       })
       .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
+  }
+
+  // Restaurează aplicația la un punct salvat: confirmare dublă (acțiune grea —
+  // producția se schimbă), apoi serverul aduce master la starea tag-ului și
+  // publicarea pornește singură. Butonul arată mersul și rezultatul cu dovadă.
+  const restoreFromPoint = (p: RecoveryRow): void => {
+    const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
+    if (!window.confirm(`Restaurezi aplicația la versiunea din ${when} (${p.sha})?`)) return
+    if (
+      !window.confirm(
+        `SIGUR? Producția va fi adusă EXACT la starea „${p.note.split('\n')[0].slice(0, 80) || p.tag}" și se republică automat. Modificările de după acest punct dispar din aplicație (rămân doar în istoricul git).`,
+      )
+    )
+      return
+    setRestoringTag(p.tag)
+    setRecoveryMsg(`Restaurez la ${p.tag}…`)
+    void fetch('/api/admin/backups/restore', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ tag: p.tag }),
+    })
+      .then((r) => r.json().then((j: { ok?: boolean; sha?: string; error?: string }) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        setRestoringTag(null)
+        if (ok && j.ok)
+          setRecoveryMsg(
+            `Restaurat ✓ master e acum la ${j.sha ?? p.sha} — publicarea pe server pornește singură (1-2 min).`,
+          )
+        else setRecoveryMsg(`Restaurarea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
+      })
+      .catch(() => {
+        setRestoringTag(null)
+        setRecoveryMsg('Restaurarea a eșuat — verifică conexiunea și reîncearcă.')
+      })
   }
 
   // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
@@ -1258,12 +1296,23 @@ export default function AdminPanel({
                     <code>{p.sha}</code>
                     {p.note ? <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{p.note.split('\n')[0].slice(0, 140)}</div> : null}
                   </span>
-                  <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>{p.tag}</span>
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={restoringTag !== null}
+                      onClick={() => restoreFromPoint(p)}
+                    >
+                      {restoringTag === p.tag ? 'Restaurez…' : 'Restaurează'}
+                    </button>
+                  </span>
                 </div>
               ))}
               <div className="chat-hint">
-                Recuperare: pe serverul Linux, <code>git checkout &lt;tag&gt;</code> sau din bundle-ul
-                salvat (<code>/root/kelion/backups/&lt;tag&gt;.bundle</code>). Spune-mi tag-ul și o fac eu.
+                „Restaurează" aduce aplicația EXACT la versiunea aleasă (commit nou pe master —
+                nimic nu se pierde din istoric) și republică automat pe server. Rezerve manuale:
+                bundle-urile din <code>/root/kelion/backups/</code>.
               </div>
             </div>
           </section>
