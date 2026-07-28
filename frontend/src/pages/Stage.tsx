@@ -169,13 +169,14 @@ export default function Stage({ user }: { user: User }) {
     // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
     stripe?: { available: number; pending: number; currency: string } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
-    // CREIERUL DE ABONAMENT: soldul cheii proprii a ownerului când modul e activ.
+    // CREIERUL DE ABONAMENT (Claude direct): validitatea cheii Anthropic +
+    // linkul consolei Claude (Anthropic n-are „sold" numeric ca OpenRouter).
     subscription?: {
       mode: string
       active: boolean
       model: string
       hasKey: boolean
-      balance: { ok: boolean; balance: number; low: boolean; topup: string } | null
+      balance: { ok: boolean; valid?: boolean; error?: string; topup: string } | null
     } | null
   } | null>(null)
   // Starea lacătului la intrare + deblocarea venită din voce (amprenta
@@ -835,27 +836,27 @@ export default function Stage({ user }: { user: User }) {
             {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
                 realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
                 creierul central. Roșu când e sub prag. Click → alimentare. */}
-            {/* ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
-                ABONAMENT, nu tot OpenRouter"): când creierul de abonament e activ,
-                bara arată soldul cheii TALE, etichetat clar. Click → Setări. */}
+            {/* ABONAMENT în bară (Adrian, 28 iul: „la ab trebuie de la cloude nu
+                openrouter"): creierul de abonament rulează Claude DIRECT (cheia
+                ta Anthropic). Anthropic n-are „sold" numeric ca OpenRouter, deci
+                arătăm dacă e VALIDĂ, iar clicul duce la CONSOLA CLAUDE (nu
+                OpenRouter). Cheie respinsă → roșu + click către consolă. */}
             {brainCredit?.subscription?.active && (
               <button
                 type="button"
-                className={`ghost ${brainCredit.subscription.balance?.low ? 'blink-red' : ''}`}
+                className={`ghost ${brainCredit.subscription.balance && !brainCredit.subscription.balance.ok ? 'blink-red' : ''}`}
                 onClick={() =>
                   brainCredit.subscription?.balance?.topup
                     ? window.open(brainCredit.subscription.balance.topup, '_blank', 'noopener')
-                    : setSettingsOpen(true)
+                    : window.open('https://console.anthropic.com/settings/billing', '_blank', 'noopener')
                 }
                 title={
                   brainCredit.subscription.balance?.ok
-                    ? `Creier ABONAMENT (cheia ta): $${(brainCredit.subscription.balance.balance ?? 0).toFixed(2)} real${brainCredit.subscription.balance.low ? ' — depune bani!' : ''} · model: ${brainCredit.subscription.model} · click pentru alimentare`
-                    : 'Creier ABONAMENT activ, dar nu pot citi soldul (cheie greșită sau cont inaccesibil)'
+                    ? `Creier ABONAMENT pe Claude (cheia ta) · model: ${brainCredit.subscription.model} · click pentru consola Claude`
+                    : `Creier ABONAMENT activ, dar cheia Claude e respinsă${brainCredit.subscription.balance?.error ? ` (${brainCredit.subscription.balance.error})` : ''} — click pentru consola Claude`
                 }
               >
-                {brainCredit.subscription.balance?.ok
-                  ? `⚡ Abonament $${(brainCredit.subscription.balance.balance ?? 0).toFixed(2)}`
-                  : '⚡ Abonament ⚠'}
+                {brainCredit.subscription.balance?.ok ? '⚡ Abonament Claude' : '⚡ Abonament ⚠'}
               </button>
             )}
             {brainCredit && (

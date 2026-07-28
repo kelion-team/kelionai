@@ -1,40 +1,43 @@
 import { loadKv, saveKv } from '../db.js'
+import { DEFAULT_CLAUDE_MODEL } from './anthropicDirect.js'
 
 // ── CREIERUL DE ABONAMENT (Adrian, 28 iul) ───────────────────────────────────
 // Un COMUTATOR admin-only între două creiere:
 //   • FREE        — creierul de acum (modele :free + Gemini direct, $0). Userii
 //                   plătitori rămân MEREU pe ăsta; comutatorul NU-i atinge.
 //   • ABONAMENT   — pe turele GRELE ale ADMINULUI (raționament/acțiune), creierul
-//                   urcă pe un model puternic (Claude/GPT) plătit din CHEIA
-//                   PROPRIE a ownerului (o cheie OpenRouter, cu creditul lui) —
-//                   „mai multă putere unde e nevoie", fără să treacă prin punga
-//                   centrală și fără să îmbogățească pe altcineva.
+//                   urcă pe un model puternic CLAUDE, plătit DIRECT din CHEIA
+//                   PROPRIE a ownerului de la consola Anthropic (sk-ant-…, cu
+//                   creditul lui) — „mai multă putere unde e nevoie", fără punga
+//                   centrală și fără OpenRouter (Adrian, 28 iul: „la ab trebuie
+//                   de la cloude nu openrouter"; cheia lui era respinsă de
+//                   OpenRouter cu 401). Apelul merge la api.anthropic.com direct.
 // Cheia trăiește DOAR pe server (kv_state), admin-only; nu se întoarce niciodată
-// întreagă spre client — UI-ul primește doar prezența + ultimele 4 cifre + soldul
-// (exact ca punga OpenRouter, fiindcă ESTE o cheie OpenRouter).
+// întreagă spre client — UI-ul primește doar prezența + ultimele 4 cifre + dacă
+// e validă (Anthropic n-are un endpoint public de sold rămas ca OpenRouter).
 
 const KV_KEY = 'brain_subscription'
 
 export interface BrainSub {
   mode: 'free' | 'subscription'
-  /** Model OpenRouter folosit pe turele grele când modul e „abonament". */
+  /** Model CLAUDE (id API Anthropic, ex. claude-sonnet-5) pe turele grele. */
   model: string
-  /** Cheia OpenRouter proprie a ownerului (sk-or-…). Server-side, admin-only. */
+  /** Cheia Anthropic proprie a ownerului (sk-ant-…). Server-side, admin-only. */
   key: string
   // VOCEA PE ABONAMENT (28 iul, Adrian: „pune vocea pe abonament"). Conversația
   // LIVE (full-duplex) rulează pe OpenAI Realtime, un provider DIFERIT de
-  // OpenRouter — cheia de mai sus nu poate plăti acea parte (altă companie,
-  // altă factură). Cheie SEPARATĂ, opțională, pentru EXACT asta: dacă e
+  // Anthropic — cheia Claude de mai sus nu poate plăti acea parte (altă
+  // companie, altă factură). Cheie SEPARATĂ, opțională, pentru EXACT asta: dacă e
   // completată ȘI modul e „abonament", sesiunea de voce live pornește pe cheia
   // OpenAI proprie a ownerului, nu pe punga centrală. Fără ea, vocea rămâne pe
   // punga centrală (degradare firească, nu eroare).
   voiceKey: string
 }
 
-// Model implicit până când ownerul alege unul din catalogul live (dropdown-ul
-// din Setări → Model AI). Un model puternic cu vedere + unelte; alegerea reală
+// Model implicit până când ownerul alege unul din lista Claude (dropdown-ul din
+// Setări → Creier abonament). Un model Claude cu vedere + unelte; alegerea reală
 // se face din listă, deci implicitul e doar sămânța.
-const DEFAULT_SUB_MODEL = (process.env.BRAIN_SUB_MODEL ?? 'anthropic/claude-sonnet-5').trim()
+const DEFAULT_SUB_MODEL = (process.env.BRAIN_SUB_MODEL ?? DEFAULT_CLAUDE_MODEL).trim()
 
 export function parseBrainSub(raw: string | null | undefined): BrainSub {
   const fallback: BrainSub = { mode: 'free', model: DEFAULT_SUB_MODEL, key: '', voiceKey: '' }

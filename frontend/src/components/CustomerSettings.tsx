@@ -116,12 +116,10 @@ export default function CustomerSettings({
   const ro = base === 'ro'
   const isAdmin = user.role === 'admin'
   // CREIERUL DE ABONAMENT (Adrian, 28 iul) — comutator admin-only + cheia proprie
-  // + soldul (card ca la OpenRouter). Userii nu văd această secțiune.
-  interface SubBalance {
+  // CLAUDE (Anthropic). Userii nu văd această secțiune. Anthropic n-are endpoint
+  // de „sold rămas" ca OpenRouter → arătăm doar dacă e VALIDĂ + link consolă.
+  interface SubKeyStatus {
     ok: boolean
-    balance: number
-    low: boolean
-    topup: string
     error?: string
   }
   const [sub, setSub] = useState<{
@@ -129,15 +127,16 @@ export default function CustomerSettings({
     model: string
     hasKey: boolean
     keyHint: string
-    balance: SubBalance | null
+    keyStatus: SubKeyStatus | null
+    manageUrl?: string
     hasVoiceKey: boolean
     voiceKeyHint: string
-  }>({ mode: 'free', model: '', hasKey: false, keyHint: '', balance: null, hasVoiceKey: false, voiceKeyHint: '' })
+  }>({ mode: 'free', model: '', hasKey: false, keyHint: '', keyStatus: null, hasVoiceKey: false, voiceKeyHint: '' })
   const [subKeyInput, setSubKeyInput] = useState('')
   const [voiceKeyInput, setVoiceKeyInput] = useState('')
   const [subBusy, setSubBusy] = useState(false)
-  // Catalogul COMPLET OpenRouter (toate modelele cu tool-use, orice provider) —
-  // selectorul manual al creierului de abonament nu e limitat la lista de user.
+  // Lista modelelor CLAUDE (apel direct la Anthropic) pentru selectorul manual
+  // al creierului de abonament.
   const [brainModels, setBrainModels] = useState<CatModel[]>([])
 
   useEffect(() => {
@@ -340,15 +339,16 @@ export default function CustomerSettings({
         )}
 
         {/* 3.5 — CREIERUL DE ABONAMENT (Adrian, 28 iul) — DOAR admin. Comutator
-            Free ⟷ Abonament + model puternic selectabil MANUAL + cheia proprie +
-            soldul (card ca la OpenRouter). Userii nu văd această secțiune. */}
+            Free ⟷ Abonament + model Claude selectabil MANUAL + cheia proprie
+            Anthropic + starea cheii (apel direct la Claude, nu OpenRouter).
+            Userii nu văd această secțiune. */}
         {isAdmin && (
           <section className="settings-sec">
             <h4>{ro ? 'Creier abonament (doar tu)' : 'Subscription brain (you only)'}</h4>
             <p className="settings-note">
               {ro
-                ? 'Comutatorul e DOAR pentru tine. Pe cererile grele (raționament/acțiune), creierul tău urcă pe modelul puternic ales mai jos, plătit din CHEIA TA. Userii rămân pe creierul de acum.'
-                : 'This switch is for YOU only. On heavy requests, your brain moves up to the powerful model chosen below, paid from YOUR key. Users stay on the current brain.'}
+                ? 'Comutatorul e DOAR pentru tine. Pe cererile grele (raționament/acțiune), creierul tău urcă pe un model Claude puternic — apel DIRECT la Anthropic, plătit din CHEIA TA de la consola Claude (nu OpenRouter). Userii rămân pe creierul de acum.'
+                : 'This switch is for YOU only. On heavy requests, your brain moves up to a powerful Claude model — called DIRECTLY on Anthropic, paid from YOUR Claude Console key (not OpenRouter). Users stay on the current brain.'}
             </p>
 
             {/* Comutator Free ⟷ Abonament */}
@@ -373,10 +373,9 @@ export default function CustomerSettings({
               ))}
             </div>
 
-            {/* Model — selectabil MANUAL din TOT catalogul OpenRouter (orice
-                provider: Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...). */}
+            {/* Model — din familia Claude (apel direct la Anthropic). */}
             <label className="contact-label" style={{ marginTop: 8 }}>
-              {ro ? 'Model (tot catalogul OpenRouter)' : 'Model (full OpenRouter catalog)'}
+              {ro ? 'Model Claude' : 'Claude model'}
             </label>
             <select value={sub.model} disabled={subBusy} onChange={(e) => void saveSub({ model: e.target.value })}>
               {/* modelul curent apare mereu, chiar dacă nu e (încă) în catalog */}
@@ -392,19 +391,19 @@ export default function CustomerSettings({
             </select>
             <p className="settings-note">
               {ro
-                ? `${brainModels.length} modele cu unelte disponibile. 👁 = vede imagini (alege un model cu vedere dacă folosești camera/poze).`
-                : `${brainModels.length} tool-capable models available. 👁 = sees images (pick a vision model if you use camera/photos).`}
+                ? 'Modelele Claude 5 văd imagini și folosesc unelte. Opus = cel mai puternic, Sonnet = echilibrat, Fable = rapid, Haiku = cel mai ieftin.'
+                : 'Claude 5 models see images and use tools. Opus = strongest, Sonnet = balanced, Fable = fast, Haiku = cheapest.'}
             </p>
 
-            {/* Cheia proprie — UNDE PUI CHEIA */}
+            {/* Cheia proprie — UNDE PUI CHEIA (Claude / Anthropic) */}
             <label className="contact-label" style={{ marginTop: 8 }}>
-              {ro ? 'Cheia ta OpenRouter (sk-or-…)' : 'Your OpenRouter key (sk-or-…)'}
+              {ro ? 'Cheia ta Claude / Anthropic (sk-ant-…)' : 'Your Claude / Anthropic key (sk-ant-…)'}
             </label>
             <div style={{ display: 'flex', gap: 6 }}>
               <input
                 type="password"
                 autoComplete="off"
-                placeholder={sub.hasKey ? `${ro ? 'setată' : 'set'} ${sub.keyHint}` : 'sk-or-…'}
+                placeholder={sub.hasKey ? `${ro ? 'setată' : 'set'} ${sub.keyHint}` : 'sk-ant-…'}
                 value={subKeyInput}
                 onChange={(e) => setSubKeyInput(e.target.value)}
                 style={{ flex: 1 }}
@@ -430,12 +429,13 @@ export default function CustomerSettings({
             </div>
             <p className="settings-note">
               {ro
-                ? 'Cheia o generezi la openrouter.ai/keys (contul tău, creditul tău) și o lipești aici. Stă doar pe server, nu se afișează niciodată înapoi.'
-                : 'Generate the key at openrouter.ai/keys (your account, your credit) and paste it here. Stored server-side only, never shown back.'}
+                ? 'Cheia o generezi la console.anthropic.com/settings/keys (contul tău, creditul tău Claude) și o lipești aici. Stă doar pe server, nu se afișează niciodată înapoi.'
+                : 'Generate the key at console.anthropic.com/settings/keys (your account, your Claude credit) and paste it here. Stored server-side only, never shown back.'}
             </p>
 
-            {/* Afișajul de sold — EXACT ca la OpenRouter (e o cheie OpenRouter) */}
-            {sub.hasKey && sub.balance && (
+            {/* Afișajul stării cheii — Anthropic n-are „sold" ca OpenRouter, deci
+                arătăm dacă e VALIDĂ + link spre consola Claude pentru credit. */}
+            {sub.hasKey && sub.keyStatus && (
               <div
                 style={{
                   marginTop: 8,
@@ -446,32 +446,28 @@ export default function CustomerSettings({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   fontSize: 14,
-                  background: sub.balance.low ? 'rgba(255,80,80,0.15)' : 'rgba(80,140,255,0.14)',
+                  background: sub.keyStatus.ok ? 'rgba(80,200,120,0.14)' : 'rgba(255,80,80,0.15)',
                 }}
               >
-                {sub.balance.ok ? (
+                {sub.keyStatus.ok ? (
                   <>
-                    <span>
-                      {ro ? 'Sold abonament' : 'Subscription balance'}:{' '}
-                      <strong>${sub.balance.balance.toFixed(2)}</strong>
-                      {sub.balance.low ? (ro ? ' — depune bani!' : ' — top up!') : ''}
-                    </span>
-                    <a href={sub.balance.topup} target="_blank" rel="noopener noreferrer">
-                      {ro ? 'alimentează' : 'top up'}
+                    <span>{ro ? '✅ Cheie Claude validă' : '✅ Claude key valid'}</span>
+                    <a href={sub.manageUrl ?? 'https://console.anthropic.com/settings/billing'} target="_blank" rel="noopener noreferrer">
+                      {ro ? 'gestionează creditul' : 'manage credit'}
                     </a>
                   </>
                 ) : (
                   <span>
-                    {ro ? 'Sold indisponibil' : 'Balance unavailable'}
-                    {sub.balance.error ? ` (${sub.balance.error})` : ''}
+                    {ro ? '❌ Cheie respinsă de Claude' : '❌ Key rejected by Claude'}
+                    {sub.keyStatus.error ? ` (${sub.keyStatus.error})` : ''}
                   </span>
                 )}
               </div>
             )}
 
-            {/* VOCEA PE ABONAMENT (28 iul) — cheie SEPARATĂ, OpenAI, nu OpenRouter.
-                Conversația live rulează pe un provider diferit; cheia de mai sus
-                (OpenRouter) nu o poate plăti niciodată. */}
+            {/* VOCEA PE ABONAMENT (28 iul) — cheie SEPARATĂ, OpenAI, nu Anthropic.
+                Conversația live rulează pe un provider diferit; cheia Claude de
+                mai sus nu o poate plăti niciodată. */}
             <label className="contact-label" style={{ marginTop: 14 }}>
               {ro ? 'Vocea pe abonament — cheia ta OpenAI (sk-…)' : 'Voice on subscription — your OpenAI key (sk-…)'}
             </label>
@@ -505,8 +501,8 @@ export default function CustomerSettings({
             </div>
             <p className="settings-note">
               {ro
-                ? 'O cheie DIFERITĂ, de la platform.openai.com (contul tău OpenAI, creditul tău) — conversația vocală live rulează pe OpenAI, nu pe OpenRouter, deci are nevoie de propria cheie. Fără ea, vocea rămâne pe punga centrală; restul (creier, imagini, căutare) merge deja pe cheia OpenRouter de mai sus.'
-                : 'A DIFFERENT key, from platform.openai.com (your OpenAI account, your credit) — the live voice conversation runs on OpenAI, not OpenRouter, so it needs its own key. Without it, voice stays on the central pool; the rest (brain, images, search) already runs on your OpenRouter key above.'}
+                ? 'O cheie DIFERITĂ, de la platform.openai.com (contul tău OpenAI, creditul tău) — conversația vocală live rulează pe OpenAI, un provider diferit de Claude, deci are nevoie de propria cheie. Fără ea, vocea rămâne pe punga centrală; creierul de abonament merge deja pe cheia Claude de mai sus.'
+                : 'A DIFFERENT key, from platform.openai.com (your OpenAI account, your credit) — the live voice conversation runs on OpenAI, a different provider from Claude, so it needs its own key. Without it, voice stays on the central pool; the subscription brain already runs on your Claude key above.'}
             </p>
           </section>
         )}
