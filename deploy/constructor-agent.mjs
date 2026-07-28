@@ -22,6 +22,7 @@
 // constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
 import { execSync, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 const ENVFILE = '/root/kelion/kelionai.env'
@@ -157,10 +158,28 @@ function toolGrep(pattern) {
   const pat = String(pattern ?? '').trim()
   if (!pat) return 'pattern gol'
   try {
-    const out = sh(
-      `grep -rnI --exclude-dir={node_modules,.git,dist,build,coverage} -e ${JSON.stringify(pat)} . | head -60`,
+    // Audit 28 iul: era `sh(...)` (execSync → /bin/sh -c) cu pattern-ul băgat
+    // în șirul de comandă via JSON.stringify — asta scapă doar ghilimelele
+    // JSON, NU scapă $()/backtick-uri, pe care shell-ul tot le evaluează în
+    // interiorul ghilimelelor duble. Reprodus: un pattern `$(touch /tmp/x)x`
+    // executa `touch` ca root ÎNAINTE ca grep să ruleze. execFileSync cu argv
+    // ca array nu trece niciodată prin shell — pattern-ul e un singur
+    // argument literal, nu poate fi niciodată interpretat ca sub-comandă.
+    const out = execFileSync(
+      'grep',
+      [
+        '-rnI',
+        '--exclude-dir=node_modules',
+        '--exclude-dir=.git',
+        '--exclude-dir=dist',
+        '--exclude-dir=build',
+        '--exclude-dir=coverage',
+        '-e', pat,
+        '.',
+      ],
+      { cwd: ATELIER, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
     )
-    return out.trim() || '(niciun rezultat)'
+    return out.trim().split('\n').slice(0, 60).join('\n') || '(niciun rezultat)'
   } catch (e) {
     // grep întoarce exit 1 când nu găsește nimic — nu e eroare.
     return e.status === 1 ? '(niciun rezultat)' : `EROARE grep: ${String(e.message).slice(0, 200)}`
@@ -546,7 +565,23 @@ async function main() {
   try {
     // Atelier proaspăt = exact master-ul de ACUM, nimic rămas din jobul trecut.
     fs.rmSync(ATELIER, { recursive: true, force: true })
-    execFileSync('git', ['clone', '--depth', '50', `https://x-access-token:${GHTOKEN}@github.com/${REPO}.git`, ATELIER], { stdio: 'pipe', timeout: 120_000 })
+    // Audit 28 iul: tokenul era în URL-ul de clonare, deci ajungea în argv —
+    // la orice eșec (rețea, token expirat), execFileSync pune COMANDA ÎNTREAGĂ
+    // (inclusiv URL-ul cu tokenul) în Error.message, care ajunge direct în
+    // logul de constructor ȘI în raportul trimis la /api/constructor/report.
+    // GIT_ASKPASS ține tokenul DOAR în variabila de mediu a procesului git —
+    // niciodată în argv, deci niciodată în mesajul de eroare.
+    const askpass = path.join(os.tmpdir(), `kelion-askpass-${process.pid}.sh`)
+    fs.writeFileSync(askpass, '#!/bin/sh\nprintf %s "$KELION_GIT_TOKEN"\n', { mode: 0o700 })
+    try {
+      execFileSync('git', ['clone', '--depth', '50', `https://x-access-token@github.com/${REPO}.git`, ATELIER], {
+        stdio: 'pipe',
+        timeout: 120_000,
+        env: { ...process.env, GIT_ASKPASS: askpass, KELION_GIT_TOKEN: GHTOKEN, GIT_TERMINAL_PROMPT: '0' },
+      })
+    } finally {
+      fs.rmSync(askpass, { force: true })
+    }
     const baseSha = sh('git rev-parse --short=7 HEAD').trim()
     log(`atelier clonat pe ${baseSha}`)
 

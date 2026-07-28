@@ -11,6 +11,15 @@ jobs:
   set:
     runs-on: ubuntu-latest
     steps:
+      # SCURGEREA REALĂ deja dovedită o dată în acest repo (vezi security-audit.yml,
+      # incidentul din 10 iul): runner-ul tipărește blocul `env:` al unui pas
+      # ÎNAINTE să-i ruleze scriptul — un „::add-mask::" pus ÎN script vine prea
+      # târziu și cheia apare în clar în jurnal. Mascăm ÎNAINTE, citind direct
+      # din fișierul de eveniment, ca în security-audit.yml.
+      - name: Maschează cheia în jurnal (înainte de orice)
+        run: |
+          v=$(jq -r '.inputs["keyb64"] // empty' "$GITHUB_EVENT_PATH")
+          { [ -n "$v" ] && echo "::add-mask::$v"; } || true
       - name: Setează secretul VPS_SSH_KEY
         env:
           GH_TOKEN: ${{ secrets.VPS_GITHUB_TOKEN }}

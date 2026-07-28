@@ -5,11 +5,18 @@
 // verificări de sănătate + email către admin DOAR la anomalie, cu prag anti-spam
 // (kv). Repornirea containerului o face sentinela bash (aplicația moartă nu-și
 // poate face singură restart); aici doar raportăm și verificăm interiorul.
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import fs from 'node:fs/promises'
 import { config } from '../config.js'
 import { getPool, dbEnabled, saveKv, loadKv } from '../db.js'
 import { sendMail } from '../services/mail.js'
+import { timingSafeStringEqual } from '../services/adminLock.js'
+
+// Audit 28 iul: comparare `!==` pe secretul punții e un canal lateral de timp.
+function bridgeAuthOk(req: FastifyRequest): boolean {
+  const got = req.headers['x-bridge-secret']
+  return !!config.bridgeSecret && typeof got === 'string' && timingSafeStringEqual(got, config.bridgeSecret)
+}
 
 // Un email pe subiect cel mult o dată pe fereastră — altfel un disc plin ar
 // bombarda inboxul adminului la fiecare 3 minute.
@@ -31,8 +38,7 @@ async function alertOnce(key: string, windowMs: number, subject: string, body: s
 
 export async function opsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { event?: string; detail?: string } }>('/api/ops/pulse', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(403).send({ error: 'forbidden' })
+    if (!bridgeAuthOk(req)) return reply.code(403).send({ error: 'forbidden' })
 
     const findings: string[] = []
 
@@ -97,8 +103,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
   // email către admin — tot prin alertOnce, deci cu prag anti-spam pe cheie
   // (6h). Nu e pentru useri, nu e pentru AI — doar mașinăria internă.
   app.post<{ Body: { key?: string; subject?: string; body?: string } }>('/api/ops/alert', async (req, reply) => {
-    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
-      return reply.code(403).send({ error: 'forbidden' })
+    if (!bridgeAuthOk(req)) return reply.code(403).send({ error: 'forbidden' })
     const key = String(req.body?.key ?? '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
     const subject = String(req.body?.subject ?? '').slice(0, 200)
     const body = String(req.body?.body ?? '').slice(0, 4000)

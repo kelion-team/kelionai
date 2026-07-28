@@ -11,6 +11,15 @@ jobs:
   enter:
     runs-on: ubuntu-latest
     steps:
+      # SCURGEREA REALĂ deja dovedită o dată în acest repo (vezi security-audit.yml,
+      # incidentul din 10 iul): runner-ul tipărește blocul `env:` al unui pas
+      # ÎNAINTE să-i ruleze scriptul — un „::add-mask::" pus ÎN script vine prea
+      # târziu și parola apare în clar în jurnal. Mascăm ÎNAINTE, citind direct
+      # din fișierul de eveniment, ca în security-audit.yml.
+      - name: Maschează parola în jurnal (înainte de orice)
+        run: |
+          v=$(jq -r '.inputs["pass"] // empty' "$GITHUB_EVENT_PATH")
+          { [ -n "$v" ] && echo "::add-mask::$v"; } || true
       - name: Intră cu parola, adaugă cheia CI, inventariază
         env:
           PASS: ${{ inputs.pass }}

@@ -265,7 +265,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (name === 'ask_brain') {
         const request = String(args.request ?? '').trim()
         if (!request) return reply.send({ output: JSON.stringify({ error: 'empty_request' }) })
-        const isAdmin = isAdminUser
+        // AUDIT DE SECURITATE (28 iul): aici era DOAR verificarea de email —
+        // exact bypass-ul pe care lacătul admin trebuie să-l oprească (sesiune
+        // furată + lacăt armat, fără al 2-lea factor). chat.ts verifică deja
+        // corect lacătul (linia ~1869); escaladarea vocii nu-l moștenea.
+        const isAdmin = isAdminUser && (!(await isArmed()) || hasUnlock(req, user.email))
         const sub = await resolveSub()
         const useSub = sub.active
         let lang = isAdmin ? 'ro' : String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
@@ -315,6 +319,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
+          // Aceeași plasă ca în chat.ts (runTool): fiecare unealtă de aici e
+          // strict admin — nu ne bazăm DOAR pe faptul că schema nu a fost oferită
+          // modelului; verificăm din nou aici, la execuție.
+          if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
           if (tname === 'list_source') return listSource(String(targs.dir ?? '.'))
           if (tname === 'read_source') return readSource(String(targs.path ?? ''))
           if (tname === 'search_source') return searchSource(String(targs.query ?? ''))

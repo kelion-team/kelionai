@@ -81,6 +81,10 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_events (created_at);
+    -- Audit 28 iul: deleteUserData() șterge din cost_events pe user_email —
+    -- fără index, scanare completă la fiecare ștergere GDPR pe un tabel care
+    -- crește la fiecare apel AI măsurat.
+    CREATE INDEX IF NOT EXISTS idx_cost_user ON cost_events (user_email);
     -- Cross-session memory: durable facts Kelion learns about each user and
     -- recalls in later conversations (the Memory agent writes here).
     -- the agent column namespaces memory: Kelion keeps its own (kelion), and each
@@ -202,6 +206,10 @@ export async function initDb(): Promise<void> {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
+    -- Audit 28 iul: getAdminAccount() face SUM(amount) WHERE kind = 'profit'
+    -- nemărginit în timp, pe panoul de costuri admin — fără acest index, scanare
+    -- completă a întregului ledger, la nesfârșit mai lentă pe măsură ce crește.
+    CREATE INDEX IF NOT EXISTS idx_billing_kind ON billing_events (kind);
     -- STRIPE + CREDITS (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
     -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
     CREATE TABLE IF NOT EXISTS transactions (
