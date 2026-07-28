@@ -42,10 +42,44 @@ function getClient(): v2.SpeechClient | null {
   return client
 }
 
+// STT ÎN STREAMING = OPȚIONAL, iar pe gazdă (VPS) NU e configurat — dovadă live
+// (28 iul): în fișierul de mediu nu există GOOGLE_SERVICE_ACCOUNT_JSON. Fără el
+// WS-ul de mai jos se închidea instant, iar BROWSERUL (nu codul nostru) tipărea
+// în consola lui Adrian «WebSocket connection to
+// 'wss://kelionai.app/api/asr-stream' failed» la FIECARE pornire de microfon.
+// Eroarea aia nu se poate prinde din JS: singurul mod de a o face să dispară e
+// ca browserul să NU mai deschidă WS-ul degeaba. De aceea expunem capabilitatea
+// pe HTTP simplu (ruta /api/asr-stream/capability de mai jos), iar clientul o
+// întreabă O SINGURĂ DATĂ pe încărcare de pagină.
+// Predicat IEFTIN, intenționat fără `getClient()`: nu construim clientul Google
+// (și nu riscăm o excepție de JSON stricat) doar ca să răspundem la o sondă
+// publică. Oglindește exact garda din handler-ul WS (`!c || !projectId`).
+function streamingAsrConfigured(): boolean {
+  if (!config.googleServiceAccountJson) return false
+  try {
+    const creds = JSON.parse(config.googleServiceAccountJson) as { project_id?: string }
+    return Boolean(creds.project_id)
+  } catch {
+    return false
+  }
+}
+
 type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>
 type Resp = protos.google.cloud.speech.v2.IStreamingRecognizeResponse
 
 export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
+  // SONDĂ DE CAPABILITATE — HTTP simplu, fără sesiune, fără cost, fără Google.
+  // Browserul o cere înainte de a deschide microfonul: dacă `streaming:false`,
+  // nici nu mai încearcă WS-ul și trece DIRECT pe dictarea batch (/api/asr, care
+  // are fallback pe OpenAI în services/asr.ts) — deci dictarea CONTINUĂ să
+  // meargă, doar că fără parțiale live, și consola rămâne curată.
+  // Când Google E configurat întoarce `true` și streamingul merge EXACT ca până
+  // acum — ruta asta nu schimbă nimic pe calea fericită.
+  app.get('/api/asr-stream/capability', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    return { streaming: streamingAsrConfigured() }
+  })
+
   app.get('/api/asr-stream', { websocket: true }, (socket, req) => {
     const user = getSessionUser(req)
     if (!user) {
@@ -59,6 +93,11 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     }
     const c = getClient()
     if (!c || !projectId) {
+      // PLASĂ DE REZERVĂ pentru clienții care n-au apucat să întrebe sonda de mai
+      // sus (pagină veche în cache, sondă căzută). Perechea (1011,
+      // 'asr_not_configured') e un CONTRACT cu frontend/src/lib/micStream.ts: la
+      // primirea ei, clientul memorează pentru toată sesiunea că streamingul nu
+      // există și cade tăcut pe batch — fără eroare, fără reîncercări.
       app.log.warn('asr-stream: WS refuzat — Google STT neconfigurat (fără service account)')
       try {
         socket.close(1011, 'asr_not_configured')

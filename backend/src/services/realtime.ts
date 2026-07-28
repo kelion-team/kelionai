@@ -318,9 +318,32 @@ export function realtimeTools(
   ]
 }
 
+// MOTIVUL EȘECULUI, CITIBIL DE MAȘINĂ (28 iul): clientul primea doar „502" și
+// nu putea nici să explice userului, nici să decidă dacă merită reîncercat.
+// Codurile de aici urcă neschimbate în corpul JSON al rutei.
+export type RealtimeFailCode =
+  | 'realtime_not_configured' // n-avem cheie — nu e vina upstreamului
+  | 'upstream_timeout' // am tăiat noi firul: marginea OpenAI n-a răspuns la timp
+  | 'upstream_unreachable' // rețea căzută / DNS / TLS
+  | 'upstream_5xx' // 500/502/503/504 de la marginea OpenAI (pagina Cloudflare)
+  | 'upstream_empty' // 2xx dar answer SDP gol → browserul n-are ce negocia
+  | 'upstream_refuz' // 4xx: cererea noastră e greșită (nu se reîncearcă)
+
 export type RealtimeAnswer =
   | { ok: true; sdp: string }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; code: RealtimeFailCode; error: string; attempts: number }
+
+// ── ROBUSTEȚEA PORNIRII VOCII (28 iul) ───────────────────────────────────────
+// Bugete măsurate pe trafic REAL, nu ghicite:
+//   • o pornire SĂNĂTOASĂ întoarce 201 în ~0,4s (3/3 reproduceri, 27 iul);
+//   • una BOLNAVĂ arde ~15s și întoarce 504 cu pagină HTML Cloudflare.
+// Deci orice trece de ~10s e deja pierdut: tăiem NOI firul înainte ca marginea
+// să ne dea 504-ul ei și folosim timpul rămas pentru o conexiune nouă.
+const ATTEMPT_TIMEOUT_MS = 10_000
+// Plafon total al rutei: userul stă cu microfonul deschis și se uită la ecran.
+// 3 × 10s ar însemna 30s+ de așteptare mută — oprim la 27s, orice ar fi.
+const TOTAL_BUDGET_MS = 27_000
+const MAX_ATTEMPTS = 3
 
 // Relay o ofertă SDP la OpenAI Realtime și întoarce answer-ul SDP.
 export async function openaiRealtimeAnswer(
@@ -330,7 +353,8 @@ export async function openaiRealtimeAnswer(
   hardLock = false,
   contextBlock = '',
 ): Promise<RealtimeAnswer> {
-  if (!config.openai.key) return { ok: false, status: 503, error: 'realtime_not_configured' }
+  if (!config.openai.key)
+    return { ok: false, status: 503, code: 'realtime_not_configured', error: 'realtime_not_configured', attempts: 0 }
 
   // Uneltele dinamice aprobate (auto-extindere) — și în voce.
   const { dynamicToolDefs } = await import('./dynamicTools.js')
@@ -342,7 +366,23 @@ export async function openaiRealtimeAnswer(
   // spre o limbă anume și „interpreta greșit" — bug-ul văzut live cu franceza).
   const iso = /^[a-z]{2}$/.test((lang || '').toLowerCase()) ? lang.toLowerCase() : ''
 
-  const session = {
+  const persona = realtimeInstructions(lang, meserie, hardLock)
+  const ctx = contextBlock || ''
+  const tools = realtimeTools(dynamic)
+
+  // SESIUNEA, CU O TREAPTĂ DE DEGRADARE (28 iul). Mărimi MĂSURATE pe sursa vie,
+  // nu estimate: persona + cele 31 de unelte = ~18KB (din care ~13,8KB uneltele
+  // și ~5,4KB doar descrierile lor), plus contextul (memorie + 20 de replici)
+  // → ~26KB în total. NU scoatem unelte din sesiune: uneltele SUNT felul în
+  // care vocea acționează, iar varianta „unelte per răspuns" a API-ului ar muta
+  // decizia în client (alt fișier, altă bucată de cod) — o rescriere mult mai
+  // mare decât problema. Pe ULTIMA încercare trimitem însă o sesiune slăbită:
+  // aceleași NUME și aceiași PARAMETRI (deci vocea poate chema în continuare
+  // ORICE unealtă), doar descrierile scurtate și contextul plafonat — ~8KB mai
+  // puțin. Dacă upstreamul chiar se îneacă în corp, tot pornim cu voce
+  // completă; dacă nu, n-am pierdut nimic: pe drumul fericit (încercarea 1)
+  // sesiunea pleacă neatinsă.
+  const buildSession = (slim: boolean): Record<string, unknown> => ({
     type: 'realtime',
     model: config.openai.realtimeModel,
     audio: {
@@ -384,9 +424,11 @@ export async function openaiRealtimeAnswer(
     // Instrucțiuni + context (memorie + istoric) intră AICI, în sesiunea inițială,
     // care e ACCEPTATĂ de OpenAI (201). Nu mai există al doilea strat prin
     // session.update — era exact dublura.
-    instructions: realtimeInstructions(lang, meserie, hardLock) + (contextBlock || ''),
+    // PERSONA NU SE TAIE NICIODATĂ (limba, poarta numelui, regula faptei) —
+    // plafonăm doar CONTEXTUL, partea variabilă și cea mai grasă.
+    instructions: persona + (slim ? ctx.slice(0, 1200) : ctx),
     // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
-    tools: realtimeTools(dynamic),
+    tools: slim ? tools.map((t) => ({ ...t, description: t.description.slice(0, 160) })) : tools,
     // NU URCA ASTA LA 'required' — regulă, nu preferință. La nivel de SESIUNE,
     // 'required' obligă modelul să cheme o unealtă la FIECARE răspuns, inclusiv
     // pe răspunsul care procesează rezultatul uneltei dinainte → buclă de unelte
@@ -396,56 +438,123 @@ export async function openaiRealtimeAnswer(
     // Tura următoare revine singură la 'auto', fără session.update. Vezi
     // frontend/src/lib/realtimeVoice.ts (poarta faptei în voce).
     tool_choice: 'auto',
-  }
+  })
 
-  const form = new FormData()
-  form.append('sdp', offerSdp)
-  // CA STRING, NU CA BLOB (25 iul — al 3-lea incident „vorbește rusă" + „nu
-  // vede/nu escaladează în voce"): Blob-ul intra în form-data ca FIȘIER
-  // (filename="blob") și parserul OpenAI îl IGNORA — de-aia „missing_model"
-  // cerea modelul în URL deși era în JSON: sesiunea NU era citită DELOC. Deci
-  // nici instrucțiunile, nici vocea, nici limba, nici uneltele nu se aplicau
-  // vreodată — modelul rula pe DEFAULT (oglindea limba percepută, răspundea la
-  // zgomot). String simplu = câmp de formular normal, parsat.
-  form.append('session', JSON.stringify(session))
+  // CORPUL SE RECONSTRUIEȘTE LA FIECARE ÎNCERCARE.
+  // Suspiciunea „un FormData se consumă o singură dată, deci reîncercarea
+  // retrimite un corp gol" a fost MĂSURATĂ, nu presupusă: pe Node 22.22.2
+  // (undici), același obiect FormData retrimis de 3 ori a pus pe fir de fiecare
+  // dată corpul ÎNTREG (19218 octeți, cu Content-Length, fără chunked). Deci NU
+  // asta a rupt reîncercarea din 27 iul. Îl reconstruim totuși per încercare,
+  // fiindcă ultima trimite o sesiune DIFERITĂ (slăbită) — și fiindcă un corp
+  // rezidit e oricum imun la orice schimbare viitoare de undici.
+  const buildForm = (slim: boolean): FormData => {
+    const form = new FormData()
+    form.append('sdp', offerSdp)
+    // CA STRING, NU CA BLOB (25 iul — al 3-lea incident „vorbește rusă" + „nu
+    // vede/nu escaladează în voce"): Blob-ul intra în form-data ca FIȘIER
+    // (filename="blob") și parserul OpenAI îl IGNORA — de-aia „missing_model"
+    // cerea modelul în URL deși era în JSON: sesiunea NU era citită DELOC. Deci
+    // nici instrucțiunile, nici vocea, nici limba, nici uneltele nu se aplicau
+    // vreodată — modelul rula pe DEFAULT (oglindea limba percepută, răspundea la
+    // zgomot). String simplu = câmp de formular normal, parsat.
+    form.append('session', JSON.stringify(buildSession(slim)))
+    return form
+  }
 
   // FIX FINAL VOCE (dovadă live 24 iul: OpenAI „missing_model"): API-ul Realtime
   // GA cere modelul ca PARAMETRU ÎN URL, nu doar în JSON-ul de sesiune.
   const callsUrl = `${OPENAI_CALLS}?model=${encodeURIComponent(config.openai.realtimeModel)}`
-  // REÎNCERCAREA (27 iul, dovadă live: două 504 trecătoare de la marginea
-  // OpenAI — pagină HTML Cloudflare după ~15s — au lăsat vocea MOARTĂ, deși
-  // reproducerea aceleiași cereri, cu aceeași sesiune de 26KB și 31 de unelte,
-  // a întors 201 în 0,4s de 3/3 ori imediat după). Un eșec trecător nu are
-  // voie să însemne „vocea nu merge": la 5xx sau rețea căzută mai încercăm o
-  // dată, cu pauză scurtă. La 4xx nu reîncercăm — aia e o cerere greșită.
-  let lastErr = ''
+
+  // ── DE CE „NU SE DECLANȘA" TIMEOUT-UL, deși ruta ținea 31s ────────────────
+  // Nu era stricat nimic: AbortSignal.timeout(20s) era armat corect, PER
+  // încercare, și pornea chiar la fetch. Doar că nicio încercare nu ajungea la
+  // 20s — marginea OpenAI (Cloudflare) închidea singură cu 504 pe la ~15s, deci
+  // fetch-ul se termina NORMAL, cu răspuns în mână. Cei 31s din log sunt exact
+  // 15s (încercarea 1) + 0,9s pauză + 15s (încercarea 2): timpul DUBLAT de
+  // reîncercarea adăugată, nu un fetch agățat. Concluzia: un plafon de 20s e mai
+  // mare decât răbdarea reală a upstreamului, deci nu apucă niciodată să
+  // folosească la ceva. Acum tăiem la 10s și cheltuim diferența pe altceva.
+  //
+  // ── ȘI DE CE N-A AJUTAT REÎNCERCAREA ─────────────────────────────────────
+  // Fiindcă pleca pe ACEEAȘI conexiune: undici ține socketul în pool și după un
+  // 504, iar reîncercarea la 0,9s reintra fix pe calea care tocmai picase →
+  // același 504, previzibil. De la a doua încercare cerem conexiune NOUĂ.
+  // Verificat local pe Node 22.22.2: 3 cereri fără antet = 2 socketuri
+  // (refolosire), 3 cereri cu `Connection: close` = 3 socketuri (zero refolosire).
+  //
+  // Pauză scurtă și crescătoare: un hopa de câteva sute de ms al marginii îl
+  // sărim, dar dacă e pană reală nu ardem bugetul stând degeaba.
+  const pause = (attempt: number): Promise<void> =>
+    new Promise((res) => setTimeout(res, attempt === 1 ? 350 : 1_000))
+
+  const startedAt = Date.now()
   let lastStatus = 502
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  let lastErr = ''
+  let lastCode: RealtimeFailCode = 'upstream_unreachable'
+  let attempts = 0
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Nu pornim o încercare care oricum nu încape în bugetul rămas — ar ține
+    // userul agățat pe o cerere pe care o abandonăm noi înșine.
+    const left = TOTAL_BUDGET_MS - (Date.now() - startedAt)
+    if (left < 2_000) break
+    attempts = attempt
+
+    const headers: Record<string, string> = { Authorization: `Bearer ${config.openai.key}` }
+    if (attempt > 1) headers.connection = 'close'
+
     let r: Response
     try {
       r = await fetch(callsUrl, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.key}` },
-        body: form,
-        signal: AbortSignal.timeout(20_000),
+        headers,
+        body: buildForm(attempt === MAX_ATTEMPTS),
+        signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, left)),
       })
     } catch (e) {
-      lastErr = `upstream_unreachable: ${String(e).slice(0, 120)}`
-      if (attempt === 1) {
-        await new Promise((res) => setTimeout(res, 900))
+      // AbortError/TimeoutError = plafonul NOSTRU (upstreamul era prea lent);
+      // orice altceva = rețea/DNS/TLS. Ambele se reîncearcă — asta lipsea.
+      const nume = (e as Error | undefined)?.name ?? ''
+      const expirat = nume === 'AbortError' || nume === 'TimeoutError'
+      lastCode = expirat ? 'upstream_timeout' : 'upstream_unreachable'
+      lastStatus = expirat ? 504 : 502
+      lastErr = `${lastCode}: ${String(e).slice(0, 160)}`
+      if (attempt < MAX_ATTEMPTS) {
+        await pause(attempt)
         continue
       }
-      return { ok: false, status: 502, error: lastErr }
+      break
     }
+
     const text = await r.text().catch(() => '')
-    if (r.ok) return { ok: true, sdp: text }
+    if (r.ok && text.trim()) return { ok: true, sdp: text }
+    if (r.ok) {
+      // 2xx CU CORP GOL e tot o pornire moartă: browserul ar arunca pe
+      // setRemoteDescription și userul ar vedea „fără voce" la un 200 vesel.
+      lastCode = 'upstream_empty'
+      lastStatus = 502
+      lastErr = 'answer SDP gol de la upstream'
+      if (attempt < MAX_ATTEMPTS) {
+        await pause(attempt)
+        continue
+      }
+      break
+    }
+
     lastStatus = r.status
     lastErr = text.slice(0, 300)
-    if (attempt === 1 && r.status >= 500) {
-      await new Promise((res) => setTimeout(res, 900))
+    // 5xx (inclusiv 504-ul cu pagină Cloudflare), 408 și 429 = necaz TRECĂTOR al
+    // marginii → mai încercăm. Restul de 4xx = cererea noastră e greșită
+    // („missing_model", cheie invalidă): reîncercarea ar doar întârzia eroarea
+    // reală cu câteva secunde, fără nicio șansă în plus.
+    const trecator = r.status >= 500 || r.status === 408 || r.status === 429
+    lastCode = trecator ? 'upstream_5xx' : 'upstream_refuz'
+    if (trecator && attempt < MAX_ATTEMPTS) {
+      await pause(attempt)
       continue
     }
     break
   }
-  return { ok: false, status: lastStatus, error: lastErr }
+  return { ok: false, status: lastStatus, code: lastCode, error: lastErr, attempts }
 }
