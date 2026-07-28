@@ -114,6 +114,25 @@ export default function CustomerSettings({
     topupAmount: 10,
   })
   const ro = base === 'ro'
+  const isAdmin = user.role === 'admin'
+  // CREIERUL DE ABONAMENT (Adrian, 28 iul) — comutator admin-only + cheia proprie
+  // + soldul (card ca la OpenRouter). Userii nu văd această secțiune.
+  interface SubBalance {
+    ok: boolean
+    balance: number
+    low: boolean
+    topup: string
+    error?: string
+  }
+  const [sub, setSub] = useState<{
+    mode: 'free' | 'subscription'
+    model: string
+    hasKey: boolean
+    keyHint: string
+    balance: SubBalance | null
+  }>({ mode: 'free', model: '', hasKey: false, keyHint: '', balance: null })
+  const [subKeyInput, setSubKeyInput] = useState('')
+  const [subBusy, setSubBusy] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -132,8 +151,38 @@ export default function CustomerSettings({
       } catch {
         /* endpointuri indisponibile → secțiunile rămân goale */
       }
+      // Creierul de abonament — DOAR pentru admin (userii nici nu ating ruta).
+      if (isAdmin) {
+        try {
+          const d = await fetch('/api/admin/brain-sub', { credentials: 'include' }).then((r) =>
+            r.ok ? r.json() : null,
+          )
+          if (d) setSub(d)
+        } catch {
+          /* ruta indisponibilă → secțiunea rămâne pe implicit */
+        }
+      }
     })()
-  }, [])
+  }, [isAdmin])
+
+  async function saveSub(patch: { mode?: 'free' | 'subscription'; model?: string; key?: string }): Promise<void> {
+    setSubBusy(true)
+    try {
+      const r = await fetch('/api/admin/brain-sub', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(patch),
+      })
+      if (r.ok) {
+        setSub(await r.json())
+        if (patch.key !== undefined) setSubKeyInput('')
+      }
+    } catch {
+      /* rețea → starea rămâne cum era */
+    }
+    setSubBusy(false)
+  }
 
   async function onModel(tier: 'chat' | 'work', model: string): Promise<void> {
     setSel((s) => ({ ...s, [tier]: model }))
@@ -278,6 +327,131 @@ export default function CustomerSettings({
                 ? 'Toate capabilitățile (voce, Google, memorie) merg la fel, indiferent de model.'
                 : 'All capabilities (voice, Google, memory) work the same, whichever model you pick.'}
             </p>
+          </section>
+        )}
+
+        {/* 3.5 — CREIERUL DE ABONAMENT (Adrian, 28 iul) — DOAR admin. Comutator
+            Free ⟷ Abonament + model puternic selectabil MANUAL + cheia proprie +
+            soldul (card ca la OpenRouter). Userii nu văd această secțiune. */}
+        {isAdmin && (
+          <section className="settings-sec">
+            <h4>{ro ? 'Creier abonament (doar tu)' : 'Subscription brain (you only)'}</h4>
+            <p className="settings-note">
+              {ro
+                ? 'Comutatorul e DOAR pentru tine. Pe cererile grele (raționament/acțiune), creierul tău urcă pe modelul puternic ales mai jos, plătit din CHEIA TA. Userii rămân pe creierul de acum.'
+                : 'This switch is for YOU only. On heavy requests, your brain moves up to the powerful model chosen below, paid from YOUR key. Users stay on the current brain.'}
+            </p>
+
+            {/* Comutator Free ⟷ Abonament */}
+            <div style={{ display: 'inline-flex', border: '1px solid rgba(140,150,180,0.4)', borderRadius: 8, overflow: 'hidden', marginBottom: 6 }}>
+              {(['free', 'subscription'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  disabled={subBusy}
+                  onClick={() => void saveSub({ mode: m })}
+                  style={{
+                    border: 0,
+                    padding: '6px 18px',
+                    cursor: subBusy ? 'default' : 'pointer',
+                    font: 'inherit',
+                    background: sub.mode === m ? '#4f7cff' : 'transparent',
+                    color: sub.mode === m ? '#fff' : 'inherit',
+                  }}
+                >
+                  {m === 'free' ? 'Free' : ro ? 'Abonament' : 'Subscription'}
+                </button>
+              ))}
+            </div>
+
+            {/* Model puternic — selectabil MANUAL, identic cu selectorul de creier */}
+            <label className="contact-label" style={{ marginTop: 8 }}>
+              {ro ? 'Model puternic (pe abonament)' : 'Powerful model (on subscription)'}
+            </label>
+            <select value={sub.model} disabled={subBusy} onChange={(e) => void saveSub({ model: e.target.value })}>
+              {/* modelul curent apare mereu, chiar dacă nu e în catalogul filtrat */}
+              {sub.model && !catalog.work.some((m) => m.id === sub.model) && (
+                <option value={sub.model}>{sub.model}</option>
+              )}
+              {catalog.work.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Cheia proprie — UNDE PUI CHEIA */}
+            <label className="contact-label" style={{ marginTop: 8 }}>
+              {ro ? 'Cheia ta OpenRouter (sk-or-…)' : 'Your OpenRouter key (sk-or-…)'}
+            </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder={sub.hasKey ? `${ro ? 'setată' : 'set'} ${sub.keyHint}` : 'sk-or-…'}
+                value={subKeyInput}
+                onChange={(e) => setSubKeyInput(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={subBusy || !subKeyInput.trim()}
+                onClick={() => void saveSub({ key: subKeyInput.trim() })}
+              >
+                {ro ? 'Salvează' : 'Save'}
+              </button>
+              {sub.hasKey && (
+                <button
+                  type="button"
+                  className="ghost settings-danger"
+                  disabled={subBusy}
+                  onClick={() => void saveSub({ key: '' })}
+                >
+                  {ro ? 'Șterge' : 'Remove'}
+                </button>
+              )}
+            </div>
+            <p className="settings-note">
+              {ro
+                ? 'Cheia o generezi la openrouter.ai/keys (contul tău, creditul tău) și o lipești aici. Stă doar pe server, nu se afișează niciodată înapoi.'
+                : 'Generate the key at openrouter.ai/keys (your account, your credit) and paste it here. Stored server-side only, never shown back.'}
+            </p>
+
+            {/* Afișajul de sold — EXACT ca la OpenRouter (e o cheie OpenRouter) */}
+            {sub.hasKey && sub.balance && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  display: 'flex',
+                  gap: 10,
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 14,
+                  background: sub.balance.low ? 'rgba(255,80,80,0.15)' : 'rgba(80,140,255,0.14)',
+                }}
+              >
+                {sub.balance.ok ? (
+                  <>
+                    <span>
+                      {ro ? 'Sold abonament' : 'Subscription balance'}:{' '}
+                      <strong>${sub.balance.balance.toFixed(2)}</strong>
+                      {sub.balance.low ? (ro ? ' — depune bani!' : ' — top up!') : ''}
+                    </span>
+                    <a href={sub.balance.topup} target="_blank" rel="noopener noreferrer">
+                      {ro ? 'alimentează' : 'top up'}
+                    </a>
+                  </>
+                ) : (
+                  <span>
+                    {ro ? 'Sold indisponibil' : 'Balance unavailable'}
+                    {sub.balance.error ? ` (${sub.balance.error})` : ''}
+                  </span>
+                )}
+              </div>
+            )}
           </section>
         )}
 

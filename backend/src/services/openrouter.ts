@@ -122,18 +122,25 @@ export interface OpenRouterBalance {
 }
 
 const OR_LOW_THRESHOLD = Math.max(0, Number(process.env.OPENROUTER_LOW_USD ?? '10') || 10)
-let orBalCache: { at: number; val: OpenRouterBalance } | null = null
+// Cache per-cheie: punga centrală (config) și cheia de abonament a ownerului au
+// solduri diferite — un singur cache le-ar amesteca.
+const orBalCache = new Map<string, { at: number; val: OpenRouterBalance }>()
 
-export async function getOpenRouterBalance(force = false): Promise<OpenRouterBalance> {
+// `apiKey` opțional: fără el = punga CENTRALĂ (config); cu el = soldul cheii date
+// (ex. cheia de abonament a ownerului). Endpoint OpenRouter identic → același card.
+export async function getOpenRouterBalance(force = false, apiKey?: string): Promise<OpenRouterBalance> {
+  const key = (apiKey ?? config.openrouter.key).trim()
   const base: OpenRouterBalance = {
     ok: false, balance: 0, totalCredits: 0, totalUsage: 0, currency: 'usd',
     low: true, threshold: OR_LOW_THRESHOLD, topup: 'https://openrouter.ai/credits',
   }
-  if (!config.openrouter.key) return { ...base, error: 'not_configured' }
-  if (!force && orBalCache && Date.now() - orBalCache.at < 60_000) return orBalCache.val
+  if (!key) return { ...base, error: 'not_configured' }
+  const cacheId = key.slice(-8)
+  const hit = orBalCache.get(cacheId)
+  if (!force && hit && Date.now() - hit.at < 60_000) return hit.val
   try {
     const r = await fetch(`${OR_BASE}/credits`, {
-      headers: { Authorization: `Bearer ${config.openrouter.key}` },
+      headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(12_000),
     })
     if (!r.ok) return { ...base, error: `http_${r.status}` }
@@ -146,7 +153,7 @@ export async function getOpenRouterBalance(force = false): Promise<OpenRouterBal
     const val: OpenRouterBalance = {
       ...base, ok: true, balance, totalCredits, totalUsage, low: balance < OR_LOW_THRESHOLD,
     }
-    orBalCache = { at: Date.now(), val }
+    orBalCache.set(cacheId, { at: Date.now(), val })
     return val
   } catch (e) {
     return { ...base, error: String(e).slice(0, 120) }
@@ -258,9 +265,12 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required'; apiKey?: string } = {},
 ): Promise<OrChatResult> {
-  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  // `apiKey` opțional = creierul de abonament (cheia proprie a ownerului); fără
+  // el, punga centrală. Aceeași cale, aceleași unelte, doar antetul Authorization diferă.
+  const orKey = (opts.apiKey ?? config.openrouter.key).trim()
+  if (!orKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -284,7 +294,7 @@ export async function openrouterChatStream(
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.openrouter.key}`,
+      Authorization: `Bearer ${orKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://kelionai.app',
       'X-Title': 'Kelionai',
@@ -366,9 +376,10 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required'; apiKey?: string } = {},
 ): Promise<OrChatResult> {
-  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  const orKey = (opts.apiKey ?? config.openrouter.key).trim()
+  if (!orKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -385,7 +396,7 @@ export async function openrouterChat(
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.openrouter.key}`,
+      Authorization: `Bearer ${orKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://kelionai.app',
       'X-Title': 'Kelionai',
