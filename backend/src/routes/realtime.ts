@@ -203,7 +203,14 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // lui, de ce?"): escaladarea din voce era un creier ORB — fără sursă,
         // fără DB, fără constructor; nega accesul. Acum are aceleași brațe ca
         // scrisul, pe partea de introspecție + construcție (doar admin).
-        const introspectionTools = isAdmin
+        // ACEEAȘI POARTĂ CA-N SCRIS (audit 28 iul, găsirea #2 — INALT): chatul
+        // scris cere, pe lacăt ARMAT, al doilea factor (voce/secret) înainte să
+        // dea uneltele de admin (chat.ts, isAdmin cu isArmed/hasUnlock). Vocea
+        // le dădea pe SIMPLA potrivire de email — un cookie de admin furat putea
+        // rula SQL prin voce. Limba rămâne pe email (Adrian aude română mereu);
+        // DOAR uneltele cer deblocarea.
+        const adminUnlocked = isAdmin && (!(await isArmed()) || hasUnlock(req, user.email))
+        const introspectionTools = adminUnlocked
           ? [
               { name: 'list_source', description: 'Listează arborele propriului cod sursă (director dat, relativ la rădăcina repo-ului).', input_schema: { type: 'object', properties: { dir: { type: 'string' } } } },
               { name: 'read_source', description: 'Citește un fișier din propriul cod sursă, cu numere de linie.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
@@ -225,10 +232,21 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const order = String(targs.order ?? '').trim()
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
             const jobId = await createBuildJob(user.email, order)
+            // „Am preluat cerința." DOAR când ordinul chiar E în coadă (audit 28
+            // iul, găsirea #19): createBuildJob întoarce 0 pe DB indisponibil sau
+            // plafon zilnic atins — a confirma atunci ar fi exact minciuna
+            // interzisă de REGULA FAPTEI. Pe eșec, vocea spune sincer că nu a
+            // putut prelua și de ce.
+            if (!jobId)
+              return JSON.stringify({
+                ok: false,
+                error: 'ordin_nepreluat',
+                speak_rule: 'Spune sincer: ordinul NU a putut fi preluat (baza de date indisponibilă sau plafonul zilnic de construcții atins) — nu confirma preluarea.',
+              })
             // Aceeași frază scurtă ca în chat (Adrian, 28 iul): doar „Am preluat
             // cerința." — vocea nu ține discursuri despre lucrător/PR/email.
             return JSON.stringify({
-              ok: !!jobId,
+              ok: true,
               job: jobId,
               speak_rule: 'Spune EXACT: „Am preluat cerința." — nimic în plus.',
             })

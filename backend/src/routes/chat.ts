@@ -50,7 +50,7 @@ import {
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
-import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
+import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -1949,13 +1949,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       try {
         r = await runBrainOnce()
       } catch (ge) {
-        if (
-          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) &&
-          isGeminiQuotaError(ge) &&
-          !textFlowed
-        ) {
-          // Cota gratuită Google s-a terminat pe ziua/minutul ăsta — secundarul
-          // preia tura fără ca userul să vadă vreo ruptură.
+        // PLASA LĂRGITĂ (audit 28 iul, găsirea #1 — INALT): înainte, secundarul
+        // prelua DOAR pe erori de cotă (`isGeminiQuotaError`: 429/500/503/quota).
+        // Un `gemini 400` (schema uneltelor), 401/403 (cheie), 404 (model) sau un
+        // TimeoutError de rețea arunca direct → userul primea „problemă tehnică"
+        // DUPĂ ce Kelion promisese acțiunea — exact „zice că face, dar nu face".
+        // Regula corectă: ORICE eșec al lui Gemini direct (dacă n-a curs încă
+        // text) cade O DATĂ pe secundarul gratuit; abia dacă pică și ăla urcăm.
+        if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
           orchestratorModel = await resolveModel('work', null)
           console.log(`[brain] gemini indisponibil (${String(ge).slice(0, 80)}) → secundar ${orchestratorModel}`)
           r = await runBrainOnce()

@@ -160,8 +160,16 @@ export function realtimeTools(
       description: t.description ?? '',
       parameters: t.input_schema,
     }))
-  // AUTO-EXTINDERE: uneltele dinamice aprobate, disponibile și în voce.
-  const fromDynamic = dynamic.map((t) => ({
+  // AUTO-EXTINDERE: uneltele dinamice aprobate, disponibile și în voce —
+  // DAR SUB PLAFONUL DOVEDIT (audit 28 iul, găsirea #4): la 31 de unelte
+  // pornirea dă 201 în 0,4s; la 37 dă 504 la FIECARE încercare (cronologia de
+  // mai sus). Uneltele dinamice ocoleau plafonul: fiecare skill instalat prin
+  // propose_tool se adăuga PESTE cele 31 → vocea reintra în pana de 504. Lăsăm
+  // dinamicele să intre doar cât încape sub prag; restul rămân în chatul scris
+  // (unde sesiunea nu are limita asta).
+  const MAX_VOICE_TOOLS = 31
+  const roomForDynamic = Math.max(0, MAX_VOICE_TOOLS - fromGoogle.length - 13) // 13 = uneltele fixe de mai jos
+  const fromDynamic = dynamic.slice(0, roomForDynamic).map((t) => ({
     type: 'function' as const,
     name: t.name,
     description: t.description,
@@ -529,7 +537,11 @@ export async function openaiRealtimeAnswer(
       r = await fetch(callsUrlFor(model), {
         method: 'POST',
         headers,
-        body: buildForm(attempt === MAX_ATTEMPTS, model),
+        // SLIM DIN A DOUA ÎNCERCARE (audit 28 iul, găsirea #4): înainte, doar a
+        // 3-a încercare slăbea sesiunea — încercările 1-2 ardeau ~6s fiecare cu
+        // corpul întreg. Dacă prima (corp complet) a picat, a doua merge deja
+        // suplă: mai multe șanse reale în același buget de timp.
+        body: buildForm(attempt >= 2, model),
         signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, left)),
       })
     } catch (e) {
