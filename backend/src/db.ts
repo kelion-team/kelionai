@@ -2842,8 +2842,27 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
   }
 }
 
+// PLAFONUL ZILNIC DE AUTONOMIE (reparat 28 iul — auditul de cod mort a găsit
+// `config.autonomyDailyMax` declarat dar niciodată aplicat: fișierul vechi
+// `autonomy.ts` care-l punea în practică a fost scos odată cu arhitectura de
+// punte, iar câmpul a rămas orfan). Numără TOATE ordinele create în ultimele
+// 24h (manual + auto-vindecare + voce), indiferent de cine le-a dat — plafonul
+// e o plasă de siguranță globală împotriva unei bucle care ar coada ordine la
+// nesfârșit, nu o limită per-user.
+export async function buildJobsToday(): Promise<number> {
+  if (!dbEnabled()) return 0
+  const r = await getPool().query<{ n: string }>(
+    `SELECT count(*) AS n FROM build_jobs WHERE created_at > now() - interval '24 hours'`,
+  )
+  return Number(r.rows[0]?.n ?? 0)
+}
+
 export async function createBuildJob(orderedBy: string, orderText: string): Promise<number> {
   if (!dbEnabled()) return 0
+  if ((await buildJobsToday()) >= config.autonomyDailyMax) {
+    console.warn(`[build_jobs] plafon zilnic atins (${config.autonomyDailyMax}) — ordin respins pentru ${orderedBy}`)
+    return 0
+  }
   const r = await getPool().query<{ id: string | number }>(
     'INSERT INTO build_jobs (ordered_by, order_text) VALUES ($1, $2) RETURNING id',
     [orderedBy.toLowerCase(), orderText],

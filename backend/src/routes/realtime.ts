@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs, proposeKelionTool, decideKelionTool } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, buildJobsToday, listBuildJobs, proposeKelionTool, decideKelionTool } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -286,7 +286,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const order = String(targs.order ?? '').trim()
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
             const jobId = await createBuildJob(user.email, order)
-            return JSON.stringify({ ok: !!jobId, job: jobId })
+            if (!jobId) {
+              // Paritate cu chat.ts: distinge plafonul zilnic de o DB picată.
+              const today = await buildJobsToday()
+              if (today >= config.autonomyDailyMax) {
+                return JSON.stringify({ error: 'plafon_zilnic_atins', today, max: config.autonomyDailyMax })
+              }
+              return JSON.stringify({ error: 'db_indisponibil' })
+            }
+            return JSON.stringify({ ok: true, job: jobId })
           }
           if (tname === 'propose_tool') {
             // AUTONOMIE DE INSTALARE ȘI DIN VOCE (Adrian, 27 iul): cererea

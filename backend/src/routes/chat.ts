@@ -15,6 +15,7 @@ import {
   refreshGoogleAccessToken,
   reverseGeocodeCached,
   promoSceneUrl,
+  geminiVision,
 } from '../services/google.js'
 import {
   saveMessage,
@@ -44,6 +45,7 @@ import {
   proposeKelionTool,
   decideKelionTool,
   createBuildJob,
+  buildJobsToday,
   listBuildJobs,
   cancelBuildJobs,
   cancelAllPendingBuildJobs,
@@ -76,6 +78,8 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
+  crawlSite,
+  screenshotUrl,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -419,6 +423,25 @@ const CANCEL_BUILD_TOOL: Tool = {
 // comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să
 // le repare"): agregarea deterministă a tuturor semnalelor + regula de
 // comportament — enumeră și ÎNTREABĂ, nu repară din proprie inițiativă.
+// VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul randat" — reparată
+// la auditul de cod mort din 28 iul: screenshotUrl + geminiVision existau, dar
+// nu erau oferite ca unealtă niciunde). Face un screenshot al unei pagini
+// publice și-l trimite unui model cu vedere ca să judece dacă rezultatul cerut
+// chiar se vede — util după o construcție/publicare, ca să confirme vizual,
+// nu doar din build+teste verzi.
+const VERIFY_VISUALLY_TOOL: Tool = {
+  name: 'verify_visually',
+  description:
+    'ADMIN ONLY. Take a screenshot of a public URL (e.g. kelionai.app after a deploy) and have a vision model describe/judge what it actually shows — use this to CONFIRM a build/publish result visually, not just from green tests. Returns what is seen, in plain text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'Full https:// URL to screenshot.' },
+      question: { type: 'string', description: 'What to check for, e.g. "does the subscription pill show in the top bar?".' },
+    },
+    required: ['url', 'question'],
+  },
+}
 const SYSTEM_HEALTH_TOOL: Tool = {
   name: 'system_health',
   description:
@@ -741,6 +764,24 @@ const BROWSER_CLOSE_TOOL: Tool = {
   description: 'Close the live browser and clear it from the monitor, when done browsing.',
   input_schema: { type: 'object', properties: {} },
 }
+// PARCURGERE ÎN BLOC (cererea #24, reparată la auditul de cod mort din 28 iul —
+// `crawlSite` era construit dar niciodată oferit; modelul era nevoit să repete
+// browser_open/browser_click pagină cu pagină pentru un simplu "conspectează
+// site-ul"). Deschide startUrl, adună linkurile interne, vizitează până la
+// maxPages și întoarce titlul+textul fiecăreia — un singur apel în loc de N.
+const BROWSER_CRAWL_TOOL: Tool = {
+  name: 'browser_crawl',
+  description:
+    'Crawl an entire website starting from a URL — follows internal links page by page (up to maxPages) and returns each page\'s title and text in ONE call. Use this instead of repeated browser_open/browser_click when the user wants a whole site surveyed/summarized ("conspectează tot site-ul", "citește toate paginile"), not just one page.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'Starting https:// (or http://) URL.' },
+      maxPages: { type: 'number', description: 'Max pages to visit, default 8.' },
+    },
+    required: ['url'],
+  },
+}
 const BROWSER_KEY_TOOL: Tool = {
   name: 'browser_key',
   description:
@@ -841,7 +882,7 @@ const PROMO_TOOL: Tool = {
 // o unealtă adăugată mâine nu poate dezarma poarta din greșeală.
 const PASSIVE_TOOLS = new Set<string>([
   'read_source', 'search_source', 'list_source', 'list_updates',
-  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs',
+  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs', 'verify_visually',
   // db_tables citește doar schema. db_query NU e aici INTENȚIONAT: rulează SQL
   // arbitrar, cu COMMIT — un DELETE e o faptă în toată regula, iar dacă l-am
   // socoti „citire", poarta faptei i-ar putea cere modelului să-l execute încă
@@ -1855,6 +1896,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_KEY_TOOL,
       BROWSER_CLICK_AT_TOOL,
       BROWSER_CLOSE_TOOL,
+      BROWSER_CRAWL_TOOL,
     ]
     // ask_brain DOAR pe treapta chat — pe work ar fi recursiv (el ESTE creierul).
     const escalationTools = heavyTurn ? [] : [ASK_BRAIN_TOOL]
@@ -1863,7 +1905,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const allTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, VERIFY_VISUALLY_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     // PLAFONUL DE 64 DE UNELTE (dovadă live 28 iul, log: `[CHAT ERROR]
     // openrouter 400: "at most 64 tools are allowed"`): importul complet Google
@@ -2288,7 +2330,21 @@ async function runTool(
       const order = String(args.order ?? '').trim()
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
       const jobId = await createBuildJob(email, order)
-      if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+      if (!jobId) {
+        // PLAFON ZILNIC (reparat 28 iul — vezi buildJobsToday în db.ts): distinge
+        // DB picat de plafonul de siguranță atins, ca Kelion să nu ceară orbește
+        // reîncercare când motivul real e „ai atins limita de azi".
+        const today = await buildJobsToday()
+        if (today >= config.autonomyDailyMax) {
+          return JSON.stringify({
+            error: 'plafon_zilnic_atins',
+            today,
+            max: config.autonomyDailyMax,
+            hint: 'Plafonul de siguranță pentru ordine de construcție în 24h a fost atins — spune-i ownerului, nu reîncerca acum.',
+          })
+        }
+        return JSON.stringify({ error: 'db_indisponibil' })
+      }
       return JSON.stringify({
         ok: true,
         job: jobId,
@@ -2313,6 +2369,17 @@ async function runTool(
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return systemHealth()
+    }
+    case 'verify_visually': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const url = String(args.url ?? '')
+      const question = String(args.question ?? '').trim() || 'Describe what this page shows, precisely.'
+      if (!url) return JSON.stringify({ error: 'no_url' })
+      const shot = await screenshotUrl(url)
+      if ('error' in shot) return JSON.stringify({ error: shot.error })
+      const seen = await geminiVision(shot.jpegBase64, question)
+      if (!seen) return JSON.stringify({ error: 'vision_unavailable' })
+      return JSON.stringify({ seen })
     }
     case 'server_logs': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
@@ -2515,6 +2582,16 @@ async function runTool(
       // Browserul s-a închis → curăță monitorul (url gol = ecran liber).
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
       return JSON.stringify({ closed: true })
+    }
+    case 'browser_crawl': {
+      const url = String(args.url ?? '')
+      if (!url) return JSON.stringify({ error: 'no_url' })
+      const maxPages = Math.min(Math.max(Number(args.maxPages) || 8, 1), 20)
+      const result = await crawlSite(email, baseUrl, url, maxPages)
+      // Fiecare pagină trunchiată (24 iul, dieta de istoric): un crawl de 20
+      // pagini nu are voie să umple tot bugetul de context al turei.
+      const pages = result.pages.map((p) => ({ url: p.url, title: p.title, text: p.text.slice(0, 2000) }))
+      return JSON.stringify({ pages, count: pages.length, error: result.error })
     }
 
     case 'save_note': {

@@ -1129,27 +1129,6 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
   return JSON.stringify({ videos: [], not_found: true })
 }
 
-// Real YouTube resolver for the [YT query] bridge tag: searches (Serper first,
-// Gemini fallback) and returns the top playable video as an embeddable URL.
-// The brain must NEVER guess a video ID — it emits [YT query] and the server
-// resolves a real, currently-available ID so the embed always plays.
-export async function youtubeFirstEmbed(
-  query: string,
-): Promise<{ embed: string; watch: string; title: string } | null> {
-  const raw = await youtubeSearch(query, 1)
-  let parsed: { videos?: { title?: string; link?: string }[] }
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  const link = parsed.videos?.[0]?.link ?? ''
-  const title = parsed.videos?.[0]?.title ?? ''
-  const emb = ytEmbed(link)
-  if (!emb) return null
-  return { embed: emb, watch: link, title }
-}
-
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
   // Fără cheie Gemini: traducem prin OpenRouter (aceeași cheie ca creierul), ca
