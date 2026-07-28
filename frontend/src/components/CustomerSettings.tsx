@@ -133,6 +133,9 @@ export default function CustomerSettings({
   }>({ mode: 'free', model: '', hasKey: false, keyHint: '', balance: null })
   const [subKeyInput, setSubKeyInput] = useState('')
   const [subBusy, setSubBusy] = useState(false)
+  // Catalogul COMPLET OpenRouter (toate modelele cu tool-use, orice provider) —
+  // selectorul manual al creierului de abonament nu e limitat la lista de user.
+  const [brainModels, setBrainModels] = useState<CatModel[]>([])
 
   useEffect(() => {
     void (async () => {
@@ -154,10 +157,12 @@ export default function CustomerSettings({
       // Creierul de abonament — DOAR pentru admin (userii nici nu ating ruta).
       if (isAdmin) {
         try {
-          const d = await fetch('/api/admin/brain-sub', { credentials: 'include' }).then((r) =>
-            r.ok ? r.json() : null,
-          )
+          const [d, bm] = await Promise.all([
+            fetch('/api/admin/brain-sub', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+            fetch('/api/admin/brain-models', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+          ])
           if (d) setSub(d)
+          if (bm?.models) setBrainModels(bm.models as CatModel[])
         } catch {
           /* ruta indisponibilă → secțiunea rămâne pe implicit */
         }
@@ -364,21 +369,28 @@ export default function CustomerSettings({
               ))}
             </div>
 
-            {/* Model puternic — selectabil MANUAL, identic cu selectorul de creier */}
+            {/* Model — selectabil MANUAL din TOT catalogul OpenRouter (orice
+                provider: Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...). */}
             <label className="contact-label" style={{ marginTop: 8 }}>
-              {ro ? 'Model puternic (pe abonament)' : 'Powerful model (on subscription)'}
+              {ro ? 'Model (tot catalogul OpenRouter)' : 'Model (full OpenRouter catalog)'}
             </label>
             <select value={sub.model} disabled={subBusy} onChange={(e) => void saveSub({ model: e.target.value })}>
-              {/* modelul curent apare mereu, chiar dacă nu e în catalogul filtrat */}
-              {sub.model && !catalog.work.some((m) => m.id === sub.model) && (
+              {/* modelul curent apare mereu, chiar dacă nu e (încă) în catalog */}
+              {sub.model && !brainModels.some((m) => m.id === sub.model) && (
                 <option value={sub.model}>{sub.model}</option>
               )}
-              {catalog.work.map((m) => (
+              {brainModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
+                  {m.vision ? ' 👁' : ''}
                 </option>
               ))}
             </select>
+            <p className="settings-note">
+              {ro
+                ? `${brainModels.length} modele cu unelte disponibile. 👁 = vede imagini (alege un model cu vedere dacă folosești camera/poze).`
+                : `${brainModels.length} tool-capable models available. 👁 = sees images (pick a vision model if you use camera/photos).`}
+            </p>
 
             {/* Cheia proprie — UNDE PUI CHEIA */}
             <label className="contact-label" style={{ marginTop: 8 }}>

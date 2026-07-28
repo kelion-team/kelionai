@@ -51,7 +51,7 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, brainModelHasVision, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
 import { parseBrainSub, subActive, type BrainSub } from '../services/brainSubscription.js'
@@ -167,7 +167,12 @@ async function selectedBrainModel(
   // modelul de abonament ales din catalog are vedere; dacă totuși n-ar avea,
   // implicitul rămâne nucleul omni gratuit care VEDE.
   if ((heavy || top) && sub && subActive(sub, isAdmin)) {
-    return { model: sub.model, heavy: true, useSubKey: true }
+    // GARDĂ DE VEDERE (auditul 28 iul): dacă tura are imagine dar modelul de
+    // abonament ales NU vede, nu trimitem poza orbește — cădem pe nucleul care
+    // vede (mai jos). `null` (id nelistat/catalog indisponibil) = necunoscut →
+    // nu blocăm (implicitul are vedere), doar `false` cert oprește ruta.
+    const blindOnImage = needsVision && (await brainModelHasVision(sub.model)) === false
+    if (!blindOnImage) return { model: sub.model, heavy: true, useSubKey: true }
   }
   const model = top
     ? await resolveModel('top')
@@ -1822,7 +1827,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       modelChoiceKv,
       turnHasImage,
       brainSub,
-      user.role === 'admin',
+      // SECURITATE (auditul 28 iul): rutarea pe cheia/creditul ownerului respectă
+      // ACELAȘI al 2-lea factor ca uneltele — lacătul admin, nu doar rolul brut.
+      // Un cookie de admin furat, fără deblocare, nu poate drena cheia de abonament.
+      isAdmin,
     )
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
@@ -2124,13 +2132,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const isQuota =
         low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
       const isRefusal = low.includes('refusal')
+      // MODEL DE ABONAMENT INVALID (auditul 28 iul): dacă tura mergea pe cheia de
+      // abonament și a picat pe 400/model inexistent, mesajul generic ascundea
+      // cauza reală. Acum îi spunem ownerului clar să aleagă alt model din listă.
+      const isBadSubModel =
+        brainApiKey != null &&
+        (low.includes('not a valid model') ||
+          low.includes('no endpoints') ||
+          low.includes('is not a valid') ||
+          low.includes('not found') ||
+          (low.includes('400') && !isQuota && !isRefusal))
       const spoken = ro
-        ? isQuota
+        ? isBadSubModel
+          ? 'Modelul de abonament pare invalid sau indisponibil pe OpenRouter. Deschide Setări → „Creier abonament" și alege alt model din listă.'
+          : isQuota
           ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
           : isRefusal
             ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
             : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-        : isQuota
+        : isBadSubModel
+          ? 'The subscription model seems invalid or unavailable on OpenRouter. Open Settings → “Subscription brain” and pick another model.'
+          : isQuota
           ? "I've temporarily run out of brain credit. Please top up so we can continue."
           : isRefusal
             ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'

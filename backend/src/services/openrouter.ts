@@ -103,6 +103,52 @@ export async function getCatalog(force = false): Promise<Catalog> {
   return cache
 }
 
+// ── CATALOG COMPLET PENTRU CREIERUL DE ABONAMENT (Adrian, 28 iul) ────────────
+// Listele `chat`/`work` de mai sus sunt CURATE pentru useri (provider îngust +
+// vedere). Creierul de abonament e altă poveste: e cheia PROPRIE a ownerului, cu
+// creditul lui — vrea acces la TOT ce poate funcționa ca creier pe OpenRouter,
+// ORICE provider (Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...). Singura
+// condiție reală e tool-use (fără unelte, creierul nu poate EXECUTA nimic).
+export interface BrainModel {
+  id: string
+  name: string
+  provider: string
+  vision: boolean
+}
+let brainCatCache: { at: number; list: BrainModel[] } | null = null
+
+/** TOATE modelele cu tool-use de pe OpenRouter (orice provider), pentru
+ *  selectorul manual al creierului de abonament. Cache scurt ca `getCatalog`. */
+export async function getBrainCatalog(force = false): Promise<BrainModel[]> {
+  if (!force && brainCatCache && Date.now() - brainCatCache.at < CATALOG_TTL_MS) return brainCatCache.list
+  if (!config.openrouter.key) return brainCatCache?.list ?? []
+  const r = await fetch(`${OR_BASE}/models`, {
+    headers: { Authorization: `Bearer ${config.openrouter.key}` },
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null)
+  if (!r || !r.ok) return brainCatCache?.list ?? []
+  const data = ((await r.json().catch(() => ({}))) as { data?: RawModel[] }).data ?? []
+  const list = data
+    .filter((m) => (m.supported_parameters ?? []).includes('tools') && isSelectable(m.id))
+    .map((m) => ({
+      id: m.id,
+      name: m.name ?? m.id,
+      provider: m.id.split('/')[0] || 'other',
+      vision: (m.architecture?.input_modalities ?? []).includes('image'),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+  brainCatCache = { at: Date.now(), list }
+  return list
+}
+
+/** Modelul de abonament ales are vedere? true/false din catalog; null dacă
+ *  necunoscut (catalog indisponibil sau id nelistat) → apelantul decide. */
+export async function brainModelHasVision(id: string): Promise<boolean | null> {
+  const list = await getBrainCatalog()
+  const m = list.find((x) => x.id === id)
+  return m ? m.vision : null
+}
+
 // ── SOLDUL REAL AL CONTULUI OPENROUTER = „punga lui Kelion" (Adrian, 24 iul) ──
 // Creierul (OpenRouter) e alimentat CENTRAL din contul lui Kelion, nu de fiecare
 // user separat. Adminul trebuie să vadă VALOAREA EXACTĂ rămasă (ca pe pagina
