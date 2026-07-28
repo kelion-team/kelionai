@@ -374,7 +374,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (phraseTimer) clearTimeout(phraseTimer)
     if (silentTimer) clearTimeout(silentTimer)
     try {
-      ws?.send(JSON.stringify({ type: 'stop' }))
+      // Doar pe socket DESCHIS: send() pe unul închis nu aruncă — scuipă
+      // «WebSocket is already in CLOSING or CLOSED state» în consolă (văzut
+      // live la căderea de rețea din 28 iul), iar try/catch nu-l poate opri.
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }))
     } catch {
       /* ignoră */
     }
