@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, buildJobsToday, listBuildJobs, proposeKelionTool, decideKelionTool } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, buildJobsToday, listBuildJobs, proposeKelionTool, decideKelionTool, loadKv } from '../db.js'
+import { parseBrainSub, subActive } from '../services/brainSubscription.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -218,6 +219,20 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         if (refreshed) token = refreshed.accessToken
       }
 
+      const isAdminUser = user.email.toLowerCase() === config.adminEmail
+      // REGULA „ALL INCLUSIVE" ȘI ÎN VOCE (28 iul, Adrian: „de ce vocea nu
+      // participă la abonament?"): vocea LIVE (conversația full-duplex) rămâne
+      // pe OpenAI — provider diferit, cheia de abonament (OpenRouter) nu poate
+      // plăti niciodată acea parte. DAR uneltele care CHIAR trec prin OpenRouter
+      // (ask_brain, generate_image, web_search/youtube_search) pot respecta
+      // comutatorul — calculat LENEȘ, doar în acele ramuri (nu pe fiecare
+      // apel de unealtă din voce — latența rămâne neschimbată pentru rest).
+      const resolveSub = async (): Promise<{ active: boolean; model: string; key: string }> => {
+        const lockedAdmin = isAdminUser && (!(await isArmed()) || hasUnlock(req, user.email))
+        const s = parseBrainSub(await loadKv('brain_subscription').catch(() => null))
+        return { active: subActive(s, lockedAdmin), model: s.model, key: s.key }
+      }
+
       // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). Clientul capturează un cadru
       // din cameră și-l trimite în args.image; îl dăm unui model cu vedere și
       // întoarcem o descriere de rostit. Fără cameră/cadru → mesaj clar.
@@ -240,7 +255,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (name === 'ask_brain') {
         const request = String(args.request ?? '').trim()
         if (!request) return reply.send({ output: JSON.stringify({ error: 'empty_request' }) })
-        const isAdmin = user.email.toLowerCase() === config.adminEmail
+        const isAdmin = isAdminUser
+        const sub = await resolveSub()
+        const useSub = sub.active
         let lang = isAdmin ? 'ro' : String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
         if (!/^[a-z]{2}$/.test(lang)) lang = 'en'
         const prompt =
@@ -363,7 +380,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           }
           if (!actionNames.has(tname)) return execIntrospection(tname, targs)
           if (tname === 'web_search' || tname === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
-          const out = await runGoogleTool(tname, targs, token)
+          // „all inclusive" pe abonament: căutarea din escaladarea vocii
+          // plătește tot din cheia ownerului când abonamentul e activ.
+          const out = await runGoogleTool(tname, targs, token, useSub ? sub.key : undefined)
           // ECRANUL CERUT DE CREIER ajunge la client — altfel creierul „găsea"
           // melodia dar nu o punea nimeni pe monitor: faptă fără efect vizibil.
           try {
@@ -389,6 +408,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           maxTokens: 2000,
           onCost: (usd) => { toolCostUsd += usd },
           forceFirstRound: hasActionIntent(request),
+          // „all inclusive" pe abonament, și în voce: raționamentul escaladării
+          // rulează pe modelul + cheia ownerului când abonamentul e activ.
+          model: useSub ? sub.model : undefined,
+          apiKey: useSub ? sub.key : undefined,
         })
         settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen })
@@ -430,7 +453,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (name === 'generate_image') {
         const prompt = String(args.prompt ?? '')
         if (!prompt) return reply.send({ output: JSON.stringify({ error: 'no_prompt' }) })
-        const r = await generateImage(prompt)
+        const imgSub = await resolveSub()
+        const r = await generateImage(prompt, imgSub.active ? imgSub.key : undefined)
         if ('error' in r) return reply.send({ output: JSON.stringify({ error: r.error }) })
         toolCostUsd += IMAGE_USD_PER_CALL
         settle()
@@ -440,8 +464,13 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
 
       // Căutările au cost fix (ca în chatul scris); skill-urile Google (Gmail,
       // Calendar...) sunt gratuite — rulează pe tokenul userului, nu pe cheile noastre.
-      if (name === 'web_search' || name === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
-      const out = await runGoogleTool(name, args, token)
+      let searchApiKey: string | undefined
+      if (name === 'web_search' || name === 'youtube_search') {
+        toolCostUsd += SERPER_USD_PER_CALL
+        const s = await resolveSub()
+        if (s.active) searchApiKey = s.key
+      }
+      const out = await runGoogleTool(name, args, token, searchApiKey)
       settle()
       // screen_url din rezultat → clientul deschide monitorul (ca în chat).
       let screen: { url: string; title: string } | undefined

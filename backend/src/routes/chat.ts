@@ -2098,6 +2098,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email, usage,
           (speechPref || isAdminUser) && langName ? langName : '',
+          brainApiKey,
         )
       }
       // PRIMUL CUVÂNT SUB 1s ȘI PE TURELE DE ACȚIUNE (Adrian, 27 iul, dovadă
@@ -2271,6 +2272,11 @@ async function runTool(
   email: string,
   usage: { usd: number },
   langName: string,
+  // REGULA „ALL INCLUSIVE" PE ABONAMENT (28 iul): când tura curentă rulează pe
+  // cheia proprie a ownerului, TOT ce costă în aceeași tură (imagine + căutare
+  // web/YouTube) se plătește tot de acolo — undefined pe restul turelor →
+  // punga centrală, ca până acum.
+  brainApiKey?: string,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
   // Urmă în jurnal pentru FIECARE unealtă chemată (incident 25 iul: „nu face
@@ -2480,7 +2486,7 @@ async function runTool(
     case 'generate_image': {
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
-      const result = await generateImage(prompt)
+      const result = await generateImage(prompt, brainApiKey)
       if ('error' in result) return JSON.stringify({ error: result.error })
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
@@ -2683,7 +2689,7 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
-        const result = await runGoogleTool(block.name, block.input, token)
+        const result = await runGoogleTool(block.name, block.input, token, brainApiKey)
         // AFIȘARE AUTOMATĂ: uneltele care întorc `screen_url` (hartă, rută, vreme,
         // video) trebuie să APARĂ pe monitor dintr-un SINGUR apel — creierul nu
         // face mereu al doilea `show_on_screen`, deci userul vedea „am arătat
