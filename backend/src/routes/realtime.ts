@@ -225,7 +225,13 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const order = String(targs.order ?? '').trim()
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
             const jobId = await createBuildJob(user.email, order)
-            return JSON.stringify({ ok: !!jobId, job: jobId })
+            // Aceeași frază scurtă ca în chat (Adrian, 28 iul): doar „Am preluat
+            // cerința." — vocea nu ține discursuri despre lucrător/PR/email.
+            return JSON.stringify({
+              ok: !!jobId,
+              job: jobId,
+              speak_rule: 'Spune EXACT: „Am preluat cerința." — nimic în plus.',
+            })
           }
           if (tname === 'constructor_status') {
             const jobs = await listBuildJobs(8)
