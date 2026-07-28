@@ -2217,10 +2217,14 @@ async function runTool(
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
       const jobId = await createBuildJob(email, order)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+      // FRAZA DE PRELUARE, SCURTĂ (Adrian, 28 iul: „scoate «mă apuc, verific și
+      // execut» — trebuie o frază scurtă: am preluat cerința"). Instrucțiunea
+      // spre model e explicită: confirmă în 3-4 cuvinte, fără promisiuni lungi.
       return JSON.stringify({
         ok: true,
         job: jobId,
-        message: `Ordin #${jobId} în coadă. Lucrătorul îl ia în cel mult 2 minute, construiește cu build+teste și deschide PR-ul; ownerul primește email cu linkul de merge. Vezi starea cu constructor_status.`,
+        message: `Am preluat cerința (ordin #${jobId}).`,
+        speak_rule: 'Confirmă EXACT atât: „Am preluat cerința." — nimic în plus, fără „mă apuc/verific/execut", fără explicații despre lucrător/PR/email.',
       })
     }
     case 'constructor_status': {
