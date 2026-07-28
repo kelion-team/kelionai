@@ -39,7 +39,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance, getBrainCatalog } from '../services/openrouter.js'
-import { loadBrainSub, saveBrainSub } from '../services/brainSubscription.js'
+import { loadBrainSub, saveBrainSub, subActive } from '../services/brainSubscription.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
@@ -302,8 +302,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ])
     // CREIERUL DE ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
     // ABONAMENT, nu tot OpenRouter"): când modul e activ + există cheie, bara
-    // arată soldul cheii ownerului, etichetat clar „Abonament".
-    const subActiveNow = sub.mode === 'subscription' && sub.key.length > 0
+    // arată soldul cheii ownerului, etichetat clar „Abonament". Sursa unică e
+    // subActive() (auditul 28 iul găsise o reimplementare manuală aici, care
+    // ar fi putut desincroniza tăcut dacă regula reală se schimba altundeva).
+    // Ruta e deja gardată admin-only mai sus, deci `true` e corect aici.
+    const subActiveNow = subActive(sub, true)
     const subBalance = sub.key.length > 0 ? await getOpenRouterBalance(false, sub.key) : null
     return reply.send({
       active: subActiveNow ? 'subscription' : 'openrouter',

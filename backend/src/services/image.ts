@@ -13,15 +13,24 @@ interface StoredImage {
 const cache = new Map<string, StoredImage>()
 const MAX_CACHE = 60
 
-async function put(mime: string, buf: Buffer): Promise<string> {
-  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-  await saveGeneratedImage(id, mime, buf)
-  cache.set(id, { mime, buf, ts: Date.now() })
+// PLAFONUL, ACUM ÎN AMBELE LOCURI (auditul 28 iul): trima exista DOAR în
+// put() — ruta publică GET /api/image/:id (fără autentificare) trecea prin
+// getImage(), care adăuga în cache FĂRĂ nicio evacuare. Orice id vechi cerut
+// repetat (share de link, crawler) creștea memoria nemărginit, ocolind
+// plafonul aparent. O singură funcție de trimare, apelată din ambele căi.
+function trim(): void {
   while (cache.size > MAX_CACHE) {
     const oldest = cache.keys().next().value
     if (oldest === undefined) break
     cache.delete(oldest)
   }
+}
+
+async function put(mime: string, buf: Buffer): Promise<string> {
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  await saveGeneratedImage(id, mime, buf)
+  cache.set(id, { mime, buf, ts: Date.now() })
+  trim()
   return id
 }
 
@@ -32,6 +41,7 @@ export async function getImage(id: string): Promise<StoredImage | null> {
   if (row) {
     const img = { mime: row.mime, buf: row.data, ts: Date.now() }
     cache.set(id, img)
+    trim()
     return img
   }
   return null
