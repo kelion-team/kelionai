@@ -45,6 +45,8 @@ import {
   decideKelionTool,
   createBuildJob,
   listBuildJobs,
+  cancelBuildJobs,
+  cancelAllPendingBuildJobs,
   dbTablesOverview,
   dbQuery,
 } from '../db.js'
@@ -376,6 +378,23 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
   description:
     'ADMIN ONLY. See the state of your build orders (queued/running/done/failed, PR link, tokens used). Call it when the owner asks how a build is going, then show the result with show_document.',
   input_schema: { type: 'object', properties: {} },
+}
+// ANULAREA ORDINELOR (Adrian, 28 iul). Lipsa a fost semnalată de KELION ÎNSUȘI
+// în „Cereri neacoperite": „Stop or cancel active and queued constructor build
+// jobs — No constructor cancellation tool is available; constructor_status is
+// read-only". Fără ea, un ordin greșit rămâne în coadă, e reluat de cron la
+// fiecare 2 minute și trimite mail de eșec de fiecare dată.
+const CANCEL_BUILD_TOOL: Tool = {
+  name: 'cancel_build_jobs',
+  description:
+    'ADMIN ONLY. Cancel build orders that are queued or running. Pass the ids to cancel, or all:true to cancel EVERYTHING pending. Use it when the owner says to stop/cancel a build, when an order is obsolete (already fixed by hand), or when the same order keeps failing in a loop. Confirm with the owner before cancelling everything.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      ids: { type: 'array', items: { type: 'number' }, description: 'Order ids to cancel (from constructor_status).' },
+      all: { type: 'boolean', description: 'true = cancel every queued/running order.' },
+    },
+  },
 }
 // SĂNĂTATEA PROPRIE (Adrian, 27 iul: „Kelion trebuie să vadă asta și să poată
 // comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să
@@ -1808,7 +1827,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const allTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     // PLAFONUL DE 64 DE UNELTE (dovadă live 28 iul, log: `[CHAT ERROR]
     // openrouter 400: "at most 64 tools are allowed"`): importul complet Google
@@ -2210,6 +2229,14 @@ async function runTool(
       return JSON.stringify({
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
+    }
+    case 'cancel_build_jobs': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const all = args.all === true
+      const ids = Array.isArray(args.ids) ? (args.ids as unknown[]).map(Number).filter(Number.isInteger) : []
+      if (!all && !ids.length) return JSON.stringify({ error: 'nimic de anulat: dă ids sau all:true' })
+      const n = all ? await cancelAllPendingBuildJobs() : await cancelBuildJobs(ids)
+      return JSON.stringify({ cancelled: n, note: n ? 'Ordinele anulate nu mai sunt reluate de lucrător.' : 'Nu era niciun ordin în coadă sau în lucru.' })
     }
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
