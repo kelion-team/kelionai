@@ -116,9 +116,21 @@ export async function brainCompleteWithTools(
   prompt: string,
   tools: AnthropicTool[],
   execTool: (name: string, args: Record<string, unknown>) => Promise<string>,
-  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void; forceFirstRound?: boolean } = {},
+  opts: {
+    maxTokens?: number
+    maxRounds?: number
+    onCost?: (usd: number) => void
+    forceFirstRound?: boolean
+    // REGULA „ALL INCLUSIVE" PE ABONAMENT ȘI ÎN VOCE (28 iul): dacă escaladarea
+    // vocii rulează în numele ownerului cu abonamentul activ, folosește modelul
+    // + cheia lui, nu punga centrală — undefined pe restul cazurilor (voce
+    // normală, useri) → comportament neschimbat.
+    model?: string
+    apiKey?: string
+  } = {},
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
+  const model = opts.model ?? workModel()
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -129,19 +141,21 @@ export async function brainCompleteWithTools(
       const forced = opts.forceFirstRound && round === 0 && tools.length > 0
       let r: OrChatResult
       try {
-        r = await openrouterChat(workModel(), messages, tools, {
+        r = await openrouterChat(model, messages, tools, {
           maxTokens: opts.maxTokens ?? 2000,
           reasoning: 'medium',
           toolChoice: forced ? 'required' : undefined,
+          apiKey: opts.apiKey,
         })
       } catch (e) {
         // Forțarea nu are voie să omoare cererea (audit 28 iul): unii furnizori
         // resping tool_choice:'required' cu 400 → runda se reia liberă, ca în
         // orchestrator. Fără forțare, eroarea urcă la plasa finală de mai jos.
         if (!forced) throw e
-        r = await openrouterChat(workModel(), messages, tools, {
+        r = await openrouterChat(model, messages, tools, {
           maxTokens: opts.maxTokens ?? 2000,
           reasoning: 'medium',
+          apiKey: opts.apiKey,
         })
       }
       if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
@@ -165,7 +179,7 @@ export async function brainCompleteWithTools(
       }
     }
     // plafonul de runde atins — cerem răspunsul final fără alte unelte
-    const last = await openrouterChat(workModel(), messages, [], { maxTokens: opts.maxTokens ?? 2000 })
+    const last = await openrouterChat(model, messages, [], { maxTokens: opts.maxTokens ?? 2000, apiKey: opts.apiKey })
     if (opts.onCost && last.costUsd > 0) opts.onCost(last.costUsd)
     return last.text.trim()
   } catch {
@@ -176,8 +190,9 @@ export async function brainCompleteWithTools(
     // tehnică". Reîncercăm O DATĂ fără unelte: un răspuns vorbit real, chiar
     // dacă fără faptă, e mai onest decât o eroare inventată.
     try {
-      const plain = await openrouterChat(workModel(), [{ role: 'user', content: prompt }], [], {
+      const plain = await openrouterChat(model, [{ role: 'user', content: prompt }], [], {
         maxTokens: opts.maxTokens ?? 2000,
+        apiKey: opts.apiKey,
       })
       if (opts.onCost && plain.costUsd > 0) opts.onCost(plain.costUsd)
       return plain.text.trim()

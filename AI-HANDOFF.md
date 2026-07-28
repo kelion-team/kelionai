@@ -250,6 +250,11 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **28 IUL (valul 32) — „ALL INCLUSIVE" ȘI ÎN VOCE (Adrian: „de ce vocea nu participă la abonament?"):**
+  1. **Răspunsul, cu limite tehnice reale**: conversația LIVE (full-duplex, ce se aude) rulează pe **OpenAI Realtime**, un provider COMPLET DIFERIT de OpenRouter — cheia de abonament (OpenRouter) nu poate plăti niciodată acea parte, indiferent ce facem în cod (nu e o alegere de design, e o limită de fapt: alt furnizor, altă factură).
+  2. **Ce CHIAR trece prin OpenRouter din voce — acum respectă comutatorul**: escaladarea `ask_brain` (raționamentul greu), `generate_image`, `web_search`/`youtube_search` — toate, dacă owner-ul are abonamentul activ ȘI e cu lacătul admin deblocat (același al 2-lea factor ca la scris). `brain.ts` (`brainCompleteWithTools`) primește acum `model?`/`apiKey?` opționale; `realtime.ts` calculează starea abonamentului LENEȘ (`resolveSub()`), doar în cele 3-4 ramuri care chiar ating OpenRouter — NU pe fiecare apel de unealtă din voce, ca să nu adauge latență pe calea rapidă (note/gesturi/Google rămân neatinse).
+  3. **Userii obișnuiți, prin voce**: `subActive` cere `isAdmin` gated de lacăt, la fel ca peste tot — niciun user nu atinge vreodată cheia/creditul ownerului, nici din escaladarea vocii.
+  4. Build backend verde, 48 teste verzi.
 - 🗓️ **28 IUL (valul 31) — CREIERUL DE ABONAMENT: regula „ALL INCLUSIVE" (Adrian: „dacă e pe abonament trebuie să respecte regula all inclusive"):**
   1. **Problema**: pe modul Abonament, doar raționamentul/uneltele mergeau pe cheia proprie a ownerului — `generate_image` și `web_search`/`youtube_search` rămâneau pe punga CENTRALĂ, indiferent de comutator. Nu era „all inclusive": o tură de abonament care genera și o imagine plătea din DOUĂ conturi diferite.
   2. **Fix**: `apiKey?` opțional propagat prin tot lanțul — `openrouter.ts` (`openrouterImage`, `openrouterWebSearch`) → `image.ts` (`generateImage`) / `google.ts` (`webSearch`, `youtubeSearch`, `runGoogleTool`) → `chat.ts` (`runTool` primește `brainApiKey` din tura curentă, îl trece la `generate_image` și la orice unealtă Google care atinge OpenRouter). Restul uneltelor Google (Calendar/Gmail/Drive/hărți/vreme/etc.) ignoră parametrul — folosesc token OAuth sau servicii keyless, neschimbate.
