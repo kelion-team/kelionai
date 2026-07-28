@@ -133,8 +133,6 @@ export const config = {
     .filter(Boolean),
   adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
   bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
-  githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
-  githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
 } as const
