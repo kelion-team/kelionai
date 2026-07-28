@@ -168,6 +168,14 @@ export default function Stage({ user }: { user: User }) {
     // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
     stripe?: { available: number; pending: number; currency: string } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
+    // CREIERUL DE ABONAMENT: soldul cheii proprii a ownerului când modul e activ.
+    subscription?: {
+      mode: string
+      active: boolean
+      model: string
+      hasKey: boolean
+      balance: { ok: boolean; balance: number; low: boolean; topup: string } | null
+    } | null
   } | null>(null)
   // Starea lacătului la intrare + deblocarea venită din voce (amprenta
   // potrivită → realtimeVoice emite `kelion:admin-unlock`).
@@ -827,6 +835,29 @@ export default function Stage({ user }: { user: User }) {
             {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
                 realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
                 creierul central. Roșu când e sub prag. Click → alimentare. */}
+            {/* ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
+                ABONAMENT, nu tot OpenRouter"): când creierul de abonament e activ,
+                bara arată soldul cheii TALE, etichetat clar. Click → Setări. */}
+            {brainCredit?.subscription?.active && (
+              <button
+                type="button"
+                className={`ghost ${brainCredit.subscription.balance?.low ? 'blink-red' : ''}`}
+                onClick={() =>
+                  brainCredit.subscription?.balance?.topup
+                    ? window.open(brainCredit.subscription.balance.topup, '_blank', 'noopener')
+                    : setSettingsOpen(true)
+                }
+                title={
+                  brainCredit.subscription.balance?.ok
+                    ? `Creier ABONAMENT (cheia ta): $${(brainCredit.subscription.balance.balance ?? 0).toFixed(2)} real${brainCredit.subscription.balance.low ? ' — depune bani!' : ''} · model: ${brainCredit.subscription.model} · click pentru alimentare`
+                    : 'Creier ABONAMENT activ, dar nu pot citi soldul (cheie greșită sau cont inaccesibil)'
+                }
+              >
+                {brainCredit.subscription.balance?.ok
+                  ? `⚡ Abonament $${(brainCredit.subscription.balance.balance ?? 0).toFixed(2)}`
+                  : '⚡ Abonament ⚠'}
+              </button>
+            )}
             {brainCredit && (
               <button
                 type="button"
@@ -834,7 +865,7 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
                 title={
                   brainCredit.openrouter.live
-                    ? `OpenRouter (creierul central): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
+                    ? `OpenRouter (creierul central, userii + free): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
                     : 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)'
                 }
               >

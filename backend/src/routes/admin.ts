@@ -38,7 +38,7 @@ import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
-import { getOpenRouterBalance } from '../services/openrouter.js'
+import { getOpenRouterBalance, getBrainCatalog } from '../services/openrouter.js'
 import { loadBrainSub, saveBrainSub } from '../services/brainSubscription.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -294,13 +294,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, stripeBal] = await Promise.all([
+    const [pool, orBalance, stripeBal, sub] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       getStripeBalance(),
+      loadBrainSub(),
     ])
+    // CREIERUL DE ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
+    // ABONAMENT, nu tot OpenRouter"): când modul e activ + există cheie, bara
+    // arată soldul cheii ownerului, etichetat clar „Abonament".
+    const subActiveNow = sub.mode === 'subscription' && sub.key.length > 0
+    const subBalance = sub.key.length > 0 ? await getOpenRouterBalance(false, sub.key) : null
     return reply.send({
-      active: 'openrouter',
+      active: subActiveNow ? 'subscription' : 'openrouter',
+      subscription: {
+        mode: sub.mode,
+        active: subActiveNow,
+        model: sub.model,
+        hasKey: sub.key.length > 0,
+        balance: subBalance
+          ? { ok: subBalance.ok, balance: subBalance.balance, low: subBalance.low, topup: subBalance.topup }
+          : null,
+      },
       openrouter: {
         ok: Boolean(config.openrouter.key),
         topup: 'https://openrouter.ai/credits',
@@ -416,6 +431,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // centrală) — cardul apare doar când există cheie.
       balance: hasKey ? await getOpenRouterBalance(false, sub.key) : null,
     })
+  })
+
+  // Catalogul COMPLET pentru selectorul manual de model al creierului de
+  // abonament: TOATE modelele cu tool-use de pe OpenRouter, orice provider
+  // (Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...), nu lista îngustă de user.
+  app.get('/api/admin/brain-models', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ models: await getBrainCatalog() })
   })
 
   app.post<{ Body: { mode?: string; model?: string; key?: string } }>(
