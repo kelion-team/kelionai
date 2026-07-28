@@ -520,14 +520,18 @@ export async function openrouterComplete(
 // Modelul de imagini întoarce imaginea inline în `message.images[].image_url.url`
 // (data URL). Întoarcem mime + bytes; costul REAL vine din usage.cost.
 export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: string }
-export async function openrouterImage(prompt: string): Promise<OrImage> {
-  if (!config.openrouter.key) return { error: 'image_not_configured' }
+// `apiKey` opțional (regula „all inclusive" pe abonament, 28 iul): pe o tură
+// rutată pe cheia de abonament, imaginea generată în ACEEAȘI tură se plătește
+// tot de acolo — nu doar raționamentul, TOT costul turei.
+export async function openrouterImage(prompt: string, apiKey?: string): Promise<OrImage> {
+  const orKey = (apiKey ?? config.openrouter.key).trim()
+  if (!orKey) return { error: 'image_not_configured' }
   let r: Response
   try {
     r = await fetch(`${OR_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${config.openrouter.key}`,
+        Authorization: `Bearer ${orKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://kelionai.app',
         'X-Title': 'Kelionai',
@@ -562,15 +566,19 @@ export interface OrSearchResult {
   sources: { title: string; url: string }[]
   costUsd: number
 }
-export async function openrouterWebSearch(query: string, instruction?: string): Promise<OrSearchResult> {
-  if (!config.openrouter.key) return { text: '', sources: [], costUsd: 0 }
+// `apiKey` opțional — vezi nota „all inclusive" de la openrouterImage: pe
+// abonament, căutarea web/YouTube din ACEEAȘI tură se plătește tot din cheia
+// ownerului, nu din punga centrală.
+export async function openrouterWebSearch(query: string, instruction?: string, apiKey?: string): Promise<OrSearchResult> {
+  const orKey = (apiKey ?? config.openrouter.key).trim()
+  if (!orKey) return { text: '', sources: [], costUsd: 0 }
   const sys = instruction ?? 'Search the web and answer concisely with the most current, factual information. Cite sources.'
   let r: Response
   try {
     r = await fetch(`${OR_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${config.openrouter.key}`,
+        Authorization: `Bearer ${orKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://kelionai.app',
         'X-Title': 'Kelionai',

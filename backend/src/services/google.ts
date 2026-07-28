@@ -542,12 +542,13 @@ export async function geminiVision(jpegBase64: string, question: string): Promis
   return text || null
 }
 
-async function webSearch(query: string, max: number): Promise<string> {
+async function webSearch(query: string, max: number, apiKey?: string): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
   // Căutare web prin OpenRouter (plugin `web`) — aceeași cheie ca creierul, fără
-  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări).
-  const r = await openrouterWebSearch(query)
+  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări). `apiKey`
+  // opțional: regula „all inclusive" pe abonament (28 iul).
+  const r = await openrouterWebSearch(query, undefined, apiKey)
   if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
   return JSON.stringify({
     answer: r.text,
@@ -1079,13 +1080,15 @@ async function ytPlayable(link: string): Promise<boolean> {
   }
 }
 
-async function youtubeSearch(query: string, max: number): Promise<string> {
+async function youtubeSearch(query: string, max: number, apiKey?: string): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
   // Prin OpenRouter (plugin web) — cerem linkuri REALE de watch. Fără Serper.
+  // `apiKey` opțional: regula „all inclusive" pe abonament (28 iul).
   const r = await openrouterWebSearch(
     `${query} — best YouTube videos`,
     'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
+    apiKey,
   )
   const seen = new Set<string>()
   const videos: { title: string; link: string }[] = []
@@ -1280,21 +1283,26 @@ function getTime(timezone: string): string {
   }
 }
 
+// `apiKey` opțional — regula „all inclusive" pe creierul de abonament (28
+// iul): doar web_search/youtube_search îl folosesc (trec prin OpenRouter);
+// restul uneltelor Google îl ignoră (folosesc token-ul OAuth al userului sau
+// servicii keyless), la fel cum majoritatea ignoră deja `token`.
 export async function runGoogleTool(
   name: string,
   input: unknown,
   token: string,
+  apiKey?: string,
 ): Promise<string> {
   const args = (input ?? {}) as Record<string, unknown>
   try {
     // These don't use the user's Google token.
-    if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5))
+    if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5), apiKey)
     if (name === 'get_weather')
       return await weather(str(args.location), num(args.lat, Number.NaN), num(args.lon, Number.NaN))
     if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
     if (name === 'maps_directions')
       return await mapsDirections(str(args.origin), str(args.destination))
-    if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
+    if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5), apiKey)
     if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
     if (name === 'wikipedia_lookup') return await wikipediaLookup(str(args.query))
     if (name === 'convert_currency')

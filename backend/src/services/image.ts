@@ -39,10 +39,13 @@ export async function getImage(id: string): Promise<StoredImage | null> {
 
 export type ImageResult = { id: string; mime: string } | { error: string }
 
-export async function generateImage(prompt: string): Promise<ImageResult> {
+// `apiKey` opțional — regula „all inclusive" pe creierul de abonament (28
+// iul): dacă tura curentă rulează pe cheia proprie a ownerului, imaginea
+// generată în ACEEAȘI tură se plătește tot de acolo, nu din punga centrală.
+export async function generateImage(prompt: string, apiKey?: string): Promise<ImageResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
-  const r = await openrouterImage(p)
+  const r = await openrouterImage(p, apiKey)
   if ('error' in r) return { error: r.error }
   return { id: await put(r.mime, r.buf), mime: r.mime }
 }
