@@ -17,7 +17,13 @@ export function getPool(): pg.Pool {
     // self-signed acceptat (proxy-uri gestionate).
     const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
     const ssl = noTls ? false : { rejectUnauthorized: false }
-    pool = new pg.Pool({ connectionString: url, ssl })
+    // PLASĂ DE BLOCARE (auditul 28 iul: pool-ul n-avea NICIUN timeout — o
+    // cerere de conexiune putea atârna nemărginit dacă Postgres era saturat).
+    // Doar timpul de OBȚINERE a unei conexiuni din pool e limitat aici — nu
+    // durata query-urilor (unele legitime, ex. backfill embeddings, pot rula
+    // mai mult; un `statement_timeout` global ar cere un audit separat al
+    // fiecărui query lung, nu o presupunere aici).
+    pool = new pg.Pool({ connectionString: url, ssl, connectionTimeoutMillis: 10_000 })
   }
   return pool
 }
@@ -75,6 +81,10 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_events (created_at);
+    -- Audit 28 iul: deleteUserData() șterge din cost_events pe user_email —
+    -- fără index, scanare completă la fiecare ștergere GDPR pe un tabel care
+    -- crește la fiecare apel AI măsurat.
+    CREATE INDEX IF NOT EXISTS idx_cost_user ON cost_events (user_email);
     -- Cross-session memory: durable facts Kelion learns about each user and
     -- recalls in later conversations (the Memory agent writes here).
     -- the agent column namespaces memory: Kelion keeps its own (kelion), and each
@@ -196,6 +206,10 @@ export async function initDb(): Promise<void> {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
+    -- Audit 28 iul: getAdminAccount() face SUM(amount) WHERE kind = 'profit'
+    -- nemărginit în timp, pe panoul de costuri admin — fără acest index, scanare
+    -- completă a întregului ledger, la nesfârșit mai lentă pe măsură ce crește.
+    CREATE INDEX IF NOT EXISTS idx_billing_kind ON billing_events (kind);
     -- STRIPE + CREDITS (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
     -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
     CREATE TABLE IF NOT EXISTS transactions (
@@ -1039,10 +1053,18 @@ export async function recordDownload(
   ua: string,
 ): Promise<void> {
   if (!dbEnabled()) return
-  await getPool().query(
-    'INSERT INTO app_downloads (file, user_email, ip, country, ua) VALUES ($1,$2,$3,$4,$5)',
-    [file, email, ip, country, ua.slice(0, 300)],
-  )
+  // PLASĂ (auditul 28 iul): singurul apelant de azi (index.ts) o cheamă cu
+  // `.catch()`, dar fără try/catch propriu funcția e fragilă la un al doilea
+  // apelant viitor fără plasă — restul funcțiilor de scriere din db.ts au
+  // toate propriul try/catch, asta era excepția.
+  try {
+    await getPool().query(
+      'INSERT INTO app_downloads (file, user_email, ip, country, ua) VALUES ($1,$2,$3,$4,$5)',
+      [file, email, ip, country, ua.slice(0, 300)],
+    )
+  } catch (e) {
+    console.error(`[downloads] recordDownload EȘUAT pentru ${file}: ${String(e).slice(0, 160)}`)
+  }
 }
 
 export interface DownloadRow {
@@ -1878,8 +1900,11 @@ export async function recordCost(email: string, kind: string, costUsd: number): 
       'INSERT INTO cost_events (user_email, kind, cost_usd) VALUES ($1, $2, $3)',
       [email, kind, costUsd],
     )
-  } catch {
-    // Never break a request because metering failed.
+  } catch (e) {
+    // Never break a request because metering failed — dar NU în tăcere
+    // (auditul 28 iul: catch-ul era complet gol, un eveniment de cost pierdut
+    // nu lăsa nicio urmă, nici măcar în server_logs).
+    console.error(`[bani] recordCost EȘUAT pentru ${email} (${kind}, $${costUsd}): ${String(e).slice(0, 160)}`)
   }
 }
 

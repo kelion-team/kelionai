@@ -130,8 +130,11 @@ export default function CustomerSettings({
     hasKey: boolean
     keyHint: string
     balance: SubBalance | null
-  }>({ mode: 'free', model: '', hasKey: false, keyHint: '', balance: null })
+    hasVoiceKey: boolean
+    voiceKeyHint: string
+  }>({ mode: 'free', model: '', hasKey: false, keyHint: '', balance: null, hasVoiceKey: false, voiceKeyHint: '' })
   const [subKeyInput, setSubKeyInput] = useState('')
+  const [voiceKeyInput, setVoiceKeyInput] = useState('')
   const [subBusy, setSubBusy] = useState(false)
   // Catalogul COMPLET OpenRouter (toate modelele cu tool-use, orice provider) —
   // selectorul manual al creierului de abonament nu e limitat la lista de user.
@@ -170,7 +173,7 @@ export default function CustomerSettings({
     })()
   }, [isAdmin])
 
-  async function saveSub(patch: { mode?: 'free' | 'subscription'; model?: string; key?: string }): Promise<void> {
+  async function saveSub(patch: { mode?: 'free' | 'subscription'; model?: string; key?: string; voiceKey?: string }): Promise<void> {
     setSubBusy(true)
     try {
       const r = await fetch('/api/admin/brain-sub', {
@@ -182,6 +185,7 @@ export default function CustomerSettings({
       if (r.ok) {
         setSub(await r.json())
         if (patch.key !== undefined) setSubKeyInput('')
+        if (patch.voiceKey !== undefined) setVoiceKeyInput('')
       }
     } catch {
       /* rețea → starea rămâne cum era */
@@ -464,6 +468,46 @@ export default function CustomerSettings({
                 )}
               </div>
             )}
+
+            {/* VOCEA PE ABONAMENT (28 iul) — cheie SEPARATĂ, OpenAI, nu OpenRouter.
+                Conversația live rulează pe un provider diferit; cheia de mai sus
+                (OpenRouter) nu o poate plăti niciodată. */}
+            <label className="contact-label" style={{ marginTop: 14 }}>
+              {ro ? 'Vocea pe abonament — cheia ta OpenAI (sk-…)' : 'Voice on subscription — your OpenAI key (sk-…)'}
+            </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder={sub.hasVoiceKey ? `${ro ? 'setată' : 'set'} ${sub.voiceKeyHint}` : 'sk-…'}
+                value={voiceKeyInput}
+                onChange={(e) => setVoiceKeyInput(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={subBusy || !voiceKeyInput.trim()}
+                onClick={() => void saveSub({ voiceKey: voiceKeyInput.trim() })}
+              >
+                {ro ? 'Salvează' : 'Save'}
+              </button>
+              {sub.hasVoiceKey && (
+                <button
+                  type="button"
+                  className="ghost settings-danger"
+                  disabled={subBusy}
+                  onClick={() => void saveSub({ voiceKey: '' })}
+                >
+                  {ro ? 'Șterge' : 'Remove'}
+                </button>
+              )}
+            </div>
+            <p className="settings-note">
+              {ro
+                ? 'O cheie DIFERITĂ, de la platform.openai.com (contul tău OpenAI, creditul tău) — conversația vocală live rulează pe OpenAI, nu pe OpenRouter, deci are nevoie de propria cheie. Fără ea, vocea rămâne pe punga centrală; restul (creier, imagini, căutare) merge deja pe cheia OpenRouter de mai sus.'
+                : 'A DIFFERENT key, from platform.openai.com (your OpenAI account, your credit) — the live voice conversation runs on OpenAI, not OpenRouter, so it needs its own key. Without it, voice stays on the central pool; the rest (brain, images, search) already runs on your OpenRouter key above.'}
+            </p>
           </section>
         )}
 

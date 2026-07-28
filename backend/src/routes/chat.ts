@@ -1821,7 +1821,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }) as typeof reply.raw.write
     const pingTimer = setInterval(() => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return
-      if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
+      // PLASĂ (auditul 28 iul): rawWrite pe un socket EXACT distrus în cursa
+      // dintre verificarea de mai sus și scriere ar arunca SINCRON, dintr-un
+      // callback de timer — în afara oricărui context Fastify supraveghează,
+      // deci ar deveni uncaughtException la nivel de proces (prins doar de
+      // plasa globală din index.ts, dar cu turul curent rămas nefinalizat).
+      try {
+        if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
+      } catch {
+        clearInterval(pingTimer)
+      }
     }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
       clearInterval(pingTimer)

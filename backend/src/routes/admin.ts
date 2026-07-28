@@ -39,7 +39,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance, getBrainCatalog } from '../services/openrouter.js'
-import { loadBrainSub, saveBrainSub } from '../services/brainSubscription.js'
+import { loadBrainSub, saveBrainSub, subActive } from '../services/brainSubscription.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
@@ -302,8 +302,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ])
     // CREIERUL DE ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
     // ABONAMENT, nu tot OpenRouter"): când modul e activ + există cheie, bara
-    // arată soldul cheii ownerului, etichetat clar „Abonament".
-    const subActiveNow = sub.mode === 'subscription' && sub.key.length > 0
+    // arată soldul cheii ownerului, etichetat clar „Abonament". Sursa unică e
+    // subActive() (auditul 28 iul găsise o reimplementare manuală aici, care
+    // ar fi putut desincroniza tăcut dacă regula reală se schimba altundeva).
+    // Ruta e deja gardată admin-only mai sus, deci `true` e corect aici.
+    const subActiveNow = subActive(sub, true)
     const subBalance = sub.key.length > 0 ? await getOpenRouterBalance(false, sub.key) : null
     return reply.send({
       active: subActiveNow ? 'subscription' : 'openrouter',
@@ -422,6 +425,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const sub = await loadBrainSub(true)
     const hasKey = sub.key.length > 0
+    const hasVoiceKey = sub.voiceKey.length > 0
     return reply.send({
       mode: sub.mode,
       model: sub.model,
@@ -430,6 +434,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Soldul REAL al cheii de abonament (același endpoint /credits ca punga
       // centrală) — cardul apare doar când există cheie.
       balance: hasKey ? await getOpenRouterBalance(false, sub.key) : null,
+      // VOCEA PE ABONAMENT (28 iul): cheie OpenAI separată — fără sold expus
+      // (OpenAI n-are un /credits public comparabil), doar starea configurării.
+      hasVoiceKey,
+      voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
     })
   })
 
@@ -442,24 +450,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ models: await getBrainCatalog() })
   })
 
-  app.post<{ Body: { mode?: string; model?: string; key?: string } }>(
+  app.post<{ Body: { mode?: string; model?: string; key?: string; voiceKey?: string } }>(
     '/api/admin/brain-sub',
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string } = {}
+      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string; voiceKey?: string } = {}
       if (req.body?.mode === 'free' || req.body?.mode === 'subscription') patch.mode = req.body.mode
       if (typeof req.body?.model === 'string' && req.body.model.trim()) patch.model = req.body.model.trim()
-      // key: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
+      // key/voiceKey: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
       if (typeof req.body?.key === 'string') patch.key = req.body.key.trim()
+      if (typeof req.body?.voiceKey === 'string') patch.voiceKey = req.body.voiceKey.trim()
       const sub = await saveBrainSub(patch)
       const hasKey = sub.key.length > 0
+      const hasVoiceKey = sub.voiceKey.length > 0
       return reply.send({
         mode: sub.mode,
         model: sub.model,
         hasKey,
         keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
         balance: hasKey ? await getOpenRouterBalance(true, sub.key) : null,
+        hasVoiceKey,
+        voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
       })
     },
   )

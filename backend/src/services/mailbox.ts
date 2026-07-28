@@ -258,14 +258,21 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
 async function poll(): Promise<void> {
   if (!mailEnabled() || running) return
   running = true
-  const client = new ImapFlow({
-    host: config.mail.imapHost,
-    port: config.mail.imapPort,
-    secure: true,
-    auth: { user: config.mail.user, pass: config.mail.pass },
-    logger: false,
-  })
+  // MOARTE SILENȚIOASĂ (auditul 28 iul): constructorul ImapFlow stătea ÎN
+  // AFARA try/catch — dacă arunca, `running` rămânea `true` pentru totdeauna,
+  // iar poller-ul (la fiecare 3 min) ieșea instant, fără eroare, fără log,
+  // la nesfârșit. Acum e ÎN interiorul try, cu `finally` care resetează
+  // `running` indiferent unde pică (declarat `let` ca să rămână accesibil
+  // acolo chiar dacă exact constructorul e cel care aruncă).
+  let client: ImapFlow | undefined
   try {
+    client = new ImapFlow({
+      host: config.mail.imapHost,
+      port: config.mail.imapPort,
+      secure: true,
+      auth: { user: config.mail.user, pass: config.mail.pass },
+      logger: false,
+    })
     await client.connect()
     const lock = await client.getMailboxLock('INBOX')
     try {
@@ -316,10 +323,12 @@ async function poll(): Promise<void> {
   } catch (e) {
     console.error('[mailbox] poll failed:', (e as Error).message)
   } finally {
-    try {
-      await client.logout()
-    } catch {
-      /* ignore */
+    if (client) {
+      try {
+        await client.logout()
+      } catch {
+        /* ignore */
+      }
     }
     running = false
   }

@@ -193,11 +193,22 @@ function isNavigationRace(e: unknown): boolean {
   )
 }
 
+// PLASĂ DE BLOCARE (auditul 28 iul): `page.evaluate()` din Playwright n-are
+// parametru de timeout (spre deosebire de goto/click/fill) — dacă pagina
+// vizitată rulează JS sincron blocant, apelul poate atârna nemărginit,
+// ținând agățat întregul tur de chat (SSE-ul deschis către user).
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}_timeout`)), ms)),
+  ])
+}
+
 async function takeSnapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
   const title = await page.title()
   const url = page.url()
-  const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
-  const text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
+  const elements = ((await withTimeout(page.evaluate(COLLECT_SCRIPT), 8_000, 'evaluate')) as BrowserElement[]) ?? []
+  const text = String((await withTimeout(page.evaluate(TEXT_SCRIPT), 8_000, 'evaluate')) ?? '').trim().slice(0, 3000)
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
   return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }

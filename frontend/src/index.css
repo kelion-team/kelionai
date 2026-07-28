@@ -2047,6 +2047,13 @@ a.card-item:hover {
   background: rgba(255, 93, 93, 0.14);
   animation: rec 1.2s ease-in-out infinite;
 }
+/* Refuz de permisiune (28 iul): fără asta, un mic blocat de browser arăta
+   identic cu unul niciodată pornit — userul nu afla NICIODATĂ de ce nu merge. */
+.composer-mic.blocked {
+  border-color: #ffb020;
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.14);
+}
 
 /* Control zoom/potrivire text pe monitor (#27) */
 .ws-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }

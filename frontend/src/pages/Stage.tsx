@@ -27,6 +27,7 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { fetchBalance } from '../lib/billing'
 
 // SALVAREA CONȚINUTULUI DE PE MONITOR (Adrian, 25 iul: „nu se poate salva ce e pe
 // monitor"). Descarcă un text/HTML ca fișier local — un nume curat din titlu.
@@ -284,13 +285,12 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     if (user.role !== 'customer') return
     let alive = true
+    // FOLOSEȘTE HELPER-UL COMUN (auditul 28 iul: era un fetch inline duplicat
+    // aici, în loc de fetchBalance() deja folosit de WalletButton.tsx).
     const load = (): void => {
-      fetch('/api/billing/balance', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j && typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
-        })
-        .catch(() => {})
+      void fetchBalance().then((w) => {
+        if (alive && w) setUserCreditOut(w.credits <= 0)
+      })
     }
     load()
     const id = window.setInterval(load, 30_000)

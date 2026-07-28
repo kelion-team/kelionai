@@ -362,8 +362,12 @@ export async function openaiRealtimeAnswer(
   meserie?: string | null,
   hardLock = false,
   contextBlock = '',
+  // VOCEA PE ABONAMENT (28 iul): cheia OpenAI proprie a ownerului, opțională —
+  // undefined pe restul cazurilor (useri, mod free) → punga centrală, ca acum.
+  apiKey?: string,
 ): Promise<RealtimeAnswer> {
-  if (!config.openai.key)
+  const openaiKey = (apiKey ?? config.openai.key).trim()
+  if (!openaiKey)
     return { ok: false, status: 503, code: 'realtime_not_configured', error: 'realtime_not_configured', attempts: 0 }
 
   // Uneltele dinamice aprobate (auto-extindere) — și în voce.
@@ -511,7 +515,7 @@ export async function openaiRealtimeAnswer(
     if (left < 2_000) break
     attempts = attempt
 
-    const headers: Record<string, string> = { Authorization: `Bearer ${config.openai.key}` }
+    const headers: Record<string, string> = { Authorization: `Bearer ${openaiKey}` }
     if (attempt > 1) headers.connection = 'close'
 
     let r: Response
