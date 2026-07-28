@@ -514,7 +514,7 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
     seInchide = true
     log(`primit ${semnal} (timeout dur?) — raportez eșecul înainte să ies`)
     const plasa = setTimeout(() => process.exit(1), 20_000)
-    Promise.resolve(raportCurent ? raportCurent('failed', {}) : null)
+    Promise.resolve(raportCurent ? raportCurent('failed', {}, 3) : null)
       .catch(() => {})
       .finally(() => {
         clearTimeout(plasa)
