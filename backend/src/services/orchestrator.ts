@@ -11,6 +11,11 @@ import {
   geminiDirectChat,
   geminiDirectChatStream,
 } from './geminiDirect.js'
+import {
+  ANTHROPIC_DIRECT_PREFIX,
+  anthropicDirectChat,
+  anthropicDirectChatStream,
+} from './anthropicDirect.js'
 
 // ── ORCHESTRATORUL — un creier, orice model ─────────────────────────────────
 // Rulează o conversație CU tool-use printr-un model ales (GPT/Gemini/Claude prin
@@ -110,6 +115,11 @@ export async function runOrchestrator(
     // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
     const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
     const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
+    // CREIERUL DE ABONAMENT PE CLAUDE DIRECT (Adrian, 28 iul): modelele cu
+    // prefixul anthropic-direct/ merg pe API-ul Anthropic (cheia proprie a
+    // ownerului, sk-ant-…), nu pe OpenRouter — aceleași forme de intrare/ieșire.
+    const claude = model.startsWith(ANTHROPIC_DIRECT_PREFIX)
+    const cModel = claude ? model.slice(ANTHROPIC_DIRECT_PREFIX.length) : model
     const askModel = (toolChoice: 'required' | undefined): Promise<OrChatResult> => {
       const callOpts = {
         maxTokens: opts.maxTokens,
@@ -117,6 +127,11 @@ export async function runOrchestrator(
         reasoning: opts.reasoning,
         toolChoice,
         apiKey: opts.apiKey,
+      }
+      if (claude) {
+        return opts.onText
+          ? anthropicDirectChatStream(cModel, convo, tools, opts.onText, callOpts)
+          : anthropicDirectChat(cModel, convo, tools, callOpts)
       }
       return opts.onText
         ? gemini

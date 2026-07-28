@@ -53,9 +53,10 @@ import {
   dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, brainModelHasVision, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
+import { ANTHROPIC_DIRECT_PREFIX, claudeModelHasVision } from '../services/anthropicDirect.js'
 import { parseBrainSub, subActive, type BrainSub } from '../services/brainSubscription.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -173,10 +174,11 @@ async function selectedBrainModel(
   if ((heavy || top) && sub && subActive(sub, isAdmin)) {
     // GARDĂ DE VEDERE (auditul 28 iul): dacă tura are imagine dar modelul de
     // abonament ales NU vede, nu trimitem poza orbește — cădem pe nucleul care
-    // vede (mai jos). `null` (id nelistat/catalog indisponibil) = necunoscut →
-    // nu blocăm (implicitul are vedere), doar `false` cert oprește ruta.
-    const blindOnImage = needsVision && (await brainModelHasVision(sub.model)) === false
-    if (!blindOnImage) return { model: sub.model, heavy: true, useSubKey: true }
+    // vede (mai jos). Modelele Claude 5 văd toate, deci în practică nu blochează.
+    const blindOnImage = needsVision && !claudeModelHasVision(sub.model)
+    // Prefixul rutează orchestratorul spre Anthropic DIRECT (cheia proprie a
+    // ownerului), nu spre OpenRouter — vezi anthropicDirect.ts.
+    if (!blindOnImage) return { model: `${ANTHROPIC_DIRECT_PREFIX}${sub.model}`, heavy: true, useSubKey: true }
   }
   const model = top
     ? await resolveModel('top')
@@ -2212,17 +2214,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           low.includes('no endpoints') ||
           low.includes('is not a valid') ||
           low.includes('not found') ||
+          // Cheia Claude respinsă (401) / fără drept (403) — tot spre „verifică
+          // cheia Anthropic", nu spre mesajul generic care ascundea cauza.
+          low.includes('401') ||
+          low.includes('403') ||
           (low.includes('400') && !isQuota && !isRefusal))
       const spoken = ro
         ? isBadSubModel
-          ? 'Modelul de abonament pare invalid sau indisponibil pe OpenRouter. Deschide Setări → „Creier abonament" și alege alt model din listă.'
+          ? 'Modelul de abonament pare invalid sau cheia Claude e respinsă. Deschide Setări → „Creier abonament", verifică cheia Anthropic și alege alt model din listă.'
           : isQuota
           ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
           : isRefusal
             ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
             : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
         : isBadSubModel
-          ? 'The subscription model seems invalid or unavailable on OpenRouter. Open Settings → “Subscription brain” and pick another model.'
+          ? 'The subscription model seems invalid or the Claude key was rejected. Open Settings → “Subscription brain”, check the Anthropic key and pick another model.'
           : isQuota
           ? "I've temporarily run out of brain credit. Please top up so we can continue."
           : isRefusal

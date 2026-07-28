@@ -38,8 +38,13 @@ import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
-import { getOpenRouterBalance, getBrainCatalog } from '../services/openrouter.js'
+import { getOpenRouterBalance } from '../services/openrouter.js'
 import { loadBrainSub, saveBrainSub, subActive } from '../services/brainSubscription.js'
+import { validateAnthropicKey, CLAUDE_MODELS } from '../services/anthropicDirect.js'
+
+// Linkul de gestionare a cheii/creditului Claude — consola Anthropic (Adrian, 28
+// iul: „la ab trebuie de la cloude nu openrouter"; clicul ducea greșit la OpenRouter).
+const CLAUDE_CONSOLE = 'https://console.anthropic.com/settings/billing'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
@@ -307,7 +312,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // ar fi putut desincroniza tăcut dacă regula reală se schimba altundeva).
     // Ruta e deja gardată admin-only mai sus, deci `true` e corect aici.
     const subActiveNow = subActive(sub, true)
-    const subBalance = sub.key.length > 0 ? await getOpenRouterBalance(false, sub.key) : null
+    // ABONAMENT PE CLAUDE DIRECT (Adrian, 28 iul): cheia e de la consola
+    // Anthropic (sk-ant-…), nu OpenRouter. Anthropic n-are un endpoint public de
+    // „sold rămas" ca OpenRouter, deci arătăm dacă e VALIDĂ (verificare ieftină
+    // pe GET /v1/models), plus linkul de gestionare la consola Claude.
+    const subKeyStatus = sub.key.length > 0 ? await validateAnthropicKey(sub.key) : null
     return reply.send({
       active: subActiveNow ? 'subscription' : 'openrouter',
       subscription: {
@@ -315,8 +324,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         active: subActiveNow,
         model: sub.model,
         hasKey: sub.key.length > 0,
-        balance: subBalance
-          ? { ok: subBalance.ok, balance: subBalance.balance, low: subBalance.low, topup: subBalance.topup }
+        // Forma o păstrăm compatibilă cu bara: `ok` = cheia validă; fără „sold"
+        // numeric (nu există la Anthropic), doar validitate + link consolă.
+        balance: subKeyStatus
+          ? { ok: subKeyStatus.ok, valid: subKeyStatus.ok, error: subKeyStatus.error, topup: CLAUDE_CONSOLE }
           : null,
       },
       openrouter: {
@@ -431,9 +442,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       model: sub.model,
       hasKey,
       keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
-      // Soldul REAL al cheii de abonament (același endpoint /credits ca punga
-      // centrală) — cardul apare doar când există cheie.
-      balance: hasKey ? await getOpenRouterBalance(false, sub.key) : null,
+      // Cheia Claude (Anthropic) n-are endpoint public de sold ca OpenRouter →
+      // arătăm dacă e VALIDĂ (GET /v1/models) + linkul spre consola Claude.
+      keyStatus: hasKey ? await validateAnthropicKey(sub.key) : null,
+      manageUrl: CLAUDE_CONSOLE,
       // VOCEA PE ABONAMENT (28 iul): cheie OpenAI separată — fără sold expus
       // (OpenAI n-are un /credits public comparabil), doar starea configurării.
       hasVoiceKey,
@@ -441,13 +453,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  // Catalogul COMPLET pentru selectorul manual de model al creierului de
-  // abonament: TOATE modelele cu tool-use de pe OpenRouter, orice provider
-  // (Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...), nu lista îngustă de user.
+  // Lista modelelor CLAUDE pentru selectorul creierului de abonament — apel
+  // direct la Anthropic (nu mai e catalogul OpenRouter). Familia Claude 5 +
+  // Haiku, toate cu vedere + unelte.
   app.get('/api/admin/brain-models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ models: await getBrainCatalog() })
+    return reply.send({ models: CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })) })
   })
 
   app.post<{ Body: { mode?: string; model?: string; key?: string; voiceKey?: string } }>(
@@ -469,7 +481,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         model: sub.model,
         hasKey,
         keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
-        balance: hasKey ? await getOpenRouterBalance(true, sub.key) : null,
+        keyStatus: hasKey ? await validateAnthropicKey(sub.key) : null,
+        manageUrl: CLAUDE_CONSOLE,
         hasVoiceKey,
         voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
       })
