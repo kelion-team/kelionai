@@ -123,14 +123,51 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
         req.log.warn(
-          { upstreamStatus: res.status, upstreamError: res.error, sdpLen: offer.length, sdpHead: offer.slice(0, 40) },
+          {
+            upstreamStatus: res.status,
+            upstreamCode: res.code,
+            upstreamError: res.error,
+            attempts: res.attempts,
+            sdpLen: offer.length,
+            sdpHead: offer.slice(0, 40),
+          },
           'realtime upstream refuz',
         )
         // CONT FĂRĂ CREDIT (incident 24 iul: vocea moartă, descoperită abia la
         // test): anunțăm adminul pe email IMEDIAT, nu la următorul test manual.
         if (isQuotaError(res.error)) alertOpenAiQuota()
         const code = res.status === 503 ? 503 : 502
-        return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
+        // EROARE CITIBILĂ, NU UN 502 GOL (Adrian, 28 iul: în browser se vedea
+        // doar „POST /api/realtime/session 502" — nici userul nu știa ce s-a
+        // întâmplat, nici clientul nu putea decide dacă merită reîncercat).
+        // Trimitem: cod stabil pentru cod (`code`), statusul REAL al upstreamului
+        // (504 ≠ 429 ≠ 401), câte încercări am ars și un mesaj gata de afișat.
+        // `error: 'realtime_upstream'` rămâne neschimbat — pe el se sprijină ce
+        // există deja; câmpurile noi doar se adaugă.
+        const mesaj =
+          res.code === 'realtime_not_configured'
+            ? 'vocea nu a putut porni: serverul nu are cheia de voce configurată'
+            : res.code === 'upstream_timeout'
+              ? `vocea nu a putut porni: upstream a expirat (${res.attempts} încercări)`
+              : res.code === 'upstream_unreachable'
+                ? `vocea nu a putut porni: upstream inaccesibil (${res.attempts} încercări)`
+                : res.code === 'upstream_empty'
+                  ? 'vocea nu a putut porni: upstream a răspuns fără answer SDP'
+                  : `vocea nu a putut porni: upstream ${res.status}`
+        return reply
+          .code(code)
+          // Antetul e ASCII (codul), mesajul cu diacritice merge în corpul JSON.
+          .header('x-kelion-voice-error', res.code)
+          .send({
+            error: 'realtime_upstream',
+            code: res.code,
+            status: res.status,
+            attempts: res.attempts,
+            // Reîncercarea din client are rost DOAR la un necaz trecător; la
+            // refuz (4xx) sau lipsă de cheie ar fi doar zgomot și bani arși.
+            retryable: res.code !== 'upstream_refuz' && res.code !== 'realtime_not_configured',
+            message: mesaj,
+          })
       }
       // REGULA FAPTEI, TRIMISĂ VOCII (Adrian, 27 iul: „autonomia lui nu e
       // reală"). Vocea trebuie să știe ce e ORDIN ca să forțeze unealta EXACT pe

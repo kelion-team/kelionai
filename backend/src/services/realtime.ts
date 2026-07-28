@@ -137,10 +137,16 @@ const VOICE_TOOL_NAMES = new Set([
   'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
   'get_calendar_events', 'get_recent_emails', 'send_email', 'create_calendar_event',
   'get_drive_files', 'get_tasks', 'add_task', 'search_contacts', 'add_contact',
-  // IMPORTUL COMPLET GOOGLE (Adrian, 27 iul: „toate skill-urile google, automat
-  // și activate") — aceleași unelte și în voce, nu doar în scris.
-  'read_email', 'read_drive_file', 'get_photos', 'my_youtube',
-  'delete_calendar_event', 'complete_task',
+  // IMPORTUL COMPLET GOOGLE (Adrian, 27 iul) e ACTIV ÎN CHAT, dar NU aici.
+  // DOVADA CRONOLOGICĂ (28 iul): la 22:09, cu 31 de unelte, reproducerea de pe
+  // VPS a primit 201 în 0,4s, 3/3. La 22:20 importul Google a urcat vocea la 37
+  // de unelte — și de ATUNCI /api/realtime/session primește 504 la FIECARE
+  // încercare (27s, trei conexiuni diferite, deci nu e pană trecătoare).
+  // Sesiunea de voce e trimisă întreagă la pornire; peste un anumit prag
+  // marginea OpenAI n-o mai procesează la timp. Vocea rămâne pe setul dovedit;
+  // uneltele noi se re-adaugă doar una câte una, fiecare probată live.
+  // 'read_email', 'read_drive_file', 'get_photos', 'my_youtube',
+  // 'delete_calendar_event', 'complete_task',
 ])
 
 export function realtimeTools(
@@ -334,16 +340,20 @@ export type RealtimeAnswer =
   | { ok: false; status: number; code: RealtimeFailCode; error: string; attempts: number }
 
 // ── ROBUSTEȚEA PORNIRII VOCII (28 iul) ───────────────────────────────────────
-// Bugete măsurate pe trafic REAL, nu ghicite:
+// Bugete MĂSURATE pe trafic real, nu ghicite:
 //   • o pornire SĂNĂTOASĂ întoarce 201 în ~0,4s (3/3 reproduceri, 27 iul);
 //   • una BOLNAVĂ arde ~15s și întoarce 504 cu pagină HTML Cloudflare.
-// Deci orice trece de ~10s e deja pierdut: tăiem NOI firul înainte ca marginea
-// să ne dea 504-ul ei și folosim timpul rămas pentru o conexiune nouă.
-const ATTEMPT_TIMEOUT_MS = 10_000
-// Plafon total al rutei: userul stă cu microfonul deschis și se uită la ecran.
-// 3 × 10s ar însemna 30s+ de așteptare mută — oprim la 27s, orice ar fi.
-const TOTAL_BUDGET_MS = 27_000
+// Deci 6s e deja de 15 ori bugetul unei porniri sănătoase: ce n-a răspuns până
+// atunci nu mai răspunde. Tăiem NOI firul înainte ca marginea să ajungă la
+// 504-ul ei de la ~15s și cheltuim secundele salvate pe o conexiune NOUĂ —
+// asta e diferența dintre 3 șanse reale și una singură lungă și inutilă.
+const ATTEMPT_TIMEOUT_MS = 6_000
 const MAX_ATTEMPTS = 3
+// Plafon TOTAL al rutei: userul stă cu microfonul deschis, uitându-se la ecran.
+// 6s + 0,35s + 6s + 1s + 6s = 19,35s în cel mai rău caz — toate cele 3 încercări
+// primesc fereastra întreagă și tot ieșim mai repede decât cei 31s de dinainte,
+// când erau doar două încercări pe aceeași conexiune spartă.
+const TOTAL_BUDGET_MS = 21_000
 
 // Relay o ofertă SDP la OpenAI Realtime și întoarce answer-ul SDP.
 export async function openaiRealtimeAnswer(
