@@ -39,6 +39,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
+import { loadBrainSub, saveBrainSub } from '../services/brainSubscription.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
@@ -395,6 +396,49 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
   })
+
+  // ── CREIERUL DE ABONAMENT (Adrian, 28 iul) ──────────────────────────────────
+  // Comutatorul admin-only FREE ⟷ ABONAMENT + cheia proprie a ownerului. GET
+  // întoarce starea + soldul cheii (EXACT cardul OpenRouter — fiindcă ESTE o
+  // cheie OpenRouter), niciodată cheia întreagă (doar prezența + ultimele 4).
+  // STRICT admin (userii nu văd și nu ating cheia/creditul ownerului).
+  app.get('/api/admin/brain-sub', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const sub = await loadBrainSub(true)
+    const hasKey = sub.key.length > 0
+    return reply.send({
+      mode: sub.mode,
+      model: sub.model,
+      hasKey,
+      keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
+      // Soldul REAL al cheii de abonament (același endpoint /credits ca punga
+      // centrală) — cardul apare doar când există cheie.
+      balance: hasKey ? await getOpenRouterBalance(false, sub.key) : null,
+    })
+  })
+
+  app.post<{ Body: { mode?: string; model?: string; key?: string } }>(
+    '/api/admin/brain-sub',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string } = {}
+      if (req.body?.mode === 'free' || req.body?.mode === 'subscription') patch.mode = req.body.mode
+      if (typeof req.body?.model === 'string' && req.body.model.trim()) patch.model = req.body.model.trim()
+      // key: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
+      if (typeof req.body?.key === 'string') patch.key = req.body.key.trim()
+      const sub = await saveBrainSub(patch)
+      const hasKey = sub.key.length > 0
+      return reply.send({
+        mode: sub.mode,
+        model: sub.model,
+        hasKey,
+        keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
+        balance: hasKey ? await getOpenRouterBalance(true, sub.key) : null,
+      })
+    },
+  )
 
   // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
   // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să

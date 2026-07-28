@@ -54,6 +54,7 @@ import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
+import { parseBrainSub, subActive, type BrainSub } from '../services/brainSubscription.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -97,7 +98,9 @@ async function selectedBrainModel(
   text: string,
   kvRaw?: string | null,
   needsVision = false,
-): Promise<{ model: string; heavy: boolean } | null> {
+  sub?: BrainSub,
+  isAdmin = false,
+): Promise<{ model: string; heavy: boolean; useSubKey: boolean } | null> {
   if (!config.openrouter.key) return null
   let sel: { chat?: string; work?: string } = {}
   try {
@@ -155,6 +158,17 @@ async function selectedBrainModel(
   // (sel.work) rămâne respectată; căderea pe secundar la cotă epuizată e la
   // locul apelului (retry în handler). Vocea NU trece pe aici — rămâne cum e.
   const geminiWork = !sel.work && geminiDirectAvailable()
+  // CREIERUL DE ABONAMENT (Adrian, 28 iul): comutatorul admin-only. Pe turele
+  // GRELE ale ADMINULUI (raționament/acțiune sau treapta top), dacă modul e
+  // „abonament" și există cheia proprie, urcăm pe modelul puternic plătit din
+  // creditul ownerului — nu din punga centrală. Userii plătitori NU trec pe
+  // aici niciodată (subActive cere isAdmin). Tura simplă rămâne pe free (rapid,
+  // aproape gratis): „mai multă putere DOAR unde e nevoie". Vederea e păstrată —
+  // modelul de abonament ales din catalog are vedere; dacă totuși n-ar avea,
+  // implicitul rămâne nucleul omni gratuit care VEDE.
+  if ((heavy || top) && sub && subActive(sub, isAdmin)) {
+    return { model: sub.model, heavy: true, useSubKey: true }
+  }
   const model = top
     ? await resolveModel('top')
     : heavy
@@ -162,7 +176,7 @@ async function selectedBrainModel(
         ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
         : await resolveModel('work', sel.work)
       : await resolveModel('chat', sel.chat)
-  return { model, heavy: heavy || top }
+  return { model, heavy: heavy || top, useSubKey: false }
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -1226,7 +1240,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
-    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv] = await Promise.all([
+    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv, brainSubKv] = await Promise.all([
       getSpeechLang(user.email),
       getMeserieActiva(user.email),
       recallWithDeadline,
@@ -1239,7 +1253,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // FLUENȚĂ (A5): alegerea de model a userului citită AICI, în paralel —
       // nu ca încă un drum DB serial chiar înainte de apelul creierului.
       loadKv(`model_choice:${user.email}`).catch(() => null),
+      // CREIERUL DE ABONAMENT (Adrian, 28 iul): starea comutatorului admin-only,
+      // citită PROASPĂT în paralel — o comutare e vizibilă din prima replică.
+      loadKv('brain_subscription').catch(() => null),
     ])
+    const brainSub = parseBrainSub(brainSubKv)
     const gestureOff = new Set(disabledGestures)
     // Tool-ul de gesturi, filtrat: gesturile dezactivate NU mai sunt oferite
     // modelului (nu le poate nici alege). Dacă TOATE sunt scoase, tool-ul iese
@@ -1798,9 +1816,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
     // el greu; pe treapta WORK nu (ar fi recursiv — el ESTE creierul).
-    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage)
+    const brainSel = await selectedBrainModel(
+      user.email,
+      lastUserText,
+      modelChoiceKv,
+      turnHasImage,
+      brainSub,
+      user.role === 'admin',
+    )
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
+    // Cheia de abonament folosită DOAR când selecția a decis-o (tura grea a
+    // adminului, modul abonament). Altfel undefined → punga centrală, ca acum.
+    const brainApiKey = brainSel?.useSubKey ? brainSub.key : undefined
 
     // ── DRUM UNIC: CREIER DIRECT PENTRU TOȚI ───────────────────────────────
     // Orchestratorul OpenRouter (chat/creier, cu escaladare automată) răspunde
@@ -2040,6 +2068,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // înainte de primul cuvânt → pare mort. Pe :free/gemini forțăm
           // gândirea SCURTĂ ('low'); pe plătite rămâne 'medium'.
           reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
+          // CREIERUL DE ABONAMENT: cheia proprie a ownerului pe turele grele
+          // (undefined pe rest → punga centrală). Vezi selectedBrainModel.
+          apiKey: brainApiKey,
           // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.

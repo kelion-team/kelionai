@@ -43,6 +43,10 @@ export interface OrchestratorOpts {
   /** Ține tool_choice:'required' până când chiar RULEAZĂ o unealtă de acțiune
    *  (plafonat la FORCE_MAX_ROUNDS) — pentru turele de ORDIN: execută, nu nara. */
   forceToolsUntilAction?: boolean
+  /** CREIERUL DE ABONAMENT: cheia OpenRouter proprie a ownerului. Când e dată,
+   *  tura grea a adminului merge pe modelul puternic plătit din creditul lui,
+   *  nu din punga centrală. Ignorată pe calea gemini-direct. */
+  apiKey?: string
 }
 
 // Cât timp poate ține forțarea de la începutul turei. Peste asta, dacă modelul
@@ -112,6 +116,7 @@ export async function runOrchestrator(
         temperature: opts.temperature,
         reasoning: opts.reasoning,
         toolChoice,
+        apiKey: opts.apiKey,
       }
       return opts.onText
         ? gemini
