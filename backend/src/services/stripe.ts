@@ -266,9 +266,6 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
 // într-o zi lucrătoare. NOTĂ: endpointul e în beta la Stripe — până la aprobare
 // răspunde 4xx, iar noi raportăm starea în panoul Circuitul banilor.
 let lastAutoFund: { at: string; ok: boolean; detail: string } | null = null
-export function lastAutoFundStatus(): { at: string; ok: boolean; detail: string } | null {
-  return lastAutoFund
-}
 
 const ISSUING_MIN = Math.max(0, Number(process.env.ISSUING_MIN_GBP ?? '10') || 10)
 const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') || 20)

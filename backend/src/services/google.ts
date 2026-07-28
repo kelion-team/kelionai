@@ -482,60 +482,6 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   return JSON.stringify({ emails })
 }
 
-interface SerperResult {
-  title?: string
-  link?: string
-  snippet?: string
-  date?: string
-}
-
-// Live web search via Gemini's built-in Google Search grounding. Uses the
-// GEMINI_API_KEY (no Serper key needed). Returns a grounded answer plus the
-// real source pages Google used. Returns null on any failure so callers can
-// fall back.
-interface GeminiGroundResult {
-  text: string
-  sources: { title: string; link: string }[]
-}
-
-async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
-  if (!config.geminiKey) return null
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  let res: Response
-  try {
-    res = await tfetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
-      }),
-    })
-  } catch {
-    return null
-  }
-  if (!res.ok) return null
-  const j = (await res.json()) as {
-    candidates?: {
-      content?: { parts?: { text?: string }[] }
-      groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
-    }[]
-  }
-  const cand = j.candidates?.[0]
-  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
-  const seen = new Set<string>()
-  const sources: { title: string; link: string }[] = []
-  for (const c of cand?.groundingMetadata?.groundingChunks ?? []) {
-    const link = c.web?.uri ?? ''
-    if (!link || seen.has(link)) continue
-    seen.add(link)
-    sources.push({ title: c.web?.title ?? '', link })
-  }
-  if (!text && sources.length === 0) return null
-  return { text, sources }
-}
-
 // VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model
 // cu vedere se uită la un screenshot și răspunde la o întrebare despre ce se vede.
 // Folosit de verificarea vizuală din admin. MIGRAT PE OPENROUTER (audit 24 iul:

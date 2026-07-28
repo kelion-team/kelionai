@@ -15,7 +15,8 @@ import { googleTools, runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCac
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
-import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
+import { browserOpen, browserClick, browserType, browserRead, browserBack, browserScroll, browserClose, type BrowserResult } from '../services/browser.js'
+import { brainCompleteWithTools, describeScene } from '../services/brain.js'
 import { hasActionIntent, ACTION_INTENT } from '../services/openrouter.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
@@ -262,6 +263,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               { name: 'propose_tool', description: 'INSTALEAZĂ-ȚI un skill nou dintr-un API public HTTPS. Când ownerul îți cere să instalezi/imporți un instrument, cheam-o — se auto-instalează pe loc și e gata din următoarea cerere. Dă nume snake_case, ce face, schema parametrilor și șablonul HTTPS (metodă + url cu {param}).', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, params_schema: { type: 'object' }, http_method: { type: 'string' }, http_url: { type: 'string' } }, required: ['name', 'description', 'http_url'] } },
               { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
               { name: 'system_health', description: 'Sănătatea proprie: publicare sincronă, rulări roșii, ordine eșuate, erori client, disc, DB, punga creierului. La probleme: enumeră-le ownerului și întreabă dacă să le repari.', input_schema: { type: 'object', properties: {} } },
+              // NAVIGATORUL LIVE ȘI ÎN VOCE (auditul 28 iul: browserul exista doar
+              // în chat). Prin escaladare (nu în sesiunea directă → fără riscul de
+              // 504 al setului mare) ownerul poate naviga/click-ui site-uri și din
+              // voce; pagina apare pe monitor (screen_url din shotUrl).
+              { name: 'browser_open', description: 'Deschide o pagină web în navigatorul live; întoarce titlu + text + elemente clicabile (cu index). Pagina apare pe monitor.', input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
+              { name: 'browser_click', description: 'Click pe elementul cu indexul dat (din lista întoarsă de browser_open/read).', input_schema: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'] } },
+              { name: 'browser_type', description: 'Scrie text în câmpul cu indexul dat; submit=true apasă Enter (caută/trimite).', input_schema: { type: 'object', properties: { index: { type: 'number' }, text: { type: 'string' }, submit: { type: 'boolean' } }, required: ['index', 'text'] } },
+              { name: 'browser_read', description: 'Recitește pagina curentă (titlu + text + elemente clicabile).', input_schema: { type: 'object', properties: {} } },
+              { name: 'browser_back', description: 'Înapoi la pagina anterioară din navigator.', input_schema: { type: 'object', properties: {} } },
+              { name: 'browser_scroll', description: 'Derulează pagina curentă (direction: up sau down).', input_schema: { type: 'object', properties: { direction: { type: 'string' } } } },
+              { name: 'browser_close', description: 'Închide navigatorul live.', input_schema: { type: 'object', properties: {} } },
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
@@ -313,6 +325,34 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         }))
         const actionNames = new Set(actionTools.map((t) => t.name))
         const execBrainTool = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
+          // NAVIGATORUL LIVE (auditul 28 iul): uneltele browser_* rulează pe
+          // Chromium-ul local (fără cost OpenRouter). Screenshot-ul servit local
+          // (shotUrl) devine screen_url → pagina apare pe monitor; modelului îi dăm
+          // doar titlu/text/elemente (nu base64-ul uriaș).
+          if (tname.startsWith('browser_')) {
+            const bu = `https://${req.headers.host ?? 'kelionai.app'}`
+            let r: BrowserResult
+            switch (tname) {
+              case 'browser_open': r = await browserOpen(user.email, bu, String(targs.url ?? '')); break
+              case 'browser_click': r = await browserClick(user.email, bu, Number(targs.index ?? 0)); break
+              case 'browser_type': r = await browserType(user.email, bu, Number(targs.index ?? 0), String(targs.text ?? ''), Boolean(targs.submit)); break
+              case 'browser_read': r = await browserRead(user.email, bu); break
+              case 'browser_back': r = await browserBack(user.email, bu); break
+              case 'browser_scroll': r = await browserScroll(user.email, bu, String(targs.direction ?? 'down') as 'up' | 'down'); break
+              case 'browser_close': await browserClose(user.email); return JSON.stringify({ closed: true })
+              default: r = { error: 'unknown_browser_tool' }
+            }
+            if (!('error' in r)) {
+              if (!brainScreen) {
+                brainScreen = {
+                  url: /^https?:/i.test(r.shotUrl) ? r.shotUrl : `${bu}${r.shotUrl}`,
+                  title: r.title || 'navigator',
+                }
+              }
+              return JSON.stringify({ url: r.url, title: r.title, text: r.text.slice(0, 4000), elements: r.elements.slice(0, 40) })
+            }
+            return JSON.stringify(r)
+          }
           if (!actionNames.has(tname)) return execIntrospection(tname, targs)
           if (tname === 'web_search' || tname === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
           const out = await runGoogleTool(tname, targs, token)
