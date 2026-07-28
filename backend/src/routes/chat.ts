@@ -1993,7 +1993,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // produce text) — fără confirmarea asta userul ar aștepta MUT până termină
       // uneltele. Se aplică pe orice tură de ordin, nu doar la owner.
       if (actionTurn || (isAdmin && heavyTurn)) {
-        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
+        const ackText = ro ? 'Preluat sarcina. ' : 'Task taken. '
         noteFirstWord()
         reply.raw.write(appendTurn(user.email, turnId, ackText))
         voice.feed(ackText)
