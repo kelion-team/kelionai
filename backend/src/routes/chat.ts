@@ -42,11 +42,8 @@ import {
   faceDistance,
   loadKv,
   proposeKelionTool,
-  decideKelionTool,
   createBuildJob,
   listBuildJobs,
-  cancelBuildJobs,
-  cancelAllPendingBuildJobs,
   dbTablesOverview,
   dbQuery,
 } from '../db.js'
@@ -379,23 +376,6 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
     'ADMIN ONLY. See the state of your build orders (queued/running/done/failed, PR link, tokens used). Call it when the owner asks how a build is going, then show the result with show_document.',
   input_schema: { type: 'object', properties: {} },
 }
-// ANULAREA ORDINELOR (Adrian, 28 iul). Lipsa a fost semnalată de KELION ÎNSUȘI
-// în „Cereri neacoperite": „Stop or cancel active and queued constructor build
-// jobs — No constructor cancellation tool is available; constructor_status is
-// read-only". Fără ea, un ordin greșit rămâne în coadă, e reluat de cron la
-// fiecare 2 minute și trimite mail de eșec de fiecare dată.
-const CANCEL_BUILD_TOOL: Tool = {
-  name: 'cancel_build_jobs',
-  description:
-    'ADMIN ONLY. Cancel build orders that are queued or running. Pass the ids to cancel, or all:true to cancel EVERYTHING pending. Use it when the owner says to stop/cancel a build, when an order is obsolete (already fixed by hand), or when the same order keeps failing in a loop. Confirm with the owner before cancelling everything.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      ids: { type: 'array', items: { type: 'number' }, description: 'Order ids to cancel (from constructor_status).' },
-      all: { type: 'boolean', description: 'true = cancel every queued/running order.' },
-    },
-  },
-}
 // SĂNĂTATEA PROPRIE (Adrian, 27 iul: „Kelion trebuie să vadă asta și să poată
 // comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să
 // le repare"): agregarea deterministă a tuturor semnalelor + regula de
@@ -490,7 +470,7 @@ const LOG_GAP_TOOL: Tool = {
 const PROPOSE_TOOL: Tool = {
   name: 'propose_tool',
   description:
-    "INSTALL A NEW SKILL FOR YOURSELF from any PUBLIC HTTPS API. This is how you gain new capabilities on your own. When the OWNER asks you to install/import a skill or tool (or you realize you're missing one while serving him), call this — for the owner it AUTO-INSTALLS instantly (his request IS the approval) and becomes usable from the next message, no admin click needed. For non-owner users it stays pending until the owner approves. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Use it freely whenever the owner wants a new skill; for building actual SOFTWARE/code use build_software (the constructor) instead.",
+    "When you realize you're missing a capability that a PUBLIC HTTPS API could provide, propose a new tool for yourself. The owner approves it with one click, then you can use it. Give a clear snake_case name, what it does, the JSON-schema of its parameters, and the HTTPS request template (method + url with {param} placeholders). Only propose when genuinely useful; never for something you can already do.",
   input_schema: {
     type: 'object',
     properties: {
@@ -810,32 +790,6 @@ const PROMO_TOOL: Tool = {
     required: ['subject', 'duration_seconds', 'script', 'scenes'],
   },
 }
-
-// ── UNELTELE PASIVE — ce NU e o faptă (Adrian, 27 iul: „autonomia lui nu e
-// reală") ────────────────────────────────────────────────────────────────────
-// Astea doar CITESC sau raportează o stare: a le chema nu schimbă nimic în lume.
-// Orchestratorul le folosește ca să nu se lase păcălit — vechea forțare cerea
-// „o unealtă" pe prima rundă, iar modelul o bifa cu un system_health și apoi
-// povestea restul. Acum forțarea ține până când rulează o unealtă de ACȚIUNE,
-// iar poarta faptei rămâne armată dacă s-a citit dar nu s-a făcut.
-// Lista e INVERSATĂ intenționat: orice unealtă NOUĂ e considerată acțiune, deci
-// o unealtă adăugată mâine nu poate dezarma poarta din greșeală.
-const PASSIVE_TOOLS = new Set<string>([
-  'read_source', 'search_source', 'list_source', 'list_updates',
-  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs',
-  // db_tables citește doar schema. db_query NU e aici INTENȚIONAT: rulează SQL
-  // arbitrar, cu COMMIT — un DELETE e o faptă în toată regula, iar dacă l-am
-  // socoti „citire", poarta faptei i-ar putea cere modelului să-l execute încă
-  // o dată. Mai bine îl tratăm ca acțiune și pierdem puțină strictețe.
-  'db_tables',
-  'list_notes', 'list_memories',
-  'get_real_cost', 'log_unsupported_request',
-  'play_avatar_gesture',
-  'browser_read',
-  // ask_brain nu e faptă: e o întrebare pusă altui creier. Dacă modelul
-  // escaladează în loc să execute, forțarea trebuie să continue.
-  'ask_brain',
-])
 
 // U+001F (unit separator) brackets a JSON control frame the frontend strips out
 // of the text stream (never shown, never spoken), e.g.
@@ -1530,7 +1484,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // exact anti-comportamentul). Acum: EXECUTĂ, nu promite.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). REPORT ONLY WHAT A TOOL RETURNED: a file path, a line number, a branch name, a PR number, an Actions link may be stated ONLY if a tool result you got THIS TURN contains that exact value. If you do not have the tool result, do not state the value and do not describe the step as if it happened — call the tool instead. Never write a plan in the shape of a report. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and ASK whether to repair them — repair ONLY after his explicit yes, with your own tools. If everything is healthy, don't bring it up unless he asks. INSTALL SKILLS ON DEMAND — DON'T DESCRIBE, INSTALL: when the owner asks you to install/import/add a NEW skill, tool or capability you don't have yet (e.g. "instalează-ți un skill de prețuri cripto/știri/acțiuni"), you MUST call propose_tool RIGHT NOW with a concrete PUBLIC HTTPS API — for the owner it auto-installs instantly and is usable from the next message. NEVER just describe what the tool would do or say you'll do it — CALL propose_tool this turn. If you don't know the exact API, use a well-known public one (crypto → api.coingecko.com; weather → wttr.in; news → a public RSS/JSON feed; npm → registry.npmjs.org). Saying you installed a skill without calling propose_tool is the forbidden empty-talk.`
+        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and ASK whether to repair them — repair ONLY after his explicit yes, with your own tools. If everything is healthy, don't bring it up unless he asks.`
       // CANALUL DE UPDATE: Kelion știe din prompt CE a primit la ultimul deploy
       // (fișier local, cache pe prima citire — zero cost pe latență).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -1776,10 +1730,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
-    // TURA DE ORDIN = tura în care se EXECUTĂ, nu se povestește („deschide",
-    // „instalează", „caută", „repară", „trimite"...). Se calculează pe textul
-    // ACESTEI ture, deci se stinge singură la replica următoare.
-    const actionTurn = hasActionIntent(lastUserText)
     // BARGRAF LA INTRAREA ÎN CREIER — UN SINGUR {heard} pentru TOȚI (admin, demo,
     // public, plătitori): serverul confirmă exact textul predat creierului la
     // această tură, banda din UI îl afișează. Nu e ecou local — dacă banda nu se
@@ -1826,37 +1776,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // redeploy) + `propose_tool` ca să-și poată propune altele noi.
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
-    const allTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+    const tools: Tool[] = isAdmin
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
-    // PLAFONUL DE 64 DE UNELTE (dovadă live 28 iul, log: `[CHAT ERROR]
-    // openrouter 400: "at most 64 tools are allowed"`): importul complet Google
-    // a urcat lista adminului la 69 și furnizorul refuză cu 400 ÎNAINTE de
-    // creier → Kelion raporta „am întâlnit o problemă tehnică" exact pe
-    // cererile de reparare. Tăiem deterministic la 64: cad întâi uneltele de
-    // lux (promo, cost, roluri...), NICIODATĂ cele de acțiune/reparare. Lista
-    // dinamică (skill-uri auto-instalate) poate crește oricât — plafonul ține.
-    const TOOL_CAP = 64
-    const DROP_FIRST = ['prepare_promo_clip', 'get_real_cost', 'set_active_role', 'open_app_view', 'log_unsupported_request', 'play_avatar_gesture', 'browser_key', 'browser_click_at', 'browser_back', 'wikipedia_lookup', 'convert_currency', 'delete_note', 'forget_memory', 'list_updates', 'runbook_log']
-    let tools: Tool[] = allTools
-    if (tools.length > TOOL_CAP) {
-      const dropped: string[] = []
-      for (const name of DROP_FIRST) {
-        if (tools.length <= TOOL_CAP) break
-        const i = tools.findIndex((t) => t.name === name)
-        if (i >= 0) {
-          dropped.push(name)
-          tools.splice(i, 1)
-        }
-      }
-      // tot peste plafon (listă dinamică uriașă) — tăiem de la coadă, dar
-      // spunem în log CE s-a pierdut, ca să nu pară dispariție misterioasă.
-      if (tools.length > TOOL_CAP) {
-        dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
-        tools = tools.slice(0, TOOL_CAP)
-      }
-      console.log(`[tools] plafon ${TOOL_CAP}: ${allTools.length} → ${tools.length}; scoase: ${dropped.join(', ')}`)
-    }
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.
@@ -1887,21 +1809,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // scoase definitiv) → mesaj onest în catch.
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY lipsește')
-      // REGULA FAPTEI, ULTIMUL LUCRU CITIT (Adrian, 27 iul). Măsurat live pe
-      // creierul gratuit: cu 61 de unelte și un prompt de 10k, instrucțiunile de
-      // la început se diluează și modelul nu mai execută (0/2, răspuns gol).
-      // Poziția finală e cea mai puternică, iar regula e scurtă și imperativă —
-      // exact opusul paragrafelor lungi care se contrazic între ele.
-      const DEED_RULE_LAST =
-        '\n\n=== REGULA FINALĂ, MAI PRESUS DE ORICE DE MAI SUS ===\n' +
-        'Dacă mesajul userului conține un ORDIN (deschide, pune, caută, instalează, repară, ' +
-        'trimite, publică, arată, construiește, șterge, salvează...), primul lucru pe care îl faci ' +
-        'în tura asta este să CHEMI UNEALTA care execută. Nu descrii, nu anunți, nu promiți.\n' +
-        'Nu ai voie să spui că ai făcut ceva, sau că urmează să faci ceva, fără rezultatul uneltei ' +
-        'în mână. A citi sau a raporta o stare NU înseamnă a face.\n' +
-        'Dacă nu ai unealta potrivită, spune-o simplu și direct — asta e onest. A povesti o faptă ' +
-        'care nu s-a întâmplat nu e.'
-      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt + DEED_RULE_LAST }]
+      const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
       for (const p of params) {
         const role = p.role === 'assistant' ? 'assistant' : 'user'
         if (typeof p.content === 'string') {
@@ -1947,12 +1855,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           usage.usd += IMAGE_USD_PER_CALL
           void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
         }
-        // AUTONOMIE TOTALĂ DE INSTALARE (Adrian, 27 iul: „autonomie totală în
-        // a-și instala instrumente/skill-uri/softuri când îi cer"): Kelion își
-        // propune o unealtă nouă. Când CERE OWNER-UL (admin), cererea lui ESTE
-        // aprobarea → unealta se AUTO-INSTALEAZĂ pe loc (status='approved') și e
-        // gata de folosit din următoarea cerere, fără niciun click în admin.
-        // Pentru alți useri rămâne 'pending' până o aprobă owner-ul (securitate).
+        // AUTO-EXTINDERE: Kelion își propune o unealtă nouă (rămâne 'pending'
+        // până o aprobă owner-ul cu un click în admin → activă instant).
         if (name === 'propose_tool') {
           const p = input as { name?: string; description?: string; params_schema?: unknown; http_method?: string; http_url?: string; http_headers?: unknown; rationale?: string }
           const id = await proposeKelionTool({
@@ -1964,18 +1868,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             httpHeaders: JSON.stringify(p.http_headers ?? {}),
             rationale: String(p.rationale ?? ''),
           })
-          if (!id) return JSON.stringify({ error: 'invalid_proposal (doar HTTPS, nume valid)' })
-          if (isAdmin) {
-            const ok = await decideKelionTool(id, true).catch(() => false)
-            return JSON.stringify({
-              installed: ok,
-              id,
-              note: ok
-                ? `Unealta „${String(p.name ?? '')}" e INSTALATĂ și activă acum (cererea owner-ului = aprobare). O poți folosi din următoarea cerere.`
-                : 'Propusă, dar auto-instalarea a picat — o poți aproba în Admin → Unelte Kelion.',
-            })
-          }
-          return JSON.stringify({ proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' })
+          return JSON.stringify(id ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' } : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
         }
         // UNEALTĂ DINAMICĂ APROBATĂ: execuție generică prin apel HTTP sigur.
         if (dynNames.has(name)) {
@@ -2007,12 +1900,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // live: 37s până la primul cuvânt — poarta faptei îl punea să execute
       // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
       // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
-      // OBLIGATORIU ODATĂ CU FORȚAREA, PENTRU TOȚI: pe o rundă forțată modelul
-      // întoarce DOAR apelul de unealtă, fără text (Gemini în mod ANY nici nu
-      // produce text) — fără confirmarea asta userul ar aștepta MUT până termină
-      // uneltele. Se aplică pe orice tură de ordin, nu doar la owner.
-      if (actionTurn || (isAdmin && heavyTurn)) {
-        const ackText = ro ? 'Preluat sarcina. ' : 'Task taken. '
+      if (isAdmin && heavyTurn) {
+        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
         noteFirstWord()
         reply.raw.write(appendTurn(user.email, turnId, ackText))
         voice.feed(ackText)
@@ -2043,17 +1932,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.
-          // POARTA FAPTEI PENTRU TOȚI (27 iul): o faptă declarată fără unealtă e
-          // vorbă goală indiferent cine e la celălalt capăt. Nu mai e doar a lui.
-          deedGate: true,
-          passiveTools: PASSIVE_TOOLS,
-          // CREIERUL FORȚAT SĂ EXECUTE (Adrian, 27 iul: „autonomia lui nu e
-          // reală"). Dovada live pe creierul gratuit, cu încărcătura REALĂ a
-          // aplicației (61 unelte, prompt de 10k): pe 'auto' execută 0/2 și
-          // răspunde GOL; forțat execută 2/2. Forțarea ține până când chiar
-          // rulează o unealtă de ACȚIUNE — o unealtă de citit nu o oprește.
-          // Pornește pe ORICE tură de ordin, a oricui, nu doar a ownerului.
-          forceToolsUntilAction: actionTurn,
+          deedGate: isAdmin,
+          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
+          // de ACȚIUNE a ownerului prima rundă e obligată să aleagă o unealtă —
+          // execută, nu narează. Runda 2+ liberă.
+          forceToolsFirstRound: isAdmin && heavyTurn,
           onText: (txt) => {
             textFlowed = true
             noteFirstWord()
@@ -2229,14 +2112,6 @@ async function runTool(
       return JSON.stringify({
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
-    }
-    case 'cancel_build_jobs': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const all = args.all === true
-      const ids = Array.isArray(args.ids) ? (args.ids as unknown[]).map(Number).filter(Number.isInteger) : []
-      if (!all && !ids.length) return JSON.stringify({ error: 'nimic de anulat: dă ids sau all:true' })
-      const n = all ? await cancelAllPendingBuildJobs() : await cancelBuildJobs(ids)
-      return JSON.stringify({ cancelled: n, note: n ? 'Ordinele anulate nu mai sunt reluate de lucrător.' : 'Nu era niciun ordin în coadă sau în lucru.' })
     }
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })

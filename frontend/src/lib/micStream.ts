@@ -28,47 +28,6 @@ const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
 const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre vocale nu mai sunt pierdute
 
-// ── STREAMING STT: DISPONIBIL SAU NU? (28 iul) ──────────────────────────────
-// DE CE există codul ăsta: pe gazdă (VPS) NU e setat GOOGLE_SERVICE_ACCOUNT_JSON
-// — verificat live în fișierul de mediu. Fără el ruta /api/asr-stream refuză
-// upgrade-ul (închide cu 1011 'asr_not_configured'), iar BROWSERUL scria roșu în
-// consola lui Adrian «WebSocket connection to 'wss://kelionai.app/api/asr-stream'
-// failed» la fiecare pornire de microfon. Mesajul ăla îl tipărește browserul,
-// nu noi — niciun try/catch nu-l poate înghiți; singura soluție e să NU mai
-// deschidem WS-ul când serverul oricum nu-l poate servi.
-// Deci întrebăm serverul O SINGURĂ DATĂ pe încărcarea paginii și, dacă
-// streamingul lipsește, predăm pe loc dictarea BATCH (/api/asr → are fallback pe
-// OpenAI în backend/src/services/asr.ts). Regula casei: dictarea degradează
-// TĂCUT (pierde doar parțialele live), nu moare niciodată și nu face buclă de
-// reîncercări. Când Google E configurat, sonda zice `true` și streamingul merge
-// exact ca înainte.
-let streamingAsrAvailable: boolean | null = null
-let capabilityProbe: Promise<boolean> | null = null
-
-function canStreamAsr(): Promise<boolean> {
-  if (streamingAsrAvailable !== null) return Promise.resolve(streamingAsrAvailable)
-  if (typeof fetch !== 'function') {
-    streamingAsrAvailable = true
-    return Promise.resolve(true)
-  }
-  capabilityProbe ??= fetch('/api/asr-stream/capability', { cache: 'no-store' })
-    .then((r) => (r.ok ? (r.json() as Promise<{ streaming?: boolean }>) : null))
-    .then((j) => {
-      // Server mai vechi / răspuns neașteptat → presupunem că streamingul MERGE
-      // (comportamentul de dinainte), iar plasa din `onclose` prinde restul.
-      const ok = j ? j.streaming !== false : true
-      streamingAsrAvailable = ok
-      return ok
-    })
-    .catch(() => true)
-  return capabilityProbe
-}
-
-// Sondăm din start (o singură cerere minusculă, la încărcarea modulului), ca
-// apăsarea pe „microfon" să nu mai aștepte NICIUN drum dus-întors — calea vocii
-// rămâne sub 1s, așa cum e regula.
-void canStreamAsr()
-
 export interface MicStreamHandle {
   stop(): void
   setMuted(muted: boolean): void
@@ -111,17 +70,6 @@ function downsample(input: Float32Array, inRate: number): Float32Array {
 export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHandle | null> {
   if (!navigator.mediaDevices?.getUserMedia) {
     opts.onError('unsupported')
-    return null
-  }
-  // Serverul n-are STT în streaming → ieșim ÎNAINTE de orice WebSocket (și
-  // înainte de getUserMedia, dacă nu ne-a fost dat un stream pre-încălzit).
-  // Captura pre-încălzită se OPREȘTE aici, altfel microfonul rămânea aprins
-  // degeaba cât timp calea batch își deschide propria captură.
-  // 'ws' e eticheta pe care ChatPanel o mapează deja pe „treci pe batch pentru
-  // restul sesiunii" — o refolosim ca să nu atingem panoul.
-  if (!(await canStreamAsr())) {
-    opts.preWarmedStream?.getTracks().forEach((t) => t.stop())
-    opts.onError('ws')
     return null
   }
   let stream: MediaStream
@@ -302,16 +250,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     phraseTimer = setTimeout(closePhrase, PHRASE_PAUSE_MS)
   }
 
-  // O SINGURĂ predare către batch: la un refuz de server se declanșează AMÂNDOUĂ
-  // (`onerror` ȘI `onclose`), iar ChatPanel repornea microfonul de două ori —
-  // exact bucla scurtă de reporniri pe care o vrem eliminată.
-  let fellBack = false
-  const fallbackToBatch = (): void => {
-    if (fellBack || closed) return
-    fellBack = true
-    opts.onError('ws')
-  }
-
   if (ws) {
     ws.onopen = () => {
       wsReady = true
@@ -358,22 +296,15 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       }
     }
     ws.onerror = () => {
-      fallbackToBatch()
+      if (!closed) opts.onError('ws')
     }
-    ws.onclose = (ev) => {
+    ws.onclose = () => {
       wsReady = false
-      // CONTRACT cu backend/src/routes/asr-stream.ts: (1011, 'asr_not_configured')
-      // = „serverul n-are STT în streaming". Îl ținem minte pe TOATĂ sesiunea de
-      // pagină, ca pornirile următoare de microfon să sară peste WS din prima
-      // (vezi garda din capul lui startMicStream) — zero erori în consolă, zero
-      // reîncercări. Reason-ul poate fi înghițit de un proxy, deci acceptăm și
-      // codul singur: 1011 nu e folosit nicăieri altundeva pe ruta asta.
-      if (ev.code === 1011 || ev.reason === 'asr_not_configured') streamingAsrAvailable = false
       // Refuz CURAT de la server (ex. 1011 asr_not_configured, 1008 auth):
       // vine DOAR onclose, niciodată onerror — fără plasa asta fallback-ul pe
       // batch nu se declanșa niciodată (surd permanent). 'ws' e eticheta pe
       // care ChatPanel o mapează pe căderea în batch.
-      if (!gotAnyMsg) fallbackToBatch()
+      if (!closed && !gotAnyMsg) opts.onError('ws')
     }
   }
 
@@ -443,10 +374,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (phraseTimer) clearTimeout(phraseTimer)
     if (silentTimer) clearTimeout(silentTimer)
     try {
-      // Doar pe socket DESCHIS: send() pe unul închis nu aruncă — scuipă
-      // «WebSocket is already in CLOSING or CLOSED state» în consolă (văzut
-      // live la căderea de rețea din 28 iul), iar try/catch nu-l poate opri.
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }))
+      ws?.send(JSON.stringify({ type: 'stop' }))
     } catch {
       /* ignoră */
     }

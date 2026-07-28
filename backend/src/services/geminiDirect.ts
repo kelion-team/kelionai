@@ -114,22 +114,7 @@ export function toGeminiPayload(
   }
   if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
   if (tools.length) {
-    // SCHEMA GOALĂ = FĂRĂ parameters (audit 28 iul, cauza „problemei tehnice"
-    // pe cererile de reparare): Gemini respinge cu 400 INVALID_ARGUMENT un
-    // `type:'object'` cu `properties` GOL — iar uneltele fără argumente
-    // (system_health, db_tables, constructor_status, list_notes...) exact așa
-    // arată. La ele omitem `parameters` de tot — Gemini acceptă declarația și
-    // cheamă funcția fără argumente. 400-ul dobora TOATĂ tura („Am întâmpinat
-    // o problemă tehnică") pentru că nu se califica drept eroare de cotă.
-    body.tools = [{
-      functionDeclarations: tools.map((t) => {
-        const p = cleanSchema(t.input_schema) as { type?: string; properties?: Record<string, unknown> } | undefined
-        const empty = !p || (p.type === 'object' && (!p.properties || Object.keys(p.properties).length === 0))
-        return empty
-          ? { name: t.name, description: t.description }
-          : { name: t.name, description: t.description, parameters: p }
-      }),
-    }]
+    body.tools = [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: cleanSchema(t.input_schema) })) }]
     body.toolConfig = { functionCallingConfig: { mode: opts.toolChoice === 'required' ? 'ANY' : 'AUTO' } }
   }
   return body

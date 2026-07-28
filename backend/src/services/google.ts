@@ -245,85 +245,6 @@ export const googleTools: Tool[] = [
       },
     },
   },
-  // ── IMPORTUL COMPLET AL SKILL-URILOR GOOGLE (Adrian, 27 iul: „importul
-  // tuturor funcțiilor și skill-urilor google, în regim automat și activate").
-  // Scope-urile pentru toate astea se cer DEJA la login (FULL_SCOPES, auth.ts)
-  // — Photos și YouTube erau cerute dar NU aveau nicio unealtă care să le
-  // folosească. Activarea e automată prin construcție: lista googleTools E
-  // sursa unică pentru chat (spread în chat.ts), voce (VOICE_TOOL_NAMES în
-  // services/realtime.ts) și escaladarea ask_brain (routes/realtime.ts).
-  {
-    name: 'read_email',
-    description:
-      "Read the FULL body of one email by its id (get it from get_recent_emails). Use when the user wants the whole message, details from it, or asks you to act on an email's content.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The Gmail message id from get_recent_emails.' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'read_drive_file',
-    description:
-      "Read the CONTENT of a Google Drive file by its id (get it from get_drive_files): Docs → text, Sheets → CSV, plain/text files → raw text. Use when the user asks what's inside a document/spreadsheet/file.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The Drive file id from get_drive_files.' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'get_photos',
-    description:
-      "List the user's most recent Google Photos (name, date, viewable URL). Use when they ask about their photos or want to see a recent picture.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        max_results: { type: 'number', description: 'How many photos (default 10, max 25).' },
-      },
-    },
-  },
-  {
-    name: 'my_youtube',
-    description:
-      "The user's OWN YouTube account: their channel subscriptions, playlists, or liked videos. NOT for searching videos to play — that is youtube_search.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        what: { type: 'string', enum: ['subscriptions', 'playlists', 'liked'], description: 'Which list to fetch.' },
-        max_results: { type: 'number', description: 'How many items (default 10, max 25).' },
-      },
-      required: ['what'],
-    },
-  },
-  {
-    name: 'delete_calendar_event',
-    description:
-      'Delete an event from the user\'s Google Calendar by its id (get it from get_calendar_events). Confirm with the user WHICH event before deleting when ambiguous.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The event id from get_calendar_events.' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'complete_task',
-    description:
-      "Mark one of the user's Google Tasks as DONE by its id (get it from get_tasks). Use when they say they finished something on their list.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The task id from get_tasks.' },
-      },
-      required: ['id'],
-    },
-  },
 ]
 
 // Exchange a refresh token for a fresh access token. Returns null on failure
@@ -428,7 +349,6 @@ async function fetchRetry(url: string | URL, tries = 3): Promise<Response | null
 }
 
 interface CalendarItem {
-  id?: string
   summary?: string
   location?: string
   start?: { dateTime?: string; date?: string }
@@ -448,9 +368,7 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `calendar_http_${res.status}` })
   const j = (await res.json()) as { items?: CalendarItem[] }
-  // id-ul e obligatoriu în ieșire: delete_calendar_event lucrează pe el.
   const events = (j.items ?? []).map((e) => ({
-    id: e.id ?? '',
     summary: e.summary ?? '(no title)',
     start: e.start?.dateTime ?? e.start?.date ?? '',
     end: e.end?.dateTime ?? e.end?.date ?? '',
@@ -468,8 +386,7 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
   const list = (await listRes.json()) as { messages?: { id: string }[] }
   const ids = (list.messages ?? []).slice(0, n)
-  // id-ul e obligatoriu în ieșire: read_email (corpul întreg) lucrează pe el.
-  const emails: { id: string; from: string; subject: string; date: string; snippet: string }[] = []
+  const emails: { from: string; subject: string; date: string; snippet: string }[] = []
   for (const { id } of ids) {
     const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`
     const mRes = await tfetch(mUrl, { headers: { Authorization: `Bearer ${token}` } })
@@ -477,7 +394,7 @@ async function recentEmails(query: string, max: number, token: string): Promise<
     const m = (await mRes.json()) as { snippet?: string; payload?: { headers?: GmailHeader[] } }
     const h = (name: string): string =>
       m.payload?.headers?.find((x) => x.name === name)?.value ?? ''
-    emails.push({ id, from: h('From'), subject: h('Subject'), date: h('Date'), snippet: m.snippet ?? '' })
+    emails.push({ from: h('From'), subject: h('Subject'), date: h('Date'), snippet: m.snippet ?? '' })
   }
   return JSON.stringify({ emails })
 }
@@ -760,134 +677,9 @@ async function driveFiles(query: string, max: number, token: string): Promise<st
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `drive_http_${res.status}` })
   const j = (await res.json()) as {
-    files?: { id?: string; name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
+    files?: { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
   }
   return JSON.stringify({ files: j.files ?? [] })
-}
-
-// ── SKILL-URILE GOOGLE IMPORTATE COMPLET (27 iul) ────────────────────────────
-
-// Corpul întreg al unui email (read_email). Gmail împachetează corpul pe părți
-// (multipart) în base64url; îl desfacem recursiv și preferăm text/plain.
-function gmailPartText(part: { mimeType?: string; body?: { data?: string }; parts?: unknown[] } | undefined): string {
-  if (!part) return ''
-  const decode = (d?: string): string => {
-    if (!d) return ''
-    try {
-      return Buffer.from(d.replaceAll('-', '+').replaceAll('_', '/'), 'base64').toString('utf8')
-    } catch {
-      return ''
-    }
-  }
-  if (part.mimeType?.startsWith('text/plain')) return decode(part.body?.data)
-  for (const p of (part.parts ?? []) as { mimeType?: string; body?: { data?: string }; parts?: unknown[] }[]) {
-    const t = gmailPartText(p)
-    if (t) return t
-  }
-  // fără text/plain — acceptăm html (modelul îl citește oricum ca text)
-  if (part.mimeType?.startsWith('text/html')) return decode(part.body?.data)
-  return ''
-}
-
-async function readEmail(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_id' })
-  const res = await tfetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) return JSON.stringify({ error: `gmail_http_${res.status}` })
-  const m = (await res.json()) as { snippet?: string; payload?: { headers?: GmailHeader[]; mimeType?: string; body?: { data?: string }; parts?: unknown[] } }
-  const h = (name: string): string => m.payload?.headers?.find((x) => x.name === name)?.value ?? ''
-  const body = gmailPartText(m.payload) || m.snippet || ''
-  return JSON.stringify({ from: h('From'), to: h('To'), subject: h('Subject'), date: h('Date'), body: body.slice(0, 20_000) })
-}
-
-// Conținutul unui fișier Drive: Docs → text, Sheets → CSV, restul → descărcare
-// directă (doar tipurile text; binarele primesc onest doar metadatele).
-async function readDriveFile(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_id' })
-  const auth = { headers: { Authorization: `Bearer ${token}` } }
-  const meta = await tfetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=name,mimeType,size`, auth)
-  if (!meta.ok) return JSON.stringify({ error: `drive_http_${meta.status}` })
-  const info = (await meta.json()) as { name?: string; mimeType?: string; size?: string }
-  const mime = info.mimeType ?? ''
-  const exportAs =
-    mime === 'application/vnd.google-apps.document' ? 'text/plain'
-    : mime === 'application/vnd.google-apps.spreadsheet' ? 'text/csv'
-    : mime === 'application/vnd.google-apps.presentation' ? 'text/plain'
-    : null
-  const url = exportAs
-    ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}/export?mimeType=${encodeURIComponent(exportAs)}`
-    : `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`
-  if (!exportAs && !/^text\/|json|xml|csv/.test(mime)) {
-    return JSON.stringify({ name: info.name, mimeType: mime, size: info.size, note: 'fișier binar — conținutul nu se poate citi ca text' })
-  }
-  const res = await tfetch(url, auth)
-  if (!res.ok) return JSON.stringify({ error: `drive_read_http_${res.status}` })
-  const text = await res.text()
-  return JSON.stringify({ name: info.name, mimeType: mime, content: text.slice(0, 20_000) })
-}
-
-// Pozele recente din Google Photos (scope cerut la login din 25 iul, unealtă
-// abia acum — era un drept fără mână).
-async function getPhotos(max: number, token: string): Promise<string> {
-  const n = Math.min(Math.max(max, 1), 25)
-  const res = await tfetch(`https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=${n}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) return JSON.stringify({ error: `photos_http_${res.status}` })
-  const j = (await res.json()) as { mediaItems?: { filename?: string; mimeType?: string; mediaMetadata?: { creationTime?: string }; baseUrl?: string; productUrl?: string }[] }
-  const photos = (j.mediaItems ?? []).map((p) => ({
-    filename: p.filename ?? '',
-    date: p.mediaMetadata?.creationTime ?? '',
-    // baseUrl e afișabil direct pe monitor (=w800-h600 cere mărimea); productUrl deschide Photos.
-    url: p.baseUrl ? `${p.baseUrl}=w1024-h768` : (p.productUrl ?? ''),
-  }))
-  return JSON.stringify({ photos })
-}
-
-// Contul YouTube al userului (youtube.readonly — și el drept fără mână până azi).
-async function myYoutube(what: string, max: number, token: string): Promise<string> {
-  const n = Math.min(Math.max(max, 1), 25)
-  const auth = { headers: { Authorization: `Bearer ${token}` } }
-  if (what === 'subscriptions') {
-    const r = await tfetch(`https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&maxResults=${n}`, auth)
-    if (!r.ok) return JSON.stringify({ error: `youtube_http_${r.status}` })
-    const j = (await r.json()) as { items?: { snippet?: { title?: string; resourceId?: { channelId?: string } } }[] }
-    return JSON.stringify({ subscriptions: (j.items ?? []).map((i) => ({ channel: i.snippet?.title ?? '', channelId: i.snippet?.resourceId?.channelId ?? '' })) })
-  }
-  if (what === 'playlists') {
-    const r = await tfetch(`https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&mine=true&maxResults=${n}`, auth)
-    if (!r.ok) return JSON.stringify({ error: `youtube_http_${r.status}` })
-    const j = (await r.json()) as { items?: { id?: string; snippet?: { title?: string }; contentDetails?: { itemCount?: number } }[] }
-    return JSON.stringify({ playlists: (j.items ?? []).map((i) => ({ id: i.id ?? '', title: i.snippet?.title ?? '', videos: i.contentDetails?.itemCount ?? 0 })) })
-  }
-  // liked — clipurile apreciate
-  const r = await tfetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&myRating=like&maxResults=${n}`, auth)
-  if (!r.ok) return JSON.stringify({ error: `youtube_http_${r.status}` })
-  const j = (await r.json()) as { items?: { id?: string; snippet?: { title?: string; channelTitle?: string } }[] }
-  return JSON.stringify({ liked: (j.items ?? []).map((i) => ({ id: i.id ?? '', title: i.snippet?.title ?? '', channel: i.snippet?.channelTitle ?? '' })) })
-}
-
-async function deleteCalendarEvent(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_id' })
-  const res = await tfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  // 204 = șters; 410 = era deja șters — ambele înseamnă „nu mai există".
-  if (!res.ok && res.status !== 410) return JSON.stringify({ error: `calendar_http_${res.status}` })
-  return JSON.stringify({ deleted: true, id })
-}
-
-async function completeTask(id: string, token: string): Promise<string> {
-  if (!id) return JSON.stringify({ error: 'missing_id' })
-  const res = await tfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'completed' }),
-  })
-  if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
-  return JSON.stringify({ completed: true, id })
 }
 
 async function getTasks(max: number, token: string): Promise<string> {
@@ -896,9 +688,8 @@ async function getTasks(max: number, token: string): Promise<string> {
   url.searchParams.set('showCompleted', 'false')
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
-  const j = (await res.json()) as { items?: { id?: string; title?: string; due?: string; status?: string }[] }
-  // id-ul e obligatoriu în ieșire: complete_task lucrează pe el.
-  const tasks = (j.items ?? []).map((t) => ({ id: t.id ?? '', title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
+  const j = (await res.json()) as { items?: { title?: string; due?: string; status?: string }[] }
+  const tasks = (j.items ?? []).map((t) => ({ title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
   return JSON.stringify({ tasks })
 }
 
@@ -1394,12 +1185,6 @@ export async function runGoogleTool(
       result = await searchContacts(str(args.query), num(args.max_results, 5), token)
     else if (name === 'add_contact')
       result = await addContact(str(args.name), str(args.email), str(args.phone), token)
-    else if (name === 'read_email') result = await readEmail(str(args.id), token)
-    else if (name === 'read_drive_file') result = await readDriveFile(str(args.id), token)
-    else if (name === 'get_photos') result = await getPhotos(num(args.max_results, 10), token)
-    else if (name === 'my_youtube') result = await myYoutube(str(args.what), num(args.max_results, 10), token)
-    else if (name === 'delete_calendar_event') result = await deleteCalendarEvent(str(args.id), token)
-    else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else return JSON.stringify({ error: 'unknown_tool' })
 
     if (/_http_(401|403)\b/.test(result)) return NEEDS_CONNECT

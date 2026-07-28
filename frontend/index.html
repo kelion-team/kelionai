@@ -71,15 +71,8 @@
           navigator.serviceWorker
             .register('/sw.js', { updateViaCache: 'none' })
             .then((reg) => {
-              // update() pică la orice cădere de rețea (nu poate lua sw.js) —
-              // fără catch, fiecare eșec ajungea «Uncaught (in promise)» în consolă.
-              // JS PUR, nu TypeScript: ăsta e un <script> inline executat DIRECT
-              // de browser, nu trece prin Vite. O adnotare de tip aici (`: void`)
-              // omoară tot fișierul cu «Uncaught SyntaxError: Unexpected token»
-              // — dovadă live 28 iul: aplicația nu mai pornea deloc.
-              var upd = function () { reg.update().catch(function () {}) }
-              upd()
-              setInterval(upd, 60000)
+              void reg.update()
+              setInterval(() => void reg.update(), 60_000)
             })
             .catch(() => {})
         })

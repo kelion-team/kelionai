@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { openrouterChat } from './openrouter.js'
-import type { AnthropicTool, OrChatResult, OrMessage } from './openrouter.js'
+import type { AnthropicTool, OrMessage } from './openrouter.js'
 import type { Message } from './brain-types.js'
 
 // ── CREIERUL — 100% OpenRouter ──────────────────────────────────────────────
@@ -116,42 +116,18 @@ export async function brainCompleteWithTools(
   prompt: string,
   tools: AnthropicTool[],
   execTool: (name: string, args: Record<string, unknown>) => Promise<string>,
-  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void; forceFirstRound?: boolean } = {},
+  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void } = {},
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
   try {
     for (let round = 0; round < maxRounds; round++) {
-      // FORȚAREA UNELTEI ȘI ÎN VOCE (Adrian, 27 iul: „inclusiv forțarea de
-      // unelte"): pe turele de acțiune ale ownerului (instalează/construiește/
-      // caută în sursă...), prima rundă e obligată să cheme o unealtă — execută,
-      // nu doar descrie. Rundele următoare revin la 'auto'.
-      const forced = opts.forceFirstRound && round === 0 && tools.length > 0
-      let r: OrChatResult
-      try {
-        r = await openrouterChat(workModel(), messages, tools, {
-          maxTokens: opts.maxTokens ?? 2000,
-          reasoning: 'medium',
-          toolChoice: forced ? 'required' : undefined,
-        })
-      } catch (e) {
-        // Forțarea nu are voie să omoare cererea (audit 28 iul): unii furnizori
-        // resping tool_choice:'required' cu 400 → runda se reia liberă, ca în
-        // orchestrator. Fără forțare, eroarea urcă la plasa finală de mai jos.
-        if (!forced) throw e
-        r = await openrouterChat(workModel(), messages, tools, {
-          maxTokens: opts.maxTokens ?? 2000,
-          reasoning: 'medium',
-        })
-      }
+      const r = await openrouterChat(workModel(), messages, tools, {
+        maxTokens: opts.maxTokens ?? 2000,
+        reasoning: 'medium',
+      })
       if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
-      // RĂSPUNS GOL ≠ RĂSPUNS (audit 28 iul, cauza #1 a „problemei tehnice"
-      // rostite): modelul :free cu multe unelte + raționament întoarce 200 cu
-      // conținut GOL și zero tool_calls — fără throw, deci plasa din catch nu-l
-      // prindea; golul ajungea {error:brain_unavailable} → „problemă tehnică".
-      // Golul cade la plasa fără unelte de mai jos, nu se întoarce ca atare.
-      if (!r.toolCalls.length && r.text.trim()) return r.text.trim()
-      if (!r.toolCalls.length) break
+      if (!r.toolCalls.length) return r.text.trim()
       messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
       for (const c of r.toolCalls) {
         let args: Record<string, unknown> = {}
@@ -169,21 +145,7 @@ export async function brainCompleteWithTools(
     if (opts.onCost && last.costUsd > 0) opts.onCost(last.costUsd)
     return last.text.trim()
   } catch {
-    // FĂRĂ FUND DE SAC (Adrian, 28 iul: Kelion „raportează că a întâlnit o
-    // problemă tehnică"): dacă bucla CU unelte pică (modelul :free se îneacă pe
-    // tool_choice/unelte multe, 429, 400...), NU întoarcem gol — golul ajungea
-    // la modelul de voce ca {error:brain_unavailable} și îl rostea ca „problemă
-    // tehnică". Reîncercăm O DATĂ fără unelte: un răspuns vorbit real, chiar
-    // dacă fără faptă, e mai onest decât o eroare inventată.
-    try {
-      const plain = await openrouterChat(workModel(), [{ role: 'user', content: prompt }], [], {
-        maxTokens: opts.maxTokens ?? 2000,
-      })
-      if (opts.onCost && plain.costUsd > 0) opts.onCost(plain.costUsd)
-      return plain.text.trim()
-    } catch {
-      return ''
-    }
+    return ''
   }
 }
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs, proposeKelionTool, decideKelionTool } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -11,12 +11,11 @@ import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
-import { googleTools, runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
+import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
-import { hasActionIntent, ACTION_INTENT } from '../services/openrouter.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -123,64 +122,17 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
         req.log.warn(
-          {
-            upstreamStatus: res.status,
-            upstreamCode: res.code,
-            upstreamError: res.error,
-            attempts: res.attempts,
-            sdpLen: offer.length,
-            sdpHead: offer.slice(0, 40),
-          },
+          { upstreamStatus: res.status, upstreamError: res.error, sdpLen: offer.length, sdpHead: offer.slice(0, 40) },
           'realtime upstream refuz',
         )
         // CONT FĂRĂ CREDIT (incident 24 iul: vocea moartă, descoperită abia la
         // test): anunțăm adminul pe email IMEDIAT, nu la următorul test manual.
         if (isQuotaError(res.error)) alertOpenAiQuota()
         const code = res.status === 503 ? 503 : 502
-        // EROARE CITIBILĂ, NU UN 502 GOL (Adrian, 28 iul: în browser se vedea
-        // doar „POST /api/realtime/session 502" — nici userul nu știa ce s-a
-        // întâmplat, nici clientul nu putea decide dacă merită reîncercat).
-        // Trimitem: cod stabil pentru cod (`code`), statusul REAL al upstreamului
-        // (504 ≠ 429 ≠ 401), câte încercări am ars și un mesaj gata de afișat.
-        // `error: 'realtime_upstream'` rămâne neschimbat — pe el se sprijină ce
-        // există deja; câmpurile noi doar se adaugă.
-        const mesaj =
-          res.code === 'realtime_not_configured'
-            ? 'vocea nu a putut porni: serverul nu are cheia de voce configurată'
-            : res.code === 'upstream_timeout'
-              ? `vocea nu a putut porni: upstream a expirat (${res.attempts} încercări)`
-              : res.code === 'upstream_unreachable'
-                ? `vocea nu a putut porni: upstream inaccesibil (${res.attempts} încercări)`
-                : res.code === 'upstream_empty'
-                  ? 'vocea nu a putut porni: upstream a răspuns fără answer SDP'
-                  : `vocea nu a putut porni: upstream ${res.status}`
-        return reply
-          .code(code)
-          // Antetul e ASCII (codul), mesajul cu diacritice merge în corpul JSON.
-          .header('x-kelion-voice-error', res.code)
-          .send({
-            error: 'realtime_upstream',
-            code: res.code,
-            status: res.status,
-            attempts: res.attempts,
-            // Reîncercarea din client are rost DOAR la un necaz trecător; la
-            // refuz (4xx) sau lipsă de cheie ar fi doar zgomot și bani arși.
-            retryable: res.code !== 'upstream_refuz' && res.code !== 'realtime_not_configured',
-            message: mesaj,
-          })
+        return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
       }
-      // REGULA FAPTEI, TRIMISĂ VOCII (Adrian, 27 iul: „autonomia lui nu e
-      // reală"). Vocea trebuie să știe ce e ORDIN ca să forțeze unealta EXACT pe
-      // tura aia. Decizia se ia în browser — acolo e transcriptul, în același
-      // tick cu response.create, deci zero latență adăugată pe calea audio —
-      // dar regula NU se rescrie acolo: ar diverge de chatul scris. O trimitem
-      // pe ACEST răspuns, care se face oricum o dată, la pornirea sesiunii.
-      // URL-encodată: regexul are diacritice, antetele HTTP sunt ASCII.
       // Clientul citește răspunsul ca text (answer SDP) → setRemoteDescription.
-      return reply
-        .header('x-kelion-action-intent', encodeURIComponent(ACTION_INTENT.source))
-        .header('content-type', 'application/sdp')
-        .send(res.sdp)
+      return reply.header('content-type', 'application/sdp').send(res.sdp)
     },
   )
 
@@ -259,7 +211,6 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               { name: 'db_tables', description: 'Schema completă a bazei de date permanente (tabele, coloane, număr de rânduri).', input_schema: { type: 'object', properties: {} } },
               { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
               { name: 'build_software', description: 'Pune un ordin de construcție în coada constructorului (lucrătorul construiește cu build+teste și deschide PR; ownerul dă merge).', input_schema: { type: 'object', properties: { order: { type: 'string' } }, required: ['order'] } },
-              { name: 'propose_tool', description: 'INSTALEAZĂ-ȚI un skill nou dintr-un API public HTTPS. Când ownerul îți cere să instalezi/imporți un instrument, cheam-o — se auto-instalează pe loc și e gata din următoarea cerere. Dă nume snake_case, ce face, schema parametrilor și șablonul HTTPS (metodă + url cu {param}).', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, params_schema: { type: 'object' }, http_method: { type: 'string' }, http_url: { type: 'string' } }, required: ['name', 'description', 'http_url'] } },
               { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
               { name: 'system_health', description: 'Sănătatea proprie: publicare sincronă, rulări roșii, ordine eșuate, erori client, disc, DB, punga creierului. La probleme: enumeră-le ownerului și întreabă dacă să le repari.', input_schema: { type: 'object', properties: {} } },
             ]
@@ -276,22 +227,6 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const jobId = await createBuildJob(user.email, order)
             return JSON.stringify({ ok: !!jobId, job: jobId })
           }
-          if (tname === 'propose_tool') {
-            // AUTONOMIE DE INSTALARE ȘI DIN VOCE (Adrian, 27 iul): cererea
-            // ownerului = aprobare → skill-ul se auto-instalează pe loc.
-            const id = await proposeKelionTool({
-              name: String(targs.name ?? ''),
-              description: String(targs.description ?? ''),
-              paramsJson: JSON.stringify(targs.params_schema ?? { type: 'object', properties: {}, required: [] }),
-              httpMethod: String(targs.http_method ?? 'GET'),
-              httpUrl: String(targs.http_url ?? ''),
-              httpHeaders: '{}',
-              rationale: '',
-            })
-            if (!id) return JSON.stringify({ error: 'invalid_proposal (doar HTTPS, nume valid)' })
-            const ok = await decideKelionTool(id, true).catch(() => false)
-            return JSON.stringify({ installed: ok, id, note: ok ? 'Skill instalat și activ — folosește-l din următoarea cerere.' : 'auto-instalare picată' })
-          }
           if (tname === 'constructor_status') {
             const jobs = await listBuildJobs(8)
             return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, pr: j.prUrl })) })
@@ -299,51 +234,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           if (tname === 'system_health') return systemHealth()
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
-        // CREIER CU BRAȚE ȘI PENTRU CEILALȚI (audit 27 iul): userul care nu e
-        // ownerul cădea pe `brainComplete` — un „expert" FĂRĂ nicio unealtă,
-        // care poate doar să vorbească. De-aia „îți caut", „îți pun melodia"
-        // rămâneau vorbe și în escaladare. Acum creierul primește exact brațele
-        // de acțiune ale userului (aceleași unelte Google/căutare pe care le are
-        // și vocea), iar ownerul le are pe deasupra pe cele de construcție.
-        let brainScreen: { url: string; title: string } | undefined
-        const actionTools = googleTools.map((t) => ({
-          name: t.name,
-          description: t.description ?? '',
-          input_schema: t.input_schema as Record<string, unknown>,
-        }))
-        const actionNames = new Set(actionTools.map((t) => t.name))
-        const execBrainTool = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
-          if (!actionNames.has(tname)) return execIntrospection(tname, targs)
-          if (tname === 'web_search' || tname === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
-          const out = await runGoogleTool(tname, targs, token)
-          // ECRANUL CERUT DE CREIER ajunge la client — altfel creierul „găsea"
-          // melodia dar nu o punea nimeni pe monitor: faptă fără efect vizibil.
-          try {
-            const j = JSON.parse(out) as { screen_url?: string }
-            if (j.screen_url && !brainScreen) {
-              brainScreen = {
-                url: /^https?:/i.test(j.screen_url) ? j.screen_url : `https://${req.headers.host ?? 'kelionai.app'}${j.screen_url}`,
-                title: tname.replace(/_/g, ' '),
-              }
-            }
-          } catch {
-            /* rezultat non-JSON — doar text pentru model */
-          }
-          return out.slice(0, 6000)
-        }
-        // FORȚARE PE CEREREA REALĂ, NU PE PROMPTUL ÎNTREG (bug găsit la auditul
-        // din 27 iul): `prompt` = SYSTEM_PROMPT + antet + cerere, iar
-        // SYSTEM_PROMPT conține „PR", „merge" și „fix" → ACTION_INTENT se
-        // potrivea MEREU. Deci forțarea rundei 1 era pornită la FIECARE
-        // escaladare, inclusiv la „explică-mi X" — exact tiparul care face
-        // modelul să bifeze o unealtă și apoi să povestească. Testăm cererea.
-        const answer = await brainCompleteWithTools(prompt, [...actionTools, ...introspectionTools], execBrainTool, {
-          maxTokens: 2000,
-          onCost: (usd) => { toolCostUsd += usd },
-          forceFirstRound: hasActionIntent(request),
-        })
+        const answer = introspectionTools.length
+          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd } })
+          : await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
-        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen })
+        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }
 
       // PARITATE VOCE↔CHAT (25 iul): notițe, rol, gesturi — apelabile din voce.
