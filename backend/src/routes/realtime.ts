@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, buildJobsToday, listBuildJobs, proposeKelionTool, decideKelionTool, loadKv } from '../db.js'
-import { parseBrainSub, subActive } from '../services/brainSubscription.js'
+import { parseBrainSub, subActive, voiceSubActive } from '../services/brainSubscription.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -119,8 +119,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           : '') +
         gpsBlock
 
+      // VOCEA PE ABONAMENT (28 iul): dacă owner-ul are cheia OpenAI proprie
+      // configurată ȘI abonamentul e activ ȘI lacătul admin e deblocat,
+      // conversația LIVE pornește pe cheia lui, nu pe punga centrală.
+      const lockedAdminPay = isAdmin && (!(await isArmed()) || hasUnlock(req, user.email))
+      const voiceSub = parseBrainSub(await loadKv('brain_subscription').catch(() => null))
+      const voiceApiKey = voiceSubActive(voiceSub, lockedAdminPay) ? voiceSub.voiceKey : undefined
+
       // hardLock = adminul (Adrian) — română MEREU, fără comutare pe italiană.
-      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock)
+      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock, voiceApiKey)
       if (!res.ok) {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).

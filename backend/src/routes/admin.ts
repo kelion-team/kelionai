@@ -422,6 +422,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const sub = await loadBrainSub(true)
     const hasKey = sub.key.length > 0
+    const hasVoiceKey = sub.voiceKey.length > 0
     return reply.send({
       mode: sub.mode,
       model: sub.model,
@@ -430,6 +431,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Soldul REAL al cheii de abonament (același endpoint /credits ca punga
       // centrală) — cardul apare doar când există cheie.
       balance: hasKey ? await getOpenRouterBalance(false, sub.key) : null,
+      // VOCEA PE ABONAMENT (28 iul): cheie OpenAI separată — fără sold expus
+      // (OpenAI n-are un /credits public comparabil), doar starea configurării.
+      hasVoiceKey,
+      voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
     })
   })
 
@@ -442,24 +447,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ models: await getBrainCatalog() })
   })
 
-  app.post<{ Body: { mode?: string; model?: string; key?: string } }>(
+  app.post<{ Body: { mode?: string; model?: string; key?: string; voiceKey?: string } }>(
     '/api/admin/brain-sub',
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string } = {}
+      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string; voiceKey?: string } = {}
       if (req.body?.mode === 'free' || req.body?.mode === 'subscription') patch.mode = req.body.mode
       if (typeof req.body?.model === 'string' && req.body.model.trim()) patch.model = req.body.model.trim()
-      // key: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
+      // key/voiceKey: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
       if (typeof req.body?.key === 'string') patch.key = req.body.key.trim()
+      if (typeof req.body?.voiceKey === 'string') patch.voiceKey = req.body.voiceKey.trim()
       const sub = await saveBrainSub(patch)
       const hasKey = sub.key.length > 0
+      const hasVoiceKey = sub.voiceKey.length > 0
       return reply.send({
         mode: sub.mode,
         model: sub.model,
         hasKey,
         keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
         balance: hasKey ? await getOpenRouterBalance(true, sub.key) : null,
+        hasVoiceKey,
+        voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
       })
     },
   )

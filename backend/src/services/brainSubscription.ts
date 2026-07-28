@@ -21,6 +21,14 @@ export interface BrainSub {
   model: string
   /** Cheia OpenRouter proprie a ownerului (sk-or-…). Server-side, admin-only. */
   key: string
+  // VOCEA PE ABONAMENT (28 iul, Adrian: „pune vocea pe abonament"). Conversația
+  // LIVE (full-duplex) rulează pe OpenAI Realtime, un provider DIFERIT de
+  // OpenRouter — cheia de mai sus nu poate plăti acea parte (altă companie,
+  // altă factură). Cheie SEPARATĂ, opțională, pentru EXACT asta: dacă e
+  // completată ȘI modul e „abonament", sesiunea de voce live pornește pe cheia
+  // OpenAI proprie a ownerului, nu pe punga centrală. Fără ea, vocea rămâne pe
+  // punga centrală (degradare firească, nu eroare).
+  voiceKey: string
 }
 
 // Model implicit până când ownerul alege unul din catalogul live (dropdown-ul
@@ -29,7 +37,7 @@ export interface BrainSub {
 const DEFAULT_SUB_MODEL = (process.env.BRAIN_SUB_MODEL ?? 'anthropic/claude-sonnet-5').trim()
 
 export function parseBrainSub(raw: string | null | undefined): BrainSub {
-  const fallback: BrainSub = { mode: 'free', model: DEFAULT_SUB_MODEL, key: '' }
+  const fallback: BrainSub = { mode: 'free', model: DEFAULT_SUB_MODEL, key: '', voiceKey: '' }
   if (!raw) return fallback
   try {
     const p = JSON.parse(raw) as Partial<BrainSub>
@@ -37,6 +45,7 @@ export function parseBrainSub(raw: string | null | undefined): BrainSub {
       mode: p.mode === 'subscription' ? 'subscription' : 'free',
       model: typeof p.model === 'string' && p.model.trim() ? p.model.trim() : DEFAULT_SUB_MODEL,
       key: typeof p.key === 'string' ? p.key.trim() : '',
+      voiceKey: typeof p.voiceKey === 'string' ? p.voiceKey.trim() : '',
     }
   } catch {
     return fallback
@@ -61,8 +70,9 @@ export async function saveBrainSub(patch: Partial<BrainSub>): Promise<BrainSub> 
   const next: BrainSub = {
     mode: patch.mode === 'subscription' || patch.mode === 'free' ? patch.mode : cur.mode,
     model: typeof patch.model === 'string' && patch.model.trim() ? patch.model.trim() : cur.model,
-    // key: undefined → păstrează; '' → șterge explicit; string → setează.
+    // key/voiceKey: undefined → păstrează; '' → șterge explicit; string → setează.
     key: patch.key === undefined ? cur.key : String(patch.key).trim(),
+    voiceKey: patch.voiceKey === undefined ? cur.voiceKey : String(patch.voiceKey).trim(),
   }
   await saveKv(KV_KEY, JSON.stringify(next))
   cache = { at: Date.now(), val: next }
@@ -76,4 +86,14 @@ export async function saveBrainSub(patch: Partial<BrainSub>): Promise<BrainSub> 
  */
 export function subActive(sub: BrainSub, isAdmin: boolean): boolean {
   return isAdmin && sub.mode === 'subscription' && sub.key.length > 0 && sub.model.length > 0
+}
+
+/**
+ * Vocea pe abonament (28 iul): la fel ca subActive, dar pentru cheia OpenAI
+ * separată — conversația live pornește pe cheia proprie a ownerului DOAR dacă
+ * modul e „abonament" ȘI cheia OpenAI a fost completată. Fără ea, degradare
+ * firească pe punga centrală (nu eroare).
+ */
+export function voiceSubActive(sub: BrainSub, isAdmin: boolean): boolean {
+  return isAdmin && sub.mode === 'subscription' && sub.voiceKey.length > 0
 }
