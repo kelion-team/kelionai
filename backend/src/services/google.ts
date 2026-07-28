@@ -1172,6 +1172,14 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
       return JSON.stringify({ videos: playable.slice(0, n), screen_url: ytEmbed(playable[0].link) })
     }
   }
+  // SEMNALARE ONESTĂ (auditul 28 iul): distinge „serviciul de căutare n-a
+  // răspuns" (nici text, nici surse → indisponibilitate) de „chiar nu există
+  // clipuri". Vechea variantă întorcea mereu `not_found` → creierul spunea „nu
+  // găsesc clipuri" chiar și când căutarea era picată. (youtubeFirstEmbed rămâne
+  // neafectat: tot citește `videos[0]`, care lipsește → null, ca înainte.)
+  if (!r.text && r.sources.length === 0) {
+    return JSON.stringify({ videos: [], error: 'search_unavailable' })
+  }
   return JSON.stringify({ videos: [], not_found: true })
 }
 

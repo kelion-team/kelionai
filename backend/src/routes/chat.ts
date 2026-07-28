@@ -1885,11 +1885,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           tools.splice(i, 1)
         }
       }
-      // tot peste plafon (listă dinamică uriașă) — tăiem de la coadă, dar
-      // spunem în log CE s-a pierdut, ca să nu pară dispariție misterioasă.
+      // tot peste plafon (listă dinamică uriașă) — scoatem NEcriticele de la
+      // coadă, PĂSTRÂND uneltele de ACȚIUNE/REPARARE (auditul 28 iul: `...dynTools`
+      // stă înaintea suitei admin în listă, iar vechea tăiere `slice(0,64)` de
+      // coadă ar fi aruncat tocmai db_query/repo_merge_pr/server_logs când
+      // userul aproba ≥12 skill-uri dinamice — exact invers față de intenție).
       if (tools.length > TOOL_CAP) {
-        dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
-        tools = tools.slice(0, TOOL_CAP)
+        const NEVER_DROP = new Set([
+          'repo_write', 'repo_open_pr', 'repo_merge_pr', 'run_runbook', 'runbook_status',
+          'build_software', 'request_repair', 'constructor_status', 'cancel_build_jobs',
+          'db_query', 'db_tables', 'list_source', 'read_source', 'search_source',
+          'server_logs', 'system_health', 'ask_brain', 'generate_image',
+        ])
+        for (let i = tools.length - 1; i >= 0 && tools.length > TOOL_CAP; i--) {
+          if (!NEVER_DROP.has(tools[i].name)) {
+            dropped.push(tools[i].name)
+            tools.splice(i, 1)
+          }
+        }
+        // Ultima plasă (doar dacă rămân >64 unelte CRITICE — practic imposibil):
+        // abia atunci tăiem de la coadă, tot cu log.
+        if (tools.length > TOOL_CAP) {
+          dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
+          tools = tools.slice(0, TOOL_CAP)
+        }
       }
       console.log(`[tools] plafon ${TOOL_CAP}: ${allTools.length} → ${tools.length}; scoase: ${dropped.join(', ')}`)
     }
