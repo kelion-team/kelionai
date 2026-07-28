@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { openrouterChat } from './openrouter.js'
-import type { AnthropicTool, OrMessage } from './openrouter.js'
+import type { AnthropicTool, OrChatResult, OrMessage } from './openrouter.js'
 import type { Message } from './brain-types.js'
 
 // ── CREIERUL — 100% OpenRouter ──────────────────────────────────────────────
@@ -126,13 +126,32 @@ export async function brainCompleteWithTools(
       // unelte"): pe turele de acțiune ale ownerului (instalează/construiește/
       // caută în sursă...), prima rundă e obligată să cheme o unealtă — execută,
       // nu doar descrie. Rundele următoare revin la 'auto'.
-      const r = await openrouterChat(workModel(), messages, tools, {
-        maxTokens: opts.maxTokens ?? 2000,
-        reasoning: 'medium',
-        toolChoice: opts.forceFirstRound && round === 0 && tools.length ? 'required' : undefined,
-      })
+      const forced = opts.forceFirstRound && round === 0 && tools.length > 0
+      let r: OrChatResult
+      try {
+        r = await openrouterChat(workModel(), messages, tools, {
+          maxTokens: opts.maxTokens ?? 2000,
+          reasoning: 'medium',
+          toolChoice: forced ? 'required' : undefined,
+        })
+      } catch (e) {
+        // Forțarea nu are voie să omoare cererea (audit 28 iul): unii furnizori
+        // resping tool_choice:'required' cu 400 → runda se reia liberă, ca în
+        // orchestrator. Fără forțare, eroarea urcă la plasa finală de mai jos.
+        if (!forced) throw e
+        r = await openrouterChat(workModel(), messages, tools, {
+          maxTokens: opts.maxTokens ?? 2000,
+          reasoning: 'medium',
+        })
+      }
       if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
-      if (!r.toolCalls.length) return r.text.trim()
+      // RĂSPUNS GOL ≠ RĂSPUNS (audit 28 iul, cauza #1 a „problemei tehnice"
+      // rostite): modelul :free cu multe unelte + raționament întoarce 200 cu
+      // conținut GOL și zero tool_calls — fără throw, deci plasa din catch nu-l
+      // prindea; golul ajungea {error:brain_unavailable} → „problemă tehnică".
+      // Golul cade la plasa fără unelte de mai jos, nu se întoarce ca atare.
+      if (!r.toolCalls.length && r.text.trim()) return r.text.trim()
+      if (!r.toolCalls.length) break
       messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
       for (const c of r.toolCalls) {
         let args: Record<string, unknown> = {}
