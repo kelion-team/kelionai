@@ -24,8 +24,6 @@ export const config = {
   googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? '',
   googleTtsKey: process.env.GOOGLE_TTS_API_KEY ?? process.env.GOOGLE_API_KEY ?? '',
   ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
-  serperKey: process.env.SERPER_API_KEY ?? '',
-  googleMapsKey: process.env.GOOGLE_MAPS_KEY ?? '',
   geminiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
   // VOCE LIVE — OpenAI Realtime (WebRTC). Cheia stă DOAR pe server; browserul
