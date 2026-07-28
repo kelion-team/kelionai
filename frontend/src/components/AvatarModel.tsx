@@ -173,6 +173,18 @@ export default function AvatarModel() {
   const variatie3 = useGLTF(CLIP_FILES['variatie-3'])
   const root = useRef<Group>(null)
 
+  // SEMNAL „AVATARUL S-A ÎNCĂRCAT" (Adrian, 28 iul): componenta ajunge aici DOAR
+  // după ce Suspense a rezolvat `useGLTF('/kelion-rpm.glb')` — adică GLB-ul de
+  // bază e încărcat și firul principal e liber. Emitem o singură dată evenimentul
+  // pe care ChatPanel îl așteaptă ca să armeze microfonul EXACT în acest moment
+  // (nu în timpul parsării grele a modelului). Punem și un flag pe window pentru
+  // cazul în care ChatPanel se montează după noi (prinde starea, fără cursă).
+  useEffect(() => {
+    const w = window as unknown as { __kelionAvatarReady?: boolean }
+    w.__kelionAvatarReady = true
+    window.dispatchEvent(new CustomEvent('kelion:avatar-ready'))
+  }, [])
+
   // Fiecare GLB din bibliotecă are un singur clip, toate cu același nume
   // generic — le redenumim după rol ca să le putem chema pe nume.
   const clips = useMemo(() => {

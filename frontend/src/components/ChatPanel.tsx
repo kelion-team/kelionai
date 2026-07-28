@@ -1482,15 +1482,35 @@ export default function ChatPanel({
     void ensureMicRef.current()
   }
 
-  // Permanent hearing: pornește la montare, revine când tabul redevine vizibil
-  // (browserele opresc captarea în fundal), curăță tot la demontare.
+  // Permanent hearing: pornește ODATĂ CU ÎNCĂRCAREA AVATARULUI (Adrian, 28 iul:
+  // „mută deschiderea odată cu încărcarea GLB-ului"). DE CE: pornirea la montarea
+  // brută rula ÎN TIMPUL parsării grele a modelului 3D (`/kelion-rpm.glb`) —
+  // firul principal ocupat → getUserMedia/AudioContext se împiedicau, primul
+  // apel eșua și intra în reîncercări cu backoff (1s→2s→4s…), de-aici „pornește
+  // greu". Acum așteptăm semnalul `kelion:avatar-ready` (emis de AvatarModel
+  // când GLB-ul de bază s-a încărcat, firul e liber) și DOAR ATUNCI armăm
+  // microfonul — prima încercare prinde, fără backoff. Pentru owner (permisiune
+  // deja dată) pornește fără click. Plasă de 4s: dacă avatarul nu se încarcă
+  // (pagină fără avatar / eșec GLB), microfonul pornește oricum, nu se pierde.
   useEffect(() => {
-    void ensureMicRef.current()
+    let armed = false
+    const arm = (): void => {
+      if (armed) return
+      armed = true
+      void ensureMicRef.current()
+    }
+    // Dacă avatarul s-a încărcat deja înainte să atașăm ascultătorul (cursă la
+    // pornire rapidă), pornim pe loc; altfel așteptăm evenimentul.
+    if ((window as unknown as { __kelionAvatarReady?: boolean }).__kelionAvatarReady) arm()
+    else window.addEventListener('kelion:avatar-ready', arm, { once: true })
+    const armFallback = window.setTimeout(arm, 4000)
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') void ensureMicRef.current()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      window.removeEventListener('kelion:avatar-ready', arm)
+      window.clearTimeout(armFallback)
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
       micRef.current?.stop()
