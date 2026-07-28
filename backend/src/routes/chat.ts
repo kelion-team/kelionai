@@ -1807,9 +1807,37 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // redeploy) + `propose_tool` ca să-și poată propune altele noi.
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
-    const tools: Tool[] = isAdmin
+    const allTools: Tool[] = isAdmin
       ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
+    // PLAFONUL DE 64 DE UNELTE (dovadă live 28 iul, log: `[CHAT ERROR]
+    // openrouter 400: "at most 64 tools are allowed"`): importul complet Google
+    // a urcat lista adminului la 69 și furnizorul refuză cu 400 ÎNAINTE de
+    // creier → Kelion raporta „am întâlnit o problemă tehnică" exact pe
+    // cererile de reparare. Tăiem deterministic la 64: cad întâi uneltele de
+    // lux (promo, cost, roluri...), NICIODATĂ cele de acțiune/reparare. Lista
+    // dinamică (skill-uri auto-instalate) poate crește oricât — plafonul ține.
+    const TOOL_CAP = 64
+    const DROP_FIRST = ['prepare_promo_clip', 'get_real_cost', 'set_active_role', 'open_app_view', 'log_unsupported_request', 'play_avatar_gesture', 'browser_key', 'browser_click_at', 'browser_back', 'wikipedia_lookup', 'convert_currency', 'delete_note', 'forget_memory', 'list_updates', 'runbook_log']
+    let tools: Tool[] = allTools
+    if (tools.length > TOOL_CAP) {
+      const dropped: string[] = []
+      for (const name of DROP_FIRST) {
+        if (tools.length <= TOOL_CAP) break
+        const i = tools.findIndex((t) => t.name === name)
+        if (i >= 0) {
+          dropped.push(name)
+          tools.splice(i, 1)
+        }
+      }
+      // tot peste plafon (listă dinamică uriașă) — tăiem de la coadă, dar
+      // spunem în log CE s-a pierdut, ca să nu pară dispariție misterioasă.
+      if (tools.length > TOOL_CAP) {
+        dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
+        tools = tools.slice(0, TOOL_CAP)
+      }
+      console.log(`[tools] plafon ${TOOL_CAP}: ${allTools.length} → ${tools.length}; scoase: ${dropped.join(', ')}`)
+    }
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
     // intră în conductă; sinteza merge în paralel cu textul care încă curge.

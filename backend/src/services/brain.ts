@@ -150,7 +150,21 @@ export async function brainCompleteWithTools(
     if (opts.onCost && last.costUsd > 0) opts.onCost(last.costUsd)
     return last.text.trim()
   } catch {
-    return ''
+    // FĂRĂ FUND DE SAC (Adrian, 28 iul: Kelion „raportează că a întâlnit o
+    // problemă tehnică"): dacă bucla CU unelte pică (modelul :free se îneacă pe
+    // tool_choice/unelte multe, 429, 400...), NU întoarcem gol — golul ajungea
+    // la modelul de voce ca {error:brain_unavailable} și îl rostea ca „problemă
+    // tehnică". Reîncercăm O DATĂ fără unelte: un răspuns vorbit real, chiar
+    // dacă fără faptă, e mai onest decât o eroare inventată.
+    try {
+      const plain = await openrouterChat(workModel(), [{ role: 'user', content: prompt }], [], {
+        maxTokens: opts.maxTokens ?? 2000,
+      })
+      if (opts.onCost && plain.costUsd > 0) opts.onCost(plain.costUsd)
+      return plain.text.trim()
+    } catch {
+      return ''
+    }
   }
 }
 
