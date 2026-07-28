@@ -198,14 +198,30 @@ function compactHistory(messages) {
   }
 }
 
+// SCARA DE MODELE GRATUITE (dovadă live 28 iul, ordinul #9: modelul configurat
+// a primit 429 la FIECARE pas — „poolside/laguna-m.1:free is rate-limited" — și
+// agentul a reîncercat același model până la plafonul de pași, fără să scrie o
+// linie de cod; jobul a picat cu „plafon de pași atins fără finish"). Reîncercarea
+// pe ACELAȘI model nu ajută când modelul e saturat: la a doua încercare eșuată
+// TRECEM LA URMĂTORUL model gratuit. Toate au tools confirmat în catalog.
+const MODEL_LADDER = [
+  MODEL,
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'google/gemma-4-26b-a4b-it:free',
+].filter((m, i, a) => m && a.indexOf(m) === i)
+let modelIdx = 0
+
 async function llm(messages) {
   let lastErr = ''
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    // de la a doua încercare coborâm pe scară: alt model gratuit, nu același
+    const model = MODEL_LADDER[Math.min(modelIdx, MODEL_LADDER.length - 1)]
     try {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+        body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
       })
       const text = await r.text()
       if (!r.ok) {
@@ -236,9 +252,15 @@ async function llm(messages) {
     } catch (e) {
       if (e?.fatal) throw e
       lastErr = String(e?.message ?? e)
-      if (attempt === 4) break
-      const wait = attempt * 15_000 // 15s, 30s, 45s — modelele free respiră greu
-      log(`llm încercarea ${attempt} a picat (${lastErr.slice(0, 120)}) — reîncerc în ${wait / 1000}s`)
+      if (attempt === 6) break
+      // 429/saturat = modelul ăsta nu ne mai servește ACUM → treci la următorul
+      // de pe scară. Pauza rămâne scurtă: schimbarea modelului e adevărata plasă.
+      if (modelIdx < MODEL_LADDER.length - 1) modelIdx++
+      const wait = Math.min(attempt * 8_000, 30_000)
+      log(
+        `llm încercarea ${attempt} a picat pe ${model} (${lastErr.slice(0, 100)}) — trec pe ` +
+          `${MODEL_LADDER[Math.min(modelIdx, MODEL_LADDER.length - 1)]} în ${wait / 1000}s`,
+      )
       await new Promise((res) => setTimeout(res, wait))
     }
   }
