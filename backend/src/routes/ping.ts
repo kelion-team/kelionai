@@ -1,3 +1,4 @@
+// test constructor 28 iul - verificare ca lantul merge.
 import { FastifyInstance } from 'fastify'
 
 export async function pingRoutes(app: FastifyInstance): Promise<void> {
