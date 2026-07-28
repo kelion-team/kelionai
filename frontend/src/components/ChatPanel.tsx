@@ -143,6 +143,11 @@ export default function ChatPanel({
   const [busy, setBusy] = useState(false)
   // Microfonul (intrare) — captează → server (STT) → creier. NU e „voce în front”.
   const [listening, setListening] = useState(false)
+  // BLOCAT DE BROWSER (28 iul — „mic-ul nu pornește singur"): pornirea automată
+  // la intrare cere permisiune FĂRĂ ca userul să fi apăsat ceva — dacă refuză sau
+  // browserul are microfonul blocat din trecut, butonul arăta identic cu starea
+  // „încă neapăsat", fără nicio explicație. Acum starea e vizibilă și distinctă.
+  const [micBlocked, setMicBlocked] = useState(false)
   // VOLUMUL VOCII (25 iul): valoarea persistată din audioIO, oglindită în slider.
   const [voiceVol, setVoiceVolState] = useState(() => getVoiceVolume())
   // DICTARE LIVE: fraza curentă, cuvânt cu cuvânt, cu efect cinematografic pe
@@ -987,7 +992,12 @@ export default function ChatPanel({
     coalescerRef.current?.cancel()
     setListening(false)
     setLiveVoice('')
-    if (reason === 'not-allowed' || reason === 'unsupported') return
+    if (reason === 'not-allowed' || reason === 'unsupported') {
+      // Refuz de permisiune ≠ ceva ce ne reîncercăm singuri (corect, mai sus) —
+      // dar userul tot trebuie să AFLE, altfel butonul pare mort degeaba.
+      if (reason === 'not-allowed') setMicBlocked(true)
+      return
+    }
     micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
     micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
   }
@@ -1326,6 +1336,7 @@ export default function ChatPanel({
             origStop()
           }
           micBackoffRef.current = 1000
+          setMicBlocked(false)
           setListening(true)
           return
         } catch {
@@ -1378,6 +1389,7 @@ export default function ChatPanel({
           }
           micRef.current = sh
           micBackoffRef.current = 1000
+          setMicBlocked(false)
           setListening(true)
           if (isVoicePlaying()) sh.setMuted(true)
         }
@@ -1410,6 +1422,7 @@ export default function ChatPanel({
         }
         micRef.current = h
         micBackoffRef.current = 1000
+        setMicBlocked(false)
         setListening(true)
         // Repornit cât încă vorbește creierul: pornește mut (anti-ecou); revine
         // singur la finalul redării, ca la orice replică.
@@ -1982,10 +1995,16 @@ export default function ChatPanel({
           />
           <button
             type="button"
-            className={`composer-mic ${listening ? 'live' : ''}`}
+            className={`composer-mic ${listening ? 'live' : ''} ${micBlocked ? 'blocked' : ''}`}
             onClick={toggleMic}
             aria-label="Microfon"
-            title={listening ? 'Oprește microfonul' : 'Vorbește (microfon)'}
+            title={
+              micBlocked
+                ? 'Microfonul e blocat de browser — dă click și permite accesul, sau verifică setările site-ului'
+                : listening
+                  ? 'Oprește microfonul'
+                  : 'Vorbește (microfon)'
+            }
           >
             {listening ? '●' : '🎤'}
           </button>
