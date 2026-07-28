@@ -2894,6 +2894,41 @@ export async function reportBuildJob(
   )
 }
 
+// ANULAREA ORDINELOR (Adrian, 28 iul; lipsa a fost semnalată de KELION ÎNSUȘI
+// în „Cereri neacoperite": „Stop or cancel active and queued constructor build
+// jobs — No constructor cancellation tool is available; constructor_status is
+// read-only"). Fără ea, un ordin greșit sau depășit rămâne în coadă și e reluat
+// la fiecare 2 minute de cron, arzând cotă și trimițând mailuri de eșec.
+// `queued` se anulează curat. `running` se marchează tot anulat: lucrătorul de
+// pe VPS își vede jobul dispărut din coadă la următoarea rundă și se oprește —
+// nu-l putem omorî de aici, dar nu-l mai reluăm niciodată.
+export async function cancelBuildJobs(ids: number[]): Promise<number> {
+  if (!dbEnabled() || !ids.length) return 0
+  try {
+    const r = await getPool().query(
+      `UPDATE build_jobs SET status='cancelled', updated_at = now()
+         WHERE id = ANY($1::int[]) AND status IN ('queued','running')`,
+      [ids],
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/** Anulează TOATE ordinele care încă așteaptă sau lucrează. Întoarce câte. */
+export async function cancelAllPendingBuildJobs(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query(
+      `UPDATE build_jobs SET status='cancelled', updated_at = now() WHERE status IN ('queued','running')`,
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
+  }
+}
+
 export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
   if (!dbEnabled()) return []
   try {
