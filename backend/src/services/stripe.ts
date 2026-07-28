@@ -7,11 +7,6 @@ import { getStripeCustomer, setStripeCustomer } from '../db.js'
 // verification (the only security-critical part — done with a timing-safe HMAC).
 
 const API = 'https://api.stripe.com/v1'
-// PLASĂ DE BLOCARE (auditul 28 iul): 14 din 20 de apeluri fetch din acest
-// fișier n-aveau NICIUN timeout — dacă api.stripe.com atârnă, cereri HTTP ale
-// userului (checkout, payment intent, reîncărcare automată) rămâneau agățate
-// nemărginit. Un singur helper, folosit peste tot unde lipsea.
-const stripeTimeout = (): AbortSignal => AbortSignal.timeout(15_000)
 
 function authHeaders(): Record<string, string> {
   return {
@@ -25,7 +20,7 @@ async function ensureCustomer(email: string, name: string): Promise<string | nul
   if (existing) return existing
   const body = new URLSearchParams({ email })
   if (name) body.set('name', name)
-  const r = await fetch(`${API}/customers`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/customers`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return null
   const j = (await r.json()) as { id?: string }
   if (!j.id) return null
@@ -62,7 +57,7 @@ export async function createCheckout(
   // SALVEAZĂ cardul pentru reîncărcarea automată (ca userul să nu rămână fără
   // credit — cerința lui Adrian). Cardul devine metoda implicită a clientului.
   body.set('payment_intent_data[setup_future_usage]', 'off_session')
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return { error: `stripe_http_${r.status}` }
   const j = (await r.json()) as { url?: string }
   return j.url ? { url: j.url } : { error: 'no_checkout_url' }
@@ -99,7 +94,7 @@ export async function createSaleCheckout(
   body.set('metadata[sale_credits]', String(c))
   body.set('payment_intent_data[metadata][email]', email)
   body.set('payment_intent_data[metadata][sale_credits]', String(c))
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return { error: `stripe_http_${r.status}` }
   const j = (await r.json()) as { url?: string }
   return j.url ? { url: j.url, pounds: pence / 100 } : { error: 'no_checkout_url' }
@@ -129,7 +124,7 @@ export async function createOwnerDeposit(
   body.set('metadata[owner_deposit]', '1')
   body.set('payment_intent_data[metadata][email]', email)
   body.set('payment_intent_data[metadata][owner_deposit]', '1')
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return { error: `stripe_http_${r.status}` }
   const j = (await r.json()) as { url?: string }
   return j.url ? { url: j.url } : { error: 'no_checkout_url' }
@@ -137,7 +132,7 @@ export async function createOwnerDeposit(
 
 // Metoda de plată salvată a clientului (pentru reîncărcarea automată off-session).
 async function defaultPaymentMethod(customerId: string): Promise<string | null> {
-  const c = await fetch(`${API}/customers/${customerId}`, { headers: authHeaders(), signal: stripeTimeout() })
+  const c = await fetch(`${API}/customers/${customerId}`, { headers: authHeaders() })
   if (c.ok) {
     const j = (await c.json()) as { invoice_settings?: { default_payment_method?: string } }
     if (j.invoice_settings?.default_payment_method) return j.invoice_settings.default_payment_method
@@ -145,7 +140,6 @@ async function defaultPaymentMethod(customerId: string): Promise<string | null> 
   // Fallback: primul card salvat al clientului.
   const pm = await fetch(`${API}/payment_methods?customer=${customerId}&type=card&limit=1`, {
     headers: authHeaders(),
-    signal: stripeTimeout(),
   })
   if (!pm.ok) return null
   const pj = (await pm.json()) as { data?: { id: string }[] }
@@ -187,7 +181,6 @@ export async function chargeSavedCard(
     method: 'POST',
     headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
     body,
-    signal: stripeTimeout(),
   })
   const j = (await r.json().catch(() => ({}))) as {
     id?: string
@@ -273,6 +266,9 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
 // într-o zi lucrătoare. NOTĂ: endpointul e în beta la Stripe — până la aprobare
 // răspunde 4xx, iar noi raportăm starea în panoul Circuitul banilor.
 let lastAutoFund: { at: string; ok: boolean; detail: string } | null = null
+export function lastAutoFundStatus(): { at: string; ok: boolean; detail: string } | null {
+  return lastAutoFund
+}
 
 const ISSUING_MIN = Math.max(0, Number(process.env.ISSUING_MIN_GBP ?? '10') || 10)
 const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') || 20)
@@ -306,7 +302,6 @@ async function autoOwnerDeposit(): Promise<string> {
     method: 'POST',
     headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
     body,
-    signal: stripeTimeout(),
   })
   const j = (await r.json().catch(() => ({}))) as { id?: string; status?: string; error?: { message?: string } }
   if (!r.ok || j.status !== 'succeeded') return `auto-depunere eșuată: ${j.error?.message ?? `http_${r.status}`}`
@@ -379,7 +374,7 @@ export async function createKelionCard(adminEmail: string): Promise<
     chBody.set('billing[address][city]', 'London')
     chBody.set('billing[address][postal_code]', 'EC1A 1AA')
     chBody.set('billing[address][country]', 'GB')
-    const ch = await fetch(`${API}/issuing/cardholders`, { method: 'POST', headers: authHeaders(), body: chBody, signal: stripeTimeout() })
+    const ch = await fetch(`${API}/issuing/cardholders`, { method: 'POST', headers: authHeaders(), body: chBody })
     const chJ = (await ch.json().catch(() => ({}))) as { id?: string; error?: { message?: string } }
     if (!ch.ok || !chJ.id) return { error: chJ.error?.message ?? `cardholder_http_${ch.status}` }
     const cBody = new URLSearchParams()
@@ -387,7 +382,7 @@ export async function createKelionCard(adminEmail: string): Promise<
     cBody.set('currency', config.stripe.currency)
     cBody.set('type', 'virtual')
     cBody.set('status', 'active')
-    const card = await fetch(`${API}/issuing/cards`, { method: 'POST', headers: authHeaders(), body: cBody, signal: stripeTimeout() })
+    const card = await fetch(`${API}/issuing/cards`, { method: 'POST', headers: authHeaders(), body: cBody })
     const cardJ = (await card.json().catch(() => ({}))) as { id?: string; last4?: string; error?: { message?: string } }
     if (!card.ok || !cardJ.id) return { error: cardJ.error?.message ?? `card_http_${card.status}` }
     return { id: cardJ.id, last4: cardJ.last4 ?? '????', url: `https://dashboard.stripe.com/issuing/cards/${cardJ.id}` }
@@ -413,7 +408,7 @@ export async function createAdminPayout(
   body.set('currency', config.stripe.currency)
   body.set('statement_descriptor', 'PAYOUT ADMIN')
   body.set('description', 'PAYOUT admin — profit Kelionai (către contul real declarat)')
-  const r = await fetch(`${API}/payouts`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/payouts`, { method: 'POST', headers: authHeaders(), body })
   const j = (await r.json().catch(() => ({}))) as {
     id?: string
     arrival_date?: number
@@ -435,7 +430,7 @@ export async function getStripeBalance(): Promise<{
   currency: string
 } | null> {
   if (!config.stripe.secretKey) return null
-  const r = await fetch(`${API}/balance`, { headers: authHeaders(), signal: stripeTimeout() })
+  const r = await fetch(`${API}/balance`, { headers: authHeaders() })
   if (!r.ok) return null
   const j = (await r.json()) as {
     available?: { amount: number; currency?: string }[]
@@ -472,7 +467,7 @@ export async function createPaymentIntent(
   body.set('automatic_payment_methods[enabled]', 'true')
   if (customer) body.set('customer', customer)
   body.set('metadata[email]', email)
-  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body, signal: stripeTimeout() })
+  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body })
   if (!r.ok) return { error: `stripe_http_${r.status}` }
   const j = (await r.json()) as { id?: string; client_secret?: string }
   if (!j.id || !j.client_secret) return { error: 'no_payment_intent' }
@@ -562,7 +557,7 @@ export async function verifyEventWithApi(raw: string): Promise<VerifiedTopup> {
 
   async function getJson(path: string): Promise<Record<string, unknown> | null> {
     try {
-      const r = await fetch(`${API}/${path}`, { headers: authHeaders(), signal: stripeTimeout() })
+      const r = await fetch(`${API}/${path}`, { headers: authHeaders() })
       if (!r.ok) return null
       return (await r.json()) as Record<string, unknown>
     } catch {

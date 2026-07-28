@@ -142,26 +142,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Exchange the code for tokens (server-to-server, with our secret)
-      // PLASĂ DE BLOCARE (auditul 28 iul): singurul fetch fără timeout de pe
-      // calea de login — dacă oauth2.googleapis.com atârnă, redirect-ul
-      // userului atârna cu el, nemărginit.
-      let tokenRes: Response
-      try {
-        tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: config.google.clientId,
-            client_secret: config.google.clientSecret,
-            redirect_uri: config.google.redirectUri,
-            grant_type: 'authorization_code',
-          }),
-          signal: AbortSignal.timeout(15_000),
-        })
-      } catch {
-        return reply.redirect(`${config.frontendOrigin}/?error=token_exchange`)
-      }
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: config.google.clientId,
+          client_secret: config.google.clientSecret,
+          redirect_uri: config.google.redirectUri,
+          grant_type: 'authorization_code',
+        }),
+      })
       if (!tokenRes.ok) {
         return reply.redirect(`${config.frontendOrigin}/?error=token_exchange`)
       }

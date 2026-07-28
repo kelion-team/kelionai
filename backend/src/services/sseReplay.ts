@@ -134,10 +134,10 @@ export async function* readTurnFrom(
   if (!buf) return
 
   const startSeq = Math.max(0, lastSeq) + 1
+  const first = buf.events[0]
 
   // If the requested range is before the oldest buffered event, we overflowed.
-  const oldest = oldestSeqFor(email)
-  if (oldest > 0 && startSeq < oldest) {
+  if (first && startSeq < first.seq) {
     yield formatSSE(++buf.seq, desyncSSE())
     return
   }
@@ -168,9 +168,15 @@ export async function* readTurnFrom(
 }
 
 /**
- * Return the oldest sequence number still in the ring — the overflow check
- * `readTurnFrom` uses to know whether a client is asking for a completely
- * lost range (reparat 28 iul: era duplicat inline, acum sursă unică).
+ * Return the last sequence number known for a conversation. Useful for the
+ * resume endpoint to know whether a client is asking for a completely lost range.
+ */
+export function lastSeqFor(email: string): number {
+  return buffers.get(email)?.seq ?? 0
+}
+
+/**
+ * Return the oldest sequence number still in the ring. Useful for overflow checks.
  */
 export function oldestSeqFor(email: string): number {
   return buffers.get(email)?.events[0]?.seq ?? 0

@@ -33,33 +33,12 @@ function verifyHash(secret: string, stored: string): boolean {
   return probe.length === ref.length && crypto.timingSafeEqual(probe, ref)
 }
 
-// Comparare timing-safe pentru secrete simple (ex: secretul punții VPS din
-// header). Audit 28 iul: comparările `!==` pe un secret sunt un canal lateral
-// de timp — un `!==` iese la primul octet diferit; asta se poate măsura.
-export function timingSafeStringEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a)
-  const bufB = Buffer.from(b)
-  if (bufA.length !== bufB.length) return false
-  return crypto.timingSafeEqual(bufA, bufB)
-}
-
-// Cache scurt (audit 28 iul, perf): isArmed() se citea din KV pe FIECARE tură
-// admin în chat ȘI în voce (6 puncte de apel) — secretul lacătului nu se
-// schimbă practic niciodată. Ca la brainSubscription: scriere → cache actualizat
-// imediat (zero fereastră stale), citire → doar dacă a expirat TTL-ul.
-let armedCache: { at: number; val: boolean } | null = null
-const ARMED_TTL_MS = 15_000
-
 export async function isArmed(): Promise<boolean> {
-  if (armedCache && Date.now() - armedCache.at < ARMED_TTL_MS) return armedCache.val
-  const val = !!(await loadKv(KV_SECRET))
-  armedCache = { at: Date.now(), val }
-  return val
+  return !!(await loadKv(KV_SECRET))
 }
 
 export async function setLockSecret(secret: string): Promise<void> {
   await saveKv(KV_SECRET, hashSecret(secret))
-  armedCache = { at: Date.now(), val: true }
 }
 
 // Anti-brute-force: 5 încercări / 10 min per email, în memorie (un singur

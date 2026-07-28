@@ -15,7 +15,6 @@ import {
   refreshGoogleAccessToken,
   reverseGeocodeCached,
   promoSceneUrl,
-  geminiVision,
 } from '../services/google.js'
 import {
   saveMessage,
@@ -45,7 +44,6 @@ import {
   proposeKelionTool,
   decideKelionTool,
   createBuildJob,
-  buildJobsToday,
   listBuildJobs,
   cancelBuildJobs,
   cancelAllPendingBuildJobs,
@@ -56,8 +54,6 @@ import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable, isGeminiQuotaError } from '../services/geminiDirect.js'
-import { ANTHROPIC_DIRECT_PREFIX, claudeModelHasVision } from '../services/anthropicDirect.js'
-import { parseBrainSub, subActive, type BrainSub } from '../services/brainSubscription.js'
 import { brainComplete } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
@@ -79,8 +75,6 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
-  crawlSite,
-  screenshotUrl,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -103,9 +97,7 @@ async function selectedBrainModel(
   text: string,
   kvRaw?: string | null,
   needsVision = false,
-  sub?: BrainSub,
-  isAdmin = false,
-): Promise<{ model: string; heavy: boolean; useSubKey: boolean } | null> {
+): Promise<{ model: string; heavy: boolean } | null> {
   if (!config.openrouter.key) return null
   let sel: { chat?: string; work?: string } = {}
   try {
@@ -163,23 +155,6 @@ async function selectedBrainModel(
   // (sel.work) rămâne respectată; căderea pe secundar la cotă epuizată e la
   // locul apelului (retry în handler). Vocea NU trece pe aici — rămâne cum e.
   const geminiWork = !sel.work && geminiDirectAvailable()
-  // CREIERUL DE ABONAMENT (Adrian, 28 iul): comutatorul admin-only. Pe turele
-  // GRELE ale ADMINULUI (raționament/acțiune sau treapta top), dacă modul e
-  // „abonament" și există cheia proprie, urcăm pe modelul puternic plătit din
-  // creditul ownerului — nu din punga centrală. Userii plătitori NU trec pe
-  // aici niciodată (subActive cere isAdmin). Tura simplă rămâne pe free (rapid,
-  // aproape gratis): „mai multă putere DOAR unde e nevoie". Vederea e păstrată —
-  // modelul de abonament ales din catalog are vedere; dacă totuși n-ar avea,
-  // implicitul rămâne nucleul omni gratuit care VEDE.
-  if ((heavy || top) && sub && subActive(sub, isAdmin)) {
-    // GARDĂ DE VEDERE (auditul 28 iul): dacă tura are imagine dar modelul de
-    // abonament ales NU vede, nu trimitem poza orbește — cădem pe nucleul care
-    // vede (mai jos). Modelele Claude 5 văd toate, deci în practică nu blochează.
-    const blindOnImage = needsVision && !claudeModelHasVision(sub.model)
-    // Prefixul rutează orchestratorul spre Anthropic DIRECT (cheia proprie a
-    // ownerului), nu spre OpenRouter — vezi anthropicDirect.ts.
-    if (!blindOnImage) return { model: `${ANTHROPIC_DIRECT_PREFIX}${sub.model}`, heavy: true, useSubKey: true }
-  }
   const model = top
     ? await resolveModel('top')
     : heavy
@@ -187,7 +162,7 @@ async function selectedBrainModel(
         ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
         : await resolveModel('work', sel.work)
       : await resolveModel('chat', sel.chat)
-  return { model, heavy: heavy || top, useSubKey: false }
+  return { model, heavy: heavy || top }
 }
 
 // POARTĂ DE GESTURI (Adrian, 13 iul: „să nu se repete obsesiv, să fie discret").
@@ -425,25 +400,6 @@ const CANCEL_BUILD_TOOL: Tool = {
 // comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să
 // le repare"): agregarea deterministă a tuturor semnalelor + regula de
 // comportament — enumeră și ÎNTREABĂ, nu repară din proprie inițiativă.
-// VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul randat" — reparată
-// la auditul de cod mort din 28 iul: screenshotUrl + geminiVision existau, dar
-// nu erau oferite ca unealtă niciunde). Face un screenshot al unei pagini
-// publice și-l trimite unui model cu vedere ca să judece dacă rezultatul cerut
-// chiar se vede — util după o construcție/publicare, ca să confirme vizual,
-// nu doar din build+teste verzi.
-const VERIFY_VISUALLY_TOOL: Tool = {
-  name: 'verify_visually',
-  description:
-    'ADMIN ONLY. Take a screenshot of a public URL (e.g. kelionai.app after a deploy) and have a vision model describe/judge what it actually shows — use this to CONFIRM a build/publish result visually, not just from green tests. Returns what is seen, in plain text.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      url: { type: 'string', description: 'Full https:// URL to screenshot.' },
-      question: { type: 'string', description: 'What to check for, e.g. "does the subscription pill show in the top bar?".' },
-    },
-    required: ['url', 'question'],
-  },
-}
 const SYSTEM_HEALTH_TOOL: Tool = {
   name: 'system_health',
   description:
@@ -766,24 +722,6 @@ const BROWSER_CLOSE_TOOL: Tool = {
   description: 'Close the live browser and clear it from the monitor, when done browsing.',
   input_schema: { type: 'object', properties: {} },
 }
-// PARCURGERE ÎN BLOC (cererea #24, reparată la auditul de cod mort din 28 iul —
-// `crawlSite` era construit dar niciodată oferit; modelul era nevoit să repete
-// browser_open/browser_click pagină cu pagină pentru un simplu "conspectează
-// site-ul"). Deschide startUrl, adună linkurile interne, vizitează până la
-// maxPages și întoarce titlul+textul fiecăreia — un singur apel în loc de N.
-const BROWSER_CRAWL_TOOL: Tool = {
-  name: 'browser_crawl',
-  description:
-    'Crawl an entire website starting from a URL — follows internal links page by page (up to maxPages) and returns each page\'s title and text in ONE call. Use this instead of repeated browser_open/browser_click when the user wants a whole site surveyed/summarized ("conspectează tot site-ul", "citește toate paginile"), not just one page.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      url: { type: 'string', description: 'Starting https:// (or http://) URL.' },
-      maxPages: { type: 'number', description: 'Max pages to visit, default 8.' },
-    },
-    required: ['url'],
-  },
-}
 const BROWSER_KEY_TOOL: Tool = {
   name: 'browser_key',
   description:
@@ -884,7 +822,7 @@ const PROMO_TOOL: Tool = {
 // o unealtă adăugată mâine nu poate dezarma poarta din greșeală.
 const PASSIVE_TOOLS = new Set<string>([
   'read_source', 'search_source', 'list_source', 'list_updates',
-  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs', 'verify_visually',
+  'runbook_status', 'runbook_log', 'constructor_status', 'system_health', 'server_logs',
   // db_tables citește doar schema. db_query NU e aici INTENȚIONAT: rulează SQL
   // arbitrar, cu COMMIT — un DELETE e o faptă în toată regula, iar dacă l-am
   // socoti „citire", poarta faptei i-ar putea cere modelului să-l execute încă
@@ -1288,7 +1226,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       recallMemories(user.email, 'kelion', lastForRecall?.role === 'user' ? lastForRecall.content : ''),
       new Promise<string>((resolve) => setTimeout(() => resolve(''), 400)),
     ])
-    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv, brainSubKv] = await Promise.all([
+    const [storedPref, meserieId, memRecall, lastSavedRow, disabledGestures, modelChoiceKv] = await Promise.all([
       getSpeechLang(user.email),
       getMeserieActiva(user.email),
       recallWithDeadline,
@@ -1301,11 +1239,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // FLUENȚĂ (A5): alegerea de model a userului citită AICI, în paralel —
       // nu ca încă un drum DB serial chiar înainte de apelul creierului.
       loadKv(`model_choice:${user.email}`).catch(() => null),
-      // CREIERUL DE ABONAMENT (Adrian, 28 iul): starea comutatorului admin-only,
-      // citită PROASPĂT în paralel — o comutare e vizibilă din prima replică.
-      loadKv('brain_subscription').catch(() => null),
     ])
-    const brainSub = parseBrainSub(brainSubKv)
     const gestureOff = new Set(disabledGestures)
     // Tool-ul de gesturi, filtrat: gesturile dezactivate NU mai sunt oferite
     // modelului (nu le poate nici alege). Dacă TOATE sunt scoase, tool-ul iese
@@ -1823,16 +1757,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }) as typeof reply.raw.write
     const pingTimer = setInterval(() => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return
-      // PLASĂ (auditul 28 iul): rawWrite pe un socket EXACT distrus în cursa
-      // dintre verificarea de mai sus și scriere ar arunca SINCRON, dintr-un
-      // callback de timer — în afara oricărui context Fastify supraveghează,
-      // deci ar deveni uncaughtException la nivel de proces (prins doar de
-      // plasa globală din index.ts, dar cu turul curent rămas nefinalizat).
-      try {
-        if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
-      } catch {
-        clearInterval(pingTimer)
-      }
+      if (Date.now() - lastByteAt >= 15_000) rawWrite(heartbeatSSE())
     }, 5_000)
     reply.raw.end = ((...args: unknown[]) => {
       clearInterval(pingTimer)
@@ -1873,22 +1798,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
     // el greu; pe treapta WORK nu (ar fi recursiv — el ESTE creierul).
-    const brainSel = await selectedBrainModel(
-      user.email,
-      lastUserText,
-      modelChoiceKv,
-      turnHasImage,
-      brainSub,
-      // SECURITATE (auditul 28 iul): rutarea pe cheia/creditul ownerului respectă
-      // ACELAȘI al 2-lea factor ca uneltele — lacătul admin, nu doar rolul brut.
-      // Un cookie de admin furat, fără deblocare, nu poate drena cheia de abonament.
-      isAdmin,
-    )
+    const brainSel = await selectedBrainModel(user.email, lastUserText, modelChoiceKv, turnHasImage)
     const orChatModel = brainSel?.model ?? null
     const heavyTurn = brainSel?.heavy ?? false
-    // Cheia de abonament folosită DOAR când selecția a decis-o (tura grea a
-    // adminului, modul abonament). Altfel undefined → punga centrală, ca acum.
-    const brainApiKey = brainSel?.useSubKey ? brainSub.key : undefined
 
     // ── DRUM UNIC: CREIER DIRECT PENTRU TOȚI ───────────────────────────────
     // Orchestratorul OpenRouter (chat/creier, cu escaladare automată) răspunde
@@ -1907,7 +1819,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       BROWSER_KEY_TOOL,
       BROWSER_CLICK_AT_TOOL,
       BROWSER_CLOSE_TOOL,
-      BROWSER_CRAWL_TOOL,
     ]
     // ask_brain DOAR pe treapta chat — pe work ar fi recursiv (el ESTE creierul).
     const escalationTools = heavyTurn ? [] : [ASK_BRAIN_TOOL]
@@ -1916,7 +1827,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const allTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, VERIFY_VISUALLY_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, CANCEL_BUILD_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     // PLAFONUL DE 64 DE UNELTE (dovadă live 28 iul, log: `[CHAT ERROR]
     // openrouter 400: "at most 64 tools are allowed"`): importul complet Google
@@ -1938,30 +1849,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           tools.splice(i, 1)
         }
       }
-      // tot peste plafon (listă dinamică uriașă) — scoatem NEcriticele de la
-      // coadă, PĂSTRÂND uneltele de ACȚIUNE/REPARARE (auditul 28 iul: `...dynTools`
-      // stă înaintea suitei admin în listă, iar vechea tăiere `slice(0,64)` de
-      // coadă ar fi aruncat tocmai db_query/repo_merge_pr/server_logs când
-      // userul aproba ≥12 skill-uri dinamice — exact invers față de intenție).
+      // tot peste plafon (listă dinamică uriașă) — tăiem de la coadă, dar
+      // spunem în log CE s-a pierdut, ca să nu pară dispariție misterioasă.
       if (tools.length > TOOL_CAP) {
-        const NEVER_DROP = new Set([
-          'repo_write', 'repo_open_pr', 'repo_merge_pr', 'run_runbook', 'runbook_status',
-          'build_software', 'request_repair', 'constructor_status', 'cancel_build_jobs',
-          'db_query', 'db_tables', 'list_source', 'read_source', 'search_source',
-          'server_logs', 'system_health', 'ask_brain', 'generate_image',
-        ])
-        for (let i = tools.length - 1; i >= 0 && tools.length > TOOL_CAP; i--) {
-          if (!NEVER_DROP.has(tools[i].name)) {
-            dropped.push(tools[i].name)
-            tools.splice(i, 1)
-          }
-        }
-        // Ultima plasă (doar dacă rămân >64 unelte CRITICE — practic imposibil):
-        // abia atunci tăiem de la coadă, tot cu log.
-        if (tools.length > TOOL_CAP) {
-          dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
-          tools = tools.slice(0, TOOL_CAP)
-        }
+        dropped.push(...tools.slice(TOOL_CAP).map((t) => t.name))
+        tools = tools.slice(0, TOOL_CAP)
       }
       console.log(`[tools] plafon ${TOOL_CAP}: ${allTools.length} → ${tools.length}; scoase: ${dropped.join(', ')}`)
     }
@@ -2109,7 +2001,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email, usage,
           (speechPref || isAdminUser) && langName ? langName : '',
-          brainApiKey,
         )
       }
       // PRIMUL CUVÂNT SUB 1s ȘI PE TURELE DE ACȚIUNE (Adrian, 27 iul, dovadă
@@ -2149,9 +2040,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // înainte de primul cuvânt → pare mort. Pe :free/gemini forțăm
           // gândirea SCURTĂ ('low'); pe plătite rămâne 'medium'.
           reasoning: heavyTurn ? (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) || orchestratorModel.endsWith(':free') ? 'low' : 'medium') : undefined,
-          // CREIERUL DE ABONAMENT: cheia proprie a ownerului pe turele grele
-          // (undefined pe rest → punga centrală). Vezi selectedBrainModel.
-          apiKey: brainApiKey,
           // POARTA FAPTEI (Adrian, 27 iul): pe turele adminului, dacă Kelion
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.
@@ -2205,31 +2093,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const isQuota =
         low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
       const isRefusal = low.includes('refusal')
-      // MODEL DE ABONAMENT INVALID (auditul 28 iul): dacă tura mergea pe cheia de
-      // abonament și a picat pe 400/model inexistent, mesajul generic ascundea
-      // cauza reală. Acum îi spunem ownerului clar să aleagă alt model din listă.
-      const isBadSubModel =
-        brainApiKey != null &&
-        (low.includes('not a valid model') ||
-          low.includes('no endpoints') ||
-          low.includes('is not a valid') ||
-          low.includes('not found') ||
-          // Cheia Claude respinsă (401) / fără drept (403) — tot spre „verifică
-          // cheia Anthropic", nu spre mesajul generic care ascundea cauza.
-          low.includes('401') ||
-          low.includes('403') ||
-          (low.includes('400') && !isQuota && !isRefusal))
       const spoken = ro
-        ? isBadSubModel
-          ? 'Modelul de abonament pare invalid sau cheia Claude e respinsă. Deschide Setări → „Creier abonament", verifică cheia Anthropic și alege alt model din listă.'
-          : isQuota
+        ? isQuota
           ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
           : isRefusal
             ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
             : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-        : isBadSubModel
-          ? 'The subscription model seems invalid or the Claude key was rejected. Open Settings → “Subscription brain”, check the Anthropic key and pick another model.'
-          : isQuota
+        : isQuota
           ? "I've temporarily run out of brain credit. Please top up so we can continue."
           : isRefusal
             ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
@@ -2287,11 +2157,6 @@ async function runTool(
   email: string,
   usage: { usd: number },
   langName: string,
-  // REGULA „ALL INCLUSIVE" PE ABONAMENT (28 iul): când tura curentă rulează pe
-  // cheia proprie a ownerului, TOT ce costă în aceeași tură (imagine + căutare
-  // web/YouTube) se plătește tot de acolo — undefined pe restul turelor →
-  // punga centrală, ca până acum.
-  brainApiKey?: string,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
   // Urmă în jurnal pentru FIECARE unealtă chemată (incident 25 iul: „nu face
@@ -2351,21 +2216,7 @@ async function runTool(
       const order = String(args.order ?? '').trim()
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
       const jobId = await createBuildJob(email, order)
-      if (!jobId) {
-        // PLAFON ZILNIC (reparat 28 iul — vezi buildJobsToday în db.ts): distinge
-        // DB picat de plafonul de siguranță atins, ca Kelion să nu ceară orbește
-        // reîncercare când motivul real e „ai atins limita de azi".
-        const today = await buildJobsToday()
-        if (today >= config.autonomyDailyMax) {
-          return JSON.stringify({
-            error: 'plafon_zilnic_atins',
-            today,
-            max: config.autonomyDailyMax,
-            hint: 'Plafonul de siguranță pentru ordine de construcție în 24h a fost atins — spune-i ownerului, nu reîncerca acum.',
-          })
-        }
-        return JSON.stringify({ error: 'db_indisponibil' })
-      }
+      if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
       return JSON.stringify({
         ok: true,
         job: jobId,
@@ -2390,17 +2241,6 @@ async function runTool(
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return systemHealth()
-    }
-    case 'verify_visually': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const url = String(args.url ?? '')
-      const question = String(args.question ?? '').trim() || 'Describe what this page shows, precisely.'
-      if (!url) return JSON.stringify({ error: 'no_url' })
-      const shot = await screenshotUrl(url)
-      if ('error' in shot) return JSON.stringify({ error: shot.error })
-      const seen = await geminiVision(shot.jpegBase64, question)
-      if (!seen) return JSON.stringify({ error: 'vision_unavailable' })
-      return JSON.stringify({ seen })
     }
     case 'server_logs': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
@@ -2501,7 +2341,7 @@ async function runTool(
     case 'generate_image': {
       const prompt = String(args.prompt ?? '')
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
-      const result = await generateImage(prompt, brainApiKey)
+      const result = await generateImage(prompt)
       if ('error' in result) return JSON.stringify({ error: result.error })
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
@@ -2604,16 +2444,6 @@ async function runTool(
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: '', title: '' } })}${CTRL}`)
       return JSON.stringify({ closed: true })
     }
-    case 'browser_crawl': {
-      const url = String(args.url ?? '')
-      if (!url) return JSON.stringify({ error: 'no_url' })
-      const maxPages = Math.min(Math.max(Number(args.maxPages) || 8, 1), 20)
-      const result = await crawlSite(email, baseUrl, url, maxPages)
-      // Fiecare pagină trunchiată (24 iul, dieta de istoric): un crawl de 20
-      // pagini nu are voie să umple tot bugetul de context al turei.
-      const pages = result.pages.map((p) => ({ url: p.url, title: p.title, text: p.text.slice(0, 2000) }))
-      return JSON.stringify({ pages, count: pages.length, error: result.error })
-    }
 
     case 'save_note': {
       const content = String(args.content ?? '')
@@ -2704,7 +2534,7 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
-        const result = await runGoogleTool(block.name, block.input, token, brainApiKey)
+        const result = await runGoogleTool(block.name, block.input, token)
         // AFIȘARE AUTOMATĂ: uneltele care întorc `screen_url` (hartă, rută, vreme,
         // video) trebuie să APARĂ pe monitor dintr-un SINGUR apel — creierul nu
         // face mereu al doilea `show_on_screen`, deci userul vedea „am arătat

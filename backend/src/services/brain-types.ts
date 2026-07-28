@@ -77,3 +77,12 @@ export interface Message {
   usage: Usage
 }
 
+// ── Request params for messages.create / messages.stream ──────────────────
+export interface MessageCreateParams {
+  model: string
+  max_tokens: number
+  system?: string | TextBlockParam[]
+  tools?: Tool[]
+  messages: MessageParam[]
+  temperature?: number
+}

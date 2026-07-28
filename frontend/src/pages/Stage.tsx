@@ -27,7 +27,6 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
-import { fetchBalance } from '../lib/billing'
 
 // SALVAREA CONȚINUTULUI DE PE MONITOR (Adrian, 25 iul: „nu se poate salva ce e pe
 // monitor"). Descarcă un text/HTML ca fișier local — un nume curat din titlu.
@@ -169,15 +168,6 @@ export default function Stage({ user }: { user: User }) {
     // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
     stripe?: { available: number; pending: number; currency: string } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
-    // CREIERUL DE ABONAMENT (Claude direct): validitatea cheii Anthropic +
-    // linkul consolei Claude (Anthropic n-are „sold" numeric ca OpenRouter).
-    subscription?: {
-      mode: string
-      active: boolean
-      model: string
-      hasKey: boolean
-      balance: { ok: boolean; valid?: boolean; error?: string; topup: string } | null
-    } | null
   } | null>(null)
   // Starea lacătului la intrare + deblocarea venită din voce (amprenta
   // potrivită → realtimeVoice emite `kelion:admin-unlock`).
@@ -286,12 +276,13 @@ export default function Stage({ user }: { user: User }) {
   useEffect(() => {
     if (user.role !== 'customer') return
     let alive = true
-    // FOLOSEȘTE HELPER-UL COMUN (auditul 28 iul: era un fetch inline duplicat
-    // aici, în loc de fetchBalance() deja folosit de WalletButton.tsx).
     const load = (): void => {
-      void fetchBalance().then((w) => {
-        if (alive && w) setUserCreditOut(w.credits <= 0)
-      })
+      fetch('/api/billing/balance', { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (alive && j && typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
+        })
+        .catch(() => {})
     }
     load()
     const id = window.setInterval(load, 30_000)
@@ -836,29 +827,6 @@ export default function Stage({ user }: { user: User }) {
             {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
                 realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
                 creierul central. Roșu când e sub prag. Click → alimentare. */}
-            {/* ABONAMENT în bară (Adrian, 28 iul: „la ab trebuie de la cloude nu
-                openrouter"): creierul de abonament rulează Claude DIRECT (cheia
-                ta Anthropic). Anthropic n-are „sold" numeric ca OpenRouter, deci
-                arătăm dacă e VALIDĂ, iar clicul duce la CONSOLA CLAUDE (nu
-                OpenRouter). Cheie respinsă → roșu + click către consolă. */}
-            {brainCredit?.subscription?.active && (
-              <button
-                type="button"
-                className={`ghost ${brainCredit.subscription.balance && !brainCredit.subscription.balance.ok ? 'blink-red' : ''}`}
-                onClick={() =>
-                  brainCredit.subscription?.balance?.topup
-                    ? window.open(brainCredit.subscription.balance.topup, '_blank', 'noopener')
-                    : window.open('https://console.anthropic.com/settings/billing', '_blank', 'noopener')
-                }
-                title={
-                  brainCredit.subscription.balance?.ok
-                    ? `Creier ABONAMENT pe Claude (cheia ta) · model: ${brainCredit.subscription.model} · click pentru consola Claude`
-                    : `Creier ABONAMENT activ, dar cheia Claude e respinsă${brainCredit.subscription.balance?.error ? ` (${brainCredit.subscription.balance.error})` : ''} — click pentru consola Claude`
-                }
-              >
-                {brainCredit.subscription.balance?.ok ? '⚡ Abonament Claude' : '⚡ Abonament ⚠'}
-              </button>
-            )}
             {brainCredit && (
               <button
                 type="button"
@@ -866,7 +834,7 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
                 title={
                   brainCredit.openrouter.live
-                    ? `OpenRouter (creierul central, userii + free): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
+                    ? `OpenRouter (creierul central): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
                     : 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)'
                 }
               >

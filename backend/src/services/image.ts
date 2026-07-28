@@ -13,24 +13,15 @@ interface StoredImage {
 const cache = new Map<string, StoredImage>()
 const MAX_CACHE = 60
 
-// PLAFONUL, ACUM ÎN AMBELE LOCURI (auditul 28 iul): trima exista DOAR în
-// put() — ruta publică GET /api/image/:id (fără autentificare) trecea prin
-// getImage(), care adăuga în cache FĂRĂ nicio evacuare. Orice id vechi cerut
-// repetat (share de link, crawler) creștea memoria nemărginit, ocolind
-// plafonul aparent. O singură funcție de trimare, apelată din ambele căi.
-function trim(): void {
+async function put(mime: string, buf: Buffer): Promise<string> {
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  await saveGeneratedImage(id, mime, buf)
+  cache.set(id, { mime, buf, ts: Date.now() })
   while (cache.size > MAX_CACHE) {
     const oldest = cache.keys().next().value
     if (oldest === undefined) break
     cache.delete(oldest)
   }
-}
-
-async function put(mime: string, buf: Buffer): Promise<string> {
-  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-  await saveGeneratedImage(id, mime, buf)
-  cache.set(id, { mime, buf, ts: Date.now() })
-  trim()
   return id
 }
 
@@ -41,7 +32,6 @@ export async function getImage(id: string): Promise<StoredImage | null> {
   if (row) {
     const img = { mime: row.mime, buf: row.data, ts: Date.now() }
     cache.set(id, img)
-    trim()
     return img
   }
   return null
@@ -49,13 +39,10 @@ export async function getImage(id: string): Promise<StoredImage | null> {
 
 export type ImageResult = { id: string; mime: string } | { error: string }
 
-// `apiKey` opțional — regula „all inclusive" pe creierul de abonament (28
-// iul): dacă tura curentă rulează pe cheia proprie a ownerului, imaginea
-// generată în ACEEAȘI tură se plătește tot de acolo, nu din punga centrală.
-export async function generateImage(prompt: string, apiKey?: string): Promise<ImageResult> {
+export async function generateImage(prompt: string): Promise<ImageResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
-  const r = await openrouterImage(p, apiKey)
+  const r = await openrouterImage(p)
   if ('error' in r) return { error: r.error }
   return { id: await put(r.mime, r.buf), mime: r.mime }
 }

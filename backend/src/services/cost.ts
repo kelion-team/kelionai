@@ -21,6 +21,11 @@ export function brainCost(model: string, inputTokens: number, outputTokens: numb
   return inputTokens * p.input + outputTokens * p.output
 }
 
+export function geminiCost(inputTokens: number, outputTokens: number): number {
+  const p = PRICES['gemini-2.5-flash']
+  return inputTokens * p.input + outputTokens * p.output
+}
+
 export const TTS_USD_PER_CHAR = 30 / 1e6
 export function ttsCost(chars: number): number {
   return chars * TTS_USD_PER_CHAR

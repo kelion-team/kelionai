@@ -482,6 +482,60 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   return JSON.stringify({ emails })
 }
 
+interface SerperResult {
+  title?: string
+  link?: string
+  snippet?: string
+  date?: string
+}
+
+// Live web search via Gemini's built-in Google Search grounding. Uses the
+// GEMINI_API_KEY (no Serper key needed). Returns a grounded answer plus the
+// real source pages Google used. Returns null on any failure so callers can
+// fall back.
+interface GeminiGroundResult {
+  text: string
+  sources: { title: string; link: string }[]
+}
+
+async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
+  if (!config.geminiKey) return null
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
+  let res: Response
+  try {
+    res = await tfetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+      }),
+    })
+  } catch {
+    return null
+  }
+  if (!res.ok) return null
+  const j = (await res.json()) as {
+    candidates?: {
+      content?: { parts?: { text?: string }[] }
+      groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
+    }[]
+  }
+  const cand = j.candidates?.[0]
+  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  const seen = new Set<string>()
+  const sources: { title: string; link: string }[] = []
+  for (const c of cand?.groundingMetadata?.groundingChunks ?? []) {
+    const link = c.web?.uri ?? ''
+    if (!link || seen.has(link)) continue
+    seen.add(link)
+    sources.push({ title: c.web?.title ?? '', link })
+  }
+  if (!text && sources.length === 0) return null
+  return { text, sources }
+}
+
 // VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model
 // cu vedere se uită la un screenshot și răspunde la o întrebare despre ce se vede.
 // Folosit de verificarea vizuală din admin. MIGRAT PE OPENROUTER (audit 24 iul:
@@ -542,13 +596,12 @@ export async function geminiVision(jpegBase64: string, question: string): Promis
   return text || null
 }
 
-async function webSearch(query: string, max: number, apiKey?: string): Promise<string> {
+async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
   // Căutare web prin OpenRouter (plugin `web`) — aceeași cheie ca creierul, fără
-  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări). `apiKey`
-  // opțional: regula „all inclusive" pe abonament (28 iul).
-  const r = await openrouterWebSearch(query, undefined, apiKey)
+  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări).
+  const r = await openrouterWebSearch(query)
   if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
   return JSON.stringify({
     answer: r.text,
@@ -1080,15 +1133,13 @@ async function ytPlayable(link: string): Promise<boolean> {
   }
 }
 
-async function youtubeSearch(query: string, max: number, apiKey?: string): Promise<string> {
+async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
   // Prin OpenRouter (plugin web) — cerem linkuri REALE de watch. Fără Serper.
-  // `apiKey` opțional: regula „all inclusive" pe abonament (28 iul).
   const r = await openrouterWebSearch(
     `${query} — best YouTube videos`,
     'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
-    apiKey,
   )
   const seen = new Set<string>()
   const videos: { title: string; link: string }[] = []
@@ -1121,15 +1172,28 @@ async function youtubeSearch(query: string, max: number, apiKey?: string): Promi
       return JSON.stringify({ videos: playable.slice(0, n), screen_url: ytEmbed(playable[0].link) })
     }
   }
-  // SEMNALARE ONESTĂ (auditul 28 iul): distinge „serviciul de căutare n-a
-  // răspuns" (nici text, nici surse → indisponibilitate) de „chiar nu există
-  // clipuri". Vechea variantă întorcea mereu `not_found` → creierul spunea „nu
-  // găsesc clipuri" chiar și când căutarea era picată. (youtubeFirstEmbed rămâne
-  // neafectat: tot citește `videos[0]`, care lipsește → null, ca înainte.)
-  if (!r.text && r.sources.length === 0) {
-    return JSON.stringify({ videos: [], error: 'search_unavailable' })
-  }
   return JSON.stringify({ videos: [], not_found: true })
+}
+
+// Real YouTube resolver for the [YT query] bridge tag: searches (Serper first,
+// Gemini fallback) and returns the top playable video as an embeddable URL.
+// The brain must NEVER guess a video ID — it emits [YT query] and the server
+// resolves a real, currently-available ID so the embed always plays.
+export async function youtubeFirstEmbed(
+  query: string,
+): Promise<{ embed: string; watch: string; title: string } | null> {
+  const raw = await youtubeSearch(query, 1)
+  let parsed: { videos?: { title?: string; link?: string }[] }
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const link = parsed.videos?.[0]?.link ?? ''
+  const title = parsed.videos?.[0]?.title ?? ''
+  const emb = ytEmbed(link)
+  if (!emb) return null
+  return { embed: emb, watch: link, title }
 }
 
 async function translateText(text: string, target: string): Promise<string> {
@@ -1283,26 +1347,21 @@ function getTime(timezone: string): string {
   }
 }
 
-// `apiKey` opțional — regula „all inclusive" pe creierul de abonament (28
-// iul): doar web_search/youtube_search îl folosesc (trec prin OpenRouter);
-// restul uneltelor Google îl ignoră (folosesc token-ul OAuth al userului sau
-// servicii keyless), la fel cum majoritatea ignoră deja `token`.
 export async function runGoogleTool(
   name: string,
   input: unknown,
   token: string,
-  apiKey?: string,
 ): Promise<string> {
   const args = (input ?? {}) as Record<string, unknown>
   try {
     // These don't use the user's Google token.
-    if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5), apiKey)
+    if (name === 'web_search') return await webSearch(str(args.query), num(args.max_results, 5))
     if (name === 'get_weather')
       return await weather(str(args.location), num(args.lat, Number.NaN), num(args.lon, Number.NaN))
     if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
     if (name === 'maps_directions')
       return await mapsDirections(str(args.origin), str(args.destination))
-    if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5), apiKey)
+    if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
     if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
     if (name === 'wikipedia_lookup') return await wikipediaLookup(str(args.query))
     if (name === 'convert_currency')

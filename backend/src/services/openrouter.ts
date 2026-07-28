@@ -103,52 +103,6 @@ export async function getCatalog(force = false): Promise<Catalog> {
   return cache
 }
 
-// ── CATALOG COMPLET PENTRU CREIERUL DE ABONAMENT (Adrian, 28 iul) ────────────
-// Listele `chat`/`work` de mai sus sunt CURATE pentru useri (provider îngust +
-// vedere). Creierul de abonament e altă poveste: e cheia PROPRIE a ownerului, cu
-// creditul lui — vrea acces la TOT ce poate funcționa ca creier pe OpenRouter,
-// ORICE provider (Grok/DeepSeek/Mistral/Qwen/Llama/Gemini plătit...). Singura
-// condiție reală e tool-use (fără unelte, creierul nu poate EXECUTA nimic).
-export interface BrainModel {
-  id: string
-  name: string
-  provider: string
-  vision: boolean
-}
-let brainCatCache: { at: number; list: BrainModel[] } | null = null
-
-/** TOATE modelele cu tool-use de pe OpenRouter (orice provider), pentru
- *  selectorul manual al creierului de abonament. Cache scurt ca `getCatalog`. */
-export async function getBrainCatalog(force = false): Promise<BrainModel[]> {
-  if (!force && brainCatCache && Date.now() - brainCatCache.at < CATALOG_TTL_MS) return brainCatCache.list
-  if (!config.openrouter.key) return brainCatCache?.list ?? []
-  const r = await fetch(`${OR_BASE}/models`, {
-    headers: { Authorization: `Bearer ${config.openrouter.key}` },
-    signal: AbortSignal.timeout(20_000),
-  }).catch(() => null)
-  if (!r || !r.ok) return brainCatCache?.list ?? []
-  const data = ((await r.json().catch(() => ({}))) as { data?: RawModel[] }).data ?? []
-  const list = data
-    .filter((m) => (m.supported_parameters ?? []).includes('tools') && isSelectable(m.id))
-    .map((m) => ({
-      id: m.id,
-      name: m.name ?? m.id,
-      provider: m.id.split('/')[0] || 'other',
-      vision: (m.architecture?.input_modalities ?? []).includes('image'),
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-  brainCatCache = { at: Date.now(), list }
-  return list
-}
-
-/** Modelul de abonament ales are vedere? true/false din catalog; null dacă
- *  necunoscut (catalog indisponibil sau id nelistat) → apelantul decide. */
-export async function brainModelHasVision(id: string): Promise<boolean | null> {
-  const list = await getBrainCatalog()
-  const m = list.find((x) => x.id === id)
-  return m ? m.vision : null
-}
-
 // ── SOLDUL REAL AL CONTULUI OPENROUTER = „punga lui Kelion" (Adrian, 24 iul) ──
 // Creierul (OpenRouter) e alimentat CENTRAL din contul lui Kelion, nu de fiecare
 // user separat. Adminul trebuie să vadă VALOAREA EXACTĂ rămasă (ca pe pagina
@@ -168,25 +122,18 @@ export interface OpenRouterBalance {
 }
 
 const OR_LOW_THRESHOLD = Math.max(0, Number(process.env.OPENROUTER_LOW_USD ?? '10') || 10)
-// Cache per-cheie: punga centrală (config) și cheia de abonament a ownerului au
-// solduri diferite — un singur cache le-ar amesteca.
-const orBalCache = new Map<string, { at: number; val: OpenRouterBalance }>()
+let orBalCache: { at: number; val: OpenRouterBalance } | null = null
 
-// `apiKey` opțional: fără el = punga CENTRALĂ (config); cu el = soldul cheii date
-// (ex. cheia de abonament a ownerului). Endpoint OpenRouter identic → același card.
-export async function getOpenRouterBalance(force = false, apiKey?: string): Promise<OpenRouterBalance> {
-  const key = (apiKey ?? config.openrouter.key).trim()
+export async function getOpenRouterBalance(force = false): Promise<OpenRouterBalance> {
   const base: OpenRouterBalance = {
     ok: false, balance: 0, totalCredits: 0, totalUsage: 0, currency: 'usd',
     low: true, threshold: OR_LOW_THRESHOLD, topup: 'https://openrouter.ai/credits',
   }
-  if (!key) return { ...base, error: 'not_configured' }
-  const cacheId = key.slice(-8)
-  const hit = orBalCache.get(cacheId)
-  if (!force && hit && Date.now() - hit.at < 60_000) return hit.val
+  if (!config.openrouter.key) return { ...base, error: 'not_configured' }
+  if (!force && orBalCache && Date.now() - orBalCache.at < 60_000) return orBalCache.val
   try {
     const r = await fetch(`${OR_BASE}/credits`, {
-      headers: { Authorization: `Bearer ${key}` },
+      headers: { Authorization: `Bearer ${config.openrouter.key}` },
       signal: AbortSignal.timeout(12_000),
     })
     if (!r.ok) return { ...base, error: `http_${r.status}` }
@@ -199,7 +146,7 @@ export async function getOpenRouterBalance(force = false, apiKey?: string): Prom
     const val: OpenRouterBalance = {
       ...base, ok: true, balance, totalCredits, totalUsage, low: balance < OR_LOW_THRESHOLD,
     }
-    orBalCache.set(cacheId, { at: Date.now(), val })
+    orBalCache = { at: Date.now(), val }
     return val
   } catch (e) {
     return { ...base, error: String(e).slice(0, 120) }
@@ -311,12 +258,9 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required'; apiKey?: string } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
-  // `apiKey` opțional = creierul de abonament (cheia proprie a ownerului); fără
-  // el, punga centrală. Aceeași cale, aceleași unelte, doar antetul Authorization diferă.
-  const orKey = (opts.apiKey ?? config.openrouter.key).trim()
-  if (!orKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -340,7 +284,7 @@ export async function openrouterChatStream(
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${orKey}`,
+      Authorization: `Bearer ${config.openrouter.key}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://kelionai.app',
       'X-Title': 'Kelionai',
@@ -422,10 +366,9 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required'; apiKey?: string } = {},
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
-  const orKey = (opts.apiKey ?? config.openrouter.key).trim()
-  if (!orKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -442,7 +385,7 @@ export async function openrouterChat(
   const r = await fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${orKey}`,
+      Authorization: `Bearer ${config.openrouter.key}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://kelionai.app',
       'X-Title': 'Kelionai',
@@ -520,18 +463,14 @@ export async function openrouterComplete(
 // Modelul de imagini întoarce imaginea inline în `message.images[].image_url.url`
 // (data URL). Întoarcem mime + bytes; costul REAL vine din usage.cost.
 export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: string }
-// `apiKey` opțional (regula „all inclusive" pe abonament, 28 iul): pe o tură
-// rutată pe cheia de abonament, imaginea generată în ACEEAȘI tură se plătește
-// tot de acolo — nu doar raționamentul, TOT costul turei.
-export async function openrouterImage(prompt: string, apiKey?: string): Promise<OrImage> {
-  const orKey = (apiKey ?? config.openrouter.key).trim()
-  if (!orKey) return { error: 'image_not_configured' }
+export async function openrouterImage(prompt: string): Promise<OrImage> {
+  if (!config.openrouter.key) return { error: 'image_not_configured' }
   let r: Response
   try {
     r = await fetch(`${OR_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${orKey}`,
+        Authorization: `Bearer ${config.openrouter.key}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://kelionai.app',
         'X-Title': 'Kelionai',
@@ -566,19 +505,15 @@ export interface OrSearchResult {
   sources: { title: string; url: string }[]
   costUsd: number
 }
-// `apiKey` opțional — vezi nota „all inclusive" de la openrouterImage: pe
-// abonament, căutarea web/YouTube din ACEEAȘI tură se plătește tot din cheia
-// ownerului, nu din punga centrală.
-export async function openrouterWebSearch(query: string, instruction?: string, apiKey?: string): Promise<OrSearchResult> {
-  const orKey = (apiKey ?? config.openrouter.key).trim()
-  if (!orKey) return { text: '', sources: [], costUsd: 0 }
+export async function openrouterWebSearch(query: string, instruction?: string): Promise<OrSearchResult> {
+  if (!config.openrouter.key) return { text: '', sources: [], costUsd: 0 }
   const sys = instruction ?? 'Search the web and answer concisely with the most current, factual information. Cite sources.'
   let r: Response
   try {
     r = await fetch(`${OR_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${orKey}`,
+        Authorization: `Bearer ${config.openrouter.key}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://kelionai.app',
         'X-Title': 'Kelionai',

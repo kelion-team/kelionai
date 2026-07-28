@@ -36,3 +36,7 @@ export async function latestUpdateSummary(maxLines = 5): Promise<string> {
   return lines.slice(0, maxLines).join('\n')
 }
 
+/** Doar pentru teste: golește cache-ul. */
+export function resetUpdatesCache(): void {
+  cached = null
+}

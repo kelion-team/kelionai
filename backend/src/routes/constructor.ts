@@ -1,16 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
-import { timingSafeStringEqual } from '../services/adminLock.js'
-
-// Audit 28 iul: comparare `!==` pe secretul punții e un canal lateral de timp.
-function bridgeAuthOk(req: FastifyRequest): boolean {
-  const got = req.headers['x-bridge-secret']
-  return !!config.bridgeSecret && typeof got === 'string' && timingSafeStringEqual(got, config.bridgeSecret)
-}
 
 // ── CONSTRUCTORUL — conducta „ordin → cod → PR" (Adrian, 27 iul: „Kelion
 // trebuie să poată crea orice soft îi cere admin, orice modificare, orice
@@ -45,7 +38,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // „pauza-autonomie" a lui Adrian oprește și constructorul: cât e pauză, nu
   // se mai dau ordine lucrătorului (cele din coadă așteaptă, nu se pierd).
   app.get('/api/constructor/next', async (req, reply) => {
-    if (!bridgeAuthOk(req)) return reply.code(401).send({ error: 'unauthorized' })
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
     if (await isOpsPaused()) return reply.send({ job: null, paused: true })
     const job = await claimNextBuildJob()
     return reply.send({ job })
@@ -54,7 +48,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string }
   }>('/api/constructor/report', async (req, reply) => {
-    if (!bridgeAuthOk(req)) return reply.code(401).send({ error: 'unauthorized' })
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
     const id = Number(req.body?.id ?? 0)
     const status = req.body?.status === 'done' ? 'done' : 'failed'
     if (!id) return reply.code(400).send({ error: 'id_lipsa' })

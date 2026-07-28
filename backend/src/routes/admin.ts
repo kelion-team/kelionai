@@ -39,12 +39,6 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
-import { loadBrainSub, saveBrainSub, subActive } from '../services/brainSubscription.js'
-import { validateAnthropicKey, CLAUDE_MODELS } from '../services/anthropicDirect.js'
-
-// Linkul de gestionare a cheii/creditului Claude — consola Anthropic (Adrian, 28
-// iul: „la ab trebuie de la cloude nu openrouter"; clicul ducea greșit la OpenRouter).
-const CLAUDE_CONSOLE = 'https://console.anthropic.com/settings/billing'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
@@ -299,37 +293,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, stripeBal, sub] = await Promise.all([
+    const [pool, orBalance, stripeBal] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       getStripeBalance(),
-      loadBrainSub(),
     ])
-    // CREIERUL DE ABONAMENT în bară (Adrian, 28 iul: „la comutare să afișeze
-    // ABONAMENT, nu tot OpenRouter"): când modul e activ + există cheie, bara
-    // arată soldul cheii ownerului, etichetat clar „Abonament". Sursa unică e
-    // subActive() (auditul 28 iul găsise o reimplementare manuală aici, care
-    // ar fi putut desincroniza tăcut dacă regula reală se schimba altundeva).
-    // Ruta e deja gardată admin-only mai sus, deci `true` e corect aici.
-    const subActiveNow = subActive(sub, true)
-    // ABONAMENT PE CLAUDE DIRECT (Adrian, 28 iul): cheia e de la consola
-    // Anthropic (sk-ant-…), nu OpenRouter. Anthropic n-are un endpoint public de
-    // „sold rămas" ca OpenRouter, deci arătăm dacă e VALIDĂ (verificare ieftină
-    // pe GET /v1/models), plus linkul de gestionare la consola Claude.
-    const subKeyStatus = sub.key.length > 0 ? await validateAnthropicKey(sub.key) : null
     return reply.send({
-      active: subActiveNow ? 'subscription' : 'openrouter',
-      subscription: {
-        mode: sub.mode,
-        active: subActiveNow,
-        model: sub.model,
-        hasKey: sub.key.length > 0,
-        // Forma o păstrăm compatibilă cu bara: `ok` = cheia validă; fără „sold"
-        // numeric (nu există la Anthropic), doar validitate + link consolă.
-        balance: subKeyStatus
-          ? { ok: subKeyStatus.ok, valid: subKeyStatus.ok, error: subKeyStatus.error, topup: CLAUDE_CONSOLE }
-          : null,
-      },
+      active: 'openrouter',
       openrouter: {
         ok: Boolean(config.openrouter.key),
         topup: 'https://openrouter.ai/credits',
@@ -425,69 +395,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyKeys())
   })
-
-  // ── CREIERUL DE ABONAMENT (Adrian, 28 iul) ──────────────────────────────────
-  // Comutatorul admin-only FREE ⟷ ABONAMENT + cheia proprie a ownerului. GET
-  // întoarce starea + soldul cheii (EXACT cardul OpenRouter — fiindcă ESTE o
-  // cheie OpenRouter), niciodată cheia întreagă (doar prezența + ultimele 4).
-  // STRICT admin (userii nu văd și nu ating cheia/creditul ownerului).
-  app.get('/api/admin/brain-sub', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const sub = await loadBrainSub(true)
-    const hasKey = sub.key.length > 0
-    const hasVoiceKey = sub.voiceKey.length > 0
-    return reply.send({
-      mode: sub.mode,
-      model: sub.model,
-      hasKey,
-      keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
-      // Cheia Claude (Anthropic) n-are endpoint public de sold ca OpenRouter →
-      // arătăm dacă e VALIDĂ (GET /v1/models) + linkul spre consola Claude.
-      keyStatus: hasKey ? await validateAnthropicKey(sub.key) : null,
-      manageUrl: CLAUDE_CONSOLE,
-      // VOCEA PE ABONAMENT (28 iul): cheie OpenAI separată — fără sold expus
-      // (OpenAI n-are un /credits public comparabil), doar starea configurării.
-      hasVoiceKey,
-      voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
-    })
-  })
-
-  // Lista modelelor CLAUDE pentru selectorul creierului de abonament — apel
-  // direct la Anthropic (nu mai e catalogul OpenRouter). Familia Claude 5 +
-  // Haiku, toate cu vedere + unelte.
-  app.get('/api/admin/brain-models', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ models: CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })) })
-  })
-
-  app.post<{ Body: { mode?: string; model?: string; key?: string; voiceKey?: string } }>(
-    '/api/admin/brain-sub',
-    async (req, reply) => {
-      const user = getSessionUser(req)
-      if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const patch: { mode?: 'free' | 'subscription'; model?: string; key?: string; voiceKey?: string } = {}
-      if (req.body?.mode === 'free' || req.body?.mode === 'subscription') patch.mode = req.body.mode
-      if (typeof req.body?.model === 'string' && req.body.model.trim()) patch.model = req.body.model.trim()
-      // key/voiceKey: string (inclusiv '' pentru ștergere) → setează; absent → păstrează.
-      if (typeof req.body?.key === 'string') patch.key = req.body.key.trim()
-      if (typeof req.body?.voiceKey === 'string') patch.voiceKey = req.body.voiceKey.trim()
-      const sub = await saveBrainSub(patch)
-      const hasKey = sub.key.length > 0
-      const hasVoiceKey = sub.voiceKey.length > 0
-      return reply.send({
-        mode: sub.mode,
-        model: sub.model,
-        hasKey,
-        keyHint: hasKey ? `…${sub.key.slice(-4)}` : '',
-        keyStatus: hasKey ? await validateAnthropicKey(sub.key) : null,
-        manageUrl: CLAUDE_CONSOLE,
-        hasVoiceKey,
-        voiceKeyHint: hasVoiceKey ? `…${sub.voiceKey.slice(-4)}` : '',
-      })
-    },
-  )
 
   // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
   // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
