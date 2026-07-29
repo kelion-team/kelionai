@@ -23,17 +23,25 @@
 import { execSync, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const ENVFILE = '/root/kelion/kelionai.env'
 const ATELIER = '/root/kelion/atelier'
 const APP = 'http://127.0.0.1:8080'
 const REPO = 'kelion-team/kelionai'
 
-// env-ul aplicației, citit direct din fișier (cronul nu are mediul shell-ului)
+// env-ul aplicației, citit direct din fișier (cronul nu are mediul shell-ului).
+// Tolerant la lipsa fișierului: pe VPS există mereu, dar dacă cumva nu (sau la
+// importul modulului dintr-un test al gărzii de comenzi), pornim cu env gol —
+// main() se oprește oricum curat pe „lipsesc BRIDGE_SECRET/...", nu crapă.
 const env = {}
-for (const line of fs.readFileSync(ENVFILE, 'utf8').split('\n')) {
-  const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-  if (m) env[m[1]] = m[2].trim()
+try {
+  for (const line of fs.readFileSync(ENVFILE, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
+    if (m) env[m[1]] = m[2].trim()
+  }
+} catch {
+  /* fișier absent/necitibil — env gol, main() raportează lipsurile */
 }
 const BRIDGE = env.BRIDGE_SECRET ?? ''
 const ORKEY = env.OPENROUTER_API_KEY ?? ''
@@ -220,8 +228,8 @@ function toolEdit(p, vechi, nou) {
   fs.writeFileSync(full, src.slice(0, prima) + nou + src.slice(prima + vechi.length))
   return `editat: ${p} (${vechi.length} → ${nou.length} caractere)`
 }
-// Comenzi PERMISE explicit — nimic altceva nu se execută (atelierul nu e un
-// shell liber; buildul și testele sunt singurele verificări de care e nevoie).
+// Comenzi PERMISE explicit — nimic altceva nu se execută prin shell (atelierul
+// nu e un shell liber; buildul și testele sunt verificările de care e nevoie).
 const RUN_ALLOWED = new Set([
   'npm --prefix backend ci',
   'npm --prefix backend run build',
@@ -231,11 +239,48 @@ const RUN_ALLOWED = new Set([
   'git status --porcelain',
   'git diff --stat',
 ])
-function toolRun(cmd) {
+// INSTALAREA DE DEPENDENȚE (Etapa 5 autonomie): un ordin poate cere o bibliotecă
+// NOUĂ, iar până acum `npm install` era „comandă nepermisă" — deci constructorul
+// nu putea adăuga un pachet, iar dacă edita doar package.json, `npm ci` din
+// verificare pica („out of sync"). Acum permitem EXACT `npm --prefix
+// (backend|frontend) install [pachete]`, dar cu două garduri: (1) argumentele
+// trec printr-un filtru strict (doar nume-npm / nume@versiune și câteva flag-uri
+// cunoscute) — un „; rm -rf" sau „--registry=http://rău" e respins; (2) execuția
+// e FĂRĂ shell (execFileSync), deci chiar dacă ceva ar scăpa de filtru, un
+// metacaracter nu poate fi interpretat. Restul (curl, apt, rm, chmod...) rămân
+// interzise; instalarea de unelte de SISTEM e treaba unui runbook, nu a atelierului.
+const NPM_PKG_RE = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(@[a-zA-Z0-9._^~*-]+)?$/
+const NPM_INSTALL_FLAGS = new Set(['--save', '--save-dev', '-D', '--save-exact', '-E', '--save-optional', '-O', '--save-peer', '--no-audit', '--no-fund', '--omit=dev'])
+const INSTALL_RE = /^npm --prefix (backend|frontend) install\b(.*)$/
+// PUR (fără shell, fără disc): decide ce e o comandă din 'run'. Ținut separat +
+// exportat ca să poată fi PROBAT (garda de injecție e prea importantă ca s-o
+// verific „pe încredere"). Întoarce {mode:'shell'|'install'|'denied'}.
+export function classifyRunCommand(cmd) {
   const c = String(cmd ?? '').trim()
-  if (!RUN_ALLOWED.has(c)) return `comandă nepermisă. Permise: ${[...RUN_ALLOWED].join(' | ')}`
+  if (RUN_ALLOWED.has(c)) return { mode: 'shell', cmd: c }
+  const mi = INSTALL_RE.exec(c)
+  if (mi) {
+    const prefix = mi[1]
+    const toks = (mi[2] || '').trim() ? mi[2].trim().split(/\s+/) : []
+    for (const t of toks) {
+      if (t.startsWith('-')) {
+        if (!NPM_INSTALL_FLAGS.has(t)) return { mode: 'denied', reason: `flag npm nepermis: „${t}". Permise: ${[...NPM_INSTALL_FLAGS].join(' ')}` }
+      } else if (!NPM_PKG_RE.test(t)) {
+        return { mode: 'denied', reason: `nume de pachet nepermis: „${t}" — doar nume-npm sau nume@versiune (fără spații/metacaractere).` }
+      }
+    }
+    return { mode: 'install', argv: ['--prefix', prefix, 'install', ...toks, '--no-audit', '--no-fund'] }
+  }
+  return { mode: 'denied', reason: `comandă nepermisă. Permise: ${[...RUN_ALLOWED].join(' | ')} | npm --prefix (backend|frontend) install [pachete]` }
+}
+function toolRun(cmd) {
+  const cls = classifyRunCommand(cmd)
+  if (cls.mode === 'denied') return cls.reason
   try {
-    const out = sh(c, { timeout: 10 * 60_000 })
+    const out =
+      cls.mode === 'install'
+        ? execFileSync('npm', cls.argv, { cwd: ATELIER, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], timeout: 10 * 60_000 })
+        : sh(cls.cmd, { timeout: 10 * 60_000 })
     return out.slice(-8000) || '(ok, fără ieșire)'
   } catch (e) {
     return `EȘEC (exit ${e.status ?? '?'})\n${String((e.stdout ?? '') + (e.stderr ?? '')).slice(-8000)}`
@@ -248,7 +293,7 @@ const TOOLS = [
   { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
-  { type: 'function', function: { name: 'run', description: 'Rulează o comandă de verificare din lista permisă (npm ci/build/test pe backend/frontend, git status/diff).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
+  { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Termină lucrarea: dai titlul + corpul PR-ului (română). Cheam-o DOAR după build verde (și teste verzi pe backend dacă l-ai atins).', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
 ]
 
@@ -261,6 +306,7 @@ PROCEDURA (ține-o STRICT — bugetul de pași cu unelte e mic, ~24):
 3. Citește DOAR fișierul pe care-l modifici, și DOAR intervalul relevant (read cu from/to). Nu citi de două ori același fișier. NU citi AI-HANDOFF.md (e uriaș) decât dacă ordinul cere explicit arhitectura.
 4. Modifică: 'edit' pe fișiere existente (dai textul vechi EXACT → textul nou) — e calea sigură, fiindcă răspunsul tău are plafon și un 'write' pe un fișier mare se taie la mijloc și strică fișierul. 'write' îl folosești la fișiere NOI sau mici.
 5. Cheamă 'finish' IMEDIAT după ce ai scris. NU rula tu 'npm ci/build/test' — sistemul verifică singur după finish. Ținta: finish în ≤3 unelte după ce ai găsit fișierul.
+   EXCEPȚIE — bibliotecă NOUĂ: dacă ordinul are nevoie de un pachet care nu există încă, rulează 'run' cu „npm --prefix backend install <pachet>" (sau frontend) ÎNAINTE de finish — așa package.json + lock rămân sincronizate și verificarea trece.
 
 REGULILE CASEI:
 - Rescrii curat modulul responsabil — fără petice band-aid; potrivește stilul din jur (comentarii în română).
@@ -472,9 +518,17 @@ function verificaAtelierul() {
   // `git diff --stat` NU vede fișierele noi (netrăcite) — logăm și starea brută,
   // altfel un ordin care doar adaugă fișiere apare în jurnal ca „fără modificări".
   log(`modificări:\n${(sh('git diff --stat').trim() || changed).slice(-1500)}`)
+  // DEPENDENȚE NOI (Etapa 5): dacă ordinul a schimbat package.json (a adăugat o
+  // bibliotecă), `npm ci` ar pica („package.json și package-lock.json out of
+  // sync"). Atunci instalăm cu `npm install` — care aduce pachetul ȘI aduce
+  // package-lock.json la zi; lock-ul actualizat intră în PR, deci publicarea în
+  // producție (care rulează `npm ci`) merge. Fără schimbare de package.json,
+  // rămânem pe `npm ci` (reproductibil din lock).
+  const backendDeps = /(^|\n).{3}backend\/package(-lock)?\.json/.test(changed)
+  const frontendDeps = /(^|\n).{3}frontend\/package(-lock)?\.json/.test(changed)
   const verify = []
-  if (touchedBackend) verify.push('npm --prefix backend ci', 'npm --prefix backend run build', 'npm --prefix backend test')
-  if (touchedFrontend) verify.push('npm --prefix frontend ci', 'npm --prefix frontend run build')
+  if (touchedBackend) verify.push(backendDeps ? 'npm --prefix backend install' : 'npm --prefix backend ci', 'npm --prefix backend run build', 'npm --prefix backend test')
+  if (touchedFrontend) verify.push(frontendDeps ? 'npm --prefix frontend install' : 'npm --prefix frontend ci', 'npm --prefix frontend run build')
   for (const cmd of verify) {
     log(`verific: ${cmd}`)
     const out = toolRun(cmd)
@@ -761,7 +815,12 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error('constructor-agent fatal:', e)
-  process.exit(1)
-})
+// Rulează bucla DOAR când fișierul e pornit ca script (node constructor-agent.mjs
+// pe VPS). La import (proba gărzii de comenzi din classifyRunCommand) nu pornim
+// agentul — doar folosim funcțiile pure.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error('constructor-agent fatal:', e)
+    process.exit(1)
+  })
+}
