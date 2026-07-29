@@ -15,7 +15,11 @@ import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '.
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
-import { brainComplete, brainCompleteWithTools, describeScene } from '../services/brain.js'
+import { brainComplete, describeScene } from '../services/brain.js'
+// §6 CREIER UNIC: vocea escaladează pe ACELAȘI orchestrator + selecție de model ca scrisul.
+import { voiceBrainTurn } from '../services/voiceBrainTurn.js'
+import { resolveModel, type AnthropicTool } from '../services/openrouter.js'
+import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiDirect.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -285,9 +289,60 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           if (tname === 'system_health') return systemHealth()
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
-        const answer = introspectionTools.length
-          ? await brainCompleteWithTools(prompt, introspectionTools, execIntrospection, { maxTokens: 2000, onCost: (usd) => { toolCostUsd += usd } })
-          : await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
+        // ── §6 CREIER UNIC — vocea = urechile și gura ACELUIAȘI creier ────────
+        // Escaladarea rulează pe EXACT același orchestrator ca scrisul
+        // (runOrchestrator prin voiceBrainTurn), cu aceeași personă (SYSTEM_PROMPT),
+        // același model (Gemini direct/resolveModel('work'), ca scrisul) și poarta
+        // faptei — NU pe un motor de creier separat (brainCompleteWithTools). Așa
+        // dispare dublura: un singur creier gândește și în scris, și în voce.
+        // Uneltele de introspecție (sursă/DB/sănătate/constructor) rămân aceleași,
+        // admin-gated identic; executorul se adaptează la contractul (name, argsJson).
+        const brainSystem =
+          `${SYSTEM_PROMPT}\n\n` +
+          `VOICE ESCALATION: the fast voice model handed you a request it judged too hard. Answer it fully ` +
+          `but CONCISELY, as plain text to be SPOKEN aloud (no markdown, no lists). Speak ONLY in ` +
+          `${langLabel(lang)} — never switch, regardless of the language mixed into the request.`
+        const execForBrain = async (tname: string, argsJson: string): Promise<string> => {
+          let targs: Record<string, unknown> = {}
+          try {
+            const p = JSON.parse(argsJson || '{}')
+            if (p && typeof p === 'object') targs = p as Record<string, unknown>
+          } catch {
+            /* argumente ne-JSON → obiect gol */
+          }
+          return execIntrospection(tname, targs)
+        }
+        const brainTools = introspectionTools as unknown as AnthropicTool[]
+        // Modelul: ca la scris — Gemini direct dacă e disponibil, altfel modelul work.
+        const primaryModel = geminiDirectAvailable()
+          ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+          : await resolveModel('work')
+        let answer = ''
+        try {
+          answer = await voiceBrainTurn(request, {
+            model: primaryModel,
+            tools: brainTools,
+            execTool: execForBrain,
+            systemPrompt: brainSystem,
+            onCost: (usd) => { toolCostUsd += usd },
+          })
+          // Gemini direct a picat în cursă (fără text) → o dată pe modelul work,
+          // exact ca fallback-ul din scris (chat.ts).
+          if (!answer && primaryModel.startsWith(GEMINI_DIRECT_PREFIX)) {
+            answer = await voiceBrainTurn(request, {
+              model: await resolveModel('work'),
+              tools: brainTools,
+              execTool: execForBrain,
+              systemPrompt: brainSystem,
+              onCost: (usd) => { toolCostUsd += usd },
+            })
+          }
+        } catch (e) {
+          req.log.warn({ err: String(e).slice(0, 200) }, 'voice ask_brain orchestrator a picat — cad pe creierul simplu')
+        }
+        // PLASĂ DE SIGURANȚĂ (regresie interzisă): dacă orchestratorul n-a întors
+        // nimic (eroare/gol), cădem pe creierul simplu ca vocea să NU rămână mută.
+        if (!answer) answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
         return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
       }

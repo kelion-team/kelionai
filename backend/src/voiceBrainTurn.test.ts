@@ -53,4 +53,18 @@ describe('voiceBrainTurn — vocea = același creier (§6)', () => {
     const opts = runOrchestrator.mock.calls[0][4]
     expect(opts.deedGate).toBe(true)
   })
+
+  it('facturează costul REAL al escaladării prin onCost (§6 — costul nu se pierde)', async () => {
+    runOrchestrator.mockResolvedValue({ text: 'ok', costUsd: 0.0123, model: 'm', rounds: 2 })
+    const costs: number[] = []
+    await voiceBrainTurn('x', { model: 'm', tools: TOOLS, execTool: exec, systemPrompt: 'S', onCost: (u) => costs.push(u) })
+    expect(costs).toEqual([0.0123])
+  })
+
+  it('cost 0 → NU cheamă onCost (nu debităm zero)', async () => {
+    runOrchestrator.mockResolvedValue({ text: 'ok', costUsd: 0, model: 'm', rounds: 1 })
+    const cb = vi.fn()
+    await voiceBrainTurn('x', { model: 'm', tools: TOOLS, execTool: exec, systemPrompt: 'S', onCost: cb })
+    expect(cb).not.toHaveBeenCalled()
+  })
 })
