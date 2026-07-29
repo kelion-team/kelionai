@@ -129,7 +129,7 @@ export function creeazaFakeGitHub(shaMaster = 'a'.repeat(40)): FakeGitHub {
     if (cale.startsWith('/actions/') && cale.includes('/dispatches') && method === 'POST') {
       const wf = cale.match(/workflows\/([^/]+)\/dispatches/)?.[1] ?? ''
       g.dispatches.push({ workflow: wf, ref: String(c.ref ?? '') })
-      return new Response(null, { status: 204 }) // 204 = fără corp, ca la GitHub
+      return raspuns(200, { ok: true }) // dispatch reușit = 200 (docul GitHub)
     }
     if (cale.startsWith('/actions/') && method === 'GET') {
       return raspuns(200, { workflow_runs: g.rulari })

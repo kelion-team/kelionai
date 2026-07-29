@@ -142,7 +142,11 @@ export async function runRunbook(name: string): Promise<string> {
     method: 'POST',
     body: JSON.stringify({ ref: 'master', inputs: v.rb.inputs ?? {} }),
   })
-  if (r.status === 204)
+  // SUCCESUL DISPATCH-ULUI = 200. Se lega pe „=== 204" — dar dispatch-ul de
+  // workflow răspunde 200 (docul GitHub „Create a workflow dispatch event"),
+  // deci pe un dispatch REUȘIT runbook-ul raporta `dispatch_failed_200` și
+  // autonomia părea căzută degeaba. Orice altceva decât 200 e eșec, raportat ca atare.
+  if (r.status === 200)
     return JSON.stringify({
       ok: true,
       started: name,
