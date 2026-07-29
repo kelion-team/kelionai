@@ -91,6 +91,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: true, admin: false },
   { name: 'list_memories', category: 'memorie', does: 'memoria de lungă durată', chat: true, voice: false, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, admin: false },
+  { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, admin: true },
 
   // 2.6 Vedere & loc
   { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: true, admin: false },
