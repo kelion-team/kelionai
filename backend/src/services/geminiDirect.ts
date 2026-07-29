@@ -142,6 +142,24 @@ function partsToResult(parts: GPart[], model: string, stop: string): OrChatResul
   return { text, toolCalls, costUsd: 0, model, stop }
 }
 
+// Apelul comun Gemini (non-stream + stream): antete x-goog-api-key + corp
+// toGeminiPayload + timeout. Diferă DOAR prin sufixul metodei (generateContent vs
+// streamGenerateContent?alt=sse). Sursă unică (principiul permanent: unic, fără dup).
+function geminiFetch(
+  model: string,
+  method: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[],
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' },
+): Promise<Response> {
+  return fetch(`${G_BASE}/models/${model}:${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+    body: JSON.stringify(toGeminiPayload(messages, tools, opts)),
+    signal: AbortSignal.timeout(120_000),
+  })
+}
+
 export async function geminiDirectChat(
   model: string,
   messages: OrMessage[],
@@ -149,12 +167,7 @@ export async function geminiDirectChat(
   opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  const r = await fetch(`${G_BASE}/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-    body: JSON.stringify(toGeminiPayload(messages, tools, opts)),
-    signal: AbortSignal.timeout(120_000),
-  })
+  const r = await geminiFetch(model, 'generateContent', messages, tools, opts)
   if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
   const j = (await r.json()) as GResp
   const cand = j.candidates?.[0]
@@ -171,12 +184,7 @@ export async function geminiDirectChatStream(
   opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  const r = await fetch(`${G_BASE}/models/${model}:streamGenerateContent?alt=sse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-    body: JSON.stringify(toGeminiPayload(messages, tools, opts)),
-    signal: AbortSignal.timeout(120_000),
-  })
+  const r = await geminiFetch(model, 'streamGenerateContent?alt=sse', messages, tools, opts)
   if (!r.ok || !r.body) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
 
   let text = ''

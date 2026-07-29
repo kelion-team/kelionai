@@ -57,7 +57,7 @@ import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
 import { checkLang, detectLang, trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, type GestureLabel } from '../services/commands.js'
-import { geoLookupCached } from './demo.js'
+import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
@@ -1394,9 +1394,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // first turn racing the browser's fix) — fall back to a city-level guess
       // from the request IP (same lookup the visitor-analytics beacon uses) so
       // Kelion is never left with zero location awareness.
-      const hdr = (name: string): string =>
-        ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-      const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+      const ip = clientIp(req)
       const geo = geoLookupCached(ip)
       if (geo && (geo.city || geo.country)) {
         const where = [geo.city, geo.region, geo.country].filter(Boolean).join(', ')

@@ -9,16 +9,20 @@ export function mailEnabled(): boolean {
   return config.mail.pass !== '' && config.mail.user !== ''
 }
 
+// Transport SMTP configurat din env. Exportat: tokenChecks.ts îl avea copiat
+// pentru verificarea conexiunii — o singură sursă (principiul permanent: unic, fără dup).
+export function smtpTransport(): Transporter {
+  return nodemailer.createTransport({
+    host: config.mail.smtpHost,
+    port: config.mail.smtpPort,
+    secure: config.mail.smtpPort === 465, // 465 = implicit TLS
+    auth: { user: config.mail.user, pass: config.mail.pass },
+  })
+}
+
 let transporter: Transporter | null = null
 function tx(): Transporter {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: config.mail.smtpHost,
-      port: config.mail.smtpPort,
-      secure: config.mail.smtpPort === 465, // 465 = implicit TLS
-      auth: { user: config.mail.user, pass: config.mail.pass },
-    })
-  }
+  if (!transporter) transporter = smtpTransport()
   return transporter
 }
 

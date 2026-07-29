@@ -100,6 +100,16 @@ function parseUa(ua: string): { browser: string; os: string; device: string; isB
   return { browser, os, device, isBot }
 }
 
+// IP-ul REAL al vizitatorului în spatele Cloudflare: cf-connecting-ip (XFF dă IP-ul
+// edge-ului CF, comun multor vizitatori — rău pentru geo ȘI anti-reuse). Preferă
+// antetele real-client, cade pe XFF apoi req.ip. Era copiat în demo (×2) și chat
+// (services→routes) — o singură sursă exportată (principiul permanent: unic, fără dup).
+export function clientIp(req: FastifyRequest): string {
+  const hdr = (name: string): string =>
+    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
+  return hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+}
+
 // Build the full visitor profile for one request: real IP (Cloudflare-aware),
 // geo, browser/OS/device, language, referrer, bot flag. Shared by the visit
 // beacon and the demo start.
@@ -107,12 +117,7 @@ async function visitorProfile(
   req: FastifyRequest,
   referrer: string,
 ): Promise<{ ip: string; visit: DemoVisit }> {
-  // Behind Cloudflare, the REAL visitor IP is in cf-connecting-ip (x-forwarded-for
-  // gives the CF edge IP, which many visitors share — bad for geo AND for the
-  // per-IP anti-reuse). Prefer the real-client headers, fall back to XFF.
-  const hdr = (name: string): string =>
-    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-  const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+  const ip = clientIp(req)
   const ua = (req.headers['user-agent'] as string | undefined) ?? ''
   const lang = ((req.headers['accept-language'] as string | undefined) ?? '').split(',')[0]?.trim() ?? ''
   const { browser, os, device, isBot } = parseUa(ua)
@@ -138,10 +143,7 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { fp?: string } }>('/api/visit/ping', async (req, reply) => {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
     const email = getSessionUser(req)?.email ?? ''
-    const hdr = (name: string): string =>
-      ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-    const ip =
-      hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+    const ip = clientIp(req)
     const touched = await touchVisit(fp, ip, email)
     if (!touched) {
       const { ip: fullIp, visit } = await visitorProfile(req, '')
