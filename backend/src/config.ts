@@ -35,6 +35,15 @@ export const config = {
   openai: {
     key: (process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? '').trim(),
     realtimeModel: (process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime').trim(),
+    // CASCADĂ DE MODELE REALTIME (28 iul — dovadă live: `gpt-realtime` întorcea
+    // 504 cu pagină Cloudflare pe TOATE încercările, deși cheia era validă
+    // (200 pe /v1/models) și endpointul răspundea — ruta modelului primar era
+    // căzută la OpenAI). Reîncercarea pe ACELAȘI model n-are nicio șansă când
+    // chiar modelul e problema: încercările 2-3 trec pe modelele de rezervă.
+    realtimeModelFallbacks: (process.env.OPENAI_REALTIME_MODEL_FALLBACKS ?? 'gpt-realtime-mini,gpt-4o-realtime-preview')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean),
     // Voce masculină unică, persistentă pentru toți userii (Adrian, 24 iul:
     // „vocea e full-duplex, nu e masculină" — `cedar` suna neutru). `ash` =
     // voce CLAR masculină, caldă și naturală din catalogul Realtime (gentleman,

@@ -15,7 +15,11 @@
 // constructor-worker.sh, plafoane de pași și tokeni. Se termină și moare.
 //
 // PLAFOANE (env, cu valori implicite): CONSTRUCTOR_MODEL,
-// CONSTRUCTOR_MAX_STEPS (60), CONSTRUCTOR_MAX_TOKENS (900000).
+// CONSTRUCTOR_MAX_STEPS (24 — pași CU UNELTE, nu ture), CONSTRUCTOR_MAX_TOKENS
+// (900000), CONSTRUCTOR_MAX_STERILE (8 — ture în care modelul doar povestește),
+// CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
+// CONSTRUCTOR_BUDGET_MS (1560000 = 26 min, sub timeout-ul dur de 30 min din
+// constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
 import { execSync, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -50,6 +54,13 @@ if (!MODEL.endsWith(':free') && !ALLOW_PAID) {
   process.exit(0)
 }
 const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
+// Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
+// contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
+// construcție, dar nici să ne țină la nesfârșit.
+const MAX_STERILE = Number(env.CONSTRUCTOR_MAX_STERILE || 8)
+// Runde de reparație după un build/test roșu (promise în system prompt, dar
+// niciodată acordate de codul vechi — vezi bucla din main()).
+const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 2)
 const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
 // FEREASTRA DE CONTEXT (audit 27 iul — cauza EȘECULUI pe ORICE model): bucla
 // re-trimitea TOT istoricul la fiecare pas, cu citiri de până la 120k caractere
@@ -59,6 +70,15 @@ const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
 const KEEP_VERBATIM = Number(env.CONSTRUCTOR_KEEP_VERBATIM || 6)
 const READ_CAP = 6_000 // caractere pe o citire (era 120k — sursa exploziei)
 
+// BUGETUL DE TIMP AL RULĂRII. constructor-worker.sh ne dă `timeout 1800`; dacă
+// ne prinde acolo, procesul moare SIGKILL/SIGTERM fără să raporteze, ordinul
+// rămâne „running" 40 de minute în DB și consumă o încercare degeaba (la a 3-a
+// e abandonat automat). Deci ne oprim SINGURI mai devreme și raportăm.
+const START = Date.now()
+const BUDGET_MS = Number(env.CONSTRUCTOR_BUDGET_MS || 26 * 60_000)
+const ramase = () => BUDGET_MS - (Date.now() - START)
+const dormi = (ms) => new Promise((r) => setTimeout(r, ms))
+
 const logLines = []
 function log(s) {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
@@ -66,12 +86,36 @@ function log(s) {
   logLines.push(line)
 }
 
-async function api(pathname, init = {}) {
-  const r = await fetch(`${APP}${pathname}`, {
-    ...init,
-    headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json', ...(init.headers ?? {}) },
-  })
-  return r.json().catch(() => null)
+// REÎNCERCARE PE API-UL APLICAȚIEI (dovadă live 28 iul, ordinul #9: stiva de
+// eroare arăta „connect ECONNREFUSED 127.0.0.1:8080" chiar aici, în api()).
+// Cauza: publicările se fac non-stop, iar containerul aplicației e jos câteva
+// secunde la fiecare repornire — exact atunci cronul nostru cere ordinul sau
+// trimite raportul. Un deploy NU are voie să omoare un ordin în lucru. Deci:
+// erorile de rețea și 5xx-urile (Caddy răspunde 502/503 cât timp aplicația
+// urcă) se reîncearcă cu pauze crescătoare; un răspuns real (200, 401, 404) se
+// întoarce ca atare, fără reîncercare. La capătul răbdării întoarcem null în
+// loc să aruncăm: coada goală = tăcere, iar cronul revine în 2 minute.
+async function api(pathname, init = {}, tries = 8) {
+  let lastErr = ''
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const r = await fetch(`${APP}${pathname}`, {
+        ...init,
+        headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json', ...(init.headers ?? {}) },
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (r.status >= 500) throw new Error(`aplicația întoarce ${r.status} (repornire în curs?)`)
+      return await r.json().catch(() => null)
+    } catch (e) {
+      lastErr = String(e?.message ?? e)
+      if (attempt === tries) break
+      const wait = Math.min(attempt * 3_000, 15_000)
+      log(`API ${pathname}: ${lastErr.slice(0, 90)} — reîncerc în ${wait / 1000}s (${attempt}/${tries})`)
+      await dormi(wait)
+    }
+  }
+  log(`API ${pathname} indisponibil după ${tries} încercări: ${lastErr.slice(0, 140)}`)
+  return null
 }
 
 function sh(cmd, opts = {}) {
@@ -122,11 +166,38 @@ function toolGrep(pattern) {
     return e.status === 1 ? '(niciun rezultat)' : `EROARE grep: ${String(e.message).slice(0, 200)}`
   }
 }
+// GARDĂ ANTI-TRUNCHIERE. 'write' cere CONȚINUTUL COMPLET al fișierului, dar
+// ieșirea modelului e plafonată la 16k tokeni: pe un fișier mare răspunsul se
+// taie la jumătate, „reparația" scrie un fișier ciuntit, buildul pică și
+// ordinul iese EȘUAT fără ca nimeni să vadă adevărata cauză. Dacă rescrierea
+// unui fișier existent îi taie peste jumătate din corp, REFUZĂM și trimitem
+// modelul la 'edit' (înlocuire punctuală, fără să retrimită tot fișierul).
 function toolWrite(p, content) {
   const full = safePath(p)
+  const vechi = fs.existsSync(full) && fs.statSync(full).isFile() ? fs.readFileSync(full, 'utf8') : null
+  if (vechi !== null && vechi.length > 2_000 && content.length < vechi.length * 0.5)
+    return (
+      `REFUZAT: ai trimis ${content.length} caractere peste un fișier de ${vechi.length} — ` +
+      `pare tăiat de plafonul de ieșire. Folosește 'edit' (înlocuiești DOAR bucata care se schimbă) ` +
+      `sau retrimite fișierul ÎNTREG.`
+    )
   fs.mkdirSync(path.dirname(full), { recursive: true })
   fs.writeFileSync(full, content)
   return `scris: ${p} (${content.length} caractere)`
+}
+// EDIT PUNCTUAL — plasa reală împotriva truncherii de mai sus: modelul dă doar
+// textul vechi (exact) și textul nou. Cerem potrivire UNICĂ, ca să nu schimbe
+// din greșeală altă apariție (fără diff-uri fuzzy, fără petice oarbe).
+function toolEdit(p, vechi, nou) {
+  const full = safePath(p)
+  if (!vechi) return 'REFUZAT: „old" gol — dă textul EXACT care trebuie înlocuit.'
+  const src = fs.readFileSync(full, 'utf8')
+  const prima = src.indexOf(vechi)
+  if (prima < 0) return `REFUZAT: textul „old" nu apare în ${p} — copiază-l EXACT din 'read' (cu tot cu spații/indentare).`
+  if (src.indexOf(vechi, prima + vechi.length) >= 0)
+    return `REFUZAT: textul „old" apare de mai multe ori în ${p} — dă un fragment mai lung, unic.`
+  fs.writeFileSync(full, src.slice(0, prima) + nou + src.slice(prima + vechi.length))
+  return `editat: ${p} (${vechi.length} → ${nou.length} caractere)`
 }
 // Comenzi PERMISE explicit — nimic altceva nu se execută (atelierul nu e un
 // shell liber; buildul și testele sunt singurele verificări de care e nevoie).
@@ -154,7 +225,8 @@ const TOOLS = [
   { type: 'function', function: { name: 'ls', description: 'Listează un director din repo (fără node_modules/.git/dist).', parameters: { type: 'object', properties: { dir: { type: 'string' } } } } },
   { type: 'function', function: { name: 'grep', description: 'Caută un text/regex în tot repo-ul și întoarce fișier:linie:conținut (max 60). FOLOSEȘTE ASTA ca să găsești fișierul de modificat — nu explora cu ls/read pas cu pas.', parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] } } },
   { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff).', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă de verificare din lista permisă (npm ci/build/test pe backend/frontend, git status/diff).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Termină lucrarea: dai titlul + corpul PR-ului (română). Cheam-o DOAR după build verde (și teste verzi pe backend dacă l-ai atins).', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
 ]
@@ -162,11 +234,11 @@ const TOOLS = [
 const SYSTEM = `Ești CONSTRUCTORUL lui Kelionai — lucrătorul de cod autonom, pe serverul proiectului.
 Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (scripturi VPS).
 
-PROCEDURA (ține-o STRICT — bugetul de pași e mic, ~24):
+PROCEDURA (ține-o STRICT — bugetul de pași cu unelte e mic, ~24):
 1. Primul tău mesaj: UN PLAN de o linie — ce fișier(e) modifici. Fără unealtă încă.
 2. Găsește fișierul cu 'grep' (un pattern din ordin). NU explora cu ls/read pas cu pas.
 3. Citește DOAR fișierul pe care-l modifici, și DOAR intervalul relevant (read cu from/to). Nu citi de două ori același fișier. NU citi AI-HANDOFF.md (e uriaș) decât dacă ordinul cere explicit arhitectura.
-4. Scrie modificarea cu 'write' (conținutul COMPLET al fișierului, rescriere integrală, fără diff).
+4. Modifică: 'edit' pe fișiere existente (dai textul vechi EXACT → textul nou) — e calea sigură, fiindcă răspunsul tău are plafon și un 'write' pe un fișier mare se taie la mijloc și strică fișierul. 'write' îl folosești la fișiere NOI sau mici.
 5. Cheamă 'finish' IMEDIAT după ce ai scris. NU rula tu 'npm ci/build/test' — sistemul verifică singur după finish. Ținta: finish în ≤3 unelte după ce ai găsit fișierul.
 
 REGULILE CASEI:
@@ -198,20 +270,120 @@ function compactHistory(messages) {
   }
 }
 
+// SCARA DE MODELE GRATUITE (dovadă live 28 iul, ordinul #9: modelul configurat
+// a primit 429 la FIECARE pas — „poolside/laguna-m.1:free is rate-limited" — și
+// agentul a reîncercat același model până la plafonul de pași, fără să scrie o
+// linie de cod; jobul a picat cu „plafon de pași atins fără finish"). Reîncercarea
+// pe ACELAȘI model nu ajută când modelul e saturat: la a doua încercare eșuată
+// TRECEM LA URMĂTORUL model gratuit. Toate au tools confirmat în catalog.
+// SCARA, REFĂCUTĂ PE MĂSURĂTORI (28 iul, catalogul live OpenRouter + uptime pe
+// 24h raportat de /models/{id}/endpoints). Trei lucruri au reieșit:
+//   • `poolside/laguna-m.1:free` (modelul din env) are cel mai PROST uptime din
+//     familia lui: 95,43% pe 24h, față de 99,9% la frații lui. De-aia primea
+//     429 la fiecare pas. NU-l mai punem primul.
+//   • Cele două trepte NVIDIA de dinainte NU erau două plase, ci UNA: ambele
+//     rulează pe platforma NVIDIA (NVCF), deci `400 DEGRADED` le doboară
+//     împreună. Ținem UNA singură pe scară, restul la alți furnizori.
+//   • Modelele Poolside gratuite spun explicit că POT FOLOSI ce le trimiți ca
+//     să se antreneze — iar constructorul le-ar trimite codul sursă al lui
+//     Adrian. Fără acordul lui explicit, NU le folosim, oricât ar fi de bune la
+//     cod. Decizia îi aparține; până atunci scara ocolește Poolside.
+// Rezultat: patru furnizori DIFERIȚI (NVIDIA, Cohere, Novita, Google), ca o
+// pană la unul să nu însemne pană la toți.
+const MODEL_LADDER = [
+  'nvidia/nemotron-3-super-120b-a12b:free', // 262k ctx, 262k out, uptime 99,70%
+  'cohere/north-mini-code:free', // agent de cod dedicat, alt furnizor, 96,79%
+  'inclusionai/ling-3.0-flash:free', // Novita, cel mai bun uptime măsurat: 99,97%
+  'google/gemma-4-31b-it:free', // Google AI Studio, 99,77% — plasă de final
+].filter((m, i, a) => m && a.indexOf(m) === i)
+// Modelul din env intră pe scară DOAR dacă nu e unul dovedit prost. Așa, o
+// setare veche în kelionai.env nu mai poate readuce boala pe treapta întâi.
+const MODELE_DOVEDIT_PROASTE = new Set([
+  'poolside/laguna-m.1:free', // 95,43% uptime, 429 la fiecare pas (dovadă live)
+  'nvidia/nemotron-nano-12b-v2-vl:free', // status -2 în catalog: degradat ACUM
+])
+if (MODEL && !MODEL_LADDER.includes(MODEL) && !MODELE_DOVEDIT_PROASTE.has(MODEL)) MODEL_LADDER.unshift(MODEL)
+let modelIdx = 0
+// Modele scoase din joc pentru rularea asta (nu există, n-au unelte, au context
+// prea mic) — nu le mai atingem, ca rotația să nu ne întoarcă la ele.
+const modeleMoarte = new Set()
+const modelCurent = () => MODEL_LADDER[modelIdx % MODEL_LADDER.length]
+// ROTAȚIE, nu coborâre într-un sens. Vechiul cod făcea „if (modelIdx < len-1)
+// modelIdx++": ajuns pe ULTIMA treaptă rămânea acolo pentru tot restul rulării
+// și reîncerca la infinit exact modelul care tocmai picase — adică fix boala pe
+// care scara trebuia s-o vindece. Acum ne rotim circular și sărim peste cele
+// moarte; primul model are timp să-și revină din rate-limit până revenim la el.
+function treciLaUrmatorulModel() {
+  for (let i = 1; i <= MODEL_LADDER.length; i++) {
+    const idx = (modelIdx + i) % MODEL_LADDER.length
+    if (!modeleMoarte.has(MODEL_LADDER[idx])) {
+      modelIdx = idx
+      return true
+    }
+  }
+  return false // toată scara e moartă
+}
+
+// CLASIFICAREA ERORILOR OPENROUTER (dovadă live 28 iul, ordinul #13: a murit
+// INSTANT cu „OpenRouter 400: Provider returned error … DEGRADED function
+// cannot be invoked", provider_name „Nvidia"). Regula veche — „429/5xx =
+// tranzitoriu, ORICE 4xx = fatal" — a omorât ordinul deși aveam încă 3 modele
+// neîncercate pe scară: ăla NU era un request greșit de-al nostru, era
+// FURNIZORUL lor picat. Dar nici invers nu e bine (a reîncerca orb orice 400
+// ne-ar arde scara pe o cerere stricată). Deci despărțim clar trei familii:
+//   'furnizor' — e stricat la ei ACUM (Provider returned error, DEGRADED,
+//                supraîncărcat, 429, 5xx) → alt model de pe scară, ordinul trăiește;
+//   'model'    — cererea noastră e bună, dar MODELUL ăsta n-o poate duce (nu
+//                există, n-are endpoint, n-are unelte, context prea mic) → alt
+//                model ȘI îl marcăm mort pentru rularea asta;
+//   'fatal'    — e vina NOASTRĂ sau a contului (401/403 cheie, 402 fără credit,
+//                corp malformat) → niciun model nu ajută, ne oprim pe loc.
+const RE_FURNIZOR =
+  /provider returned error|degraded|upstream|overload|capacity|temporarily|unavailable|rate.?limit|try again|timed? ?out|bad gateway|service unavailable|internal server error/i
+const RE_MODEL =
+  /not a valid model|invalid model|model not found|no endpoints|no allowed providers|no providers|does not support|not supported|tool.?call|maximum context|context.?length|max_tokens|too many tokens|prompt is too long/i
+function clasificaEroare(status, text) {
+  const t = String(text ?? '')
+  if (status === 401 || status === 402 || status === 403) return 'fatal' // cheie/credit — scara nu ajută
+  if (status === 429 || status === 408 || status === 409) return 'furnizor'
+  if (status >= 500) return 'furnizor'
+  if (status === 404) return 'model' // ruta/modelul nu există la ei
+  if (status === 400 || status === 422) {
+    if (RE_FURNIZOR.test(t)) return 'furnizor'
+    if (RE_MODEL.test(t)) return 'model'
+    return 'fatal' // 400 neclasificat = presupunem că e cererea noastră; nu ardem scara
+  }
+  return 'furnizor'
+}
+
+const LLM_ATTEMPTS = Math.max(6, MODEL_LADDER.length * 2)
+
 async function llm(messages) {
   let lastErr = ''
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
+    const model = modelCurent()
+    if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
     try {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+        body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+        // Fără plafon, un endpoint :free care atârnă ținea agentul blocat până
+        // la `timeout 1800` din worker — adică moarte fără raport.
+        signal: AbortSignal.timeout(Math.max(30_000, Math.min(180_000, ramase()))),
       })
       const text = await r.text()
       if (!r.ok) {
         lastErr = `OpenRouter ${r.status}: ${text.slice(0, 300)}`
-        if (r.status === 429 || r.status >= 500) throw new Error(lastErr) // tranzitoriu → retry
-        throw Object.assign(new Error(lastErr), { fatal: true }) // 4xx real → fără retry
+        const clasa = clasificaEroare(r.status, text)
+        // Familia intră ÎN JURNAL (deci în emailul de eșec): la următoarea
+        // cădere se vede din prima dacă a fost vina lor, a treptei sau a
+        // noastră — fără să mai reconstituim cauza din text brut.
+        if (clasa === 'fatal') {
+          log(`llm [fatal, ${model}] — e cererea/contul nostru, scara nu ajută: ${lastErr.slice(0, 200)}`)
+          throw Object.assign(new Error(lastErr), { fatal: true })
+        }
+        throw Object.assign(new Error(lastErr), { clasa })
       }
       if (!text.trim()) throw new Error('corp gol de la OpenRouter')
       let parsed
@@ -236,13 +408,126 @@ async function llm(messages) {
     } catch (e) {
       if (e?.fatal) throw e
       lastErr = String(e?.message ?? e)
-      if (attempt === 4) break
-      const wait = attempt * 15_000 // 15s, 30s, 45s — modelele free respiră greu
-      log(`llm încercarea ${attempt} a picat (${lastErr.slice(0, 120)}) — reîncerc în ${wait / 1000}s`)
-      await new Promise((res) => setTimeout(res, wait))
+      const clasa = e?.clasa ?? 'furnizor'
+      // 'model' = treapta asta nu poate duce cererea noastră niciodată în
+      // rularea asta (nu există / n-are unelte / context prea mic) → o scoatem
+      // definitiv din rotație, ca să nu ne întoarcem la ea peste două ture.
+      if (clasa === 'model') modeleMoarte.add(model)
+      if (attempt === LLM_ATTEMPTS) break
+      const maiAvem = treciLaUrmatorulModel()
+      if (!maiAvem)
+        throw Object.assign(new Error(`toate modelele gratuite de pe scară sunt inutilizabile — ultima eroare: ${lastErr}`), {
+          fatal: true,
+          // Nu e vina ordinului: furnizorii gratuiți sunt sugrumați ACUM.
+          // main() amână ordinul (rămâne în coadă) în loc să-l declare mort.
+          amanabil: true,
+        })
+      // Când chiar SCHIMBĂM modelul, pauza n-are rost (nu el e saturat) — 2s.
+      // Când scara are o singură treaptă bună, revenim la pauze crescătoare.
+      const schimbat = modelCurent() !== model
+      const wait = schimbat ? 2_000 : Math.min(attempt * 8_000, 30_000)
+      log(
+        `llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${model} [${clasa}] (${lastErr.slice(0, 100)}) — ` +
+          `trec pe ${modelCurent()} în ${wait / 1000}s`,
+      )
+      await dormi(wait)
     }
   }
-  throw new Error(lastErr || 'OpenRouter indisponibil după 4 încercări')
+  // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
+  // (429/rate-limit/DEGRADED), marcăm amânabil — ordinul nu moare, se reia.
+  throw Object.assign(new Error(lastErr || `OpenRouter indisponibil după ${LLM_ATTEMPTS} încercări`), {
+    amanabil: /429|rate.?limit|ResourceExhausted|DEGRADED function|Provider returned error/i.test(lastErr),
+  })
+}
+
+// VERIFICAREA ATELIERULUI — ce s-a atins trebuie să compileze. Întoarce '' dacă
+// e curat, altfel TEXTUL problemei: îl dăm înapoi modelului pentru o rundă de
+// reparație, în loc să omorâm ordinul din prima (vezi bucla din main()).
+function verificaAtelierul() {
+  const changed = sh('git status --porcelain').trim()
+  if (!changed) return 'finish fără nicio modificare de fișier — nu ai scris nimic în atelier.'
+  const touchedBackend = /(^|\n).{3}backend\//.test(changed)
+  const touchedFrontend = /(^|\n).{3}frontend\//.test(changed)
+  // `git diff --stat` NU vede fișierele noi (netrăcite) — logăm și starea brută,
+  // altfel un ordin care doar adaugă fișiere apare în jurnal ca „fără modificări".
+  log(`modificări:\n${(sh('git diff --stat').trim() || changed).slice(-1500)}`)
+  const verify = []
+  if (touchedBackend) verify.push('npm --prefix backend ci', 'npm --prefix backend run build', 'npm --prefix backend test')
+  if (touchedFrontend) verify.push('npm --prefix frontend ci', 'npm --prefix frontend run build')
+  for (const cmd of verify) {
+    log(`verific: ${cmd}`)
+    const out = toolRun(cmd)
+    if (/^EȘEC/.test(out)) return `verificarea a picat la „${cmd}":\n${out.slice(-2000)}`
+  }
+  return ''
+}
+
+// DESCHIDEREA PR-ULUI, rezistentă. Două capcane reale pe drumul ăsta:
+// (1) ordinele se REIAU (claimNextBuildJob repune joburile înțepenite, până la
+//     3 încercări) — dar ramura e mereu `kelion/job-N`, deci a doua oară GitHub
+//     întoarce 422 „A pull request already exists". Codul vechi arunca „PR-ul
+//     nu s-a deschis" și marca ordinul EȘUAT, deși codul era împins și PR-ul
+//     exista deja. Acum îl regăsim după ramură și-l refolosim.
+// (2) un 5xx/o pică de rețea la GitHub arunca la fel de definitiv — acum se
+//     reîncearcă de câteva ori.
+async function deschidePR(titlu, corp, branch) {
+  const owner = REPO.split('/')[0]
+  const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' }
+  let lastErr = ''
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    let status = 0
+    let body = null
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/pulls`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ title: titlu, head: branch, base: 'master', body: corp }),
+        signal: AbortSignal.timeout(60_000),
+      })
+      status = r.status
+      body = await r.json().catch(() => null)
+    } catch (e) {
+      lastErr = String(e?.message ?? e)
+      await dormi(attempt * 5_000)
+      continue
+    }
+    if (body?.html_url) return body.html_url
+    lastErr = `GitHub ${status}: ${JSON.stringify(body).slice(0, 300)}`
+    if (status === 422) {
+      const existent = await fetch(`https://api.github.com/repos/${REPO}/pulls?state=open&head=${owner}:${branch}`, { headers })
+        .then((x) => x.json())
+        .catch(() => null)
+      const url = Array.isArray(existent) ? existent[0]?.html_url : null
+      if (url) {
+        log(`PR-ul pentru ${branch} exista deja — îl refolosesc`)
+        return url
+      }
+      throw new Error(`PR-ul nu s-a deschis: ${lastErr}`) // 422 real (ex. „No commits between…")
+    }
+    if (status < 500) throw new Error(`PR-ul nu s-a deschis: ${lastErr}`)
+    await dormi(attempt * 5_000)
+  }
+  throw new Error(`PR-ul nu s-a deschis după 4 încercări: ${lastErr}`)
+}
+
+// RAPORTUL DE AVARIE LA OMORÂRE. `timeout 1800` din constructor-worker.sh ne
+// trimite SIGTERM; fără handler mureau mut, iar ordinul rămânea „running" 40 de
+// minute în DB și mai ardea o încercare din trei. Acum apucăm să raportăm.
+let raportCurent = null
+let seInchide = false
+for (const semnal of ['SIGTERM', 'SIGINT']) {
+  process.on(semnal, () => {
+    if (seInchide) return
+    seInchide = true
+    log(`primit ${semnal} (timeout dur?) — raportez eșecul înainte să ies`)
+    const plasa = setTimeout(() => process.exit(1), 20_000)
+    Promise.resolve(raportCurent ? raportCurent('failed', {}, 3) : null)
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(plasa)
+        process.exit(1)
+      })
+  })
 }
 
 async function main() {
@@ -255,11 +540,15 @@ async function main() {
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
 
-  const report = (status, extra = {}) =>
-    api('/api/constructor/report', {
-      method: 'POST',
-      body: JSON.stringify({ id: job.id, status, log: logLines.join('\n'), ...extra }),
-    })
+  // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
+  // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
+  const report = (status, extra = {}, tries = 8) =>
+    api(
+      '/api/constructor/report',
+      { method: 'POST', body: JSON.stringify({ id: job.id, status, log: logLines.join('\n'), ...extra }) },
+      tries,
+    )
+  raportCurent = report // ca handlerul de SIGTERM să poată raporta eșecul
 
   try {
     // Atelier proaspăt = exact master-ul de ACUM, nimic rămas din jobul trecut.
@@ -274,113 +563,177 @@ async function main() {
     ]
     let tokens = 0
     let finish = null
-    for (let step = 1; step <= MAX_STEPS && !finish; step++) {
-      const resp = await llm(messages)
-      tokens += Number(resp.usage?.total_tokens ?? 0)
-      if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
-      const msg = resp.choices?.[0]?.message
-      if (!msg) throw new Error('răspuns gol de la model')
-      // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
-      // „invalid message at index 9: must have non-empty content or tool
-      // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
-      // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
-      // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
-      // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
-      const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
-      if (msg.tool_calls?.length) {
-        // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
-        // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
-        // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
-        // Normalizăm: orice nu parsează ca obiect devine '{}'.
-        clean.tool_calls = msg.tool_calls.map((c) => {
-          let a = c.function?.arguments
+    // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
+    // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio
+    // reparație). Bucla veche socotea O TURĂ = UN PAS, indiferent dacă modelul
+    // a atins vreo unealtă: vorbăria, unealta inexistentă, comanda nepermisă,
+    // calea greșită — toate mâncau din bugetul de CONSTRUCȚIE exact ca o
+    // modificare reală de fișier. Așa se termina bugetul fără o linie de cod
+    // scrisă. Acum plătim doar munca: pașii utili (cel puțin o unealtă care a
+    // lucrat) au plafonul MAX_STEPS, iar turele sterile au plafonul lor, mic —
+    // ca să ieșim repede ȘI CU DIAGNOSTIC dacă modelul nu știe uneltele.
+    let pasiUtili = 0
+    let pasiSterili = 0
+    let reparatii = 0
+    // Rezultate care înseamnă „unealta a REFUZAT", nu „unealta a lucrat".
+    const RE_REFUZ = /^(EROARE|REFUZAT|unealtă necunoscută|comandă nepermisă|pattern gol)/
+    // BUCLA MARE = ordinul întreg, cu rundele lui de reparație. Bucla mică
+    // (while) = dialogul cu modelul până la 'finish'; după fiecare finish
+    // verificăm în atelier și, dacă e roșu, ne întoarcem aici cu eroarea în mână.
+    for (;;) {
+      while (!finish) {
+        if (pasiUtili >= MAX_STEPS)
+          throw new Error(`plafon de pași atins fără finish (${pasiUtili} pași cu unelte, ${pasiSterili} sterili)`)
+        if (pasiSterili >= MAX_STERILE)
+          throw new Error(
+            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
+          )
+        // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
+        // rămână timp de verificare + push + PR + RAPORT. Omorâți de timeout am
+        // muri muți, iar ordinul ar rămâne „running" 40 de minute și ar arde o
+        // încercare din trei degeaba.
+        if (ramase() < 6 * 60_000)
+          throw new Error(`timpul rulării s-a terminat înainte de finish (${pasiUtili} pași utili, ${pasiSterili} sterili)`)
+        const resp = await llm(messages)
+        tokens += Number(resp.usage?.total_tokens ?? 0)
+        if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
+        const msg = resp.choices?.[0]?.message
+        if (!msg) throw new Error('răspuns gol de la model')
+        // COMPATIBILITATE COHERE (jobul #2, 27 iul, cauza reală din log:
+        // „invalid message at index 9: must have non-empty content or tool
+        // calls"): modelul întoarce uneori mesaje de asistent cu content NULL și
+        // fără tool_calls — GPT/Claude le înghit, Cohere refuză TOATĂ conversația
+        // la pasul următor. Normalizăm: content mereu string; mesaj complet gol →
+        // umplem cu un marcaj inofensiv ca istoricul să rămână valid.
+        const clean = { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : '' }
+        if (msg.tool_calls?.length) {
+          // A DOUA capcană Cohere (jobul #2, pasul 18): la re-trimiterea
+          // istoricului, argumentele uneltelor TREBUIE să fie JSON de obiect
+          // stringificat — un „arguments" gol/rupt pica TOATĂ conversația.
+          // Normalizăm: orice nu parsează ca obiect devine '{}'.
+          clean.tool_calls = msg.tool_calls.map((c) => {
+            let a = c.function?.arguments
+            try {
+              const p = JSON.parse(a || '{}')
+              a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
+            } catch {
+              a = '{}'
+            }
+            return { ...c, function: { ...c.function, arguments: a } }
+          })
+        }
+        if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
+        messages.push(clean)
+        const calls = msg.tool_calls ?? []
+        if (!calls.length) {
+          // modelul a vorbit fără unealtă — îl împingem înapoi la lucru. Tură
+          // STERILĂ: nu scade din bugetul de construcție, are contorul ei.
+          pasiSterili++
+          messages.push({
+            role: 'user',
+            content: `Continuă cu uneltele (grep/read/edit/write/run) sau cheamă finish. Nu povesti — lucrează. (${pasiSterili}/${MAX_STERILE} ture irosite)`,
+          })
+          compactHistory(messages)
+          continue
+        }
+        let aLucrat = false
+        for (const c of calls) {
+          let args = {}
           try {
-            const p = JSON.parse(a || '{}')
-            a = JSON.stringify(p && typeof p === 'object' && !Array.isArray(p) ? p : {})
+            args = JSON.parse(c.function?.arguments || '{}')
           } catch {
-            a = '{}'
+            /* argumente stricate → unealta răspunde cu eroare */
           }
-          return { ...c, function: { ...c.function, arguments: a } }
-        })
-      }
-      if (!clean.content && !clean.tool_calls) clean.content = '(pas fără conținut)'
-      messages.push(clean)
-      const calls = msg.tool_calls ?? []
-      if (!calls.length) {
-        // modelul a vorbit fără unealtă — îl împingem înapoi la lucru
-        messages.push({ role: 'user', content: 'Continuă cu uneltele (ls/read/write/run) sau cheamă finish. Nu povesti — lucrează.' })
-        continue
-      }
-      for (const c of calls) {
-        let args = {}
-        try {
-          args = JSON.parse(c.function?.arguments || '{}')
-        } catch {
-          /* argumente stricate → unealta răspunde cu eroare */
+          let result = ''
+          try {
+            if (c.function.name === 'ls') result = toolLs(String(args.dir ?? '.'))
+            else if (c.function.name === 'grep') result = toolGrep(String(args.pattern ?? ''))
+            else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
+            else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
+            else if (c.function.name === 'edit') result = toolEdit(String(args.path ?? ''), String(args.old ?? ''), String(args.new ?? ''))
+            else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
+            else if (c.function.name === 'finish') {
+              finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
+              result = 'lucrarea se închide — verific și public'
+            } else result = 'unealtă necunoscută'
+          } catch (e) {
+            result = `EROARE: ${e.message}`
+          }
+          // Unealta care a REFUZAT (cale greșită, comandă nepermisă, write tăiat)
+          // nu e progres — tura rămâne sterilă și nu costă buget de construcție.
+          if (!RE_REFUZ.test(result)) aLucrat = true
+          if (c.function.name !== 'read')
+            log(
+              `pas ${pasiUtili + 1}/${MAX_STEPS}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}` +
+                (RE_REFUZ.test(result) ? ` → ${result.slice(0, 90)}` : ''),
+            )
+          // Plafon per-rezultat mic (era 100k — sursa exploziei de context).
+          messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, READ_CAP) })
         }
-        let result = ''
-        try {
-          if (c.function.name === 'ls') result = toolLs(String(args.dir ?? '.'))
-          else if (c.function.name === 'grep') result = toolGrep(String(args.pattern ?? ''))
-          else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
-          else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
-          else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
-          else if (c.function.name === 'finish') {
-            finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
-            result = 'lucrarea se închide — verific și public'
-          } else result = 'unealtă necunoscută'
-        } catch (e) {
-          result = `EROARE: ${e.message}`
-        }
-        if (c.function.name !== 'read') log(`pas ${step}: ${c.function.name} ${String(args.path ?? args.cmd ?? args.dir ?? args.pattern ?? '').slice(0, 80)}`)
-        // Plafon per-rezultat mic (era 100k — sursa exploziei de context).
-        messages.push({ role: 'tool', tool_call_id: c.id, content: result.slice(0, READ_CAP) })
+        if (aLucrat) pasiUtili++
+        else pasiSterili++
+        // FEREASTRA GLISANTĂ (fixul structural, audit 27 iul): comprimă
+        // rezultatele uneltelor VECHI la un ciot de o linie — modelul păstrează
+        // firul (ce a făcut) fără să care conținutul integral al fiecărei citiri
+        // pe veci. Doar ultimele KEEP_VERBATIM rezultate rămân întregi.
+        compactHistory(messages)
       }
-      // FEREASTRA GLISANTĂ (fixul structural, audit 27 iul): comprimă
-      // rezultatele uneltelor VECHI la un ciot de o linie — modelul păstrează
-      // firul (ce a făcut) fără să care conținutul integral al fiecărei citiri
-      // pe veci. Doar ultimele KEEP_VERBATIM rezultate rămân întregi.
-      compactHistory(messages)
-    }
-    if (!finish) throw new Error('plafon de pași atins fără finish')
 
-    // VERIFICAREA NOASTRĂ, nu pe încredere: ce s-a atins trebuie să compileze.
-    const changed = sh('git status --porcelain').trim()
-    if (!changed) throw new Error('finish fără nicio modificare de fișier')
-    const touchedBackend = /(^|\n).{3}backend\//.test(changed)
-    const touchedFrontend = /(^|\n).{3}frontend\//.test(changed)
-    log(`modificări:\n${sh('git diff --stat').trim().slice(-1500)}`)
-    const verify = []
-    if (touchedBackend) verify.push('npm --prefix backend ci', 'npm --prefix backend run build', 'npm --prefix backend test')
-    if (touchedFrontend) verify.push('npm --prefix frontend ci', 'npm --prefix frontend run build')
-    for (const cmd of verify) {
-      log(`verific: ${cmd}`)
-      const out = toolRun(cmd)
-      if (/^EȘEC/.test(out)) throw new Error(`verificarea a picat la „${cmd}":\n${out.slice(-2000)}`)
+      // VERIFICAREA NOASTRĂ, nu pe încredere: ce s-a atins trebuie să compileze.
+      const problema = verificaAtelierul()
+      if (!problema) break
+      // RUNDA DE REPARAȚIE. System promptul îi promite modelului: „dacă sistemul
+      // îți spune că buildul a picat, repari și re-finish" — dar codul vechi NU
+      // dădea niciodată runda aia: la primul build roșu arunca direct și ordinul
+      // ieșea EȘUAT. Un model gratuit greșește un import sau un tip la prima
+      // scriere; asta singură explică o parte din ordinele picate „end-to-end".
+      // Mărginită: MAX_REPAIR runde ȘI doar dacă mai avem timp de încă un ciclu
+      // complet de npm ci/build/test (altfel murim la timeout, fără raport).
+      if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) throw new Error(problema)
+      reparatii++
+      finish = null
+      log(`verificarea a picat — runda de reparație ${reparatii}/${MAX_REPAIR}`)
+      messages.push({
+        role: 'user',
+        content: `VERIFICAREA A PICAT în atelier. Repară CAUZA (nu peticește) și cheamă din nou 'finish'.\n\n${problema.slice(-3000)}`,
+      })
+      compactHistory(messages)
     }
 
     const branch = `kelion/job-${job.id}`
+    // Titlu gol = `git commit -m ""` refuză commit-ul („Aborting commit due to
+    // empty commit message") și ordinul pica după ce toată munca era făcută.
+    const titlu = (finish.title || '').trim() || `Ordin #${job.id} — modificare automată`
     sh(`git checkout -B ${branch}`)
     sh('git add -A')
-    execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', finish.title], { cwd: ATELIER, stdio: 'pipe' })
+    execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', titlu], { cwd: ATELIER, stdio: 'pipe' })
     execFileSync('git', ['push', '-u', 'origin', branch, '--force'], { cwd: ATELIER, stdio: 'pipe', timeout: 60_000 })
     log(`ramura ${branch} împinsă`)
 
-    const pr = await fetch(`https://api.github.com/repos/${REPO}/pulls`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        title: finish.title,
-        head: branch,
-        base: 'master',
-        body: `${finish.body}\n\n---\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
-      }),
-    }).then((r) => r.json())
-    const prUrl = pr?.html_url
-    if (!prUrl) throw new Error(`PR-ul nu s-a deschis: ${JSON.stringify(pr).slice(0, 300)}`)
+    const prUrl = await deschidePR(
+      titlu,
+      `${finish.body}\n\n---\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
+      branch,
+    )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
     await report('done', { branch, prUrl, tokens })
   } catch (e) {
+    // AMÂNARE, NU MOARTE (dovadă live 28 iul, ordinele #9-#13: toate au picat pe
+    // sugrumarea furnizorilor gratuiți — 429 „free-models-per-min", Nvidia
+    // „DEGRADED" — iar #14, IDENTIC ca natură, a reușit o oră mai târziu când
+    // cotele s-au eliberat). Când vina e a furnizorilor, NU raportăm eșec:
+    // ordinul rămâne „running" iar coada îl reia singură după 40 min (până la 3
+    // încercări — mecanismul existent din claimNextBuildJob). Fără email de
+    // eșec fals, fără ordin îngropat degeaba.
+    const amanabil =
+      e?.amanabil || /429|rate.?limit|ResourceExhausted|DEGRADED function|Provider returned error/i.test(String(e?.message ?? ''))
+    if (amanabil && Number(job.attempts) < 3) {
+      log(
+        `AMÂNAT (nu eșuat): furnizorii gratuiți sunt sugrumați (${String(e.message).slice(0, 120)}) — ` +
+          'ordinul rămâne în coadă și se reia automat în ~40 min',
+      )
+      return
+    }
     log(`EȘEC: ${e.message}`)
     await report('failed', {})
   }
