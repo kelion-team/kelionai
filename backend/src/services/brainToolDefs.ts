@@ -253,3 +253,33 @@ export const BROWSER_TOOLS: Tool[] = [
   BROWSER_CLICK_AT_TOOL,
   BROWSER_CLOSE_TOOL,
 ]
+
+
+// ── Lotul C: panoul aplicatiei — o SINGURA declaratie ────────────────────────
+// Unealta asta era scrisa de DOUA ori: aici in format Anthropic (pentru scris)
+// si inca o data, litera cu litera, in services/realtime.ts in formatul OpenAI
+// Realtime (pentru voce) — aceleasi enum-uri, aceeasi descriere. Daca se adauga
+// un panou nou, trebuia editat in ambele, altfel vocea si scrisul stiau lucruri
+// diferite. Acum: o declaratie, iar vocea o CONVERTESTE (realtimeTools).
+export const OPEN_APP_VIEW_TOOL: Tool = {
+  name: 'open_app_view',
+  description:
+    "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      view: {
+        type: 'string',
+        enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
+        description:
+          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
+      },
+      section: {
+        type: 'string',
+        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'],
+        description: 'Optional admin section (only when view=admin).',
+      },
+    },
+    required: ['view'],
+  },
+}

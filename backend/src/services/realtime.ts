@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { langLabel } from './lang.js'
 import { googleTools } from './google.js'
 import { CAPABILITIES } from './brainCapabilities.js'
+import { OPEN_APP_VIEW_TOOL } from './brainToolDefs.js'
 
 // ── VOCE LIVE — proxy SDP către OpenAI Realtime (WebRTC) ─────────────────────
 // Arhitectura (reconstruită fidel din aplicația live, adusă în git ca sursă
@@ -237,27 +238,13 @@ export function realtimeTools(
       // ACCES REAL LA APLICAȚIE (Adrian, 24 iul: „în full-duplex Kelion trebuie
       // să poată intra în orice tab al aplicației, real"). Deschide panourile
       // proprii ale aplicației prin voce — clientul execută direct (e UI-ul lui).
+      // Lotul C: declarația vine din sursa UNICĂ (brainToolDefs) și e CONVERTITĂ
+      // în formatul Realtime. Înainte era rescrisă aici literă cu literă — dacă
+      // apărea un panou nou, vocea și scrisul divergeau tăcut.
       type: 'function',
-      name: 'open_app_view',
-      description:
-        "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
-      parameters: {
-        type: 'object',
-        properties: {
-          view: {
-            type: 'string',
-            enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
-            description:
-              'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
-          },
-          section: {
-            type: 'string',
-            enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'],
-            description: 'Optional admin section (only when view=admin).',
-          },
-        },
-        required: ['view'],
-      },
+      name: OPEN_APP_VIEW_TOOL.name,
+      description: OPEN_APP_VIEW_TOOL.description ?? '',
+      parameters: OPEN_APP_VIEW_TOOL.input_schema,
     },
     {
       // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). Kelion privește prin camera
