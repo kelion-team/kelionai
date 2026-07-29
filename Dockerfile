@@ -12,6 +12,12 @@ RUN apt-get update \
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci
 COPY frontend ./frontend
+# CONTRACTUL HTTP COMUN (Lotul A): tipurile care circulă prin API sunt declarate
+# o SINGURĂ dată, în backend/src/shared, și importate de ambele capete. Aici
+# copiem DOAR folderul acela (fișier de tipuri, câțiva KB) — fără el, `tsc -b` al
+# frontend-ului nu găsește modulul și build-ul imaginii pică (dovedit: deploy-ul
+# 607ce8f, TS2307). Nu copiem tot backend-ul: ar strica ordinea cache-ului.
+COPY backend/src/shared ./backend/src/shared
 RUN cd frontend && npm run build
 
 # --- backend build ---
