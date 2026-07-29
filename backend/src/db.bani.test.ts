@@ -30,11 +30,17 @@ vi.mock('pg', () => {
   return { default: { Pool } }
 })
 
-// DATABASE_URL trebuie pus ÎNAINTE de a încărca config.js/db.js (config citește
-// mediul la import). De-aia importul e dinamic, sub linia asta.
-process.env.DATABASE_URL = 'postgres://test@localhost:5432/test?sslmode=disable'
-process.env.USER_SHARE = '0.75'
-process.env.CREDIT_VALUE = '0.1'
+// Configurarea se MOCHEAZĂ, nu se pune în process.env: variabilele de mediu sunt
+// comune pe tot procesul de test, iar un DATABASE_URL scăpat aici schimba
+// comportamentul ALTOR fișiere de test (le-a și picat o dată). Aici, doar
+// valorile de care are nevoie calea banilor.
+vi.mock('./config.js', () => ({
+  config: {
+    databaseUrl: 'postgres://test@localhost:5432/test?sslmode=disable',
+    geminiKey: '',
+    stripe: { userShare: 0.75, creditValue: 0.1, usdToCurrency: 1 },
+  },
+}))
 
 const motor = creeazaFakePg()
 pgFals.motor = motor
