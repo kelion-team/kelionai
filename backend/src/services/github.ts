@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { isOpsPaused, alertAdminLoop } from './runbooks.js'
+import { createRecoveryPoint } from './recovery.js'
 
 // ── BUCLA COMPLETĂ DE COD A LUI KELION — FĂRĂ PORȚI (Adrian, 25 iul: „ridici
 // absolut toate restricțiile lui Kelion — decizia mea, nu a ta"; „full
@@ -144,12 +145,15 @@ export async function repoMergePR(prNumber: number): Promise<string> {
   if (!ghToken()) return NO_TOKEN
   if (await isOpsPaused()) return PAUSED
   if (!Number.isInteger(prNumber) || prNumber <= 0) return JSON.stringify({ error: 'invalid_pr_number' })
-  // Info (nu poartă): ce zice verificarea de build/teste până acum.
+  // Info (nu poartă): ce zice verificarea de build/teste până acum + titlul PR
+  // (pentru descrierea checkpoint-ului de mai jos).
   let verify = 'necunoscut'
+  let prTitle = ''
   try {
     const pr = await gh(`/pulls/${prNumber}`)
     if (pr.ok) {
-      const pj = (await pr.json()) as { head?: { sha?: string } }
+      const pj = (await pr.json()) as { head?: { sha?: string }; title?: string }
+      prTitle = String(pj.title ?? '').slice(0, 160)
       if (pj.head?.sha) {
         const runs = await gh(`/actions/runs?head_sha=${pj.head.sha}&per_page=10`)
         if (runs.ok) {
@@ -162,6 +166,30 @@ export async function repoMergePR(prNumber: number): Promise<string> {
   } catch {
     /* informativ — mergem mai departe oricum */
   }
+
+  // ── CHECKPOINT AUTOMAT ÎNAINTE DE OPERAȚIA RISCANTĂ (Etapa 3 autonomie, ordin
+  // owner 29 iul: „înainte de operații dificile se face o salvare pentru a putea
+  // reveni la pasul anterior, cu descriere completă") ──────────────────────────
+  // Merge-ul unui PR duce ÎN PRODUCȚIE (deploy.yml pornește pe push-ul în master).
+  // Deci ÎNAINTE de merge salvăm starea CURENTĂ a lui master ca punct de
+  // recuperare adnotat, cu descriere clară a ce urmează să se schimbe. Dacă
+  // deploy-ul strică ceva, owner-ul (sau Kelion) revine EXACT la starea de
+  // dinainte din panoul Recuperare (restoreToPoint). Best-effort: un checkpoint
+  // eșuat NU blochează merge-ul (cronul backup-versiuni face oricum puncte la 10
+  // min) — dar se raportează clar, ca să se știe dacă plasa există sau nu.
+  let checkpoint: string | undefined
+  let checkpointError: string | undefined
+  try {
+    const cp = await createRecoveryPoint(
+      `Checkpoint AUTO înainte de merge PR #${prNumber}${prTitle ? `: ${prTitle}` : ''}. ` +
+        'Salvează starea PRODUCȚIEI de dinainte de această schimbare — revenire din panoul Recuperare dacă deploy-ul strică ceva.',
+    )
+    if (cp.ok) checkpoint = cp.tag
+    else checkpointError = cp.error
+  } catch (e) {
+    checkpointError = String((e as Error).message ?? e).slice(0, 120)
+  }
+
   const m = await gh(`/pulls/${prNumber}/merge`, {
     method: 'PUT',
     body: JSON.stringify({ merge_method: 'squash' }),
@@ -193,6 +221,12 @@ export async function repoMergePR(prNumber: number): Promise<string> {
     merged: j.merged === true,
     sha: j.sha?.slice(0, 7),
     verify,
+    // Checkpoint-ul de dinainte de merge: spune-i owner-ului că poate reveni la
+    // el (tag-ul) dacă deploy-ul strică ceva; sau avertizează dacă n-a putut fi
+    // creat (plasa lipsește pe această schimbare).
+    ...(checkpoint
+      ? { checkpoint, checkpointHint: `Am salvat starea de dinainte ca punct de recuperare „${checkpoint}" — revenire din panoul Recuperare dacă e nevoie.` }
+      : { checkpointWarning: `NU am putut crea checkpoint înainte de merge (${checkpointError ?? 'necunoscut'}) — există totuși punctele automate la 10 min.` }),
     ...(deployWarning ? { warning: deployWarning } : {}),
     hint: 'deploy.yml pornește singur pe push-ul în master; dovada = live v == sha-ul nou',
   })
