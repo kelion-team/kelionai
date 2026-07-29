@@ -25,24 +25,40 @@ export interface DeviceCommand {
 const CLOSE_VERB =
   /(?<![\p{L}\p{N}])(închide|inchide|închid|ascunde|opre[șs]t[eiî]|close|hide|dismiss|cierra|cerrar|ferme|fermer|schlie[sß]|закро)\w*/iu
 const SCREEN_NOUN =
-  /\b(harta|hart[ăa]|ecran\w*|monitor\w*|map|screen|video|imagin\w*|image|fereastr\w*|window|pagin\w*|page|asta|aceasta|acesta|it|that|tot)\b/i
+  /(?<![\p{L}\p{N}])(harta|hart[ăa]|ecran\p{L}*|monitor\p{L}*|map|screen|video|imagin\p{L}*|image|fereastr\p{L}*|window|pagin\p{L}*|page|asta|aceasta|acesta|it|that|tot)(?![\p{L}\p{N}])/iu
 // "Switch to <task>" — narrow verbs only, so "arată-mi harta Romei" (new
 // content) still reaches Kelion; a bare switch just changes the active surface.
 const SWITCH_VERB =
   /(?<![\p{L}\p{N}])(comut[ăa]?|treci|revino|switch|schimb[ăa]\s+la|mergi\s+la|back\s+to|înapoi\s+la|inapoi\s+la)(?![\p{L}])/iu
-const CLOSE_ALL = /\b(tot|totul|toate|everything|all)\b/i
+const CLOSE_ALL = /(?<![\p{L}\p{N}])(tot|totul|toate|everything|all)(?![\p{L}\p{N}])/iu
 
 // Map words the user says to a monitor task kind (the tab to switch/close).
+// BUG REAL PRINS DE TESTE (30 iul): aici era `\b...\b`, iar în JavaScript `\b`
+// e ASCII-only — după „ă"/„î"/„ș" NU se potrivește. Efectul, dovedit:
+//   „treci pe hartă"  → NU făcea nimic (fără diacritic mergea);
+//   „închide hartă"   → închidea TAB-UL ACTIV în loc de hartă (chiar regresia
+//                        W4 #2 pe care comentariul de mai jos o crede reparată).
+// Aceeași capcană ca la „Dansează!" (20 iul, AI-HANDOFF). Soluția casei, deja
+// folosită de CLOSE_VERB/SWITCH_VERB din acest fișier: graniță Unicode explicită
+// prin lookaround + flag `u`.
+const G0 = '(?<![\\p{L}\\p{N}])' // început de cuvânt, sigur pe diacritice
+const G1 = '(?![\\p{L}\\p{N}])' // sfârșit de cuvânt, sigur pe diacritice
+const cuvinte = (corp: string): RegExp => new RegExp(`${G0}(?:${corp})${G1}`, 'iu')
+
+const RE_MAP = cuvinte('hart[ăa]|harta|map|rut[ăa]|ruta|traseu\\p{L}*|route|directions|navigat\\p{L}*')
+const RE_YOUTUBE = cuvinte('youtube|video\\p{L}*|clip\\p{L}*|film\\p{L}*|melodi\\p{L}*|pies[ăa]|muzic\\p{L}*|song')
+const RE_WEATHER = cuvinte('meteo|vreme\\p{L}*|vremea|weather|windy')
+const RE_IMAGE = cuvinte('imagin\\p{L}*|poz[ăa]\\p{L}*|poza|image|picture')
+const RE_WEB = cuvinte('pagin\\p{L}*|pagina|site\\p{L}*|web|articol\\p{L}*|page')
+const RE_DOC = cuvinte('document\\p{L}*|documentul|text\\p{L}*|textul|email\\p{L}*|emailul|scrisoare\\p{L}*|nota|not[ăa]')
+
 function taskKindFromText(msg: string): string | null {
-  if (/\b(hart[ăa]|harta|map|rut[ăa]|ruta|traseu\w*|route|directions|navigat\w*)\b/i.test(msg))
-    return 'map'
-  if (/\b(youtube|video\w*|clip\w*|film\w*|melodi\w*|pies[ăa]|muzic\w*|song)\b/i.test(msg))
-    return 'youtube'
-  if (/\b(meteo|vreme\w*|vremea|weather|windy)\b/i.test(msg)) return 'weather'
-  if (/\b(imagin\w*|poz[ăa]\w*|poza|image|picture)\b/i.test(msg)) return 'image'
-  if (/\b(pagin\w*|pagina|site\w*|web|articol\w*|page)\b/i.test(msg)) return 'web'
-  if (/\b(document\w*|documentul|text\w*|textul|email\w*|emailul|scrisoare\w*|nota|notă)\b/i.test(msg))
-    return 'doc'
+  if (RE_MAP.test(msg)) return 'map'
+  if (RE_YOUTUBE.test(msg)) return 'youtube'
+  if (RE_WEATHER.test(msg)) return 'weather'
+  if (RE_IMAGE.test(msg)) return 'image'
+  if (RE_WEB.test(msg)) return 'web'
+  if (RE_DOC.test(msg)) return 'doc'
   return null
 }
 
