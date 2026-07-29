@@ -133,6 +133,34 @@ function getSharedAudioEl(): HTMLAudioElement {
   sharedAudioEl = el
   return el
 }
+
+// ── IEȘIREA AUDIO PE CĂȘTI BLUETOOTH (Adrian, 29 iul: „de ce nu se poate trece
+// audio pe căști bluetooth?") ────────────────────────────────────────────────
+// Cauza (fapt din cod): aplicația NU ruta NICIODATĂ ieșirea audio — elementul
+// <audio> reda pe dispozitivul implicit și nu reacționa la conectarea căștilor.
+// setSinkId (Chromium desktop/Android) leagă elementul de un dispozitiv anume;
+// pe iOS Safari NU există (sistemul rutează singur — aici e no-op inofensiv).
+// Regula: dacă apar căști/BT, le PREFERĂM; altfel urmăm implicitul. Reaplicăm la
+// fiecare `devicechange`, ca sunetul să MIGREZE pe căști când le conectezi în
+// timpul convorbirii. Tolerant la eșec: orice pică → rămânem pe implicit, fără
+// să rupem redarea. Etichetele au nevoie de permisiunea de microfon (o avem —
+// sesiunea de voce e activă), altfel labels vin goale și rămânem pe implicit.
+const AUDIO_OUT_RE = /bluetooth|blueto|airpod|headset|headphone|c[ăa][șs]ti|wireless|buds|earbud|hands?-?free/i
+async function routeAudioOutput(el: HTMLAudioElement): Promise<void> {
+  const sinkEl = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+  if (typeof sinkEl.setSinkId !== 'function') return // iOS/Safari: rutează sistemul
+  try {
+    let target = 'default'
+    if (navigator.mediaDevices?.enumerateDevices) {
+      const devs = await navigator.mediaDevices.enumerateDevices()
+      const bt = devs.find((d) => d.kind === 'audiooutput' && AUDIO_OUT_RE.test(d.label))
+      if (bt?.deviceId) target = bt.deviceId
+    }
+    await sinkEl.setSinkId(target)
+  } catch {
+    /* dispozitivul a dispărut / refuzat — rămânem pe implicit, sunetul nu se rupe */
+  }
+}
 const voiceSessionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 let voiceBc: BroadcastChannel | null = null
 try {
@@ -317,6 +345,14 @@ export async function startRealtimeVoice(
     cleanups.push(() => {
       audioEl.srcObject = null
     })
+    // IEȘIREA PE CĂȘTI/BT: rutează acum + reaplică ori de câte ori se schimbă
+    // dispozitivele (conectezi căștile în timpul convorbirii → sunetul migrează).
+    void routeAudioOutput(audioEl)
+    const onDeviceChange = (): void => {
+      void routeAudioOutput(audioEl)
+    }
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange)
+    cleanups.push(() => navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange))
     let stopLip: (() => void) | null = null
     pc.ontrack = (ev) => {
       audioEl.srcObject = ev.streams[0] ?? new MediaStream([ev.track])
