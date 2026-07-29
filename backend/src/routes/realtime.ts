@@ -29,7 +29,16 @@ import {
 } from '../services/brainToolDefs.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
-import { SYSTEM_PROMPT } from './chat.js'
+import {
+  SYSTEM_PROMPT,
+  // CALEA AUTONOMIEI PE VOCE (Adrian, 29 iul: „de la cererea mea până la deploy
+  // final, pe toate rutele") — aceleași definiții de unelte ca scrisul (sursă
+  // unică, importate, nu duplicate), ca vocea să ajungă și ea până în producție.
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
+} from './chat.js'
+import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
+import { runRunbook, runbookStatus, runbookLog, requestRepair } from '../services/runbooks.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -257,6 +266,12 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               DB_TABLES_TOOL, DB_QUERY_TOOL,
               BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL,
               SYSTEM_HEALTH_TOOL,
+              // CALEA AUTONOMIEI COMPLETĂ PE VOCE (Adrian: „de la cererea mea până
+              // la deploy final, pe toate rutele"): scrie cod → PR → merge (auto-
+              // deploy) → ops → verificare, exact ca scrisul. Admin-gated identic.
+              REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+              RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
+              REQUEST_REPAIR_TOOL,
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
@@ -293,6 +308,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, progress: j.progress, ci: j.ci, pr: j.prUrl })) })
           }
           if (tname === 'system_health') return systemHealth()
+          // ── Calea autonomiei pe voce: aceiași executori ca scrisul (chat.ts) ──
+          // repo_write/open_pr/merge_pr (github.ts, cu isOpsPaused + checkpoint la
+          // merge), run_runbook/status/log (runbooks.ts), request_repair.
+          if (tname === 'repo_write') return repoWrite(String(targs.branch ?? ''), String(targs.path ?? ''), String(targs.content ?? ''), String(targs.message ?? ''))
+          if (tname === 'repo_open_pr') return repoOpenPR(String(targs.branch ?? ''), String(targs.title ?? ''), String(targs.body ?? ''))
+          if (tname === 'repo_merge_pr') return repoMergePR(Number(targs.pr ?? 0))
+          if (tname === 'run_runbook') return runRunbook(String(targs.name ?? ''))
+          if (tname === 'runbook_status') return runbookStatus(targs.name ? String(targs.name) : undefined)
+          if (tname === 'runbook_log') return runbookLog(Number(targs.run_id ?? 0))
+          if (tname === 'request_repair') return requestRepair(String(targs.title ?? ''), String(targs.details ?? ''))
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
         // ── §6 CREIER UNIC — vocea = urechile și gura ACELUIAȘI creier ────────
