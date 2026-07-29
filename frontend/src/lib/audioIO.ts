@@ -1,3 +1,4 @@
+import { openMicGraph } from './audioGraph'
 // AUDIO I/O — poarta către creier (Adrian, 4 iul). Aplicația NU sintetizează și
 // NU recunoaște nimic local: microfonul captează → trimite la server (STT), iar
 // vocea creierului vine gata sintetizată de pe server (Chirp 3) ca un cadru
@@ -408,32 +409,12 @@ export async function startMic(
     onError('unsupported')
     return null
   }
-  let stream: MediaStream
-  if (preWarmedStream && preWarmedStream.getAudioTracks().length > 0) {
-    stream = preWarmedStream
-  } else {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-    } catch (e) {
-      // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
-      // eșecul trecător (dispozitiv ocupat, căști scoase) da.
-      const name = (e as { name?: string })?.name
-      onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
-      return null
-    }
-  }
-
-  const AC =
-    globalThis.AudioContext ??
-    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AC) {
-    stream.getTracks().forEach((t) => t.stop())
-    onError('unsupported')
-    return null
-  }
-  const ctx = new AC()
+  // Deschiderea microfonului + contextul audio vin din sursa COMUNĂ
+  // (lib/audioGraph.ts) — aceleași constrângeri ca la dictare, ca cele două să
+  // nu poată auzi diferit (Lotul D, unic fără duplicate).
+  const graph = await openMicGraph(onError, preWarmedStream)
+  if (!graph) return null
+  const { stream, ctx } = graph
   void ctx.resume().catch(() => {})
   const source = ctx.createMediaStreamSource(stream)
   const analyser = ctx.createAnalyser()

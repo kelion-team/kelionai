@@ -1,3 +1,4 @@
+import { openMicGraph } from './audioGraph'
 // MICROFON ÎN STREAMING — dictare LIVE (Adrian, 10 iul): pe măsură ce vorbește,
 // fiecare cuvânt apare pe bandă instantaneu (rezultate PARȚIALE), se VALIDEAZĂ
 // când e confirmat (rezultat FINAL), așa pentru toată fraza; la o PAUZĂ > 3s
@@ -124,30 +125,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     opts.onError('ws')
     return null
   }
-  let stream: MediaStream
-  if (opts.preWarmedStream && opts.preWarmedStream.getAudioTracks().length > 0) {
-    stream = opts.preWarmedStream
-  } else {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-    } catch (e) {
-      const name = (e as { name?: string })?.name
-      opts.onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
-      return null
-    }
-  }
-
-  const AC =
-    globalThis.AudioContext ??
-    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!AC) {
-    stream.getTracks().forEach((t) => t.stop())
-    opts.onError('unsupported')
-    return null
-  }
-  const ctx = new AC()
+  // Aceeași deschidere de microfon ca vocea (lib/audioGraph.ts) — sursă unică.
+  const graph = await openMicGraph(opts.onError, opts.preWarmedStream)
+  if (!graph) return null
+  const { stream, ctx } = graph
   void ctx.resume().catch(() => {})
   const source = ctx.createMediaStreamSource(stream)
   // ScriptProcessor e depreciat dar universal și fără fișier separat — cel mai
