@@ -37,9 +37,25 @@ export function normalizeBranch(name: string): string {
     .slice(0, 120)
 }
 
-/** Nume de ramură valid DUPĂ normalizare. Gardă tehnică, nu de politică. */
+/** Nume de ramură valid DUPĂ normalizare.
+ *
+ *  ÎNTĂRITĂ (30 iul, două găuri prinse de teste pe garda celei mai puternice
+ *  unelte din soft):
+ *   • `main` NU era blocat — doar `master`. Azi ramura implicită e master, deci
+ *     nu se putea exploata, dar era o gaură LATENTĂ: dacă repo-ul ar trece
+ *     vreodată pe `main`, Kelion ar fi putut scrie DIRECT în producție, ocolind
+ *     regula „publicarea trece obligatoriu prin PR".
+ *   • `///` trecea validarea (se potrivea cu setul de caractere permise). Pe
+ *     calea reală normalizarea îl golea, dar o gardă nu se sprijină pe altcineva:
+ *     cerem acum cel puțin o literă sau cifră.
+ */
 export function isValidBranch(name: string): boolean {
-  return /^[A-Za-z0-9._/-]{1,120}$/.test(name) && !name.includes('..') && name !== 'master'
+  if (!/^[A-Za-z0-9._/-]{1,120}$/.test(name)) return false
+  if (!/[A-Za-z0-9]/.test(name)) return false // „///" sau „---" nu sunt nume
+  if (name.includes('..')) return false
+  // Ramurile de publicare nu se scriu NICIODATĂ direct — nici sub alt nume.
+  const jos = name.toLowerCase()
+  return jos !== 'master' && jos !== 'main'
 }
 
 /** Ramură nouă din vârful lui master (idempotent: dacă există deja, o refolosește). */
