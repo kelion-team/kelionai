@@ -41,6 +41,18 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'read_email',
+    description:
+      "Read the FULL BODY of one Gmail message — the best match for a search. Use when the user wants to know what an email actually SAYS (not just the subject list from get_recent_emails): 'read me the email from X', 'what does the message about Y say'. Pass a Gmail search in `query` (e.g. from:john, subject:invoice, is:unread). Returns sender, subject, date and the full text.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Gmail search to pick the message, e.g. "from:john subject:invoice".' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'web_search',
     description:
       'Search the live web for current, real information (news, facts, prices, anything recent). Returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches — use it whenever the answer depends on up-to-date or external information you do not already know.',
@@ -397,6 +409,52 @@ async function recentEmails(query: string, max: number, token: string): Promise<
     emails.push({ from: h('From'), subject: h('Subject'), date: h('Date'), snippet: m.snippet ?? '' })
   }
   return JSON.stringify({ emails })
+}
+
+// CORPUL COMPLET AL UNUI EMAIL (CREIER UNIC §2.2): get_recent_emails dă doar
+// antetul; asta citește ce SCRIE mesajul. Folosește ACELAȘI scope Gmail (fără
+// re-autentificare). Alege cel mai bun rezultat pentru căutare, extrage corpul
+// (preferă text/plain, altfel curăță html), plafonat ca să nu umple contextul.
+function decodeGmailB64(data: string): string {
+  try {
+    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+  } catch {
+    return ''
+  }
+}
+interface GmailPart {
+  mimeType?: string
+  body?: { data?: string }
+  parts?: GmailPart[]
+}
+function extractGmailBody(payload: GmailPart | undefined, prefer: string): string {
+  if (!payload) return ''
+  if (payload.mimeType === prefer && payload.body?.data) return decodeGmailB64(payload.body.data)
+  for (const p of payload.parts ?? []) {
+    const r = extractGmailBody(p, prefer)
+    if (r) return r
+  }
+  return ''
+}
+async function readEmail(query: string, token: string): Promise<string> {
+  const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
+  listUrl.searchParams.set('maxResults', '1')
+  if (query) listUrl.searchParams.set('q', query)
+  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
+  if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
+  const list = (await listRes.json()) as { messages?: { id: string }[] }
+  const id = list.messages?.[0]?.id
+  if (!id) return JSON.stringify({ found: false, note: 'Niciun email pentru această căutare.' })
+  const mRes = await tfetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!mRes.ok) return JSON.stringify({ error: `gmail_http_${mRes.status}` })
+  const m = (await mRes.json()) as { snippet?: string; payload?: GmailPart & { headers?: GmailHeader[] } }
+  const h = (name: string): string => m.payload?.headers?.find((x) => x.name === name)?.value ?? ''
+  let body = extractGmailBody(m.payload, 'text/plain') || extractGmailBody(m.payload, 'text/html')
+  if (/<[a-z][\s\S]*>/i.test(body)) body = body.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')
+  body = body.replace(/&nbsp;/g, ' ').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000)
+  return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
 }
 
 interface SerperResult {
@@ -1174,6 +1232,7 @@ export async function runGoogleTool(
     if (name === 'get_calendar_events') result = await calendarEvents(num(args.max_results, 10), token)
     else if (name === 'get_recent_emails')
       result = await recentEmails(str(args.query), num(args.max_results, 5), token)
+    else if (name === 'read_email') result = await readEmail(str(args.query), token)
     else if (name === 'send_email')
       result = await sendEmail(str(args.to), str(args.subject), str(args.body), token)
     else if (name === 'create_calendar_event')
