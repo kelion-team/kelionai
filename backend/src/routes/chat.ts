@@ -55,7 +55,7 @@ import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
-import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
+import { checkLang, detectLang, trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, type GestureLabel } from '../services/commands.js'
 import { geoLookupCached } from './demo.js'
 import { synthesize } from '../services/tts.js'
@@ -959,27 +959,9 @@ DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that yo
 
 AGENT DOCTRINE (be a fluid mind, not a throttled menu — the owner, 27 Jul): you ARE a capable reasoning agent with a full set of tools. On any real request, do not stop at one shallow step. THINK it through, PLAN the concrete steps, then ACT them out with your tools in sequence, VERIFY each result actually happened (read it back — get_monitor, constructor_status, read_source, db_query), and CONTINUE until the goal is genuinely done or you hit a real blocker you must report. Chain tools freely across turns; use source-reading, the database, the constructor, runbooks, the monitor, Google — whatever the task needs — as natural extensions of your reasoning, without waiting to be told which one. Prefer doing over describing. When something fails, diagnose and try another way rather than giving up. Be proactive: if you notice a problem while doing the task, surface it and offer to fix it. Flow — reason, act, check, finish — never a half-answer that leaves the owner to push you to the next step.`
 
-// Human language names for the language lock — the brain obeys an explicit language
-// name far more reliably than a bare locale code.
-const LANG_NAMES: Record<string, string> = {
-  ro: 'Romanian',
-  en: 'English',
-  fr: 'French',
-  es: 'Spanish',
-  pt: 'Portuguese',
-  it: 'Italian',
-  de: 'German',
-  nl: 'Dutch',
-  pl: 'Polish',
-  ru: 'Russian',
-  uk: 'Ukrainian',
-  tr: 'Turkish',
-  ar: 'Arabic',
-  zh: 'Chinese',
-  ja: 'Japanese',
-  ko: 'Korean',
-  hi: 'Hindi',
-}
+// Numele de limbi (pentru blocarea limbii — creierul ascultă un NUME explicit
+// mult mai fiabil decât un cod de locale) vin din sursa UNICĂ `LANG_LABELS`
+// (services/lang.ts). Aici era o copie identică — eliminată (unic, fără duplicate).
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -1373,7 +1355,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // was resolved above. Using the account locale is why short/ambiguous
     // messages used to get answered in English.
     const langBase = userLang.toLowerCase().split('-')[0]
-    const langName = LANG_NAMES[langBase]
+    const langName = LANG_LABELS[langBase]
     // Two tiers. ESTABLISHED (a saved speech preference): absolute lock — that
     // language and nothing else, so tool results can never drift it (the
     // Portuguese-tickets bug). NOT established (new visitor / free trial): the

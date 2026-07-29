@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { isOpsPaused, alertAdminLoop } from './runbooks.js'
 import { createRecoveryPoint } from './recovery.js'
+import { ghToken, gh } from './githubApi.js' // token + fetch GitHub din sursa UNICĂ
 
 // ── BUCLA COMPLETĂ DE COD A LUI KELION — FĂRĂ PORȚI (Adrian, 25 iul: „ridici
 // absolut toate restricțiile lui Kelion — decizia mea, nu a ta"; „full
@@ -11,26 +12,6 @@ import { createRecoveryPoint } from './recovery.js'
 // ea (ordinul lui Adrian). Orice AI viitor: NU adăuga porți aici fără ordinul
 // lui explicit. Tokenul vine din env (GITHUB_TOKEN) și nu se întoarce niciodată
 // în răspunsuri.
-
-const REPO = 'kelion-team/kelionai'
-const API = `https://api.github.com/repos/${REPO}`
-
-function ghToken(): string {
-  return (process.env.GITHUB_TOKEN ?? '').trim()
-}
-
-async function gh(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${ghToken()}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init?.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(20_000),
-  })
-}
 
 const NO_TOKEN = JSON.stringify({
   error: 'github_token_missing',
