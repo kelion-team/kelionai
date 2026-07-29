@@ -44,8 +44,6 @@ import {
   proposeKelionTool,
   createBuildJob,
   listBuildJobs,
-  dbTablesOverview,
-  dbQuery,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
@@ -79,13 +77,10 @@ import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
-import { listSource, readSource, searchSource } from '../services/sourceCode.js'
-import { systemHealth } from '../services/health.js'
+import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from '../services/adminTools.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
-import { runRunbook, requestRepair, runbookStatus, runbookLog } from '../services/runbooks.js'
-import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -2038,53 +2033,23 @@ async function runTool(
   // nimic" — fără urma asta, diagnosticul a cerut interogarea bazei de date).
   console.log(`[tool] ${block.name} (${isAdmin ? 'admin' : 'user'})`)
 
+  // Uneltele admin PARTAJATE (chat ∩ voce) — dispatch UNIC, comun cu vocea
+  // (services/adminTools.ts). Fără duplicare (§1 unicitate / audit risc #4):
+  // extragerea argumentelor + apelul trăiesc într-un singur loc, nu copiate în
+  // chat și în realtime. Poarta de admin rămâne AICI; execuția e în sursa comună.
+  if (SHARED_ADMIN_TOOLS.has(block.name)) {
+    if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+    const shared = await execSharedAdminTool(block.name, args)
+    if (shared !== null) return shared
+  }
+
   switch (block.name) {
-    case 'list_source': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return listSource(String(args.dir ?? '.'))
-    }
-    case 'read_source': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return readSource(String(args.path ?? ''), Number(args.from_line ?? 1) || 1)
-    }
-    case 'search_source': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return searchSource(String(args.query ?? ''))
-    }
     case 'list_updates': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const raw = await updatesList()
       return raw
         ? raw.slice(0, 20_000)
         : JSON.stringify({ error: 'no_updates_file', hint: 'apare începând cu primul deploy făcut prin deploy.sh de pe 25 iul' })
-    }
-    case 'run_runbook': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return runRunbook(String(args.name ?? ''))
-    }
-    case 'runbook_status': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return runbookStatus(args.name ? String(args.name) : undefined)
-    }
-    case 'runbook_log': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return runbookLog(Number(args.run_id ?? 0))
-    }
-    case 'request_repair': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
-    }
-    case 'repo_write': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
-    }
-    case 'repo_open_pr': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
-    }
-    case 'repo_merge_pr': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return repoMergePR(Number(args.pr ?? 0))
     }
     case 'build_software': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
@@ -2117,10 +2082,6 @@ async function runTool(
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
     }
-    case 'system_health': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return systemHealth()
-    }
     case 'read_inbox': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 40)
@@ -2141,14 +2102,6 @@ async function runTool(
           ? 'Jurnalele serverului (F12-ul de server). level: 40=warn, 50=error, 60=fatal.'
           : 'Nicio eroare/avertisment reținut de la ultimul restart — serverul e curat pe fereastra actuală.',
       })
-    }
-    case 'db_tables': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return dbTablesOverview()
-    }
-    case 'db_query': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return dbQuery(String(args.sql ?? ''))
     }
 
     case 'show_document': {
