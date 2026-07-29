@@ -136,6 +136,18 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'read_drive_file',
+    description:
+      "Read the CONTENT of one Google Drive file — the best match for a name search. Use when the user wants what a document SAYS, not just the file list: 'read me the doc about X', 'what's in the budget sheet'. Google Docs and Sheets are exported to text; text files are read directly; binary files (pdf/images) return a link instead.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name search to pick the file, e.g. "budget 2026".' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'get_tasks',
     description: "List the user's Google Tasks (to-dos). Use for questions about their tasks or to-do list.",
     input_schema: {
@@ -763,7 +775,7 @@ async function createCalendarEvent(
 async function driveFiles(query: string, max: number, token: string): Promise<string> {
   const url = new URL('https://www.googleapis.com/drive/v3/files')
   url.searchParams.set('pageSize', String(Math.min(Math.max(max, 1), 25)))
-  url.searchParams.set('fields', 'files(name,mimeType,modifiedTime,webViewLink)')
+  url.searchParams.set('fields', 'files(id,name,mimeType,modifiedTime,webViewLink)')
   url.searchParams.set('orderBy', 'modifiedTime desc')
   if (query) {
     const safe = query.replaceAll("'", String.raw`\'`)
@@ -774,9 +786,43 @@ async function driveFiles(query: string, max: number, token: string): Promise<st
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `drive_http_${res.status}` })
   const j = (await res.json()) as {
-    files?: { name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
+    files?: { id?: string; name?: string; mimeType?: string; modifiedTime?: string; webViewLink?: string }[]
   }
   return JSON.stringify({ files: j.files ?? [] })
+}
+
+// CITEȘTE CONȚINUTUL UNUI FIȘIER DRIVE (CREIER UNIC §2.2). Scope Drive EXISTENT
+// (același ca get_drive_files) — fără re-autentificare. Alege cel mai bun
+// rezultat pentru căutare; Google Docs → export text, Sheets → csv, fișiere text
+// → conținut brut; binarele (pdf/imagini) nu se pot citi ca text → link.
+async function readDriveFile(query: string, token: string): Promise<string> {
+  const listUrl = new URL('https://www.googleapis.com/drive/v3/files')
+  listUrl.searchParams.set('pageSize', '1')
+  listUrl.searchParams.set('fields', 'files(id,name,mimeType,webViewLink)')
+  listUrl.searchParams.set('orderBy', 'modifiedTime desc')
+  const safe = (query || '').replaceAll("'", String.raw`\'`)
+  listUrl.searchParams.set('q', safe ? `name contains '${safe}' and trashed = false` : 'trashed = false')
+  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
+  if (!listRes.ok) return JSON.stringify({ error: `drive_http_${listRes.status}` })
+  const list = (await listRes.json()) as { files?: { id?: string; name?: string; mimeType?: string; webViewLink?: string }[] }
+  const f = list.files?.[0]
+  if (!f?.id) return JSON.stringify({ found: false, note: 'Niciun fișier pentru această căutare.' })
+  const mime = f.mimeType ?? ''
+  const auth = { headers: { Authorization: `Bearer ${token}` } }
+  let contentUrl: string
+  if (mime === 'application/vnd.google-apps.document') {
+    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}/export?mimeType=text/plain`
+  } else if (mime === 'application/vnd.google-apps.spreadsheet') {
+    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}/export?mimeType=text/csv`
+  } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+    contentUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`
+  } else {
+    return JSON.stringify({ found: true, name: f.name, mimeType: mime, note: 'Fișier binar (pdf/imagine/etc.) — nu se poate citi ca text.', link: f.webViewLink ?? '' })
+  }
+  const cRes = await tfetch(contentUrl, auth)
+  if (!cRes.ok) return JSON.stringify({ error: `drive_read_http_${cRes.status}` })
+  const text = (await cRes.text()).slice(0, 8000)
+  return JSON.stringify({ found: true, name: f.name, mimeType: mime, content: text, link: f.webViewLink ?? '' })
 }
 
 async function getTasks(max: number, token: string): Promise<string> {
@@ -1292,6 +1338,7 @@ export async function runGoogleTool(
     else if (name === 'delete_calendar_event') result = await deleteCalendarEvent(str(args.id), token)
     else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)
+    else if (name === 'read_drive_file') result = await readDriveFile(str(args.query), token)
     else if (name === 'get_tasks') result = await getTasks(num(args.max_results, 20), token)
     else if (name === 'add_task') result = await addTask(str(args.title), str(args.due), token)
     else if (name === 'search_contacts')
