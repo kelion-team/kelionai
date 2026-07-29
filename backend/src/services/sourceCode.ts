@@ -49,8 +49,17 @@ export async function listSource(rel = '.'): Promise<string> {
   const dir = safePath(rel)
   if (!dir) return JSON.stringify({ error: 'bad_path' })
   const out: string[] = []
+  let truncated = false
   async function walk(d: string, depth: number): Promise<void> {
-    if (depth > 3 || out.length > 400) return
+    // ARBORE COMPLET (Etapa 2 autonomie, 29 iul — „Kelion trebuie să vadă orice
+    // fișier are nevoie"): adâncimea era 3 și SĂREA toate dot-dir-urile → codul
+    // real din `.github/workflows/` (CI-ul) și fișierele adânci erau INVIZIBILE.
+    // Acum mergem adânc (8) și NU mai sărim dot-urile — doar zgomotul din
+    // IGNORE_DIRS (node_modules/.git/dist...). Secretele rămân blocate la CITIRE.
+    if (depth > 8 || out.length > 2000) {
+      truncated = true
+      return
+    }
     let entries
     try {
       entries = await fs.readdir(d, { withFileTypes: true })
@@ -58,7 +67,7 @@ export async function listSource(rel = '.'): Promise<string> {
       return
     }
     for (const e of entries) {
-      if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
+      if (IGNORE_DIRS.has(e.name)) continue
       const p = path.join(d, e.name)
       const relp = path.relative(ROOT, p)
       if (e.isDirectory()) {
@@ -70,26 +79,39 @@ export async function listSource(rel = '.'): Promise<string> {
     }
   }
   await walk(dir, 0)
-  return out.join('\n') || '(gol)'
+  const body = out.join('\n') || '(gol)'
+  return truncated ? `${body}\n…(arbore tăiat — listează un subdirector anume pentru restul)` : body
 }
 
-export async function readSource(rel: string): Promise<string> {
+export async function readSource(rel: string, fromLine = 1): Promise<string> {
   const p = safePath(rel)
   if (!p) return JSON.stringify({ error: 'bad_path' })
   if (SECRET_FILE_RE.test(p)) return JSON.stringify({ error: 'fisier_secret', nota: 'Fișierele de secrete (.env, chei, certificate) nu se citesc niciodată prin unealta asta.' })
   try {
     const raw = await fs.readFile(p, 'utf8')
-    // DIETA DE COST (25 iul — Adrian: „chat imens", dovadă: o tură cu unelte a
-    // costat $4.24): 60KB pline de cod intrau în FIECARE rundă ulterioară a
-    // aceleiași ture (fiecare apel de unealtă retrimite tot ce s-a citit până
-    // atunci). Coborât la 24KB — suficient pentru majoritatea fișierelor mici/
-    // medii; pentru unul mare, search_source găsește linia exactă înainte.
-    const clipped = raw.length > 24_000 ? raw.slice(0, 24_000) + '\n…(tăiat la 24KB — folosește search_source ca să găsești linia exactă întâi)' : raw
-    // Numere de linie — ca referințele („fișier:linie") să fie precise.
-    return clipped
-      .split('\n')
-      .map((l, i) => `${i + 1}\t${l}`)
-      .join('\n')
+    const lines = raw.split('\n')
+    // CITIRE INTEGRALĂ PRIN PAGINARE (Etapa 2 autonomie, 29 iul — „Kelion trebuie
+    // să vadă orice fișier"): înainte se tăia la 24KB de la ÎNCEPUT, deci un
+    // fișier mare (chat.ts ~2500 linii) nu putea fi citit tot. Acum se citește
+    // de la `fromLine`, în pagini de ~24KB, cu indicație clară cum să continue —
+    // fișierul se poate parcurge INTEGRAL fără să umflăm o singură rundă (dieta
+    // de cost din 25 iul rămâne: fiecare pagină ≤24KB).
+    const BUDGET = 24_000
+    const start = Math.max(1, Math.floor(Number(fromLine)) || 1)
+    const out: string[] = []
+    let bytes = 0
+    let i = start - 1 // index 0-based
+    for (; i < lines.length; i++) {
+      const numbered = `${i + 1}\t${lines[i]}`
+      if (out.length > 0 && bytes + numbered.length > BUDGET) break
+      out.push(numbered)
+      bytes += numbered.length + 1
+    }
+    const more = i < lines.length
+    const foot = more
+      ? `\n…(fișier de ${lines.length} linii; citite până la ${i}. Continuă: read_source(path, from_line=${i + 1}).)`
+      : ''
+    return (out.join('\n') || '(gol)') + foot
   } catch (e) {
     return JSON.stringify({ error: `read_failed: ${String(e).slice(0, 120)}` })
   }

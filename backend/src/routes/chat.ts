@@ -438,8 +438,8 @@ const REQUEST_REPAIR_TOOL: Tool = {
 }
 const READ_SOURCE_TOOL: Tool = {
   name: 'read_source',
-  description: "ADMIN ONLY. Read one of your own source files (with line numbers). Use for diagnosing bugs the owner reports — look at the REAL code.",
-  input_schema: { type: 'object', properties: { path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." } }, required: ['path'] },
+  description: "ADMIN ONLY. Read one of your own source files (with line numbers). Use for diagnosing bugs the owner reports — look at the REAL code. Large files are paged ~24KB at a time; to read the REST of a big file, call again with from_line set to the number shown in the '…continue' footer — this way you can read ANY file completely.",
+  input_schema: { type: 'object', properties: { path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." }, from_line: { type: 'integer', description: 'Optional: start reading from this line number (for paging through a large file). Default 1.' } }, required: ['path'] },
 }
 const SEARCH_SOURCE_TOOL: Tool = {
   name: 'search_source',
@@ -2054,7 +2054,7 @@ async function runTool(
     }
     case 'read_source': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      return readSource(String(args.path ?? ''))
+      return readSource(String(args.path ?? ''), Number(args.from_line ?? 1) || 1)
     }
     case 'search_source': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })

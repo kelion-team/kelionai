@@ -213,7 +213,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const introspectionTools = adminUnlocked
           ? [
               { name: 'list_source', description: 'Listează arborele propriului cod sursă (director dat, relativ la rădăcina repo-ului).', input_schema: { type: 'object', properties: { dir: { type: 'string' } } } },
-              { name: 'read_source', description: 'Citește un fișier din propriul cod sursă, cu numere de linie.', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
+              { name: 'read_source', description: 'Citește un fișier din propriul cod sursă, cu numere de linie. Fișierele mari se citesc în pagini de ~24KB; pentru RESTUL unui fișier mare, cheamă din nou cu from_line = numărul din subsolul „…continuă" — așa citești ORICE fișier integral.', input_schema: { type: 'object', properties: { path: { type: 'string' }, from_line: { type: 'integer' } }, required: ['path'] } },
               { name: 'search_source', description: 'Caută un text/regex în tot codul sursă propriu.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
               { name: 'db_tables', description: 'Schema completă a bazei de date permanente (tabele, coloane, număr de rânduri).', input_schema: { type: 'object', properties: {} } },
               { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
@@ -224,7 +224,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
           if (tname === 'list_source') return listSource(String(targs.dir ?? '.'))
-          if (tname === 'read_source') return readSource(String(targs.path ?? ''))
+          if (tname === 'read_source') return readSource(String(targs.path ?? ''), Number(targs.from_line ?? 1) || 1)
           if (tname === 'search_source') return searchSource(String(targs.query ?? ''))
           if (tname === 'db_tables') return dbTablesOverview()
           if (tname === 'db_query') return dbQuery(String(targs.sql ?? ''))
