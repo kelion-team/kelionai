@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getSessionUser } from '../session.js'
 import {
   logVisit,
@@ -110,6 +110,20 @@ export function clientIp(req: FastifyRequest): string {
   return hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
 }
 
+// Poll-ul conversației vizitator↔admin: aceleași conv/after + validare + răspuns.
+// Folosit de ruta PUBLICĂ (/api/visitor-chat/poll, aici) și de cea de ADMIN
+// (/api/admin/visitor-chat, care adaugă doar poarta de admin înainte). Sursă
+// unică (principiul permanent: unic, fără duplicate).
+export async function pollVisitorChat(
+  req: FastifyRequest<{ Querystring: { conv?: string; after?: string } }>,
+  reply: FastifyReply,
+): Promise<unknown> {
+  const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+  const after = Number(req.query?.after ?? 0) || 0
+  if (!conv) return reply.code(400).send({ error: 'bad_request' })
+  return reply.send({ messages: await getVisitorMessages(conv, after) })
+}
+
 // Build the full visitor profile for one request: real IP (Cloudflare-aware),
 // geo, browser/OS/device, language, referrer, bot flag. Shared by the visit
 // beacon and the demo start.
@@ -181,11 +195,6 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
     '/api/visitor-chat/poll',
-    async (req, reply) => {
-      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
-      const after = Number(req.query?.after ?? 0) || 0
-      if (!conv) return reply.code(400).send({ error: 'bad_request' })
-      return reply.send({ messages: await getVisitorMessages(conv, after) })
-    },
+    (req, reply) => pollVisitorChat(req, reply),
   )
 }

@@ -1,5 +1,6 @@
 import { config } from '../config.js'
 import type { AnthropicTool, OrChatResult, OrMessage, OrToolCall } from './openrouter.js'
+import { readSSE } from './sse.js'
 
 // ── CREIERUL PRINCIPAL: GEMINI DIRECT DE LA GOOGLE (Adrian, 27 iul: „comută la
 // celălalt free... gemini... principal, și ce e acum secundar") ───────────────
@@ -190,37 +191,20 @@ export async function geminiDirectChatStream(
   let text = ''
   const collected: GPart[] = []
   let stop = 'stop'
-  const reader = r.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let nl: number
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (!line.startsWith('data:')) continue
-      const data = line.slice(5).trim()
-      if (!data || data === '[DONE]') continue
-      let ev: GResp
-      try {
-        ev = JSON.parse(data) as GResp
-      } catch {
-        continue
+  // Citirea fluxului SSE din sursa comună (services/sse.ts); procesarea
+  // evenimentului (format Gemini: candidates/parts) rămâne aici.
+  await readSSE(r.body, (raw) => {
+    const ev = raw as GResp
+    const cand = ev.candidates?.[0]
+    if (cand?.finishReason) stop = cand.finishReason
+    for (const p of cand?.content?.parts ?? []) {
+      if (p.text) {
+        text += p.text
+        onText(p.text)
       }
-      const cand = ev.candidates?.[0]
-      if (cand?.finishReason) stop = cand.finishReason
-      for (const p of cand?.content?.parts ?? []) {
-        if (p.text) {
-          text += p.text
-          onText(p.text)
-        }
-        if (p.functionCall) collected.push(p)
-      }
+      if (p.functionCall) collected.push(p)
     }
-  }
+  })
   const res = partsToResult(collected, model, stop)
   return { ...res, text }
 }
