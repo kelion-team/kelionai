@@ -1918,10 +1918,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // AFIRMĂ o faptă fără să cheme unealta, e obligat mecanic să execute
           // sau să retragă — nu mai rămâne la stadiul declarativ.
           deedGate: isAdmin,
-          // CREIERUL FORȚAT SĂ CHEME UNELTE (Adrian, 27 iul, „1,2,3"): pe tura
-          // de ACȚIUNE a ownerului prima rundă e obligată să aleagă o unealtă —
-          // execută, nu narează. Runda 2+ liberă.
-          forceToolsFirstRound: isAdmin && heavyTurn,
+          // NU MAI FORȚĂM unealta (Adrian, 29 iul: „nu ascultă cerința, face ce
+          // vrea el, ca și cum ar fi hardcodate anumite lucruri"). CAUZA REALĂ:
+          // ACTION_INTENT prinde aproape ORICE verb uzual (arată/pune/caută/
+          // deschide/verifică/fă/citește/scrie...), iar tool_choice:'required' îl
+          // OBLIGA să cheme o unealtă chiar când tu voiai doar un răspuns → „face
+          // ce vrea el". Forțarea = exact hardcodatul care surzea creierul la
+          // cerință. Acum creierul (tot capabil — heavy escaladează modelul) DECIDE
+          // singur dacă și ce unealtă cheamă, ASCULTĂND ce ai cerut. Poarta faptei
+          // (deedGate) rămâne plasa: nu poate declara o faptă fără s-o fi făcut.
+          forceToolsFirstRound: false,
           onText: (txt) => {
             textFlowed = true
             noteFirstWord()
