@@ -81,7 +81,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
@@ -196,12 +196,7 @@ function allowAutoGesture(email: string, name: string): boolean {
 }
 
 // Admin-only tool so Kelion can report its own real running cost when asked.
-const COST_TOOL: Tool = {
-  name: 'get_real_cost',
-  description:
-    "Get Kelion's REAL provider cost so far in USD (total, today, and a breakdown). Admin only. Use when the admin asks how much Kelion costs / has cost.",
-  input_schema: { type: 'object', properties: {} },
-}
+
 
 // Lets Kelion put something on the user's screen on his own initiative — the
 // "monitor mode" surface (a web page in a sandboxed panel behind the avatar).
@@ -284,11 +279,7 @@ const IMAGE_TOOL: Tool = {
 // CANALUL DE UPDATE (Adrian, 25 iul: „canal de informare a lui cu tot ce
 // primește ca update") — la fiecare deploy, imaginea aduce git log-ul recent
 // (deploy/last-updates.txt); Kelion răspunde din el, nu din memorie.
-const LIST_UPDATES_TOOL: Tool = {
-  name: 'list_updates',
-  description: "ADMIN ONLY. List the updates you received — the commits that shipped in recent deploys, newest first (each line: sha | date | subject). Use when the owner asks what's new, what changed, or what update you got.",
-  input_schema: { type: 'object', properties: {} },
-}
+
 // ── MÂINILE LUI KELION — FĂRĂ RESTRICȚII (Adrian, 25 iul: „ridici absolut
 // toate restricțiile lui Kelion"; „full autonomie") ──────────────────────────
 // Operațiuni: runbook NUMIT → workflow GitHub cu comenzi fixe, vizibil în
@@ -396,31 +387,12 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
 // ajungă la Kelion ca și F12"): jurnalele aplicației (pino) trăiau doar în
 // docker logs, unde Kelion nu ajunge. Inelul din services/logbuffer.ts le
 // reține, iar unealta asta i le dă nativ — perechea de server a erorilor F12.
-const SERVER_LOGS_TOOL: Tool = {
-  name: 'server_logs',
-  description:
-    "ADMIN ONLY. Read YOUR OWN server logs (the backend's live log stream — the server-side F12): errors, warnings, failed requests, crashes, tool failures. Use this WHENEVER something froze, failed or behaved strangely — for you or for the owner — to see the real error before guessing. Pair with db_query on client_errors (the browser-side F12) for the full picture.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      errorsOnly: { type: 'boolean', description: 'true (default) = only warnings+errors; false = all retained entries.' },
-      limit: { type: 'number', description: 'Max entries, default 60.' },
-    },
-  },
-}
+
 // CUTIA POȘTALĂ PROPRIE (CREIER UNIC §2.5, Adrian: „creierul trebuie să ajungă
 // la TOT ce are softul"): inbox-ul lui Kelion (contact@kelionai.app) exista în
 // date (mailbox.ts) dar n-avea unealtă — o capabilitate adormită. Acum o poate
 // citi în conversație, nu doar din panoul admin.
-const READ_INBOX_TOOL: Tool = {
-  name: 'read_inbox',
-  description:
-    "ADMIN ONLY. Read YOUR OWN mailbox (contact@kelionai.app) — the most recent messages that landed in the app's inbox: sender, subject, date, whether seen. Use it when the owner asks what mail arrived, if someone wrote, or to triage the inbox. Returns metadata only (not full bodies).",
-  input_schema: {
-    type: 'object',
-    properties: { limit: { type: 'number', description: 'Max messages, default 20.' } },
-  },
-}
+
 // ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
 // de stocare permanentă... acces la orice bază de date a aplicației"): vederea
 // completă a schemei + SQL direct pe Postgres-ul aplicației. Admin only.
@@ -443,19 +415,7 @@ export const REQUEST_REPAIR_TOOL: Tool = {
 // read_source / search_source — definiții în services/brainToolDefs.ts (sursa
 // comună, CREIER UNIC §1), importate mai jos și folosite și de creierul de voce.
 
-const LOG_GAP_TOOL: Tool = {
-  name: 'log_unsupported_request',
-  description:
-    "Silently record — for the owner only — something the user asked you to do that you genuinely CANNOT do yet because no tool or capability exists for it (e.g. 'book a taxi', 'send a WhatsApp', 'control my smart home', 'call someone'). Call this IN ADDITION to honestly telling the user you can't do it yet. Do NOT call it for things you CAN do, for things a user just phrased oddly, or for simple errors. The user never sees this.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      request: { type: 'string', description: 'Short, clear description of the capability the user wanted (in English).' },
-      reason: { type: 'string', description: 'Why it is not possible right now (e.g. "no taxi-booking integration").' },
-    },
-    required: ['request'],
-  },
-}
+
 
 // AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul: „Kelion să-și instaleze singur
 // unelte, independent, până la deploy — cu aprobarea mea"). Când Kelion vede că-i
@@ -616,24 +576,8 @@ const DELETE_NOTE_TOOL: Tool = {
 // MEMORIA E A USERULUI (#20, Adrian 10 iul): pe lângă notițele explicite, userul
 // vede și controlează și memoria învățată automat — transparență + „uită asta".
 // Disponibile TUTUROR userilor (aceleași capabilități pentru toți).
-const LIST_MEMORIES_TOOL: Tool = {
-  name: 'list_memories',
-  description:
-    'Show everything you (Kelion) remember about this user from earlier conversations — the auto-learned durable facts (distinct from their explicitly saved notes). Use when they ask "ce știi despre mine?", "ce ții minte despre mine?", "what do you remember about me?". Present it naturally in their language.',
-  input_schema: { type: 'object', properties: {} },
-}
-const FORGET_MEMORY_TOOL: Tool = {
-  name: 'forget_memory',
-  description:
-    'Permanently forget remembered facts about this user that match a text fragment, when they ask you to forget something (e.g. "uită că...", "șterge din memorie...", "forget that I..."). Pass the most specific fragment of the fact. Returns how many facts were deleted — confirm honestly (0 = nothing matched).',
-  input_schema: {
-    type: 'object',
-    properties: {
-      fragment: { type: 'string', description: 'Text fragment identifying the fact(s) to forget.' },
-    },
-    required: ['fragment'],
-  },
-}
+
+
 
 // Kelion's LIVE browser — a real Chromium he navigates, showing it live on the
 // user's monitor. Unlike show_on_screen (a static iframe that many sites
