@@ -1,4 +1,7 @@
 import crypto from 'node:crypto'
+// CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
+import type { MoneyCircuit } from '../shared/api-types.js'
+export type { MoneyCircuit }
 import { config } from '../config.js'
 import { getStripeCustomer, setStripeCustomer } from '../db.js'
 
@@ -218,15 +221,6 @@ export async function chargeSavedCard(
 // pungă), capacitatea Issuing, cardurile virtuale existente. Ce se poate face
 // prin API se face de aici (creare card); ce cere dashboard-ul (activare
 // Issuing, introducerea cardului la OpenAI/OpenRouter) primește link direct.
-export interface MoneyCircuit {
-  payoutsInterval: string // 'manual' = corect (banii rămân în pungă)
-  issuingStatus: string // 'active' | 'inactive' | 'pending' | 'unknown'
-  cards: { id: string; last4: string; status: string }[]
-  issuingAvailable: number // punga Issuing (bani gata de cheltuit pe card), GBP
-  // Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API).
-  autoFund?: { at: string; ok: boolean; detail: string } | null
-  error?: string
-}
 
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
   const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund }

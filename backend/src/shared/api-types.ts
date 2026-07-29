@@ -1,0 +1,85 @@
+// ── CONTRACTUL HTTP dintre backend și frontend — O SINGURĂ DECLARAȚIE ────────
+//
+// DE CE EXISTĂ (Adrian: „principiul permanent unic, fără duplicate"; „0 clone,
+// ăsta e targetul"): formele astea de date circulă prin API și erau declarate de
+// DOUĂ ori — o dată în backend (`db.ts`, `stripe.ts`) și o dată, identic, în
+// frontend (`lib/admin.ts`). Detectorul le raporta ca cele mai mari clone din
+// proiect (42 + 36 + 20 = 98 de linii). Cauza nu era neglijență, ci lipsa unui
+// loc COMUN: cele două build-uri n-aveau niciun fișier partajat.
+//
+// REGULI pentru fișierul ăsta (ca să rămână legal în ambele build-uri):
+//   • DOAR tipuri (`interface` / `type`). Zero logică, zero import de runtime.
+//     Așa dispare complet la compilare și nu contează că backend-ul e NodeNext
+//     iar frontend-ul bundler — nu se emite niciun `import` real.
+//   • Se importă cu `import type { … }`, din ambele capete.
+//   • Ce e AICI e contract PUBLIC (ce vede clientul). Formele interne de bază de
+//     date rămân în backend — nu se urcă aici doar ca să scadă un număr.
+//
+// Lotul A din `PROCEDURA-REFACERE-CLONE.md`.
+
+/** Un rând din analiza vizitatorilor: cine, de unde, cu ce, ce l-a interesat. */
+export interface DemoRecent {
+  kind: 'visit' | 'demo'
+  ip: string
+  country: string
+  code: string
+  city: string
+  region: string
+  isp: string
+  browser: string
+  os: string
+  device: string
+  lang: string
+  referrer: string
+  is_bot: boolean
+  started_at: string
+  /** La un rând DEMO: emailul temporar a cărui conversație o poate deschide
+   *  owner-ul (click pe rând). Gol la vizitele simple (n-au vorbit niciodată). */
+  session_email: string
+  /** Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple. */
+  topic: string
+}
+
+/** Analiza vizitatorilor, agregată (admin-only): totaluri + țări + ultimele sosiri. */
+export interface DemoStats {
+  total: number
+  today: number
+  bots: number
+  visitsTotal: number
+  visitsToday: number
+  byCountry: { country: string; code: string; count: number }[]
+  recent: DemoRecent[]
+}
+
+/** CIRCUITUL BANILOR (admin-only): starea LIVE a fiecărei verigi Stripe→AI. */
+export interface MoneyCircuit {
+  /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
+  payoutsInterval: string
+  /** 'active' | 'inactive' | 'pending' | 'unknown'. */
+  issuingStatus: string
+  cards: { id: string; last4: string; status: string }[]
+  /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului. */
+  issuingAvailable: number
+  /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
+  autoFund?: { at: string; ok: boolean; detail: string } | null
+  error?: string
+}
+
+/** Activitatea per USER (admin-only): cine s-a conectat, ultimul IP/loc/dispozitiv,
+ *  cât a stat în total și soldul lui. */
+export interface UserActivityRow {
+  email: string
+  sessions: number
+  seconds: number
+  actions: number
+  messages: number
+  last_seen: string
+  last_ip: string
+  city: string
+  country: string
+  code: string
+  device: string
+  browser: string
+  blocked: boolean
+  balance: number
+}
