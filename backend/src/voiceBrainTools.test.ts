@@ -1,43 +1,69 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock-uim DOAR runGoogleTool (păstrăm googleTools reale) ca să testăm dispecerul
-// executorului fără să lovim API-urile Google.
+// Mock-uim runGoogleTool (păstrăm googleTools reale) + funcțiile de acces la cod,
+// ca să testăm dispecerul decuplat fără să lovim API-uri reale sau discul.
 const runGoogleTool = vi.hoisted(() => vi.fn(async () => '{"ok":true}'))
+const listSource = vi.hoisted(() => vi.fn(async () => 'ARBORE'))
+const readSource = vi.hoisted(() => vi.fn(async () => 'FIȘIER'))
+const searchSource = vi.hoisted(() => vi.fn(async () => 'POTRIVIRE'))
 vi.mock('./services/google.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services/google.js')>()
   return { ...actual, runGoogleTool }
 })
+vi.mock('./services/sourceCode.js', () => ({ listSource, readSource, searchSource }))
 
-import { googleBrainTools, makeGoogleExecTool } from './services/voiceBrainTools.js'
+import { voiceBrainTools, makeVoiceExecTool } from './services/voiceBrainTools.js'
 
-describe('voiceBrainTools — uneltele + executorul decuplat al vocii (§6 pas 2)', () => {
-  beforeEach(() => runGoogleTool.mockClear())
+describe('voiceBrainTools — uneltele + executorul decuplat al vocii (§6 pas 2-3)', () => {
+  beforeEach(() => {
+    runGoogleTool.mockClear()
+    listSource.mockClear()
+    readSource.mockClear()
+    searchSource.mockClear()
+  })
 
-  it('expune definițiile reale ale skill-urilor Google', () => {
-    const names = googleBrainTools().map((t) => t.name)
+  it('non-admin: doar Google (fără uneltele de cod)', () => {
+    const names = voiceBrainTools(false).map((t) => t.name)
     expect(names).toContain('web_search')
-    expect(names).toContain('read_email') // adăugate în CREIER UNIC
-    expect(names).toContain('delete_calendar_event')
-    expect(names.length).toBeGreaterThanOrEqual(22)
+    expect(names).toContain('read_email')
+    expect(names).not.toContain('read_source')
   })
 
-  it('executorul parsează argumentele și cheamă runGoogleTool cu tokenul', async () => {
-    const exec = makeGoogleExecTool('TOK')
-    const out = await exec('web_search', '{"query":"kelion"}')
-    expect(out).toBe('{"ok":true}')
-    expect(runGoogleTool).toHaveBeenCalledWith('web_search', { query: 'kelion' }, 'TOK')
+  it('admin: Google + accesul la cod (list/read/search_source)', () => {
+    const names = voiceBrainTools(true).map((t) => t.name)
+    expect(names).toContain('web_search')
+    expect(names).toContain('list_source')
+    expect(names).toContain('read_source')
+    expect(names).toContain('search_source')
   })
 
-  it('argumente ne-JSON → obiect gol (nu aruncă)', async () => {
-    const exec = makeGoogleExecTool('TOK')
-    await exec('get_time', 'nu-i json')
+  it('executorul cheamă runGoogleTool pentru skill-uri Google, cu tokenul', async () => {
+    const exec = makeVoiceExecTool('TOK', true)
+    expect(await exec('web_search', '{"query":"x"}')).toBe('{"ok":true}')
+    expect(runGoogleTool).toHaveBeenCalledWith('web_search', { query: 'x' }, 'TOK')
+  })
+
+  it('admin: uneltele de cod merg la sourceCode (decuplat), cu argumentele corecte', async () => {
+    const exec = makeVoiceExecTool('TOK', true)
+    expect(await exec('list_source', '{"dir":"backend/src"}')).toBe('ARBORE')
+    expect(listSource).toHaveBeenCalledWith('backend/src')
+    await exec('read_source', '{"path":"a.ts","from_line":10}')
+    expect(readSource).toHaveBeenCalledWith('a.ts', 10)
+    await exec('search_source', '{"query":"foo"}')
+    expect(searchSource).toHaveBeenCalledWith('foo')
+  })
+
+  it('non-admin NU poate atinge uneltele de cod (gate de securitate)', async () => {
+    const exec = makeVoiceExecTool('TOK', false)
+    const out = await exec('read_source', '{"path":"secret.ts"}')
+    expect(JSON.parse(out)).toEqual({ error: 'admin_only', name: 'read_source' })
+    expect(readSource).not.toHaveBeenCalled()
+  })
+
+  it('input ne-JSON → obiect gol; unealtă necunoscută → eroare', async () => {
+    const exec = makeVoiceExecTool('TOK', true)
+    await exec('get_time', 'stricat')
     expect(runGoogleTool).toHaveBeenCalledWith('get_time', {}, 'TOK')
-  })
-
-  it('unealtă necunoscută (non-Google) → eroare clară, fără să cheme runGoogleTool', async () => {
-    const exec = makeGoogleExecTool('TOK')
-    const out = await exec('repo_merge_pr', '{}')
-    expect(JSON.parse(out)).toEqual({ error: 'unknown_tool', name: 'repo_merge_pr' })
-    expect(runGoogleTool).not.toHaveBeenCalled()
+    expect(JSON.parse(await exec('repo_merge_pr', '{}'))).toEqual({ error: 'unknown_tool', name: 'repo_merge_pr' })
   })
 })

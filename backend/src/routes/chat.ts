@@ -82,6 +82,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 import { runRunbook, requestRepair, runbookStatus, runbookLog } from '../services/runbooks.js'
 import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
@@ -267,11 +268,8 @@ const IMAGE_TOOL: Tool = {
 // ── ACCES INTEGRAL LA CODUL SURSĂ (Adrian, 24 iul) — admin only ─────────────
 // „Kelion trebuie să aibă acces la codul sursă integral": își citește propriul
 // cod din container (read-only) — la „repară X" se uită în COD, nu ghicește.
-const LIST_SOURCE_TOOL: Tool = {
-  name: 'list_source',
-  description: "ADMIN ONLY. List your own source code tree — the WHOLE repo: backend/, frontend/, deploy/, .github/workflows/, docs. Use to orient before reading files.",
-  input_schema: { type: 'object', properties: { dir: { type: 'string', description: "Subdirectory (e.g. 'backend/src/routes'); default root." } } },
-}
+// list_source / read_source / search_source — definiții în sursa COMUNĂ
+// services/brainToolDefs.ts (CREIER UNIC §1), folosite și de creierul de voce.
 // CANALUL DE UPDATE (Adrian, 25 iul: „canal de informare a lui cu tot ce
 // primește ca update") — la fiecare deploy, imaginea aduce git log-ul recent
 // (deploy/last-updates.txt); Kelion răspunde din el, nu din memorie.
@@ -450,16 +448,8 @@ const REQUEST_REPAIR_TOOL: Tool = {
     required: ['title', 'details'],
   },
 }
-const READ_SOURCE_TOOL: Tool = {
-  name: 'read_source',
-  description: "ADMIN ONLY. Read one of your own source files (with line numbers). Use for diagnosing bugs the owner reports — look at the REAL code. Large files are paged ~24KB at a time; to read the REST of a big file, call again with from_line set to the number shown in the '…continue' footer — this way you can read ANY file completely.",
-  input_schema: { type: 'object', properties: { path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." }, from_line: { type: 'integer', description: 'Optional: start reading from this line number (for paging through a large file). Default 1.' } }, required: ['path'] },
-}
-const SEARCH_SOURCE_TOOL: Tool = {
-  name: 'search_source',
-  description: "ADMIN ONLY. Search your own source code (regex/text) — returns file:line matches. Use to find where a feature/bug lives.",
-  input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Text or regex to search for.' } }, required: ['query'] },
-}
+// read_source / search_source — definiții în services/brainToolDefs.ts (sursa
+// comună, CREIER UNIC §1), importate mai jos și folosite și de creierul de voce.
 
 const LOG_GAP_TOOL: Tool = {
   name: 'log_unsupported_request',
