@@ -26,15 +26,21 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     }
   })
 
-  // OGLINDA REALITĂȚII: skill-urile Google din registru (cele marcate voce) TREBUIE
-  // să fie EXACT setul real de nume-voce din serviciul de voce. Dacă cineva scoate
-  // un skill din voce fără să atingă registrul, testul cade — nu se adoarme tăcut.
-  it('skill-urile Google din registru == setul real de nume-voce (realtime.ts)', () => {
-    const googleVoiceFromRegistry = CAPABILITIES.filter((c) => c.category === 'google' && c.voice)
-      .map((c) => c.name)
-      .sort()
-    const runtime = [...VOICE_TOOL_NAMES].sort()
-    expect(googleVoiceFromRegistry).toEqual(runtime)
+  // SURSĂ UNICĂ (§1): vocea DERIVĂ acum din registru (realtime.ts). Verificăm
+  // registrul față de lista CANONICĂ a celor 18 skill-uri Google de voce — și că
+  // derivarea produce exact setul canonic. Dacă cineva schimbă registrul pe
+  // ascuns, testul cade; nimic nu se adoarme tăcut.
+  it('skill-urile Google pe voce = cele 18 canonice, dintr-o singură sursă', () => {
+    const canonic = [
+      'add_contact', 'add_task', 'convert_currency', 'create_calendar_event', 'get_calendar_events',
+      'get_drive_files', 'get_recent_emails', 'get_tasks', 'get_time', 'get_weather',
+      'maps_directions', 'maps_search', 'search_contacts', 'send_email', 'translate_text',
+      'web_search', 'wikipedia_lookup', 'youtube_search',
+    ].sort()
+    const dinRegistru = CAPABILITIES.filter((c) => c.category === 'google' && c.voice).map((c) => c.name).sort()
+    expect(dinRegistru).toEqual(canonic)
+    // VOICE_TOOL_NAMES (realtime.ts) derivă din registru → trebuie să fie identic.
+    expect([...VOICE_TOOL_NAMES].sort()).toEqual(canonic)
   })
 
   // STAREA MĂSURATĂ AZI — orice schimbare a suprafeței creierului trebuie să treacă
