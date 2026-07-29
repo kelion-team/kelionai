@@ -190,6 +190,15 @@ export function openWorkspaceApp(title: string, html: string): void {
   upsert({ id: 'app', kind: 'app', title, url: '', card: null, html, status: 'ok' })
 }
 
+// PANOUL CONSTRUCTORULUI (Etapa 4b, Adrian: „afișare pe monitor a rezolvării
+// cerințelor"). O suprafață aparte (kind 'build') care NU are url/text/html — se
+// randează cu un poller propriu în Stage, abonat la /api/constructor/live, și
+// arată fiecare ordin: Preluat→pasul curent→Gata/Eșuat. Dedup pe kind: un singur
+// tab de constructor, mereu cel curent.
+export function openWorkspaceBuild(title = 'Constructor'): void {
+  upsert({ id: 'build', kind: 'build', title, url: '', card: null, status: 'ok' })
+}
+
 // Close the ACTIVE task (back-compat for the single-close / voice-command paths).
 export function closeWorkspace(): void {
   if (state.open) closeTask(state.activeId)
