@@ -1149,11 +1149,19 @@ export default function ChatPanel({
                 const fresh = await getFreshCoords()
                 if (fresh) {
                   rvLiveRef.current?.updateCoords(fresh)
-                  return JSON.stringify({ lat: fresh.lat, lon: fresh.lon })
+                  // „PUNE-MĂ PE HARTĂ" (Adrian, test live 29 iul: „i-am cerut să
+                  // vadă unde sunt și nu a preluat GPS-ul"): get_location lua
+                  // coordonatele dar NU deschidea nicio hartă — de-aia „nu se
+                  // vedea". Acum, când prinde poziția reală, deschide pe monitor
+                  // harta centrată pe ea, cu semn (OSM → embed cu marker în Stage).
+                  handleControl({
+                    monitor: { url: `https://www.openstreetmap.org/?mlat=${fresh.lat}&mlon=${fresh.lon}`, title: 'Locația ta' },
+                  })
+                  return JSON.stringify({ lat: fresh.lat, lon: fresh.lon, shown_on_map: true })
                 }
                 return JSON.stringify({
                   error: 'location_unavailable',
-                  hint: 'Permisiunea de locație e refuzată sau nu există semnal — spune-i userului sincer și cere-i să activeze locația.',
+                  hint: 'Permisiunea de locație e refuzată sau nu există semnal — spune-i userului SINCER că nu ai locația și cere-i să activeze permisiunea. NU inventa un loc, NU folosi o locație implicită.',
                 })
               }
               // GPS DOAR LA NEVOIE, DAR REAL (Adrian, 26 iul): exact în
