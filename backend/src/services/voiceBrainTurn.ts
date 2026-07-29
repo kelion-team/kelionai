@@ -26,6 +26,9 @@ export interface VoiceBrainTurnDeps {
   history?: OrMessage[]
   /** Text difuzat pe măsură ce curge (pentru sinteză TTS incrementală). */
   onText?: (delta: string) => void
+  /** Costul REAL al turei (facturare pe voce) — orchestratorul îl acumulează pe
+   *  toate rundele; fără callback, costul escaladării s-ar pierde. */
+  onCost?: (usd: number) => void
 }
 
 // O TURĂ COMPLETĂ DE VOCE prin creierul unic. Întoarce textul de rostit.
@@ -42,5 +45,7 @@ export async function voiceBrainTurn(transcript: string, deps: VoiceBrainTurnDep
     deedGate: true,
     onText: deps.onText,
   })
+  // Costul real al escaladării (toate rundele) → facturare pe voce.
+  if (res.costUsd > 0) deps.onCost?.(res.costUsd)
   return res.text
 }
