@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listActiveBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 
@@ -71,5 +71,32 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
     void sendMail({ to: config.adminEmail, subject, html: body.replace(/\n/g, '<br>'), text: body }).catch(() => {})
     return reply.send({ ok: true })
+  })
+
+  // ── PROGRES LIVE (Etapa 4 autonomie, 29 iul) ────────────────────────────────
+  // Lucrătorul de pe VPS trimite AICI pasul curent (clonat → editez X → build →
+  // deschid PR...), pe măsură ce lucrează — oglinda lui /report, aceeași auth
+  // x-bridge-secret. NU schimbă statusul terminal (updateBuildJobProgress
+  // scrie doar pe joburi `running`). Astfel starea nu mai e o cutie neagră între
+  // „Preluat" și „Gata": monitorul o poate afișa, iar Kelion o poate NARA.
+  app.post<{ Body: { id?: number; progress?: string } }>('/api/constructor/progress', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    const id = Number(req.body?.id ?? 0)
+    const progress = String(req.body?.progress ?? '').trim()
+    if (!id || !progress) return reply.code(400).send({ error: 'bad_request' })
+    await updateBuildJobProgress(id, progress)
+    return reply.send({ ok: true })
+  })
+
+  // Joburile ACTIVE + pasul lor curent — pentru afișajul live pe monitor
+  // (sesiune admin; folosit de poller-ul din frontend, Etapa 4b).
+  app.get('/api/constructor/live', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const jobs = await listActiveBuildJobs()
+    return reply.send({
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, prUrl: j.prUrl, attempts: j.attempts })),
+    })
   })
 }

@@ -2115,7 +2115,9 @@ async function runTool(
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const jobs = await listBuildJobs(12)
       return JSON.stringify({
-        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+        // `progress` = pasul curent al constructorului (Etapa 4) — Kelion îl
+        // poate rosti („acum compilez", „deschid PR-ul") în loc de „lucrează…".
+        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
     }
     case 'system_health': {

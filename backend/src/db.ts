@@ -339,6 +339,11 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_build_jobs_status ON build_jobs (status, created_at);
+    -- PROGRES LIVE (Etapa 4 autonomie, 29 iul): pasul curent al constructorului
+    -- (clonat → editez X → build → deschid PR...) ca să apară pe monitor și ca
+    -- Kelion să-l poată NARA. Actualizat pe parcurs de POST /api/constructor/progress.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress TEXT;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -2808,6 +2813,7 @@ export interface BuildJob {
   prUrl: string | null
   tokens: number
   log: string | null
+  progress: string | null
   createdAt: string
   updatedAt: string
 }
@@ -2822,6 +2828,7 @@ interface BuildJobDbRow {
   pr_url: string | null
   tokens: string | number
   log: string | null
+  progress?: string | null
   created_at: Date
   updated_at: Date
 }
@@ -2837,6 +2844,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     prUrl: r.pr_url,
     tokens: Number(r.tokens),
     log: r.log,
+    progress: r.progress ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -2898,6 +2906,33 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
+    return r.rows.map(rowToBuildJob)
+  } catch {
+    return []
+  }
+}
+
+// PROGRES LIVE (Etapa 4): scrie pasul curent al constructorului. DOAR pe joburi
+// active (`running`) — nu suprascrie starea terminală a unui job gata/eșuat.
+export async function updateBuildJobProgress(id: number, progress: string): Promise<void> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
+  try {
+    await getPool().query(
+      `UPDATE build_jobs SET progress=$2, progress_at=now(), updated_at=now() WHERE id=$1 AND status='running'`,
+      [id, progress.slice(0, 500)],
+    )
+  } catch {
+    /* progresul e best-effort — nu oprește nimic dacă pică */
+  }
+}
+
+// Joburile ACTIVE (în coadă sau în lucru) — pentru afișajul live pe monitor.
+export async function listActiveBuildJobs(): Promise<BuildJob[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<BuildJobDbRow>(
+      `SELECT * FROM build_jobs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 10`,
+    )
     return r.rows.map(rowToBuildJob)
   } catch {
     return []
