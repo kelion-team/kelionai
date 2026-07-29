@@ -1152,6 +1152,15 @@ export async function setStripeCustomer(email: string, id: string): Promise<void
   }
 }
 
+// Garda de idempotență a plăților: un stripe_ref deja înregistrat NU se creditează
+// a doua oară. Apelată în interiorul unei tranzacții deschise (apelantul face
+// ROLLBACK dacă e true). Era copiată în cele 3 credite (top-up, vânzare, refund) —
+// o singură sursă aici (principiul permanent: unic, fără duplicate).
+async function billingRefSeen(client: pg.PoolClient, ref: string): Promise<boolean> {
+  const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [ref])
+  return (seen.rowCount ?? 0) > 0
+}
+
 /**
  * User top-up (Stripe). The user KEEPS `userShare` (75%) as spendable credit;
  * the remaining 25% is our profit, taken up front. Idempotent on stripeRef.
@@ -1169,8 +1178,7 @@ export async function topUpUser(
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
-    if ((seen.rowCount ?? 0) > 0) {
+    if (await billingRefSeen(client, stripeRef)) {
       await client.query('ROLLBACK')
       return false
     }
@@ -1375,8 +1383,7 @@ export async function creditSaleExact(
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [stripeRef])
-    if ((seen.rowCount ?? 0) > 0) {
+    if (await billingRefSeen(client, stripeRef)) {
       await client.query('ROLLBACK')
       return false
     }
@@ -1434,10 +1441,7 @@ export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> 
       await client.query('ROLLBACK')
       return false
     }
-    const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [
-      `${stripeRef}:refund`,
-    ])
-    if ((seen.rowCount ?? 0) > 0) {
+    if (await billingRefSeen(client, `${stripeRef}:refund`)) {
       await client.query('ROLLBACK')
       return false
     }
@@ -2683,15 +2687,23 @@ export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   }
 }
 
-/** Euclidean distance between two equal-length vectors. */
-export function vectorDistance(a: number[], b: number[]): number {
+// Nucleul comun al celor două distanțe (voce normalizată + față brută): suma
+// pătratelor diferențelor pe componente + lungimea comparată. Sursă unică — cele
+// două funcții diferă DOAR prin normalizarea finală (unic, fără duplicate).
+function sumSquaredDiff(a: number[], b: number[]): { sum: number; len: number } {
   const len = Math.min(a.length, b.length)
-  if (len === 0) return Infinity
   let sum = 0
   for (let i = 0; i < len; i++) {
     const d = (a[i] ?? 0) - (b[i] ?? 0)
     sum += d * d
   }
+  return { sum, len }
+}
+
+/** Euclidean distance between two equal-length vectors. */
+export function vectorDistance(a: number[], b: number[]): number {
+  const { sum, len } = sumSquaredDiff(a, b)
+  if (len === 0) return Infinity
   return Math.sqrt(sum / len)
 }
 
@@ -2755,13 +2767,8 @@ function rowToFaceprint(r: FaceprintDbRow): FaceprintRow {
 
 /** Distanță euclidiană BRUTĂ (nu normalizată) — convenția face-api, prag ~0.6. */
 export function faceDistance(a: number[], b: number[]): number {
-  const len = Math.min(a.length, b.length)
+  const { sum, len } = sumSquaredDiff(a, b)
   if (len === 0) return Infinity
-  let sum = 0
-  for (let i = 0; i < len; i++) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0)
-    sum += d * d
-  }
   return Math.sqrt(sum)
 }
 

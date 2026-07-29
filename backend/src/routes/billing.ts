@@ -29,16 +29,38 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     return null
   }
 
-  // Start a top-up: returns a Stripe Checkout URL to redirect the user to.
-  app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
+  // Preambulul comun al rutelor de plată: auth + Stripe configurat + suma +
+  // validarea top-up. Întoarce {user, amount} sau trimite deja răspunsul de eroare
+  // și dă null (apelantul se oprește). Cele două rute diferă doar prin ce creează
+  // după (Checkout vs PaymentIntent) — antetul era copiat. Sursă unică (unic, fără dup).
+  async function topUpPreamble(
+    req: FastifyRequest<{ Body: { amount?: number } }>,
+    reply: FastifyReply,
+  ): Promise<{ user: NonNullable<ReturnType<typeof getSessionUser>>; amount: number } | null> {
     const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    if (!config.stripe.secretKey) return reply.code(503).send({ error: 'stripe_not_configured' })
+    if (!user) {
+      reply.code(401).send({ error: 'unauthorized' })
+      return null
+    }
+    if (!config.stripe.secretKey) {
+      reply.code(503).send({ error: 'stripe_not_configured' })
+      return null
+    }
     const amount = Number(req.body?.amount ?? 10)
     const bad = await validateTopUp(user.email, amount)
-    if (bad) return reply.code(400).send({ error: bad })
+    if (bad) {
+      reply.code(400).send({ error: bad })
+      return null
+    }
+    return { user, amount }
+  }
+
+  // Start a top-up: returns a Stripe Checkout URL to redirect the user to.
+  app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
+    const pre = await topUpPreamble(req, reply)
+    if (!pre) return reply
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
-    const result = await createCheckout(user.email, user.name ?? '', amount, baseUrl)
+    const result = await createCheckout(pre.user.email, pre.user.name ?? '', pre.amount, baseUrl)
     if ('error' in result) return reply.code(502).send(result)
     return reply.send(result)
   })
@@ -47,13 +69,9 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // Returns { client_secret, payment_intent_id, amount, currency } for the
   // frontend to confirm with Stripe.js.
   app.post<{ Body: { amount?: number } }>('/api/billing/payment-intent', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    if (!config.stripe.secretKey) return reply.code(503).send({ error: 'stripe_not_configured' })
-    const amount = Number(req.body?.amount ?? 10)
-    const bad = await validateTopUp(user.email, amount)
-    if (bad) return reply.code(400).send({ error: bad })
-    const result = await createPaymentIntent(user.email, user.name ?? '', amount)
+    const pre = await topUpPreamble(req, reply)
+    if (!pre) return reply
+    const result = await createPaymentIntent(pre.user.email, pre.user.name ?? '', pre.amount)
     if ('error' in result) return reply.code(502).send(result)
     return reply.send(result)
   })

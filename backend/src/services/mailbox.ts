@@ -255,16 +255,22 @@ async function processOne(client: ImapFlow, uid: number, source: Buffer, already
   }
 }
 
-async function poll(): Promise<void> {
-  if (!mailEnabled() || running) return
-  running = true
-  const client = new ImapFlow({
+// Clientul IMAP configurat din env (host/port/secure/auth). Era copiat identic în
+// poll() și fetchRecentInbox() — o singură sursă (principiul permanent: unic, fără dup).
+function newImapClient(): ImapFlow {
+  return new ImapFlow({
     host: config.mail.imapHost,
     port: config.mail.imapPort,
     secure: true,
     auth: { user: config.mail.user, pass: config.mail.pass },
     logger: false,
   })
+}
+
+async function poll(): Promise<void> {
+  if (!mailEnabled() || running) return
+  running = true
+  const client = newImapClient()
   try {
     await client.connect()
     const lock = await client.getMailboxLock('INBOX')
@@ -348,13 +354,7 @@ function isValidEnvelopeDate(d: unknown): d is string | Date {
 
 export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
   if (!mailEnabled()) return []
-  const client = new ImapFlow({
-    host: config.mail.imapHost,
-    port: config.mail.imapPort,
-    secure: true,
-    auth: { user: config.mail.user, pass: config.mail.pass },
-    logger: false,
-  })
+  const client = newImapClient()
   const out: InboxLiveItem[] = []
   try {
     await client.connect()
