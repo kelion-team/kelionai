@@ -78,6 +78,7 @@ import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from '../services/adminTools.js'
+import { formatDeviceTime } from '../services/timeContext.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
@@ -1437,25 +1438,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     // Kelion's built-in sense of "now" — the client's real local date/time, so he
     // always knows today's date and the current time without being asked.
-    const nowIso = req.body?.now
-    if (typeof nowIso === 'string' && !Number.isNaN(Date.parse(nowIso))) {
-      const tzName = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : 'UTC'
-      let human: string
-      try {
-        human = new Date(nowIso).toLocaleString('en-GB', {
-          timeZone: tzName,
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      } catch {
-        human = new Date(nowIso).toUTCString()
-      }
+    // Ancora de timp — formatarea comună (services/timeContext.ts), fără duplicare.
+    const nowCtx = formatDeviceTime(req.body?.now, req.body?.tz)
+    if (nowCtx) {
       systemPrompt +=
-        `\n\nCURRENT DATE & TIME: right now it is ${human} (timezone ${tzName}). You ALWAYS know the current date and time — when the user directly asks what time or date it is, or if you know it, ANSWER with this exact value, confidently, never deny knowing it. Otherwise use it silently only when relevant (scheduling, "today", "tomorrow"). When you state a clock time, ALWAYS write it numerically (e.g. "15:04"), never spelled out in words. Just don't volunteer or narrate it unprompted (e.g. in greetings) when the user hasn't asked.`
+        `\n\nCURRENT DATE & TIME: right now it is ${nowCtx.human} (timezone ${nowCtx.tzName}). You ALWAYS know the current date and time — when the user directly asks what time or date it is, or if you know it, ANSWER with this exact value, confidently, never deny knowing it. Otherwise use it silently only when relevant (scheduling, "today", "tomorrow"). When you state a clock time, ALWAYS write it numerically (e.g. "15:04"), never spelled out in words. Just don't volunteer or narrate it unprompted (e.g. in greetings) when the user hasn't asked.`
     }
 
     // Owner-only (RESCRIS 25 iul — incident real: Adrian a cerut o reparație și

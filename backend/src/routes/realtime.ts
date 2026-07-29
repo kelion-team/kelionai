@@ -37,6 +37,7 @@ import {
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
 import { execSharedAdminTool } from '../services/adminTools.js'
+import { formatDeviceTime } from '../services/timeContext.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -130,26 +131,12 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // ANCORA DE TIMP (fix „bună seara" dimineața): vocea primea GPS-ul dar NU
       // ora — creierul de voce ghicea partea zilei. Injectăm data/ora reală a
       // dispozitivului, exact ca scrisul (chat.ts), ca salutul să urmeze ceasul.
+      // Formatarea comună (services/timeContext.ts) — aceeași sursă ca scrisul.
       let timeBlock = ''
-      const nowIso = req.body?.now
-      if (typeof nowIso === 'string' && !Number.isNaN(Date.parse(nowIso))) {
-        const tzName = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : 'UTC'
-        let human: string
-        try {
-          human = new Date(nowIso).toLocaleString('en-GB', {
-            timeZone: tzName,
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        } catch {
-          human = new Date(nowIso).toUTCString()
-        }
+      const nowCtx = formatDeviceTime(req.body?.now, req.body?.tz)
+      if (nowCtx) {
         timeBlock =
-          `\n\nDATA ȘI ORA CURENTĂ (reală, de pe dispozitivul utilizatorului): acum este ${human} (fus orar ${tzName}). ` +
+          `\n\nDATA ȘI ORA CURENTĂ (reală, de pe dispozitivul utilizatorului): acum este ${nowCtx.human} (fus orar ${nowCtx.tzName}). ` +
           `ȘTII MEREU data și ora exactă. Salutul și ORICE referire la partea zilei (bună dimineața/ziua/seara) urmează ACEASTĂ oră — NICIODATĂ ghicită. ` +
           `Când te întreabă cât e ceasul sau ce zi e, răspunzi cu această valoare, ora scrisă numeric (ex. „15:04").`
       }
