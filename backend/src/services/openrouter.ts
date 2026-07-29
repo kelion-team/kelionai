@@ -200,6 +200,26 @@ export function hasActionIntent(text: string): boolean {
   return ACTION_INTENT.test(text || '')
 }
 
+// CREIERUL OWNERULUI = AGENT PUTERNIC (regula de fier §14, AI-HANDOFF): pe drumul
+// ownerului modelul NU se cioantă pe gratuit. Alege cel mai bun model PLĂTIT cu
+// vedere+unelte din catalogul LIVE (deci ID garantat valid, nu inventat): preferă
+// Claude/Anthropic (creierul stabilit de owner), altfel OpenAI. null dacă în
+// catalog nu există niciun model plătit capabil (cade pe comportamentul curent).
+export async function bestPaidWorkModel(): Promise<string | null> {
+  // GARDĂ ANTI-SPARGERE: nu ruta pe PLĂTIT dacă punga OpenRouter e goală — apelul
+  // plătit ar pica (402/insufficient) și creierul s-ar rupe. Fără bani → null →
+  // rămâne pe free, dumb dar FUNCȚIONAL (incident 27 iul: soldul a ajuns la minus).
+  const bal = await getOpenRouterBalance().catch(() => null)
+  if (!bal || !bal.ok || bal.balance <= 0) return null
+  const cat = await getCatalog()
+  const paid = cat.work.filter(
+    (m) => (m.provider === 'anthropic' || m.provider === 'openai') && !m.id.endsWith(':free'),
+  )
+  if (!paid.length) return null
+  const claude = paid.find((m) => m.provider === 'anthropic')
+  return (claude ?? paid[0]).id
+}
+
 /** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
   const fallback =

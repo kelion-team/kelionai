@@ -46,7 +46,7 @@ import {
   listBuildJobs,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
@@ -139,7 +139,21 @@ async function selectedBrainModel(
   // EXECUTĂ, nu narează. „Mereu Fable 5" a fost scos: ardea creditul (OpenRouter
   // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
   // extremă.
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  const isOwner = roleFor(email) === 'admin'
+  const heavy = needsVision || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
+  // ── CREIERUL OWNERULUI = AGENT PUTERNIC, MEREU (regula de fier §14, AI-HANDOFF:
+  // „pe drumul ownerului, modelul E agentul... FĂRĂ clasificator care să-l coboare
+  // pe model ieftin"). Cauza „creierul plătit e prost ca cel free": ruta ownerului
+  // căzuse pe modele :free (gemma/nemotron/gemini-flash-free) → ignora ancora de
+  // timp, nu asculta. FIX: ownerul primește ÎNTOTDEAUNA modelul PLĂTIT capabil din
+  // catalogul live (ID garantat valid), respectând alegerea lui manuală (sel.work).
+  // Clasificatorul `heavy` rămâne DOAR pentru efortul de raționament (latență), NU
+  // ca să coboare modelul. Public/demo păstrează scara free (regula §5: costul demo
+  // nu se schimbă). Dacă în catalog nu există niciun model plătit, cade pe free.
+  if (isOwner) {
+    const ownerModel = sel.work ? await resolveModel('work', sel.work) : await bestPaidWorkModel()
+    if (ownerModel) return { model: ownerModel, heavy }
+  }
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
   // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
   // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
