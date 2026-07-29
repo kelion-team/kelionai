@@ -6,11 +6,22 @@ const runGoogleTool = vi.hoisted(() => vi.fn(async () => '{"ok":true}'))
 const listSource = vi.hoisted(() => vi.fn(async () => 'ARBORE'))
 const readSource = vi.hoisted(() => vi.fn(async () => 'FIȘIER'))
 const searchSource = vi.hoisted(() => vi.fn(async () => 'POTRIVIRE'))
+const dbTablesOverview = vi.hoisted(() => vi.fn(async () => 'TABELE'))
+const dbQuery = vi.hoisted(() => vi.fn(async () => 'REZULTAT'))
+const systemHealth = vi.hoisted(() => vi.fn(async () => 'SANATATE'))
 vi.mock('./services/google.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services/google.js')>()
   return { ...actual, runGoogleTool }
 })
 vi.mock('./services/sourceCode.js', () => ({ listSource, readSource, searchSource }))
+vi.mock('./db.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./db.js')>()
+  return { ...actual, dbTablesOverview, dbQuery }
+})
+vi.mock('./services/health.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./services/health.js')>()
+  return { ...actual, systemHealth }
+})
 
 import { voiceBrainTools, makeVoiceExecTool } from './services/voiceBrainTools.js'
 
@@ -29,12 +40,25 @@ describe('voiceBrainTools — uneltele + executorul decuplat al vocii (§6 pas 2
     expect(names).not.toContain('read_source')
   })
 
-  it('admin: Google + accesul la cod (list/read/search_source)', () => {
+  it('admin: Google + acces la cod + vede-și starea (DB, sănătate)', () => {
     const names = voiceBrainTools(true).map((t) => t.name)
     expect(names).toContain('web_search')
     expect(names).toContain('list_source')
     expect(names).toContain('read_source')
     expect(names).toContain('search_source')
+    expect(names).toContain('db_tables')
+    expect(names).toContain('db_query')
+    expect(names).toContain('system_health')
+  })
+
+  it('admin: DB + sănătatea merg la executorii decupla ți', async () => {
+    const exec = makeVoiceExecTool('TOK', true)
+    expect(await exec('db_tables', '{}')).toBe('TABELE')
+    expect(dbTablesOverview).toHaveBeenCalled()
+    expect(await exec('db_query', '{"sql":"select 1"}')).toBe('REZULTAT')
+    expect(dbQuery).toHaveBeenCalledWith('select 1')
+    expect(await exec('system_health', '{}')).toBe('SANATATE')
+    expect(systemHealth).toHaveBeenCalled()
   })
 
   it('executorul cheamă runGoogleTool pentru skill-uri Google, cu tokenul', async () => {
