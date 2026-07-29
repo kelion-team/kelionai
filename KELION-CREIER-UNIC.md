@@ -155,9 +155,11 @@ Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (
 | Audio pe căști Bluetooth (`setSinkId` + `devicechange`) | PR #516, LIVE (`9211629`); marker `setSinkId`+`devicechange` prezent în bundle |
 | §1 Definițiile uneltelor de introspecție/constructor mutate în sursa comună (`brainToolDefs`) — fără duplicare | PR #517, LIVE (`7dd3ac3`) |
 | §7 Tabelul de dovezi — fiecare funcție cu proba ei (`KELION-DOVEZI.md`) | PR #517, LIVE |
-| §4 Auto-instalarea dependențelor — creierul le adaugă singur prin constructor (package.json/Dockerfile → PR → rebuild), NU prin apt live arbitrar (decizia owner-ului) | această livrare |
+| §4 Auto-instalarea dependențelor — creierul le adaugă singur prin constructor (package.json/Dockerfile → PR → rebuild), NU prin apt live arbitrar (decizia owner-ului) | PR #518, LIVE (`9241b71`) |
+| §6 COMPLET — TOATE turele cu conținut trec prin creierul unic; modelul de voce e doar urechile+gura + acțiunile de dispozitiv (ordinul „fă-l complet") | această livrare |
 
-**RĂMAS:**
-- **§6 complet — TOATE turele de voce prin creierul unic** (nu doar cele grele): decizie de reglaj a owner-ului (mai viu vs. primul cuvânt mai rapid), apoi cablare.
-- Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (decizia owner-ului).
+**RĂMAS (cere acțiunea owner-ului, nu cod):**
+- Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (buton „Conectează Google").
+- **Testele LIVE ale owner-ului** — voce, cameră, GPS, email real: codul e livrat și dovedit; efectul pe dispozitivul lui îl confirmă el.
+- Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant.
 - Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant (nu mai e „model gratuit slab").
