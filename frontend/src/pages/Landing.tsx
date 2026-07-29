@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { AVATAR_ORBIT } from '../lib/avatarCamera'
 import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ContactModal from '../components/ContactModal'
@@ -120,15 +121,9 @@ export default function Landing({ error }: { error?: string | null }) {
           <Suspense fallback={null}>
             <AvatarModel />
           </Suspense>
-          <OrbitControls
-            enablePan={false}
-            enableZoom={false}
-            minPolarAngle={Math.PI / 2.3}
-            maxPolarAngle={Math.PI / 1.95}
-            minAzimuthAngle={-Math.PI / 60}
-            maxAzimuthAngle={Math.PI / 60}
-            target={[0, 0.7, 0]}
-          />
+          {/* Limitele camerei vin din sursa comună (lib/avatarCamera) — aceleași
+              pe landing și în aplicație, ca Kelion să fie încadrat identic. */}
+          <OrbitControls {...AVATAR_ORBIT} />
         </Canvas>
         <AvatarLoading />
         <div className="landing-hero-fade" />

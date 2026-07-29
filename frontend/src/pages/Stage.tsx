@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { AVATAR_ORBIT } from '../lib/avatarCamera'
 import AvatarModel from '../components/AvatarModel'
 import AvatarLoading from '../components/AvatarLoading'
 import ChatPanel from '../components/ChatPanel'
@@ -10,6 +11,7 @@ import CustomerSettings from '../components/CustomerSettings'
 import { WalletButton } from '../components/WalletButton'
 import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
+import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings } from '../lib/i18n'
 import {
@@ -49,6 +51,25 @@ function downloadContent(name: string, content: string, mime: string): void {
 // Vizor de cod/text pe monitor (Adrian, 27 iul): aduce conținutul fișierului
 // (cod, json, csv, log…) și-l afișează citibil, monospațiat. Fetch simplu; la
 // eșec (cross-origin / fișier privat) oferă linkul de deschidere.
+// ── Un document pe monitor, o singură dată (unic, fără duplicate) ────────────
+// PDF-ul (servit direct) și fișierele Office (prin vizorul online) se afișau prin
+// DOUĂ cadre identice — aceeași clasă, același fundal alb, aceeași raportare de
+// stare (`ok` / `error`, pe care Kelion o citește cu get_monitor). Difereau doar
+// prin `src`. Acum: o componentă, două apeluri — dacă se schimbă modul de
+// raportare a stării, nu mai poate rămâne o jumătate veche.
+function DocFrame({ title, src, taskId }: { title: string; src: string; taskId: string }): React.JSX.Element {
+  return (
+    <iframe
+      title={title}
+      src={src}
+      className="workspace-frame"
+      style={{ background: '#fff' }}
+      onLoad={() => setTaskStatus(taskId, 'ok')}
+      onError={() => setTaskStatus(taskId, 'error')}
+    />
+  )
+}
+
 function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
   const [text, setText] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
@@ -207,6 +228,23 @@ function safeFileName(title: string, ext: string): string {
   return `${base}.${ext}`
 }
 
+// Forma răspunsului de la /api/admin/brain-credit — numită, ca sondarea comună
+// (usePolledJson) s-o poată tipa.
+interface BrainCredit {
+    active: string | null
+    openrouter: {
+      ok: boolean
+      topup: string
+      // Soldul REAL, exact din contul OpenRouter (USD) — „punga lui Kelion".
+      balance?: number
+      low?: boolean
+      live?: boolean
+    }
+    // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
+    stripe?: { available: number; pending: number; currency: string } | null
+    pool: { loaded: number; remaining: number; spent: number; profit: number }
+  }
+
 export default function Stage({ user }: { user: User }) {
   // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
   // LIMBA UI (regula finală, Adrian 24 iul: „default ENGLEZĂ pentru toți; după
@@ -260,20 +298,7 @@ export default function Stage({ user }: { user: User }) {
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
   // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
   // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
-  const [brainCredit, setBrainCredit] = useState<{
-    active: string | null
-    openrouter: {
-      ok: boolean
-      topup: string
-      // Soldul REAL, exact din contul OpenRouter (USD) — „punga lui Kelion".
-      balance?: number
-      low?: boolean
-      live?: boolean
-    }
-    // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
-    stripe?: { available: number; pending: number; currency: string } | null
-    pool: { loaded: number; remaining: number; spent: number; profit: number }
-  } | null>(null)
+  const [brainCredit, setBrainCredit] = useState<BrainCredit | null>(null)
   // Starea lacătului la intrare + deblocarea venită din voce (amprenta
   // potrivită → realtimeVoice emite `kelion:admin-unlock`).
   useEffect(() => {
@@ -318,24 +343,11 @@ export default function Stage({ user }: { user: User }) {
       })
       .catch(() => setUnlockErr('Eroare de rețea — reîncearcă.'))
   }
-  useEffect(() => {
-    if (user.role !== 'admin') return
-    let alive = true
-    const load = (): void => {
-      fetch('/api/admin/brain-credit', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j && j.openrouter && j.pool) setBrainCredit(j)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 30_000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [user.role])
+  // Sondare din sursa comună (lib/usePolledJson) — garda `alive` și oprirea
+  // intervalului sunt garantate acolo, o singură dată.
+  usePolledJson<BrainCredit>('/api/admin/brain-credit', user.role === 'admin', (j) => {
+    if (j && j.openrouter && j.pool) setBrainCredit(j)
+  })
   // ACCES REAL LA APLICAȚIE PRIN VOCE/CHAT (Adrian, 24 iul: „Kelion trebuie să
   // poată intra în orice tab al aplicației, real"). Kelion cheamă unealta
   // `open_app_view` → ChatPanel emite `kelion:navigate` → aici deschidem chiar
@@ -378,24 +390,9 @@ export default function Stage({ user }: { user: User }) {
   // CREDIT USER pe CERCUL-logo (Adrian, 13 iul): clientul își dă seama din cerc
   // — verde = are credit, ROȘU PULSÂND = i s-a terminat creditul. Doar clienți.
   const [userCreditOut, setUserCreditOut] = useState<boolean | null>(null)
-  useEffect(() => {
-    if (user.role !== 'customer') return
-    let alive = true
-    const load = (): void => {
-      fetch('/api/billing/balance', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (alive && j && typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 30_000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [user.role])
+  usePolledJson<{ credits?: number }>('/api/billing/balance', user.role === 'customer', (j) => {
+    if (typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
+  })
   // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
   // colțului, editate cu dublu-click pe avatar. SALVATĂ PE SERVER per
   // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
@@ -777,24 +774,14 @@ export default function Stage({ user }: { user: User }) {
                   </div>
                 ) : task.url && task.kind === 'pdf' ? (
                   // PDF: vizorul nativ al browserului, în cadru.
-                  <iframe
-                    title={task.title}
-                    src={task.url}
-                    className="workspace-frame"
-                    style={{ background: '#fff' }}
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
-                  />
+                  <DocFrame title={task.title} src={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'office' ? (
                   // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
                   // să fie la un URL public — cele servite de kelionai.app sunt).
-                  <iframe
+                  <DocFrame
                     title={task.title}
                     src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(task.url)}`}
-                    className="workspace-frame"
-                    style={{ background: '#fff' }}
-                    onLoad={() => setTaskStatus(task.id, 'ok')}
-                    onError={() => setTaskStatus(task.id, 'error')}
+                    taskId={task.id}
                   />
                 ) : task.url && task.kind === 'textfile' ? (
                   // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
@@ -888,16 +875,9 @@ export default function Stage({ user }: { user: User }) {
         <Suspense fallback={null}>
           <AvatarModel />
         </Suspense>
-        <OrbitControls
-          enablePan={false}
-          enableZoom={false}
-          minPolarAngle={Math.PI / 2.3}
-          maxPolarAngle={Math.PI / 1.95}
-          // Kelion may only be turned ±3° around its axis (left/right).
-          minAzimuthAngle={-Math.PI / 60}
-          maxAzimuthAngle={Math.PI / 60}
-          target={[0, 0.7, 0]}
-        />
+        {/* Limitele camerei vin din sursa comună (lib/avatarCamera) — aceleași
+            pe landing și în aplicație, ca Kelion să fie încadrat identic. */}
+        <OrbitControls {...AVATAR_ORBIT} />
       </Canvas>
       <AvatarLoading />
       </div>
