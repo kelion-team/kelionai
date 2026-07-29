@@ -160,7 +160,15 @@ Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (
 | Creierul NU mai e FORȚAT să cheme o unealtă la orice verb — ascultă cerința, decide singur (cauza „face ce vrea el, hardcodat"); poarta faptei rămâne plasa | PR #520, LIVE (`f06486c`) |
 | CALEA AUTONOMIEI COMPLETĂ PE VOCE — vocea are acum aceleași unelte ca scrisul (repo_write/open_pr/merge_pr, run_runbook/status/log, request_repair): de la cererea ta până la deploy final, pe toate rutele | această livrare |
 
-**RĂMAS (cere acțiunea owner-ului, nu cod):**
-- Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (buton „Conectează Google").
-- **Testele LIVE ale owner-ului** — voce, cameră, GPS, email real: codul e livrat și dovedit; efectul pe dispozitivul lui îl confirmă el.
-- Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant (nu mai e „model gratuit slab").
+**§4 CREIERUL PLĂTIT — CORECȚIE DE ADEVĂR (30 iul, LIVE `8a5e32e`):**
+| Ce | Dovada |
+|---|---|
+| **Minciună corectată:** intrarea veche zicea „owner-ul a setat un model PLĂTIT performant". FALS în practică: chiar dacă env-ul era setat, ruta ownerului **cădea pe modele `:free`** (gemma-4-26b / nemotron-nano / gemini-flash-free) prin override-ul `geminiWork` + `resolveModel('work', null)` la orchestrator. De-aia „creierul plătit era prost ca free" — chiar ERA free. §4 (a raționa) era rupt, nu §3. | Owner a testat live: oră greșită după 2 corecții, vreme→Abingdon (IP), „nu ascultă" |
+| **FIX:** `bestPaidWorkModel()` (openrouter.ts) — ownerul primește ÎNTOTDEAUNA cel mai bun model PLĂTIT cu vedere+unelte din catalogul LIVE (preferă Claude/Anthropic), pe chat ȘI voce (§6). Gardă anti-spargere: punga goală → rămâne free funcțional. Public/demo NEATINSE (§5 cost demo). | PR #527, LIVE `8a5e32e`; `/api/version` 16b4a41→8a5e32e + health 200 |
+| **Principiul permanent unic-fără-duplicate:** clone reale scoase (openrouter/stripe/google/db/auth/... + module comune githubApi/sse/clientIp), jscpd **50→16** (1.51%→0.59%). Cele 16 rămase sunt inevitabile (tipuri de contract backend↔frontend, semnături de interfață, CSS/JSX) — explicat, NU forțat. | PR #527, LIVE; `npx jscpd` la fiecare PR (CI) |
+
+**RĂMAS (onest — NU „gata"):**
+- **Testul LIVE al owner-ului pe creierul plătit:** dă-i o sarcină de RAȚIONAMENT + mai mulți pași (§4), nu „cât e ceasul" (aia e podeaua/§3). Se confirmă că gândește DOAR pe rezultat.
+- **Dependențe reale ale locației/creierului plătit:** (1) sold pe OpenRouter — punga goală ține creierul pe free; (2) permisiunea GPS din browser — refuzată → cade pe IP (Abingdon). Astea NU le repară modelul; se verifică separat.
+- Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google.
+- Restul rândurilor din §2: fiecare are nevoie de proba LIVE a owner-ului pentru bifă.
