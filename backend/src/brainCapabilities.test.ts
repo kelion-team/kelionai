@@ -8,6 +8,8 @@ import {
   dormantOnChat,
 } from './services/brainCapabilities.js'
 import { VOICE_TOOL_NAMES } from './services/realtime.js'
+import { googleTools } from './services/google.js'
+import { RUNBOOKS } from './services/runbooks.js'
 
 // PAZNICUL DE COMPLETITUDINE (CREIER UNIC §5). Adrian: „dacă nu înmagazinează
 // REAL tot ce are softul, nu are rost". Testul apără sursa unică: să rămână
@@ -41,6 +43,23 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     expect(dinRegistru).toEqual(canonic)
     // VOICE_TOOL_NAMES (realtime.ts) derivă din registru → trebuie să fie identic.
     expect([...VOICE_TOOL_NAMES].sort()).toEqual(canonic)
+  })
+
+  // COMPLETITUDINE FAȚĂ DE REALITATE (§5): registrul nu se verifică doar pe el
+  // însuși, ci față de SURSELE REALE. Dacă în google.ts apare/dispare un skill
+  // fără să atingă registrul, testul cade — creierul nu poate avea o rută
+  // ne-înregistrată, nici registrul o rută inexistentă.
+  it('categoria google din registru == skill-urile Google REALE (google.ts)', () => {
+    const realGoogle = googleTools.map((t) => t.name).sort()
+    const registruGoogle = CAPABILITIES.filter((c) => c.category === 'google').map((c) => c.name).sort()
+    expect(registruGoogle).toEqual(realGoogle)
+  })
+
+  it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {
+    // Cele 8 runbook-uri se cheamă prin unealta run_runbook — care TREBUIE să
+    // existe în registru cât timp există runbook-uri reale.
+    expect(Object.keys(RUNBOOKS).length).toBeGreaterThan(0)
+    expect(allCapabilityNames()).toContain('run_runbook')
   })
 
   // STAREA MĂSURATĂ AZI — orice schimbare a suprafeței creierului trebuie să treacă
