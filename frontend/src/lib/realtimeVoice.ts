@@ -611,7 +611,16 @@ export async function startRealtimeVoice(
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       signal,
-      body: JSON.stringify({ sdp: pc.localDescription?.sdp ?? '', language: opts.language, coords: opts.coords }),
+      // ANCORA DE TIMP (fix „bună seara" dimineața): vocea primea GPS-ul dar NU
+      // ora — creierul de voce ghicea partea zilei. Trimitem ora reală + fusul
+      // dispozitivului, exact ca scrisul, ca salutul să urmeze ceasul adevărat.
+      body: JSON.stringify({
+        sdp: pc.localDescription?.sdp ?? '',
+        language: opts.language,
+        coords: opts.coords,
+        now: new Date().toISOString(),
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
     })
     if (!res.ok) {
       const note = res.status === 401 ? 'trebuie să fii logat' : `realtime ${res.status}`
