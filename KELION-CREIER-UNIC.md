@@ -167,6 +167,16 @@ Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (
 | **FIX:** `bestPaidWorkModel()` (openrouter.ts) — ownerul primește ÎNTOTDEAUNA cel mai bun model PLĂTIT cu vedere+unelte din catalogul LIVE (preferă Claude/Anthropic), pe chat ȘI voce (§6). Gardă anti-spargere: punga goală → rămâne free funcțional. Public/demo NEATINSE (§5 cost demo). | PR #527, LIVE `8a5e32e`; `/api/version` 16b4a41→8a5e32e + health 200 |
 | **Principiul permanent unic-fără-duplicate:** clone reale scoase (openrouter/stripe/google/db/auth/... + module comune githubApi/sse/clientIp), jscpd **50→16** (1.51%→0.59%). Cele 16 rămase sunt inevitabile (tipuri de contract backend↔frontend, semnături de interfață, CSS/JSX) — explicat, NU forțat. | PR #527, LIVE; `npx jscpd` la fiecare PR (CI) |
 
+**§1 „CE POATE SCRISUL, POATE ȘI VOCEA" — ÎNCHIS (30 iul, LIVE `4442d2b`):**
+| Ce | Dovada |
+|---|---|
+| **Golul măsurat:** registrul avea 66 capabilități pe scris și doar **31 pe voce** → **38 adormite**. Cauza: sesiunea OpenAI Realtime e plafonată la 31 de unelte — dar plafonul se aplică DOAR listei directe a modelului de voce; creierul ESCALADAT (același `runOrchestrator`, §6) nu are limita asta, și nimeni nu-i dăduse uneltele. | `dormantOnVoice()` din registru, măsurat înainte/după |
+| **Google complet pe voce** (`read_email`, `delete_calendar_event`, `complete_task`, `read_drive_file`) — executate cu `runGoogleTool` pe tokenul userului, exact ca la scris | PR #529, LIVE `93d5e0e` |
+| **Unelte legate de user** (`list_updates`, `read_inbox`, `server_logs`, `get_real_cost`, `list_memories`, `forget_memory`, `log_unsupported_request`) — executor comun NOU `execUserScopedTool`, sursă unică folosită de chat ȘI de voce | PR #529, LIVE `93d5e0e` |
+| **Browserul live pe voce (9 unelte)** — definițiile erau LOCALE în `chat.ts` (deci vocea nu avea cum să le ceară); mutate în `brainToolDefs`, executor unic `runBrowserTool`, screenshot pe monitor prin câmpul `screen` al răspunsului `ask_brain` | PR #530, LIVE `4442d2b` |
+| **`show_document` + `propose_tool` pe voce** | PR #530, LIVE `4442d2b` |
+| **REZULTAT: adormite pe voce 38 → 1.** Vocea ajunge la **68 din 69** capabilități (scrisul: 66). Singura rămasă: `prepare_promo_clip` — cere butonul Rec din client, e legată fizic de interfață. | registru + paznicul §5, 74/74 teste |
+
 **RĂMAS (onest — NU „gata"):**
 - **Testul LIVE al owner-ului pe creierul plătit:** dă-i o sarcină de RAȚIONAMENT + mai mulți pași (§4), nu „cât e ceasul" (aia e podeaua/§3). Se confirmă că gândește DOAR pe rezultat.
 - **Dependențe reale ale locației/creierului plătit:** (1) sold pe OpenRouter — punga goală ține creierul pe free; (2) permisiunea GPS din browser — refuzată → cade pe IP (Abingdon). Astea NU le repară modelul; se verifică separat.
