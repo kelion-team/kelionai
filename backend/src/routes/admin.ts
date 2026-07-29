@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
+import { pollVisitorChat } from './demo.js' // poll conv vizitator din sursa comună
 import {
   listAllTransactions,
   listUsers,
@@ -19,7 +20,6 @@ import {
   listContactMessages,
   markLeadContacted,
   listVisitorConvos,
-  getVisitorMessages,
   addVisitorMessage,
   getDemoStats,
   getUserActivity,
@@ -607,10 +607,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
-      const after = Number(req.query?.after ?? 0) || 0
-      if (!conv) return reply.code(400).send({ error: 'bad_request' })
-      return reply.send({ messages: await getVisitorMessages(conv, after) })
+      // Corpul e comun cu ruta publică (sursă unică în demo.ts); aici doar poarta
+      // de admin de mai sus e în plus.
+      return pollVisitorChat(req, reply)
     },
   )
 

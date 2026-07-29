@@ -1,6 +1,7 @@
 import { saveWorkOrder, loadKv, saveKv } from '../db.js'
 import { sendMail } from './mail.js'
 import { config } from '../config.js'
+import { REPO, ghToken, gh as ghFetch } from './githubApi.js' // GitHub din sursa UNICĂ
 
 // ── MÂINILE LUI KELION PE OPERAȚIUNI — FĂRĂ RESTRICȚII (Adrian, 25 iul:
 // „ridici absolut toate restricțiile lui Kelion — decizia mea, nu a ta") ─────
@@ -16,8 +17,9 @@ import { config } from '../config.js'
 // sau blocări aici fără ordinul lui Adrian. Singura „limită" rămasă e fizică:
 // fără GITHUB_TOKEN în env, GitHub refuză — răspundem clar, nu improvizăm.
 
-const REPO = 'kelion-team/kelionai'
-const API = `https://api.github.com/repos/${REPO}`
+// Apelul GitHub aici păstrează timeout-ul de 15s (dispatch/jurnale) — wrapper
+// de o linie peste sursa comună; REPO + ghToken vin tot de acolo.
+const gh = (path: string, init?: RequestInit): Promise<Response> => ghFetch(path, init, 15_000)
 
 export interface Runbook {
   workflow: string
@@ -69,23 +71,6 @@ export function validateRunbook(
   const rb = RUNBOOKS[name]
   if (!rb) return { ok: false, error: 'unknown_runbook', known: Object.keys(RUNBOOKS) }
   return { ok: true, rb }
-}
-
-function ghToken(): string {
-  return (process.env.GITHUB_TOKEN ?? '').trim()
-}
-
-async function gh(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${ghToken()}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init?.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
 }
 
 // ── COMANDA DE STOP a lui Adrian (nu e restricție — e întrerupătorul LUI) ────

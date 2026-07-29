@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getSessionUser } from '../session.js'
 import {
   logVisit,
@@ -100,6 +100,30 @@ function parseUa(ua: string): { browser: string; os: string; device: string; isB
   return { browser, os, device, isBot }
 }
 
+// IP-ul REAL al vizitatorului în spatele Cloudflare: cf-connecting-ip (XFF dă IP-ul
+// edge-ului CF, comun multor vizitatori — rău pentru geo ȘI anti-reuse). Preferă
+// antetele real-client, cade pe XFF apoi req.ip. Era copiat în demo (×2) și chat
+// (services→routes) — o singură sursă exportată (principiul permanent: unic, fără dup).
+export function clientIp(req: FastifyRequest): string {
+  const hdr = (name: string): string =>
+    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
+  return hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+}
+
+// Poll-ul conversației vizitator↔admin: aceleași conv/after + validare + răspuns.
+// Folosit de ruta PUBLICĂ (/api/visitor-chat/poll, aici) și de cea de ADMIN
+// (/api/admin/visitor-chat, care adaugă doar poarta de admin înainte). Sursă
+// unică (principiul permanent: unic, fără duplicate).
+export async function pollVisitorChat(
+  req: FastifyRequest<{ Querystring: { conv?: string; after?: string } }>,
+  reply: FastifyReply,
+): Promise<unknown> {
+  const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
+  const after = Number(req.query?.after ?? 0) || 0
+  if (!conv) return reply.code(400).send({ error: 'bad_request' })
+  return reply.send({ messages: await getVisitorMessages(conv, after) })
+}
+
 // Build the full visitor profile for one request: real IP (Cloudflare-aware),
 // geo, browser/OS/device, language, referrer, bot flag. Shared by the visit
 // beacon and the demo start.
@@ -107,12 +131,7 @@ async function visitorProfile(
   req: FastifyRequest,
   referrer: string,
 ): Promise<{ ip: string; visit: DemoVisit }> {
-  // Behind Cloudflare, the REAL visitor IP is in cf-connecting-ip (x-forwarded-for
-  // gives the CF edge IP, which many visitors share — bad for geo AND for the
-  // per-IP anti-reuse). Prefer the real-client headers, fall back to XFF.
-  const hdr = (name: string): string =>
-    ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-  const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+  const ip = clientIp(req)
   const ua = (req.headers['user-agent'] as string | undefined) ?? ''
   const lang = ((req.headers['accept-language'] as string | undefined) ?? '').split(',')[0]?.trim() ?? ''
   const { browser, os, device, isBot } = parseUa(ua)
@@ -138,10 +157,7 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { fp?: string } }>('/api/visit/ping', async (req, reply) => {
     const fp = typeof req.body?.fp === 'string' ? req.body.fp.slice(0, 128) : ''
     const email = getSessionUser(req)?.email ?? ''
-    const hdr = (name: string): string =>
-      ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-    const ip =
-      hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+    const ip = clientIp(req)
     const touched = await touchVisit(fp, ip, email)
     if (!touched) {
       const { ip: fullIp, visit } = await visitorProfile(req, '')
@@ -179,11 +195,6 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
     '/api/visitor-chat/poll',
-    async (req, reply) => {
-      const conv = typeof req.query?.conv === 'string' ? req.query.conv : ''
-      const after = Number(req.query?.after ?? 0) || 0
-      if (!conv) return reply.code(400).send({ error: 'bad_request' })
-      return reply.send({ messages: await getVisitorMessages(conv, after) })
-    },
+    (req, reply) => pollVisitorChat(req, reply),
   )
 }

@@ -335,22 +335,33 @@ export async function crawlSite(
   return { pages }
 }
 
-export async function browserClick(
+// Rutinele care ACȚIONEAZĂ pe pagină (click/type) au același schelet: sesiune
+// validă → acțiunea în try/catch (element_not_found) → așteaptă încărcarea +
+// 300ms → snapshot. Doar `act` diferă. Sursă unică (unic, fără duplicate).
+async function withPageAction(
   email: string,
   baseUrl: string,
-  index: number,
+  act: (page: Page) => Promise<void>,
 ): Promise<BrowserResult> {
   const session = sessions.get(email)
   if (!session) return { error: 'no_session' }
   session.lastUsed = Date.now()
   try {
-    await session.page.click(`[data-kelion-idx="${index}"]`, { timeout: 5000 })
+    await act(session.page)
   } catch {
     return { error: 'element_not_found' }
   }
   await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
   await session.page.waitForTimeout(300)
   return snapshot(session.page, baseUrl)
+}
+
+export async function browserClick(
+  email: string,
+  baseUrl: string,
+  index: number,
+): Promise<BrowserResult> {
+  return withPageAction(email, baseUrl, (page) => page.click(`[data-kelion-idx="${index}"]`, { timeout: 5000 }))
 }
 
 export async function browserType(
@@ -360,19 +371,11 @@ export async function browserType(
   text: string,
   submit: boolean,
 ): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
   const sel = `[data-kelion-idx="${index}"]`
-  try {
-    await session.page.fill(sel, text, { timeout: 5000 })
-    if (submit) await session.page.press(sel, 'Enter')
-  } catch {
-    return { error: 'element_not_found' }
-  }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl)
+  return withPageAction(email, baseUrl, async (page) => {
+    await page.fill(sel, text, { timeout: 5000 })
+    if (submit) await page.press(sel, 'Enter')
+  })
 }
 
 export async function browserRead(email: string, baseUrl: string): Promise<BrowserResult> {

@@ -46,7 +46,7 @@ import {
   listBuildJobs,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
@@ -55,9 +55,9 @@ import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
-import { checkLang, detectLang, trackSpeechLang } from '../services/lang.js'
+import { checkLang, detectLang, trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, type GestureLabel } from '../services/commands.js'
-import { geoLookupCached } from './demo.js'
+import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
@@ -70,6 +70,7 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
+  type BrowserResult,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -138,7 +139,21 @@ async function selectedBrainModel(
   // EXECUTĂ, nu narează. „Mereu Fable 5" a fost scos: ardea creditul (OpenRouter
   // ajuns la minus pe 27 iul) și nu asta a cerut. Vârful doar pe dificultate
   // extremă.
-  const heavy = needsVision || difficulty >= ESCALATE_AT || (roleFor(email) === 'admin' && hasActionIntent(text))
+  const isOwner = roleFor(email) === 'admin'
+  const heavy = needsVision || difficulty >= ESCALATE_AT || (isOwner && hasActionIntent(text))
+  // ── CREIERUL OWNERULUI = AGENT PUTERNIC, MEREU (regula de fier §14, AI-HANDOFF:
+  // „pe drumul ownerului, modelul E agentul... FĂRĂ clasificator care să-l coboare
+  // pe model ieftin"). Cauza „creierul plătit e prost ca cel free": ruta ownerului
+  // căzuse pe modele :free (gemma/nemotron/gemini-flash-free) → ignora ancora de
+  // timp, nu asculta. FIX: ownerul primește ÎNTOTDEAUNA modelul PLĂTIT capabil din
+  // catalogul live (ID garantat valid), respectând alegerea lui manuală (sel.work).
+  // Clasificatorul `heavy` rămâne DOAR pentru efortul de raționament (latență), NU
+  // ca să coboare modelul. Public/demo păstrează scara free (regula §5: costul demo
+  // nu se schimbă). Dacă în catalog nu există niciun model plătit, cade pe free.
+  if (isOwner) {
+    const ownerModel = sel.work ? await resolveModel('work', sel.work) : await bestPaidWorkModel()
+    if (ownerModel) return { model: ownerModel, heavy }
+  }
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
   // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
   // (work), care VEDE. Altfel poza s-ar pierde în drum spre „geniul orb".
@@ -959,27 +974,9 @@ DEED RULE (the owner's law, 27 Jul — saying is NOT doing): NEVER state that yo
 
 AGENT DOCTRINE (be a fluid mind, not a throttled menu — the owner, 27 Jul): you ARE a capable reasoning agent with a full set of tools. On any real request, do not stop at one shallow step. THINK it through, PLAN the concrete steps, then ACT them out with your tools in sequence, VERIFY each result actually happened (read it back — get_monitor, constructor_status, read_source, db_query), and CONTINUE until the goal is genuinely done or you hit a real blocker you must report. Chain tools freely across turns; use source-reading, the database, the constructor, runbooks, the monitor, Google — whatever the task needs — as natural extensions of your reasoning, without waiting to be told which one. Prefer doing over describing. When something fails, diagnose and try another way rather than giving up. Be proactive: if you notice a problem while doing the task, surface it and offer to fix it. Flow — reason, act, check, finish — never a half-answer that leaves the owner to push you to the next step.`
 
-// Human language names for the language lock — the brain obeys an explicit language
-// name far more reliably than a bare locale code.
-const LANG_NAMES: Record<string, string> = {
-  ro: 'Romanian',
-  en: 'English',
-  fr: 'French',
-  es: 'Spanish',
-  pt: 'Portuguese',
-  it: 'Italian',
-  de: 'German',
-  nl: 'Dutch',
-  pl: 'Polish',
-  ru: 'Russian',
-  uk: 'Ukrainian',
-  tr: 'Turkish',
-  ar: 'Arabic',
-  zh: 'Chinese',
-  ja: 'Japanese',
-  ko: 'Korean',
-  hi: 'Hindi',
-}
+// Numele de limbi (pentru blocarea limbii — creierul ascultă un NUME explicit
+// mult mai fiabil decât un cod de locale) vin din sursa UNICĂ `LANG_LABELS`
+// (services/lang.ts). Aici era o copie identică — eliminată (unic, fără duplicate).
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -1287,11 +1284,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
-    // A device command (camera / monitor tabs): answer instantly — {device}
-    // control frame the client executes verbatim, plus a short ack — with NO
-    // model call. Same stream shape as a normal turn ({turn} receipt first) so
-    // the delivery check mark and the resume path still work.
-    if (deviceCmd) {
+    // Comandă instantanee (device sau gesture): răspuns pe loc, FĂRĂ apel la
+    // model — un cadru de control {device|gesture} pe care clientul îl execută
+    // verbatim, plus un ack scurt. Aceeași formă de stream ca o tură normală
+    // (chitanța {turn} întâi) ca bifa de livrare și reluarea să meargă. Cele două
+    // erau blocuri identice — o singură sursă aici (unic, fără duplicate).
+    const instantCommand = (frameKey: 'device' | 'gesture', value: unknown, ack: string): void => {
       reply.hijack()
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -1300,40 +1298,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       })
       const cmdTurnId = randomUUID()
       startTurn(user.email, cmdTurnId)
-      const ack = deviceAck(deviceCmd, ro)
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
-        `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
+        `${CTRL}${JSON.stringify({ [frameKey]: value })}${CTRL}` +
         ack
       reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
       finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
       reply.raw.end()
-      return
     }
 
-    // A gesture command: interpreted on the server, answered instantly with a
-    // {gesture} control frame for the avatar — no model call, full speed.
+    // Camera / tab-urile monitorului: cadru {device}.
+    if (deviceCmd) {
+      instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
+      return
+    }
+    // Gest pentru avatar, interpretat pe server: cadru {gesture}.
     if (gestureCmd) {
-      reply.hijack()
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-      })
-      const cmdTurnId = randomUUID()
-      startTurn(user.email, cmdTurnId)
-      const ack = gestureAck(gestureCmd, ro)
-      const payload =
-        `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
-        `${CTRL}${JSON.stringify({ gesture: gestureCmd })}${CTRL}` +
-        ack
-      reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
-      finishTurn(user.email, cmdTurnId)
-      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
-      if (ack) void saveMessage(user.email, 'assistant', ack)
-      reply.raw.end()
+      instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
       return
     }
 
@@ -1373,7 +1356,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // was resolved above. Using the account locale is why short/ambiguous
     // messages used to get answered in English.
     const langBase = userLang.toLowerCase().split('-')[0]
-    const langName = LANG_NAMES[langBase]
+    const langName = LANG_LABELS[langBase]
     // Two tiers. ESTABLISHED (a saved speech preference): absolute lock — that
     // language and nothing else, so tool results can never drift it (the
     // Portuguese-tickets bug). NOT established (new visitor / free trial): the
@@ -1425,9 +1408,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // first turn racing the browser's fix) — fall back to a city-level guess
       // from the request IP (same lookup the visitor-analytics beacon uses) so
       // Kelion is never left with zero location awareness.
-      const hdr = (name: string): string =>
-        ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
-      const ip = hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
+      const ip = clientIp(req)
       const geo = geoLookupCached(ip)
       if (geo && (geo.city || geo.country)) {
         const where = [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
@@ -2020,6 +2001,18 @@ async function runTool(
   // nimic" — fără urma asta, diagnosticul a cerut interogarea bazei de date).
   console.log(`[tool] ${block.name} (${isAdmin ? 'admin' : 'user'})`)
 
+  // Coada COMUNĂ a tuturor acțiunilor de browser (open/click/type/read/back/
+  // scroll/key/click_at): pe succes trimite pe monitor SCREENSHOT-ul servit local
+  // (embeddabil — nu URL-ul extern pe care iframe-ul îl refuza, audit 24 iul P1-4),
+  // apoi întoarce rezultatul brut. Era copiată în 8 cazuri; aici o singură dată
+  // (principiul permanent: unic, fără duplicate).
+  const browserResult = (result: BrowserResult): string => {
+    if (!('error' in result)) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+    }
+    return JSON.stringify(result)
+  }
+
   // Uneltele admin PARTAJATE (chat ∩ voce) — dispatch UNIC, comun cu vocea
   // (services/adminTools.ts). Fără duplicare (§1 unicitate / audit risc #4):
   // extragerea argumentelor + apelul trăiesc într-un singur loc, nu copiate în
@@ -2177,96 +2170,28 @@ async function runTool(
       return JSON.stringify({ shown: true, url: imageUrl })
     }
 
+    // Cele 8 acțiuni de browser: apelul diferă, coada e comună (browserResult —
+    // vezi nota din capul lui runTool). BROWSER VIZIBIL (audit 24 iul, P1-4):
+    // monitorul primește SCREENSHOT-ul servit local (embeddabil), nu URL-ul extern.
     case 'browser_open': {
       const url = String(args.url ?? '')
       if (!url) return JSON.stringify({ error: 'no_url' })
-      const result = await browserOpen(email, baseUrl, url)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
+      return browserResult(await browserOpen(email, baseUrl, url))
     }
-    case 'browser_click': {
-      const result = await browserClick(email, baseUrl, Number(args.index ?? 0))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_type': {
-      const result = await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_read': {
-      const result = await browserRead(email, baseUrl)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_back': {
-      const result = await browserBack(email, baseUrl)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_scroll': {
-      const result = await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down')
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_key': {
-      const result = await browserKey(email, baseUrl, String(args.key ?? ''))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_click_at': {
-      const result = await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
+    case 'browser_click':
+      return browserResult(await browserClick(email, baseUrl, Number(args.index ?? 0)))
+    case 'browser_type':
+      return browserResult(await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit)))
+    case 'browser_read':
+      return browserResult(await browserRead(email, baseUrl))
+    case 'browser_back':
+      return browserResult(await browserBack(email, baseUrl))
+    case 'browser_scroll':
+      return browserResult(await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down'))
+    case 'browser_key':
+      return browserResult(await browserKey(email, baseUrl, String(args.key ?? '')))
+    case 'browser_click_at':
+      return browserResult(await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0)))
     case 'browser_close': {
       await browserClose(email)
       // Browserul s-a închis → curăță monitorul (url gol = ecran liber).

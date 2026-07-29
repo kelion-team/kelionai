@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { readSSE } from './sse.js'
 
 // ── MODELE SELECTABILE — OpenRouter (o singură cheie pentru tot creierul) ─────
 // O cheie OpenRouter dă acces la GPT/Gemini/Claude. Catalogul se ia LIVE și se
@@ -199,6 +200,26 @@ export function hasActionIntent(text: string): boolean {
   return ACTION_INTENT.test(text || '')
 }
 
+// CREIERUL OWNERULUI = AGENT PUTERNIC (regula de fier §14, AI-HANDOFF): pe drumul
+// ownerului modelul NU se cioantă pe gratuit. Alege cel mai bun model PLĂTIT cu
+// vedere+unelte din catalogul LIVE (deci ID garantat valid, nu inventat): preferă
+// Claude/Anthropic (creierul stabilit de owner), altfel OpenAI. null dacă în
+// catalog nu există niciun model plătit capabil (cade pe comportamentul curent).
+export async function bestPaidWorkModel(): Promise<string | null> {
+  // GARDĂ ANTI-SPARGERE: nu ruta pe PLĂTIT dacă punga OpenRouter e goală — apelul
+  // plătit ar pica (402/insufficient) și creierul s-ar rupe. Fără bani → null →
+  // rămâne pe free, dumb dar FUNCȚIONAL (incident 27 iul: soldul a ajuns la minus).
+  const bal = await getOpenRouterBalance().catch(() => null)
+  if (!bal || !bal.ok || bal.balance <= 0) return null
+  const cat = await getCatalog()
+  const paid = cat.work.filter(
+    (m) => (m.provider === 'anthropic' || m.provider === 'openai') && !m.id.endsWith(':free'),
+  )
+  if (!paid.length) return null
+  const claude = paid.find((m) => m.provider === 'anthropic')
+  return (claude ?? paid[0]).id
+}
+
 /** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
 export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
   const fallback =
@@ -248,6 +269,51 @@ export interface OrChatResult {
   stop: string
 }
 
+// ── SURSĂ UNICĂ pentru cererea OpenRouter (antete + fetch + corp) ────────────
+// Antetele + fetch-ul erau copiate în fiecare funcție (stream/chat/complete/
+// image); corpul de chat (model/mesaje/tokeni/temperatură/usage + raționament +
+// unelte) era copiat în stream și chat. Aici, o singură dată (principiul
+// unic-fără-duplicate). Comportament IDENTIC — doar mutat.
+function orFetch(body: unknown, timeoutMs = 120_000): Promise<Response> {
+  return fetch(`${OR_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.openrouter.key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://kelionai.app',
+      'X-Title': 'Kelionai',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+}
+
+function orBody(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[],
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' },
+  stream: boolean,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature ?? 0.7,
+    usage: { include: true },
+  }
+  if (stream) {
+    body.stream = true
+    body.stream_options = { include_usage: true }
+  }
+  if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
+  if (tools.length) {
+    body.tools = toolsToOpenAI(tools)
+    body.tool_choice = opts.toolChoice ?? 'auto'
+  }
+  return body
+}
+
 // Variantă STREAMING: textul curge prin `onText` (primul cuvânt instant, ca pe
 // vechiul Kimi), iar apelurile de unelte se asamblează pe index din delte.
 export async function openrouterChatStream(
@@ -258,37 +324,8 @@ export async function openrouterChatStream(
   opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  const body: Record<string, unknown> = {
-    model,
-    messages,
-    max_tokens: opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0.7,
-    stream: true,
-    usage: { include: true },
-    stream_options: { include_usage: true },
-  }
-  // RAȚIONAMENT REAL (Adrian, 25 iul: „să gândească la fiecare cerință =
-  // raționament adevărat"): modelele cu gândire internă (Fable/Claude/GPT-o)
-  // primesc buget explicit de raționament. Gândirea NU curge în text — doar
-  // răspunsul final ajunge la user; deltele de reasoning sunt separate în stream.
-  if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
-  if (tools.length) {
-    body.tools = toolsToOpenAI(tools)
-    // 'required' = modelul TREBUIE să cheme o unealtă (Adrian, 27 iul: „creierul
-    // forțat să cheme unelte" pe turele de acțiune) — altfel 'auto'.
-    body.tool_choice = opts.toolChoice ?? 'auto'
-  }
-  const r = await fetch(`${OR_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.openrouter.key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://kelionai.app',
-      'X-Title': 'Kelionai',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
-  })
+  // Corp + fetch din sursa comună (raționament + unelte incluse). `stream:true`.
+  const r = await orFetch(orBody(model, messages, tools, opts, true))
   if (!r.ok || !r.body) {
     throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
   }
@@ -300,53 +337,36 @@ export async function openrouterChatStream(
   // Apelurile de unelte vin fragmentat, pe index; le asamblăm.
   const calls = new Map<number, { id: string; name: string; args: string }>()
 
-  const reader = r.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let nl: number
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (!line.startsWith('data:')) continue
-      const data = line.slice(5).trim()
-      if (data === '[DONE]') continue
-      let ev: {
-        choices?: {
-          delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
-          finish_reason?: string
-        }[]
-        usage?: { cost?: number }
-        model?: string
-      }
-      try {
-        ev = JSON.parse(data)
-      } catch {
-        continue
-      }
-      if (ev.model) served = ev.model
-      if (ev.usage?.cost != null) costUsd = Number(ev.usage.cost)
-      const choice = ev.choices?.[0]
-      if (!choice) continue
-      if (choice.finish_reason) stop = choice.finish_reason
-      const d = choice.delta
-      if (d?.content) {
-        text += d.content
-        onText(d.content)
-      }
-      for (const tc of d?.tool_calls ?? []) {
-        const idx = tc.index ?? 0
-        const cur = calls.get(idx) ?? { id: '', name: '', args: '' }
-        if (tc.id) cur.id = tc.id
-        if (tc.function?.name) cur.name = tc.function.name
-        if (tc.function?.arguments) cur.args += tc.function.arguments
-        calls.set(idx, cur)
-      }
+  // Citirea fluxului SSE din sursa comună (services/sse.ts); procesarea
+  // evenimentului (format OpenAI: choices/delta) rămâne aici.
+  await readSSE(r.body, (raw) => {
+    const ev = raw as {
+      choices?: {
+        delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
+        finish_reason?: string
+      }[]
+      usage?: { cost?: number }
+      model?: string
     }
-  }
+    if (ev.model) served = ev.model
+    if (ev.usage?.cost != null) costUsd = Number(ev.usage.cost)
+    const choice = ev.choices?.[0]
+    if (!choice) return
+    if (choice.finish_reason) stop = choice.finish_reason
+    const d = choice.delta
+    if (d?.content) {
+      text += d.content
+      onText(d.content)
+    }
+    for (const tc of d?.tool_calls ?? []) {
+      const idx = tc.index ?? 0
+      const cur = calls.get(idx) ?? { id: '', name: '', args: '' }
+      if (tc.id) cur.id = tc.id
+      if (tc.function?.name) cur.name = tc.function.name
+      if (tc.function?.arguments) cur.args += tc.function.arguments
+      calls.set(idx, cur)
+    }
+  })
 
   const toolCalls: OrToolCall[] = [...calls.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -366,30 +386,8 @@ export async function openrouterChat(
   opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
 ): Promise<OrChatResult> {
   if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  const body: Record<string, unknown> = {
-    model,
-    messages,
-    max_tokens: opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0.7,
-    usage: { include: true },
-  }
-  // Raționament real pentru modelele cu gândire internă (vezi nota din stream).
-  if (opts.reasoning) body.reasoning = { effort: opts.reasoning }
-  if (tools.length) {
-    body.tools = toolsToOpenAI(tools)
-    body.tool_choice = opts.toolChoice ?? 'auto'
-  }
-  const r = await fetch(`${OR_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.openrouter.key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://kelionai.app',
-      'X-Title': 'Kelionai',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
-  })
+  // Corp + fetch din sursa comună (raționament + unelte incluse). `stream:false`.
+  const r = await orFetch(orBody(model, messages, tools, opts, false))
   if (!r.ok) throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
   const j = (await r.json()) as {
     choices?: { message?: { content?: string; tool_calls?: OrToolCall[] }; finish_reason?: string }[]
@@ -423,22 +421,13 @@ export async function openrouterComplete(
   opts: { maxTokens?: number; temperature?: number } = {},
 ): Promise<OrResult> {
   if (!config.openrouter.key) return { text: '', costUsd: 0, model }
-  const r = await fetch(`${OR_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.openrouter.key}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://kelionai.app',
-      'X-Title': 'Kelionai',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: opts.maxTokens ?? 1024,
-      temperature: opts.temperature ?? 0.7,
-      usage: { include: true },
-    }),
-    signal: AbortSignal.timeout(120_000),
+  // Antete + fetch din sursa comună; corp simplu (fără unelte/raționament).
+  const r = await orFetch({
+    model,
+    messages,
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature ?? 0.7,
+    usage: { include: true },
   })
   if (!r.ok) {
     const err = await r.text().catch(() => '')
@@ -464,21 +453,12 @@ export async function openrouterImage(prompt: string): Promise<OrImage> {
   if (!config.openrouter.key) return { error: 'image_not_configured' }
   let r: Response
   try {
-    r = await fetch(`${OR_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.openrouter.key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://kelionai.app',
-        'X-Title': 'Kelionai',
-      },
-      body: JSON.stringify({
-        model: config.openrouter.imageModel,
-        messages: [{ role: 'user', content: prompt }],
-        modalities: ['image', 'text'],
-        usage: { include: true },
-      }),
-      signal: AbortSignal.timeout(120_000),
+    // Antete + fetch din sursa comună; corp specific de imagine (modalities).
+    r = await orFetch({
+      model: config.openrouter.imageModel,
+      messages: [{ role: 'user', content: prompt }],
+      modalities: ['image', 'text'],
+      usage: { include: true },
     })
   } catch {
     return { error: 'image_unavailable' }
@@ -507,25 +487,16 @@ export async function openrouterWebSearch(query: string, instruction?: string): 
   const sys = instruction ?? 'Search the web and answer concisely with the most current, factual information. Cite sources.'
   let r: Response
   try {
-    r = await fetch(`${OR_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.openrouter.key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://kelionai.app',
-        'X-Title': 'Kelionai',
-      },
-      body: JSON.stringify({
-        model: config.openrouter.searchModel,
-        plugins: [{ id: 'web' }],
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: query },
-        ],
-        max_tokens: 900,
-        usage: { include: true },
-      }),
-      signal: AbortSignal.timeout(60_000),
+    // Antete + fetch din sursa comună; corp specific de căutare (plugin web).
+    r = await orFetch({
+      model: config.openrouter.searchModel,
+      plugins: [{ id: 'web' }],
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: query },
+      ],
+      max_tokens: 900,
+      usage: { include: true },
     })
   } catch {
     return { text: '', sources: [], costUsd: 0 }

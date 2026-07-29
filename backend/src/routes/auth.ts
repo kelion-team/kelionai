@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import crypto from 'node:crypto'
 import { config, isAllowed, roleFor } from '../config.js'
 import { SESSION_COOKIE, getSessionUser, setSession } from '../session.js'
@@ -56,43 +56,54 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly',
 ].join(' ')
 
+// Antetul comun al ambelor fluxuri OAuth Google (login + connect): generează
+// state-ul (cu prefix opțional „c." pentru connect, ca să știe callback-ul comun
+// să PĂSTREZE identitatea și doar să atașeze tokenii), pune cookie-ul de state și
+// pornește parametrii cu identificatorii clientului. Cele două rute diverau doar
+// prin scope/prompt — nu prin acest antet, care era copiat. Sursă unică aici
+// (principiul permanent: unic, fără duplicate).
+function beginGoogleOAuth(reply: FastifyReply, statePrefix = ''): { state: string; params: URLSearchParams } {
+  const state = statePrefix + crypto.randomBytes(16).toString('hex')
+  reply.setCookie(STATE_COOKIE, state, {
+    path: '/',
+    httpOnly: true,
+    secure: config.isProd,
+    sameSite: 'lax',
+    maxAge: 600,
+  })
+  const params = new URLSearchParams({
+    client_id: config.google.clientId,
+    redirect_uri: config.google.redirectUri,
+    response_type: 'code',
+  })
+  return { state, params }
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   // Step 1 — kick off Google OAuth
   app.get('/auth/google/login', async (_req, reply) => {
-    const state = crypto.randomBytes(16).toString('hex')
-    reply.setCookie(STATE_COOKIE, state, {
-      path: '/',
-      httpOnly: true,
-      secure: config.isProd,
-      sameSite: 'lax',
-      maxAge: 600,
-    })
-    const params = new URLSearchParams({
-      client_id: config.google.clientId,
-      redirect_uri: config.google.redirectUri,
-      response_type: 'code',
-      // DOAR IDENTITATE la login (Adrian, 25 iul — a văzut live ecranul roșu
-      // „Google hasn't verified this app" care sperie clienții). Aceste 3 scope-uri
-      // sunt NON-sensibile → Google NU arată niciun avertisment, orice vizitator se
-      // loghează liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
-      // rămân OPȚIONALE, cerute la nevoie prin „Connect Google" (doar cine le vrea
-      // trece prin ecranul de consimțământ). Singura cale ca loginul să ceară TOTUL
-      // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
-      // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
-      scope: 'openid email profile',
-      // PROCEDURA COMPLETĂ LA LOGIN (Adrian, 26 iul: „nu trebuie automat,
-      // trebuie să facă procedura completă, să întrebe user și pass").
-      // Fără astea, un browser cu sesiune Google activă sărea DIRECT în cont:
-      //  • select_account → Google arată MEREU alegerea contului;
-      //  • max_age=0 → Google cere RE-AUTENTIFICAREA (user + parolă/pin),
-      //    nu se mulțumește cu sesiunea veche.
-      // Cine NU are cont Google: ecranul Google are propriul „Create account" —
-      // își face contul chiar în flux; alt login nu există (aplicația e
-      // Google-only prin decizie).
-      prompt: 'select_account',
-      max_age: '0',
-      state,
-    })
+    const { state, params } = beginGoogleOAuth(reply)
+    // DOAR IDENTITATE la login (Adrian, 25 iul — a văzut live ecranul roșu
+    // „Google hasn't verified this app" care sperie clienții). Aceste 3 scope-uri
+    // sunt NON-sensibile → Google NU arată niciun avertisment, orice vizitator se
+    // loghează liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
+    // rămân OPȚIONALE, cerute la nevoie prin „Connect Google" (doar cine le vrea
+    // trece prin ecranul de consimțământ). Singura cale ca loginul să ceară TOTUL
+    // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
+    // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
+    params.set('scope', 'openid email profile')
+    // PROCEDURA COMPLETĂ LA LOGIN (Adrian, 26 iul: „nu trebuie automat,
+    // trebuie să facă procedura completă, să întrebe user și pass").
+    // Fără astea, un browser cu sesiune Google activă sărea DIRECT în cont:
+    //  • select_account → Google arată MEREU alegerea contului;
+    //  • max_age=0 → Google cere RE-AUTENTIFICAREA (user + parolă/pin),
+    //    nu se mulțumește cu sesiunea veche.
+    // Cine NU are cont Google: ecranul Google are propriul „Create account" —
+    // își face contul chiar în flux; alt login nu există (aplicația e
+    // Google-only prin decizie).
+    params.set('prompt', 'select_account')
+    params.set('max_age', '0')
+    params.set('state', state)
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
   })
 
@@ -108,25 +119,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!user) {
       return reply.redirect(`${config.frontendOrigin}/?error=closed`)
     }
-    const state = 'c.' + crypto.randomBytes(16).toString('hex')
-    reply.setCookie(STATE_COOKIE, state, {
-      path: '/',
-      httpOnly: true,
-      secure: config.isProd,
-      sameSite: 'lax',
-      maxAge: 600,
-    })
-    const params = new URLSearchParams({
-      client_id: config.google.clientId,
-      redirect_uri: config.google.redirectUri,
-      response_type: 'code',
-      scope: CONNECT_SCOPES,
-      access_type: 'offline',
-      include_granted_scopes: 'true',
-      prompt: 'consent',
-      login_hint: user.email, // pre-select the account they're signed in as
-      state,
-    })
+    const { state, params } = beginGoogleOAuth(reply, 'c.')
+    params.set('scope', CONNECT_SCOPES)
+    params.set('access_type', 'offline')
+    params.set('include_granted_scopes', 'true')
+    params.set('prompt', 'consent')
+    params.set('login_hint', user.email) // pre-select the account they're signed in as
+    params.set('state', state)
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
   })
 

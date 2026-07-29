@@ -16,7 +16,7 @@ import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 // §6 CREIER UNIC: vocea escaladează pe ACELAȘI orchestrator + selecție de model ca scrisul.
 import { voiceBrainTurn } from '../services/voiceBrainTurn.js'
-import { resolveModel, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, bestPaidWorkModel, type AnthropicTool } from '../services/openrouter.js'
 import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiDirect.js'
 // CREIER UNIC §1 („fără duplicare"): definițiile uneltelor de introspecție/
 // constructor vin din sursa COMUNĂ, nu mai sunt copiate inline aici.
@@ -320,10 +320,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           return execIntrospection(tname, targs)
         }
         const brainTools = introspectionTools as unknown as AnthropicTool[]
-        // Modelul: ca la scris — Gemini direct dacă e disponibil, altfel modelul work.
-        const primaryModel = geminiDirectAvailable()
-          ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-          : await resolveModel('work')
+        // Modelul: ca la scris (§6 creier unic). OWNERUL primește modelul PLĂTIT
+        // capabil din catalogul live (regula de fier §14 — nu se cioantă pe free,
+        // exact ca pe chat); publicul rămâne pe free (Gemini direct / work). Dacă
+        // în catalog nu există model plătit, cade pe free ca înainte.
+        const ownerPaid = isAdmin ? await bestPaidWorkModel() : null
+        const primaryModel = ownerPaid
+          ? ownerPaid
+          : geminiDirectAvailable()
+            ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+            : await resolveModel('work')
         let answer = ''
         try {
           answer = await voiceBrainTurn(request, {

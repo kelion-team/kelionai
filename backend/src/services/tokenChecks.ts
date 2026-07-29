@@ -2,9 +2,8 @@ import { config } from '../config.js'
 import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
 import { getStripeBalance } from './stripe.js'
-import { mailEnabled } from './mail.js'
+import { mailEnabled, smtpTransport } from './mail.js'
 import { ImapFlow } from 'imapflow'
-import nodemailer from 'nodemailer'
 
 export interface TokenCheck {
   name: string
@@ -169,12 +168,7 @@ async function checkMailSmtp(): Promise<TokenCheck> {
     return { name: 'Mail SMTP', status: 'not_configured', requiredScope: 'SMTP send' }
   }
   try {
-    const tx = nodemailer.createTransport({
-      host: config.mail.smtpHost,
-      port: config.mail.smtpPort,
-      secure: config.mail.smtpPort === 465,
-      auth: { user: config.mail.user, pass: config.mail.pass },
-    })
+    const tx = smtpTransport()
     await timed(15_000, () => new Promise<void>((resolve, reject) => {
       tx.verify((err) => (err ? reject(err) : resolve()))
     }))
