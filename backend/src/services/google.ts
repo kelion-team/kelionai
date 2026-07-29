@@ -112,6 +112,18 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'delete_calendar_event',
+    description:
+      "Delete an event from the user's Google Calendar. First call get_calendar_events to get the event's `id`, then pass it here. Use for 'cancel my 3pm', 'delete the meeting with X'. Confirm which event if there is any ambiguity.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The calendar event id (from get_calendar_events).' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'get_drive_files',
     description:
       "Search or list the user's Google Drive files. Use for questions about their documents, files, or to find something on Drive.",
@@ -143,6 +155,18 @@ export const googleTools: Tool[] = [
         due: { type: 'string', description: 'Optional due date, ISO 8601 (e.g. 2026-07-05).' },
       },
       required: ['title'],
+    },
+  },
+  {
+    name: 'complete_task',
+    description:
+      "Mark a Google Task as done. First call get_tasks to get the task's `id`, then pass it here. Use for 'mark X as done', 'I finished Y'.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task id (from get_tasks).' },
+      },
+      required: ['id'],
     },
   },
   {
@@ -361,6 +385,7 @@ async function fetchRetry(url: string | URL, tries = 3): Promise<Response | null
 }
 
 interface CalendarItem {
+  id?: string
   summary?: string
   location?: string
   start?: { dateTime?: string; date?: string }
@@ -381,12 +406,26 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   if (!res.ok) return JSON.stringify({ error: `calendar_http_${res.status}` })
   const j = (await res.json()) as { items?: CalendarItem[] }
   const events = (j.items ?? []).map((e) => ({
+    id: e.id ?? '', // necesar pentru delete_calendar_event
     summary: e.summary ?? '(no title)',
     start: e.start?.dateTime ?? e.start?.date ?? '',
     end: e.end?.dateTime ?? e.end?.date ?? '',
     location: e.location ?? '',
   }))
   return JSON.stringify({ events })
+}
+
+// ȘTERGE UN EVENIMENT (CREIER UNIC §2.2). Scope calendar EXISTENT (același ca
+// create_calendar_event) — fără re-autentificare. ID-ul vine din get_calendar_events.
+async function deleteCalendarEvent(id: string, token: string): Promise<string> {
+  if (!id) return JSON.stringify({ error: 'missing_event_id', hint: 'Cheamă întâi get_calendar_events ca să iei id-ul.' })
+  const res = await tfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  // Calendar întoarce 204 la ștergere reușită; 410 = deja șters (tot succes).
+  if (res.status === 204 || res.status === 410) return JSON.stringify({ deleted: true, id })
+  return JSON.stringify({ error: `calendar_delete_http_${res.status}` })
 }
 
 async function recentEmails(query: string, max: number, token: string): Promise<string> {
@@ -746,9 +785,22 @@ async function getTasks(max: number, token: string): Promise<string> {
   url.searchParams.set('showCompleted', 'false')
   const res = await tfetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return JSON.stringify({ error: `tasks_http_${res.status}` })
-  const j = (await res.json()) as { items?: { title?: string; due?: string; status?: string }[] }
-  const tasks = (j.items ?? []).map((t) => ({ title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
+  const j = (await res.json()) as { items?: { id?: string; title?: string; due?: string; status?: string }[] }
+  const tasks = (j.items ?? []).map((t) => ({ id: t.id ?? '', title: t.title ?? '', due: t.due ?? '', status: t.status ?? '' }))
   return JSON.stringify({ tasks })
+}
+
+// BIFEAZĂ UN TASK CA TERMINAT (CREIER UNIC §2.2). Scope tasks EXISTENT (același
+// ca add_task) — fără re-autentificare. ID-ul vine din get_tasks.
+async function completeTask(id: string, token: string): Promise<string> {
+  if (!id) return JSON.stringify({ error: 'missing_task_id', hint: 'Cheamă întâi get_tasks ca să iei id-ul.' })
+  const res = await tfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'completed' }),
+  })
+  if (!res.ok) return JSON.stringify({ error: `tasks_complete_http_${res.status}` })
+  return JSON.stringify({ completed: true, id })
 }
 
 async function addTask(title: string, due: string, token: string): Promise<string> {
@@ -1237,6 +1289,8 @@ export async function runGoogleTool(
       result = await sendEmail(str(args.to), str(args.subject), str(args.body), token)
     else if (name === 'create_calendar_event')
       result = await createCalendarEvent(str(args.summary), str(args.start), str(args.end), str(args.location), token)
+    else if (name === 'delete_calendar_event') result = await deleteCalendarEvent(str(args.id), token)
+    else if (name === 'complete_task') result = await completeTask(str(args.id), token)
     else if (name === 'get_drive_files') result = await driveFiles(str(args.query), num(args.max_results, 10), token)
     else if (name === 'get_tasks') result = await getTasks(num(args.max_results, 20), token)
     else if (name === 'add_task') result = await addTask(str(args.title), str(args.due), token)
