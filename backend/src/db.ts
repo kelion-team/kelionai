@@ -1,4 +1,7 @@
 import pg from 'pg'
+// CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
+import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.js'
+export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
 
@@ -1658,22 +1661,6 @@ export async function touchVisit(
   }
 }
 
-export interface UserActivityRow {
-  email: string
-  sessions: number
-  seconds: number
-  actions: number
-  messages: number
-  last_seen: string
-  last_ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-  browser: string
-  blocked: boolean
-  balance: number
-}
 
 export interface UserSessionRow {
   email: string
@@ -1738,38 +1725,7 @@ export async function getUserActivity(): Promise<{
   }
 }
 
-export interface DemoRecent {
-  kind: 'visit' | 'demo'
-  ip: string
-  country: string
-  code: string
-  city: string
-  region: string
-  isp: string
-  browser: string
-  os: string
-  device: string
-  lang: string
-  referrer: string
-  is_bot: boolean
-  started_at: string
-  // For a DEMO row: the throwaway email whose conversation the owner can open.
-  // Empty for plain visits (they never chatted).
-  session_email: string
-  // CE L-A INTERESAT: prima întrebare/temă a vizitatorului din proba demo (semnal
-  // real de interes). Gol pentru vizitele fără chat.
-  topic: string
-}
 
-export interface DemoStats {
-  total: number
-  today: number
-  bots: number
-  visitsTotal: number
-  visitsToday: number
-  byCountry: { country: string; code: string; count: number }[]
-  recent: DemoRecent[]
-}
 
 // The owner's visitor analytics (admin only): EVERY site visit — totals, a
 // breakdown by country, and the latest arrivals with their full profile.

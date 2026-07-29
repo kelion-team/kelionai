@@ -1,3 +1,9 @@
+// CONTRACTUL HTTP cu backend-ul, o SINGURĂ declarație (Lotul A din
+// PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
+// și în backend (98 de linii duplicate). Acum vin din sursa comună; import de
+// TIP, deci dispare la compilare — nu adaugă nimic în bundle.
+import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
+export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
 export interface UserSummary {
   email: string
   count: number
@@ -64,14 +70,6 @@ export async function fetchFinance(): Promise<Finance | null> {
 }
 
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
-export interface MoneyCircuit {
-  payoutsInterval: string
-  issuingStatus: string
-  cards: { id: string; last4: string; status: string }[]
-  issuingAvailable: number
-  autoFund?: { at: string; ok: boolean; detail: string } | null
-  error?: string
-}
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   try {
     const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
@@ -195,37 +193,7 @@ export async function fetchStores(): Promise<StoresData | null> {
 // Free-trial visitor analytics (admin only): the full professional picture —
 // who (human/bot), from where (country/region/city/ISP), on what device, which
 // browser, speaking what, and which ad brought them.
-export interface DemoRecent {
-  kind: 'visit' | 'demo'
-  ip: string
-  country: string
-  code: string
-  city: string
-  region: string
-  isp: string
-  browser: string
-  os: string
-  device: string
-  lang: string
-  referrer: string
-  is_bot: boolean
-  started_at: string
-  // For a DEMO row: the throwaway email whose conversation the owner can open
-  // (click the row). Empty for plain visits.
-  session_email: string
-  // Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple.
-  topic: string
-}
 
-export interface DemoStats {
-  total: number
-  today: number
-  bots: number
-  visitsTotal: number
-  visitsToday: number
-  byCountry: { country: string; code: string; count: number }[]
-  recent: DemoRecent[]
-}
 
 export async function fetchDemos(): Promise<DemoStats | null> {
   try {
@@ -239,22 +207,6 @@ export async function fetchDemos(): Promise<DemoStats | null> {
 
 // Per-USER activity (admin only): who signed in, last IP/place/device, how
 // long they stayed in total, and their latest sessions one by one.
-export interface UserActivityRow {
-  email: string
-  sessions: number
-  seconds: number
-  actions: number
-  messages: number
-  last_seen: string
-  last_ip: string
-  city: string
-  country: string
-  code: string
-  device: string
-  browser: string
-  blocked: boolean
-  balance: number
-}
 
 export interface UserSessionRow {
   email: string
