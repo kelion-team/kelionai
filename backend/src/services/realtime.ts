@@ -1,6 +1,7 @@
 import { config } from '../config.js'
 import { langLabel } from './lang.js'
 import { googleTools } from './google.js'
+import { CAPABILITIES } from './brainCapabilities.js'
 
 // ── VOCE LIVE — proxy SDP către OpenAI Realtime (WebRTC) ─────────────────────
 // Arhitectura (reconstruită fidel din aplicația live, adusă în git ca sursă
@@ -139,22 +140,16 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
 // execută prin POST /api/realtime/tool (serverul rulează runGoogleTool cu
 // cheile lui) și deschide monitorul din screen_url. show_on_screen se execută
 // direct în client (monitorul e al browserului).
-export const VOICE_TOOL_NAMES = new Set([
-  'web_search', 'get_weather', 'maps_search', 'maps_directions', 'youtube_search',
-  'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
-  'get_calendar_events', 'get_recent_emails', 'send_email', 'create_calendar_event',
-  'get_drive_files', 'get_tasks', 'add_task', 'search_contacts', 'add_contact',
-  // IMPORTUL COMPLET GOOGLE (Adrian, 27 iul) e ACTIV ÎN CHAT, dar NU aici.
-  // DOVADA CRONOLOGICĂ (28 iul): la 22:09, cu 31 de unelte, reproducerea de pe
-  // VPS a primit 201 în 0,4s, 3/3. La 22:20 importul Google a urcat vocea la 37
-  // de unelte — și de ATUNCI /api/realtime/session primește 504 la FIECARE
-  // încercare (27s, trei conexiuni diferite, deci nu e pană trecătoare).
-  // Sesiunea de voce e trimisă întreagă la pornire; peste un anumit prag
-  // marginea OpenAI n-o mai procesează la timp. Vocea rămâne pe setul dovedit;
-  // uneltele noi se re-adaugă doar una câte una, fiecare probată live.
-  // 'read_email', 'read_drive_file', 'get_photos', 'my_youtube',
-  // 'delete_calendar_event', 'complete_task',
-])
+// SURSA UNICĂ (CREIER UNIC §1, Adrian: „nu înzeci dublările"): numele
+// skill-urilor Google de pe voce vin ACUM din registrul unic
+// (brainCapabilities), NU dintr-o listă paralelă hardcodată. Zero duplicare,
+// zero drift — dacă se schimbă registrul, se schimbă și vocea, dintr-un singur
+// loc. Plafonul de 31 al vocii rămâne (limită MĂSURATĂ a OpenAI Realtime: la
+// 22:09/31 unelte → 201 în 0,4s; la 22:20/37 → 504 mereu). Ce nu încape pe voce
+// se vede explicit în `dormantOnVoice()`, niciodată pe ascuns.
+export const VOICE_TOOL_NAMES = new Set(
+  CAPABILITIES.filter((c) => c.category === 'google' && c.voice).map((c) => c.name),
+)
 
 export function realtimeTools(
   dynamic: { name: string; description: string; input_schema: unknown }[] = [],
