@@ -31,7 +31,7 @@ import { SYSTEM_PROMPT } from './chat.js'
 // test, userii cumpără să probeze"). Vocea de prezentare de pe landing (fără
 // login, plătită din contul admin) e tratată separat, în alt endpoint.
 export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { sdp?: string; language?: string; coords?: { lat?: number; lon?: number } } }>(
+  app.post<{ Body: { sdp?: string; language?: string; coords?: { lat?: number; lon?: number }; now?: string; tz?: string } }>(
     '/api/realtime/session',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -109,7 +109,34 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         gpsBlock =
           `\n\nNU ai încă poziția utilizatorului. Când cere ceva legat de locul lui — „aici", „lângă mine", „unde sunt", vremea locală, locuri din zonă, trasee de aici — cheamă ÎNTÂI get_location (citește GPS-ul real al dispozitivului în acel moment) și folosește coordonatele întoarse. NU spune niciodată că nu ai acces la locație fără să fi încercat get_location.`
       }
+      // ANCORA DE TIMP (fix „bună seara" dimineața): vocea primea GPS-ul dar NU
+      // ora — creierul de voce ghicea partea zilei. Injectăm data/ora reală a
+      // dispozitivului, exact ca scrisul (chat.ts), ca salutul să urmeze ceasul.
+      let timeBlock = ''
+      const nowIso = req.body?.now
+      if (typeof nowIso === 'string' && !Number.isNaN(Date.parse(nowIso))) {
+        const tzName = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : 'UTC'
+        let human: string
+        try {
+          human = new Date(nowIso).toLocaleString('en-GB', {
+            timeZone: tzName,
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        } catch {
+          human = new Date(nowIso).toUTCString()
+        }
+        timeBlock =
+          `\n\nDATA ȘI ORA CURENTĂ (reală, de pe dispozitivul utilizatorului): acum este ${human} (fus orar ${tzName}). ` +
+          `ȘTII MEREU data și ora exactă. Salutul și ORICE referire la partea zilei (bună dimineața/ziua/seara) urmează ACEASTĂ oră — NICIODATĂ ghicită. ` +
+          `Când te întreabă cât e ceasul sau ce zi e, răspunzi cu această valoare, ora scrisă numeric (ex. „15:04").`
+      }
       const contextBlock =
+        timeBlock +
         (memRecall || '') +
         (history
           ? `\n\nCONVERSAȚIA DE PÂNĂ ACUM (continu-o firesc, ține minte ce s-a spus):\n${history}`

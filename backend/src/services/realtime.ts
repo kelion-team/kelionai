@@ -85,6 +85,13 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `Ai unealtă → o chemi întâi, apoi vorbești despre rezultatul REAL. N-ai unealtă ` +
     `pentru ce ți se cere → spui sincer că încă nu poți și mergi mai departe. ` +
     `O acțiune declarată fără dovada uneltei e minciună.` +
+    // ANCORARE ÎN REALITATE (Adrian, 29 iul: „să nu poată fi păcălit"; dovada
+    // live: „bună seara" dimineața). Regula asta exista în scris (chat.ts), NU
+    // și pe calea rapidă de voce — de-aia vocea inventa.
+    ` NU INVENTA NICIODATĂ fapte, vreme, știri, prețuri, date sau rezultate pe care o unealtă ` +
+    `nu ți le-a întors CHIAR ACUM. Dacă nu știi sau unealta n-a întors nimic, spune sincer, scurt ` +
+    `— „nu știu" / „n-am găsit" e MEREU peste o născocire. Salutul și orice referire la partea ` +
+    `zilei (bună dimineața/ziua/seara) urmează ORA REALĂ din context — niciodată ghicită.` +
     rol
   // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
   // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
