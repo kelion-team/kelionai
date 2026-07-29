@@ -35,7 +35,8 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: true, admin: false },
 
   // 2.2 Google (18)
-  { name: 'get_recent_emails', category: 'google', does: 'citește emailurile recente', chat: true, voice: true, admin: false },
+  { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: true, admin: false },
+  { name: 'read_email', category: 'google', does: 'citește corpul COMPLET al unui email (după căutare)', chat: true, voice: false, admin: false },
   { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: true, admin: false },
   { name: 'get_calendar_events', category: 'google', does: 'citește calendarul', chat: true, voice: true, admin: false },
   { name: 'create_calendar_event', category: 'google', does: 'pune un eveniment în calendar', chat: true, voice: true, admin: false },
