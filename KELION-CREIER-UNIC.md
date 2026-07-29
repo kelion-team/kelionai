@@ -153,11 +153,11 @@ Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (
 | §3 GPS „pune-mă pe hartă" — `get_location` deschide harta pe poziția reală | PR #514, LIVE; marker `openstreetmap.org/?mlat=` absent în bundle vechi, prezent în cel nou |
 | §6 Vocea = ACELAȘI creier ca scrisul (escaladarea grea pe `runOrchestrator`, nu pe motor separat) | PR #515, LIVE (`3f11d51`); typecheck 0 + teste verzi |
 | Audio pe căști Bluetooth (`setSinkId` + `devicechange`) | PR #516, LIVE (`9211629`); marker `setSinkId`+`devicechange` prezent în bundle |
-| §1 Definițiile uneltelor de introspecție/constructor mutate în sursa comună (`brainToolDefs`) — fără duplicare | această livrare |
+| §1 Definițiile uneltelor de introspecție/constructor mutate în sursa comună (`brainToolDefs`) — fără duplicare | PR #517, LIVE (`7dd3ac3`) |
+| §7 Tabelul de dovezi — fiecare funcție cu proba ei (`KELION-DOVEZI.md`) | PR #517, LIVE |
+| §4 Auto-instalarea dependențelor — creierul le adaugă singur prin constructor (package.json/Dockerfile → PR → rebuild), NU prin apt live arbitrar (decizia owner-ului) | această livrare |
 
 **RĂMAS:**
-- **§7 — tabelul de dovezi LIVE la fiecare funcție** (vezi `KELION-DOVEZI.md`): ce se poate proba pe server e probat; rândurile care cer sesiunea/dispozitivul owner-ului (voce, cameră, GPS, email real) sunt marcate „de testat de owner" — nu se declară dovedite fără testul lui.
 - **§6 complet — TOATE turele de voce prin creierul unic** (nu doar cele grele): decizie de reglaj a owner-ului (mai viu vs. primul cuvânt mai rapid), apoi cablare.
-- **§4 auto-instalarea de dependențe de sistem** (npm/apt ca runbook) — executorul încă nefăcut (Etapa 5b).
 - Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (decizia owner-ului).
 - Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant (nu mai e „model gratuit slab").
