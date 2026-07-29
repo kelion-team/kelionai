@@ -1091,12 +1091,21 @@ export interface SharedMemoryRow {
 
 // ── Prepaid wallet (Stripe credit) ──
 
+// EMAILUL PORTOFELULUI, O SINGURĂ FORMĂ (gaură prinsă de teste, 30 iul).
+// Alimentările scriu de mult `lower($1)` (auditul P2-3), dar CITIREA soldului,
+// TAXAREA și clientul Stripe foloseau emailul EXACT cum vine din sesiune. Google
+// Workspace poate întoarce emailul cu majuscule („Ion@Firma.ro"): userul plătea,
+// creditul intra pe rândul mic, iar aplicația îi arăta 0 credite și îl oprea în
+// paywall — în timp ce consumul lui deschidea un AL DOILEA portofel, pe minus.
+// Aceeași formă peste tot, o singură dată, aici.
+const walletKey = (email: string): string => String(email ?? '').trim().toLowerCase()
+
 export async function getBalance(email: string): Promise<number> {
   if (!dbEnabled()) return 0
   try {
     const r = await getPool().query<{ balance: string }>(
       'SELECT balance FROM wallets WHERE user_email = $1',
-      [email],
+      [walletKey(email)],
     )
     return Number(r.rows[0]?.balance ?? 0)
   } catch {
@@ -1115,11 +1124,11 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
     await pool.query(
       `INSERT INTO wallets (user_email, balance) VALUES ($1, -($2::numeric))
        ON CONFLICT (user_email) DO UPDATE SET balance = wallets.balance - $2::numeric, updated_at = now()`,
-      [email, amount],
+      [walletKey(email), amount],
     )
     await pool.query(
       `INSERT INTO billing_events (user_email, kind, amount, meta) VALUES ($1, 'usage', $2, $3)`,
-      [email, -amount, meta],
+      [walletKey(email), -amount, meta],
     )
   } catch (e) {
     // Nu rupem chatul dacă taxarea pică — dar NICIODATĂ în tăcere (audit 27
@@ -1134,7 +1143,7 @@ export async function getStripeCustomer(email: string): Promise<string | null> {
   try {
     const r = await getPool().query<{ stripe_customer_id: string | null }>(
       'SELECT stripe_customer_id FROM wallets WHERE user_email = $1',
-      [email],
+      [walletKey(email)],
     )
     return r.rows[0]?.stripe_customer_id ?? null
   } catch {
@@ -1148,7 +1157,7 @@ export async function setStripeCustomer(email: string, id: string): Promise<void
     await getPool().query(
       `INSERT INTO wallets (user_email, stripe_customer_id) VALUES ($1, $2)
        ON CONFLICT (user_email) DO UPDATE SET stripe_customer_id = $2, updated_at = now()`,
-      [email, id],
+      [walletKey(email), id],
     )
   } catch {
     // Non-fatal.

@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": false
   },
   "include": ["src"],
-  "exclude": ["src/**/*.verify.ts", "src/**/*.test.ts"]
+  "exclude": ["src/**/*.verify.ts", "src/**/*.test.ts", "src/testing/**"]
 }
