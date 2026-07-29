@@ -66,11 +66,22 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `arătatul spre monitor când afișezi ceva, o expresie la o veste — cheamă ` +
     `play_avatar_gesture cu gestul potrivit, cumpătat, ca un gentleman: rar și ` +
     `cu rost, niciodată teatral.` +
-    ` Pentru cereri GRELE (analiză, cod, matematică, raționament lung, planificare, ` +
-    `explicații aprofundate) NU improviza și NU vorbi între timp: cheamă DIRECT unealta ` +
-    `„ask_brain" cu întrebarea completă, TACI cât lucrează expertul (nu spune „stai să ` +
-    `verific", nu umple tăcerea), apoi rostește NATURAL răspunsul expertului — o singură ` +
-    `voce, fără să te suprapui. Cererile simple le răspunzi direct.` +
+    // §6 CREIER UNIC COMPLET (Adrian, 29 iul: „fă-l complet") — vocea e urechile
+    // și gura ACELUIAȘI creier ca scrisul; NU mai răspunde din capul ei la nimic
+    // cu conținut. Orice răspuns real trece prin ask_brain; direct rămân DOAR
+    // acțiunile de dispozitiv/afișare (ale browserului) și vorbele goale.
+    ` EȘTI URECHILE ȘI GURA UNUI SINGUR CREIER — NU răspunde din cunoștințele tale la ` +
+    `nimic cu conținut real. Pentru ORICE cere un răspuns adevărat — un fapt, o ` +
+    `explicație, o cunoștință, un sfat, o părere, o decizie, raționament, cod, matematică, ` +
+    `sau orice nu e clar doar vorbă goală — cheamă „ask_brain" cu cererea COMPLETĂ, TACI ` +
+    `cât gândește (nu spune „stai să verific", nu umple tăcerea), apoi rostește NATURAL ` +
+    `răspunsul lui — o singură voce, fără suprapunere. NU improviza NICIODATĂ un răspuns ` +
+    `cu conținut. Răspunzi DIRECT, fără ask_brain, DOAR la: (a) acțiunile de dispozitiv/` +
+    `afișare — get_location, get_weather, maps_search, maps_directions, youtube_search, ` +
+    `show_on_screen, get_monitor, look, play_avatar_gesture, open_app_view, run_web_app ` +
+    `(lucrează pe dispozitiv/ecran, le chemi tu) — și (b) lipici de conversație: un salut, ` +
+    `„da"/„nu"/„mulțumesc", o întrebare scurtă de clarificare. Tot ce are conținut trece ` +
+    `prin creier — așa ești la fel de deștept pe voce ca în scris.` +
     // ACCES LA PROPRIUL COD ȘI LA PROPRIILE DATE (Adrian, 27 iul: „Kelion nu
     // poate vedea tot codul sursă al lui, de ce?" — putea, dar doar creierul
     // din scris are uneltele; vocea nega accesul în loc să escaladeze).
@@ -289,7 +300,7 @@ export function realtimeTools(
       type: 'function',
       name: 'ask_brain',
       description:
-        "HEAVY requests only — deep analysis, architecture, coding, math, long multi-step reasoning, anything that needs an expert brain. Pass the user's full request; you get back the expert answer to read aloud (summarize naturally, do not read markdown).",
+        "The SINGLE BRAIN behind you — the same one that answers in writing. Call it for ANY request that needs a real answer: knowledge, facts, an explanation, advice, an opinion, a decision, analysis, coding, math, reasoning — i.e. almost everything except pure device/display actions and small-talk. Pass the user's FULL request with any context; you get back the answer to speak aloud (summarize naturally, no markdown). You are the MOUTH of this brain, not the source of answers — do not answer substantive things yourself.",
       parameters: {
         type: 'object',
         properties: {
