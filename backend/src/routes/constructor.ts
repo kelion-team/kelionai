@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listActiveBuildJobs } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 
@@ -89,14 +89,16 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Joburile ACTIVE + pasul lor curent — pentru afișajul live pe monitor
-  // (sesiune admin; folosit de poller-ul din frontend, Etapa 4b).
+  // Joburile de afișat pe monitor (active + terminate recent) + pasul lor curent
+  // — pentru panoul live din frontend (sesiune admin; Etapa 4b). Include și
+  // `done`/`failed` din ultimele minute, ca panoul să arate FINALUL (Gata/Eșuat),
+  // nu doar drumul până la el.
   app.get('/api/constructor/live', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const jobs = await listActiveBuildJobs()
+    const jobs = await listMonitorBuildJobs()
     return reply.send({
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, prUrl: j.prUrl, attempts: j.attempts })),
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }

@@ -38,6 +38,10 @@ export interface ChatControl {
   // O pagină web COMPLETĂ scrisă de Kelion (run_web_app) — rulează live pe
   // monitor într-un cadru izolat (srcdoc + sandbox) și se poate salva ca .html.
   app?: { title: string; html: string }
+  // PANOUL CONSTRUCTORULUI (Etapa 4b): deschide pe monitor afișajul live al
+  // ordinelor de construcție — se abonează la /api/constructor/live și arată
+  // Preluat→pasul curent→Gata/Eșuat. Emis când Kelion preia un ordin de build.
+  build?: { open?: boolean; title?: string }
   // A device command the SERVER interpreted (camera / monitor tabs) — the
   // regexes moved off the browser; the client just executes what this says.
   device?: {

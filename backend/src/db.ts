@@ -2926,12 +2926,22 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
   }
 }
 
-// Joburile ACTIVE (în coadă sau în lucru) — pentru afișajul live pe monitor.
-export async function listActiveBuildJobs(): Promise<BuildJob[]> {
+// Joburile pentru AFIȘAJUL LIVE pe monitor (Etapa 4b): cele active (în coadă /
+// în lucru) PLUS cele terminate RECENT (ultimele 10 min). Fără „recent
+// terminate", panoul ar șterge jobul chiar în clipa în care devine „Gata"/
+// „Eșuat" — exact starea pe care Adrian vrea s-o VADĂ. Active primele, apoi
+// după cât de proaspăt s-au mișcat; câteva, cât încap pe ecran.
+export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<BuildJobDbRow>(
-      `SELECT * FROM build_jobs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 10`,
+      `SELECT * FROM build_jobs
+         WHERE status IN ('queued','running')
+            OR (status IN ('done','failed') AND updated_at > now() - interval '10 minutes')
+       ORDER BY
+         CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
+         COALESCE(progress_at, updated_at, created_at) DESC
+       LIMIT 10`,
     )
     return r.rows.map(rowToBuildJob)
   } catch {

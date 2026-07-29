@@ -90,6 +90,102 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
   )
 }
 
+// PANOUL CONSTRUCTORULUI pe monitor (Etapa 4b, Adrian: „sistem performant cu
+// afișare pe monitor a rezolvării cerințelor"). Se abonează la
+// /api/constructor/live (sesiune admin) și arată fiecare ordin de build:
+// starea (În coadă / Lucrează / Gata / Eșuat), PASUL CURENT trimis de lucrătorul
+// de pe VPS (Etapa 4), încercările și PR-ul. Nu mai e o cutie neagră între
+// „Preluat" și „Gata": se vede drumul, pas cu pas. Poll ușor la 2.5s, oprit
+// curat la demontare (fără scurgeri, fără poll când panoul e închis).
+interface BuildLiveJob {
+  id: number
+  status: string
+  order: string
+  progress: string | null
+  prUrl: string | null
+  attempts: number
+  updatedAt?: string
+}
+const BUILD_LABEL: Record<string, string> = { queued: 'În coadă', running: 'Lucrează', done: 'Gata', failed: 'Eșuat' }
+function BuildSurface({ zoom }: { zoom: number }) {
+  const [jobs, setJobs] = useState<BuildLiveJob[]>([])
+  const [note, setNote] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    let alive = true
+    let timer: number | undefined
+    async function tick(): Promise<void> {
+      try {
+        const r = await fetch('/api/constructor/live', { credentials: 'include' })
+        if (!alive) return
+        if (r.status === 403) {
+          setNote('Doar adminul vede constructorul.')
+          setJobs([])
+        } else if (!r.ok) {
+          setNote('Constructor indisponibil momentan.')
+        } else {
+          const j = (await r.json()) as { jobs?: BuildLiveJob[] }
+          if (!alive) return
+          setNote('')
+          setJobs(Array.isArray(j.jobs) ? j.jobs : [])
+        }
+        setLoaded(true)
+      } catch {
+        if (alive) {
+          setNote('Fără legătură cu serverul.')
+          setLoaded(true)
+        }
+      } finally {
+        if (alive) timer = window.setTimeout(() => void tick(), 2500)
+      }
+    }
+    void tick()
+    return () => {
+      alive = false
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [])
+  return (
+    <div className="workspace-doc build-surface" style={{ fontSize: `${zoom}em` }}>
+      <div className="build-head">Constructorul lui Kelion</div>
+      {!loaded ? (
+        <p className="build-empty">Se încarcă…</p>
+      ) : note ? (
+        <p className="build-empty">{note}</p>
+      ) : jobs.length === 0 ? (
+        <p className="build-empty">Niciun ordin în lucru acum. Când Kelion preia o cerință, apare aici pas cu pas.</p>
+      ) : (
+        <ul className="build-list">
+          {jobs.map((j) => (
+            <li key={j.id} className={`build-item build-${j.status}`}>
+              <div className="build-row">
+                <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
+                <span className="build-order">#{j.id} — {j.order}</span>
+              </div>
+              {j.progress ? (
+                <div className="build-progress">
+                  {j.status === 'running' && <span className="build-spin" aria-hidden>●</span>}
+                  {j.progress}
+                </div>
+              ) : j.status === 'queued' ? (
+                <div className="build-progress build-progress-dim">Așteaptă lucrătorul…</div>
+              ) : null}
+              {(j.attempts > 1 || j.prUrl) && (
+                <div className="build-meta">
+                  {j.attempts > 1 && <span>încercarea {j.attempts}</span>}
+                  {j.prUrl && (
+                    <a href={j.prUrl} target="_blank" rel="noreferrer" className="build-pr">Vezi PR ↗</a>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // Nume de fișier sigur din titlul panoului (diacritice/spații → cratime).
 function safeFileName(title: string, ext: string): string {
   const base = (title || 'kelion')
@@ -592,7 +688,10 @@ export default function Stage({ user }: { user: User }) {
               if (sonor && (!active || !ws.open)) return null
               return (
                 <div key={task.id} style={active ? { display: 'contents' } : { display: 'none' }}>
-                {task.html ? (
+                {task.kind === 'build' ? (
+                  // PANOUL CONSTRUCTORULUI (Etapa 4b) — poller propriu, fără url/text.
+                  <BuildSurface zoom={monZoom} />
+                ) : task.html ? (
                   // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
                   // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
                   // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.

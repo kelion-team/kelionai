@@ -20,6 +20,7 @@ import {
   openWorkspaceCard,
   openWorkspaceDoc,
   openWorkspaceApp,
+  openWorkspaceBuild,
   closeWorkspace,
   closeTasksByKind,
   closeAllTasks,
@@ -378,6 +379,12 @@ export default function ChatPanel({
     // PLAYGROUND: pagina scrisă de Kelion rulează live pe monitor (cadru izolat).
     if (c.app && c.app.html.trim()) {
       openWorkspaceApp(c.app.title || t.monitorTitle, c.app.html)
+      return
+    }
+    // PANOUL CONSTRUCTORULUI (Etapa 4b): Kelion a preluat un ordin de build →
+    // deschide pe monitor afișajul live (Preluat→pas→Gata/Eșuat).
+    if (c.build?.open) {
+      openWorkspaceBuild(c.build.title || 'Constructor')
       return
     }
     if (c.card && c.card.items.length > 0) {
@@ -1180,6 +1187,13 @@ export default function ChatPanel({
                 const html = String(args.html ?? '')
                 if (html.trim()) handleControl({ app: { title, html } })
                 return JSON.stringify({ running: Boolean(html.trim()), title, savable: true })
+              }
+              // PANOUL CONSTRUCTORULUI ÎN VOCE (Etapa 4b, paritate cu scrisul):
+              // când Kelion preia un ordin de build sau i se cere starea, deschide
+              // pe monitor afișajul live. NU întrerupem execuția server-side —
+              // doar deschidem panoul, apoi lăsăm unealta să meargă la server.
+              if (name === 'build_software' || name === 'constructor_status') {
+                handleControl({ build: { open: true } })
               }
               // ACCES REAL LA APLICAȚIE (Adrian, 24 iul): Kelion deschide panourile
               // proprii ale aplicației prin voce. Se execută în client (e UI-ul lui):

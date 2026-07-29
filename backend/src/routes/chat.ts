@@ -2101,6 +2101,10 @@ async function runTool(
       if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
       const jobId = await createBuildJob(email, order)
       if (!jobId) return JSON.stringify({ error: 'db_indisponibil' })
+      // DESCHIDE PANOUL LIVE PE MONITOR (Etapa 4b): din clipa preluării, Adrian
+      // vede pe monitor Preluat→pas→Gata/Eșuat (panoul se abonează la
+      // /api/constructor/live). Cadru de control, ca {monitor}/{card}.
+      reply.raw.write(`${CTRL}${JSON.stringify({ build: { open: true } })}${CTRL}`)
       // FRAZA DE PRELUARE, SCURTĂ (Adrian, 28 iul: „scoate «mă apuc, verific și
       // execut» — trebuie o frază scurtă: am preluat cerința"). Instrucțiunea
       // spre model e explicită: confirmă în 3-4 cuvinte, fără promisiuni lungi.
