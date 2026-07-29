@@ -44,6 +44,23 @@ export async function execSharedAdminTool(name: string, args: Record<string, unk
     case 'runbook_status': return runbookStatus(args.name ? String(args.name) : undefined)
     case 'runbook_log': return runbookLog(Number(args.run_id ?? 0))
     case 'request_repair': return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
+    case 'propose_tool': {
+      // AUTO-EXTINDEREA: Kelion își cere singur o unealtă nouă (owner o aprobă
+      // cu un click în Admin → Unelte Kelion). Identic pe scris și pe voce.
+      const p = args as Record<string, unknown>
+      const id = await proposeKelionTool({
+        name: String(p.name ?? ''),
+        description: String(p.description ?? ''),
+        paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
+        httpMethod: String(p.http_method ?? 'GET'),
+        httpUrl: String(p.http_url ?? ''),
+        httpHeaders: JSON.stringify(p.http_headers ?? {}),
+        rationale: String(p.rationale ?? ''),
+      })
+      return JSON.stringify(id
+        ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' }
+        : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
+    }
     default: return null
   }
 }
@@ -58,11 +75,11 @@ export async function execSharedAdminTool(name: string, args: Record<string, unk
 import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
-import { getMemories, deleteMemory, logCapabilityGap, getCostSummary } from '../db.js'
+import { getMemories, deleteMemory, logCapabilityGap, getCostSummary, proposeKelionTool } from '../db.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
-  'list_memories', 'forget_memory', 'log_unsupported_request',
+  'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
 ])
 
 export async function execUserScopedTool(
