@@ -47,6 +47,13 @@ jobs:
         continue-on-error: true
         run: |
           cd backend && npx oxlint --deny no-unused-vars
+
+      # oxlint vede doar ÎN fișier. Codul mort care contează sunt EXPORTURILE pe
+      # care nu le importă nimeni — 16 găsite la auditul din 29 iul, toate „verzi"
+      # până atunci fiindcă nicio poartă nu se uita acolo.
+      - name: Exporturi fără utilizator — ținta 0
+        continue-on-error: true
+        run: node scripts/verifica-exporturi.mjs
       # 3. SEMNE GREȘIT PUSE = 0. `tsc` acoperă .ts/.tsx, dar CSS-ul și JSON-ul nu
       #    sunt verificate de nimeni: un `}` în plus în CSS strică tăcut restul
       #    foii de stil, iar un JSON rupt oprește pornirea abia în producție.

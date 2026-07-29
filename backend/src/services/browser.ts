@@ -216,42 +216,6 @@ async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
     return await takeSnapshot(page, baseUrl)
   }
 }
-
-// ── VERIFICARE VIZUALĂ (Adrian, 13 iul: „Kelion să VADĂ app-ul randat") ────
-// Screenshot al unei pagini publice, pentru ca Kelion să-și verifice VIZUAL
-// rezultatele (constructorul trimite imaginea la Gemini să judece dacă
-// rezultatul cerut chiar se vede). Context izolat, închis imediat — nu atinge
-// sesiunile de browsing ale userilor.
-export async function screenshotUrl(
-  rawUrl: string,
-  opts: { width?: number; height?: number; fullPage?: boolean; waitMs?: number } = {},
-): Promise<{ jpegBase64: string } | { error: string }> {
-  let u: URL
-  try {
-    u = await assertPublicUrl(rawUrl)
-  } catch {
-    return { error: 'blocked_url' }
-  }
-  let context: BrowserContext | null = null
-  let page: Page | null = null
-  try {
-    const browser = await getBrowser()
-    context = await browser.newContext({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } })
-    page = await context.newPage()
-    await page
-      .goto(u.toString(), { waitUntil: 'networkidle', timeout: 30_000 })
-      .catch(() => page!.goto(u.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 }))
-    await page.waitForTimeout(opts.waitMs ?? 1800)
-    const buf = await page.screenshot({ type: 'jpeg', quality: 70, fullPage: opts.fullPage ?? false })
-    return { jpegBase64: Buffer.from(buf).toString('base64') }
-  } catch (e) {
-    return { error: e instanceof Error ? e.message.slice(0, 200) : 'screenshot_failed' }
-  } finally {
-    try { await page?.close() } catch { /* ignore */ }
-    try { await context?.close() } catch { /* ignore */ }
-  }
-}
-
 // ── public actions ───────────────────────────────────────────────────────
 export async function browserOpen(
   email: string,
@@ -290,49 +254,6 @@ export async function browserOpen(
     console.error('[browser] snapshot failed:', e instanceof Error ? e.message.slice(0, 300) : e)
     return { error: 'snapshot_failed' }
   }
-}
-
-// CRAWL (cererea #24): deschide un site și îl parcurge PAGINĂ CU PAGINĂ — adună
-// linkurile interne din prima pagină și vizitează până la maxPages, întorcând
-// titlul + textul fiecăreia, ca să poată fi trecute în revistă. Refolosește
-// browserOpen (aceeași sesiune, navighează în ea), fără dublare de infrastructură.
-export async function crawlSite(
-  email: string,
-  baseUrl: string,
-  startUrl: string,
-  maxPages = 8,
-): Promise<{ pages: { url: string; title: string; text: string }[]; error?: string }> {
-  const first = await browserOpen(email, baseUrl, startUrl)
-  if ('error' in first) return { pages: [], error: first.error }
-  let host = ''
-  try {
-    host = new URL(first.url).host
-  } catch {
-    return { pages: [], error: 'bad_url' }
-  }
-  const pages = [{ url: first.url, title: first.title, text: first.text }]
-  const seen = new Set([first.url.replace(/#.*$/, '')])
-  const queue: string[] = []
-  for (const el of first.elements) {
-    if (!el.href) continue
-    try {
-      const abs = new URL(el.href, first.url)
-      abs.hash = ''
-      if (abs.host === host && !seen.has(abs.toString()) && !queue.includes(abs.toString())) {
-        queue.push(abs.toString())
-      }
-    } catch {
-      /* link malformat — sărit */
-    }
-  }
-  for (const link of queue) {
-    if (pages.length >= maxPages) break
-    seen.add(link)
-    const snap = await browserOpen(email, baseUrl, link)
-    if (!('error' in snap)) pages.push({ url: snap.url, title: snap.title, text: snap.text })
-  }
-  await browserClose(email).catch(() => {})
-  return { pages }
 }
 
 // Rutinele care ACȚIONEAZĂ pe pagină (click/type) au același schelet: sesiune
