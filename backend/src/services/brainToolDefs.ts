@@ -51,3 +51,20 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
     "ADMIN ONLY. See your OWN health: publication sync (live vs master), red workflow runs (48h), failed build orders, client-error spikes, disk, database, brain balance. CALL THIS at the START of a conversation with the owner (his first message of a session) and whenever he asks about problems or health. If problems exist: list them BRIEFLY (x, y, z) and ASK whether you should repair them — never repair on your own initiative; wait for his explicit yes, then use your tools (repo_write, build_software, run_runbook, db_query).",
   input_schema: { type: 'object', properties: {} },
 }
+
+// Constructorul (autonomie) — definiții mutate din ruta vocii aici, în sursa
+// COMUNĂ (CREIER UNIC §1, „fără duplicare"): aceleași definiții și pentru scris,
+// și pentru escaladarea vocii. Executorii rămân în rutele lor (createBuildJob/
+// listBuildJobs), fiindcă au nevoie de contextul userului.
+export const BUILD_SOFTWARE_TOOL: Tool = {
+  name: 'build_software',
+  description:
+    "ADMIN ONLY. Queue a build order for the autonomous constructor: the VPS worker builds it (with build+tests) and opens a PR; the owner merges. Use when the owner orders new software, or a change/repair to yourself. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
+  input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
+}
+
+export const CONSTRUCTOR_STATUS_TOOL: Tool = {
+  name: 'constructor_status',
+  description: "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link).",
+  input_schema: { type: 'object', properties: {} },
+}

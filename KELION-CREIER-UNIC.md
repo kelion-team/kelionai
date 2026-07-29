@@ -145,9 +145,19 @@ La final: **tabelul de mai sus, fiecare rând bifat cu dovada lui.**
 | `complete_task` — bifează un task terminat | PR #507 |
 | `read_drive_file` — citește conținutul unui fișier Drive | PR #508 |
 
-Paznicul azi: **chat = 66 capabilități**, voce = 31 (plafon măsurat), toate verificate contra codului real. **64 teste verzi.**
+Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (plafon măsurat), pe categorii (google 22, cod 15, browser 9, afișare 6, memorie 6, ops 3, vedere 3, bani 3, diverse 2), toate verificate contra codului real. **76 teste verzi.**
+
+**MIEZUL — creier unic + ancorare (LIVRAT + LIVE, dovedit — 29 iul):**
+| Ce | Dovada |
+|---|---|
+| §3 GPS „pune-mă pe hartă" — `get_location` deschide harta pe poziția reală | PR #514, LIVE; marker `openstreetmap.org/?mlat=` absent în bundle vechi, prezent în cel nou |
+| §6 Vocea = ACELAȘI creier ca scrisul (escaladarea grea pe `runOrchestrator`, nu pe motor separat) | PR #515, LIVE (`3f11d51`); typecheck 0 + teste verzi |
+| Audio pe căști Bluetooth (`setSinkId` + `devicechange`) | PR #516, LIVE (`9211629`); marker `setSinkId`+`devicechange` prezent în bundle |
+| §1 Definițiile uneltelor de introspecție/constructor mutate în sursa comună (`brainToolDefs`) — fără duplicare | această livrare |
 
 **RĂMAS:**
-- Skill-uri care cer scope-uri Google NOI (Photos, YouTube personal) → cer re-autentificarea userului (buton „Conectează Google") — de făcut când owner-ul decide re-conectarea.
-- **§6 — vocea la TOATE rutele** (pasul mare): calea curată = vocea devine urechile+gura aceluiași creier; se construiește în paralel, verificat, apoi se comută — ca să nu cadă vocea live.
-- Inteligența brută a creierului (raționament) depinde de **modelul** pe care gândește — azi modele gratuite slabe; un model capabil = decizia de bani a owner-ului.
+- **§7 — tabelul de dovezi LIVE la fiecare funcție** (vezi `KELION-DOVEZI.md`): ce se poate proba pe server e probat; rândurile care cer sesiunea/dispozitivul owner-ului (voce, cameră, GPS, email real) sunt marcate „de testat de owner" — nu se declară dovedite fără testul lui.
+- **§6 complet — TOATE turele de voce prin creierul unic** (nu doar cele grele): decizie de reglaj a owner-ului (mai viu vs. primul cuvânt mai rapid), apoi cablare.
+- **§4 auto-instalarea de dependențe de sistem** (npm/apt ca runbook) — executorul încă nefăcut (Etapa 5b).
+- Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (decizia owner-ului).
+- Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant (nu mai e „model gratuit slab").

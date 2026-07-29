@@ -20,6 +20,13 @@ import { brainComplete, describeScene } from '../services/brain.js'
 import { voiceBrainTurn } from '../services/voiceBrainTurn.js'
 import { resolveModel, type AnthropicTool } from '../services/openrouter.js'
 import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiDirect.js'
+// CREIER UNIC §1 („fără duplicare"): definițiile uneltelor de introspecție/
+// constructor vin din sursa COMUNĂ, nu mai sunt copiate inline aici.
+import {
+  LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
+  BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL,
+} from '../services/brainToolDefs.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SYSTEM_PROMPT } from './chat.js'
@@ -241,16 +248,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // rula SQL prin voce. Limba rămâne pe email (Adrian aude română mereu);
         // DOAR uneltele cer deblocarea.
         const adminUnlocked = isAdmin && (!(await isArmed()) || hasUnlock(req, user.email))
+        // Aceleași definiții ca scrisul, din sursa COMUNĂ (brainToolDefs) — zero
+        // duplicare. Executorul (execIntrospection) rămâne aici, are nevoie de
+        // contextul userului (createBuildJob pe email, tokenul etc.).
         const introspectionTools = adminUnlocked
           ? [
-              { name: 'list_source', description: 'Listează arborele propriului cod sursă (director dat, relativ la rădăcina repo-ului).', input_schema: { type: 'object', properties: { dir: { type: 'string' } } } },
-              { name: 'read_source', description: 'Citește un fișier din propriul cod sursă, cu numere de linie. Fișierele mari se citesc în pagini de ~24KB; pentru RESTUL unui fișier mare, cheamă din nou cu from_line = numărul din subsolul „…continuă" — așa citești ORICE fișier integral.', input_schema: { type: 'object', properties: { path: { type: 'string' }, from_line: { type: 'integer' } }, required: ['path'] } },
-              { name: 'search_source', description: 'Caută un text/regex în tot codul sursă propriu.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
-              { name: 'db_tables', description: 'Schema completă a bazei de date permanente (tabele, coloane, număr de rânduri).', input_schema: { type: 'object', properties: {} } },
-              { name: 'db_query', description: 'O instrucțiune SQL pe baza de date a aplicației (max 200 rânduri la ieșire). Distructiv DOAR la ordin explicit al ownerului.', input_schema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } },
-              { name: 'build_software', description: 'Pune un ordin de construcție în coada constructorului (lucrătorul construiește cu build+teste și deschide PR; ownerul dă merge).', input_schema: { type: 'object', properties: { order: { type: 'string' } }, required: ['order'] } },
-              { name: 'constructor_status', description: 'Starea ordinelor de construcție (coadă/lucrează/gata/eșuat + PR).', input_schema: { type: 'object', properties: {} } },
-              { name: 'system_health', description: 'Sănătatea proprie: publicare sincronă, rulări roșii, ordine eșuate, erori client, disc, DB, punga creierului. La probleme: enumeră-le ownerului și întreabă dacă să le repari.', input_schema: { type: 'object', properties: {} } },
+              LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
+              DB_TABLES_TOOL, DB_QUERY_TOOL,
+              BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL,
+              SYSTEM_HEALTH_TOOL,
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
