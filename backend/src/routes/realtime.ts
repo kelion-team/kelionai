@@ -1,9 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
-import { listSource, readSource, searchSource } from '../services/sourceCode.js'
-import { systemHealth } from '../services/health.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
@@ -37,8 +35,8 @@ import {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
 } from './chat.js'
-import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
-import { runRunbook, runbookStatus, runbookLog, requestRepair } from '../services/runbooks.js'
+// Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
+import { execSharedAdminTool } from '../services/adminTools.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
 // /api/realtime/session : proxy SDP. Clientul (browser WebRTC) trimite oferta
@@ -275,11 +273,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             ]
           : []
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
-          if (tname === 'list_source') return listSource(String(targs.dir ?? '.'))
-          if (tname === 'read_source') return readSource(String(targs.path ?? ''), Number(targs.from_line ?? 1) || 1)
-          if (tname === 'search_source') return searchSource(String(targs.query ?? ''))
-          if (tname === 'db_tables') return dbTablesOverview()
-          if (tname === 'db_query') return dbQuery(String(targs.sql ?? ''))
+          // Uneltele admin PARTAJATE (sursă/DB/sănătate/repo/runbook/request_repair):
+          // dispatch UNIC, comun cu scrisul (services/adminTools.ts) — fără duplicare.
+          const shared = await execSharedAdminTool(tname, targs)
+          if (shared !== null) return shared
+          // Specifice vocii (efect/formatare diferită de chat):
           if (tname === 'build_software') {
             const order = String(targs.order ?? '').trim()
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
@@ -307,17 +305,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const jobs = await listBuildJobs(8)
             return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, progress: j.progress, ci: j.ci, pr: j.prUrl })) })
           }
-          if (tname === 'system_health') return systemHealth()
-          // ── Calea autonomiei pe voce: aceiași executori ca scrisul (chat.ts) ──
-          // repo_write/open_pr/merge_pr (github.ts, cu isOpsPaused + checkpoint la
-          // merge), run_runbook/status/log (runbooks.ts), request_repair.
-          if (tname === 'repo_write') return repoWrite(String(targs.branch ?? ''), String(targs.path ?? ''), String(targs.content ?? ''), String(targs.message ?? ''))
-          if (tname === 'repo_open_pr') return repoOpenPR(String(targs.branch ?? ''), String(targs.title ?? ''), String(targs.body ?? ''))
-          if (tname === 'repo_merge_pr') return repoMergePR(Number(targs.pr ?? 0))
-          if (tname === 'run_runbook') return runRunbook(String(targs.name ?? ''))
-          if (tname === 'runbook_status') return runbookStatus(targs.name ? String(targs.name) : undefined)
-          if (tname === 'runbook_log') return runbookLog(Number(targs.run_id ?? 0))
-          if (tname === 'request_repair') return requestRepair(String(targs.title ?? ''), String(targs.details ?? ''))
+          // (sursă/DB/sănătate/repo/runbook/request_repair sunt deja tratate de
+          // execSharedAdminTool mai sus — dispatch unic, comun cu scrisul.)
           return JSON.stringify({ error: 'unealtă necunoscută' })
         }
         // ── §6 CREIER UNIC — vocea = urechile și gura ACELUIAȘI creier ────────

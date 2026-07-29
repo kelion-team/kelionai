@@ -12,6 +12,7 @@ import {
 import { VOICE_TOOL_NAMES } from './services/realtime.js'
 import { googleTools } from './services/google.js'
 import { RUNBOOKS } from './services/runbooks.js'
+import { SHARED_ADMIN_TOOLS } from './services/adminTools.js'
 
 // PAZNICUL DE COMPLETITUDINE (CREIER UNIC §5). Adrian: „dacă nu înmagazinează
 // REAL tot ce are softul, nu are rost". Testul apără sursa unică: să rămână
@@ -70,7 +71,10 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     // Interceptate în execTool ÎNAINTE de runTool (nu sunt `case`): raționamentul
     // greu și auto-propunerea de unealtă.
     const special = new Set(['ask_brain', 'propose_tool'])
-    const areHandler = (n: string): boolean => cases.has(n) || google.has(n) || special.has(n)
+    // Uneltele admin PARTAJATE (chat ∩ voce) trec prin garda comună înainte de
+    // switch (execSharedAdminTool) → nu mai au `case`, dar SUNT tratate.
+    const areHandler = (n: string): boolean =>
+      cases.has(n) || google.has(n) || special.has(n) || SHARED_ADMIN_TOOLS.has(n)
     const orfane = chatCapabilityNames().filter((n) => !areHandler(n))
     expect(orfane, `capabilități de chat FĂRĂ handler în chat.ts (adormite): ${orfane.join(', ')}`).toEqual([])
   })
