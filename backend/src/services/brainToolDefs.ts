@@ -142,3 +142,114 @@ export const FORGET_MEMORY_TOOL: Tool = {
     required: ['fragment'],
   },
 }
+
+
+// ── §1: BROWSERUL LIVE — definiții comune (erau locale în chat.ts, deci vocea
+// nu avea cum să le ceară → cele 9 unelte apăreau „adormite pe voce"). ───────
+export const BROWSER_OPEN_TOOL: Tool = {
+  name: 'browser_open',
+  description:
+    'Open a real web page in a live browser and show it, live, on the user\'s monitor — including sites that refuse to load in a simple embedded frame (Google, banks, social media). Returns the page title, its visible text, and a NUMBERED list of its links/buttons/inputs so you can navigate further with browser_click / browser_type. Prefer this over show_on_screen whenever the user wants to actually browse, read inside, search within, or interact with a real website.',
+  input_schema: {
+    type: 'object',
+    properties: { url: { type: 'string', description: 'Full https:// (or http://) URL to open.' } },
+    required: ['url'],
+  },
+}
+
+export const BROWSER_CLICK_TOOL: Tool = {
+  name: 'browser_click',
+  description:
+    'Click a link, button or other element on the currently open browser page, by its number from the last browser_open/browser_read/browser_click/browser_type result. This is how you walk through an entire site page by page — e.g. to survey/summarize it ("conspectează site-ul"): open it, read it, click into each relevant link, read again.',
+  input_schema: {
+    type: 'object',
+    properties: { index: { type: 'number', description: 'The element number to click.' } },
+    required: ['index'],
+  },
+}
+
+export const BROWSER_TYPE_TOOL: Tool = {
+  name: 'browser_type',
+  description:
+    'Type text into an input/textarea/search box on the currently open browser page, by its number. Set submit=true to press Enter afterwards (e.g. to submit a search).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      index: { type: 'number', description: 'The input element number to type into.' },
+      text: { type: 'string', description: 'The text to type.' },
+      submit: { type: 'boolean', description: 'Press Enter after typing.' },
+    },
+    required: ['index', 'text'],
+  },
+}
+
+export const BROWSER_READ_TOOL: Tool = {
+  name: 'browser_read',
+  description:
+    'Re-read the currently open browser page — its visible text and numbered links/buttons — without navigating. Use to survey/summarize a page or refresh the list of clickable elements.',
+  input_schema: { type: 'object', properties: {} },
+}
+
+export const BROWSER_BACK_TOOL: Tool = {
+  name: 'browser_back',
+  description: 'Go back to the previous page in the live browser.',
+  input_schema: { type: 'object', properties: {} },
+}
+
+export const BROWSER_SCROLL_TOOL: Tool = {
+  name: 'browser_scroll',
+  description: 'Scroll the currently open browser page to see more content.',
+  input_schema: {
+    type: 'object',
+    properties: { direction: { type: 'string', enum: ['down', 'up'], description: 'Scroll direction.' } },
+    required: ['direction'],
+  },
+}
+
+export const BROWSER_KEY_TOOL: Tool = {
+  name: 'browser_key',
+  description:
+    'Press a keyboard key or combo on the currently open browser page — for interactions a click/type cannot do: Tab/Shift+Tab to move between fields, Escape to close a popup, ArrowDown/ArrowUp to pick from a dropdown/autocomplete, Enter to submit, Control+A to select all. Use it when the page needs a real keystroke, not text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      key: {
+        type: 'string',
+        description: 'Playwright key name or combo, e.g. "Enter", "Tab", "Escape", "ArrowDown", "Control+A", "Shift+Tab".',
+      },
+    },
+    required: ['key'],
+  },
+}
+
+export const BROWSER_CLICK_AT_TOOL: Tool = {
+  name: 'browser_click_at',
+  description:
+    'Click at pixel coordinates (x,y) in the browser viewport (1280×800), for elements the numbered list does not capture — a spot on a map, a canvas, a custom widget. Read the page screenshot first to judge where to click. Prefer browser_click by index when the target is in the numbered list.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      x: { type: 'number', description: 'X pixel (0–1280).' },
+      y: { type: 'number', description: 'Y pixel (0–800).' },
+    },
+    required: ['x', 'y'],
+  },
+}
+
+export const BROWSER_CLOSE_TOOL: Tool = {
+  name: 'browser_close',
+  description: 'Close the live browser and clear it from the monitor, when done browsing.',
+  input_schema: { type: 'object', properties: {} },
+}
+
+export const BROWSER_TOOLS: Tool[] = [
+  BROWSER_OPEN_TOOL,
+  BROWSER_CLICK_TOOL,
+  BROWSER_TYPE_TOOL,
+  BROWSER_READ_TOOL,
+  BROWSER_BACK_TOOL,
+  BROWSER_SCROLL_TOOL,
+  BROWSER_KEY_TOOL,
+  BROWSER_CLICK_AT_TOOL,
+  BROWSER_CLOSE_TOOL,
+]
