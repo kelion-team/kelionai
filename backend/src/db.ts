@@ -344,6 +344,11 @@ export async function initDb(): Promise<void> {
     -- Kelion să-l poată NARA. Actualizat pe parcurs de POST /api/constructor/progress.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress TEXT;
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
+    -- VERDICTUL VERIFICĂRII INDEPENDENTE (Etapa 6 autonomie, 29 iul): „Gata" nu
+    -- mai e pe cuvântul lucrătorului — după PR, lucrătorul așteaptă CI-ul (verify)
+    -- pe o mașină curată și scrie aici 'verde' / 'roșu' / 'în curs'. Kelion îl
+    -- poate NARA („Gata, verificat de CI") și ownerul îl vede în raport.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS ci TEXT;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -2814,6 +2819,7 @@ export interface BuildJob {
   tokens: number
   log: string | null
   progress: string | null
+  ci: string | null
   createdAt: string
   updatedAt: string
 }
@@ -2829,6 +2835,7 @@ interface BuildJobDbRow {
   tokens: string | number
   log: string | null
   progress?: string | null
+  ci?: string | null
   created_at: Date
   updated_at: Date
 }
@@ -2845,6 +2852,7 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     tokens: Number(r.tokens),
     log: r.log,
     progress: r.progress ?? null,
+    ci: r.ci ?? null,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -2892,13 +2900,13 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string },
 ): Promise<void> {
   if (!dbEnabled()) return
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-       tokens = tokens + $5, log = $6, updated_at = now() WHERE id = $1`,
-    [id, fields.status, fields.branch ?? null, fields.prUrl ?? null, fields.tokens ?? 0, (fields.log ?? '').slice(-20000) || null],
+       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), updated_at = now() WHERE id = $1`,
+    [id, fields.status, fields.branch ?? null, fields.prUrl ?? null, fields.tokens ?? 0, (fields.log ?? '').slice(-20000) || null, fields.ci ?? null],
   )
 }
 

@@ -253,7 +253,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           }
           if (tname === 'constructor_status') {
             const jobs = await listBuildJobs(8)
-            return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, progress: j.progress, pr: j.prUrl })) })
+            return JSON.stringify({ jobs: jobs.map((j) => ({ id: j.id, status: j.status, progress: j.progress, ci: j.ci, pr: j.prUrl })) })
           }
           if (tname === 'system_health') return systemHealth()
           return JSON.stringify({ error: 'unealtă necunoscută' })

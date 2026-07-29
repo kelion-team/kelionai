@@ -2121,7 +2121,9 @@ async function runTool(
       return JSON.stringify({
         // `progress` = pasul curent al constructorului (Etapa 4) — Kelion îl
         // poate rosti („acum compilez", „deschid PR-ul") în loc de „lucrează…".
-        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
+        // `ci` = verdictul verificării INDEPENDENTE (Etapa 6): „Gata, verificat
+        // de CI (verde)" — nu pe cuvântul lucrătorului.
+        jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
     }
     case 'system_health': {

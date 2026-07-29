@@ -1046,6 +1046,17 @@ body {
 .build-badge-queued { background: color-mix(in srgb, #b0b6c0 20%, transparent); }
 .build-badge-done { background: color-mix(in srgb, #57c98a 22%, transparent); }
 .build-badge-failed { background: color-mix(in srgb, #ff7a7a 22%, transparent); }
+.build-ci {
+  flex: none;
+  font-size: 0.72em;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.build-ci-ok { color: #57c98a; background: color-mix(in srgb, #57c98a 16%, transparent); }
+.build-ci-bad { color: #ff7a7a; background: color-mix(in srgb, #ff7a7a 16%, transparent); }
+.build-ci-wait { color: #d3a54a; background: color-mix(in srgb, #d3a54a 16%, transparent); }
 .build-order {
   font-weight: 500;
   word-break: break-word;

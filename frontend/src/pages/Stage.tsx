@@ -102,6 +102,7 @@ interface BuildLiveJob {
   status: string
   order: string
   progress: string | null
+  ci?: string | null
   prUrl: string | null
   attempts: number
   updatedAt?: string
@@ -160,6 +161,14 @@ function BuildSurface({ zoom }: { zoom: number }) {
             <li key={j.id} className={`build-item build-${j.status}`}>
               <div className="build-row">
                 <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
+                {/* Verdictul verificării INDEPENDENTE (Etapa 6): „Gata" dovedit de CI. */}
+                {j.ci === 'verde' ? (
+                  <span className="build-ci build-ci-ok" title="Verificat independent de CI (build + teste pe mașină curată)">CI ✓</span>
+                ) : j.ci === 'roșu' ? (
+                  <span className="build-ci build-ci-bad" title="CI a picat pe PR">CI ✗</span>
+                ) : j.ci === 'în curs' ? (
+                  <span className="build-ci build-ci-wait" title="CI încă rulează pe PR">CI…</span>
+                ) : null}
                 <span className="build-order">#{j.id} — {j.order}</span>
               </div>
               {j.progress ? (

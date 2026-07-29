@@ -46,29 +46,42 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
     const id = Number(req.body?.id ?? 0)
     const status = req.body?.status === 'done' ? 'done' : 'failed'
     if (!id) return reply.code(400).send({ error: 'id_lipsa' })
+    // VERDICTUL VERIFICĂRII INDEPENDENTE (Etapa 6): 'verde' = CI a re-rulat
+    // build+teste pe o mașină curată și a trecut; 'roșu' = a picat; 'în curs' =
+    // nu s-a putut confirma în bugetul lucrătorului (atelierul trecuse oricum).
+    const ci = ['verde', 'roșu', 'în curs'].includes(String(req.body?.ci)) ? String(req.body?.ci) : undefined
     await reportBuildJob(id, {
       status,
       branch: req.body?.branch,
       prUrl: req.body?.prUrl,
       tokens: Number(req.body?.tokens ?? 0),
       log: req.body?.log,
+      ci,
     })
     // Raportul către Adrian — pe email, cu PR-ul de apăsat (merge-ul e al lui).
+    const dovadaCI =
+      ci === 'verde'
+        ? 'Verificare INDEPENDENTĂ: CI verde pe o mașină curată (build + teste re-rulate). ✅'
+        : ci === 'în curs'
+          ? 'Verificare independentă (CI): încă rulează pe PR — atelierul trecuse deja build + teste.'
+          : 'Build + teste verificate în atelier.'
     const subject =
       status === 'done'
         ? `[Kelion] Constructorul a terminat ordinul #${id} — PR gata de merge`
         : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
     const body =
       status === 'done'
-        ? `Ordinul #${id} e construit, cu build + teste verificate în atelier.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
-        : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
+        ? `Ordinul #${id} e construit. ${dovadaCI}\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
+        : ci === 'roșu'
+          ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
+          : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
     void sendMail({ to: config.adminEmail, subject, html: body.replace(/\n/g, '<br>'), text: body }).catch(() => {})
     return reply.send({ ok: true })
   })
@@ -98,7 +111,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const jobs = await listMonitorBuildJobs()
     return reply.send({
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }

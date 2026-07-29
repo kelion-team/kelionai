@@ -585,6 +585,40 @@ async function deschidePR(titlu, corp, branch) {
   throw new Error(`PR-ul nu s-a deschis după 4 încercări: ${lastErr}`)
 }
 
+// DOVADA INDEPENDENTĂ (Etapa 6): „Gata" nu mai e pe cuvântul lucrătorului —
+// după PR, CI-ul (workflow-ul pr-verify) re-rulează build+teste pe o MAȘINĂ
+// CURATĂ. PUR (fără rețea): din răspunsul GitHub /check-runs alege checkul
+// „verify" și dă verdictul. Ținut separat + exportat ca să poată fi PROBAT.
+export function verdictDinCheckRuns(json, nume = 'verify') {
+  const runs = Array.isArray(json?.check_runs) ? json.check_runs : []
+  const r = runs.find((x) => x?.name === nume)
+  if (!r) return 'absent'
+  if (r.status !== 'completed') return 'pending'
+  return r.conclusion === 'success' ? 'success' : 'failure'
+}
+
+// Așteaptă checkul „verify" pe commit-ul PR-ului, mărginit de un termen (nu poate
+// depăși bugetul de timp al rulării — un job NU devine demon). Întoarce
+// 'success' | 'failure' | 'timeout'.
+async function asteaptaVerificareCI(sha, deadlineMs) {
+  const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json' }
+  let ultim = 'absent'
+  while (Date.now() < deadlineMs) {
+    let json = null
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/commits/${sha}/check-runs`, { headers, signal: AbortSignal.timeout(15_000) })
+      json = await r.json().catch(() => null)
+    } catch {
+      /* rețea — reîncerc la următoarea tură */
+    }
+    const v = verdictDinCheckRuns(json, 'verify')
+    ultim = v
+    if (v === 'success' || v === 'failure') return v
+    await dormi(15_000)
+  }
+  return ultim === 'failure' ? 'failure' : ultim === 'success' ? 'success' : 'timeout'
+}
+
 // RAPORTUL DE AVARIE LA OMORÂRE. `timeout 1800` din constructor-worker.sh ne
 // trimite SIGTERM; fără handler mureau mut, iar ordinul rămânea „running" 40 de
 // minute în DB și mai ardea o încercare din trei. Acum apucăm să raportăm.
@@ -784,6 +818,7 @@ async function main() {
     sh('git add -A')
     execFileSync('git', ['-c', 'user.name=Kelion Constructor', '-c', 'user.email=contact@kelionai.app', 'commit', '-m', titlu], { cwd: ATELIER, stdio: 'pipe' })
     execFileSync('git', ['push', '-u', 'origin', branch, '--force'], { cwd: ATELIER, stdio: 'pipe', timeout: 60_000 })
+    const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
     const prUrl = await deschidePR(
@@ -792,7 +827,26 @@ async function main() {
       branch,
     )
     log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
-    await report('done', { branch, prUrl, tokens })
+
+    // VERIFICARE INDEPENDENTĂ (Etapa 6): aștept CI-ul pe PR, mărginit de bugetul
+    // rămas (las 60s tampon ca să apuc să raportez înainte de timeout-ul dur).
+    // Doar dacă mai am timp real — altfel „Gata" cu ci:'în curs' (atelierul
+    // trecuse deja build+teste), fără să blochez sau să mint.
+    let ci = 'în curs'
+    const timpCI = Math.min(ramase() - 60_000, 9 * 60_000)
+    if (timpCI > 45_000) {
+      log('aștept verificarea independentă (CI) pe PR…')
+      const v = await asteaptaVerificareCI(headSha, Date.now() + timpCI)
+      ci = v === 'success' ? 'verde' : v === 'failure' ? 'roșu' : 'în curs'
+      log(`CI: ${ci}`)
+    }
+    if (ci === 'roșu') {
+      // CI a picat pe o mașină curată deși atelierul trecuse — NU declar „Gata"
+      // fals. Raportez eșec cu dovada, ca ownerul să nu dea merge pe roșu.
+      await report('failed', { branch, prUrl, tokens, ci, log: `${logLines.join('\n')}\n\nVerificarea independentă (CI) a picat pe PR (commit ${headSha.slice(0, 7)}).` })
+    } else {
+      await report('done', { branch, prUrl, tokens, ci })
+    }
   } catch (e) {
     // AMÂNARE, NU MOARTE (dovadă live 28 iul, ordinele #9-#13: toate au picat pe
     // sugrumarea furnizorilor gratuiți — 429 „free-models-per-min", Nvidia
