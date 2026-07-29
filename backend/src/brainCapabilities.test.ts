@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   CAPABILITIES,
   allCapabilityNames,
@@ -53,6 +55,24 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     const realGoogle = googleTools.map((t) => t.name).sort()
     const registruGoogle = CAPABILITIES.filter((c) => c.category === 'google').map((c) => c.name).sort()
     expect(registruGoogle).toEqual(realGoogle)
+  })
+
+  // HANDLER REAL PENTRU FIECARE CAPABILITATE DE CHAT (întărirea paznicului, audit
+  // 29 iul, risc #5): înainte, paznicul verifica realitatea DOAR pe suprafața
+  // google; un rând nou în registru, în afara google, fără handler în chat.ts ar
+  // fi trecut verde („adormit ascuns"). Acum: fiecare capabilitate de chat TREBUIE
+  // să aibă un `case '<nume>'` în runTool (chat.ts), SAU să fie skill Google (rutat
+  // prin runGoogleTool), SAU una din cele interceptate ÎNAINTE de runTool (execTool).
+  it('fiecare capabilitate de CHAT are un handler real în chat.ts (nu doar în registru)', () => {
+    const chatSrc = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
+    const cases = new Set([...chatSrc.matchAll(/case '([a-z_]+)':/g)].map((m) => m[1]))
+    const google = new Set(googleTools.map((t) => t.name))
+    // Interceptate în execTool ÎNAINTE de runTool (nu sunt `case`): raționamentul
+    // greu și auto-propunerea de unealtă.
+    const special = new Set(['ask_brain', 'propose_tool'])
+    const areHandler = (n: string): boolean => cases.has(n) || google.has(n) || special.has(n)
+    const orfane = chatCapabilityNames().filter((n) => !areHandler(n))
+    expect(orfane, `capabilități de chat FĂRĂ handler în chat.ts (adormite): ${orfane.join(', ')}`).toEqual([])
   })
 
   it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {
