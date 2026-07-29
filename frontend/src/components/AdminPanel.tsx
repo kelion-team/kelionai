@@ -124,6 +124,25 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
   return groups
 }
 
+// ── O GRILĂ DE LINKURI, o singură dată (unic, fără duplicate) ────────────────
+// „Trimite linkul pe rețele" și „Platforme video" erau DOUĂ blocuri JSX identice,
+// diferite doar prin titlu și listă. Dacă se schimba aspectul unui buton, trebuia
+// schimbat în ambele. Acum: o componentă mică, două apeluri.
+function ShareGrid({ title, items }: { title: string; items: { name: string; href: string }[] }): React.JSX.Element {
+  return (
+    <div className="fin-breakdown">
+      <div className="fin-breakdown-head">{title}</div>
+      <div className="share-grid">
+        {items.map((l) => (
+          <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
+            {l.name}
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function AdminPanel({
   onClose,
   initialTab,
@@ -1879,28 +1898,11 @@ export default function AdminPanel({
                       )}
                     </div>
                   </div>
-                  <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Trimite linkul pe rețele</div>
-                    <div className="share-grid">
-                      {links.map((l) => (
-                        <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
-                          {l.name}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">
-                      Platforme video — clipurile promo sunt în folderul Downloads; se încarcă în studioul lor
-                    </div>
-                    <div className="share-grid">
-                      {uploads.map((l) => (
-                        <a key={l.name} className="share-btn" href={l.href} target="_blank" rel="noreferrer">
-                          {l.name}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
+                  <ShareGrid title="Trimite linkul pe rețele" items={links} />
+                  <ShareGrid
+                    title="Platforme video — clipurile promo sunt în folderul Downloads; se încarcă în studioul lor"
+                    items={uploads}
+                  />
                 </>
               )
             })()}
