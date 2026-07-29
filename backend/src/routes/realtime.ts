@@ -11,6 +11,13 @@ import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../se
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, googleTools, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
+// §1: BROWSERUL LIVE ȘI PE VOCE (era adormit — 9 capabilități). Serverul rulează
+// Chromium ca la scris și întoarce `screen` cu screenshot-ul; clientul îl pune pe
+// monitor prin canalul care exista deja (handleControl → monitor).
+import {
+  browserOpen, browserClick, browserType, browserRead, browserBack,
+  browserScroll, browserKey, browserClickAt, browserClose,
+} from '../services/browser.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
@@ -21,6 +28,7 @@ import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiD
 // CREIER UNIC §1 („fără duplicare"): definițiile uneltelor de introspecție/
 // constructor vin din sursa COMUNĂ, nu mai sunt copiate inline aici.
 import {
+  BROWSER_TOOLS,
   COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
   LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL,
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
@@ -29,6 +37,7 @@ import {
 } from '../services/brainToolDefs.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
+import { proposeKelionTool } from '../db.js'
 import {
   SYSTEM_PROMPT,
   // CALEA AUTONOMIEI PE VOCE (Adrian, 29 iul: „de la cererea mea până la deploy
@@ -36,6 +45,7 @@ import {
   // unică, importate, nu duplicate), ca vocea să ajungă și ea până în producție.
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
+  PROPOSE_TOOL, SHOW_DOCUMENT_TOOL,
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
 import { execUserScopedTool, execSharedAdminTool } from '../services/adminTools.js'
@@ -51,6 +61,33 @@ import { formatDeviceTime } from '../services/timeContext.js'
 // FĂRĂ tier gratuit: vocea cere utilizator logat (Adrian: „se scot minutele de
 // test, userii cumpără să probeze"). Vocea de prezentare de pe landing (fără
 // login, plătită din contul admin) e tratată separat, în alt endpoint.
+// ── §1: BROWSERUL LIVE, EXECUTOR UNIC PENTRU VOCE ────────────────────────────
+// Aceleași unelte ca la scris (Chromium pe server). Rezultatul poartă `shotUrl`
+// (screenshot servit local, embeddabil) → ruta îl trimite ca `screen`, iar
+// clientul îl pune pe monitor prin canalul care exista deja. Un singur loc,
+// folosit atât de apelul direct, cât și de creierul escaladat (principiul
+// permanent: unic, fără duplicate).
+async function runBrowserTool(
+  name: string,
+  args: Record<string, unknown>,
+  base: string,
+  email: string,
+): Promise<unknown> {
+  const idx = Number(args.index ?? 0)
+  switch (name) {
+    case 'browser_open': return browserOpen(email, base, String(args.url ?? ''))
+    case 'browser_click': return browserClick(email, base, idx)
+    case 'browser_type': return browserType(email, base, idx, String(args.text ?? ''), Boolean(args.submit))
+    case 'browser_read': return browserRead(email, base)
+    case 'browser_back': return browserBack(email, base)
+    case 'browser_scroll': return browserScroll(email, base, String(args.direction ?? 'down') as 'up' | 'down')
+    case 'browser_key': return browserKey(email, base, String(args.key ?? ''))
+    case 'browser_click_at': return browserClickAt(email, base, Number(args.x ?? 0), Number(args.y ?? 0))
+    case 'browser_close': { await browserClose(email); return { closed: true } }
+    default: return { error: 'unealtă de browser necunoscută' }
+  }
+}
+
 export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { sdp?: string; language?: string; coords?: { lat?: number; lon?: number }; now?: string; tz?: string } }>(
     '/api/realtime/session',
@@ -257,6 +294,12 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           // admin (jurnale, poștă, costuri, update-uri). Poarta de admin o face
           // execUserScopedTool, ca la scris. Nu depind de monitor → merg vorbind.
           LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, LOG_GAP_TOOL,
+          // §1: BROWSERUL LIVE pe voce. Nu încape în sesiunea Realtime (plafon 31,
+          // deja plin), dar creierul escaladat n-are plafon — iar screenshot-ul
+          // ajunge pe monitor prin `screen`-ul răspunsului de la ask_brain.
+          ...BROWSER_TOOLS,
+          // §1: ultimele două care nu cereau nimic din client.
+          PROPOSE_TOOL, SHOW_DOCUMENT_TOOL,
           ...(adminUnlocked ? [LIST_UPDATES_TOOL, READ_INBOX_TOOL, SERVER_LOGS_TOOL, COST_TOOL] : []),
           ...(adminUnlocked
           ? [
@@ -273,6 +316,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             ]
           : []),
         ]
+        // Screenshot-ul ultimei pagini deschise de creier în tura asta (dacă a
+        // folosit browserul) — pleacă spre client ca `screen`, deci pe monitor.
+        let brainScreen: { url: string; title: string } | undefined
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
           // Uneltele admin PARTAJATE (sursă/DB/sănătate/repo/runbook/request_repair):
           // dispatch UNIC, comun cu scrisul (services/adminTools.ts) — fără duplicare.
@@ -282,6 +328,36 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           // aceeași cu scrisul; poarta de admin e ÎN executor.
           const scoped = await execUserScopedTool(tname, targs, user.email, isAdmin)
           if (scoped !== null) return scoped
+          if (tname === 'propose_tool') {
+            const p = targs as Record<string, unknown>
+            const id = await proposeKelionTool({
+              name: String(p.name ?? ''),
+              description: String(p.description ?? ''),
+              paramsJson: JSON.stringify(p.params_schema ?? {}),
+              httpMethod: String(p.http_method ?? 'GET'),
+              httpUrl: String(p.http_url ?? ''),
+              httpHeaders: JSON.stringify(p.http_headers ?? {}),
+              rationale: String(p.rationale ?? ''),
+            })
+            return JSON.stringify(id && id > 0 ? { proposed: true, id } : { error: 'nepropus' })
+          }
+          if (tname === 'show_document') {
+            // Documentul ajunge pe monitor prin ACELAȘI canal `screen`: îl servim
+            // ca text simplu, într-un data-URL (nu cere nimic în plus în client).
+            const title = String(targs.title ?? 'Document')
+            const text = String(targs.text ?? '')
+            if (!text.trim()) return JSON.stringify({ error: 'empty' })
+            brainScreen = { url: `data:text/plain;charset=utf-8,${encodeURIComponent(text.slice(0, 20_000))}`, title }
+            return JSON.stringify({ shown: true })
+          }
+          if (tname.startsWith('browser_')) {
+            const r = await runBrowserTool(tname, targs, `https://${req.headers.host ?? 'kelionai.app'}`, user.email)
+            const rr = r as { shotUrl?: string; title?: string }
+            // Ultimul screenshot al turei → îl trimitem clientului la finalul
+            // escaladării, ca pagina să apară pe monitor (ca la scris).
+            if (rr.shotUrl) brainScreen = { url: rr.shotUrl, title: rr.title ?? 'browser' }
+            return JSON.stringify(r).slice(0, 6000)
+          }
           // §1 „CE POATE SCRISUL, POATE ȘI VOCEA" — golul măsurat (29 iul): registrul
           // avea 66 capabilități pe scris, dar doar 31 pe voce, fiindcă sesiunea
           // Realtime e plafonată la 31 de unelte de către OpenAI. Plafonul e REAL,
@@ -386,7 +462,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // nimic (eroare/gol), cădem pe creierul simplu ca vocea să NU rămână mută.
         if (!answer) answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
-        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }) })
+        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen })
       }
 
       // PARITATE VOCE↔CHAT (25 iul): notițe, rol, gesturi — apelabile din voce.
@@ -435,6 +511,18 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
 
       // Căutările au cost fix (ca în chatul scris); skill-urile Google (Gmail,
       // Calendar...) sunt gratuite — rulează pe tokenul userului, nu pe cheile noastre.
+      // BROWSER LIVE PE VOCE (§1): aceleași unelte ca scrisul; rezultatul poartă
+      // `shotUrl` (screenshot servit local, embeddabil) → îl trimitem ca `screen`,
+      // deci pagina apare pe monitor exact ca atunci când i-o ceri scriind.
+      if (name.startsWith('browser_')) {
+        const r = await runBrowserTool(name, args, `https://${req.headers.host ?? 'kelionai.app'}`, user.email)
+        settle()
+        const res = r as { shotUrl?: string; title?: string }
+        return reply.send({
+          output: JSON.stringify(r).slice(0, 6000),
+          screen: res.shotUrl ? { url: res.shotUrl, title: res.title ?? 'browser' } : undefined,
+        })
+      }
       if (name === 'web_search' || name === 'youtube_search') toolCostUsd += SERPER_USD_PER_CALL
       const out = await runGoogleTool(name, args, token)
       settle()

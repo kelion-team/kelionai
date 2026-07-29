@@ -33,7 +33,7 @@ export interface Capability {
 export const CAPABILITIES: readonly Capability[] = [
   // 2.1 Comunicare & afișare
   { name: 'show_on_screen', category: 'afisare', does: 'pune un URL/dată pe monitor', chat: true, voice: true, admin: false },
-  { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, admin: false },
+  { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: true, admin: false },
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: true, admin: false },
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: true, admin: false },
@@ -81,18 +81,18 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'server_logs', category: 'cod', does: 'jurnalele serverului', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'ask_brain', category: 'cod', does: 'raționament profund (cod/analiză)', chat: true, voice: true, admin: false },
-  { name: 'propose_tool', category: 'cod', does: 'își cere singur o unealtă nouă', chat: true, voice: false, admin: false },
+  { name: 'propose_tool', category: 'cod', does: 'își cere singur o unealtă nouă', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.4 Browser live (9) — admin
-  { name: 'browser_open', category: 'browser', does: 'deschide un site', chat: true, voice: false, admin: false },
-  { name: 'browser_click', category: 'browser', does: 'dă click în pagină', chat: true, voice: false, admin: false },
-  { name: 'browser_type', category: 'browser', does: 'scrie în pagină', chat: true, voice: false, admin: false },
-  { name: 'browser_read', category: 'browser', does: 'citește pagina', chat: true, voice: false, admin: false },
-  { name: 'browser_back', category: 'browser', does: 'înapoi în istoric', chat: true, voice: false, admin: false },
-  { name: 'browser_scroll', category: 'browser', does: 'derulează pagina', chat: true, voice: false, admin: false },
-  { name: 'browser_close', category: 'browser', does: 'închide browserul', chat: true, voice: false, admin: false },
-  { name: 'browser_key', category: 'browser', does: 'apasă o tastă', chat: true, voice: false, admin: false },
-  { name: 'browser_click_at', category: 'browser', does: 'click la coordonate', chat: true, voice: false, admin: false },
+  { name: 'browser_open', category: 'browser', does: 'deschide un site', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_click', category: 'browser', does: 'dă click în pagină', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_type', category: 'browser', does: 'scrie în pagină', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_read', category: 'browser', does: 'citește pagina', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_back', category: 'browser', does: 'înapoi în istoric', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_scroll', category: 'browser', does: 'derulează pagina', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_close', category: 'browser', does: 'închide browserul', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_key', category: 'browser', does: 'apasă o tastă', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'browser_click_at', category: 'browser', does: 'click la coordonate', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.5 Memorie & note
   { name: 'save_note', category: 'memorie', does: 'salvează o notiță', chat: true, voice: true, admin: false },
