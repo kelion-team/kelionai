@@ -125,3 +125,29 @@ La FIECARE pas: build + deploy + **verificat live cu dovadă reală** (curl,
 măsurare, înregistrare) — regula ta. Fără „gata" pe cuvânt.
 
 La final: **tabelul de mai sus, fiecare rând bifat cu dovada lui.**
+
+## 8. STAREA LIVRĂRII (dovezi — 29 iul)
+
+**Fundația (LIVRATĂ, merge-uită, teste verzi):**
+| Ce | Dovada |
+|---|---|
+| §5 Registrul unic (`brainCapabilities.ts`) + paznicul de completitudine | PR #501; paznicul verifică registrul față de `google.ts`/`runbooks.ts` REALE |
+| §3 Ancorarea vocii în timp + anti-inventare pe voce (fix „bună seara" dimineața) | PR #501 |
+| §1 Vocea derivă lista din registru (fără duplicare) | PR #502 |
+| §5 Paznicul verifică completitudinea față de sursele reale | PR #503 |
+
+**Capabilități adormite ACTIVATE (LIVRATE — creierul ajunge acum la ele):**
+| Funcție | Dovada |
+|---|---|
+| `read_inbox` — își citește propria cutie poștală | PR #505 |
+| `read_email` — corpul COMPLET al unui email | PR #506 |
+| `delete_calendar_event` — șterge un eveniment | PR #507 |
+| `complete_task` — bifează un task terminat | PR #507 |
+| `read_drive_file` — citește conținutul unui fișier Drive | PR #508 |
+
+Paznicul azi: **chat = 66 capabilități**, voce = 31 (plafon măsurat), toate verificate contra codului real. **64 teste verzi.**
+
+**RĂMAS:**
+- Skill-uri care cer scope-uri Google NOI (Photos, YouTube personal) → cer re-autentificarea userului (buton „Conectează Google") — de făcut când owner-ul decide re-conectarea.
+- **§6 — vocea la TOATE rutele** (pasul mare): calea curată = vocea devine urechile+gura aceluiași creier; se construiește în paralel, verificat, apoi se comută — ca să nu cadă vocea live.
+- Inteligența brută a creierului (raționament) depinde de **modelul** pe care gândește — azi modele gratuite slabe; un model capabil = decizia de bani a owner-ului.
