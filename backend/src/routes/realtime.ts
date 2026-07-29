@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, dbTablesOverview, dbQuery, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
@@ -453,12 +453,27 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user) return reply.code(401).send({ error: 'unauthorized' })
-      const seconds = Math.max(0, Math.min(60, Number(req.body?.seconds ?? 0)))
-      if (seconds <= 0) return reply.send({ ok: true, charged: 0 })
-      const cost = (seconds / 60) * VOICE_USD_PER_MINUTE
+      // CEAS DE SERVER (audit 29 iul, risc #1 — bani): înainte, taxam secundele
+      // RAPORTATE DE CLIENT; un client care le sub-raporta (sau nu pulsa deloc)
+      // vorbea aproape gratis pe cheia platformei. Acum taxăm timpul REAL măsurat
+      // de server între două pulsuri (marcaj în KV per user), plafon 60s/puls.
+      // La PRIMUL puls al sesiunii (sau marcaj vechi >90s: pauză/sesiune nouă) nu
+      // avem interval de server → folosim estimarea clientului, tot mărginită la
+      // 60s. Clientul nu mai poate sub-raporta cât timp pulsează normal (~20s).
+      const now = Date.now()
+      const KEY = `voice_tick:${user.email}`
+      const last = Number(await loadKv(KEY).catch(() => null)) || 0
+      void saveKv(KEY, String(now)).catch(() => {})
+      const serverGap = now - last
+      const billSec =
+        last > 0 && serverGap > 0 && serverGap <= 90_000
+          ? Math.min(60, Math.round(serverGap / 1000))
+          : Math.max(0, Math.min(60, Number(req.body?.seconds ?? 0)))
+      if (billSec <= 0) return reply.send({ ok: true, charged: 0, balance: await getBalance(user.email) })
+      const cost = (billSec / 60) * VOICE_USD_PER_MINUTE
       void recordCost(user.email, 'voice_minutes', cost)
       // TOȚI se debitează, inclusiv adminul (regula din 25 iul).
-      void debitWallet(user.email, cost, `voice_min:${Math.round(seconds)}s`)
+      void debitWallet(user.email, cost, `voice_min:${billSec}s`)
       const bal = await getBalance(user.email)
       // Semnalăm clientului dacă a rămas fără credit → oprește vocea.
       return reply.send({ ok: true, charged: cost, balance: bal, stop: config.stripe.secretKey && user.role !== 'admin' && bal <= 0 })
