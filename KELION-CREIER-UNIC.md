@@ -156,10 +156,11 @@ Paznicul azi: registrul are **69 capabilități** — **chat 66**, **voce 31** (
 | §1 Definițiile uneltelor de introspecție/constructor mutate în sursa comună (`brainToolDefs`) — fără duplicare | PR #517, LIVE (`7dd3ac3`) |
 | §7 Tabelul de dovezi — fiecare funcție cu proba ei (`KELION-DOVEZI.md`) | PR #517, LIVE |
 | §4 Auto-instalarea dependențelor — creierul le adaugă singur prin constructor (package.json/Dockerfile → PR → rebuild), NU prin apt live arbitrar (decizia owner-ului) | PR #518, LIVE (`9241b71`) |
-| §6 COMPLET — TOATE turele cu conținut trec prin creierul unic; modelul de voce e doar urechile+gura + acțiunile de dispozitiv (ordinul „fă-l complet") | această livrare |
+| §6 COMPLET — TOATE turele cu conținut trec prin creierul unic; modelul de voce e doar urechile+gura + acțiunile de dispozitiv (ordinul „fă-l complet") | PR #519, LIVE (`a3285a6`) |
+| Creierul NU mai e FORȚAT să cheme o unealtă la orice verb — ascultă cerința, decide singur (cauza „face ce vrea el, hardcodat"); poarta faptei rămâne plasa | PR #520, LIVE (`f06486c`) |
+| CALEA AUTONOMIEI COMPLETĂ PE VOCE — vocea are acum aceleași unelte ca scrisul (repo_write/open_pr/merge_pr, run_runbook/status/log, request_repair): de la cererea ta până la deploy final, pe toate rutele | această livrare |
 
 **RĂMAS (cere acțiunea owner-ului, nu cod):**
 - Skill-uri cu scope-uri Google NOI (Photos, YouTube personal) → cer re-conectarea Google (buton „Conectează Google").
 - **Testele LIVE ale owner-ului** — voce, cameră, GPS, email real: codul e livrat și dovedit; efectul pe dispozitivul lui îl confirmă el.
-- Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant.
 - Modelul de raționament: owner-ul a setat deja prin env un model PLĂTIT performant (nu mai e „model gratuit slab").
