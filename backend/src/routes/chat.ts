@@ -70,6 +70,7 @@ import {
   browserKey,
   browserClickAt,
   browserClose,
+  type BrowserResult,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -1269,11 +1270,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       return
     }
 
-    // A device command (camera / monitor tabs): answer instantly — {device}
-    // control frame the client executes verbatim, plus a short ack — with NO
-    // model call. Same stream shape as a normal turn ({turn} receipt first) so
-    // the delivery check mark and the resume path still work.
-    if (deviceCmd) {
+    // Comandă instantanee (device sau gesture): răspuns pe loc, FĂRĂ apel la
+    // model — un cadru de control {device|gesture} pe care clientul îl execută
+    // verbatim, plus un ack scurt. Aceeași formă de stream ca o tură normală
+    // (chitanța {turn} întâi) ca bifa de livrare și reluarea să meargă. Cele două
+    // erau blocuri identice — o singură sursă aici (unic, fără duplicate).
+    const instantCommand = (frameKey: 'device' | 'gesture', value: unknown, ack: string): void => {
       reply.hijack()
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -1282,40 +1284,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       })
       const cmdTurnId = randomUUID()
       startTurn(user.email, cmdTurnId)
-      const ack = deviceAck(deviceCmd, ro)
       const payload =
         `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
-        `${CTRL}${JSON.stringify({ device: deviceCmd })}${CTRL}` +
+        `${CTRL}${JSON.stringify({ [frameKey]: value })}${CTRL}` +
         ack
       reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
       finishTurn(user.email, cmdTurnId)
       if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
       if (ack) void saveMessage(user.email, 'assistant', ack)
       reply.raw.end()
-      return
     }
 
-    // A gesture command: interpreted on the server, answered instantly with a
-    // {gesture} control frame for the avatar — no model call, full speed.
+    // Camera / tab-urile monitorului: cadru {device}.
+    if (deviceCmd) {
+      instantCommand('device', deviceCmd, deviceAck(deviceCmd, ro))
+      return
+    }
+    // Gest pentru avatar, interpretat pe server: cadru {gesture}.
     if (gestureCmd) {
-      reply.hijack()
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-      })
-      const cmdTurnId = randomUUID()
-      startTurn(user.email, cmdTurnId)
-      const ack = gestureAck(gestureCmd, ro)
-      const payload =
-        `${CTRL}${JSON.stringify({ turn: cmdTurnId })}${CTRL}` +
-        `${CTRL}${JSON.stringify({ gesture: gestureCmd })}${CTRL}` +
-        ack
-      reply.raw.write(appendTurn(user.email, cmdTurnId, payload))
-      finishTurn(user.email, cmdTurnId)
-      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
-      if (ack) void saveMessage(user.email, 'assistant', ack)
-      reply.raw.end()
+      instantCommand('gesture', gestureCmd, gestureAck(gestureCmd, ro))
       return
     }
 
@@ -2002,6 +1989,18 @@ async function runTool(
   // nimic" — fără urma asta, diagnosticul a cerut interogarea bazei de date).
   console.log(`[tool] ${block.name} (${isAdmin ? 'admin' : 'user'})`)
 
+  // Coada COMUNĂ a tuturor acțiunilor de browser (open/click/type/read/back/
+  // scroll/key/click_at): pe succes trimite pe monitor SCREENSHOT-ul servit local
+  // (embeddabil — nu URL-ul extern pe care iframe-ul îl refuza, audit 24 iul P1-4),
+  // apoi întoarce rezultatul brut. Era copiată în 8 cazuri; aici o singură dată
+  // (principiul permanent: unic, fără duplicate).
+  const browserResult = (result: BrowserResult): string => {
+    if (!('error' in result)) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
+    }
+    return JSON.stringify(result)
+  }
+
   // Uneltele admin PARTAJATE (chat ∩ voce) — dispatch UNIC, comun cu vocea
   // (services/adminTools.ts). Fără duplicare (§1 unicitate / audit risc #4):
   // extragerea argumentelor + apelul trăiesc într-un singur loc, nu copiate în
@@ -2159,96 +2158,28 @@ async function runTool(
       return JSON.stringify({ shown: true, url: imageUrl })
     }
 
+    // Cele 8 acțiuni de browser: apelul diferă, coada e comună (browserResult —
+    // vezi nota din capul lui runTool). BROWSER VIZIBIL (audit 24 iul, P1-4):
+    // monitorul primește SCREENSHOT-ul servit local (embeddabil), nu URL-ul extern.
     case 'browser_open': {
       const url = String(args.url ?? '')
       if (!url) return JSON.stringify({ error: 'no_url' })
-      const result = await browserOpen(email, baseUrl, url)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
+      return browserResult(await browserOpen(email, baseUrl, url))
     }
-    case 'browser_click': {
-      const result = await browserClick(email, baseUrl, Number(args.index ?? 0))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_type': {
-      const result = await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_read': {
-      const result = await browserRead(email, baseUrl)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_back': {
-      const result = await browserBack(email, baseUrl)
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_scroll': {
-      const result = await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down')
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_key': {
-      const result = await browserKey(email, baseUrl, String(args.key ?? ''))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
-    case 'browser_click_at': {
-      const result = await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0))
-      // BROWSER VIZIBIL (audit 24 iul, P1-4): înainte trimiteam URL-ul EXTERN al
-      // paginii → iframe-ul îl refuza (X-Frame-Options) → ecran gol deși modelul
-      // naviga corect. Acum monitorul primește SCREENSHOT-ul servit local
-      // (mereu embeddabil); modelul primește separat textul + elementele.
-      if (!('error' in result)) {
-        reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: result.shotUrl, title: result.title } })}${CTRL}`)
-      }
-      return JSON.stringify(result)
-    }
+    case 'browser_click':
+      return browserResult(await browserClick(email, baseUrl, Number(args.index ?? 0)))
+    case 'browser_type':
+      return browserResult(await browserType(email, baseUrl, Number(args.index ?? 0), String(args.text ?? ''), Boolean(args.submit)))
+    case 'browser_read':
+      return browserResult(await browserRead(email, baseUrl))
+    case 'browser_back':
+      return browserResult(await browserBack(email, baseUrl))
+    case 'browser_scroll':
+      return browserResult(await browserScroll(email, baseUrl, String(args.direction ?? 'down') as 'up' | 'down'))
+    case 'browser_key':
+      return browserResult(await browserKey(email, baseUrl, String(args.key ?? '')))
+    case 'browser_click_at':
+      return browserResult(await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0)))
     case 'browser_close': {
       await browserClose(email)
       // Browserul s-a închis → curăță monitorul (url gol = ecran liber).
