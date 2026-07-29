@@ -164,6 +164,28 @@ Verificare vizuală obligatorie (build frontend + ochi pe pagină), apoi → **7
 - [ ] merge în master → `/api/version` == sha-ul de master + `/health` 200
 - [ ] rândul din tabelul de mai sus se taie, cu sha-ul live lângă el
 
+---
+
+## REZULTATUL: **0 clone** (30 iul) — toate cele 5 loturi executate
+
+| Pas | Clone | % |
+|---|---|---|
+| Înainte de curățare (29 iul) | 50 | 1,51% |
+| După clonele reale de logică | 16 | 0,59% |
+| **Lotul A** — contractul API (`backend/src/shared/api-types.ts`) | 13 | 0,31% |
+| **Lotul D** — deschiderea microfonului (`lib/audioGraph.ts`) | 11 | 0,26% |
+| **Lotul C** — unealta `open_app_view`, o singură declarație | 10 | 0,21% |
+| **Lotul E** — CSS + JSX (`ShareGrid`, `usePolledJson`, `DocFrame`, `AVATAR_ORBIT`, modale, butoane) | 3 | 0,05% |
+| **Lotul B** — contractul creierului (`BrainCallOpts`, `orCall`) | **0** | **0,00%** |
+
+Ce părea „inevitabil" (tipuri backend↔frontend, semnături între furnizori, CSS
+coincidental) s-a dovedit **reductibil** — dar NU prin forțare: fiecare a cerut
+modulul potrivit (un pachet de tipuri fără runtime, un hook, o componentă, un tip
+numit). **Zero-ul e real, nu obținut cu `jscpd:ignore`.**
+
+**Cum rămâne 0:** detectorul rulează la fiecare PR (`pr-verify.yml`), iar pragul a
+fost coborât de la 2% la **0,1%** — orice clonă nouă sare imediat, la primul PR.
+
 ## Ce NU se face niciodată în procedura asta
 
 - nu se unesc două lucruri doar ca să scadă un număr (dacă se sparge o graniță

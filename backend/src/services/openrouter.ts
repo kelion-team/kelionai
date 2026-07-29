@@ -230,6 +230,23 @@ export async function resolveModel(tier: ModelTier, wanted?: string | null): Pro
   return list.some((m) => m.id === wanted) ? wanted : fallback
 }
 
+// ── CONTRACTUL UNUI APEL LA CREIER (Lotul B) ─────────────────────────────────
+// Reglajele unei ture erau scrise LITERAL în 7 semnături, în ambele motoare
+// (OpenRouter și Gemini direct). Nu era neglijență: cele două IMPLEMENTEAZĂ
+// același contract, ca orchestratorul să le cheme interschimbabil. Dar scris de
+// mână de 7 ori, contractul putea diverge tăcut — adăugai un reglaj într-un
+// motor și celălalt îl ignora. Acum e UN singur tip; ambele îl folosesc.
+export interface BrainCallOpts {
+  /** Plafonul de tokeni al răspunsului. */
+  maxTokens?: number
+  /** Cât de „liber" răspunde (0 = strict, 1 = creativ). */
+  temperature?: number
+  /** Cât de mult gândește intern modelele cu raționament. */
+  reasoning?: 'low' | 'medium' | 'high'
+  /** `required` = trebuie să cheme o unealtă; `auto` = decide singur. */
+  toolChoice?: 'auto' | 'required'
+}
+
 export interface OrMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   // String pentru text simplu; array pentru multimodal în format OpenAI
@@ -292,7 +309,7 @@ function orBody(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' },
+  opts: BrainCallOpts,
   stream: boolean,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -314,6 +331,20 @@ function orBody(
   return body
 }
 
+// Garda de cheie + apelul, într-un singur loc: fără cheie NU se cheamă rețeaua,
+// se întoarce un rezultat gol marcat `no_key` (apelantul îl dă mai departe ca
+// atare). Cele două ture — cu flux și fără — aveau garda și apelul copiate.
+async function orCall(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[],
+  opts: BrainCallOpts,
+  stream: boolean,
+): Promise<Response | OrChatResult> {
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  return orFetch(orBody(model, messages, tools, opts, stream))
+}
+
 // Variantă STREAMING: textul curge prin `onText` (primul cuvânt instant, ca pe
 // vechiul Kimi), iar apelurile de unelte se asamblează pe index din delte.
 export async function openrouterChatStream(
@@ -321,11 +352,11 @@ export async function openrouterChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  // Corp + fetch din sursa comună (raționament + unelte incluse). `stream:true`.
-  const r = await orFetch(orBody(model, messages, tools, opts, true))
+  const call = await orCall(model, messages, tools, opts, true)
+  if (!(call instanceof Response)) return call
+  const r = call
   if (!r.ok || !r.body) {
     throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
   }
@@ -383,11 +414,11 @@ export async function openrouterChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
-  // Corp + fetch din sursa comună (raționament + unelte incluse). `stream:false`.
-  const r = await orFetch(orBody(model, messages, tools, opts, false))
+  const call = await orCall(model, messages, tools, opts, false)
+  if (!(call instanceof Response)) return call
+  const r = call
   if (!r.ok) throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
   const j = (await r.json()) as {
     choices?: { message?: { content?: string; tool_calls?: OrToolCall[] }; finish_reason?: string }[]

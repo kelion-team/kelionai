@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import type { AnthropicTool, OrChatResult, OrMessage, OrToolCall } from './openrouter.js'
+import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall } from './openrouter.js'
 import { readSSE } from './sse.js'
 
 // ── CREIERUL PRINCIPAL: GEMINI DIRECT DE LA GOOGLE (Adrian, 27 iul: „comută la
@@ -51,7 +51,7 @@ function cleanSchema(s: unknown): unknown {
 export function toGeminiPayload(
   messages: OrMessage[],
   tools: AnthropicTool[],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: BrainCallOpts = {},
 ): Record<string, unknown> {
   const sys: string[] = []
   const contents: GContent[] = []
@@ -151,7 +151,7 @@ function geminiFetch(
   method: string,
   messages: OrMessage[],
   tools: AnthropicTool[],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' },
+  opts: BrainCallOpts,
 ): Promise<Response> {
   return fetch(`${G_BASE}/models/${model}:${method}`, {
     method: 'POST',
@@ -165,7 +165,7 @@ export async function geminiDirectChat(
   model: string,
   messages: OrMessage[],
   tools: AnthropicTool[] = [],
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const r = await geminiFetch(model, 'generateContent', messages, tools, opts)
@@ -182,7 +182,7 @@ export async function geminiDirectChatStream(
   messages: OrMessage[],
   tools: AnthropicTool[],
   onText: (delta: string) => void,
-  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high'; toolChoice?: 'auto' | 'required' } = {},
+  opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
   const r = await geminiFetch(model, 'streamGenerateContent?alt=sse', messages, tools, opts)

@@ -36,4 +36,4 @@ jobs:
       # dar face duplicarea VIZIBILĂ automat, ca să nu se mai strecoare pe ascuns.
       - name: Duplicare (jscpd) — principiul unic-fără-duplicate
         continue-on-error: true
-        run: npx --yes jscpd --threshold 2
+        run: npx --yes jscpd --threshold 0.1
