@@ -516,75 +516,6 @@ async function readEmail(query: string, token: string): Promise<string> {
   body = body.replace(/&nbsp;/g, ' ').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000)
   return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
 }
-
-// Apel direct Gemini generateContent (aceeași cheie x-goog-api-key). Corpul
-// (contents/tools/generationConfig) îl dă apelantul; aici doar URL-ul + POST-ul,
-// comune la căutarea groundată și la vedere. null dacă nu e cheie sau throw.
-// Sursă unică (principiul permanent: unic, fără duplicate).
-async function geminiGenerate(body: unknown): Promise<Response | null> {
-  if (!config.geminiKey) return null
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  try {
-    return await tfetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-      body: JSON.stringify(body),
-    })
-  } catch {
-    return null
-  }
-}
-
-// VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model
-// cu vedere se uită la un screenshot și răspunde la o întrebare despre ce se vede.
-// Folosit de verificarea vizuală din admin. MIGRAT PE OPENROUTER (audit 24 iul:
-// `GEMINI_API_KEY` lipsea pe VPS → ruta pica MEREU cu `gemini_vision_indisponibil`);
-// acum folosește ACEEAȘI cheie OpenRouter ca tot creierul (regula „o singură
-// cheie") — Gemini direct rămâne DOAR fallback dacă cheia lui există.
-export async function geminiVision(jpegBase64: string, question: string): Promise<string | null> {
-  // 1) OpenRouter (cheia unică a creierului) — modelul de chat are vedere.
-  if (config.openrouter.key) {
-    try {
-      const { openrouterChat } = await import('./openrouter.js')
-      const r = await openrouterChat(
-        config.openrouter.chatDefault,
-        [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: question },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpegBase64}` } },
-            ],
-          },
-        ],
-        [],
-        { maxTokens: 600, temperature: 0.1 },
-      )
-      if (r.text.trim()) return r.text.trim()
-    } catch {
-      /* cade pe Gemini mai jos */
-    }
-  }
-  // 2) Fallback: Gemini direct (doar dacă cheia lui e configurată — geminiGenerate
-  // întoarce null când lipsește). Corp + POST din sursa comună.
-  const res = await geminiGenerate({
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: question },
-          { inline_data: { mime_type: 'image/jpeg', data: jpegBase64 } },
-        ],
-      },
-    ],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
-  })
-  if (!res || !res.ok) return null
-  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
-  const text = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
-  return text || null
-}
-
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
@@ -1084,28 +1015,6 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
   }
   return JSON.stringify({ videos: [], not_found: true })
 }
-
-// Real YouTube resolver for the [YT query] bridge tag: searches (Serper first,
-// Gemini fallback) and returns the top playable video as an embeddable URL.
-// The brain must NEVER guess a video ID — it emits [YT query] and the server
-// resolves a real, currently-available ID so the embed always plays.
-export async function youtubeFirstEmbed(
-  query: string,
-): Promise<{ embed: string; watch: string; title: string } | null> {
-  const raw = await youtubeSearch(query, 1)
-  let parsed: { videos?: { title?: string; link?: string }[] }
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  const link = parsed.videos?.[0]?.link ?? ''
-  const title = parsed.videos?.[0]?.title ?? ''
-  const emb = ytEmbed(link)
-  if (!emb) return null
-  return { embed: emb, watch: link, title }
-}
-
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
   // Fără cheie Gemini: traducem prin OpenRouter (aceeași cheie ca creierul), ca

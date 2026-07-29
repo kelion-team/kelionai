@@ -492,16 +492,6 @@ export async function initDb(): Promise<void> {
   `)
 }
 
-export interface ClientErrorRow {
-  id: number
-  type: string
-  message: string
-  stack: string | null
-  url: string
-  ip: string
-  created_at: string
-}
-
 export async function saveClientError(e: {
   type?: string
   message?: string
@@ -527,13 +517,29 @@ export async function saveClientError(e: {
   }
 }
 
-export async function listClientErrors(n = 100): Promise<ClientErrorRow[]> {
+export interface ClientErrorGroup {
+  created_at: string
+  user_email: string | null
+  message: string
+  n: string
+}
+
+/** Erorile de client GRUPATE pe mesaj, pentru panoul de admin.
+ *
+ *  Interogarea asta trăia scrisă de mână ÎN RUTĂ (admin.ts), în timp ce aici
+ *  zăcea o `listClientErrors` pe care n-o chema nimeni: două locuri pentru
+ *  aceeași treabă, unul mort. jscpd nu putea s-o prindă (textul diferea), dar e
+ *  exact încălcarea principiului „unic, fără duplicate" — plus o rută care
+ *  atingea direct baza, ocolind stratul ăsta. Acum: o singură sursă, aici. */
+export async function listClientErrorGroups(hours = 48, limit = 30): Promise<ClientErrorGroup[]> {
   if (!dbEnabled()) return []
   try {
-    const r = await getPool().query<ClientErrorRow>(
-      `SELECT id, type, message, stack, url, ip, created_at::text
-       FROM client_errors ORDER BY created_at DESC LIMIT $1`,
-      [Math.max(1, Math.min(500, n))],
+    const r = await getPool().query<ClientErrorGroup>(
+      `SELECT max(created_at)::text AS created_at, user_email, left(message, 200) AS message, count(*)::text AS n
+       FROM client_errors WHERE created_at > now() - ($1 || ' hours')::interval
+       GROUP BY user_email, left(message, 200)
+       ORDER BY max(created_at) DESC LIMIT $2`,
+      [Math.max(1, Math.min(720, hours)), Math.max(1, Math.min(200, limit))],
     )
     return r.rows
   } catch {
@@ -603,16 +609,6 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
   } catch {
     return []
   }
-}
-
-export interface TierEventRow {
-  id: number
-  worker: string
-  from_tier: string | null
-  to_tier: string
-  action: string
-  reason: string | null
-  at: string
 }
 
 // ── Conectarea Google persistentă (refresh token per cont) ──────────────────
@@ -915,30 +911,12 @@ export async function deleteUserData(email: string): Promise<void> {
 
 // ── Work orders (persistent builder queue) ──────────────────────────────────
 
-export interface WorkOrderRow {
-  id: string
-  text: string
-  status: string
-  created_at: string
-  delivered_at: string | null
-}
-
 export async function saveWorkOrder(id: string, text: string): Promise<void> {
   if (!dbEnabled()) return
   await getPool().query('INSERT INTO work_orders (id, text) VALUES ($1,$2)', [id, text])
 }
 
 // ── Staged releases (persistent approval gate) ──────────────────────────────
-
-export interface StagedReleaseRow {
-  id: string
-  title: string
-  detail: string
-  branch: string
-  status: string
-  approved_at: string | null
-  at: string
-}
 
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
 // (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
@@ -1082,12 +1060,6 @@ export async function getDownloadStats(): Promise<{
 }
 
 // ── Shared memory: the common notebook both sides read + write ──
-
-export interface SharedMemoryRow {
-  source: string
-  content: string
-  created_at: string
-}
 
 // ── Prepaid wallet (Stripe credit) ──
 
@@ -2672,26 +2644,11 @@ export function vectorDistance(a: number[], b: number[]): number {
   return Math.sqrt(sum / len)
 }
 
-export async function identifyVoiceprint(
-  vector: number[],
-  threshold: number,
-): Promise<(VoiceprintRow & { distance: number }) | null> {
-  if (!dbEnabled() || vector.length === 0) return null
-  try {
-    const rows = await listVoiceprints(1000)
-    let best: (VoiceprintRow & { distance: number }) | null = null
-    for (const row of rows) {
-      if (!row.features || row.features.length === 0) continue
-      const d = vectorDistance(vector, row.features)
-      if (d < threshold && (!best || d < best.distance)) {
-        best = { ...row, distance: d }
-      }
-    }
-    return best
-  } catch {
-    return null
-  }
-}
+// Aici a stat `identifyVoiceprint` — căuta printre TOATE amprentele „cine
+// vorbește" (1:N). N-a chemat-o niciodată nimeni. Regula produsului e O SINGURĂ
+// persoană pe cont (Adrian, 29 iul), deci recunoașterea corectă e cea care chiar
+// rulează: VERIFICARE 1:1 — „e titularul contului sau altcineva?" (chat.ts și
+// realtime.ts, prin vectorDistance). Ștearsă: cod abandonat, nu capabilitate.
 
 // ── Face identification by faceprint (128-d descriptor de la face-api) ───────
 // Camera pornită + voce = Kelion prinde automat fața vorbitorului, o compară cu

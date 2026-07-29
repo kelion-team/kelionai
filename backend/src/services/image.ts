@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
 import { openrouterImage } from './openrouter.js'
 
@@ -14,7 +15,13 @@ const cache = new Map<string, StoredImage>()
 const MAX_CACHE = 60
 
 async function put(mime: string, buf: Buffer): Promise<string> {
-  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  // ID IMPOSIBIL DE GHICIT (audit pe toate rutele, 29 iul). `/api/image/:id` e
+  // PUBLICĂ — cine știe id-ul vede imaginea. Vechiul id era ceasul (previzibil)
+  // plus 6 caractere din Math.random, care NU e criptografic: cunoscând
+  // aproximativ momentul generării, spațiul de căutare devenea mic. Screenshot-urile
+  // (browser.ts) foloseau deja randomUUID; acum la fel peste tot — un singur
+  // principiu, nu două standarde pentru același risc.
+  const id = randomUUID()
   await saveGeneratedImage(id, mime, buf)
   cache.set(id, { mime, buf, ts: Date.now() })
   while (cache.size > MAX_CACHE) {

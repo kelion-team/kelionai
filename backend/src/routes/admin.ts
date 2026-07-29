@@ -30,8 +30,7 @@ import {
   listKelionTools,
   decideKelionTool,
   listBuildJobs,
-  getPool,
-  dbEnabled,
+  listClientErrorGroups,
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -41,7 +40,7 @@ import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../serv
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
-import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -230,17 +229,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const [healthRaw, jobs, clientErrors] = await Promise.all([
       systemHealth().catch(() => '{}'),
       listBuildJobs(12).catch(() => []),
-      dbEnabled()
-        ? getPool()
-            .query<{ created_at: string; user_email: string | null; message: string; n: string }>(
-              `SELECT max(created_at) AS created_at, user_email, left(message, 200) AS message, count(*) AS n
-               FROM client_errors WHERE created_at > now() - interval '48 hours'
-               GROUP BY user_email, left(message, 200)
-               ORDER BY max(created_at) DESC LIMIT 30`,
-            )
-            .then((r) => r.rows)
-            .catch(() => [])
-        : Promise.resolve([]),
+      listClientErrorGroups(48, 30).catch(() => []),
     ])
     let health: unknown = {}
     try {
@@ -461,7 +450,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getMoneyCircuit())
+    // ALIMENTAREA AUTOMATĂ A CARDULUI, VIZIBILĂ (audit „cod abandonat", 29 iul):
+    // `lastAutoFundStatus` exista, dar n-o citea nimeni — deci dacă alimentarea
+    // automată a cardului lui Kelion EȘUA, nu se vedea nicăieri: creierul rămânea
+    // fără bani „din senin". Acum ultima încercare (când, reușită sau nu, cu
+    // motivul) intră în circuitul banilor din admin, lângă restul verigilor.
+    return reply.send({ ...(await getMoneyCircuit()), autoFund: lastAutoFundStatus() })
   })
   app.post('/api/admin/money-circuit/card', async (req, reply) => {
     const user = getSessionUser(req)

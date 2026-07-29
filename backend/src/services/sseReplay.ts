@@ -167,17 +167,3 @@ export async function* readTurnFrom(
   }
 }
 
-/**
- * Return the last sequence number known for a conversation. Useful for the
- * resume endpoint to know whether a client is asking for a completely lost range.
- */
-export function lastSeqFor(email: string): number {
-  return buffers.get(email)?.seq ?? 0
-}
-
-/**
- * Return the oldest sequence number still in the ring. Useful for overflow checks.
- */
-export function oldestSeqFor(email: string): number {
-  return buffers.get(email)?.events[0]?.seq ?? 0
-}
