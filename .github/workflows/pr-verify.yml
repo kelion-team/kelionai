@@ -29,3 +29,11 @@ jobs:
           cd frontend
           npm install --no-audit --no-fund
           npm run build
+      # PRINCIPIUL PERMANENT: unic, fără duplicate (Adrian, 29 iul). Detectorul de
+      # cod duplicat (jscpd, config în .jscpd.json) rulează la FIECARE PR și
+      # raportează clonele; pică (roșu) dacă duplicarea urcă peste 2% (azi ~1,5%).
+      # Informativ ca tot pr-verify — nu blochează merge-ul (ordinul „CI informativ"),
+      # dar face duplicarea VIZIBILĂ automat, ca să nu se mai strecoare pe ascuns.
+      - name: Duplicare (jscpd) — principiul unic-fără-duplicate
+        continue-on-error: true
+        run: npx --yes jscpd --threshold 2
