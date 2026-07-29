@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, toolsToOpenAI, hasActionIntent } from './openrouter.js'
+import { toModel, resolveModel, toolsToOpenAI, hasActionIntent, groupCatalog } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
@@ -16,6 +16,35 @@ describe('openrouter catalog', () => {
     expect(toModel({ id: 'mistral/large', supported_parameters: ['tools'] })).toBeNull()
     // variantă veche exclusă
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
+  })
+
+  it('în AMBELE liste apar DOAR modele care fac TOT (văd + știu unelte)', async () => {
+    // Ordinul lui Adrian, 29 iul: „se afișează doar AI care respectă toate
+    // funcționalitățile aplicației — văz, auz, voce live". Un model orb ajuns în
+    // meniu e o promisiune ruptă: userul îl alege și pe urmă camera nu merge.
+    // Uneltele sunt la fel de obligatorii — fără ele cad skill-urile Google,
+    // memoria, comenzile și escaladarea vocii pe creier.
+    const vede = { input_modalities: ['text', 'image'] }
+    const brut = [
+      { id: 'openai/gpt-5', supported_parameters: ['tools'], architecture: vede },
+      { id: 'google/gemini-3-pro', supported_parameters: ['tools'], architecture: vede },
+      { id: 'anthropic/claude-opus-5', supported_parameters: ['tools'], architecture: vede },
+      // ORBUL: are unelte, dar NU vede → nu are ce căuta în nicio listă.
+      { id: 'openai/gpt-5-text-only', supported_parameters: ['tools'] },
+      // FĂRĂ UNELTE: vede, dar n-ar putea folosi nimic din aplicație.
+      { id: 'google/gemini-3-vision-mut', supported_parameters: [], architecture: vede },
+    ]
+    const modele = brut.map(toModel).filter((m) => m != null)
+    const cat = groupCatalog(modele)
+    const toate = [...cat.chat, ...cat.work]
+    expect(toate.length).toBeGreaterThan(0)
+    for (const m of toate) expect(m.vision, `${m.id} nu vede, dar e oferit userului`).toBe(true)
+    expect(toate.map((m) => m.id)).not.toContain('openai/gpt-5-text-only')
+    expect(toate.map((m) => m.id)).not.toContain('google/gemini-3-vision-mut')
+    // Și cele complete chiar ajung acolo unde trebuie (nu „liste goale = curat").
+    expect(cat.chat.map((m) => m.id)).toContain('openai/gpt-5')
+    expect(cat.chat.map((m) => m.id)).toContain('google/gemini-3-pro')
+    expect(cat.work.map((m) => m.id)).toContain('anthropic/claude-opus-5')
   })
 
   it('convertește uneltele Anthropic → OpenAI (input_schema → parameters)', () => {
