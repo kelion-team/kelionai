@@ -9,7 +9,7 @@ import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
 import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
-import { runGoogleTool, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
+import { runGoogleTool, googleTools, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { generateImage } from '../services/image.js'
@@ -21,6 +21,8 @@ import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiD
 // CREIER UNIC §1 („fără duplicare"): definițiile uneltelor de introspecție/
 // constructor vin din sursa COMUNĂ, nu mai sunt copiate inline aici.
 import {
+  COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
+  LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL,
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
   BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL,
@@ -36,7 +38,7 @@ import {
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
-import { execSharedAdminTool } from '../services/adminTools.js'
+import { execUserScopedTool, execSharedAdminTool } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 
 // ── VOCE LIVE (OpenAI Realtime) — endpointuri aduse în git ca sursă unică ────
@@ -245,7 +247,18 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // Aceleași definiții ca scrisul, din sursa COMUNĂ (brainToolDefs) — zero
         // duplicare. Executorul (execIntrospection) rămâne aici, are nevoie de
         // contextul userului (createBuildJob pe email, tokenul etc.).
-        const introspectionTools = adminUnlocked
+        // §1: TOATE uneltele Google merg la creierul escaladat, indiferent de
+        // rolul userului (sunt gratuite, pe tokenul lui) — plafonul de 31 al
+        // sesiunii Realtime nu se aplică aici. Uneltele de admin se adaugă doar
+        // pe lacăt deblocat, ca la scris.
+        const introspectionTools = [
+          ...googleTools,
+          // §1: unelte legate de USER (memorie, notificarea lipsurilor) + cele de
+          // admin (jurnale, poștă, costuri, update-uri). Poarta de admin o face
+          // execUserScopedTool, ca la scris. Nu depind de monitor → merg vorbind.
+          LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, LOG_GAP_TOOL,
+          ...(adminUnlocked ? [LIST_UPDATES_TOOL, READ_INBOX_TOOL, SERVER_LOGS_TOOL, COST_TOOL] : []),
+          ...(adminUnlocked
           ? [
               LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
               DB_TABLES_TOOL, DB_QUERY_TOOL,
@@ -258,12 +271,28 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
               REQUEST_REPAIR_TOOL,
             ]
-          : []
+          : []),
+        ]
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
           // Uneltele admin PARTAJATE (sursă/DB/sănătate/repo/runbook/request_repair):
           // dispatch UNIC, comun cu scrisul (services/adminTools.ts) — fără duplicare.
           const shared = await execSharedAdminTool(tname, targs)
           if (shared !== null) return shared
+          // Unelte legate de user (memorie/jurnale/poștă/costuri) — sursă UNICĂ,
+          // aceeași cu scrisul; poarta de admin e ÎN executor.
+          const scoped = await execUserScopedTool(tname, targs, user.email, isAdmin)
+          if (scoped !== null) return scoped
+          // §1 „CE POATE SCRISUL, POATE ȘI VOCEA" — golul măsurat (29 iul): registrul
+          // avea 66 capabilități pe scris, dar doar 31 pe voce, fiindcă sesiunea
+          // Realtime e plafonată la 31 de unelte de către OpenAI. Plafonul e REAL,
+          // dar se aplică DOAR listei directe a modelului de voce — creierul
+          // escaladat (același orchestrator ca scrisul) nu are limita asta. Deci
+          // aici îi dăm TOATE uneltele Google, cu ACELAȘI executor ca scrisul, pe
+          // tokenul userului: read_email, delete_calendar_event, complete_task,
+          // read_drive_file (adormite pe voce până acum) devin accesibile vorbind.
+          if (googleTools.some((t) => t.name === tname)) {
+            return await runGoogleTool(tname, targs, token)
+          }
           // Specifice vocii (efect/formatare diferită de chat):
           if (tname === 'build_software') {
             const order = String(targs.order ?? '').trim()
