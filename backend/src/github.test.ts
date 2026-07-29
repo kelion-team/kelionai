@@ -26,7 +26,7 @@ function fakeResp(data: unknown, ok = true, status = 200): Response {
 beforeEach(() => {
   callLog = []
   createRecoveryPoint.mockReset()
-  global.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+  global.fetch = vi.fn(async (url: unknown, _init?: RequestInit) => {
     const u = String(url)
     if (u.includes('/pulls/123/merge')) {
       callLog.push('merge')

@@ -2,10 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config, roleFor } from '../config.js'
 import type {
   Tool,
-  Message,
   MessageParam,
-  ToolResultBlockParam,
-  TextBlock,
   ToolUseBlock,
 } from '../services/brain-types.js'
 import { getSessionUser, setSession, type SessionUser } from '../session.js'
@@ -14,15 +11,12 @@ import {
   runGoogleTool,
   refreshGoogleAccessToken,
   reverseGeocodeCached,
-  promoSceneUrl,
-} from '../services/google.js'
+  } from '../services/google.js'
 import {
   saveMessage,
   recordCost,
-  getCostSummary,
   getBalance,
   debitWallet,
-  logCapabilityGap,
   getSpeechLang,
   setSpeechLangPref,
   getMeserieActiva,
@@ -32,8 +26,6 @@ import {
   listNotes,
   deleteNote,
   getRecentHistory,
-  getMemories,
-  deleteMemory,
   getVoiceprint,
   saveVoiceprint,
   vectorDistance,
@@ -41,7 +33,6 @@ import {
   saveFaceprint,
   faceDistance,
   loadKv,
-  proposeKelionTool,
   createBuildJob,
   listBuildJobs,
 } from '../db.js'
@@ -55,8 +46,8 @@ import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { generateImage } from '../services/image.js'
-import { checkLang, detectLang, trackSpeechLang, LANG_LABELS } from '../services/lang.js'
-import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, type GestureLabel } from '../services/commands.js'
+import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
+import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
@@ -73,7 +64,6 @@ import {
   type BrowserResult,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
-import { recentLogs } from '../services/logbuffer.js'
 import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
@@ -81,9 +71,8 @@ import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
-import { fetchRecentInbox } from '../services/mailbox.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL } from '../services/brainToolDefs.js'
-import { updatesList, latestUpdateSummary } from '../services/updates.js'
+import { latestUpdateSummary } from '../services/updates.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
 // selectabil e citit din KV (aceeași sursă ca /api/models/selection): modelul ALES
@@ -1579,10 +1568,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (firstWordMarked || !isAdmin) return
       firstWordMarked = true
     }
-    let inTokens = 0
-    let outTokens = 0
-    let usageUsd = 0 // running provider cost this turn (for wallet debit)
     // Cost provider acumulat de-a lungul turei (apeluri creier + unelte plătite).
+    // Contorul REAL e ăsta; vechile `inTokens/outTokens/usageUsd` rămăseseră
+    // neatinse de când costul vine gata calculat de la furnizor (usage.cost).
     const usage = { usd: 0 }
 
     // ── CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian) ────────────────────
@@ -1820,8 +1808,10 @@ async function runTool(
   reply: { raw: { write(c: string): void } },
   baseUrl: string,
   email: string,
-  usage: { usd: number },
-  langName: string,
+  // Păstrați în semnătură (apelanții îi trimit), dar nefolosiți în corp de când
+  // costul se contorizează în afara lui runTool: prefixul `_` o spune explicit.
+  _usage: { usd: number },
+  _langName: string,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
   // Urmă în jurnal pentru FIECARE unealtă chemată (incident 25 iul: „nu face

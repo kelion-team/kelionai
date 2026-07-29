@@ -29,11 +29,27 @@ jobs:
           cd frontend
           npm install --no-audit --no-fund
           npm run build
-      # PRINCIPIUL PERMANENT: unic, fără duplicate (Adrian, 29 iul). Detectorul de
-      # cod duplicat (jscpd, config în .jscpd.json) rulează la FIECARE PR și
-      # raportează clonele; pică (roșu) dacă duplicarea urcă peste 2% (azi ~1,5%).
-      # Informativ ca tot pr-verify — nu blochează merge-ul (ordinul „CI informativ"),
-      # dar face duplicarea VIZIBILĂ automat, ca să nu se mai strecoare pe ascuns.
-      - name: Duplicare (jscpd) — principiul unic-fără-duplicate
+      # ── CELE TREI ZERO-URI (Adrian, 30 iul: „0 cod duplicat, 0 cod abandonat" +
+      # „caut în tot softul acolade, ghilimele sau alte semne greșit puse") ──────
+      # Toate trei sunt INFORMATIVE (nu blochează merge-ul — ordinul „CI informativ"),
+      # dar se fac ROȘII imediat ce cifra se strică. Fiecare a fost DOVEDITĂ prin
+      # test cu greșeală intenționată: prinde, iar pe cod curat trece.
+      #
+      # 1. DUPLICAT = 0. Pragul 0,0001% e practic zero-toleranță (testat: o clonă
+      #    de 10 linii → exit 1; codul curat → exit 0). Un prag mai mare NU prindea
+      #    clonele mici: la 0,1%, două clone reale treceau verde.
+      - name: Cod duplicat (jscpd) — ținta 0
         continue-on-error: true
-        run: npx --yes jscpd --threshold 0.1
+        run: npx --yes jscpd --threshold 0.0001
+      # 2. ABANDONAT = 0. Importuri, variabile, funcții și tipuri nefolosite —
+      #    exact ce lasă în urmă o refactorare grăbită (au fost 56 pe 30 iul).
+      - name: Cod abandonat (oxlint) — ținta 0
+        continue-on-error: true
+        run: |
+          cd backend && npx oxlint --deny no-unused-vars
+      # 3. SEMNE GREȘIT PUSE = 0. `tsc` acoperă .ts/.tsx, dar CSS-ul și JSON-ul nu
+      #    sunt verificate de nimeni: un `}` în plus în CSS strică tăcut restul
+      #    foii de stil, iar un JSON rupt oprește pornirea abia în producție.
+      - name: Sintaxă CSS + JSON (acolade, ghilimele)
+        continue-on-error: true
+        run: node scripts/verifica-sintaxa.mjs

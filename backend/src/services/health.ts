@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises'
-import { config } from '../config.js'
 import { getPool, dbEnabled, listBuildJobs } from '../db.js'
 import { getOpenRouterBalance } from './openrouter.js'
 
