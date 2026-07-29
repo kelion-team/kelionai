@@ -517,22 +517,6 @@ async function readEmail(query: string, token: string): Promise<string> {
   return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
 }
 
-interface SerperResult {
-  title?: string
-  link?: string
-  snippet?: string
-  date?: string
-}
-
-// Live web search via Gemini's built-in Google Search grounding. Uses the
-// GEMINI_API_KEY (no Serper key needed). Returns a grounded answer plus the
-// real source pages Google used. Returns null on any failure so callers can
-// fall back.
-interface GeminiGroundResult {
-  text: string
-  sources: { title: string; link: string }[]
-}
-
 // Apel direct Gemini generateContent (aceeași cheie x-goog-api-key). Corpul
 // (contents/tools/generationConfig) îl dă apelantul; aici doar URL-ul + POST-ul,
 // comune la căutarea groundată și la vedere. null dacă nu e cheie sau throw.
@@ -549,33 +533,6 @@ async function geminiGenerate(body: unknown): Promise<Response | null> {
   } catch {
     return null
   }
-}
-
-async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
-  const res = await geminiGenerate({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    tools: [{ google_search: {} }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
-  })
-  if (!res || !res.ok) return null
-  const j = (await res.json()) as {
-    candidates?: {
-      content?: { parts?: { text?: string }[] }
-      groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
-    }[]
-  }
-  const cand = j.candidates?.[0]
-  const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
-  const seen = new Set<string>()
-  const sources: { title: string; link: string }[] = []
-  for (const c of cand?.groundingMetadata?.groundingChunks ?? []) {
-    const link = c.web?.uri ?? ''
-    if (!link || seen.has(link)) continue
-    seen.add(link)
-    sources.push({ title: c.web?.title ?? '', link })
-  }
-  if (!text && sources.length === 0) return null
-  return { text, sources }
 }
 
 // VEDERE (Adrian, 13 iul: „Kelion să VADĂ app-ul"): dă lui Kelion OCHI — un model

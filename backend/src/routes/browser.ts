@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify'
 import { getShot } from '../services/browser.js'
-import { config } from '../config.js'
 
 // Serves the live browser's latest screenshot, so the monitor iframe can show
 // it (mirrors routes/image.ts's pattern for generated images).

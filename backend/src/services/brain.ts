@@ -10,9 +10,6 @@ import type { Message } from './brain-types.js'
 // non-streaming folosite în afara chatului: memorie (agents), rezumate scurte
 // (mailbox/admin) și verificarea cheii.
 
-function workModel(): string {
-  return config.openrouter.workDefault
-}
 
 // ── EXPERTUL FIABIL (Etapa 1, ordin owner 29 iul) ────────────────────────────
 // CAUZA (confirmată în cod + logurile constructorului): brainComplete/WithTools

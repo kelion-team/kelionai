@@ -148,7 +148,7 @@ async function fileInto(
   }
 }
 
-async function processOne(client: ImapFlow, uid: number, source: Buffer, alreadySeen = false): Promise<void> {
+async function processOne(client: ImapFlow, uid: number, source: Buffer, _alreadySeen = false): Promise<void> {
   const parsed = await simpleParser(source)
   const fromAddr = parsed.from?.value?.[0]?.address ?? ''
   const fromName = parsed.from?.value?.[0]?.name ?? ''

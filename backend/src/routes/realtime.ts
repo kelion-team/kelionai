@@ -7,7 +7,7 @@ import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
-import { openaiRealtimeAnswer, realtimeInstructions, realtimeTools } from '../services/realtime.js'
+import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { runGoogleTool, googleTools, refreshGoogleAccessToken, reverseGeocodeCached } from '../services/google.js'
 import { interpretDeviceCommand } from '../services/commands.js'
@@ -246,7 +246,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (name === 'look' || name === 'see') {
         const image = String((args as { image?: string }).image ?? '')
         const question = String(args.question ?? args.request ?? '').trim()
-        if (!/^data:image\//.test(image)) {
+        if (!image.startsWith('data:image/')) {
           return reply.send({ output: JSON.stringify({ error: 'no_camera', hint: 'camera closed' }) })
         }
         const seen = await describeScene(image, question, (usd) => { toolCostUsd += usd })

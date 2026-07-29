@@ -18,7 +18,7 @@ export async function gh(path: string, init?: RequestInit, timeoutMs = 20_000): 
       Authorization: `Bearer ${ghToken()}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
-      ...(init?.headers ?? {}),
+      ...init?.headers,
     },
     signal: AbortSignal.timeout(timeoutMs),
   })
