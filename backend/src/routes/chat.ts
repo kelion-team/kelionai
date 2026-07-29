@@ -78,8 +78,9 @@ import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
-import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from '../services/adminTools.js'
+import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
+import { buildPromo } from '../services/promo.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
@@ -598,7 +599,7 @@ const DELETE_NOTE_TOOL: Tool = {
 // explicitly authorizes it calls this tool: the script goes on the monitor as a
 // readable panel, the screen recorder arms (one click picks the screen — browser
 // law), and when recording starts the approved script is spoken aloud verbatim.
-const PROMO_TOOL: Tool = {
+export const PROMO_TOOL: Tool = {
   name: 'prepare_promo_clip',
   description:
     'ADMIN ONLY. Arm the screen recorder for a professional promo clip (TikTok/Instagram) with ' +
@@ -1661,17 +1662,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // AUTO-EXTINDERE: Kelion își propune o unealtă nouă (rămâne 'pending'
         // până o aprobă owner-ul cu un click în admin → activă instant).
         if (name === 'propose_tool') {
-          const p = input as { name?: string; description?: string; params_schema?: unknown; http_method?: string; http_url?: string; http_headers?: unknown; rationale?: string }
-          const id = await proposeKelionTool({
-            name: String(p.name ?? ''),
-            description: String(p.description ?? ''),
-            paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
-            httpMethod: String(p.http_method ?? 'GET'),
-            httpUrl: String(p.http_url ?? ''),
-            httpHeaders: JSON.stringify(p.http_headers ?? {}),
-            rationale: String(p.rationale ?? ''),
-          })
-          return JSON.stringify(id ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' } : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
+          // Executor COMUN cu vocea (services/adminTools.ts) — fără duplicare.
+          const out = await execUserScopedTool(name, input as Record<string, unknown>, user.email, isAdminUser)
+          if (out !== null) return out
         }
         // UNEALTĂ DINAMICĂ APROBATĂ: execuție generică prin apel HTTP sigur.
         if (dynNames.has(name)) {
@@ -1872,6 +1865,12 @@ async function runTool(
   // (services/adminTools.ts). Fără duplicare (§1 unicitate / audit risc #4):
   // extragerea argumentelor + apelul trăiesc într-un singur loc, nu copiate în
   // chat și în realtime. Poarta de admin rămâne AICI; execuția e în sursa comună.
+  // Unelte legate de USER (memorie, jurnale, poștă, costuri, update-uri,
+  // propunere de unealtă): executor COMUN cu vocea — poarta de admin e în el.
+  if (USER_SCOPED_TOOLS.has(block.name)) {
+    const scoped = await execUserScopedTool(block.name, args, email, isAdmin)
+    if (scoped !== null) return scoped
+  }
   if (SHARED_ADMIN_TOOLS.has(block.name)) {
     if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
     const shared = await execSharedAdminTool(block.name, args)
@@ -1879,13 +1878,6 @@ async function runTool(
   }
 
   switch (block.name) {
-    case 'list_updates': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const raw = await updatesList()
-      return raw
-        ? raw.slice(0, 20_000)
-        : JSON.stringify({ error: 'no_updates_file', hint: 'apare începând cu primul deploy făcut prin deploy.sh de pe 25 iul' })
-    }
     case 'build_software': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const order = String(args.order ?? '').trim()
@@ -1915,27 +1907,6 @@ async function runTool(
         // `ci` = verdictul verificării INDEPENDENTE (Etapa 6): „Gata, verificat
         // de CI (verde)" — nu pe cuvântul lucrătorului.
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
-      })
-    }
-    case 'read_inbox': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 40)
-      const items = await fetchRecentInbox(limit)
-      return JSON.stringify({
-        count: items.length,
-        messages: items.map((m) => ({ from: m.fromName || m.from, subject: m.subject, date: m.date, seen: m.seen })),
-        note: items.length ? 'Cutia poștală proprie (contact@kelionai.app) — doar antete.' : 'Inbox gol sau poșta neconfigurată.',
-      })
-    }
-    case 'server_logs': {
-      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
-      const minLevel = args.errorsOnly === false ? 0 : 40
-      const entries = recentLogs(minLevel, Math.min(Math.max(Number(args.limit) || 60, 1), 200))
-      return JSON.stringify({
-        entries,
-        note: entries.length
-          ? 'Jurnalele serverului (F12-ul de server). level: 40=warn, 50=error, 60=fatal.'
-          : 'Nicio eroare/avertisment reținut de la ultimul restart — serverul e curat pe fereastra actuală.',
       })
     }
 
@@ -2071,73 +2042,20 @@ async function runTool(
       await deleteNote(email, id)
       return JSON.stringify({ deleted: true })
     }
-    case 'list_memories': {
-      const memories = await getMemories(email)
-      return JSON.stringify({ memories: memories.map((m) => m.content) })
-    }
-    case 'forget_memory': {
-      const fragment = String(args.fragment ?? '')
-      if (!fragment) return JSON.stringify({ error: 'no_fragment' })
-      // FIX (audit 24 iul): ordinea corectă e (email, fragment, agent).
-      const count = await deleteMemory(email, fragment, 'kelion')
-      return JSON.stringify({ deleted: count })
-    }
 
-    case 'log_unsupported_request': {
-      const request = String(args.request ?? '')
-      const reason = String(args.reason ?? '')
-      if (!request) return JSON.stringify({ error: 'no_request' })
-      void logCapabilityGap(email, request, reason)
-      return JSON.stringify({ logged: true })
-    }
 
-    case 'get_real_cost': {
-      if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
-      const summary = await getCostSummary()
-      return JSON.stringify(summary)
-    }
 
     case 'prepare_promo_clip': {
       if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
-      const subject = String(args.subject ?? '')
-      const duration = Number(args.duration_seconds ?? 30)
-      const script = String(args.script ?? '')
-      const lang = String(args.lang ?? 'ro-RO')
-      const scenes = Array.isArray(args.scenes) ? args.scenes : []
-      if (!subject || !script) return JSON.stringify({ error: 'missing_params' })
-      const imageScenes = scenes.filter((s: unknown) => (s as { kind?: string }).kind === 'image')
-      for (const s of imageScenes) {
-        const scene = s as { url?: string }
-        if (!scene.url?.startsWith('/api/image/')) {
-          return JSON.stringify({ error: 'image_scene_needs_api_image_url' })
-        }
-      }
-      const promoUrl = await promoSceneUrl('map', subject)
-      // SCENELE ÎN FORMA CLIENTULUI (QA 24 iul: serverul emitea scenele brute
-      // {at_seconds,kind,query,url}, clientul așteaptă {at,title,url,close} →
-      // toate timerele ieșeau NaN și scenele map/weather rămâneau fără URL).
-      // Convertim AICI: at_seconds→at; map/weather→URL real prin promoSceneUrl;
-      // avatar = scenă fără URL (clientul închide monitorul → avatarul singur).
-      const clientScenes: { at: number; title: string; url?: string; close?: boolean }[] = []
-      for (const raw of scenes) {
-        const s = raw as { at_seconds?: number; kind?: string; query?: string; url?: string; title?: string }
-        const at = Math.max(0, Number(s.at_seconds ?? 0))
-        const title = String(s.title ?? s.query ?? subject)
-        if (s.kind === 'image' && s.url) clientScenes.push({ at, title, url: s.url })
-        else if (s.kind === 'map' || s.kind === 'weather') {
-          const u = await promoSceneUrl(s.kind, String(s.query ?? subject))
-          if (u) clientScenes.push({ at, title, url: u })
-        } else clientScenes.push({ at, title, close: true }) // avatar → ecran liber
-      }
-      // ARMAREA RECORDERULUI (audit 24 iul: „clip promo nu merge din chat scris")
-      // — frame-ul `{promo}` e cel pe care ChatPanel îl așteaptă (c.promo?.script
-      // → armPromo) ca să armeze butonul Rec cu scenariul aprobat; înainte se
-      // emitea DOAR `{monitor}` și recorderul nu se arma niciodată.
-      reply.raw.write(
-        `${CTRL}${JSON.stringify({ promo: { subject, duration, script, lang, scenes: clientScenes } })}${CTRL}`,
-      )
-      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: promoUrl, title: `Promo: ${subject}` } })}${CTRL}`)
-      return JSON.stringify({ armed: true, shown: true, url: promoUrl })
+      // Pregătirea clipului vine din sursa COMUNĂ (services/promo.ts) — aceeași
+      // folosită de voce, ca §1 să fie respectat fără duplicare.
+      const built = await buildPromo(args)
+      if ('error' in built) return JSON.stringify({ error: built.error })
+      // ARMAREA RECORDERULUI: frame-ul `{promo}` e cel pe care ChatPanel îl
+      // așteaptă (c.promo?.script → armPromo) ca să armeze butonul Rec.
+      reply.raw.write(`${CTRL}${JSON.stringify({ promo: built.promo })}${CTRL}`)
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: built.monitorUrl, title: `Promo: ${built.promo.subject}` } })}${CTRL}`)
+      return JSON.stringify({ armed: true, shown: true, url: built.monitorUrl })
     }
 
     default: {

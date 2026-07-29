@@ -37,7 +37,7 @@ import {
 } from '../services/brainToolDefs.js'
 import { recallMemories } from '../services/agents.js'
 import { dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
-import { proposeKelionTool } from '../db.js'
+import { buildPromo } from '../services/promo.js'
 import {
   SYSTEM_PROMPT,
   // CALEA AUTONOMIEI PE VOCE (Adrian, 29 iul: „de la cererea mea până la deploy
@@ -45,7 +45,7 @@ import {
   // unică, importate, nu duplicate), ca vocea să ajungă și ea până în producție.
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
-  PROPOSE_TOOL, SHOW_DOCUMENT_TOOL,
+  PROPOSE_TOOL, SHOW_DOCUMENT_TOOL, PROMO_TOOL,
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
 import { execUserScopedTool, execSharedAdminTool } from '../services/adminTools.js'
@@ -300,6 +300,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           ...BROWSER_TOOLS,
           // §1: ultimele două care nu cereau nimic din client.
           PROPOSE_TOOL, SHOW_DOCUMENT_TOOL,
+          ...(adminUnlocked ? [PROMO_TOOL] : []),
           ...(adminUnlocked ? [LIST_UPDATES_TOOL, READ_INBOX_TOOL, SERVER_LOGS_TOOL, COST_TOOL] : []),
           ...(adminUnlocked
           ? [
@@ -319,6 +320,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // Screenshot-ul ultimei pagini deschise de creier în tura asta (dacă a
         // folosit browserul) — pleacă spre client ca `screen`, deci pe monitor.
         let brainScreen: { url: string; title: string } | undefined
+        let brainPromo: unknown
         const execIntrospection = async (tname: string, targs: Record<string, unknown>): Promise<string> => {
           // Uneltele admin PARTAJATE (sursă/DB/sănătate/repo/runbook/request_repair):
           // dispatch UNIC, comun cu scrisul (services/adminTools.ts) — fără duplicare.
@@ -328,18 +330,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           // aceeași cu scrisul; poarta de admin e ÎN executor.
           const scoped = await execUserScopedTool(tname, targs, user.email, isAdmin)
           if (scoped !== null) return scoped
-          if (tname === 'propose_tool') {
-            const p = targs as Record<string, unknown>
-            const id = await proposeKelionTool({
-              name: String(p.name ?? ''),
-              description: String(p.description ?? ''),
-              paramsJson: JSON.stringify(p.params_schema ?? {}),
-              httpMethod: String(p.http_method ?? 'GET'),
-              httpUrl: String(p.http_url ?? ''),
-              httpHeaders: JSON.stringify(p.http_headers ?? {}),
-              rationale: String(p.rationale ?? ''),
-            })
-            return JSON.stringify(id && id > 0 ? { proposed: true, id } : { error: 'nepropus' })
+          if (tname === 'prepare_promo_clip') {
+            if (!isAdmin) return JSON.stringify({ error: 'unauthorized' })
+            const built = await buildPromo(targs)
+            if ('error' in built) return JSON.stringify({ error: built.error })
+            // Cadrul {promo} armează butonul Rec în client — pleacă odată cu
+            // răspunsul escaladării, ca `screen`-ul.
+            brainPromo = built.promo
+            if (built.monitorUrl) brainScreen = { url: built.monitorUrl, title: `Promo: ${built.promo.subject}` }
+            return JSON.stringify({ armed: true, shown: true })
           }
           if (tname === 'show_document') {
             // Documentul ajunge pe monitor prin ACELAȘI canal `screen`: îl servim
@@ -462,7 +461,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // nimic (eroare/gol), cădem pe creierul simplu ca vocea să NU rămână mută.
         if (!answer) answer = await brainComplete(prompt, 2000, (usd) => { toolCostUsd += usd })
         settle()
-        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen })
+        return reply.send({ output: answer || JSON.stringify({ error: 'brain_unavailable' }), screen: brainScreen, promo: brainPromo })
       }
 
       // PARITATE VOCE↔CHAT (25 iul): notițe, rol, gesturi — apelabile din voce.

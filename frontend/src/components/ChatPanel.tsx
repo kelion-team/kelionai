@@ -1230,8 +1230,12 @@ export default function ChatPanel({
                 const j = (await r.json()) as {
                   output?: string
                   screen?: { url: string; title: string }
+                  promo?: unknown
                 }
                 if (j.screen?.url) handleControl({ monitor: { url: j.screen.url, title: j.screen.title } })
+                // §1 „ce poate scrisul, poate și vocea": clipul promo cerut VORBIND
+                // armează butonul Rec exact ca din scris (cadrul {promo} → armPromo).
+                if (j.promo) handleControl({ promo: j.promo as never })
                 return String(j.output ?? '{}')
               } catch (e) {
                 return JSON.stringify({ error: String(e).slice(0, 200) })

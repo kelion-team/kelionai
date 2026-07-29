@@ -110,7 +110,7 @@ export const CAPABILITIES: readonly Capability[] = [
   // 2.7 Bani & stare — admin
   { name: 'get_real_cost', category: 'bani', does: 'costul real', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'list_updates', category: 'bani', does: 'ce update-uri a primit', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'prepare_promo_clip', category: 'bani', does: 'pregătește un clip promo', chat: true, voice: false, admin: true },
+  { name: 'prepare_promo_clip', category: 'bani', does: 'pregătește un clip promo', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // Diverse
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },

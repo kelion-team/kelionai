@@ -12,7 +12,7 @@ import {
 import { VOICE_TOOL_NAMES } from './services/realtime.js'
 import { googleTools } from './services/google.js'
 import { RUNBOOKS } from './services/runbooks.js'
-import { SHARED_ADMIN_TOOLS } from './services/adminTools.js'
+import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './services/adminTools.js'
 
 // PAZNICUL DE COMPLETITUDINE (CREIER UNIC §5). Adrian: „dacă nu înmagazinează
 // REAL tot ce are softul, nu are rost". Testul apără sursa unică: să rămână
@@ -74,7 +74,11 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     // Uneltele admin PARTAJATE (chat ∩ voce) trec prin garda comună înainte de
     // switch (execSharedAdminTool) → nu mai au `case`, dar SUNT tratate.
     const areHandler = (n: string): boolean =>
-      cases.has(n) || google.has(n) || special.has(n) || SHARED_ADMIN_TOOLS.has(n)
+      // Un handler REAL poate fi: un `case` în chat.ts, o unealtă Google, una
+      // specială, sau un executor din sursa COMUNĂ (partajat cu vocea — dispatch
+      // unic, fără duplicare). Toate patru sunt căi valide; ce nu e în niciuna
+      // e cu adevărat adormit.
+      cases.has(n) || google.has(n) || special.has(n) || SHARED_ADMIN_TOOLS.has(n) || USER_SCOPED_TOOLS.has(n)
     const orfane = chatCapabilityNames().filter((n) => !areHandler(n))
     expect(orfane, `capabilități de chat FĂRĂ handler în chat.ts (adormite): ${orfane.join(', ')}`).toEqual([])
   })
@@ -97,9 +101,12 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // chat (chatul vede inline). Restul „adormirii" e pe voce — ținta §1/§6 = 0.
   it('adormirea e enumerată explicit, niciodată ascunsă', () => {
     expect(dormantOnChat().map((c) => c.name).sort()).toEqual(['get_location', 'get_monitor', 'look'])
-    // Azi vocea nu ajunge la ~33 de rute ale chatului (cod/browser/memorie/bani).
-    // Le expunem ca listă de dus mai departe, nu ca secret.
-    expect(dormantOnVoice().length).toBeGreaterThan(0)
+    // ȚINTA §1 ATINSĂ (30 iul): vocea ajunge la TOATE capabilitățile chatului —
+    // adormite = 0. Testul era „> 0" cât timp lista mai avea rânduri; acum e
+    // PAZNIC DE REGRESIE: dacă cineva adaugă o unealtă doar pe chat, sau taie o
+    // cale de pe voce, lista redevine nenulă și CI-ul PICĂ roșu. Nu se mai poate
+    // strecura „adormit" pe tăcute — exact garanția cerută în §5.
+    expect(dormantOnVoice().map((c) => c.name)).toEqual([])
     // eslint-disable-next-line no-console
     console.log(`[completitudine] adormite pe voce (de dus în §1/§6): ${dormantOnVoice().map((c) => c.name).join(', ')}`)
   })
