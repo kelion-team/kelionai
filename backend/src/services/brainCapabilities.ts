@@ -40,6 +40,8 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: true, admin: false },
   { name: 'get_calendar_events', category: 'google', does: 'citește calendarul', chat: true, voice: true, admin: false },
   { name: 'create_calendar_event', category: 'google', does: 'pune un eveniment în calendar', chat: true, voice: true, admin: false },
+  { name: 'delete_calendar_event', category: 'google', does: 'șterge un eveniment din calendar (după id)', chat: true, voice: false, admin: false },
+  { name: 'complete_task', category: 'google', does: 'bifează un task ca terminat (după id)', chat: true, voice: false, admin: false },
   { name: 'get_drive_files', category: 'google', does: 'listează fișierele Drive', chat: true, voice: true, admin: false },
   { name: 'get_tasks', category: 'google', does: 'citește task-urile', chat: true, voice: true, admin: false },
   { name: 'add_task', category: 'google', does: 'adaugă un task', chat: true, voice: true, admin: false },
