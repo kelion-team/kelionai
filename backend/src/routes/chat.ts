@@ -82,7 +82,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 import { runRunbook, requestRepair, runbookStatus, runbookLog } from '../services/runbooks.js'
 import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
@@ -379,12 +379,8 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
 // comunica adminului prin chat că are problemele x,y,z și să întrebe dacă să
 // le repare"): agregarea deterministă a tuturor semnalelor + regula de
 // comportament — enumeră și ÎNTREABĂ, nu repară din proprie inițiativă.
-const SYSTEM_HEALTH_TOOL: Tool = {
-  name: 'system_health',
-  description:
-    "ADMIN ONLY. See your OWN health: publication sync (live vs master), red workflow runs (48h), failed build orders, client-error spikes, disk, database, brain balance. CALL THIS at the START of a conversation with the owner (his first message of a session) and whenever he asks about problems or health. If problems exist: list them BRIEFLY (x, y, z) and ASK whether you should repair them — never repair on your own initiative; wait for his explicit yes, then use your tools (repo_write, build_software, run_runbook, db_query).",
-  input_schema: { type: 'object', properties: {} },
-}
+// system_health / db_tables / db_query — definiții în services/brainToolDefs.ts
+// (sursa comună, CREIER UNIC §1), importate mai jos, folosite și de voce.
 // F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele astea trebuie obligatoriu să
 // ajungă la Kelion ca și F12"): jurnalele aplicației (pino) trăiau doar în
 // docker logs, unde Kelion nu ajunge. Inelul din services/logbuffer.ts le
@@ -417,22 +413,7 @@ const READ_INBOX_TOOL: Tool = {
 // ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
 // de stocare permanentă... acces la orice bază de date a aplicației"): vederea
 // completă a schemei + SQL direct pe Postgres-ul aplicației. Admin only.
-const DB_TABLES_TOOL: Tool = {
-  name: 'db_tables',
-  description:
-    "ADMIN ONLY. See YOUR OWN permanent storage: every table in the application's Postgres database, with its columns and live row count. This is the real persisted state (users, wallets, transactions, messages, memories, voiceprints...). Call it before db_query when you need the exact table/column names.",
-  input_schema: { type: 'object', properties: {} },
-}
-const DB_QUERY_TOOL: Tool = {
-  name: 'db_query',
-  description:
-    "ADMIN ONLY. Run ONE SQL statement directly on the application's Postgres database — full access, SELECT or write. Results are capped at 200 rows. HOUSE RULES: destructive statements (DELETE/DROP/TRUNCATE/UPDATE on money tables: wallets, transactions, billing_events, cost_events, admin_pool) ONLY when the owner explicitly ordered that exact change in this conversation — never on your own initiative. Always look at db_tables first if unsure of names.",
-  input_schema: {
-    type: 'object',
-    properties: { sql: { type: 'string', description: 'The SQL statement to execute.' } },
-    required: ['sql'],
-  },
-}
+// db_tables / db_query — definiții în services/brainToolDefs.ts (sursa comună).
 // request_repair renăscut: ordinul se SCRIE (work_orders) + semnal pe email;
 // execuția o face o sesiune Claude pornită de owner — nu un LLM permanent.
 const REQUEST_REPAIR_TOOL: Tool = {

@@ -28,3 +28,26 @@ export const SEARCH_SOURCE_TOOL: Tool = {
   description: "ADMIN ONLY. Search your own source code (regex/text) — returns file:line matches. Use to find where a feature/bug lives.",
   input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Text or regex to search for.' } }, required: ['query'] },
 }
+
+// „Vede-și starea proprie": baza de date + sănătatea. Executori decupla ți în
+// db.ts (dbTablesOverview/dbQuery) și health.ts (systemHealth).
+export const DB_TABLES_TOOL: Tool = {
+  name: 'db_tables',
+  description:
+    "ADMIN ONLY. See YOUR OWN permanent storage: every table in the application's Postgres database, with its columns and live row count. This is the real persisted state (users, wallets, transactions, messages, memories, voiceprints...). Call it before db_query when you need the exact table/column names.",
+  input_schema: { type: 'object', properties: {} },
+}
+
+export const DB_QUERY_TOOL: Tool = {
+  name: 'db_query',
+  description:
+    "ADMIN ONLY. Run ONE SQL statement directly on the application's Postgres database — full access, SELECT or write. Results are capped at 200 rows. HOUSE RULES: destructive statements (DELETE/DROP/TRUNCATE/UPDATE on money tables: wallets, transactions, billing_events, cost_events, admin_pool) ONLY when the owner explicitly ordered that exact change in this conversation — never on your own initiative. Always look at db_tables first if unsure of names.",
+  input_schema: { type: 'object', properties: { sql: { type: 'string', description: 'The SQL statement to execute.' } }, required: ['sql'] },
+}
+
+export const SYSTEM_HEALTH_TOOL: Tool = {
+  name: 'system_health',
+  description:
+    "ADMIN ONLY. See your OWN health: publication sync (live vs master), red workflow runs (48h), failed build orders, client-error spikes, disk, database, brain balance. CALL THIS at the START of a conversation with the owner (his first message of a session) and whenever he asks about problems or health. If problems exist: list them BRIEFLY (x, y, z) and ASK whether you should repair them — never repair on your own initiative; wait for his explicit yes, then use your tools (repo_write, build_software, run_runbook, db_query).",
+  input_schema: { type: 'object', properties: {} },
+}
