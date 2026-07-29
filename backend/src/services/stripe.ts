@@ -28,6 +28,72 @@ async function ensureCustomer(email: string, name: string): Promise<string | nul
   return j.id
 }
 
+// ── SURSE UNICE pentru corpurile Stripe repetate (unic, fără duplicate) ───────
+// Calea banilor: comportament IDENTIC — doar mutat. Cele 3 fluxuri de Checkout
+// (top-up, vânzare admin, depunere owner) și cele 2 taxări off-session (reîncărcare
+// user, auto-depunere owner) aveau corpul + apelul copiate; aici o singură dată.
+
+// Corpul comun al unei sesiuni Checkout: mod plată, clientul (opțional), URL-urile
+// de retur și UN singur line_item cu preț ad-hoc. Suma/denumirea/metadata le pun
+// apelanții după (ordinea parametrilor rămâne identică cu înainte).
+function checkoutBody(
+  baseUrl: string,
+  customer: string | null,
+  unitAmountPence: number,
+  productName: string,
+  returnTag: 'topup' | 'deposit',
+): URLSearchParams {
+  const body = new URLSearchParams()
+  body.set('mode', 'payment')
+  if (customer) body.set('customer', customer)
+  body.set('success_url', `${baseUrl}/?${returnTag}=success`)
+  body.set('cancel_url', `${baseUrl}/?${returnTag}=cancel`)
+  body.set('line_items[0][quantity]', '1')
+  body.set('line_items[0][price_data][currency]', config.stripe.currency)
+  body.set('line_items[0][price_data][unit_amount]', String(unitAmountPence))
+  body.set('line_items[0][price_data][product_data][name]', productName)
+  return body
+}
+
+// Postează sesiunea Checkout și extrage URL-ul (sau eroarea). Apelantul care are
+// nevoie și de altceva (ex. vânzarea admin întoarce și lirele) adaugă peste.
+async function postCheckout(body: URLSearchParams): Promise<CheckoutResult> {
+  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
+  if (!r.ok) return { error: `stripe_http_${r.status}` }
+  const j = (await r.json()) as { url?: string }
+  return j.url ? { url: j.url } : { error: 'no_checkout_url' }
+}
+
+// Taxare OFF-SESSION a cardului salvat (PaymentIntent confirmat imediat, cu
+// Idempotency-Key anti dublă-debitare). Corpul + apelul sunt comuni pentru
+// reîncărcarea userului și auto-depunerea ownerului; `extraMeta` adaugă marcajele
+// specifice (ex. owner_deposit). Cheia de idempotență o dă apelantul (format diferit).
+async function offSessionCharge(
+  customer: string,
+  pm: string,
+  amountPence: number,
+  email: string,
+  idemKey: string,
+  extraMeta?: Record<string, string>,
+): Promise<{ ok: boolean; status: number; id?: string; piStatus?: string; error?: string }> {
+  const body = new URLSearchParams()
+  body.set('amount', String(amountPence))
+  body.set('currency', config.stripe.currency)
+  body.set('customer', customer)
+  body.set('payment_method', pm)
+  body.set('off_session', 'true')
+  body.set('confirm', 'true')
+  body.set('metadata[email]', email)
+  for (const [k, v] of Object.entries(extraMeta ?? {})) body.set(`metadata[${k}]`, v)
+  const r = await fetch(`${API}/payment_intents`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
+    body,
+  })
+  const j = (await r.json().catch(() => ({}))) as { id?: string; status?: string; error?: { message?: string } }
+  return { ok: r.ok, status: r.status, id: j.id, piStatus: j.status, error: j.error?.message }
+}
+
 export type CheckoutResult = { url: string } | { error: string }
 
 // Create a one-off Checkout Session that tops the wallet up by `pounds`.
@@ -40,15 +106,7 @@ export async function createCheckout(
   if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
   const amount = Math.max(1, Math.min(500, Math.round(pounds))) // clamp £1..£500
   const customer = await ensureCustomer(email, name)
-  const body = new URLSearchParams()
-  body.set('mode', 'payment')
-  if (customer) body.set('customer', customer)
-  body.set('success_url', `${baseUrl}/?topup=success`)
-  body.set('cancel_url', `${baseUrl}/?topup=cancel`)
-  body.set('line_items[0][quantity]', '1')
-  body.set('line_items[0][price_data][currency]', config.stripe.currency)
-  body.set('line_items[0][price_data][unit_amount]', String(amount * 100))
-  body.set('line_items[0][price_data][product_data][name]', 'Kelion credit')
+  const body = checkoutBody(baseUrl, customer, amount * 100, 'Kelion credit', 'topup')
   body.set('metadata[email]', email)
   // Emailul și pe PaymentIntent (audit 24 iul, P2-4): PI-ul NU moștenește
   // metadata sesiunii, iar fără email evenimentul payment_intent.succeeded nu
@@ -57,10 +115,7 @@ export async function createCheckout(
   // SALVEAZĂ cardul pentru reîncărcarea automată (ca userul să nu rămână fără
   // credit — cerința lui Adrian). Cardul devine metoda implicită a clientului.
   body.set('payment_intent_data[setup_future_usage]', 'off_session')
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
-  if (!r.ok) return { error: `stripe_http_${r.status}` }
-  const j = (await r.json()) as { url?: string }
-  return j.url ? { url: j.url } : { error: 'no_checkout_url' }
+  return postCheckout(body)
 }
 
 // ── VÂNZARE DE CREDITE DE CĂTRE ADMIN (Adrian, 24 iul: „se vând X credite pe
@@ -81,23 +136,13 @@ export async function createSaleCheckout(
   if (!(c > 0) || c > 100_000) return { error: 'bad_credits' }
   const pence = Math.ceil((c * 100 * config.stripe.creditValue) / config.stripe.userShare)
   const customer = await ensureCustomer(email, '')
-  const body = new URLSearchParams()
-  body.set('mode', 'payment')
-  if (customer) body.set('customer', customer)
-  body.set('success_url', `${baseUrl}/?topup=success`)
-  body.set('cancel_url', `${baseUrl}/?topup=cancel`)
-  body.set('line_items[0][quantity]', '1')
-  body.set('line_items[0][price_data][currency]', config.stripe.currency)
-  body.set('line_items[0][price_data][unit_amount]', String(pence))
-  body.set('line_items[0][price_data][product_data][name]', `${c} Kelion credits`)
+  const body = checkoutBody(baseUrl, customer, pence, `${c} Kelion credits`, 'topup')
   body.set('metadata[email]', email)
   body.set('metadata[sale_credits]', String(c))
   body.set('payment_intent_data[metadata][email]', email)
   body.set('payment_intent_data[metadata][sale_credits]', String(c))
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
-  if (!r.ok) return { error: `stripe_http_${r.status}` }
-  const j = (await r.json()) as { url?: string }
-  return j.url ? { url: j.url, pounds: pence / 100 } : { error: 'no_checkout_url' }
+  const res = await postCheckout(body)
+  return 'url' in res ? { url: res.url, pounds: pence / 100 } : res
 }
 
 // ── DEPUNEREA OWNERULUI ÎN PUNGĂ, din admin (Adrian, 24 iul: „de unde din
@@ -112,22 +157,13 @@ export async function createOwnerDeposit(
 ): Promise<CheckoutResult> {
   if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
   const amount = Math.max(1, Math.min(2000, Math.round(pounds)))
-  const body = new URLSearchParams()
-  body.set('mode', 'payment')
-  body.set('success_url', `${baseUrl}/?deposit=success`)
-  body.set('cancel_url', `${baseUrl}/?deposit=cancel`)
-  body.set('line_items[0][quantity]', '1')
-  body.set('line_items[0][price_data][currency]', config.stripe.currency)
-  body.set('line_items[0][price_data][unit_amount]', String(amount * 100))
-  body.set('line_items[0][price_data][product_data][name]', 'Kelion pot deposit (owner)')
+  // Fără client atașat (depunerea ownerului nu creditează niciun user).
+  const body = checkoutBody(baseUrl, null, amount * 100, 'Kelion pot deposit (owner)', 'deposit')
   body.set('metadata[email]', email)
   body.set('metadata[owner_deposit]', '1')
   body.set('payment_intent_data[metadata][email]', email)
   body.set('payment_intent_data[metadata][owner_deposit]', '1')
-  const r = await fetch(`${API}/checkout/sessions`, { method: 'POST', headers: authHeaders(), body })
-  if (!r.ok) return { error: `stripe_http_${r.status}` }
-  const j = (await r.json()) as { url?: string }
-  return j.url ? { url: j.url } : { error: 'no_checkout_url' }
+  return postCheckout(body)
 }
 
 // Metoda de plată salvată a clientului (pentru reîncărcarea automată off-session).
@@ -164,33 +200,16 @@ export async function chargeSavedCard(
   if (!customer) return { ok: false, error: 'no_customer' }
   const pm = await defaultPaymentMethod(customer)
   if (!pm) return { ok: false, error: 'no_saved_card' }
-  const body = new URLSearchParams()
-  body.set('amount', String(amount * 100))
-  body.set('currency', config.stripe.currency)
-  body.set('customer', customer)
-  body.set('payment_method', pm)
-  body.set('off_session', 'true')
-  body.set('confirm', 'true')
-  body.set('metadata[email]', email)
   // ANTI DUBLĂ-DEBITARE (audit 24 iul, P1-2): Idempotency-Key per user + fereastră
   // de 10 min — dacă două procese/retry-uri cer aceeași reîncărcare aproape
   // simultan, Stripe execută UNA singură (lacătul in-memory nu supraviețuiește
   // restartului și nu există între instanțe; cheia asta da).
   const idemKey = `kelion-ar-${email.toLowerCase()}-${Math.floor(Date.now() / 600_000)}`
-  const r = await fetch(`${API}/payment_intents`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
-    body,
-  })
-  const j = (await r.json().catch(() => ({}))) as {
-    id?: string
-    status?: string
-    error?: { message?: string }
+  const res = await offSessionCharge(customer, pm, amount * 100, email, idemKey)
+  if (!res.ok || !res.id || res.piStatus !== 'succeeded') {
+    return { ok: false, error: res.error ?? `stripe_http_${res.status}` }
   }
-  if (!r.ok || !j.id || j.status !== 'succeeded') {
-    return { ok: false, error: j.error?.message ?? `stripe_http_${r.status}` }
-  }
-  return { ok: true, paymentIntentId: j.id, amount }
+  return { ok: true, paymentIntentId: res.id, amount }
 }
 
 // ── CIRCUITUL BANILOR, din adminul Kelionai (Adrian, 24 iul: „din platforma
@@ -288,24 +307,10 @@ async function autoOwnerDeposit(): Promise<string> {
   if (!customer) return 'fără client Stripe pentru owner'
   const pm = await defaultPaymentMethod(customer)
   if (!pm) return 'ownerul nu are card salvat (o plată prin aplicație îl salvează)'
-  const body = new URLSearchParams()
-  body.set('amount', String(OWNER_AUTODEPOSIT * 100))
-  body.set('currency', config.stripe.currency)
-  body.set('customer', customer)
-  body.set('payment_method', pm)
-  body.set('off_session', 'true')
-  body.set('confirm', 'true')
-  body.set('metadata[email]', email)
-  body.set('metadata[owner_deposit]', '1')
   const idemKey = `kelion-ownerdep-${new Date().toISOString().slice(0, 10)}`
-  const r = await fetch(`${API}/payment_intents`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Idempotency-Key': idemKey },
-    body,
-  })
-  const j = (await r.json().catch(() => ({}))) as { id?: string; status?: string; error?: { message?: string } }
-  if (!r.ok || j.status !== 'succeeded') return `auto-depunere eșuată: ${j.error?.message ?? `http_${r.status}`}`
-  return `auto-depunere owner £${OWNER_AUTODEPOSIT} reușită (${j.id}) — intră în pungă la decontare`
+  const res = await offSessionCharge(customer, pm, OWNER_AUTODEPOSIT * 100, email, idemKey, { owner_deposit: '1' })
+  if (!res.ok || res.piStatus !== 'succeeded') return `auto-depunere eșuată: ${res.error ?? `http_${res.status}`}`
+  return `auto-depunere owner £${OWNER_AUTODEPOSIT} reușită (${res.id}) — intră în pungă la decontare`
 }
 
 export async function autoFundIssuing(): Promise<void> {

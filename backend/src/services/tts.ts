@@ -99,6 +99,30 @@ export async function synthesize(
   return { ok: false, status: 502, error: 'tts_failed' }
 }
 
+// POST-ul comun al ambelor motoare TTS (Google Chirp + OpenAI): fetch cu timeout
+// 30s, întoarce 502 `tts_failed` la throw sau răspuns ne-ok. Parsarea audio diferă
+// (JSON base64 la Google, arrayBuffer la OpenAI) și rămâne la apelant. Întoarce
+// Response la succes, altfel TtsResult de eroare. Sursă unică (unic, fără duplicate).
+async function ttsPost(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+): Promise<Response | TtsResult> {
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    return { ok: false, status: 502, error: 'tts_failed' }
+  }
+  if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
+  return res
+}
+
 // ── Chirp 3 HD (Google) ──────────────────────────────────────────────────────
 async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promise<TtsResult> {
   // Forțăm mereu Chirp 3 HD: stilul din env poate fi un nume complet de voce
@@ -126,23 +150,13 @@ async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promis
   const audioConfig: Record<string, unknown> = { audioEncoding: encoding }
   if (encoding === 'LINEAR16') audioConfig.sampleRateHertz = opts.sampleRateHertz ?? 24000
 
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        input: { text: spoken },
-        voice: { languageCode: lang, name: voiceName },
-        audioConfig,
-      }),
-      signal: AbortSignal.timeout(30_000),
-    })
-  } catch {
-    return { ok: false, status: 502, error: 'tts_failed' }
-  }
-  if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
-  const j = (await res.json().catch(() => ({}))) as { audioContent?: string }
+  const r = await ttsPost(url, headers, {
+    input: { text: spoken },
+    voice: { languageCode: lang, name: voiceName },
+    audioConfig,
+  })
+  if (!(r instanceof Response)) return r
+  const j = (await r.json().catch(() => ({}))) as { audioContent?: string }
   if (!j.audioContent) return { ok: false, status: 502, error: 'tts_empty' }
   return { ok: true, audio: Buffer.from(j.audioContent, 'base64') }
 }
@@ -151,27 +165,13 @@ async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promis
 async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> {
   // OpenAI TTS: `pcm` = LINEAR16 24kHz mono; altfel `mp3`. Voce masculină unică.
   const format = opts.encoding === 'LINEAR16' ? 'pcm' : 'mp3'
-  let res: Response
-  try {
-    res = await fetch(OPENAI_SPEECH, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.openai.key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: config.openai.ttsModel,
-        voice: config.openai.ttsVoice,
-        input: spoken,
-        response_format: format,
-      }),
-      signal: AbortSignal.timeout(30_000),
-    })
-  } catch {
-    return { ok: false, status: 502, error: 'tts_failed' }
-  }
-  if (!res.ok) return { ok: false, status: 502, error: 'tts_failed' }
-  const audio = Buffer.from(await res.arrayBuffer())
+  const r = await ttsPost(
+    OPENAI_SPEECH,
+    { Authorization: `Bearer ${config.openai.key}`, 'Content-Type': 'application/json' },
+    { model: config.openai.ttsModel, voice: config.openai.ttsVoice, input: spoken, response_format: format },
+  )
+  if (!(r instanceof Response)) return r
+  const audio = Buffer.from(await r.arrayBuffer())
   if (audio.length === 0) return { ok: false, status: 502, error: 'tts_empty' }
   return { ok: true, audio }
 }

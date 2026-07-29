@@ -440,17 +440,30 @@ async function deleteCalendarEvent(id: string, token: string): Promise<string> {
   return JSON.stringify({ error: `calendar_delete_http_${res.status}` })
 }
 
-async function recentEmails(query: string, max: number, token: string): Promise<string> {
-  const n = Math.min(Math.max(max, 1), 10)
+// Listează ID-urile mesajelor Gmail pentru o căutare (comun la get_recent_emails
+// și read_email). Întoarce {ids} sau {err} — un string JSON gata de întors userului.
+// Sursă unică (principiul permanent: unic, fără duplicate).
+async function gmailListMessageIds(
+  query: string,
+  max: number,
+  token: string,
+): Promise<{ ids: string[] } | { err: string }> {
   const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
-  listUrl.searchParams.set('maxResults', String(n))
+  listUrl.searchParams.set('maxResults', String(max))
   if (query) listUrl.searchParams.set('q', query)
   const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
-  if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
+  if (!listRes.ok) return { err: JSON.stringify({ error: `gmail_http_${listRes.status}` }) }
   const list = (await listRes.json()) as { messages?: { id: string }[] }
-  const ids = (list.messages ?? []).slice(0, n)
+  return { ids: (list.messages ?? []).map((m) => m.id) }
+}
+
+async function recentEmails(query: string, max: number, token: string): Promise<string> {
+  const n = Math.min(Math.max(max, 1), 10)
+  const listed = await gmailListMessageIds(query, n, token)
+  if ('err' in listed) return listed.err
+  const ids = listed.ids.slice(0, n)
   const emails: { from: string; subject: string; date: string; snippet: string }[] = []
-  for (const { id } of ids) {
+  for (const id of ids) {
     const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`
     const mRes = await tfetch(mUrl, { headers: { Authorization: `Bearer ${token}` } })
     if (!mRes.ok) continue
@@ -488,13 +501,9 @@ function extractGmailBody(payload: GmailPart | undefined, prefer: string): strin
   return ''
 }
 async function readEmail(query: string, token: string): Promise<string> {
-  const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages')
-  listUrl.searchParams.set('maxResults', '1')
-  if (query) listUrl.searchParams.set('q', query)
-  const listRes = await tfetch(listUrl, { headers: { Authorization: `Bearer ${token}` } })
-  if (!listRes.ok) return JSON.stringify({ error: `gmail_http_${listRes.status}` })
-  const list = (await listRes.json()) as { messages?: { id: string }[] }
-  const id = list.messages?.[0]?.id
+  const listed = await gmailListMessageIds(query, 1, token)
+  if ('err' in listed) return listed.err
+  const id = listed.ids[0]
   if (!id) return JSON.stringify({ found: false, note: 'Niciun email pentru această căutare.' })
   const mRes = await tfetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -524,24 +533,31 @@ interface GeminiGroundResult {
   sources: { title: string; link: string }[]
 }
 
-async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
+// Apel direct Gemini generateContent (aceeași cheie x-goog-api-key). Corpul
+// (contents/tools/generationConfig) îl dă apelantul; aici doar URL-ul + POST-ul,
+// comune la căutarea groundată și la vedere. null dacă nu e cheie sau throw.
+// Sursă unică (principiul permanent: unic, fără duplicate).
+async function geminiGenerate(body: unknown): Promise<Response | null> {
   if (!config.geminiKey) return null
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  let res: Response
   try {
-    res = await tfetch(url, {
+    return await tfetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
-      }),
+      body: JSON.stringify(body),
     })
   } catch {
     return null
   }
-  if (!res.ok) return null
+}
+
+async function geminiGroundedSearch(prompt: string): Promise<GeminiGroundResult | null> {
+  const res = await geminiGenerate({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+  })
+  if (!res || !res.ok) return null
   const j = (await res.json()) as {
     candidates?: {
       content?: { parts?: { text?: string }[] }
@@ -592,31 +608,21 @@ export async function geminiVision(jpegBase64: string, question: string): Promis
       /* cade pe Gemini mai jos */
     }
   }
-  // 2) Fallback: Gemini direct (doar dacă cheia lui e configurată).
-  if (!config.geminiKey) return null
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
-  let res: Response
-  try {
-    res = await tfetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: question },
-              { inline_data: { mime_type: 'image/jpeg', data: jpegBase64 } },
-            ],
-          },
+  // 2) Fallback: Gemini direct (doar dacă cheia lui e configurată — geminiGenerate
+  // întoarce null când lipsește). Corp + POST din sursa comună.
+  const res = await geminiGenerate({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: question },
+          { inline_data: { mime_type: 'image/jpeg', data: jpegBase64 } },
         ],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
-      }),
-    })
-  } catch {
-    return null
-  }
-  if (!res.ok) return null
+      },
+    ],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+  })
+  if (!res || !res.ok) return null
   const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
   const text = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
   return text || null
