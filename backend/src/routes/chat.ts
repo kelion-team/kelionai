@@ -81,6 +81,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
 import { listSource, readSource, searchSource } from '../services/sourceCode.js'
 import { systemHealth } from '../services/health.js'
+import { fetchRecentInbox } from '../services/mailbox.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 import { runRunbook, requestRepair, runbookStatus, runbookLog } from '../services/runbooks.js'
 import { repoWrite, repoOpenPR, repoMergePR } from '../services/github.js'
@@ -400,6 +401,19 @@ const SERVER_LOGS_TOOL: Tool = {
       errorsOnly: { type: 'boolean', description: 'true (default) = only warnings+errors; false = all retained entries.' },
       limit: { type: 'number', description: 'Max entries, default 60.' },
     },
+  },
+}
+// CUTIA POȘTALĂ PROPRIE (CREIER UNIC §2.5, Adrian: „creierul trebuie să ajungă
+// la TOT ce are softul"): inbox-ul lui Kelion (contact@kelionai.app) exista în
+// date (mailbox.ts) dar n-avea unealtă — o capabilitate adormită. Acum o poate
+// citi în conversație, nu doar din panoul admin.
+const READ_INBOX_TOOL: Tool = {
+  name: 'read_inbox',
+  description:
+    "ADMIN ONLY. Read YOUR OWN mailbox (contact@kelionai.app) — the most recent messages that landed in the app's inbox: sender, subject, date, whether seen. Use it when the owner asks what mail arrived, if someone wrote, or to triage the inbox. Returns metadata only (not full bodies).",
+  input_schema: {
+    type: 'object',
+    properties: { limit: { type: 'number', description: 'Max messages, default 20.' } },
   },
 }
 // ACCES LA BAZA DE DATE (Adrian, 27 iul: „Kelion nu are acces la baze de date
@@ -1777,7 +1791,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -2129,6 +2143,16 @@ async function runTool(
     case 'system_health': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       return systemHealth()
+    }
+    case 'read_inbox': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 40)
+      const items = await fetchRecentInbox(limit)
+      return JSON.stringify({
+        count: items.length,
+        messages: items.map((m) => ({ from: m.fromName || m.from, subject: m.subject, date: m.date, seen: m.seen })),
+        note: items.length ? 'Cutia poștală proprie (contact@kelionai.app) — doar antete.' : 'Inbox gol sau poșta neconfigurată.',
+      })
     }
     case 'server_logs': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
