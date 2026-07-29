@@ -82,7 +82,7 @@ import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPE
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL } from '../services/brainToolDefs.js'
 import { updatesList, latestUpdateSummary } from '../services/updates.js'
 
 // CREIERUL — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, definitiv). Modelul de chat
@@ -501,28 +501,7 @@ const PLAY_AVATAR_GESTURE_TOOL: Tool = {
 // ACCES REAL LA TAB-URILE APLICAȚIEI din chatul SCRIS (Adrian, 24 iul: „Kelion
 // trebuie să poată intra în orice tab al aplicației, real"). Pandantul uneltei
 // din voce (services/realtime.ts) — execuția emite frame-ul {nav} spre client.
-const OPEN_APP_VIEW_TOOL: Tool = {
-  name: 'open_app_view',
-  description:
-    "Open a panel/tab INSIDE the Kelionai app on the user's screen (not a web page). Use when the user asks to open settings, their wallet/credits, contact, the admin panel, or go back to the main screen. For the admin panel you may also pass a section.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      view: {
-        type: 'string',
-        enum: ['settings', 'wallet', 'contact', 'admin', 'home'],
-        description:
-          'Which app panel to open: settings, wallet (credits & top-up), contact, admin (owner only), or home (close panels).',
-      },
-      section: {
-        type: 'string',
-        enum: ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'],
-        description: 'Optional admin section (only when view=admin).',
-      },
-    },
-    required: ['view'],
-  },
-}
+
 
 // User-facing notes ("reține asta", "salvează-mi asta") — explicit, visible,
 // listable and deletable by the user themselves. Distinct from Kelion's silent
