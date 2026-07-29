@@ -80,10 +80,31 @@ const ramase = () => BUDGET_MS - (Date.now() - START)
 const dormi = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const logLines = []
+// PROGRES LIVE (Etapa 4 autonomie, 29 iul): fiecare pas al constructorului
+// (clonat → editez X → build → deschid PR...) e împins spre aplicație ca să
+// apară pe monitor și ca Kelion să-l poată NARA. Fire-and-forget, throttlat la
+// ~4s și cu timeout scurt: NU are voie să mănânce din bugetul de timp al rulării
+// (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
+let beatJobId = 0
+let lastBeatAt = 0
+function beat(text) {
+  if (!beatJobId || !BRIDGE) return
+  const now = Date.now()
+  if (now - lastBeatAt < 4000) return
+  lastBeatAt = now
+  fetch(`${APP}/api/constructor/progress`, {
+    method: 'POST',
+    headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json' },
+    body: JSON.stringify({ id: beatJobId, progress: String(text).slice(0, 300) }),
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => {})
+}
+
 function log(s) {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
   console.log(line)
   logLines.push(line)
+  beat(s) // pasul curent → monitorul lui Kelion (throttlat în beat)
 }
 
 // REÎNCERCARE PE API-UL APLICAȚIEI (dovadă live 28 iul, ordinul #9: stiva de
@@ -537,6 +558,7 @@ async function main() {
   }
   const claim = await api('/api/constructor/next')
   if (!claim?.job) return // coada goală sau pauza-autonomie — tăcere totală
+  beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
 
