@@ -98,11 +98,12 @@ o unealtă nu i le-a întors. Dacă nu știe → o spune sincer. Minciuna declar
 **DOVADA:** îl întreb ora prin voce dimineața → spune „bună dimineața" + ora
 corectă. Îi cer un fapt fără unealtă → spune sincer că nu știe, nu inventează.
 
-## 4. Ce va FACE (comportament)
+## 4. Ce va FACE (comportament) — AI VIU, CU CREIER, TOTAL INDEPENDENT
 - Gândește înainte să acționeze; **cheamă unealta**, nu declară că a făcut.
-- Duce o cerință până la capăt singur: caută → încearcă → verifică → livrează.
+- Duce o cerință până la capăt **singur, total independent**: caută → încearcă → verifică → livrează, fără să ceară voie la fiecare pas.
+- **Conștient de ce-i lipsește:** dacă o sarcină cere ceva ce nu are (o dependență, o unealtă, un pas), **își dă seama singur, și-l instalează / și-l cere (`propose_tool`, constructor, `npm install`, runbook), apoi termină sarcina** — nu se oprește cu „nu pot".
 - Același creier pe voce și pe scris.
-- Când chiar nu poate, spune sincer și de ce.
+- Când chiar nu poate (imposibil, nu doar lipsă), spune sincer și de ce.
 
 ## 5. Garanția că ține TOT (paznicul cerut de owner)
 O verificare automată compară **lista funcțiilor softului** cu **ce ține

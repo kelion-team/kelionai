@@ -139,7 +139,7 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
 // execută prin POST /api/realtime/tool (serverul rulează runGoogleTool cu
 // cheile lui) și deschide monitorul din screen_url. show_on_screen se execută
 // direct în client (monitorul e al browserului).
-const VOICE_TOOL_NAMES = new Set([
+export const VOICE_TOOL_NAMES = new Set([
   'web_search', 'get_weather', 'maps_search', 'maps_directions', 'youtube_search',
   'translate_text', 'wikipedia_lookup', 'convert_currency', 'get_time',
   'get_calendar_events', 'get_recent_emails', 'send_email', 'create_calendar_event',
