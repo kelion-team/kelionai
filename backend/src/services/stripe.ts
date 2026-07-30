@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import type { MoneyCircuit, ExpenseLine } from '../shared/api-types.js'
 export type { MoneyCircuit }
 import { config } from '../config.js'
-import { getStripeCustomer, setStripeCustomer, countWalletUsers } from '../db.js'
+import { getStripeCustomer, setStripeCustomer, countWalletUsers, getCostSummary } from '../db.js'
 
 // Thin Stripe client over the REST API (no SDK dependency). Handles: a customer
 // per user, a Checkout Session for a credit top-up, and webhook signature
@@ -301,6 +301,32 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
       }
     } catch {
       /* informativ: lipsa listei nu strică restul circuitului */
+    }
+
+    // ── REGULA BATUTA IN CUIE: platile catre AI ies din punga ──────────────
+    // Adrian, 30 iul: „regula trebuie batuta in cuie sa se faca plati din punga."
+    // Codul NU poate pune cardul in contul furnizorului — nu exista API la niciunul
+    // (verificat in specificatia OpenRouter: 69 de rute, niciuna de plata).
+    // Dar poate PRINDE cand nu e pus: daca am consumat AI si cardul n-a fost taxat
+    // deloc, atunci furnizorii sunt platiti din alta parte, adica din buzunarul
+    // ownerului. Asta se masoara, nu se presupune.
+    try {
+      const cost = await getCostSummary()
+      const cheltuit = Math.round(cost.total * config.stripe.usdToCurrency * 100) / 100
+      const taxat = Math.round((out.issuingCharges ?? []).reduce((s2, t) => s2 + t.amount, 0) * 100) / 100
+      const respectata = cheltuit < 1 || taxat > 0
+      out.pouchRule = {
+        spent: cheltuit,
+        charged: taxat,
+        ok: respectata,
+        verdict: respectata
+          ? taxat > 0
+            ? 'Furnizorii taxeaza cardul Kelion — platile ies din punga, cum trebuie.'
+            : 'Inca nu s-a cheltuit destul ca sa se vada; regula se verifica singura la prima factura.'
+          : `Am consumat AI de ${cheltuit.toFixed(2)}, dar cardul Kelion n-a fost taxat niciodata. Deci furnizorii sunt platiti din ALT card. Pune cardul Kelion in contul lor de facturare si scoate-l pe celalalt.`,
+      }
+    } catch {
+      /* informativ */
     }
 
     if (out.issuingStatus === 'active') {

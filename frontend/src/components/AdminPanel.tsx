@@ -898,6 +898,19 @@ export default function AdminPanel({
                           'Cardul n-a fost taxat de niciun furnizor încă — deci nu e (încă) pus în contul lor de facturare. Se pune o dată, de mână, din linkurile de mai sus; după aceea merge singur.'
                         )}
                       </span>
+                      {/* REGULA, VERIFICATA: platile catre AI ies din punga.
+                          Nu o mai declaram — o masuram, comparand cat am consumat
+                          cu cat a fost taxat cardul. */}
+                      {circuit.pouchRule && (
+                        <span
+                          className="or-wallet-sub"
+                          style={{ color: circuit.pouchRule.ok ? undefined : '#ff6b6b', fontWeight: circuit.pouchRule.ok ? undefined : 600 }}
+                        >
+                          {circuit.pouchRule.ok ? '✅' : '❌'} REGULA: plățile ies din pungă — consumat {sym}
+                          {circuit.pouchRule.spent.toFixed(2)}, taxat pe card {sym}
+                          {circuit.pouchRule.charged.toFixed(2)}. {circuit.pouchRule.verdict}
+                        </span>
+                      )}
                       {/* TOATE CHELTUIELILE, cu locul de unde se platesc. */}
                       {(circuit.expenses?.length ?? 0) > 0 && (
                         <div className="fin-breakdown" style={{ marginTop: 10 }}>
