@@ -52,6 +52,7 @@ const {
   createPaymentIntent,
   chargeSavedCard,
   createAdminPayout,
+  createCardEphemeralKey,
   getStripeBalance,
   hasRefund,
 } = await import('./services/stripe.js')
@@ -133,6 +134,14 @@ describe('stripe — fără cheie secretă NU pleacă nicio cerere de bani', () 
 
   it('createAdminPayout (scoate bani din cont!) se oprește curat', async () => {
     expect(await createAdminPayout(100)).toEqual({ error: 'stripe_not_configured' })
+  })
+
+  it('createCardEphemeralKey (deschide numărul cardului!) se oprește curat', async () => {
+    // Cheia efemeră e poarta către cifrele cardului virtual. Fără cheia secretă
+    // NU pleacă nimic spre Stripe — și nici nu inventăm un „secret" gol pe care
+    // panoul l-ar duce mai departe la Stripe.js.
+    expect(await createCardEphemeralKey('ic_test123', 'nonce_abc')).toEqual({ error: 'stripe_not_configured' })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
   it('getStripeBalance întoarce null, nu cifre inventate', async () => {

@@ -39,7 +39,7 @@ import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../serv
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
-import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
+import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createCardEphemeralKey, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -486,6 +486,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const r = await createKelionCard(user.email)
     if ('error' in r) return reply.code(502).send(r)
     return reply.send({ ok: true, ...r })
+  })
+
+  // NUMĂRUL CARDULUI ÎN PANOU (Adrian, 30 iul: „nu mă descurc, intră și ajută-mă").
+  // Schimbă nonce-ul făcut de Stripe.js în browser pe o cheie efemeră de 15 min.
+  // Serverul NU vede cifrele cardului — vede un nonce; numărul se randează
+  // într-un iframe Stripe. Poarta e dublă, cum cere Stripe pentru ruta asta:
+  // sesiune de admin ȘI încuietoarea de admin ridicată (dacă e armată), fiindcă
+  // dincolo de ea stă un instrument de plată.
+  app.post<{ Body: { card_id?: string; nonce?: string } }>('/api/admin/money-circuit/card-key', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    if ((await isLockArmed()) && !hasUnlock(req, user.email)) return reply.code(403).send({ error: 'locked' })
+    const r = await createCardEphemeralKey(String(req.body?.card_id ?? ''), String(req.body?.nonce ?? ''))
+    if ('error' in r) return reply.code(502).send(r)
+    return reply.send(r)
   })
 
   // DEPUNEREA OWNERULUI (Adrian, 24 iul: „de unde din admin depun bani să

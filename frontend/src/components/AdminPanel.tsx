@@ -7,6 +7,7 @@ import {
   saveDisabledGestures,
 } from '../lib/gestures'
 import BackLink from './BackLink'
+import CardReveal from './CardReveal'
 import {
   fetchUsers,
   fetchHistory,
@@ -189,6 +190,9 @@ export default function AdminPanel({
   // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
   const [cardBusy, setCardBusy] = useState(false)
+  // Numărul cardului se randează DOAR când îl ceri: cheia efemeră ține 15 minute
+  // și n-are rost să plece la fiecare deschidere a panoului de bani.
+  const [cardDeschis, setCardDeschis] = useState(false)
   // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
@@ -864,10 +868,31 @@ export default function AdminPanel({
                             {cardBusy ? 'Se creează…' : 'Creează cardul'}
                           </button>
                         )}
+                        {/* NUMĂRUL, AICI. Înainte exista doar linkul spre Stripe;
+                            pasul „îl caut în dashboard" e exact cel pe care Adrian
+                            l-a semnalat ca blocant (30 iul). Butonul apare doar cu
+                            cheia publică pusă în env — altfel spunem ce lipsește,
+                            nu tăcem. */}
+                        {circuit.cards.length > 0 && circuit.stripePk && (
+                          <button type="button" className="ghost" onClick={() => setCardDeschis((v) => !v)}>
+                            {cardDeschis ? 'Ascunde numărul' : 'Vezi numărul cardului'}
+                          </button>
+                        )}
                         {circuit.cards.length > 0 && (
-                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi datele cardului</a>
+                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi în Stripe</a>
                         )}
                       </span>
+                      {circuit.cards.length > 0 && !circuit.stripePk && (
+                        <span className="or-wallet-sub">
+                          Ca numărul cardului să apară aici (fără drum prin Stripe): pune cheia PUBLICĂ
+                          (<code>pk_live_…</code>, de la <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">Stripe → API keys</a>)
+                          în secretul <code>STRIPE_PUBLISHABLE_KEY</code> și rulează workflow-ul <code>vps-set-env</code>.
+                          E cheie publică, nu secretă — se poate pune liniștit.
+                        </span>
+                      )}
+                      {cardDeschis && circuit.cards.length > 0 && circuit.stripePk && (
+                        <CardReveal cardId={circuit.cards[0].id} pk={circuit.stripePk} last4={circuit.cards[0].last4} />
+                      )}
                       {/* VERIGA 4, MĂSURATĂ, nu declarată. Aici scria pur și simplu
                           „cu auto-recharge pornit la amândouă" — o afirmație pe care
                           nimic n-o verifica. Adăugarea cardului în contul de facturare

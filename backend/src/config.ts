@@ -116,6 +116,11 @@ export const config = {
   },
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+    // Cheia PUBLICĂ (pk_live_…). NU e secret: Stripe o proiectează ca să stea în
+    // pagina din browser. Aici e nevoie de ea pentru UN singur lucru — afișarea
+    // numărului cardului virtual în panoul de admin prin Issuing Elements, unde
+    // numărul se randează într-un iframe Stripe și NU trece prin serverul nostru.
+    publishableKey: (process.env.STRIPE_PUBLISHABLE_KEY ?? '').trim(),
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
     currency: (process.env.STRIPE_CURRENCY ?? 'gbp').toLowerCase(),
     // Split banilor la fiecare alimentare: 75% devin credite pentru user, 25%
