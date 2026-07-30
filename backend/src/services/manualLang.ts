@@ -67,7 +67,7 @@ export function normalizeLang(v: string): string {
 /** Traduce un lot într-un singur apel. Întoarce null dacă nu iese o listă de
  *  ACEEAȘI lungime — mai bine engleză întreagă decât o traducere decalată, în
  *  care fiecare rând ajunge sub alt titlu. */
-async function traduceLot(valori: string[], lang: string): Promise<string[] | null> {
+async function traduceLot(valori: string[], lang: string): Promise<(string | null)[] | null> {
   const numerotat = valori.map((v, i) => `${i + 1}. ${v.replace(/\s*\n+\s*/g, ' ')}`).join('\n')
   const r = await openrouterComplete(
     config.openrouter.searchModel,
@@ -75,22 +75,40 @@ async function traduceLot(valori: string[], lang: string): Promise<string[] | nu
       {
         role: 'user',
         content:
-          `Translate each numbered line into ${numeLimba(lang)}. Keep the exact same numbering and the same number of lines. ` +
+          `Translate each numbered line into ${numeLimba(lang)}. Keep the exact same numbering: ` +
+          'every output line must start with its number, and there must be exactly one output line per input line. ' +
           'Translate naturally, the way a native speaker would write it in a product manual. ' +
           'Lines in quotation marks are example phrases a user would say out loud — translate them as natural speech and keep the quotes. ' +
-          'Do not add, merge or drop lines. No commentary, no preamble.\n\n' +
+          'Keep the product name "Kelionai" and the assistant name "Kelion" exactly as they are — never translate or alter them. ' +
+          'No commentary, no preamble.\n\n' +
           numerotat,
       },
     ],
     { temperature: 0, maxTokens: 8000 },
   ).catch(() => null)
   if (!r?.text) return null
-  const linii = r.text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => /^\d+[.)]\s/.test(l))
-    .map((l) => l.replace(/^\d+[.)]\s*/, '').trim())
-  return linii.length === valori.length ? linii : null
+
+  // POTRIVIRE DUPĂ NUMĂR, nu după numărătoare. Garda de dinainte era „totul sau
+  // nimic": dacă modelul întorcea fie și un rând în plus sau în minus, aruncam
+  // TOATĂ limba — iar limba aia se reîncerca la fiecare cerere și pica la fel.
+  // Româna a stat blocată așa (verificat live, 30 iul: „ÎNCĂ" minute la rând,
+  // în timp ce celelalte șase erau gata).
+  //
+  // Acum fiecare rând se așază la INDEXUL lui, luat din numărul cu care începe.
+  // Ce lipsește rămâne în engleză — un rând netradus într-o pagină tradusă e
+  // supărător, o limbă întreagă blocată e o funcție moartă.
+  const out: (string | null)[] = new Array(valori.length).fill(null)
+  let puse = 0
+  for (const linie of r.text.split('\n')) {
+    const m = linie.trim().match(/^(\d+)[.)]\s*(.+)$/)
+    if (!m) continue
+    const idx = Number(m[1]) - 1
+    if (idx < 0 || idx >= valori.length || out[idx] !== null) continue
+    out[idx] = m[2].trim()
+    puse++
+  }
+  // Sub trei sferturi traduse înseamnă că răspunsul e rupt, nu doar incomplet.
+  return puse >= Math.ceil(valori.length * 0.75) ? out : null
 }
 
 /**
@@ -105,7 +123,7 @@ export async function translationReady(
 ): Promise<Record<string, string> | null> {
   const cod = normalizeLang(lang)
   if (!cod || cod === 'en') return {}
-  const salvat = await loadKv(`tr2:${cod}:${amprenta(sursa)}`).catch(() => null)
+  const salvat = await loadKv(`tr3:${cod}:${amprenta(sursa)}`).catch(() => null)
   if (!salvat) return null
   try {
     return JSON.parse(salvat) as Record<string, string>
@@ -126,7 +144,7 @@ export async function translateStrings(
   // v2 în cheie: traducerile salvate ÎNAINTE de reparație sunt greșite (italiana
   // era spaniolă, româna era engleză) și ar rămâne în bază pe veci. Schimbarea
   // versiunii le lasă acolo, dar nimeni nu le mai citește — se traduce din nou.
-  const cheieKv = `tr2:${cod}:${amprenta(sursa)}`
+  const cheieKv = `tr3:${cod}:${amprenta(sursa)}`
   const salvat = await loadKv(cheieKv).catch(() => null)
   if (salvat) {
     try {
@@ -156,14 +174,15 @@ export async function translateStrings(
       const felii: string[][] = []
       for (let i = 0; i < valori.length; i += LOT) felii.push(valori.slice(i, i + LOT))
       const rezultate = await Promise.all(felii.map((f) => traduceLot(f, cod)))
-      if (rezultate.some((r) => r == null)) return {} // un lot ratat = manual decalat
+      if (rezultate.some((r) => r == null)) return {} // lot rupt de tot → engleză
       const out: Record<string, string> = {}
       rezultate.forEach((traduse, idxFelie) => {
         traduse!.forEach((v, j) => {
           if (v) out[chei[idxFelie * LOT + j]] = v
         })
       })
-      if (Object.keys(out).length === chei.length) {
+      // Se salvează dacă marea majoritate e tradusă; golurile rămân engleză.
+      if (Object.keys(out).length >= Math.ceil(chei.length * 0.9)) {
         await saveKv(cheieKv, JSON.stringify(out)).catch(() => {})
       }
       return out
