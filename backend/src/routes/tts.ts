@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { recordCost } from '../db.js'
+import { recordCost, getVoicePref } from '../db.js'
 import { ttsCost } from '../services/cost.js'
 import { synthesize } from '../services/tts.js'
 
@@ -19,7 +19,9 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
     if (!text) return reply.code(400).send({ error: 'bad_request' })
 
     try {
-      const r = await synthesize(text, req.body?.lang)
+      // ACEEAȘI VOCE CA LA VOCEA LIVE (C4). Fără asta, omul își alegea vocea din
+      // Setări, o auzea în full-duplex, iar chatul scris îi răspundea cu altcineva.
+      const r = await synthesize(text, req.body?.lang, { voice: await getVoicePref(user.email).catch(() => null) })
       if (!r.ok) {
         if (r.status >= 500) app.log.warn({ status: r.status, error: r.error }, 'google tts failed')
         return reply.code(r.status).send({ error: r.error })

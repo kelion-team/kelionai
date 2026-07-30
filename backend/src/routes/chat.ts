@@ -51,6 +51,7 @@ import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
+import { getVoicePref } from '../db.js'
 import { splitForSpeech } from '../services/speech-chunk.js'
 import {
   browserOpen,
@@ -642,6 +643,8 @@ const CTRL = String.fromCharCode(31)
 function createVoiceStream(
   reply: { raw: { write(c: string): void } },
   lang: string | undefined,
+  /** Vocea aleasă de userul ăsta (C4). Necunoscută sau lipsă → vocea aplicației. */
+  voicePref: string | null,
 ): { feed(t: string): void; fed(): boolean; finish(): Promise<void> } {
   let pending = '' // text sosit, încă netrimis la sinteză
   let spoken = 0 // caractere deja rostite (plafonul de 4000)
@@ -653,7 +656,8 @@ function createVoiceStream(
     spoken += t.length
     chain = chain.then(async () => {
       try {
-        const r = await synthesize(t, lang)
+        // Vocea aleasă de user, ca răspunsul scris să sune ca vocea live (C4).
+        const r = await synthesize(t, lang, { voice: voicePref })
         if (r.ok) {
           reply.raw.write(`${CTRL}${JSON.stringify({ audio: r.audio.toString('base64') })}${CTRL}`)
         }
@@ -1560,7 +1564,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const voice =
       req.body?.serverVoiceOff === true
         ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
-        : createVoiceStream(reply, userLang)
+        : createVoiceStream(reply, userLang, await getVoicePref(user.email).catch(() => null))
     let assistantText = ''
     // CEASUL CREIERULUI (admin): primul cuvânt real măsoară viteza; bara trece pe
     // „Compun răspunsul". O singură dată pe tură, doar pentru admin (telemetria lui).
