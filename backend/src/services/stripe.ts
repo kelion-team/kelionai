@@ -632,6 +632,12 @@ export async function createAdminPayout(
 export async function getStripeBalance(): Promise<{
   available: number
   pending: number
+  /** Punga CARDULUI (Issuing) — al treilea buzunar, complet separat de plăți.
+   *  Adrian, 30 iul: „Stripe e 0? am băgat bani." Panoul îi arăta DOAR
+   *  `available`, deci banii care erau încă în decontare (`pending`) sau care
+   *  intraseră direct în punga cardului (alimentare prin transfer bancar pentru
+   *  Issuing) păreau dispăruți. Trei buzunare, una singură afișată. */
+  issuing: number
   currency: string
 } | null> {
   if (!config.stripe.secretKey) return null
@@ -640,6 +646,7 @@ export async function getStripeBalance(): Promise<{
   const j = (await r.json()) as {
     available?: { amount: number; currency?: string }[]
     pending?: { amount: number; currency?: string }[]
+    issuing?: { available?: { amount: number; currency?: string }[] }
   }
   // BUG FIX (4 iul): Stripe returns one entry PER CURRENCY. Summing them all
   // into a single figure mixed gbp+usd+eur into one meaningless number (that's
@@ -649,7 +656,12 @@ export async function getStripeBalance(): Promise<{
     (arr ?? [])
       .filter((x) => !x.currency || x.currency.toLowerCase() === cur)
       .reduce((s, x) => s + x.amount, 0) / 100
-  return { available: sum(j.available), pending: sum(j.pending), currency: cur }
+  return {
+    available: sum(j.available),
+    pending: sum(j.pending),
+    issuing: sum(j.issuing?.available),
+    currency: cur,
+  }
 }
 
 // Create a PaymentIntent for a credit top-up. The frontend confirms the payment

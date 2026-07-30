@@ -1669,7 +1669,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // TOATE uneltele înainte să scoată o vorbă). Pe tura de acțiune a
       // adminului, confirmarea pleacă INSTANT; uneltele rulează imediat după.
       if (isAdmin && heavyTurn) {
-        const ackText = ro ? 'Mă apuc — verific și execut. ' : 'On it — checking and executing. '
+        // Formularea cerută de Adrian (30 iul, a doua oară): „am preluat
+        // sarcina", nu „mă apuc — verific și execut". Prima spune că treaba e
+        // ÎN mâinile lui; a doua descria ce urmează să facă el, ceea ce nu-l
+        // interesează pe om.
+        const ackText = ro ? 'Am preluat sarcina. ' : 'Task taken on. '
         noteFirstWord()
         reply.raw.write(appendTurn(user.email, turnId, ackText))
         voice.feed(ackText)

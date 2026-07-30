@@ -364,8 +364,11 @@ export default function AdminPanel({
         setMailboxLive(m)
         setMailboxLoading(false)
       })
-      void fetchEnvCheck().then(setEnvCheck)
     } else if (tab === 'tokenuri') {
+      // Tabelul „Ce chei vede serverul CHIAR ACUM" se încarcă odată cu tabul.
+      // Apelul ăsta ajunsese din greșeală la coada ramurii `inbox`, deci tabelul
+      // nu apărea NICIODATĂ în Tokenuri — prins de Adrian dintr-o captură.
+      void fetchEnvCheck().then(setEnvCheck)
       setTokenChecksLoading(true)
       void fetchTokenChecks().then((r) => {
         setTokenChecks(r)
