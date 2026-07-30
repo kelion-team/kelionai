@@ -9,6 +9,7 @@
 // întors nu are voie să conțină vreo bucată din valoarea reală.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
+<<<<<<< HEAD
 vi.mock('./config.js', () => ({
   config: { stripe: { secretKey: 'sk_live_SECRET_NU_TREBUIE_SA_IASA' } },
   ENV_ALIASES: {
@@ -31,6 +32,11 @@ vi.mock('./config.js', () => ({
 }))
 
 const { envCheck, envSummary, envOrphans, stripeMode } = await import('./services/envCheck.js')
+=======
+vi.mock('./config.js', () => ({ config: { stripe: { secretKey: 'sk_live_SECRET_NU_TREBUIE_SA_IASA' } } }))
+
+const { envCheck, envSummary, stripeMode } = await import('./services/envCheck.js')
+>>>>>>> origin/master
 
 const SECRET = 'valoare-foarte-secreta-1234567890'
 
@@ -76,6 +82,7 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(stripeMode()).toBe('live')
     expect(JSON.stringify(stripeMode())).not.toContain('SECRET_NU_TREBUIE')
   })
+<<<<<<< HEAD
 
   // ── MIEZUL PROBLEMEI LUI ADRIAN, 30 iul ────────────────────────────────────
   // „toate cheile au fost scrise de zeci de ori" — și erau. Doar că el scrisese
@@ -106,4 +113,6 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(JSON.stringify(envOrphans())).not.toContain(SECRET)
     delete process.env.STRIPE_ALT_KEY
   })
+=======
+>>>>>>> origin/master
 })

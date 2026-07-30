@@ -16,7 +16,11 @@
 // „primele caractere". O cheie pe jumătate e tot o cheie scursă. Se întorc doar
 // numele, dacă e prezentă, și câte caractere are — atât cât să deosebești „nu e"
 // de „e, dar e goală" sau „e, dar e trunchiată".
+<<<<<<< HEAD
 import { config, ENV_ALIASES } from '../config.js'
+=======
+import { config } from '../config.js'
+>>>>>>> origin/master
 
 export interface EnvVarState {
   /** Numele EXACT al variabilei, cum îl caută codul. */
@@ -29,15 +33,19 @@ export interface EnvVarState {
   length: number
   /** Fără ea, ce nu merge. */
   breaks: string
+<<<<<<< HEAD
   /** Sub CE nume a fost găsită. Poate fi un alias, nu numele principal — de-aia
    *  se arată: „ai scris-o ca GOOGLE_MAPS_API_KEY" e o informație, nu un detaliu. */
   foundAs?: string
   /** Toate numele sub care o caut. Ca omul să nu ghicească. */
   accepts: string[]
+=======
+>>>>>>> origin/master
 }
 
 /** Variabilele fără de care o capabilitate anume moare. Lista e scrisă de mână
  *  dinadins: „tot ce e în env" ar include și lucruri care n-au treabă cu noi. */
+<<<<<<< HEAD
 const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] }[] = [
   { alias: ENV_ALIASES.openaiKey, name: 'OPENAI_API_KEY', what: 'vocea live + TTS + STT de rezervă', breaks: 'vocea nu pornește deloc' },
   { alias: ENV_ALIASES.openrouterKey, name: 'OPENROUTER_API_KEY', what: 'creierul (chat, gândire, traduceri)', breaks: 'nu răspunde nimic' },
@@ -58,27 +66,57 @@ const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] 
   { alias: ENV_ALIASES.mailPass, name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
   { alias: ENV_ALIASES.githubToken, name: 'GITHUB_TOKEN', what: 'mâinile lui Kelion pe runbook-uri', breaks: 'nu poate publica singur' },
   { alias: ENV_ALIASES.bridgeSecret, name: 'BRIDGE_SECRET', what: 'raportările constructorului', breaks: 'constructorul nu poate raporta progresul' },
+=======
+const ASTEPTATE: { name: string; what: string; breaks: string }[] = [
+  { name: 'OPENAI_API_KEY', what: 'vocea live + TTS + STT de rezervă', breaks: 'vocea nu pornește deloc' },
+  { name: 'OPENROUTER_API_KEY', what: 'creierul (chat, gândire, traduceri)', breaks: 'nu răspunde nimic' },
+  { name: 'DATABASE_URL', what: 'baza de date', breaks: 'conturi, credite, istoric — toate' },
+  { name: 'SESSION_SECRET', what: 'sesiunile de login', breaks: 'nimeni nu poate rămâne logat' },
+  { name: 'STRIPE_SECRET_KEY', what: 'plățile', breaks: 'nu se pot cumpăra credite' },
+  { name: 'STRIPE_WEBHOOK_SECRET', what: 'confirmarea plăților de la Stripe', breaks: 'plata trece dar creditele nu intră' },
+  { name: 'STRIPE_PUBLISHABLE_KEY', what: 'afișarea numărului cardului în panou', breaks: 'butonul „Vezi numărul cardului" nu apare' },
+  { name: 'GOOGLE_CLIENT_ID', what: 'login cu Google', breaks: 'butonul Google nu merge' },
+  { name: 'GOOGLE_CLIENT_SECRET', what: 'login cu Google', breaks: 'butonul Google nu merge' },
+  { name: 'GEMINI_API_KEY', what: 'creier de rezervă + vedere', breaks: 'cade pe modele mai slabe' },
+  { name: 'SERPER_API_KEY', what: 'căutarea pe web', breaks: 'nu poate căuta nimic pe internet' },
+  { name: 'GOOGLE_MAPS_KEY', what: 'hărți, locuri, trasee bune', breaks: 'rămâne doar harta gratuită (OSM)' },
+  { name: 'GOOGLE_TTS_API_KEY', what: 'vocea sintetizată Google', breaks: 'TTS-ul cade pe OpenAI' },
+  { name: 'GOOGLE_API_KEY', what: 'alternativă pentru TTS/Gemini', breaks: '—' },
+  { name: 'GOOGLE_SERVICE_ACCOUNT_JSON', what: 'Chirp 3 HD (auz/voce de calitate)', breaks: 'STT/TTS cad pe OpenAI' },
+  { name: 'MAIL_USER', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
+  { name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
+  { name: 'GITHUB_TOKEN', what: 'mâinile lui Kelion pe runbook-uri', breaks: 'nu poate publica singur' },
+  { name: 'BRIDGE_SECRET', what: 'raportările constructorului', breaks: 'constructorul nu poate raporta progresul' },
+>>>>>>> origin/master
 ]
 
 export function envCheck(): EnvVarState[] {
   return ASTEPTATE.map((v) => {
+<<<<<<< HEAD
     // Caut sub TOATE numele acceptate, nu doar cel principal. Un nume scris
     // altfel nu e o cheie lipsă — vezi comentariul din config.ts.
     const nume = v.alias ?? [v.name]
     const gasit = nume.find((n) => (process.env[n] ?? '').trim() !== '')
     const raw = gasit != null ? process.env[gasit] : nume.map((n) => process.env[n]).find((x) => x != null)
+=======
+    const raw = process.env[v.name]
+>>>>>>> origin/master
     return {
       name: v.name,
       what: v.what,
       present: raw != null,
       length: (raw ?? '').length,
       breaks: v.breaks,
+<<<<<<< HEAD
       foundAs: gasit,
       accepts: nume,
+=======
+>>>>>>> origin/master
     }
   })
 }
 
+<<<<<<< HEAD
 // ── CHEI PE CARE LE AI, DAR EU NU LE CITESC ─────────────────────────────────
 //
 // Cazul „am scris-o de zeci de ori" are o a doua față: cheia E în proces, dar
@@ -100,6 +138,8 @@ export function envOrphans(): string[] {
     .sort()
 }
 
+=======
+>>>>>>> origin/master
 /** Rezumatul, ca panoul să poată spune într-o linie cum stă treaba. */
 export function envSummary(): { total: number; lipsa: number; goale: number; nume: string[] } {
   const s = envCheck()

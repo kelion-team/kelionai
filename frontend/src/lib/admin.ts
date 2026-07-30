@@ -634,9 +634,13 @@ export interface TokenChecksResult {
  *  vs. „(neconfigurat)": o cheie scrisă nu ajunge automat în procesul care
  *  rulează. NU conține valori — doar nume, prezență și lungime. */
 export interface EnvCheckResult {
+<<<<<<< HEAD
   vars: { name: string; what: string; present: boolean; length: number; breaks: string; foundAs?: string; accepts: string[] }[]
   /** Nume de chei pe care serverul le ARE, dar pe care codul nu le citea. */
   orphans: string[]
+=======
+  vars: { name: string; what: string; present: boolean; length: number; breaks: string }[]
+>>>>>>> origin/master
   summary: { total: number; lipsa: number; goale: number; nume: string[] }
   /** Ora pornirii procesului: o cheie scrisă DUPĂ asta nu e încărcată. */
   startedAt: string
