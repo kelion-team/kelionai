@@ -205,7 +205,9 @@ const MISIUNE: Sarcina[] = [
       `5 în 5 minute, potrivește codul KLN din referință și creditează. Scrii teste dacă ` +
       `atingi cod; dacă a fost doar configurare, scrii în PR ce ai configurat și dovada că ` +
       `starea a trecut pe verde.`,
-    // MÂINILE LUI: portal = browser + secrete. Constructorul n-are niciuna.
+    // MÂINILE LUI: portal = browser + secrete. Rulează în aplicație, unde
+    // uneltele chiar există (constructorul le are acum și el, prin
+    // /api/constructor/tool — dar pasul ăsta nu e muncă de cod).
     executant: 'maini',
     // Dovada: cele trei chei chiar există. Fără ele, cititorul nu poate citi nimic.
     dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY', 'GOCARDLESS_ACCOUNT_ID'),
