@@ -1829,9 +1829,10 @@ body {
   padding: 5px 0;
   border-top: 1px solid var(--border);
 }
-.fin-cards-4 {
-  grid-template-columns: repeat(4, 1fr);
-}
+/* `.fin-cards-4` a fost ștearsă odată cu cele patru fișe din tabul Bani
+   (30 iul): trei din cifrele lor erau scrise a doua oară mai jos, în pungă și
+   în tabelul de costuri. Regula rămasă (`.fin-cards`, 3 coloane) e folosită de
+   analiza vizitatorilor. */
 /* Visitor analytics — professional two-line rows with a real flag image. */
 .flag-img {
   border-radius: 2px;

@@ -604,6 +604,13 @@ export default function AdminPanel({
   }
 
   const sym = finance?.currency === 'usd' ? '$' : '£'
+  // NU CONFUNDA „nu am voie să văd" cu „nu există" (Adrian, 30 iul: panoul îi
+  // arăta trei ❌ roșii — payouts, Issuing, card „necreat" — când adevărul era
+  // că cheia restricționată din env n-are dreptul să citească /v1/account, deci
+  // aplicația nu vede NIMIC despre ele. Trei probleme false în loc de una reală.
+  const stripeOrb = Boolean(
+    circuit && (circuit.payoutsInterval === 'fara_permisiune_cheie' || circuit.payoutsInterval.startsWith('http_')),
+  )
   const aiParts = finance
     ? Object.entries(finance.byKind)
         .filter(([, v]) => v > 0)
@@ -738,78 +745,93 @@ export default function AdminPanel({
             {!finance && <p className="chat-hint">Se încarcă…</p>}
             {finance && (
               <>
-                <div className="fin-cards fin-cards-4">
-                  <div className="fin-card">
-                    <span className="fin-label">Stripe — disponibil</span>
-                    <span className="fin-val">
-                      {finance.stripe ? `${sym}${finance.stripe.available.toFixed(2)}` : '—'}
+                {/* ── PANOUL BANI, CURĂȚAT (Adrian, 30 iul: „simplifică pagina, să
+                    rămână doar ce folosim") ──────────────────────────────────
+                    Ce era: aceleași cifre scrise de două-trei ori. „Stripe —
+                    disponibil" apărea și ca fișă mare sus, și ca rând în pungă.
+                    Soldul creierului apărea de două ori — în dolari sus, în lire
+                    jos („Credit la creier"). Punga cardului, la fel, în două
+                    locuri. Iar „Consumat la AI (real)" era exact suma tabelului
+                    „Cost per AI" de dedesubt. Din 4 fișe + 2 blocuri rămâne UN
+                    singur loc unde scrie cât ai, cu fiecare cifră o dată. */}
+                <div className="pool-manage">
+                  <div className="pool-manage-head">
+                    Punga: {sym}
+                    {finance.punga.total.toFixed(2)}
+                    {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
+                  </div>
+                  <div className="pool-parts">
+                    {([
+                      ['Stripe — disponibil', finance.punga.parti.stripeAvailable],
+                      ['Stripe — în tranzit', finance.punga.parti.stripePending],
+                      ['Card virtual (gata de cheltuit pe AI)', finance.punga.parti.stripeIssuing],
+                      ['Credit la creier (OpenRouter)', finance.punga.parti.openrouter],
+                    ] as [string, number | null][]).map(([eticheta, val]) => (
+                      <div className="fin-row" key={eticheta}>
+                        <span>{eticheta}</span>
+                        <span>{val === null ? 'nu răspunde' : `${sym}${val.toFixed(2)}`}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {finance.stripe && finance.stripe.available < 0 && (
+                    <span className="or-wallet-sub">
+                      Disponibilul sub zero = taxe Stripe reținute la rambursări/dispute. Cifra vine
+                      direct de la Stripe.
                     </span>
-                    {finance.stripe && finance.stripe.pending !== 0 && (
-                      <span className="fin-sub">
-                        în tranzit {sym}
-                        {finance.stripe.pending.toFixed(2)}
-                      </span>
-                    )}
-                    {finance.stripe && finance.stripe.available < 0 && (
-                      <span className="fin-sub">
-                        sub zero = taxe Stripe reținute la rambursări/dispute (cifra vine direct de
-                        la Stripe)
-                      </span>
-                    )}
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Consumat la AI (real)</span>
-                    <span className="fin-val">
-                      {sym}
-                      {finance.spent.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Consumat azi</span>
-                    <span className="fin-val">${finance.today.toFixed(2)}</span>
-                  </div>
-                  <div className="fin-card">
-                    <span className="fin-label">Profit</span>
-                    <span className="fin-val">
-                      {sym}
-                      {finance.profit.toFixed(2)}
-                    </span>
-                  </div>
+                  )}
+                  <span className="or-wallet-sub">
+                    💰{' '}
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={async () => {
+                        const s = window.prompt('Câte lire depui în pungă? (întreg, max 2000)')
+                        if (s == null) return
+                        const pounds = Math.round(Number(s))
+                        if (!(pounds > 0)) return
+                        const url = await ownerDeposit(pounds)
+                        if (url) window.open(url, '_blank', 'noopener')
+                        else window.alert('Generarea plății a eșuat.')
+                      }}
+                    >
+                      Depune în pungă
+                    </button>{' '}
+                    (owner, fără credite) · 🏦{' '}
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={async () => {
+                        const s = window.prompt('Câte lire tragi în contul tău real? (din disponibil)')
+                        if (s == null) return
+                        const pounds = Number(s)
+                        if (!(pounds > 0)) return
+                        const r = await adminPayout(pounds)
+                        if (r) window.alert(`PAYOUT ADMIN creat: £${pounds.toFixed(2)} → contul tău real${r.arrival ? `, ajunge ~${r.arrival}` : ''}.`)
+                        else window.alert('Payout eșuat — verifică disponibilul (nu poate depăși punga disponibilă).')
+                      }}
+                    >
+                      Trage profitul
+                    </button>{' '}
+                    ({sym}
+                    {finance.profit.toFixed(2)}, către contul tău REAL — nu cel virtual)
+                  </span>
                 </div>
-                {/* PUNGA LUI KELION = soldul REAL, exact din contul OpenRouter
-                    (creierul central). Valoare LIVE; când e sub prag, avertizăm
-                    să depui bani. Doar adminul vede acest tab. */}
-                {finance.openrouter && (
-                  <div className={`or-wallet ${finance.openrouter.low ? 'low' : ''}`}>
-                    <div className="or-wallet-main">
-                      <span className="or-wallet-label">
-                        OpenRouter — punga lui Kelion (creierul central)
-                      </span>
-                      <span className="or-wallet-val">
-                        {finance.openrouter.live ? `$${finance.openrouter.balance.toFixed(2)}` : '—'}
-                      </span>
-                    </div>
-                    {!finance.openrouter.live && (
+                {/* SOLDUL CREIERULUI se vede în pungă („Credit la creier"), deci
+                    aici nu-l mai repetăm în dolari. Rămâne DOAR când e ceva de
+                    făcut: sub prag sau necitibil. */}
+                {finance.openrouter && (!finance.openrouter.live || finance.openrouter.low) && (
+                  <div className="or-wallet low">
+                    {!finance.openrouter.live ? (
                       <span className="or-wallet-sub">
-                        Nu pot citi soldul acum (cheia OpenRouter lipsește sau contul e inaccesibil).
+                        Nu pot citi soldul creierului (cheia OpenRouter lipsește sau contul e inaccesibil).
                       </span>
-                    )}
-                    {finance.openrouter.live && finance.openrouter.low && (
+                    ) : (
                       <span className="or-wallet-sub">
-                        ⚠️ Sub ${finance.openrouter.threshold} — depune bani ca să nu pice creierul.{' '}
+                        ⚠️ Creierul are sub ${finance.openrouter.threshold} — depune ca să nu pice.{' '}
                         <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
                           Alimentează OpenRouter
-                        </a>
-                        {' · '}
-                        Ca să se alimenteze SINGUR, activează „Auto Top-Up" pe OpenRouter (cu un card salvat) — se reîncarcă automat sub prag.
-                      </span>
-                    )}
-                    {finance.openrouter.live && !finance.openrouter.low && (
-                      <span className="or-wallet-sub">
-                        Creierul central consumă din acest cont. Pentru alimentare automată, activează „Auto Top-Up" pe OpenRouter.{' '}
-                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
-                          Deschide OpenRouter
-                        </a>
+                        </a>{' '}
+                        · pornește „Auto Top-Up" acolo ca să se reîncarce singur.
                       </span>
                     )}
                   </div>
@@ -825,29 +847,48 @@ export default function AdminPanel({
                   {!circuit && <span className="or-wallet-sub">Se citește starea din Stripe…</span>}
                   {circuit && (
                     <>
-                      <span className="or-wallet-sub">
-                        {circuit.payoutsInterval === 'manual' ? '✅' : '❌'} 1. Banii RĂMÂN în pungă (payouts: {circuit.payoutsInterval}){' '}
-                        {circuit.payoutsInterval !== 'manual' && (
-                          <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
-                        )}
-                      </span>
+                      {/* O SINGURĂ PROBLEMĂ REALĂ, nu trei false. Cât timp cheia
+                          n-are voie să citească contul, verigile 1-3 nu se pot
+                          verifica — deci nu le arătăm deloc, ca să nu pară că
+                          sunt stricate. */}
+                      {stripeOrb && (
+                        <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
+                          ⚠ Nu pot citi contul Stripe: cheia de pe server e restricționată și n-are
+                          dreptul <code>Account: Read</code>. Până i-l dai, pașii 1-3 de mai jos nu se
+                          pot verifica — nu înseamnă că sunt stricați, înseamnă că nu-i văd.{' '}
+                          <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">
+                            Stripe → API keys → cheia restricționată → Edit → Account: Read
+                          </a>
+                        </span>
+                      )}
+                      {!stripeOrb && (
+                        <span className="or-wallet-sub">
+                          {circuit.payoutsInterval === 'manual' ? '✅' : '❌'} 1. Banii RĂMÂN în pungă (payouts: {circuit.payoutsInterval}){' '}
+                          {circuit.payoutsInterval !== 'manual' && (
+                            <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
+                          )}
+                        </span>
+                      )}
                       {/* DE CE E PUNGA 0. Cauza nu e in cod: Stripe scoate singur
                           banii in banca dupa programul lui, INAINTE ca transferul
                           orar sa apuce sa-i mute pe card. Codul NU poate schimba
                           programul de payout — e o setare de cont. O spunem tare. */}
-                      {circuit.payoutsInterval !== 'manual' && circuit.payoutsInterval !== 'unknown' && (
+                      {!stripeOrb && circuit.payoutsInterval !== 'manual' && circuit.payoutsInterval !== 'unknown' && (
                         <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
                           ⚠ De asta rămâne punga pe 0: Stripe îți trimite banii în bancă ({circuit.payoutsInterval}),
                           înainte să apuce să ajungă pe card. Cât timp e așa, AI-ul NU se poate alimenta din punga
                           userilor. Se schimbă doar din Stripe — nu există API pentru asta.
                         </span>
                       )}
-                      <span className="or-wallet-sub">
-                        {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
-                        {circuit.issuingStatus !== 'active' && (
-                          <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">Activează</a>
-                        )}
-                      </span>
+                      {!stripeOrb && (
+                        <span className="or-wallet-sub">
+                          {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
+                          {circuit.issuingStatus !== 'active' && (
+                            <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">Activează</a>
+                          )}
+                        </span>
+                      )}
+                      {!stripeOrb && (
                       <span className="or-wallet-sub">
                         {circuit.cards.length > 0
                           ? `${circuit.cards[0].livemode ? '✅' : '⚠'} 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}${circuit.cards[0].livemode ? '' : ' — CARD DE TEST'}`
@@ -884,6 +925,7 @@ export default function AdminPanel({
                           <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi în Stripe</a>
                         )}
                       </span>
+                      )}
                       {/* CAPCANA CARE L-A COSTAT O ORĂ PE ADRIAN (30 iul): un card
                           de TEST arată în dashboard exact ca unul real — aceleași
                           ultime 4 cifre, „active", buton de detalii. Dar numărul lui
@@ -961,68 +1003,27 @@ export default function AdminPanel({
                           {circuit.pouchRule.charged.toFixed(2)}. {circuit.pouchRule.verdict}
                         </span>
                       )}
-                      {/* TOATE CHELTUIELILE, cu locul de unde se platesc. */}
-                      {(circuit.expenses?.length ?? 0) > 0 && (
-                        <div className="fin-breakdown" style={{ marginTop: 10 }}>
-                          <div className="fin-breakdown-head">Cheltuielile aplicației — de unde se plătesc</div>
-                          {circuit.expenses!.map((e) => (
-                            <div className="fin-row" key={e.name}>
-                              <span>
-                                {e.configured ? '' : '(neconfigurat) '}
-                                {e.name} — {e.what}
-                              </span>
-                              <span style={{ color: e.billing.startsWith('Cardul') ? undefined : '#e6a23c' }}>{e.billing}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <span className="or-wallet-sub">
-                        Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
-                        AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
-                        <a href="https://dashboard.stripe.com/balance/overview" target="_blank" rel="noreferrer">Vezi punga</a>
-                      </span>
-                      {/* PAYOUT ADMIN (Adrian): profitul → contul/cardul REAL
-                          declarat la Stripe (prin design, NU cel virtual).
-                          Pe extras scrie „PAYOUT ADMIN". */}
-                      <span className="or-wallet-sub">
-                        🏦 PAYOUT admin (către cardul/contul tău REAL, nu cel virtual):{' '}
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={async () => {
-                            const s = window.prompt('Câte lire tragi în contul tău real? (din disponibil)')
-                            if (s == null) return
-                            const pounds = Number(s)
-                            if (!(pounds > 0)) return
-                            const r = await adminPayout(pounds)
-                            if (r) window.alert(`PAYOUT ADMIN creat: £${pounds.toFixed(2)} → contul tău real${r.arrival ? `, ajunge ~${r.arrival}` : ''}.`)
-                            else window.alert('Payout eșuat — verifică disponibilul (nu poate depăși punga disponibilă).')
-                          }}
-                        >
-                          Trage profitul
-                        </button>
-                      </span>
-                      {/* DEPUNEREA OWNERULUI (Adrian): bani în pungă prin ușa din
-                          față — checkout Stripe marcat owner_deposit, FĂRĂ să
-                          genereze credite. De aici: transfer automat → card → AI. */}
-                      <span className="or-wallet-sub">
-                        💰 Depune bani în pungă (owner, fără credite):{' '}
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={async () => {
-                            const s = window.prompt('Câte lire depui în pungă? (întreg, max 2000)')
-                            if (s == null) return
-                            const pounds = Math.round(Number(s))
-                            if (!(pounds > 0)) return
-                            const url = await ownerDeposit(pounds)
-                            if (url) window.open(url, '_blank', 'noopener')
-                            else window.alert('Generarea plății a eșuat.')
-                          }}
-                        >
-                          Depune
-                        </button>
-                      </span>
+                      {/* CHELTUIELILE, într-un rând (Adrian, 30 iul: „doar ce
+                          folosim"). Erau nouă rânduri, din care șase repetau
+                          identic „Cardul Kelion (punga Stripe)" și trei erau
+                          servicii NECONFIGURATE — adică fără cheie, deci fără
+                          factură. Un serviciu care nu costă nimic n-are ce căuta
+                          într-o listă de cheltuieli. Rămân doar cele care chiar
+                          consumă bani, grupate după cine le plătește. */}
+                      {(circuit.expenses?.length ?? 0) > 0 &&
+                        (() => {
+                          const active = circuit.expenses!.filter((e) => e.configured)
+                          const dinCard = active.filter((e) => e.billing.startsWith('Cardul'))
+                          const alteleu = active.filter((e) => !e.billing.startsWith('Cardul'))
+                          return (
+                            <span className="or-wallet-sub">
+                              Plătite din cardul Kelion: {dinCard.map((e) => e.name).join(', ') || '—'}.
+                              {alteleu.length > 0 && (
+                                <> În afara cardului: {alteleu.map((e) => `${e.name} (${e.billing.toLowerCase()})`).join(' · ')}.</>
+                              )}
+                            </span>
+                          )
+                        })()}
                       {circuit.autoFund && (
                         <span className="or-wallet-sub">
                           {circuit.autoFund.ok ? '✅' : '⚠️'} Ultimul transfer automat plăți→card:{' '}
@@ -1035,35 +1036,13 @@ export default function AdminPanel({
                     </>
                   )}
                 </div>
-                {/* PUNGA UNICĂ (Adrian, 30 iul). Aici era câmpul „+ Adaugă bani /
-                    − Scoate bani": scriai cu mâna cât credeai că ai, iar panoul
-                    afișa cifra aia ca fapt, fără s-o verifice NICIODATĂ cu
-                    Stripe sau cu furnizorul creierului. Ștearsă. Acum se ADUNĂ
-                    din cele trei surse reale; dacă una nu răspunde, se spune,
-                    nu se socotește zero. */}
-                <div className="pool-manage">
-                  <div className="pool-manage-head">
-                    Punga (tot ce ai, citit de la surse): {sym}
-                    {finance.punga.total.toFixed(2)}
-                    {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
-                  </div>
-                  <div className="pool-parts">
-                    {([
-                      ['Stripe — disponibil', finance.punga.parti.stripeAvailable],
-                      ['Stripe — în tranzit', finance.punga.parti.stripePending],
-                      ['Card virtual (Issuing)', finance.punga.parti.stripeIssuing],
-                      ['Credit la creier', finance.punga.parti.openrouter],
-                    ] as [string, number | null][]).map(([eticheta, val]) => (
-                      <div className="fin-row" key={eticheta}>
-                        <span>{eticheta}</span>
-                        <span>{val === null ? 'nu răspunde' : `${sym}${val.toFixed(2)}`}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
-                    Cost per AI (real)
+                    {/* Totalul stătea sus, ca fișă separată („Consumat la AI
+                        (real)"), deși e exact suma rândurilor de mai jos. Acum e
+                        capul tabelului pe care-l însumează. */}
+                    Cost per AI — total {sym}
+                    {finance.spent.toFixed(2)}, azi ${finance.today.toFixed(2)}
                     {/* RESETAREA CONTOARELOR (Adrian, 30 iul). Șterge DOAR
                         jurnalul costurilor noastre la furnizori. Portofelele
                         userilor NU se ating: creditele consumate nu se dau
