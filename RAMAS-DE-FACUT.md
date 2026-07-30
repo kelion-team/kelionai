@@ -158,10 +158,21 @@ Pașii, în ordine, și cum se verifică fiecare:
 scrie ultima trecere: ce a pornit singur, sau de ce nu. Dacă rândul lipsește sau
 e vechi de ore, bucla nu merge; nu se presupune că merge.
 
-**Gărzile** (ca „fără restricții" să nu însemne „fără minte"): un singur ordin
-odată; plafonul `AUTONOMY_DAILY_MAX` (implicit 20/zi) — care până azi era o
-limită *declarată și necitită de nimeni*; trei încercări pe același pas, apoi
-pasul e marcat blocat, cu motivul la vedere, și trece mai departe.
+**Bariere: niciuna dintre ale mele.** Pusesem un plafon zilnic și un abandon
+după trei încercări. Nu mi le ceruse nimeni — sunt scoase (30 iul, PR #593).
+Rămâne „un singur ordin odată", care nu e o permisiune: lucrătorul ia oricum un
+ordin pe rând.
+
+**După 3 încercări, IESE ȘI CAUTĂ** — cerința ta, și e echilibrul corect: nu
+renunță, dar nici nu se învârte. Schimbă metoda: browser pe mesajul exact de
+eroare și pe documentația oficială → studiu pe date reale → **își instalează**
+ce-i lipsește → alt drum, motivat în PR. Ca un pas greu să nu blocheze restul,
+sarcinile se iau în ordinea „cine a fost încercat de mai puține ori".
+
+**Își cunoaște inventarul.** Lista completă a capabilităților lui, grupată, îi
+intră în minte la fiecare tură — în chat și în munca autonomă — cu regula: nu
+ceri voie pentru ce ai, și nu spui „nu pot" pentru ceva ce e în listă. Se derivă
+din registru, deci nu poate rămâne în urmă (are test).
 
 **Agenții sunt echipați la full (30 iul, PR #591).** Constructorul avea șapte
 unelte — putea scrie cod, dar nu putea deschide un site și nu putea pune o cheie.
