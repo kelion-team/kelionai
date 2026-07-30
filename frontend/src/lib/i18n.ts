@@ -1,6 +1,7 @@
 // Minimal i18n. UI strings per language; English is the fallback for any
 // language we don't have a translation for. Add a new language by adding a
 // block to `dict` — nothing else changes.
+import { loadLocalLang } from './prefs'
 
 export type Lang = 'en' | 'ro' | 'es' | 'fr' | 'de' | 'it' | 'pt'
 
@@ -76,6 +77,33 @@ export interface Strings {
   calibrateVoiceFailed: string
   calibrateVoiceReset: string
   voiceNotEnrolledHint: string
+  // ── MONITORUL (Stage.tsx) — erau scrise direct în cod, în română ──────────
+  // 20 de texte pe care un user nelogat-pe-română le vedea în română: titluri
+  // de butoane, stări goale, panoul de deblocare admin.
+  wsFileFailed: string
+  wsOpenFile: string
+  wsPageBlocked: string
+  wsDownloadArchive: string
+  wsClose: string
+  wsCloseAll: string
+  wsCopy: string
+  wsZoomFit: string
+  wsZoomOut: string
+  wsZoomIn: string
+  wsSaveHtml: string
+  wsSaveTxt: string
+  buildLoading: string
+  buildEmpty: string
+  buildWaiting: string
+  buildCiOk: string
+  buildCiRunning: string
+  adminLocked: string
+  adminLockedHint: string
+  adminUnlock: string
+  // ── BENZILE DE LATENȚĂ ȘI DE ASCULTARE (ChatPanel.tsx) ───────────────────
+  latencyChip: string
+  heardYouTitle: string
+  heardBrainTitle: string
 }
 
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
@@ -175,6 +203,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: "Couldn't calibrate — try again",
     calibrateVoiceReset: 'Reset voice',
     voiceNotEnrolledHint: 'Mic is muted until you set up your voice (+ → Recognize my voice).',
+    wsFileFailed: "Couldn't load the contents of this file here.",
+    wsOpenFile: 'Open the file ↗',
+    wsPageBlocked: 'This page cannot be displayed here.',
+    wsDownloadArchive: 'Download the archive ↓',
+    wsClose: 'Close',
+    wsCloseAll: 'Close everything',
+    wsCopy: 'Copy',
+    wsZoomFit: 'Fit the text (zoom)',
+    wsZoomOut: 'Zoom out',
+    wsZoomIn: 'Zoom in',
+    wsSaveHtml: "Save to Kelion's memory + download (.html)",
+    wsSaveTxt: "Save to Kelion's memory + download (.txt)",
+    buildLoading: 'Loading…',
+    buildEmpty: 'Nothing in progress. When Kelion picks up a request, it shows here step by step.',
+    buildWaiting: 'Waiting for the worker…',
+    buildCiOk: 'Independently verified by CI (build + tests on a clean machine)',
+    buildCiRunning: 'CI is still running on the pull request',
+    adminLocked: 'The Admin panel is locked 🔒',
+    adminLockedHint: 'Talk to Kelion — your voiceprint opens it by itself — or type the unlock secret.',
+    adminUnlock: 'Unlock',
+    latencyChip: 'sent → first word / full answer',
+    heardYouTitle: 'You — on the way to the brain',
+    heardBrainTitle: 'The brain got it and is thinking',
   },
   ro: {
     tagline: 'Asistentul tău. Conectează-te pentru a continua.',
@@ -262,6 +313,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'Nu am reușit — încearcă din nou',
     calibrateVoiceReset: 'Resetează vocea',
     voiceNotEnrolledHint: 'Microfonul e mut până îți configurezi vocea (+ → Recunoaște-mi vocea).',
+    wsFileFailed: 'Nu am putut aduce conținutul fișierului aici.',
+    wsOpenFile: 'Deschide fișierul ↗',
+    wsPageBlocked: 'Această pagină nu poate fi afișată aici.',
+    wsDownloadArchive: 'Descarcă arhiva ↓',
+    wsClose: 'Închide',
+    wsCloseAll: 'Închide tot',
+    wsCopy: 'Copiază',
+    wsZoomFit: 'Potrivește textul (zoom)',
+    wsZoomOut: 'Micșorează',
+    wsZoomIn: 'Mărește',
+    wsSaveHtml: 'Salvează în memoria lui Kelion + descarcă (.html)',
+    wsSaveTxt: 'Salvează în memoria lui Kelion + descarcă (.txt)',
+    buildLoading: 'Se încarcă…',
+    buildEmpty: 'Niciun ordin în lucru acum. Când Kelion preia o cerință, apare aici pas cu pas.',
+    buildWaiting: 'Așteaptă lucrătorul…',
+    buildCiOk: 'Verificat independent de CI (build + teste pe mașină curată)',
+    buildCiRunning: 'CI încă rulează pe PR',
+    adminLocked: 'Panoul Admin e încuiat 🔒',
+    adminLockedHint: 'Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.',
+    adminUnlock: 'Deblochează',
+    latencyChip: 'trimis → primul cuvânt / răspuns complet',
+    heardYouTitle: 'Tu — înspre creier',
+    heardBrainTitle: 'Creierul a primit și gândește',
   },
   es: {
     tagline: 'Tu asistente. Inicia sesión para continuar.',
@@ -349,6 +423,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'No se pudo calibrar — inténtalo de nuevo',
     calibrateVoiceReset: 'Restablecer voz',
     voiceNotEnrolledHint: 'El micrófono está silenciado hasta que configures tu voz (+ → Reconoce mi voz).',
+    wsFileFailed: 'No se pudo cargar aquí el contenido del archivo.',
+    wsOpenFile: 'Abrir el archivo ↗',
+    wsPageBlocked: 'Esta página no se puede mostrar aquí.',
+    wsDownloadArchive: 'Descargar el archivo ↓',
+    wsClose: 'Cerrar',
+    wsCloseAll: 'Cerrar todo',
+    wsCopy: 'Copiar',
+    wsZoomFit: 'Ajustar el texto (zoom)',
+    wsZoomOut: 'Alejar',
+    wsZoomIn: 'Acercar',
+    wsSaveHtml: 'Guardar en la memoria de Kelion + descargar (.html)',
+    wsSaveTxt: 'Guardar en la memoria de Kelion + descargar (.txt)',
+    buildLoading: 'Cargando…',
+    buildEmpty: 'Nada en curso. Cuando Kelion acepte una petición, aparecerá aquí paso a paso.',
+    buildWaiting: 'Esperando al trabajador…',
+    buildCiOk: 'Verificado de forma independiente por CI (compilación + pruebas en una máquina limpia)',
+    buildCiRunning: 'CI todavía se está ejecutando en el pull request',
+    adminLocked: 'El panel de Admin está bloqueado 🔒',
+    adminLockedHint: 'Habla con Kelion — tu huella de voz lo abre sola — o escribe el secreto de activación.',
+    adminUnlock: 'Desbloquear',
+    latencyChip: 'enviado → primera palabra / respuesta completa',
+    heardYouTitle: 'Tú — camino al cerebro',
+    heardBrainTitle: 'El cerebro lo recibió y está pensando',
   },
   fr: {
     tagline: 'Votre assistant. Connectez-vous pour continuer.',
@@ -436,6 +533,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'Échec de la calibration — réessayez',
     calibrateVoiceReset: 'Réinitialiser la voix',
     voiceNotEnrolledHint: 'Micro coupé jusqu’à ce que vous configuriez votre voix (+ → Reconnaître ma voix).',
+    wsFileFailed: 'Impossible de charger le contenu du fichier ici.',
+    wsOpenFile: 'Ouvrir le fichier ↗',
+    wsPageBlocked: 'Cette page ne peut pas être affichée ici.',
+    wsDownloadArchive: 'Télécharger l’archive ↓',
+    wsClose: 'Fermer',
+    wsCloseAll: 'Tout fermer',
+    wsCopy: 'Copier',
+    wsZoomFit: 'Ajuster le texte (zoom)',
+    wsZoomOut: 'Dézoomer',
+    wsZoomIn: 'Zoomer',
+    wsSaveHtml: 'Enregistrer dans la mémoire de Kelion + télécharger (.html)',
+    wsSaveTxt: 'Enregistrer dans la mémoire de Kelion + télécharger (.txt)',
+    buildLoading: 'Chargement…',
+    buildEmpty: 'Rien en cours. Dès que Kelion prend une demande, elle s’affiche ici étape par étape.',
+    buildWaiting: 'En attente du travailleur…',
+    buildCiOk: 'Vérifié indépendamment par la CI (build + tests sur une machine propre)',
+    buildCiRunning: 'La CI tourne encore sur la pull request',
+    adminLocked: 'Le panneau Admin est verrouillé 🔒',
+    adminLockedHint: 'Parlez à Kelion — votre empreinte vocale l’ouvre toute seule — ou tapez le secret d’activation.',
+    adminUnlock: 'Déverrouiller',
+    latencyChip: 'envoyé → premier mot / réponse complète',
+    heardYouTitle: 'Vous — en route vers le cerveau',
+    heardBrainTitle: 'Le cerveau a reçu et réfléchit',
   },
   de: {
     tagline: 'Dein Assistent. Melde dich an, um fortzufahren.',
@@ -523,6 +643,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'Kalibrierung fehlgeschlagen — erneut versuchen',
     calibrateVoiceReset: 'Stimme zurücksetzen',
     voiceNotEnrolledHint: 'Mikrofon stumm, bis du deine Stimme einrichtest (+ → Meine Stimme erkennen).',
+    wsFileFailed: 'Der Inhalt der Datei konnte hier nicht geladen werden.',
+    wsOpenFile: 'Datei öffnen ↗',
+    wsPageBlocked: 'Diese Seite kann hier nicht angezeigt werden.',
+    wsDownloadArchive: 'Archiv herunterladen ↓',
+    wsClose: 'Schließen',
+    wsCloseAll: 'Alles schließen',
+    wsCopy: 'Kopieren',
+    wsZoomFit: 'Text einpassen (Zoom)',
+    wsZoomOut: 'Verkleinern',
+    wsZoomIn: 'Vergrößern',
+    wsSaveHtml: 'In Kelions Gedächtnis speichern + herunterladen (.html)',
+    wsSaveTxt: 'In Kelions Gedächtnis speichern + herunterladen (.txt)',
+    buildLoading: 'Wird geladen…',
+    buildEmpty: 'Nichts in Arbeit. Sobald Kelion einen Auftrag übernimmt, erscheint er hier Schritt für Schritt.',
+    buildWaiting: 'Wartet auf den Arbeiter…',
+    buildCiOk: 'Unabhängig von der CI geprüft (Build + Tests auf einer sauberen Maschine)',
+    buildCiRunning: 'Die CI läuft noch am Pull Request',
+    adminLocked: 'Das Admin-Panel ist gesperrt 🔒',
+    adminLockedHint: 'Sprich mit Kelion — dein Stimmabdruck öffnet es von selbst — oder tippe das Freischaltgeheimnis.',
+    adminUnlock: 'Entsperren',
+    latencyChip: 'gesendet → erstes Wort / vollständige Antwort',
+    heardYouTitle: 'Du — unterwegs zum Gehirn',
+    heardBrainTitle: 'Das Gehirn hat es und denkt nach',
   },
   it: {
     tagline: 'Il tuo assistente. Accedi per continuare.',
@@ -610,6 +753,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'Calibrazione non riuscita — riprova',
     calibrateVoiceReset: 'Reimposta voce',
     voiceNotEnrolledHint: 'Microfono muto finché non configuri la tua voce (+ → Riconosci la mia voce).',
+    wsFileFailed: 'Non è stato possibile caricare qui il contenuto del file.',
+    wsOpenFile: 'Apri il file ↗',
+    wsPageBlocked: 'Questa pagina non può essere mostrata qui.',
+    wsDownloadArchive: 'Scarica l’archivio ↓',
+    wsClose: 'Chiudi',
+    wsCloseAll: 'Chiudi tutto',
+    wsCopy: 'Copia',
+    wsZoomFit: 'Adatta il testo (zoom)',
+    wsZoomOut: 'Riduci',
+    wsZoomIn: 'Ingrandisci',
+    wsSaveHtml: 'Salva nella memoria di Kelion + scarica (.html)',
+    wsSaveTxt: 'Salva nella memoria di Kelion + scarica (.txt)',
+    buildLoading: 'Caricamento…',
+    buildEmpty: 'Niente in corso. Quando Kelion prende in carico una richiesta, compare qui passo dopo passo.',
+    buildWaiting: 'In attesa del lavoratore…',
+    buildCiOk: 'Verificato in modo indipendente dalla CI (build + test su una macchina pulita)',
+    buildCiRunning: 'La CI è ancora in esecuzione sulla pull request',
+    adminLocked: 'Il pannello Admin è bloccato 🔒',
+    adminLockedHint: 'Parla con Kelion — la tua impronta vocale lo apre da sola — oppure digita il segreto di attivazione.',
+    adminUnlock: 'Sblocca',
+    latencyChip: 'inviato → prima parola / risposta completa',
+    heardYouTitle: 'Tu — in viaggio verso il cervello',
+    heardBrainTitle: 'Il cervello l’ha ricevuto e sta pensando',
   },
   pt: {
     tagline: 'O seu assistente. Inicie sessão para continuar.',
@@ -697,6 +863,29 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     calibrateVoiceFailed: 'Não foi possível calibrar — tente novamente',
     calibrateVoiceReset: 'Redefinir voz',
     voiceNotEnrolledHint: 'Microfone mudo até configurar sua voz (+ → Reconhecer minha voz).',
+    wsFileFailed: 'Não foi possível carregar aqui o conteúdo do arquivo.',
+    wsOpenFile: 'Abrir o arquivo ↗',
+    wsPageBlocked: 'Esta página não pode ser exibida aqui.',
+    wsDownloadArchive: 'Baixar o arquivo ↓',
+    wsClose: 'Fechar',
+    wsCloseAll: 'Fechar tudo',
+    wsCopy: 'Copiar',
+    wsZoomFit: 'Ajustar o texto (zoom)',
+    wsZoomOut: 'Diminuir',
+    wsZoomIn: 'Aumentar',
+    wsSaveHtml: 'Salvar na memória do Kelion + baixar (.html)',
+    wsSaveTxt: 'Salvar na memória do Kelion + baixar (.txt)',
+    buildLoading: 'Carregando…',
+    buildEmpty: 'Nada em andamento. Quando o Kelion assumir um pedido, ele aparece aqui passo a passo.',
+    buildWaiting: 'Aguardando o trabalhador…',
+    buildCiOk: 'Verificado de forma independente pela CI (build + testes numa máquina limpa)',
+    buildCiRunning: 'A CI ainda está a correr no pull request',
+    adminLocked: 'O painel Admin está bloqueado 🔒',
+    adminLockedHint: 'Fala com o Kelion — a tua impressão de voz abre-o sozinha — ou escreve o segredo de ativação.',
+    adminUnlock: 'Desbloquear',
+    latencyChip: 'enviado → primeira palavra / resposta completa',
+    heardYouTitle: 'Tu — a caminho do cérebro',
+    heardBrainTitle: 'O cérebro recebeu e está a pensar',
   },
 }
 
@@ -720,4 +909,13 @@ export function strings(lang: Lang): Strings {
   const unit: Strings = lang === 'en' ? dict.en : { ...dict.en, ...(dict[lang] ?? {}) }
   cache.set(lang, unit)
   return unit
+}
+
+// LIMBA INTERFEȚEI, ÎNTR-UN SINGUR LOC. `resolveLang(loadLocalLang() ?? 'en')`
+// era copiat în Stage, WalletButton și CustomerSettings — trei locuri de
+// schimbat dacă regula se mută. Aici e regula: oglinda locală a limbii
+// IDENTIFICATE de server; lipsă → ENGLEZĂ (Adrian: „la delogare se afișează
+// engleză; la relogare se revine la limba detectată").
+export function uiStrings(): Strings {
+  return strings(resolveLang(loadLocalLang() ?? 'en'))
 }

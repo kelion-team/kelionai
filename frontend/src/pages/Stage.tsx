@@ -13,7 +13,7 @@ import { CardView } from '../components/CardView'
 import type { User } from '../lib/api'
 import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
-import { resolveLang, strings } from '../lib/i18n'
+import { resolveLang, strings, uiStrings } from '../lib/i18n'
 import {
   getWorkspace,
   subscribeWorkspace,
@@ -98,8 +98,8 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
   if (failed)
     return (
       <div className="workspace-blocked">
-        <p>Nu am putut aduce conținutul fișierului aici.</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">Deschide fișierul ↗</a>
+        <p>{uiStrings().wsFileFailed}</p>
+        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
       </div>
     )
   return (
@@ -171,11 +171,11 @@ function BuildSurface({ zoom }: { zoom: number }) {
     <div className="workspace-doc build-surface" style={{ fontSize: `${zoom}em` }}>
       <div className="build-head">Constructorul lui Kelion</div>
       {!loaded ? (
-        <p className="build-empty">Se încarcă…</p>
+        <p className="build-empty">{uiStrings().buildLoading}</p>
       ) : note ? (
         <p className="build-empty">{note}</p>
       ) : jobs.length === 0 ? (
-        <p className="build-empty">Niciun ordin în lucru acum. Când Kelion preia o cerință, apare aici pas cu pas.</p>
+        <p className="build-empty">{uiStrings().buildEmpty}</p>
       ) : (
         <ul className="build-list">
           {jobs.map((j) => (
@@ -184,11 +184,11 @@ function BuildSurface({ zoom }: { zoom: number }) {
                 <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
                 {/* Verdictul verificării INDEPENDENTE (Etapa 6): „Gata" dovedit de CI. */}
                 {j.ci === 'verde' ? (
-                  <span className="build-ci build-ci-ok" title="Verificat independent de CI (build + teste pe mașină curată)">CI ✓</span>
+                  <span className="build-ci build-ci-ok" title={uiStrings().buildCiOk}>CI ✓</span>
                 ) : j.ci === 'roșu' ? (
                   <span className="build-ci build-ci-bad" title="CI a picat pe PR">CI ✗</span>
                 ) : j.ci === 'în curs' ? (
-                  <span className="build-ci build-ci-wait" title="CI încă rulează pe PR">CI…</span>
+                  <span className="build-ci build-ci-wait" title={uiStrings().buildCiRunning}>CI…</span>
                 ) : null}
                 <span className="build-order">#{j.id} — {j.order}</span>
               </div>
@@ -198,7 +198,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
                   {j.progress}
                 </div>
               ) : j.status === 'queued' ? (
-                <div className="build-progress build-progress-dim">Așteaptă lucrătorul…</div>
+                <div className="build-progress build-progress-dim">{uiStrings().buildWaiting}</div>
               ) : null}
               {(j.attempts > 1 || j.prUrl) && (
                 <div className="build-meta">
@@ -651,7 +651,7 @@ export default function Stage({ user }: { user: User }) {
                     <span
                       className="ws-tab-x"
                       role="button"
-                      aria-label="Închide"
+                      aria-label={t.wsClose}
                       onClick={(e) => {
                         e.stopPropagation()
                         closeTask(task.id)
@@ -662,12 +662,12 @@ export default function Stage({ user }: { user: User }) {
                   </button>
                 ))}
               </div>
-              <div className="ws-zoom" title="Potrivește textul (zoom)">
-                <button type="button" className="ghost" onClick={zoomOut} aria-label="Micșorează">
+              <div className="ws-zoom" title={t.wsZoomFit}>
+                <button type="button" className="ghost" onClick={zoomOut} aria-label={t.wsZoomOut}>
                   A−
                 </button>
                 <span className="ws-zoom-val">{Math.round(monZoom * 100)}%</span>
-                <button type="button" className="ghost" onClick={zoomIn} aria-label="Mărește">
+                <button type="button" className="ghost" onClick={zoomIn} aria-label={t.wsZoomIn}>
                   A+
                 </button>
               </div>
@@ -676,7 +676,7 @@ export default function Stage({ user }: { user: User }) {
                   type="button"
                   className="ghost"
                   onClick={closeAllTasks}
-                  title="Închide tot"
+                  title={t.wsCloseAll}
                 >
                   Închide tot
                 </button>
@@ -706,7 +706,7 @@ export default function Stage({ user }: { user: User }) {
                       type="button"
                       className="doc-copy"
                       onClick={() => saveDocToKelion(task.title, task.html ?? '', safeFileName(task.title, 'html'), 'text/html')}
-                      title="Salvează în memoria lui Kelion + descarcă (.html)"
+                      title={t.wsSaveHtml}
                     >
                       {docSaved ? 'Salvat ✓' : 'Salvează'}
                     </button>
@@ -723,7 +723,7 @@ export default function Stage({ user }: { user: User }) {
                       type="button"
                       className="doc-copy"
                       onClick={() => void navigator.clipboard?.writeText(task.text ?? '')}
-                      title="Copiază"
+                      title={t.wsCopy}
                     >
                       Copiază
                     </button>
@@ -732,7 +732,7 @@ export default function Stage({ user }: { user: User }) {
                       className="doc-copy"
                       style={{ right: '6.5rem' }}
                       onClick={() => saveDocToKelion(task.title, task.text ?? '', safeFileName(task.title, 'txt'), 'text/plain')}
-                      title="Salvează în memoria lui Kelion + descarcă (.txt)"
+                      title={t.wsSaveTxt}
                     >
                       {docSaved ? 'Salvat ✓' : 'Salvează'}
                     </button>
@@ -791,7 +791,7 @@ export default function Stage({ user }: { user: User }) {
                   // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
                   <div className="workspace-blocked">
                     <p>Arhivă ({task.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
-                    <a href={task.url} download className="composer-send">Descarcă arhiva ↓</a>
+                    <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
                   </div>
                 ) : task.url && isEmbeddable(task.url) ? (
                   <iframe
@@ -814,7 +814,7 @@ export default function Stage({ user }: { user: User }) {
                   />
                 ) : task.url ? (
                   <div className="workspace-blocked">
-                    <p>Această pagină nu poate fi afișată aici.</p>
+                    <p>{t.wsPageBlocked}</p>
                     {/^https?:\/\//i.test(task.url) && (
                       <a href={task.url} target="_blank" rel="noreferrer" className="composer-send">
                         Deschide într-un tab nou ↗
@@ -1013,8 +1013,8 @@ export default function Stage({ user }: { user: User }) {
       {unlockOpen && (
         <div className="unlock-overlay" onClick={() => setUnlockOpen(false)}>
           <div className="unlock-card" onClick={(e) => e.stopPropagation()}>
-            <h3>Panoul Admin e încuiat 🔒</h3>
-            <p>Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.</p>
+            <h3>{t.adminLocked}</h3>
+            <p>{t.adminLockedHint}</p>
             <form
               onSubmit={(e) => {
                 e.preventDefault()
@@ -1029,7 +1029,7 @@ export default function Stage({ user }: { user: User }) {
                 placeholder="Secretul de activare"
                 autoComplete="current-password"
               />
-              <button type="submit">Deblochează</button>
+              <button type="submit">{t.adminUnlock}</button>
             </form>
             {unlockErr && <p className="unlock-err">{unlockErr}</p>}
           </div>

@@ -608,9 +608,7 @@ export default function AdminPanel({
   // arăta trei ❌ roșii — payouts, Issuing, card „necreat" — când adevărul era
   // că cheia restricționată din env n-are dreptul să citească /v1/account, deci
   // aplicația nu vede NIMIC despre ele. Trei probleme false în loc de una reală.
-  const stripeOrb = Boolean(
-    circuit && (circuit.payoutsInterval === 'fara_permisiune_cheie' || circuit.payoutsInterval.startsWith('http_')),
-  )
+  const stripeOrb = circuit?.payoutsInterval === 'nu_pot_citi'
   const aiParts = finance
     ? Object.entries(finance.byKind)
         .filter(([, v]) => v > 0)
@@ -851,15 +849,35 @@ export default function AdminPanel({
                           n-are voie să citească contul, verigile 1-3 nu se pot
                           verifica — deci nu le arătăm deloc, ca să nu pară că
                           sunt stricate. */}
-                      {stripeOrb && (
-                        <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
-                          ⚠ Nu pot citi contul Stripe: cheia de pe server e restricționată și n-are
-                          dreptul <code>Account: Read</code>. Până i-l dai, pașii 1-3 de mai jos nu se
-                          pot verifica — nu înseamnă că sunt stricați, înseamnă că nu-i văd.{' '}
-                          <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">
-                            Stripe → API keys → cheia restricționată → Edit → Account: Read
-                          </a>
-                        </span>
+                      {/* CE VĂD ȘI CE NU VĂD DIN STRIPE — măsurat, pe fiecare
+                          întrebare (Adrian, 30 iul: „partea de Stripe ai
+                          zbârcit-o de tot, super varză"). Înainte, un singur
+                          apel picat colora trei rânduri roșii și otrăvea și
+                          punga. Acum fiecare citire își spune singură verdictul,
+                          iar când lipsește o permisiune apare NUMELE ei din
+                          dashboard — un singur rând de bifat, nicio ghicitoare. */}
+                      {(circuit.probes?.length ?? 0) > 0 && (
+                        <div className="fin-breakdown" style={{ marginTop: 6, marginBottom: 8 }}>
+                          <div className="fin-breakdown-head">Ce pot citi din Stripe</div>
+                          {circuit.probes!.map((p) => (
+                            <div className="fin-row" key={p.ruta}>
+                              <span>
+                                {p.ok ? '✅' : '⚠'} {p.ce}
+                              </span>
+                              <span style={{ color: p.ok ? undefined : '#e6a23c' }}>{p.detaliu}</span>
+                            </div>
+                          ))}
+                          {circuit.probes!.some((p) => !p.ok && p.detaliu.startsWith('cheia nu are')) && (
+                            <div className="or-wallet-sub">
+                              Permisiunile se dau într-un singur loc:{' '}
+                              <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">
+                                Stripe → API keys
+                              </a>{' '}
+                              → cheia restricționată → <strong>Edit key</strong> → cauți rândul de mai
+                              sus → <strong>Read</strong> → Save. Nu schimba nimic altceva.
+                            </div>
+                          )}
+                        </div>
                       )}
                       {!stripeOrb && (
                         <span className="or-wallet-sub">
