@@ -83,6 +83,48 @@ export const SECRET_PUBLICA_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── CERINȚELE OWNERULUI, PRINSE ÎN ZBOR (Adrian, 30 iul: „gestiune a
+// cerințelor" · „ți-am cerut de zeci de ori") ────────────────────────────────
+// Tabela `cerinte` exista, dar NU avea cine s-o umple: cerințele lui rămâneau
+// în chat și se pierdeau. De-aia „ți-am cerut de zeci de ori" era adevărat și
+// nedemonstrabil. Uneltele astea o umplu din conversație, pe loc.
+export const CERINTA_NOUA_TOOL: Tool = {
+  name: 'cerinta_noua',
+  description:
+    "ADMIN ONLY. Record a requirement the owner just stated, the moment he states it — do not wait to be told to write it down. Also write HOW it will be proven done (criteriu), in his own terms, BEFORE any work starts, so the target cannot move later. Set prioritate 1 when he says it burns, 9 when it can wait. Recording is not doing: say what you recorded and what you will do about it now.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: "The requirement, in the owner's own words." },
+      criteriu: { type: 'string', description: 'How it will be PROVEN done — a measurement, not an opinion.' },
+      prioritate: { type: 'number', description: '1 = urgent, 5 = normal, 9 = can wait.' },
+    },
+    required: ['text'],
+  },
+}
+export const CERINTE_LISTA_TOOL: Tool = {
+  name: 'cerinte_lista',
+  description:
+    "ADMIN ONLY. See the owner's requirements and where each one stands: new / analysed (options scored, one chosen) / in progress / delivered / verified live. Use it when he asks what you are doing, what is left, or whether something was ever done.",
+  input_schema: {
+    type: 'object',
+    properties: { stare: { type: 'string', description: 'Optional filter: noua|analizata|in_lucru|livrata|verificata' } },
+  },
+}
+export const CERINTA_PRIORITATE_TOOL: Tool = {
+  name: 'cerinta_prioritate',
+  description:
+    'ADMIN ONLY. Change how urgent a requirement is (1 = burns, 9 = can wait). Use it when the owner says something is urgent or can wait — his order decides what you work on next, not the order things were written in.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'number' },
+      prioritate: { type: 'number', description: '1..9' },
+    },
+    required: ['id', 'prioritate'],
+  },
+}
+
 // Constructorul (autonomie) — definiții mutate din ruta vocii aici, în sursa
 // COMUNĂ (CREIER UNIC §1, „fără duplicare"): aceleași definiții și pentru scris,
 // și pentru escaladarea vocii. Executorii rămân în rutele lor (createBuildJob/

@@ -17,6 +17,7 @@ import { systemHealth } from './health.js'
 import { repoWrite, repoOpenPR, repoMergePR } from './github.js'
 import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks.js'
 import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
+import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 
 // Numele uneltelor admin partajate (chat ∩ voce). Apelantul verifică apartenența
 // ca să știe dacă delegă aici sau tratează el (build_software, google, browser...).
@@ -26,6 +27,7 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'repo_write', 'repo_open_pr', 'repo_merge_pr',
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
+  'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
 ])
 
 // Execută o unealtă admin PARTAJATĂ. Întoarce rezultatul (string) sau `null` dacă
@@ -51,6 +53,35 @@ export async function execSharedAdminTool(name: string, args: Record<string, unk
     case 'secret_pune': return seteazaSecret(String(args.nume ?? ''), String(args.valoare ?? ''))
     case 'secret_lista': return listeazaSecrete()
     case 'secret_publica': return publicaCheile()
+    // CERINȚELE OWNERULUI, prinse din conversație. Fără astea, tabela `cerinte`
+    // rămânea goală și tot sistemul de gestiune era decor.
+    case 'cerinta_noua': {
+      const id = await adaugaCerinta(
+        String(args.text ?? ''),
+        'owner',
+        args.criteriu ? String(args.criteriu) : undefined,
+        Number(args.prioritate ?? 5),
+      )
+      return JSON.stringify(id ? { notat: true, id } : { error: 'cerinta_goala_sau_baza_indisponibila' })
+    }
+    case 'cerinte_lista': {
+      const c = await listeazaCerinte(args.stare ? String(args.stare) : undefined, 60)
+      return JSON.stringify({
+        total: c.length,
+        cerinte: c.map((x) => ({
+          id: x.id, text: x.text.slice(0, 200), stare: x.stare, prioritate: x.prioritate,
+          criteriu: x.criteriu?.slice(0, 200) ?? null, aleasa: x.aleasa?.slice(0, 200) ?? null,
+          dovada: x.dovada?.slice(0, 200) ?? null,
+        })),
+      })
+    }
+    case 'cerinta_prioritate': {
+      const id = Number(args.id ?? 0)
+      const p = Math.max(1, Math.min(9, Math.round(Number(args.prioritate ?? 5)) || 5))
+      if (!id) return JSON.stringify({ error: 'fara_id' })
+      await actualizeazaCerinta(id, { prioritate: p })
+      return JSON.stringify({ ok: true, id, prioritate: p })
+    }
     case 'propose_tool': {
       // AUTO-EXTINDEREA: Kelion își cere singur o unealtă nouă (owner o aprobă
       // cu un click în Admin → Unelte Kelion). Identic pe scris și pe voce.
