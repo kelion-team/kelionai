@@ -1063,14 +1063,21 @@ export async function getDownloadStats(): Promise<{
 
 // ── Prepaid wallet (Stripe credit) ──
 
-// EMAILUL PORTOFELULUI, O SINGURĂ FORMĂ (gaură prinsă de teste, 30 iul).
-// Alimentările scriu de mult `lower($1)` (auditul P2-3), dar CITIREA soldului,
-// TAXAREA și clientul Stripe foloseau emailul EXACT cum vine din sesiune. Google
-// Workspace poate întoarce emailul cu majuscule („Ion@Firma.ro"): userul plătea,
-// creditul intra pe rândul mic, iar aplicația îi arăta 0 credite și îl oprea în
-// paywall — în timp ce consumul lui deschidea un AL DOILEA portofel, pe minus.
-// Aceeași formă peste tot, o singură dată, aici.
-const walletKey = (email: string): string => String(email ?? '').trim().toLowerCase()
+// ── EMAILUL UNUI OM, O SINGURĂ FORMĂ, ÎN TOT SOFTUL ─────────────────────────
+//
+// Găsit întâi la portofel (teste, 30 iul): alimentările scriau de mult `lower($1)`
+// (auditul P2-3), dar CITIREA soldului, TAXAREA și clientul Stripe foloseau
+// emailul EXACT cum vine din sesiune. Logarea locală îl coboară la litere mici;
+// logarea Google NU. Pentru un email cu majuscule („Ion@Firma.ro") userul plătea,
+// creditul intra pe un rând, aplicația citea altul → îi arăta 0 credite și îl
+// oprea în paywall, iar consumul lui deschidea un AL DOILEA portofel, pe minus.
+//
+// Aceeași fisură era deschisă și la PREFERINȚE (limbă, meserie), la
+// AUTO-REÎNCĂRCARE (bani: setarea nu se mai citea → userul rămânea fără credit
+// deși o pornise), la ALEGEREA MODELULUI și la aranjarea avatarului. Toate se
+// scriu și se citesc de-acum prin cheia asta — una singură, exportată.
+export const userKey = (email: string): string => String(email ?? '').trim().toLowerCase()
+const walletKey = userKey
 
 export async function getBalance(email: string): Promise<number> {
   if (!dbEnabled()) return 0
@@ -1499,7 +1506,7 @@ const AUTO_RECHARGE_DEFAULT: AutoRecharge = { enabled: false, threshold: 20, top
 
 export async function getAutoRecharge(email: string): Promise<AutoRecharge> {
   try {
-    const raw = await loadKv(`autorecharge:${email}`)
+    const raw = await loadKv(`autorecharge:${userKey(email)}`)
     if (!raw) return { ...AUTO_RECHARGE_DEFAULT }
     const p = JSON.parse(raw) as Partial<AutoRecharge>
     return {
@@ -1515,7 +1522,7 @@ export async function getAutoRecharge(email: string): Promise<AutoRecharge> {
 }
 
 export async function setAutoRecharge(email: string, v: AutoRecharge): Promise<void> {
-  await saveKv(`autorecharge:${email}`, JSON.stringify(v))
+  await saveKv(`autorecharge:${userKey(email)}`, JSON.stringify(v))
 }
 
 /** Owner loads the provider-credit pool (real money he put at the AI providers). */
@@ -1898,7 +1905,7 @@ export async function getSpeechLang(email: string): Promise<string | null> {
   try {
     const r = await getPool().query<{ speech_lang: string | null }>(
       'SELECT speech_lang FROM user_prefs WHERE user_email = $1',
-      [email],
+      [userKey(email)],
     )
     return r.rows[0]?.speech_lang ?? null
   } catch {
@@ -1913,7 +1920,7 @@ export async function setSpeechLangPref(email: string, lang: string): Promise<vo
       `INSERT INTO user_prefs (user_email, speech_lang, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET speech_lang = $2, updated_at = now()`,
-      [email, lang],
+      [userKey(email), lang],
     )
   } catch {
     // Never break the chat because persistence failed.
@@ -1927,7 +1934,7 @@ export async function getMeserieActiva(email: string): Promise<number | null> {
   try {
     const r = await getPool().query<{ meserie_activa: number | null }>(
       'SELECT meserie_activa FROM user_prefs WHERE user_email = $1',
-      [email],
+      [userKey(email)],
     )
     return r.rows[0]?.meserie_activa ?? null
   } catch {
@@ -1942,7 +1949,7 @@ export async function setMeserieActivaPref(email: string, id: number | null): Pr
       `INSERT INTO user_prefs (user_email, meserie_activa, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (user_email) DO UPDATE SET meserie_activa = $2, updated_at = now()`,
-      [email, id],
+      [userKey(email), id],
     )
   } catch {
     // Never break the chat because persistence failed.

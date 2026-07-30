@@ -56,6 +56,7 @@ const {
   updateTransactionStatus,
   getStripeCustomer,
   setStripeCustomer,
+  userKey,
 } = await import('./db.js')
 
 const sold = (email: string): number => motor.baza.wallets.get(email.toLowerCase())?.balance ?? 0
@@ -280,6 +281,18 @@ describe('bani — citirea soldului nu depinde de cum e scris emailul', () => {
     expect(await getStripeCustomer('ion@test.ro')).toBe('cus_123')
     expect(await getStripeCustomer('ION@TEST.RO')).toBe('cus_123')
     expect(motor.baza.wallets.size).toBe(1)
+  })
+
+  it('preferințele și auto-reîncărcarea folosesc ACEEAȘI cheie ca portofelul', async () => {
+    // Aceeași fisură era deschisă și la limbă, meserie, auto-reîncărcare, model
+    // și avatar: cu un email cu majuscule, setările „se uitau" — iar la
+    // auto-reîncărcare asta înseamnă bani: o pornești, nu se mai citește, rămâi
+    // fără credit. O singură formă a cheii, verificată aici pe toate variantele.
+    for (const scris of ['ion@test.ro', 'Ion@Test.RO', '  ION@TEST.RO  ']) {
+      expect(userKey(scris)).toBe('ion@test.ro')
+    }
+    expect(userKey('')).toBe('')
+    expect(userKey(undefined as unknown as string)).toBe('')
   })
 
   it('fără portofel, soldul e 0 (nu crapă)', async () => {

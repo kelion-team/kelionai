@@ -35,6 +35,7 @@ import {
   loadKv,
   createBuildJob,
   listBuildJobs,
+  userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
@@ -89,7 +90,7 @@ async function selectedBrainModel(
   try {
     // FLUENȚĂ (A5): kv-ul vine pre-citit din Promise.all-ul turei (fără încă
     // un drum DB serial aici); fallback la citire doar pentru apelanții vechi.
-    const raw = kvRaw !== undefined ? kvRaw : await loadKv(`model_choice:${email}`)
+    const raw = kvRaw !== undefined ? kvRaw : await loadKv(`model_choice:${userKey(email)}`)
     if (raw) sel = JSON.parse(raw) as { chat?: string; work?: string }
   } catch {
     sel = {}
@@ -1005,7 +1006,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       getDisabledGestures().catch(() => [] as string[]),
       // FLUENȚĂ (A5): alegerea de model a userului citită AICI, în paralel —
       // nu ca încă un drum DB serial chiar înainte de apelul creierului.
-      loadKv(`model_choice:${user.email}`).catch(() => null),
+      loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
     ])
     const gestureOff = new Set(disabledGestures)
     // Tool-ul de gesturi, filtrat: gesturile dezactivate NU mai sunt oferite

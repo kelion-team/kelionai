@@ -9,6 +9,7 @@ import {
   saveKv,
   loadKv,
   saveNote,
+  userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 
@@ -68,7 +69,7 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     let avatarBox: AvatarBox | null = null
     try {
-      const raw = await loadKv(`avatar_box:${user.email}`)
+      const raw = await loadKv(`avatar_box:${userKey(user.email)}`)
       if (raw) {
         const parsed: unknown = JSON.parse(raw)
         if (validAvatarBox(parsed)) avatarBox = parsed
@@ -120,7 +121,7 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       if (!validAvatarBox(b)) {
         return reply.code(400).send({ error: 'bad_request' })
       }
-      await saveKv(`avatar_box:${user.email}`, JSON.stringify({ x: b.x, y: b.y, s: b.s }))
+      await saveKv(`avatar_box:${userKey(user.email)}`, JSON.stringify({ x: b.x, y: b.y, s: b.s }))
     }
 
     return reply.send({ ok: true })
