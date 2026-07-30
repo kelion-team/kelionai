@@ -31,6 +31,8 @@ interface Cerere {
 }
 let cereri: Cerere[] = []
 let token = 'ghp_test'
+// Când e pornit, GitHub „refuză" — ca să probăm mesajul de permisiune lipsă.
+let fortezaRefuz = false
 
 vi.mock('./services/githubApi.js', () => ({
   REPO: 'kelion-team/kelionai',
@@ -41,6 +43,7 @@ vi.mock('./services/githubApi.js', () => ({
       method: init?.method ?? 'GET',
       body: init?.body ? JSON.parse(String(init.body)) : null,
     })
+    if (fortezaRefuz) return new Response('', { status: 403 })
     if (path === '/actions/secrets/public-key') {
       return new Response(JSON.stringify({ key: CHEIE_PUBLICA, key_id: '568250167242549743' }), { status: 200 })
     }
@@ -63,6 +66,7 @@ const VALOARE = 'rk_live_9f3ac21b7de44c8ea5' // o „cheie" inventată, doar pen
 beforeEach(() => {
   cereri = []
   token = 'ghp_test'
+  fortezaRefuz = false
 })
 
 describe('Kelion își pune singur cheile', () => {
@@ -117,6 +121,19 @@ describe('Kelion își pune singur cheile', () => {
     expect(JSON.parse(await seteazaSecret('REVOLUT_API_KEY', VALOARE)).error).toBe('github_token_missing')
     expect(JSON.parse(await listeazaSecrete()).error).toBe('github_token_missing')
     expect(JSON.parse(await publicaCheile()).error).toBe('github_token_missing')
+  })
+
+  it('un 403 spune EXACT ce permisiune lipsește — nu-l pune pe om să ghicească', async () => {
+    // Lecția din 30 iul: l-am trimis pe owner să caute o permisiune Stripe care
+    // nici măcar nu era problema. Un cod de eroare gol e o vânătoare de comori.
+    token = 'ghp_fara_drepturi'
+    fortezaRefuz = true
+    const j = JSON.parse(await seteazaSecret('REVOLUT_API_KEY', VALOARE))
+    expect(j.error).toContain('Secrets: write')
+    expect(j.error).toContain('Fine-grained tokens')
+    // Și tot NU scapă valoarea în mesajul de eroare.
+    expect(JSON.stringify(j)).not.toContain(VALOARE)
+    fortezaRefuz = false
   })
 
   it('lista dă doar NUMELE — GitHub nu întoarce valori nimănui', async () => {
