@@ -30,6 +30,34 @@ const amprenta = (texte: Record<string, string>): string =>
     .digest('hex')
     .slice(0, 12)
 
+/** NUMELE limbii, nu codul — bug prins verificând live pe 30 iul: italiana
+ *  întorcea text SPANIOL, iar româna rămânea în engleză.
+ *
+ *  Cauza: trimiteam modelului „Translate into it" / „into ro". Pentru un model,
+ *  „it" e pronumele englezesc, nu italiana; „ro" nu înseamnă nimic. Codul de
+ *  limbă e pentru mașini; cererea de traducere e text pentru un cititor, deci
+ *  cere numele scris. */
+const NUME_LIMBA: Record<string, string> = {
+  en: 'English',
+  fr: 'French',
+  de: 'German',
+  es: 'Spanish',
+  it: 'Italian',
+  ru: 'Russian',
+  ro: 'Romanian',
+  pt: 'Portuguese',
+  nl: 'Dutch',
+  pl: 'Polish',
+  zh: 'Chinese (Simplified)',
+  ar: 'Arabic',
+  ja: 'Japanese',
+  tr: 'Turkish',
+  uk: 'Ukrainian',
+  hi: 'Hindi',
+}
+
+const numeLimba = (cod: string): string => NUME_LIMBA[cod] ?? cod
+
 /** Codul de limbă normalizat („pt-BR" → „pt"), fără gunoi. */
 export function normalizeLang(v: string): string {
   const s = String(v ?? '').trim().toLowerCase().split(/[-_]/)[0]
@@ -47,7 +75,7 @@ async function traduceLot(valori: string[], lang: string): Promise<string[] | nu
       {
         role: 'user',
         content:
-          `Translate each numbered line into ${lang}. Keep the exact same numbering and the same number of lines. ` +
+          `Translate each numbered line into ${numeLimba(lang)}. Keep the exact same numbering and the same number of lines. ` +
           'Translate naturally, the way a native speaker would write it in a product manual. ' +
           'Lines in quotation marks are example phrases a user would say out loud — translate them as natural speech and keep the quotes. ' +
           'Do not add, merge or drop lines. No commentary, no preamble.\n\n' +
@@ -77,7 +105,7 @@ export async function translationReady(
 ): Promise<Record<string, string> | null> {
   const cod = normalizeLang(lang)
   if (!cod || cod === 'en') return {}
-  const salvat = await loadKv(`tr:${cod}:${amprenta(sursa)}`).catch(() => null)
+  const salvat = await loadKv(`tr2:${cod}:${amprenta(sursa)}`).catch(() => null)
   if (!salvat) return null
   try {
     return JSON.parse(salvat) as Record<string, string>
@@ -95,7 +123,10 @@ export async function translateStrings(
   const chei = Object.keys(sursa)
   if (!chei.length) return {}
 
-  const cheieKv = `tr:${cod}:${amprenta(sursa)}`
+  // v2 în cheie: traducerile salvate ÎNAINTE de reparație sunt greșite (italiana
+  // era spaniolă, româna era engleză) și ar rămâne în bază pe veci. Schimbarea
+  // versiunii le lasă acolo, dar nimeni nu le mai citește — se traduce din nou.
+  const cheieKv = `tr2:${cod}:${amprenta(sursa)}`
   const salvat = await loadKv(cheieKv).catch(() => null)
   if (salvat) {
     try {
