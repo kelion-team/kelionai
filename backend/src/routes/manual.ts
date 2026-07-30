@@ -20,6 +20,11 @@ function aplatizeaza(d: ManualDoc): Record<string, string> {
     columnWhat: d.columnWhat,
     columnSay: d.columnSay,
   }
+  out['flow.t'] = d.flow.title
+  d.flow.steps.forEach((p, i) => {
+    out[`flow.l${i}`] = p.label
+    out[`flow.n${i}`] = p.note
+  })
   d.sections.forEach((s, i) => {
     out[`s${i}.t`] = s.title
     s.paragraphs.forEach((p, j) => (out[`s${i}.p${j}`] = p))
@@ -47,6 +52,15 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
     columnWhat: g('columnWhat', d.columnWhat),
     columnSay: g('columnSay', d.columnSay),
     footer: d.footer,
+    // Pictogramele NU trec prin traducere: un emoji tradus ar deveni un cuvânt.
+    flow: {
+      title: g('flow.t', d.flow.title),
+      steps: d.flow.steps.map((p, i) => ({
+        icon: p.icon,
+        label: g(`flow.l${i}`, p.label),
+        note: g(`flow.n${i}`, p.note),
+      })),
+    },
     sections: d.sections.map((s, i) => ({
       title: g(`s${i}.t`, s.title),
       paragraphs: s.paragraphs.map((p, j) => g(`s${i}.p${j}`, p)),
