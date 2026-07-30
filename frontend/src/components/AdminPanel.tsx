@@ -20,6 +20,7 @@ import {
   manageUser,
   sellCredits,
   fetchMoneyCircuit,
+  pauzaAutonomie,
   type MoneyCircuit,
   fetchLeads,
   emailLead,
@@ -310,6 +311,16 @@ export default function AdminPanel({
     const rows = await fetchHistory(u.email)
     setUserConvo({ u, rows })
     setUserConvoLoading(false)
+  }
+
+  // MANETA OWNERULUI: oprește / repornește autonomia, dintr-un click. După
+  // apăsare recitim starea de la server — nu presupunem că a mers.
+  const [pauzaBusy, setPauzaBusy] = useState(false)
+  async function onPauzaAutonomie(oprit: boolean): Promise<void> {
+    setPauzaBusy(true)
+    await pauzaAutonomie(oprit)
+    setCircuit(await fetchMoneyCircuit())
+    setPauzaBusy(false)
   }
 
   useEffect(() => {
@@ -833,6 +844,40 @@ export default function AdminPanel({
                         Revolut"). Aici se vede ULTIMA trecere a buclei: ori a
                         pornit ceva singur, ori de ce nu. Fără rândul ăsta,
                         „e autonom" ar fi iar o vorbă de-a mea. */}
+                    {/* COSTUL LA VEDERE (Adrian, 30 iul). Exista ca unealtă —
+                        trebuia să întrebi ca să afli cât te costă. Acum e aici,
+                        lângă bani. Nu taie nimic: arată. */}
+                    {circuit?.costReal && (
+                      <span className="or-wallet-sub">
+                        💷 Cât a costat, real: ${circuit.costReal.total.toFixed(2)} total · $
+                        {circuit.costReal.today.toFixed(2)} azi
+                        {Object.keys(circuit.costReal.byKind).length > 0 && (
+                          <>
+                            {' — '}
+                            {Object.entries(circuit.costReal.byKind)
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 4)
+                              .map(([k, v]) => `${k} $${v.toFixed(2)}`)
+                              .join(' · ')}
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {/* MANETA TA (Adrian: „cele 6 trebuiesc, dar nu frâne").
+                        Comanda „pauza-autonomie" exista din 27 iul, dar trebuia
+                        s-o știi pe de rost. O limită pe care o alegi TU nu e o
+                        barieră; una pe care ți-o pun eu, da. */}
+                    <span className="or-wallet-sub">
+                      {circuit?.autonomiaOprita ? '⏸ Autonomia e OPRITĂ de tine' : '▶ Autonomia merge'}{' '}
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={pauzaBusy}
+                        onClick={() => void onPauzaAutonomie(!circuit?.autonomiaOprita)}
+                      >
+                        {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
+                      </button>
+                    </span>
                     {circuit?.autonomie && (
                       <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
                         {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}

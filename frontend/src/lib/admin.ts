@@ -90,6 +90,25 @@ export async function fetchFinance(): Promise<Finance | null> {
 }
 
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
+/** Maneta ownerului: oprește / repornește autonomia lui Kelion.
+ *
+ *  Comanda „pauza-autonomie" exista din 27 iul, dar trebuia s-o știi pe de rost
+ *  și s-o spui în chat. O frână pe care ownerul o alege singur nu e o barieră —
+ *  e control. De-aia e un buton, la vedere, nu un cuvânt magic. */
+export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/autonomie/pauza', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ oprit }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   try {
     const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
