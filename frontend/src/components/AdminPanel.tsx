@@ -888,11 +888,16 @@ export default function AdminPanel({
                           )}
                         </span>
                       )}
-                      {!stripeOrb && (
+                      {/* VERIGA 3 SE ARATĂ MEREU (30 iul): lista de carduri se cere
+                          acum necondiționat, deci răspunsul e real chiar și când
+                          cheia e oarbă pe /v1/account. „Necreat" se scrie DOAR
+                          dacă Stripe chiar a răspuns cu zero carduri. */}
                       <span className="or-wallet-sub">
                         {circuit.cards.length > 0
                           ? `${circuit.cards[0].livemode ? '✅' : '⚠'} 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}${circuit.cards[0].livemode ? '' : ' — CARD DE TEST'}`
-                          : '❌ 3. Cardul Kelion AI: necreat'}{' '}
+                          : circuit.cardsChecked
+                            ? '❌ 3. Cardul Kelion AI: necreat (Stripe a răspuns, n-are niciun card activ)'
+                            : `⚠ 3. Cardul Kelion AI: nu pot verifica — ${circuit.cardsError ?? 'Stripe n-a răspuns'}`}{' '}
                         {circuit.issuingStatus === 'active' && circuit.cards.length === 0 && (
                           <button
                             type="button"
@@ -925,7 +930,6 @@ export default function AdminPanel({
                           <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi în Stripe</a>
                         )}
                       </span>
-                      )}
                       {/* CAPCANA CARE L-A COSTAT O ORĂ PE ADRIAN (30 iul): un card
                           de TEST arată în dashboard exact ca unul real — aceleași
                           ultime 4 cifre, „active", buton de detalii. Dar numărul lui
