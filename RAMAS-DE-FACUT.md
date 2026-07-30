@@ -67,7 +67,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
 | D5 | **Barge-in prin STT streaming** | mort structural: clientul nu trimite audio cât microfonul e pe mut. |
 | D6 | **Pauza de autonomie invizibilă în UI** | coada constructorului nu arată când un ordin e amânat pe cotă de furnizor. |
-| D7 | **Corpul erorii 502 aruncat de client** | serverul trimite `retryable`/`code`, clientul le ignoră — mesaje mai proaste decât ar putea fi. |
+| D7 | **Corpul erorii 502 aruncat de client** | ✅ **reparat** (30 iul, PR #573): serverul trimite acum și `code` (ce anume a picat) și `retryable`; clientul le citește și afișează motivul pe înțelesul omului — „furnizorul vocii n-a răspuns la timp", „nu mai ai credit" — în loc de „realtime 502". |
 
 ---
 
