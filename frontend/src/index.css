@@ -3135,15 +3135,21 @@ a.card-item:hover {
 
 /* ── MANUALUL (public) ──────────────────────────────────────────────────────
    Butonul dreapta-sus pe pagina de start + pagina propriu-zisă. Manualul se
-   citește, deci fundal clar și rânduri scurte — nu tema închisă a aplicației. */
-.landing-manual {
+   citește, deci fundal clar și rânduri scurte — nu tema închisă a aplicației.
+
+   NUMELE CLASEI E `-btn` DINTR-UN MOTIV: `.landing-manual` EXISTA DEJA — e
+   lista de capabilități din pagina de start. Am refolosit numele din greșeală
+   și stilul de mai jos (position: absolute) a smuls lista din pagină și a
+   trântit-o peste titlu: „Your brilliant assistant" a ajuns ilizibil în
+   producție. O clasă nouă nu se botează niciodată fără să cauți numele întâi. */
+.landing-manual-btn {
   position: absolute; top: 18px; right: 20px; z-index: 6;
   padding: 8px 14px; border-radius: 999px;
   border: 1px solid rgba(255,255,255,.18); background: rgba(12,14,20,.55);
   color: #dfe4ee; font-size: 13px; font-weight: 600; text-decoration: none;
   backdrop-filter: blur(6px); transition: background .15s ease, border-color .15s ease;
 }
-.landing-manual:hover { background: rgba(24,28,38,.8); border-color: rgba(255,255,255,.34); }
+.landing-manual-btn:hover { background: rgba(24,28,38,.8); border-color: rgba(255,255,255,.34); }
 
 .manual-page { min-height: 100vh; background: #f6f7f9; padding: 26px 16px 60px; overflow-y: auto; }
 .manual-card { max-width: 820px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 26px 30px 34px; box-shadow: 0 1px 3px rgba(16,20,30,.10), 0 12px 32px rgba(16,20,30,.06); }

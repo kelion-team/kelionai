@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import BackLink from './BackLink'
 import type { User } from '../lib/api'
 import { logout } from '../lib/api'
 import {
@@ -29,7 +30,6 @@ interface L {
   wallet: string
   credits: string
   topUp: string
-  marginNote: string
   account: string
   signedInAs: string
   loggingOut: string
@@ -47,8 +47,6 @@ const RO: L = {
   wallet: 'Credit / portofel',
   credits: 'credite disponibile',
   topUp: 'Reîncarcă',
-  marginNote:
-    'Din fiecare reîncărcare, 75% devine credit disponibil pentru tine, iar 25% merge către contul platformei (admin).',
   account: 'Cont',
   signedInAs: 'Conectat ca',
   loggingOut: 'Se deloghează…',
@@ -67,8 +65,6 @@ const EN: L = {
   wallet: 'Credit / wallet',
   credits: 'credits available',
   topUp: 'Top up',
-  marginNote:
-    'From each top-up, 75% becomes credit available to you, and 25% goes to the platform account (admin).',
   account: 'Account',
   signedInAs: 'Signed in as',
   loggingOut: 'Signing out…',
@@ -80,6 +76,10 @@ const EN: L = {
   cancel: 'Cancel',
   close: 'Close',
 }
+
+// Cât primești la o liră. Aceeași valoare ca la cumpărare (WalletButton) —
+// userul nu vede lire nicăieri în ecranul lui, doar creditele rezultate.
+const CREDITE_PE_LIRA = 7.5
 
 interface CatModel {
   id: string
@@ -181,6 +181,7 @@ export default function CustomerSettings({
     <div className="contact-overlay" onClick={onClose}>
       <div className="contact-panel settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="contact-langbar">
+          <BackLink onBack={onClose} />
           <div className="contact-title" style={{ margin: 0 }}>
             ⚙ {t.title}
           </div>
@@ -213,10 +214,9 @@ export default function CustomerSettings({
           </div>
           <p className="settings-note">
             {ro
-              ? 'Alimentezi din pastila de credit „＋" din bara de sus (prima dată £20, apoi multipli de £5).'
-              : 'Top up from the credit pill “＋” in the top bar (first £20, then multiples of £5).'}
+              ? 'Alimentezi din pastila de credit „＋" din bara de sus — alegi pachetul de credite dorit.'
+              : 'Top up from the credit pill “＋” in the top bar — pick the credit pack you want.'}
           </p>
-          <p className="settings-note">{t.marginNote}</p>
 
           {/* Reîncărcare automată — ca să nu rămâi fără credit în mijlocul unei sesiuni */}
           <label className="contact-label" style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -233,20 +233,21 @@ export default function CustomerSettings({
                 onChange={(e) => void onAr({ threshold: Math.max(0, Number(e.target.value)) })}
                 style={{ width: 70 }}
               />
-              <span className="settings-note">{ro ? 'credite, reîncarcă £' : 'credits, top up £'}</span>
-              {/* Multipli de £5 (regula cunoscută), min £5 — rotunjim la 5 la ieșire. */}
-              <input
-                type="number"
-                min={5}
-                max={500}
-                step={5}
+              <span className="settings-note">{ro ? 'credite, adaugă' : 'credits, add'}</span>
+              {/* USERUL VEDE DOAR CREDITE (Adrian, 30 iul). Serverul lucrează în
+                  lire (regula lui: multipli de £5), deci pachetele de mai jos sunt
+                  aceleași sume, arătate în singura unitate care-l privește pe el.
+                  Conversia rămâne aici, într-un singur loc. */}
+              <select
                 value={ar.topupAmount}
-                onChange={(e) => {
-                  const n = Math.max(5, Math.min(500, Math.round(Number(e.target.value) / 5) * 5))
-                  void onAr({ topupAmount: n })
-                }}
-                style={{ width: 70 }}
-              />
+                onChange={(e) => void onAr({ topupAmount: Number(e.target.value) })}
+              >
+                {[5, 10, 20, 50].map((lire) => (
+                  <option key={lire} value={lire}>
+                    {Math.floor(lire * CREDITE_PE_LIRA)} {ro ? 'credite' : 'credits'}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </section>

@@ -6,6 +6,7 @@ import {
   fetchDisabledGestures,
   saveDisabledGestures,
 } from '../lib/gestures'
+import BackLink from './BackLink'
 import {
   fetchUsers,
   fetchHistory,
@@ -724,9 +725,7 @@ export default function AdminPanel({
               Recuperare
             </button>
           </div>
-          <button type="button" className="ghost" onClick={onClose}>
-            Close
-          </button>
+          <BackLink onBack={onClose} />
         </header>
         {tab === 'finance' && (
           <section className="admin-finance">
