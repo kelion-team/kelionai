@@ -849,7 +849,9 @@ export default function AdminPanel({
                         )}
                       </span>
                       <span className="or-wallet-sub">
-                        {circuit.cards.length > 0 ? `✅ 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}` : '❌ 3. Cardul Kelion AI: necreat'}{' '}
+                        {circuit.cards.length > 0
+                          ? `${circuit.cards[0].livemode ? '✅' : '⚠'} 3. Cardul Kelion AI: •••• ${circuit.cards[0].last4}${circuit.cards[0].livemode ? '' : ' — CARD DE TEST'}`
+                          : '❌ 3. Cardul Kelion AI: necreat'}{' '}
                         {circuit.issuingStatus === 'active' && circuit.cards.length === 0 && (
                           <button
                             type="button"
@@ -882,6 +884,29 @@ export default function AdminPanel({
                           <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi în Stripe</a>
                         )}
                       </span>
+                      {/* CAPCANA CARE L-A COSTAT O ORĂ PE ADRIAN (30 iul): un card
+                          de TEST arată în dashboard exact ca unul real — aceleași
+                          ultime 4 cifre, „active", buton de detalii. Dar numărul lui
+                          e refuzat de orice formular de plată adevărat, cu „numărul
+                          cardului este incorect", fiindcă nu e un card, e o simulare.
+                          Panoul zicea ✅ despre el. Acum spune adevărul. */}
+                      {circuit.cards.length > 0 && !circuit.cards[0].livemode && (
+                        <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
+                          ⚠ Cardul ăsta e o SIMULARE (Stripe test mode), nu un card real. Nu-l poți pune
+                          la OpenRouter sau OpenAI — formularul lor îți va zice „numărul cardului este
+                          incorect", și are dreptate. Cardul real se poate crea abia după ce Stripe
+                          aprobă Issuing pe contul LIVE:{' '}
+                          <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">vezi starea cererii</a>.
+                          Verifică și comutatorul Test/Live din dashboard — cardurile din test mode nu
+                          apar în live și invers.
+                        </span>
+                      )}
+                      {circuit.keyLivemode === false && (
+                        <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
+                          ⚠ Cheia Stripe de pe server e de TEST — deci TOT ce vezi mai sus (solduri,
+                          card, tranzacții) sunt cifre simulate, nu bani adevărați.
+                        </span>
+                      )}
                       {circuit.cards.length > 0 && !circuit.stripePk && (
                         <span className="or-wallet-sub">
                           Ca numărul cardului să apară aici (fără drum prin Stripe): pune cheia PUBLICĂ

@@ -250,7 +250,7 @@ function expenseLines(): ExpenseLine[] {
 }
 
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey }
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey, keyLivemode: !/_test_/.test(config.stripe.secretKey) }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
     const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
@@ -335,8 +335,12 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
         signal: AbortSignal.timeout(12_000),
       })
       if (cards.ok) {
-        const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string }[] }
-        out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '' }))
+        // `livemode` vine pe FIECARE obiect Stripe. Îl ducem mai departe: un card
+        // de test arată identic cu unul real în listă, dar numărul lui e refuzat
+        // de orice formular de plată adevărat. Fără steagul ăsta, panoul spune
+        // „✅ Cardul Kelion AI" despre o simulare.
+        const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string; livemode?: boolean }[] }
+        out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '', livemode: x.livemode === true }))
       }
     }
     return out

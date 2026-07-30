@@ -81,7 +81,14 @@ export interface MoneyCircuit {
   payoutsInterval: string
   /** 'active' | 'inactive' | 'pending' | 'unknown'. */
   issuingStatus: string
-  cards: { id: string; last4: string; status: string }[]
+  /** `livemode:false` = CARD DE TEST. Arată exact ca unul real în dashboard, dar
+   *  numărul lui e respins de orice formular de plată real („numărul cardului
+   *  este incorect") fiindcă nu e un card, e o simulare. Adrian a pierdut o oră
+   *  pe capcana asta (30 iul) — de-aia steagul se vede în panou. */
+  cards: { id: string; last4: string; status: string; livemode: boolean }[]
+  /** Cheia Stripe din env e `live` sau `test`? Cu o cheie de test TOT panoul
+   *  arată cifre simulate — solduri, carduri, tranzacții. */
+  keyLivemode?: boolean
   /** Cheia PUBLICĂ Stripe (pk_live_…), dacă e pusă în env. Cu ea panoul poate
    *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
    *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
