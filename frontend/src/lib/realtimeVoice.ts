@@ -659,8 +659,31 @@ export async function startRealtimeVoice(
       }),
     })
     if (!res.ok) {
-      const note = res.status === 401 ? 'trebuie să fii logat' : `realtime ${res.status}`
-      throw new Error(note)
+      // MOTIVUL, PE ÎNȚELESUL OMULUI (D7). Serverul trimite de mult un corp
+      // structurat (`code`, `retryable`), dar clientul îl arunca și afișa
+      // „realtime 502" — un număr care nu spune nimic și nu ajută pe nimeni să
+      // decidă dacă merită reîncercat.
+      const corp = (await res.json().catch(() => null)) as
+        | { code?: string; retryable?: boolean }
+        | null
+      const dupaCod: Record<string, string> = {
+        realtime_not_configured: 'vocea nu e configurată pe server',
+        upstream_timeout: 'furnizorul vocii n-a răspuns la timp — încearcă din nou',
+        upstream_unreachable: 'nu am putut ajunge la furnizorul vocii — verifică rețeaua',
+        upstream_5xx: 'furnizorul vocii are o pană — încearcă din nou peste puțin',
+        upstream_empty: 'furnizorul vocii a răspuns gol — încearcă din nou',
+        upstream_refuz: 'cererea de pornire a vocii a fost refuzată',
+      }
+      const note =
+        res.status === 401
+          ? 'trebuie să fii logat'
+          : res.status === 402
+            ? 'nu mai ai credit'
+            : (corp?.code && dupaCod[corp.code]) || `realtime ${res.status}`
+      const err = new Error(note)
+      // Cine prinde eroarea poate decide dacă arată butonul „încearcă din nou".
+      ;(err as Error & { retryable?: boolean }).retryable = corp?.retryable !== false
+      throw err
     }
     const answer = await res.text()
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })

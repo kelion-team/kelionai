@@ -204,7 +204,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // test): anunțăm adminul pe email IMEDIAT, nu la următorul test manual.
         if (isQuotaError(res.error)) alertOpenAiQuota()
         const code = res.status === 503 ? 503 : 502
-        return reply.code(code).send({ error: 'realtime_upstream', status: res.status })
+        // CE ANUME A PICAT, nu doar „502" (D7 din RAMAS-DE-FACUT). Clientul
+        // afișa `realtime 502` — un număr care nu spune omului nimic și nu-l
+        // ajută să decidă dacă merită să reîncerce. `code` e diagnosticul, iar
+        // `retryable` spune dacă are rost butonul „încearcă din nou".
+        return reply.code(code).send({
+          error: 'realtime_upstream',
+          status: res.status,
+          code: res.code,
+          retryable: res.code !== 'realtime_not_configured' && res.code !== 'upstream_refuz',
+        })
       }
       // Clientul citește răspunsul ca text (answer SDP) → setRemoteDescription.
       return reply.header('content-type', 'application/sdp').send(res.sdp)
