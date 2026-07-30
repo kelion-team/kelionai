@@ -19,12 +19,12 @@ import BackLink from '../components/BackLink'
 // de limbi rămâne pentru formularul de contact, unde nu costă nimic.
 const MANUAL_LANGS: { code: string; label: string }[] = [
   { code: 'en', label: 'English' },
-  { code: 'es', label: 'Español' },
   { code: 'fr', label: 'Français' },
   { code: 'de', label: 'Deutsch' },
+  { code: 'es', label: 'Español' },
+  { code: 'it', label: 'Italiano' },
   { code: 'ru', label: 'Русский' },
-  { code: 'zh', label: '中文' },
-  { code: 'ar', label: 'العربية' },
+  { code: 'ro', label: 'Română' },
 ]
 
 interface ManualDoc {
@@ -43,7 +43,7 @@ interface ManualDoc {
 
 /** O „filă" a cărții: fie o secțiune de proză, fie un grup de funcții. */
 type Fila =
-  | { fel: 'coperta'; titlu: string; subtitlu: string }
+  | { fel: 'coperta'; titlu: string; subtitlu: string; cuprins: string[] }
   | { fel: 'proza'; titlu: string; paragrafe: string[] }
   | { fel: 'intro'; titlu: string; text: string }
   | { fel: 'grup'; titlu: string; coloane: [string, string]; randuri: { what: string; say: string }[] }
@@ -53,7 +53,10 @@ type Fila =
  *  inegale nu se citește, se derulează. */
 function inFile(d: ManualDoc): Fila[] {
   const RANDURI_PE_FILA = 9
-  const file: Fila[] = [{ fel: 'coperta', titlu: d.title, subtitlu: d.subtitle }]
+  // Coperta poartă și cuprinsul: altfel e titlu + subtitlu pe o filă întreagă,
+  // adică trei sferturi de pagină goală.
+  const cuprins = [...d.sections.map((s) => s.title), ...d.groups.map((g) => g.title)]
+  const file: Fila[] = [{ fel: 'coperta', titlu: d.title, subtitlu: d.subtitle, cuprins }]
   for (const s of d.sections) file.push({ fel: 'proza', titlu: s.title, paragrafe: s.paragraphs })
   file.push({ fel: 'intro', titlu: d.abilitiesTitle, text: d.abilitiesIntro })
   for (const g of d.groups) {
@@ -190,6 +193,12 @@ export default function Manual(): React.JSX.Element {
                   <div className="leaf-cover">
                     <h1>{(file[fila] as { titlu: string }).titlu}</h1>
                     <p>{(file[fila] as { subtitlu: string }).subtitlu}</p>
+                    <div className="leaf-toc">
+                      {[...new Set((file[fila] as { cuprins: string[] }).cuprins)].map((c) => (
+                        <span key={c}>{c}</span>
+                      ))}
+                    </div>
+                    <p className="leaf-hint">← → turn the page</p>
                   </div>
                 )}
                 {file[fila]?.fel === 'proza' && (

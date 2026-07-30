@@ -3206,9 +3206,18 @@ a.card-item:hover {
 @media (prefers-reduced-motion: reduce) {
   .manual-leaf.turn-inainte, .manual-leaf.turn-inapoi { animation: none; }
 }
-.leaf-cover { display: flex; flex-direction: column; justify-content: center; min-height: 52vh; text-align: center; }
+/* Coperta: era titlu + subtitlu pe o filă de 52vh, adică trei sferturi de pagină
+   goală (se vede în captura din 30 iul). Acum are și un cuprins scurt — omul
+   vede din prima ce urmează, ca la o carte adevărată. */
+.leaf-cover { display: flex; flex-direction: column; justify-content: center; min-height: 46vh; text-align: center; }
 .leaf-cover h1 { font-size: 34px; margin: 0 0 10px; letter-spacing: -.02em; }
-.leaf-cover p { color: #5b6270; font-size: 16px; margin: 0; }
+.leaf-cover p { color: #5b6270; font-size: 16px; margin: 0 0 26px; }
+.leaf-toc { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 560px; margin: 0 auto; }
+.leaf-toc span {
+  font-size: 12.5px; color: #4a5261; background: #f2f4f8;
+  border: 1px solid #e4e8ef; border-radius: 999px; padding: 5px 12px;
+}
+.leaf-hint { margin-top: 26px; color: #8b93a7; font-size: 12.5px; }
 .manual-nav { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 16px; }
 .manual-nav button {
   width: 42px; height: 42px; border-radius: 50%;

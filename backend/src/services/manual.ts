@@ -21,9 +21,14 @@ import { CAPABILITIES } from './brainCapabilities.js'
 //
 // Deci o listă ÎNCHISĂ, nu „orice cod de limbă". Fiecare limbă nouă înseamnă o
 // traducere plătită a întregului manual; nelimitat, un singur vizitator care
-// umblă prin selector le-ar porni pe toate. Cele 6 limbi oficiale ONU + germana.
-// Orice altceva primește engleza, fără să cheme traducătorul.
-export const MANUAL_LANGS = ['en', 'es', 'fr', 'de', 'ru', 'zh', 'ar'] as const
+// umblă prin selector le-ar porni pe toate. Orice cod în afara listei primește
+// engleza, fără să cheme traducătorul.
+//
+// Lista: cele șase limbi de circulație internațională + ROMÂNA. Prima variantă
+// pe care am pus-o (limbile oficiale ONU: + chineză și arabă, fără italiană și
+// fără română) era o alegere academică, nu una potrivită produsului — Adrian a
+// întrebat pe bună dreptate „unde e ro? italiana?".
+export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro'] as const
 
 export function isManualLang(v: string): boolean {
   return (MANUAL_LANGS as readonly string[]).includes(String(v ?? '').trim().toLowerCase())
