@@ -31,13 +31,6 @@
 #        REVOLUT_PAY_LINK      (linkul TĂU de plată Revolut — pe el ajunge userul
 #                               când apasă „adaugă credit". Nu e secret, dar stă
 #                               aici ca să se poată schimba fără publicare.)
-#        GOCARDLESS_SECRET_ID  (de la bankaccountdata.gocardless.com → Developers →
-#        GOCARDLESS_SECRET_KEY  User Secrets. GRATUITE. Cu ele aplicația CITEȘTE
-#                               tranzacțiile intrate în Revolut și creditează
-#                               singură userul, potrivind codul unic din referință.
-#                               ACCES DOAR DE CITIRE — nu pot mișca niciun ban.)
-#        GOCARDLESS_ACCOUNT_ID (id-ul contului Revolut, primit după ce dai
-#                               consimțământul de citire în GoCardless.)
 #        GITHUB_TOKEN          (fin-granulat, DOAR repo kelionai, Actions:write —
 #                               mâinile lui Kelion pe runbook-uri; + Contents/PR
 #                               write dacă vrei să și scrie cod pe ramuri)
