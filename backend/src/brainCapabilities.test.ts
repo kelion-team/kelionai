@@ -113,7 +113,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // STAREA MĂSURATĂ AZI — orice schimbare a suprafeței creierului trebuie să treacă
   // pe AICI (altfel testul cade), deci registrul nu poate rămâne în urmă.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(69) // + secret_pune/secret_lista/secret_publica (30 iul: își face SINGUR setările)
+    expect(chatCapabilityNames().length).toBe(72) // + cerinta_noua/cerinte_lista/cerinta_prioritate (30 iul: gestiunea cerințelor)
     expect(voiceCapabilityNames().length).toBe(31) // vocea = plafon OpenAI Realtime (măsurat)
   })
 

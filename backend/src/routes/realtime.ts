@@ -47,6 +47,7 @@ import {
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
   PROPOSE_TOOL, SHOW_DOCUMENT_TOOL, PROMO_TOOL,
   SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+  CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
 import { execUserScopedTool, execSharedAdminTool } from '../services/adminTools.js'
@@ -330,6 +331,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               REQUEST_REPAIR_TOOL,
               // Setările lui, puse de el — aceleași pe voce ca pe scris.
               SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+              // Cerințele ownerului se prind și când vorbește, nu doar când scrie.
+              CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
             ]
           : []),
         ]

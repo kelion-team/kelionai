@@ -273,10 +273,16 @@ export async function initDb(): Promise<void> {
       dovada TEXT,       -- ce s-a măsurat la final (nu ce s-a declarat)
       job_id BIGINT,
       pr_url TEXT,
+      -- CÂT DE URGENTĂ E, pentru OWNER (1 = arde, 9 = poate aștepta). Fără ea,
+      -- lucrează în ordinea în care s-au scris lucrurile — și îți repară un
+      -- buton în timp ce plățile stau. Nu e o frână: schimbă ORDINEA, nu ce
+      -- are voie să facă.
+      prioritate INT NOT NULL DEFAULT 5,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, created_at);
+    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS prioritate INT NOT NULL DEFAULT 5;
+    CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, prioritate, created_at);
 
     CREATE TABLE IF NOT EXISTS capability_gaps (
       id BIGSERIAL PRIMARY KEY,
@@ -2299,6 +2305,7 @@ export interface Cerinta {
   sursa: string
   stare: string
   criteriu: string | null
+  prioritate: number
   optiuni: string | null
   aleasa: string | null
   dovada: string | null
@@ -2311,7 +2318,12 @@ export interface Cerinta {
 /** Scrie o cerință. Dublurile nu se adaugă: aceeași cerere, același rând —
  *  altfel lista s-ar umple cu variații ale aceluiași lucru și n-ar mai fi
  *  gestiune, ci zgomot. */
-export async function adaugaCerinta(text: string, sursa = 'owner', criteriu?: string): Promise<number> {
+export async function adaugaCerinta(
+  text: string,
+  sursa = 'owner',
+  criteriu?: string,
+  prioritate = 5,
+): Promise<number> {
   if (!dbEnabled()) return 0
   const t = text.trim().slice(0, 4000)
   if (!t) return 0
@@ -2322,8 +2334,8 @@ export async function adaugaCerinta(text: string, sursa = 'owner', criteriu?: st
     )
     if (dej.rows[0]) return Number(dej.rows[0].id)
     const r = await getPool().query<{ id: string | number }>(
-      'INSERT INTO cerinte (text, sursa, criteriu) VALUES ($1,$2,$3) RETURNING id',
-      [t, sursa, criteriu ?? null],
+      'INSERT INTO cerinte (text, sursa, criteriu, prioritate) VALUES ($1,$2,$3,$4) RETURNING id',
+      [t, sursa, criteriu ?? null, Math.max(1, Math.min(9, Math.round(prioritate) || 5))],
     )
     return Number(r.rows[0]?.id ?? 0)
   } catch {
@@ -2336,7 +2348,7 @@ export async function listeazaCerinte(stare?: string, limit = 100): Promise<Ceri
   try {
     const r = stare
       ? await getPool().query<Cerinta>(
-          'SELECT * FROM cerinte WHERE stare = $1 ORDER BY created_at DESC LIMIT $2',
+          'SELECT * FROM cerinte WHERE stare = $1 ORDER BY prioritate ASC, created_at ASC LIMIT $2',
           [stare, limit],
         )
       : await getPool().query<Cerinta>('SELECT * FROM cerinte ORDER BY created_at DESC LIMIT $1', [limit])
@@ -2349,7 +2361,7 @@ export async function listeazaCerinte(stare?: string, limit = 100): Promise<Ceri
 /** Mută cerința pe drumul ei. Doar câmpurile date se ating — restul rămân. */
 export async function actualizeazaCerinta(
   id: number,
-  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url'>> & { job_id?: number },
+  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate'>> & { job_id?: number },
 ): Promise<void> {
   if (!dbEnabled() || !id) return
   const campuri: string[] = []
