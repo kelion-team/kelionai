@@ -1,5 +1,47 @@
 import 'dotenv/config'
 
+// ── UN NUME SCRIS ALTFEL NU E O CHEIE LIPSĂ ─────────────────────────────────
+//
+// Adrian, 30 iul, de două ori: „toate cheile au fost scrise de zeci de ori."
+// Avea dreptate, iar vina e a codului ăstuia. Uită-te la ce era mai jos:
+//   OPENAI_API_KEY     sau OPENAI_KEY      → două nume acceptate
+//   OPENROUTER_API_KEY sau OPENROUTER_KEY  → două nume acceptate
+//   GOOGLE_TTS_API_KEY sau GOOGLE_API_KEY  → două nume acceptate
+//   GOOGLE_MAPS_KEY                        → UNUL singur, și fără „_API_"
+//   SERPER_API_KEY, GEMINI_API_KEY         → câte unul
+// Cineva a lovit deja de trei ori problema „am scris alt nume" și a peticit-o cu
+// alias-uri — dar exact pe cele care nu mergeau, alias nu exista. Iar `MAPS` e
+// singura scrisă fără `_API_`, deci varianta pe care o scrie oricine normal
+// (`GOOGLE_MAPS_API_KEY`) nimerea în gol. O cheie scrisă cu un nume rezonabil
+// TREBUIE găsită; altfel omul o rescrie la nesfârșit și noi îi spunem „lipsește".
+function env(...names: string[]): string {
+  for (const n of names) {
+    const v = process.env[n]
+    if (v != null && v.trim() !== '') return v.trim()
+  }
+  return ''
+}
+
+/** Toate numele acceptate pentru fiecare cheie. Exportat ca panoul de admin să
+ *  poată spune „ai scris X, eu citesc Y" în loc de „lipsește". */
+export const ENV_ALIASES: Record<string, string[]> = {
+  databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
+  googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
+  googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY', 'GOOGLE_API_KEY'],
+  serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
+  googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
+  geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
+  openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
+  openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
+  stripeSecretKey: ['STRIPE_SECRET_KEY', 'STRIPE_SK'],
+  stripePublishableKey: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_PUBLIC_KEY', 'STRIPE_PK'],
+  stripeWebhookSecret: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_WH_SECRET'],
+  mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
+  bridgeSecret: ['BRIDGE_SECRET'],
+  sessionSecret: ['SESSION_SECRET'],
+  githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
+}
+
 function required(name: string): string {
   const v = process.env[name]
   if (!v || v.trim() === '') {
@@ -20,20 +62,20 @@ export const config = {
   },
   sessionSecret: required('SESSION_SECRET'),
   autonomyDailyMax: Math.max(1, Number(process.env.AUTONOMY_DAILY_MAX ?? '20') || 20),
-  databaseUrl: process.env.DATABASE_URL ?? '',
-  googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? '',
-  googleTtsKey: process.env.GOOGLE_TTS_API_KEY ?? process.env.GOOGLE_API_KEY ?? '',
+  databaseUrl: env(...ENV_ALIASES.databaseUrl),
+  googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),
+  googleTtsKey: env(...ENV_ALIASES.googleTtsKey),
   ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
-  serperKey: process.env.SERPER_API_KEY ?? '',
-  googleMapsKey: process.env.GOOGLE_MAPS_KEY ?? '',
-  geminiKey: process.env.GEMINI_API_KEY ?? '',
+  serperKey: env(...ENV_ALIASES.serperKey),
+  googleMapsKey: env(...ENV_ALIASES.googleMapsKey),
+  geminiKey: env(...ENV_ALIASES.geminiKey),
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
   // VOCE LIVE — OpenAI Realtime (WebRTC). Cheia stă DOAR pe server; browserul
   // trimite oferta SDP la /api/realtime/session, backendul o relayează la OpenAI
   // și injectează server-side modelul + o SINGURĂ voce masculină + persona/limba.
   // Auto-update model din env (fără deploy) dacă OpenAI schimbă numele.
   openai: {
-    key: (process.env.OPENAI_API_KEY ?? process.env.OPENAI_KEY ?? '').trim(),
+    key: env(...ENV_ALIASES.openaiKey),
     realtimeModel: (process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime').trim(),
     // CASCADĂ DE MODELE REALTIME (28 iul — dovadă live: `gpt-realtime` întorcea
     // 504 cu pagină Cloudflare pe TOATE încercările, deși cheia era validă
@@ -85,7 +127,7 @@ export const config = {
   // update: modele noi apar fără deploy). Costul REAL vine din răspuns
   // (usage.cost) → ledger precis. Voce = OpenAI direct (OpenRouter n-are realtime).
   openrouter: {
-    key: (process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY ?? '').trim(),
+    key: env(...ENV_ALIASES.openrouterKey),
     // Modele implicite per tier (editabile din env, fără deploy). Chat = rapid,
     // Work = raționament greu/tool-use.
     // GRATUIT IMPLICIT, TESTAT REAL (Adrian, 25 iul: „free default cu creștere
@@ -124,13 +166,13 @@ export const config = {
     searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
   },
   stripe: {
-    secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+    secretKey: env(...ENV_ALIASES.stripeSecretKey),
     // Cheia PUBLICĂ (pk_live_…). NU e secret: Stripe o proiectează ca să stea în
     // pagina din browser. Aici e nevoie de ea pentru UN singur lucru — afișarea
     // numărului cardului virtual în panoul de admin prin Issuing Elements, unde
     // numărul se randează într-un iframe Stripe și NU trece prin serverul nostru.
-    publishableKey: (process.env.STRIPE_PUBLISHABLE_KEY ?? '').trim(),
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+    publishableKey: env(...ENV_ALIASES.stripePublishableKey),
+    webhookSecret: env(...ENV_ALIASES.stripeWebhookSecret),
     currency: (process.env.STRIPE_CURRENCY ?? 'gbp').toLowerCase(),
     // Split banilor la fiecare alimentare: 75% devin credite pentru user, 25%
     // intră în fondul real al adminului (care plătește cheile AI). Adrian, iul:
@@ -146,7 +188,7 @@ export const config = {
     smtpHost: process.env.MAIL_SMTP_HOST ?? 'mail.privateemail.com',
     smtpPort: Number(process.env.MAIL_SMTP_PORT ?? 465),
     user: (process.env.MAIL_USER ?? 'contact@kelionai.app').trim(),
-    pass: process.env.MAIL_PASS ?? '',
+    pass: env(...ENV_ALIASES.mailPass),
     forwardTo: (process.env.MAIL_FORWARD_TO ?? process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com')
       .trim()
       .toLowerCase(),
@@ -157,7 +199,7 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   adminEmail: (process.env.ADMIN_EMAIL ?? 'adrianenc11@gmail.com').toLowerCase(),
-  bridgeSecret: (process.env.BRIDGE_SECRET ?? '').trim(),
+  bridgeSecret: env(...ENV_ALIASES.bridgeSecret),
   githubToken: (process.env.GITHUB_TOKEN ?? '').trim(),
   githubRepo: (process.env.GITHUB_REPO ?? 'kelion-team/kelionai').trim(),
   frontendDist: process.env.FRONTEND_DIST ?? '../frontend/dist',

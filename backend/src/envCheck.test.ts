@@ -9,9 +9,28 @@
 // întors nu are voie să conțină vreo bucată din valoarea reală.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-vi.mock('./config.js', () => ({ config: { stripe: { secretKey: 'sk_live_SECRET_NU_TREBUIE_SA_IASA' } } }))
+vi.mock('./config.js', () => ({
+  config: { stripe: { secretKey: 'sk_live_SECRET_NU_TREBUIE_SA_IASA' } },
+  ENV_ALIASES: {
+    openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
+    openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
+    databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
+    sessionSecret: ['SESSION_SECRET'],
+    stripeSecretKey: ['STRIPE_SECRET_KEY', 'STRIPE_SK'],
+    stripeWebhookSecret: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_WH_SECRET'],
+    stripePublishableKey: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_PUBLIC_KEY', 'STRIPE_PK'],
+    geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
+    serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
+    googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
+    googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY', 'GOOGLE_API_KEY'],
+    googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
+    mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
+    githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
+    bridgeSecret: ['BRIDGE_SECRET'],
+  },
+}))
 
-const { envCheck, envSummary, stripeMode } = await import('./services/envCheck.js')
+const { envCheck, envSummary, envOrphans, stripeMode } = await import('./services/envCheck.js')
 
 const SECRET = 'valoare-foarte-secreta-1234567890'
 
@@ -56,5 +75,35 @@ describe('env-check — nicio valoare nu iese', () => {
   it('spune modul cheii Stripe fără să arate cheia', () => {
     expect(stripeMode()).toBe('live')
     expect(JSON.stringify(stripeMode())).not.toContain('SECRET_NU_TREBUIE')
+  })
+
+  // ── MIEZUL PROBLEMEI LUI ADRIAN, 30 iul ────────────────────────────────────
+  // „toate cheile au fost scrise de zeci de ori" — și erau. Doar că el scrisese
+  // GOOGLE_MAPS_API_KEY (numele normal), iar codul citea DOAR GOOGLE_MAPS_KEY.
+  // Testele astea există ca să nu se mai repete niciodată tăcerea aia.
+  it('găsește cheia scrisă cu un nume rezonabil, nu doar cu cel canonic', () => {
+    process.env.GOOGLE_MAPS_API_KEY = 'cheia-de-harti'
+    delete process.env.GOOGLE_MAPS_KEY
+    const maps = envCheck().find((v) => v.name === 'GOOGLE_MAPS_KEY')
+    expect(maps?.present).toBe(true)
+    // Și spune SUB CE nume a găsit-o — altfel omul tot nu știe de ce merge acum.
+    expect(maps?.foundAs).toBe('GOOGLE_MAPS_API_KEY')
+    delete process.env.GOOGLE_MAPS_API_KEY
+  })
+
+  it('arată cheile pe care le ai sub un nume pe care codul NU-l citește', () => {
+    process.env.GOOGLE_SEARCH_API_KEY = 'ceva'
+    expect(envOrphans()).toContain('GOOGLE_SEARCH_API_KEY')
+    // Un nume pe care ÎL citim nu e orfan.
+    process.env.SERPER_KEY = 'x'
+    expect(envOrphans()).not.toContain('SERPER_KEY')
+    delete process.env.GOOGLE_SEARCH_API_KEY
+    delete process.env.SERPER_KEY
+  })
+
+  it('lista de orfani nu conține valori, doar nume', () => {
+    process.env.STRIPE_ALT_KEY = SECRET
+    expect(JSON.stringify(envOrphans())).not.toContain(SECRET)
+    delete process.env.STRIPE_ALT_KEY
   })
 })

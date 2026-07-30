@@ -14,17 +14,20 @@
 
 ## A. CODAT, DAR MORT PE LIVE — cheia nu ajunge în procesul care rulează
 
-> **Corecție, 30 iul.** Adrian: „toate cheile au fost scrise de zeci de ori."
-> Îl cred, și rândurile de mai jos NU mai spun „lipsesc". Ce măsurase panoul era
-> altceva: `config.googleMapsKey` era **gol în procesul care răspundea** — adică
-> o cheie poate fi scrisă și tot să nu ajungă acolo. Trei cauze posibile, toate
-> reale: scrisă în alt fișier decât cel dat lui docker (`--env-file
-> /root/kelion/kelionai.env`); scrisă **după** ce a pornit containerul, deci
-> neîncărcată până la repornire; sau pusă ca secret în GitHub fără să fi rulat
-> `vps-set-env`. **Nu mai ghicim:** tabul **Admin → Tokenuri** are acum
-> „**Ce chei vede serverul CHIAR ACUM**" — numele fiecărei variabile, dacă e în
-> proces, câte caractere are (**niciodată valoarea**) și **ora la care a pornit
-> procesul**. O cheie scrisă după ora aia explică singură totul.
+> **CAUZA GĂSITĂ, 30 iul — era în codul meu, nu la tine.** Adrian a spus de două
+> ori „toate cheile au fost scrise de zeci de ori". Avea dreptate. `config.ts`
+> accepta **două nume** pentru OpenAI (`OPENAI_API_KEY` / `OPENAI_KEY`), două
+> pentru OpenRouter, două pentru Google TTS — semn că problema „am scris alt
+> nume" lovise deja de trei ori și fusese peticită. Dar exact pe cele care nu
+> mergeau, alias nu exista: `GOOGLE_MAPS_KEY` (singura scrisă **fără `_API_`**),
+> `SERPER_API_KEY`, `GEMINI_API_KEY` — câte un singur nume. O cheie scrisă
+> `GOOGLE_MAPS_API_KEY`, cum scrie oricine, nimerea în gol, iar panoul raporta
+> „lipsește". **Reparat (PR #578):** fiecare cheie e căutată acum sub toate
+> numele rezonabile, iar tabul **Admin → Tokenuri** arată „**Ce chei vede
+> serverul CHIAR ACUM**" — sub ce nume a găsit fiecare cheie, câte caractere are
+> (**niciodată valoarea**), ora pornirii procesului, și mai ales **cheile pe care
+> le ai sub un nume pe care codul nu-l citea**.
+
 
 | Ce nu merge | Cheia care lipsește | Dovada |
 |---|---|---|
