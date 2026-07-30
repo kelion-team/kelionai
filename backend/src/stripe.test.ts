@@ -37,6 +37,15 @@ vi.mock('./config.js', () => ({
       userShare: 0.75,
     },
     adminEmail: 'adrianenc11@gmail.com',
+    // Cheile furnizorilor: `expenseLines()` (lista „de unde se plătește
+    // fiecare") le citește ca să spună care serviciu e configurat. Toate goale
+    // = starea „niciun furnizor pornit", potrivită pentru testele astea.
+    openrouter: { key: '' },
+    openai: { key: '' },
+    geminiKey: '',
+    googleMapsKey: '',
+    googleTtsKey: '',
+    serperKey: '',
   },
 }))
 vi.mock('./db.js', () => ({
@@ -53,6 +62,7 @@ const {
   chargeSavedCard,
   createAdminPayout,
   createCardEphemeralKey,
+  getMoneyCircuit,
   getStripeBalance,
   hasRefund,
 } = await import('./services/stripe.js')
@@ -141,6 +151,16 @@ describe('stripe — fără cheie secretă NU pleacă nicio cerere de bani', () 
     // NU pleacă nimic spre Stripe — și nici nu inventăm un „secret" gol pe care
     // panoul l-ar duce mai departe la Stripe.js.
     expect(await createCardEphemeralKey('ic_test123', 'nonce_abc')).toEqual({ error: 'stripe_not_configured' })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('circuitul banilor NU inventează un zero: punga cardului e null, nu 0', async () => {
+    // Bugul reparat pe 30 iul („super varză"): `issuingAvailable` pornea de la 0
+    // și rămânea 0 și când cererea pica. Deci „n-am putut citi" se afișa exact
+    // ca „ai zero lire" — două lucruri complet diferite, aceeași cifră.
+    const c = await getMoneyCircuit()
+    expect(c.issuingAvailable).toBeNull()
+    expect(c.error).toBe('stripe_not_configured')
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 

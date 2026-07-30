@@ -339,7 +339,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const parti = {
       stripeAvailable: stripe?.available ?? null,
       stripePending: stripe?.pending ?? null,
-      stripeIssuing: circuit.error ? null : circuit.issuingAvailable,
+      // Punga cardului: EXACT ce-a răspuns `/v1/balance`, nu ce-a răspuns altă
+      // rută. Aici scria `circuit.error ? null : …` — adică un 403 pe
+      // `/v1/account` (setările contului) făcea punga cardului să pară
+      // necitibilă, deși soldul se citise perfect. Eroarea unei întrebări
+      // otrăvea răspunsul alteia.
+      stripeIssuing: circuit.issuingAvailable,
       openrouter: orBalance.ok ? orBalance.balance * usdInMoneda : null,
     }
     const complete = Object.values(parti).every((v) => v !== null)

@@ -76,6 +76,20 @@ export interface ExpenseLine {
   billing: string
 }
 
+/** O întrebare pusă lui Stripe și ce a răspuns. Panoul le arată pe toate, ca
+ *  omul să vadă DINTR-O PRIVIRE ce vede aplicația și ce nu — în loc să
+ *  ghicească din cinci rânduri roșii care spun toate altceva. */
+export interface StripeProbe {
+  /** Ce am întrebat, pe înțelesul omului („soldul", „cardurile"). */
+  ce: string
+  /** Ruta exactă, pentru cine vrea să verifice singur. */
+  ruta: string
+  /** A răspuns cum trebuie? */
+  ok: boolean
+  /** Dacă nu: permisiunea care lipsește, cu numele ei din Stripe, sau codul HTTP. */
+  detaliu: string
+}
+
 export interface MoneyCircuit {
   /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
   payoutsInterval: string
@@ -99,8 +113,14 @@ export interface MoneyCircuit {
    *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
    *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
   stripePk?: string
-  /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului. */
-  issuingAvailable: number
+  /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului.
+   *  `null` = N-AM PUTUT CITI, nu „ai zero". Erau confundate: câmpul pornea de
+   *  la 0 și rămânea 0 și când cererea pica, deci panoul arăta „£0.00" cu
+   *  aceeași încredere ca un zero adevărat. */
+  issuingAvailable: number | null
+  /** Fiecare întrebare pusă lui Stripe, cu răspunsul ei. Sursa de adevăr a
+   *  panoului: nu mai deducem starea contului dintr-un singur apel picat. */
+  probes?: StripeProbe[]
   /** DOVADA că veriga 4 (cardul pus la furnizorii de AI) chiar există: dacă
    *  OpenRouter/OpenAI au taxat cardul, aici sunt tranzacțiile lor. Listă goală
    *  = cardul n-a fost încă folosit de nimeni, deci nu e legat (sau nu s-a

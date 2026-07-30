@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 // CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
-import type { MoneyCircuit, ExpenseLine } from '../shared/api-types.js'
+import type { MoneyCircuit, ExpenseLine, StripeProbe } from '../shared/api-types.js'
 export type { MoneyCircuit }
 import { config } from '../config.js'
 import { getStripeCustomer, setStripeCustomer, countWalletUsers, getCostSummary } from '../db.js'
@@ -249,58 +249,86 @@ function expenseLines(): ExpenseLine[] {
   ]
 }
 
+// ── O SINGURĂ CITIRE DE LA STRIPE, CU VERDICTUL EI ───────────────────────────
+//
+// Adrian, 30 iul: „partea de Stripe și cheia la AI ai zbârcit-o de tot, super
+// varză". Avea dreptate, și cauza era una singură: fiecare apel către Stripe își
+// trata eșecul altfel, iar panoul amesteca rezultatele.
+//   • `/v1/account` pica pe permisiune → puneam motivul în `payoutsInterval` ȘI
+//     în `issuingStatus` ȘI în `out.error` — trei rânduri roșii dintr-un eșec.
+//   • `out.error` (setat de account) făcea ca punga să arate „Card virtual — nu
+//     răspunde", deși `/v1/balance` răspunsese perfect. Eroarea unei citiri
+//     otrăvea altă citire.
+//   • `issuingAvailable` pornea de la 0 și rămânea 0 când cererea pica — deci
+//     „n-am putut citi" arăta identic cu „ai zero lire".
+//
+// Acum: FIECARE întrebare se pune prin funcția asta, își notează singură
+// verdictul, și niciun eșec nu se scurge în altă parte. Când e 403, spunem
+// permisiunea cu numele ei din dashboard — omul are un singur rând de bifat.
+async function intreabaStripe<T>(
+  ce: string,
+  ruta: string,
+  permisiune: string,
+  probes: StripeProbe[],
+): Promise<T | null> {
+  try {
+    const r = await fetch(`${API}${ruta}`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
+    if (r.ok) {
+      probes.push({ ce, ruta, ok: true, detaliu: 'ok' })
+      return (await r.json()) as T
+    }
+    const b = (await r.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null
+    const faraVoie = r.status === 403 || b?.error?.code === 'more_permissions_required'
+    probes.push({
+      ce,
+      ruta,
+      ok: false,
+      detaliu: faraVoie
+        ? `cheia nu are permisiunea „${permisiune}"`
+        : `HTTP ${r.status}${b?.error?.message ? ` — ${b.error.message.slice(0, 90)}` : ''}`,
+    })
+    return null
+  } catch (e) {
+    probes.push({ ce, ruta, ok: false, detaliu: String(e).slice(0, 90) })
+    return null
+  }
+}
+
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey, keyLivemode: !/_test_/.test(config.stripe.secretKey) }
+  const probes: StripeProbe[] = []
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: null, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey, keyLivemode: !/_test_/.test(config.stripe.secretKey), probes }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
-    const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
-    if (acc.ok) {
-      const a = (await acc.json()) as {
-        settings?: { payouts?: { schedule?: { interval?: string } } }
-        capabilities?: { card_issuing?: string }
-      }
+    const a = await intreabaStripe<{
+      settings?: { payouts?: { schedule?: { interval?: string } } }
+      capabilities?: { card_issuing?: string }
+    }>('Setările contului (program payout, Issuing)', '/account', 'Account: Read', probes)
+    if (a) {
       out.payoutsInterval = a.settings?.payouts?.schedule?.interval ?? 'unknown'
       out.issuingStatus = a.capabilities?.card_issuing ?? 'inactive'
     } else {
-      // „unknown" MUT era o minciună prin omisiune (Adrian, 26 iul: „datele de
-      // aici nu sunt reale"). Verificat live: cheia din env e RESTRICȚIONATĂ
-      // (rk_live_…) și /v1/account răspunde 403 more_permissions_required —
-      // aplicația nu ARE VOIE să citească setările contului. Spunem exact asta
-      // și ce e de făcut (Stripe Dashboard → Developers → API keys → cheia
-      // restricționată → Edit → Account: Read), nu lăsăm „unknown" fără motiv.
-      const body = (await acc.json().catch(() => null)) as { error?: { code?: string } } | null
-      const reason =
-        acc.status === 403 || body?.error?.code === 'more_permissions_required'
-          ? 'fara_permisiune_cheie'
-          : `http_${acc.status}`
-      out.payoutsInterval = reason
-      out.issuingStatus = reason
-      out.error = `Stripe /v1/account: ${acc.status} (${body?.error?.code ?? 'eroare'}) — cheia restricționată nu poate citi contul; dă-i permisiunea Account:Read în Dashboard → API keys.`
+      // Necunoscut, spus pe față. NU mai punem motivul și în `out.error`: ăla
+      // e pentru eșecuri care ating TOT circuitul, nu pentru o citire ratată.
+      out.payoutsInterval = 'nu_pot_citi'
+      out.issuingStatus = 'nu_pot_citi'
     }
-    const bal = await fetch(`${API}/balance`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
-    if (bal.ok) {
-      const b = (await bal.json()) as { issuing?: { available?: { amount: number }[] } }
-      out.issuingAvailable = (b.issuing?.available?.[0]?.amount ?? 0) / 100
-    }
+    const b = await intreabaStripe<{ issuing?: { available?: { amount: number }[] } }>(
+      'Punga cardului (Issuing)', '/balance', 'Balance: Read', probes,
+    )
+    if (b) out.issuingAvailable = (b.issuing?.available?.[0]?.amount ?? 0) / 100
     // VERIGA 4, MĂSURATĂ (nu declarată): cine a taxat cardul. Dacă OpenRouter
     // sau OpenAI l-au folosit, apar aici. Gol = cardul nu e (încă) legat la ei.
-    try {
-      const tr = await fetch(`${API}/issuing/transactions?limit=8`, {
-        headers: authHeaders(),
-        signal: AbortSignal.timeout(12_000),
-      })
-      if (tr.ok) {
-        const tj = (await tr.json()) as {
-          data?: { amount: number; created: number; merchant_data?: { name?: string } }[]
-        }
+    {
+      const tj = await intreabaStripe<{
+        data?: { amount: number; created: number; merchant_data?: { name?: string } }[]
+      }>('Taxările pe card (cine l-a folosit)', '/issuing/transactions?limit=8', 'Issuing Transactions: Read', probes)
+      if (tj) {
         out.issuingCharges = (tj.data ?? []).map((x) => ({
           merchant: x.merchant_data?.name ?? 'necunoscut',
           amount: Math.abs(x.amount) / 100,
           at: new Date(x.created * 1000).toISOString(),
         }))
       }
-    } catch {
-      /* informativ: lipsa listei nu strică restul circuitului */
     }
 
     // ── REGULA BATUTA IN CUIE: platile catre AI ies din punga ──────────────
@@ -344,30 +372,22 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
     // 24 iul, verificată cu apeluri reale), deci răspunsul vine fără nicio
     // umblătură prin dashboard. Și un răspuns bun spune mai mult decât
     // `/v1/account`: dacă Stripe îți listează carduri, Issuing E activ.
-    const cards = await fetch(`${API}/issuing/cards?limit=5&status=active`, {
-      headers: authHeaders(),
-      signal: AbortSignal.timeout(12_000),
-    })
-    if (cards.ok) {
+    const c = await intreabaStripe<{ data?: { id: string; last4?: string; status?: string; livemode?: boolean }[] }>(
+      'Cardurile virtuale active', '/issuing/cards?limit=5&status=active', 'Issuing Cards: Read', probes,
+    )
+    if (c) {
       // `livemode` vine pe FIECARE obiect Stripe. Îl ducem mai departe: un card
       // de test arată identic cu unul real în listă, dar numărul lui e refuzat
       // de orice formular de plată adevărat. Fără steagul ăsta, panoul spune
       // „✅ Cardul Kelion AI" despre o simulare.
-      const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string; livemode?: boolean }[] }
       out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '', livemode: x.livemode === true }))
       // Stripe ți-a dat carduri ⇒ Issuing e activ, oricât de oarbă ar fi cheia
       // pe /v1/account. Nu lăsăm veriga 2 pe „nu știu" când dovada e în mână.
       if (out.cards.length > 0 && out.issuingStatus !== 'active') out.issuingStatus = 'active'
       // Zero carduri ACTIVE, cu răspuns bun de la Stripe: acum chiar știm.
-      else if (out.cards.length === 0) out.cardsChecked = true
+      else out.cardsChecked = true
     } else {
-      // 403 aici = cheii îi lipsește Issuing Cards: Read. Spunem CARE permisiune,
-      // nu „a picat ceva" — omul are de bifat un singur rând.
-      const b = (await cards.json().catch(() => null)) as { error?: { code?: string } } | null
-      out.cardsError =
-        cards.status === 403 || b?.error?.code === 'more_permissions_required'
-          ? 'Cheia nu are „Issuing Cards: Read" — dă-i-l în Stripe → API keys → cheia restricționată → Edit key.'
-          : `Stripe /v1/issuing/cards: http_${cards.status}`
+      out.cardsError = probes[probes.length - 1]?.detaliu ?? 'Stripe n-a răspuns'
     }
     return out
   } catch (e) {
