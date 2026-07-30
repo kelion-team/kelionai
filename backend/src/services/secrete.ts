@@ -36,6 +36,26 @@ const FARA_TOKEN = JSON.stringify({
   hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env (fin-granulat pe repo, Secrets: write + Actions: write) și repornește.',
 })
 
+/** Spune EXACT ce lipsește, nu doar un cod de eroare.
+ *
+ *  Un „HTTP 403" îl pune pe om să ghicească — și ghicitul pe permisiuni de
+ *  GitHub e exact felul în care s-a pierdut o zi pe 30 iul (l-am trimis să caute
+ *  `Account: Read` la Stripe, care nici măcar nu era problema). Scrierea
+ *  secretelor cere permisiunea **Secrets: write** pe tokenul fin-granulat —
+ *  documentația noastră proprie o pomenește doar pe `Actions: write`. Deci dacă
+ *  vine 403, ăsta e primul lucru de verificat, și scrie aici, nu în capul meu. */
+function lipsaPermisiune(status: number, ce: string): string {
+  if (status === 403 || status === 404) {
+    return (
+      `${ce} (HTTP ${status}). Cel mai probabil tokenul (GITHUB_TOKEN) NU are ` +
+      `permisiunea „Secrets: write" pe repo. Se dă din GitHub → Settings → ` +
+      `Developer settings → Fine-grained tokens → tokenul kelionai → ` +
+      `Repository permissions → Secrets: Read and write. NU e nevoie de nimic altceva.`
+    )
+  }
+  return `${ce} (HTTP ${status}).`
+}
+
 /** Numele acceptate: MAJUSCULE, cifre și `_`, începând cu o literă. */
 export function numeSecretValid(nume: string): boolean {
   if (!/^[A-Z][A-Z0-9_]{2,99}$/.test(nume)) return false
@@ -85,7 +105,7 @@ export async function seteazaSecret(nume: string, valoare: string): Promise<stri
   }
 
   const rk = await gh('/actions/secrets/public-key')
-  if (!rk.ok) return JSON.stringify({ error: `nu pot lua cheia publică a repo-ului (HTTP ${rk.status})` })
+  if (!rk.ok) return JSON.stringify({ error: lipsaPermisiune(rk.status, 'nu pot lua cheia publică a repo-ului') })
   const { key, key_id } = (await rk.json()) as { key: string; key_id: string }
 
   const encrypted_value = await cripteaza(valoare, key)
@@ -94,7 +114,7 @@ export async function seteazaSecret(nume: string, valoare: string): Promise<stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ encrypted_value, key_id }),
   })
-  if (!r.ok) return JSON.stringify({ error: `GitHub a refuzat (HTTP ${r.status})`, nume: n })
+  if (!r.ok) return JSON.stringify({ error: lipsaPermisiune(r.status, 'GitHub a refuzat scrierea'), nume: n })
   // 201 = creat acum, 204 = actualizat.
   console.log(`[SECRETE] ${n}: scris (${valoare.length} caractere) — valoarea NU se afișează`)
   return JSON.stringify({
