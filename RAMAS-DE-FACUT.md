@@ -163,6 +163,13 @@ odată; plafonul `AUTONOMY_DAILY_MAX` (implicit 20/zi) — care până azi era o
 limită *declarată și necitită de nimeni*; trei încercări pe același pas, apoi
 pasul e marcat blocat, cu motivul la vedere, și trece mai departe.
 
+**Agenții sunt echipați la full (30 iul, PR #591).** Constructorul avea șapte
+unelte — putea scrie cod, dar nu putea deschide un site și nu putea pune o cheie.
+Acum are browserul real (9), secretele (3), baza de date, sănătatea proprie,
+runbook-urile de pe server și `request_repair`. Ordinul de portal pe care i-l
+scrisesem era **imposibil** pentru el; ar fi picat de trei ori și ar fi părut că
+agentul e prost, când de fapt eu îl trimisesem unde nu avea mâini.
+
 **Cine intră pe portal (30 iul, hotărât de tine): EL.** „Are liber 1000000% să
 folosească tot ca să obțină scopul meu." Browserul lui e real (9 unelte,
 Playwright pe server) și de azi are și mâinile ca să-și pună singur cheile. Deci
