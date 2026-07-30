@@ -36,6 +36,7 @@ import { runSelfHeal } from './services/selfHeal.js'
 import { autoFundIssuing } from './services/stripe.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
+import { manualRoutes } from './routes/manual.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
@@ -266,6 +267,7 @@ await app.register(clientErrorRoutes)
 await app.register(realtimeRoutes)
 await app.register(modelRoutes)
 await app.register(pingRoutes)
+await app.register(manualRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)

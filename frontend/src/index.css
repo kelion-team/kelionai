@@ -3132,3 +3132,38 @@ a.card-item:hover {
 /* Defalcarea pungii unice (Admin → Bani): din ce surse reale s-a adunat cifra.
    Fără ea, un total e doar încă un număr în care trebuie să ai încredere. */
 .pool-parts { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+
+/* ── MANUALUL (public) ──────────────────────────────────────────────────────
+   Butonul dreapta-sus pe pagina de start + pagina propriu-zisă. Manualul se
+   citește, deci fundal clar și rânduri scurte — nu tema închisă a aplicației. */
+.landing-manual {
+  position: absolute; top: 18px; right: 20px; z-index: 6;
+  padding: 8px 14px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.18); background: rgba(12,14,20,.55);
+  color: #dfe4ee; font-size: 13px; font-weight: 600; text-decoration: none;
+  backdrop-filter: blur(6px); transition: background .15s ease, border-color .15s ease;
+}
+.landing-manual:hover { background: rgba(24,28,38,.8); border-color: rgba(255,255,255,.34); }
+
+.manual-page { min-height: 100vh; background: #f6f7f9; padding: 26px 16px 60px; overflow-y: auto; }
+.manual-card { max-width: 820px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 26px 30px 34px; box-shadow: 0 1px 3px rgba(16,20,30,.10), 0 12px 32px rgba(16,20,30,.06); }
+.manual-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+.manual-actions { display: flex; align-items: center; gap: 12px; }
+.manual-lang { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: #5b6270; }
+.manual-lang select { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #d7dbe2; background: #fff; color: #16181d; }
+.manual-dl { padding: 7px 15px; border-radius: 8px; background: #2f6df6; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; }
+.manual-dl:hover { background: #2560e0; }
+.manual-body { color: #16181d; line-height: 1.65; }
+.manual-body h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -.02em; }
+.manual-sub { color: #5b6270; margin: 0 0 26px; font-size: 15px; }
+.manual-body h2 { font-size: 19px; margin: 30px 0 8px; }
+.manual-body h3 { font-size: 16px; margin: 24px 0 6px; }
+.manual-body p { margin: 0 0 10px; }
+.manual-table { width: 100%; border-collapse: collapse; margin: 6px 0 4px; }
+.manual-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; border-bottom: 1px solid #d7dbe2; padding: 5px 12px 5px 0; font-weight: 600; }
+.manual-table td { padding: 7px 12px 7px 0; border-bottom: 1px solid #eef0f4; vertical-align: top; font-size: 14px; }
+.manual-say { color: #3b4453; font-style: italic; }
+.manual-foot { margin-top: 34px; padding-top: 12px; border-top: 1px solid #d7dbe2; color: #6b7280; font-size: 12px; }
+.manual-page .back-link { color: #6b7280; }
+.manual-page .back-link:hover { color: #2f6df6; }
+@media (max-width: 560px) { .manual-card { padding: 20px 18px 28px; } .manual-body h1 { font-size: 24px; } }

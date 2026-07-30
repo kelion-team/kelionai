@@ -109,6 +109,9 @@ export default function Landing({ error }: { error?: string | null }) {
 
   return (
     <div className="landing">
+      {/* MANUALUL, dreapta-sus (Adrian): oricine, fără cont, poate citi tot ce
+          face aplicația — își alege limba și îl descarcă în limba aia. */}
+      <a className="landing-manual" href="/manual">{PT.userManual}</a>
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
