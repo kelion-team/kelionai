@@ -925,13 +925,26 @@ export default function AdminPanel({
                             className="ghost"
                             disabled={cardBusy}
                             onClick={async () => {
+                              // ADRESA REALĂ, CERUTĂ AICI. Era inventată în cod
+                              // („London, EC1A 1AA") — un card emis pe o adresă
+                              // care nu există poate fi refuzat la verificarea
+                              // de adresă, iar omul n-ar avea de unde ghici de ce.
+                              const line1 = window.prompt('Street address (line 1)')?.trim()
+                              if (!line1) return
+                              const line2 = window.prompt('Address line 2 (optional)')?.trim() ?? ''
+                              const city = window.prompt('City')?.trim()
+                              if (!city) return
+                              const postal = window.prompt('Postcode')?.trim()
+                              if (!postal) return
+                              const country = (window.prompt('Country code (2 letters, e.g. GB)', 'GB') ?? '').trim()
+                              if (!/^[A-Za-z]{2}$/.test(country)) return
                               setCardBusy(true)
-                              const c = await createAiCard()
+                              const c = await createAiCard({ line1, line2, city, postal_code: postal, country })
                               setCardBusy(false)
                               if (c) {
                                 window.open(c.url, '_blank', 'noopener')
                                 void fetchMoneyCircuit().then(setCircuit)
-                              } else window.alert('Crearea cardului a eșuat — activează întâi Issuing.')
+                              } else window.alert('Card creation failed — check the address, and that Issuing is active.')
                             }}
                           >
                             {cardBusy ? 'Se creează…' : 'Creează cardul'}

@@ -545,19 +545,40 @@ export async function createCardEphemeralKey(
 // cardholder pe emailul adminului + card virtual GBP. Numărul complet se vede
 // în panou (Issuing Elements, vezi mai sus) sau în dashboardul Stripe —
 // întoarcem și linkul direct la card.
-export async function createKelionCard(adminEmail: string): Promise<
-  { id: string; last4: string; url: string } | { error: string }
-> {
+export interface CardholderAddress {
+  line1: string
+  line2?: string
+  city: string
+  postal_code: string
+  country: string
+}
+
+export async function createKelionCard(
+  adminEmail: string,
+  addr: CardholderAddress,
+): Promise<{ id: string; last4: string; url: string } | { error: string }> {
   if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  // ADRESA REALĂ, CERUTĂ — NU INVENTATĂ (Adrian, 30 iul).
+  // Aici scria hardcodat „Kelionai, London, EC1A 1AA" — o adresă care nu există
+  // și care nu e a nimănui. Două probleme: (1) la verificarea de adresă (AVS) a
+  // unui furnizor, cardul poate fi refuzat, iar omul n-ar avea de unde ghici de
+  // ce; (2) e o declarație falsă către Stripe despre titularul cardului. Adresa
+  // vine acum de la owner, o dată, din panou — și e obligatorie.
+  const line1 = addr.line1?.trim()
+  const city = addr.city?.trim()
+  const postal = addr.postal_code?.trim()
+  const country = (addr.country ?? '').trim().toUpperCase()
+  if (!line1 || !city || !postal || !/^[A-Z]{2}$/.test(country)) return { error: 'bad_address' }
   try {
     const chBody = new URLSearchParams()
     chBody.set('name', 'Kelion AI')
     chBody.set('email', adminEmail)
     chBody.set('type', 'individual')
-    chBody.set('billing[address][line1]', 'Kelionai')
-    chBody.set('billing[address][city]', 'London')
-    chBody.set('billing[address][postal_code]', 'EC1A 1AA')
-    chBody.set('billing[address][country]', 'GB')
+    chBody.set('billing[address][line1]', line1)
+    if (addr.line2?.trim()) chBody.set('billing[address][line2]', addr.line2.trim())
+    chBody.set('billing[address][city]', city)
+    chBody.set('billing[address][postal_code]', postal)
+    chBody.set('billing[address][country]', country)
     const ch = await fetch(`${API}/issuing/cardholders`, { method: 'POST', headers: authHeaders(), body: chBody })
     const chJ = (await ch.json().catch(() => ({}))) as { id?: string; error?: { message?: string } }
     if (!ch.ok || !chJ.id) return { error: chJ.error?.message ?? `cardholder_http_${ch.status}` }

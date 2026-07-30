@@ -40,7 +40,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | B3 | **Punga rămâne pe £0** | Stripe scoate banii în bancă după programul lui, înainte să apuce transferul orar spre card. Se schimbă DOAR din dashboard (payouts → Manual). Nu există API. |
 | B4 | **Transferul automat plăți→card** | `POST /v1/balance_transfers` e în **beta** la Stripe — până la aprobare răspunde 4xx. |
 | B5 | **Cheia `sk_live` „K"** | Acces TOTAL la cont, nefolosită din 10 iunie. De retras — dar cu grijă, după ce restul merge. |
-| B6 | **Adresa cardului** | Hardcodată „Kelionai, London, EC1A 1AA" — adresă inventată. La un card real poate da refuz pe verificarea de adresă. De luat adresa reală la creare. |
+| B6 | **Adresa cardului** | ✅ **reparat** (30 iul, PR #572): adresa hardcodată („Kelionai, London, EC1A 1AA" — o adresă care nu există) a fost ștearsă. Butonul „Creează cardul" o cere acum, iar backendul refuză cu `bad_address` dacă lipsește. Nu mai declarăm către Stripe o adresă falsă a titularului. |
 | B7 | **Cheia restricționată nu poate citi contul** | `/v1/account` → 403. Verigile 1 și 2 din circuit nu se pot verifica. Nu mai e blocant pentru card (B1 reparat), dar payouts rămâne neverificabil. |
 
 ---
