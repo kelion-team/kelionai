@@ -9,6 +9,7 @@ import VisitorChatWidget from '../components/VisitorChatWidget'
 import { startGoogleLogin } from '../lib/api'
 import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
+import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
 
 // The four install codes — one per platform. Click → enlarged for scanning.
@@ -174,9 +175,9 @@ export default function Landing({ error }: { error?: string | null }) {
                 iul dar niciodată legate din landing; auditul le-a găsit
                 neatinse de niciun link): intrarea cu email + prețurile publice. */}
             <div className="landing-alt-links">
-              <a href="/login">Intră cu email</a>
+              <a href="/login">{PT.emailSignIn}</a>
               <span aria-hidden>·</span>
-              <a href="/credite">Credite &amp; prețuri</a>
+              <a href="/credite">{PT.creditsPricing}</a>
             </div>
           </div>
 
@@ -248,7 +249,7 @@ export default function Landing({ error }: { error?: string | null }) {
                   <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
                     Install
                   </a>
-                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title="Mărește codul pentru scanare">
+                  <button type="button" className="qr-zoom-btn" onClick={() => setQrZoom(q)} title={PT.zoomQr}>
                     🔍
                   </button>
                 </figure>

@@ -2976,6 +2976,18 @@ a.card-item:hover {
   color: var(--text, #e8ecf4);
 }
 .login-brand { font-size: 22px; font-weight: 800; color: var(--accent, #7aa2ff); text-decoration: none; }
+
+/* Butonul de întoarcere la pagina anterioară (Adrian, 30 iul): pe aplicația
+   instalată nu există bara browserului, deci fără el userul rămâne blocat în
+   pagină. Discret, sus-stânga în card, aceeași formă peste tot. */
+.back-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 4px 0; margin-bottom: 10px;
+  color: var(--muted, #8b93a7); font: inherit; font-size: 13px; cursor: pointer;
+  transition: color .15s ease;
+}
+.back-link:hover { color: var(--accent, #7aa2ff); }
+.back-link svg { flex: none; }
 .login-title { margin: 4px 0 8px; font-size: 18px; }
 .login-google {
   display: block; text-align: center; padding: 10px; border-radius: 12px;

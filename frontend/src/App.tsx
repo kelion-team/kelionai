@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
+import { PUBLIC_TEXT as PT } from './lib/publicText'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Credits from './pages/Credits'
@@ -120,9 +121,9 @@ export default function App() {
           când se aplică; dacă pleacă din tab, se aplică singură, neobservat. */}
       {updateReady && (
         <div className="update-banner" role="status">
-          <span>Versiune nouă disponibilă</span>
+          <span>{PT.updateAvailable}</span>
           <button type="button" onClick={() => void hardResetToLatest()}>
-            Actualizează acum
+            {PT.updateNow}
           </button>
         </div>
       )}
