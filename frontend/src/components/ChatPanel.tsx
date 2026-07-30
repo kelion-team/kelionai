@@ -10,7 +10,7 @@ import {
   type DragEvent as ReactDragEvent,
 } from 'react'
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
-import { strings, resolveLang, type Lang } from '../lib/i18n'
+import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang } from '../lib/languages'
@@ -1804,7 +1804,7 @@ export default function ChatPanel({
           ARUNCA — cititorii nu erau chemați de nimeni). Dovada regulii „primul
           cuvânt sub 1s", discretă, doar proaspătă (sub 2 min de la măsurare). */}
       {realLatency && Date.now() - realLatency.at < 120_000 && (
-        <span className="latency-chip" title="trimis → primul cuvânt / răspuns complet">
+        <span className="latency-chip" title={uiStrings().latencyChip}>
           ⚡ {(realLatency.firstMs / 1000).toFixed(1)}s · {(realLatency.totalMs / 1000).toFixed(1)}s
         </span>
       )}
@@ -1872,14 +1872,14 @@ export default function ChatPanel({
             teletext când e terminat). Un rând, mereu, nimic în afara ei. */}
         {busy && !delivered && lastUser?.content ? (
           <div className="heard-band user-band" aria-live="polite">
-            <span className="heard-band-label" title="Tu — înspre creier">👤</span>
+            <span className="heard-band-label" title={uiStrings().heardYouTitle}>👤</span>
             <span className="speech-tail">
               <span className="speech-tail-text">{lastUser.content.slice(0, 400)}</span>
             </span>
           </div>
         ) : busy && !lastAssistant?.content ? (
           <div className="heard-band" aria-live="polite">
-            <span className="heard-band-label" title="Creierul a primit și gândește">🧠</span>
+            <span className="heard-band-label" title={uiStrings().heardBrainTitle}>🧠</span>
             <span className="speech-tail">
               <span className="speech-tail-text">{heard ? `„${heard}”` : '…'}</span>
             </span>

@@ -49,7 +49,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 
 | # | Cerința | Cât e făcut | Ce mai e |
 |---|---|---|---|
-| C1 | **Toată aplicația în engleză, apoi limba userului** | doar suprafața de dinainte de login | **~98 de texte** românești hardcodate: 57 în `AdminPanel.tsx`, 26 în `Stage.tsx`, 15 în `ChatPanel.tsx` |
+| C1 | **Toată aplicația în engleză, apoi limba userului** | ✅ **tot ce vede un user** (30 iul, PR #567): Stage 20 de texte + ChatPanel 3, mutate în `i18n.ts` cu **toate cele 7 limbi**. Numărătoarea de dimineață (98) era umflată — includea comentarii din cod și cuvintele-cheie ale comenzilor vocale românești, care TREBUIE să rămână românești. | rămâne **panoul de Admin: 53 de texte** (+2 în `CardReveal`), văzute doar de admin |
 | C2 | **Buton „înapoi" pe toate panourile și paginile** | Credits, Login, Manual, AdminPanel, CustomerSettings | lipsește pe **Landing**, **Stage**, **ChatPanel**, **ContactModal** |
 | C3 | **Manualul** | 7 limbi, carte cu întors pagina, descărcabil | arată rudimentar — **fără imagini, fără diagrame**; ai zis „nivel de clasă pregătitoare" și n-am revenit |
 | C4 | **Vocea per user** | coloana în bază + citit/scris, puse deoparte | de legat la vocea live și la TTS + selector în Setări. Parcat la cererea ta. |
