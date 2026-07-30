@@ -182,6 +182,35 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'in_lucru' })
   })
 
+  it('ce e livrat se PROBEAZĂ pe live, înaintea oricărei munci noi', async () => {
+    misiuneaInchisa()
+    cerinte = [{ id: 9, text: 'x', stare: 'livrata', criteriu: 'userul primește creditele', aleasa: null, optiuni: null }]
+    spuseCreierul = 'VERIFICAT: am intrat pe kelionai.app, am cumpărat credit, a intrat în 4 minute'
+
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('VERIFICATĂ pe live')
+    expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'verificata' })
+    expect(jobs).toHaveLength(0) // proba trece înaintea muncii noi
+  })
+
+  it('dacă proba pică, cerința se ÎNTOARCE la lucru — nu se declară gata', async () => {
+    misiuneaInchisa()
+    cerinte = [{ id: 9, text: 'x', stare: 'livrata', criteriu: 'userul primește creditele', aleasa: null, optiuni: null }]
+    spuseCreierul = 'NU MERGE: butonul de credit dă 503'
+
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('n-a trecut proba')
+    expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'analizata' })
+  })
+
+  it('nu poate scrie „verificat" fără măsurătoare — orice altceva înseamnă că n-a trecut', async () => {
+    misiuneaInchisa()
+    cerinte = [{ id: 9, text: 'x', stare: 'livrata', criteriu: null, aleasa: null, optiuni: null }]
+    spuseCreierul = 'cred că merge, arată bine' // fără probă → NU trece
+    await poateSaLucreze()
+    expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'analizata' })
+  })
+
   it('ordinul terminat o duce pe „livrată", NU pe „verificată"', async () => {
     misiuneaInchisa()
     cerinte = [{ id: 9, text: 'x', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]

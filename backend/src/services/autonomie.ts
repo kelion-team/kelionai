@@ -515,6 +515,47 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   }
 }
 
+// ── VERIFICAREA PROPRIE: „livrat" nu înseamnă „merge" ────────────────────────
+//
+// Tot ce s-a „terminat" azi l-am dovedit EU, cu mâna, cu curl. Asta nu se
+// scalează și, mai rău, e exact felul în care s-a strecurat „chatul e mut": un
+// ordin terminat, un PR verde, și aplicația tăcută pe live.
+//
+// Aici cerința LIVRATĂ se probează singură, cu uneltele reale — browser pe
+// site-ul viu, interogare în baza de date, sănătatea aplicației — față de
+// CRITERIUL scris înainte de livrare. Trece pe „verificată" DOAR cu ce a
+// măsurat; altfel se întoarce la lucru, cu ce a găsit. Regula #1 a ownerului,
+// aplicată propriei noastre evidențe.
+async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | null> {
+  const livrate = await listeazaCerinte('livrata', 5).catch(() => [])
+  const c = livrate[0]
+  if (!c) return null
+  const tools = [
+    ...BROWSER_TOOLS, SECRET_LISTA_TOOL,
+  ] as unknown as AnthropicTool[]
+  const prompt =
+    `VERIFICI CE AI LIVRAT. Nu întrebi pe nimeni, nu presupui — MĂSORI.\n\n` +
+    `CERINȚA #${c.id}: ${c.text}\n` +
+    `CRITERIUL DE ACCEPTARE (scris ÎNAINTE de livrare, ca ținta să nu se mute): ` +
+    `${c.criteriu ?? '(nescris — atunci verifică dacă cerința chiar e îndeplinită, pe înțelesul omului)'}\n` +
+    (c.aleasa ? `Soluția aleasă: ${c.aleasa}\n` : '') +
+    `\n${inventarulMeu()}\n\n` +
+    `Deschide aplicația LIVE (https://kelionai.app) cu browserul și probează. ` +
+    `Dacă merge: răspunde exact „VERIFICAT: <ce ai măsurat, concret>". ` +
+    `Dacă NU merge: „NU MERGE: <ce ai văzut, exact>". ` +
+    `Nu ai voie să scrii „VERIFICAT" fără o măsurătoare pe care ai făcut-o tu.`
+  const spus = await brainCompleteWithTools(prompt, tools, uneltele, { maxRounds: 20, maxTokens: 1500 })
+    .catch((e: Error) => `NU MERGE: verificarea a crăpat — ${e.message}`)
+
+  if (/^\s*VERIFICAT/i.test(spus)) {
+    await actualizeazaCerinta(c.id, { stare: 'verificata', dovada: spus.slice(0, 2000) }).catch(() => {})
+    return { pornit: true, motiv: `cerința #${c.id} — VERIFICATĂ pe live: ${spus.slice(10, 160)}` }
+  }
+  // N-a trecut → înapoi la lucru, cu ce a găsit. Nu se declară gata.
+  await actualizeazaCerinta(c.id, { stare: 'analizata', dovada: spus.slice(0, 2000) }).catch(() => {})
+  return { pornit: true, motiv: `cerința #${c.id} — n-a trecut proba, o reia: ${spus.slice(0, 160)}` }
+}
+
 /** O tură de lucru a lui Kelion, pornită de buclă, nu de un om. */
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   const tools = [
@@ -561,6 +602,18 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   )
   // După misiune: întâi CE ÎI LIPSEȘTE LUI (golurile pe care le-a triat singur
   // — „vede ce-i lipsește și se dezvoltă"), apoi rândurile din lista ownerului.
+  // PROBA ÎNAINTE DE ORICE ALTCEVA: ce e livrat dar neverificat nu are voie să
+  // stea așa. „Livrat" nu înseamnă „merge" — vezi chatul mut din 30 iul.
+  if (!mainileOcupate) {
+    mainileOcupate = true
+    try {
+      const v = await verificaLivrata().catch(() => null)
+      if (v) return v
+    } finally {
+      mainileOcupate = false
+    }
+  }
+
   // ANALIZA ÎNAINTE DE COD: o cerință nouă se evaluează întâi — variante,
   // scoruri, una aleasă cu motiv. E o tură ieftină de creier, nu un ordin.
   const noi = await listeazaCerinte('noua', 5).catch(() => [])
