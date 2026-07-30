@@ -1868,6 +1868,36 @@ export interface CostSummary {
   byKind: Record<string, number>
 }
 
+/** ── RESETAREA CONTOARELOR DE CONSUM ────────────────────────────────────────
+ *
+ *  Adrian, 30 iul: „resetează pe 0 toate contoarele; doar banii de la AI lasă-i
+ *  să reflecte ce credite sunt acum; în rest, ce s-a consumat pune pe 0."
+ *  Și, imediat: „trebuie pus în locul corect, că creditele dacă s-au consumat
+ *  NU se face refund."
+ *
+ *  De-aia ștergem EXACT un singur lucru: `cost_events` — jurnalul costurilor
+ *  noastre la furnizori, adică „cât ne-a costat pe noi". Contorul ăsta e doar
+ *  istoric; nu-l citește nimeni ca să decidă ceva.
+ *
+ *  NU SE ATINGE, cu intenție:
+ *    • `wallets`       — creditele userilor. Consumate = consumate; a le pune la
+ *                        loc ar însemna un refund pe care nimeni nu l-a cerut.
+ *    • `billing_events`— registrul plăților reale (alimentări, marje, refunduri).
+ *                        E contabilitate; se șterge doar la ștergerea contului.
+ *    • `transactions`  — istoricul de cumpărare al fiecărui om.
+ *
+ *  Banii de la AI (punga) nu au ce reseta: se citesc LIVE de la Stripe și de la
+ *  furnizorul creierului, deci reflectă întotdeauna ce e acum. */
+export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number }> {
+  if (!dbEnabled()) return { ok: false, sterse: 0 }
+  try {
+    const r = await getPool().query('DELETE FROM cost_events')
+    return { ok: true, sterse: r.rowCount ?? 0 }
+  } catch {
+    return { ok: false, sterse: 0 }
+  }
+}
+
 export async function getCostSummary(): Promise<CostSummary> {
   const empty: CostSummary = { total: 0, today: 0, byKind: {} }
   if (!dbEnabled()) return empty
@@ -1972,6 +2002,18 @@ export interface UserSummary {
   email: string
   count: number
   last: string
+}
+
+/** Câți oameni au cont cu portofel (folosit la rezerva din Stripe). Numărăm
+ *  portofelele, nu conversațiile: un cont fără portofel n-are credit de apărat. */
+export async function countWalletUsers(): Promise<number> {
+  if (!dbEnabled()) return 0
+  try {
+    const r = await getPool().query<{ n: string }>('SELECT COUNT(*)::text AS n FROM wallets')
+    return Number(r.rows[0]?.n ?? 0)
+  } catch {
+    return 0
+  }
 }
 
 export async function listUsers(): Promise<UserSummary[]> {
