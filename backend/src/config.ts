@@ -165,6 +165,18 @@ export const config = {
     // e doar al plugin-ului web (per căutare), nu al modelului.
     searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
   },
+  // ── ÎNCASAREA PRIN REVOLUT (Adrian, 30 iul: „Stripe se scoate total și intră
+  // Pro") ──────────────────────────────────────────────────────────────────────
+  // Contul Revolut Pro nu are Merchant API (aia e doar pe Business), deci nu
+  // există webhook care să crediteze userul singur. Ce ARE e un link de plată
+  // găzduit de Revolut: userul plătește acolo, iar creditele le acordă adminul
+  // din panou (`grantCredit`, care exista deja).
+  //
+  // Linkul stă în env, nu în cod: se schimbă fără publicare, iar dacă lipsește
+  // butonul SPUNE că nu e configurat, în loc să ducă userul într-un gol.
+  revolut: {
+    payLink: (process.env.REVOLUT_PAY_LINK ?? '').trim(),
+  },
   stripe: {
     secretKey: env(...ENV_ALIASES.stripeSecretKey),
     // Cheia PUBLICĂ (pk_live_…). NU e secret: Stripe o proiectează ca să stea în

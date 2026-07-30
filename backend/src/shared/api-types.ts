@@ -74,6 +74,11 @@ export interface ExpenseLine {
   configured: boolean
   /** Unde se plateste factura lui. */
   billing: string
+  /** Pagina LUI de facturare, unde se schimba cardul (Adrian, 30 iul: „link la
+   *  fiecare AI, să schimb cardul"). Gol pentru furnizorii care n-au una
+   *  (gratuit, sau platit din alta parte) — atunci nu se afiseaza niciun buton,
+   *  ca sa nu-l trimitem pe om intr-un gol. */
+  billingUrl?: string
 }
 
 /** O întrebare pusă lui Stripe și ce a răspuns. Panoul le arată pe toate, ca

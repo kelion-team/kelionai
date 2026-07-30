@@ -31,7 +31,10 @@ export async function fetchBalance(): Promise<WalletStatus | null> {
   }
 }
 
-// Start a top-up: ask the backend for a Stripe Checkout URL and redirect there.
+// Pornește o alimentare: cere serverului linkul de plată și duce omul acolo.
+// De la 30 iul linkul e cel de Revolut, nu o sesiune Stripe — dar forma
+// răspunsului a rămas aceeași (`{ url }`), tocmai ca toate locurile de plată
+// (pastila de portofel, /credite, paywall) să se schimbe dintr-o singură atingere.
 // ÎNTOARCE eroarea în loc s-o înghită (Adrian, 24 iul: „apăs pe +credite și nu
 // se execută procedura" — orice eșec era tăcut, butonul părea mort).
 export async function startCheckout(amount: number): Promise<string | null> {
@@ -54,23 +57,8 @@ export async function startCheckout(amount: number): Promise<string | null> {
   }
 }
 
-// ORDIN #6G: create a Stripe PaymentIntent for a direct top-up.
-export async function createPaymentIntent(
-  amount: number,
-): Promise<{ client_secret: string; payment_intent_id: string; amount: number; currency: string } | null> {
-  try {
-    const r = await fetch('/api/billing/payment-intent', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount }),
-    })
-    if (!r.ok) return null
-    return (await r.json()) as { client_secret: string; payment_intent_id: string; amount: number; currency: string }
-  } catch {
-    return null
-  }
-}
+// AICI A STAT `createPaymentIntent` — a doua cale de plată, pe Stripe.js. N-o
+// chema nimeni din interfață, iar ruta din spate a fost scoasă odată cu Stripe.
 
 // ORDIN #6G: user purchase history from the transactions table.
 export async function fetchHistory(): Promise<{ history: PurchaseRecord[] } | null> {
