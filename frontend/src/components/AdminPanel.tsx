@@ -857,12 +857,35 @@ export default function AdminPanel({
                           <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi datele cardului</a>
                         )}
                       </span>
+                      {/* VERIGA 4, MĂSURATĂ, nu declarată. Aici scria pur și simplu
+                          „cu auto-recharge pornit la amândouă" — o afirmație pe care
+                          nimic n-o verifica. Adăugarea cardului în contul de facturare
+                          al unui furnizor NU se poate face prin API (niciunul nu-ți
+                          lasă alt program să-și bage cardul acolo) — deci codul n-are
+                          cum s-o facă. Dar are cum s-o DOVEDEASCĂ: dacă furnizorii
+                          chiar folosesc cardul, există tranzacții pe el. */}
                       <span className="or-wallet-sub">
-                        4. Cardul pus la AI:{' '}
+                        {(circuit.issuingCharges?.length ?? 0) > 0 ? '✅' : '⏳'} 4. Cardul pus la AI —
+                        pas MANUAL, o singură dată:{' '}
                         <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">OpenAI (voce)</a>
                         {' · '}
                         <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">OpenRouter (creier)</a>
-                        {' '}— cu auto-recharge pornit la amândouă
+                      </span>
+                      <span className="or-wallet-sub">
+                        {(circuit.issuingCharges?.length ?? 0) > 0 ? (
+                          <>
+                            Dovadă — cine a taxat cardul:{' '}
+                            {circuit.issuingCharges!.slice(0, 4).map((t, i) => (
+                              <span key={i}>
+                                {i > 0 && ' · '}
+                                {t.merchant} {sym}
+                                {t.amount.toFixed(2)}
+                              </span>
+                            ))}
+                          </>
+                        ) : (
+                          'Cardul n-a fost taxat de niciun furnizor încă — deci nu e (încă) pus în contul lor de facturare. Se pune o dată, de mână, din linkurile de mai sus; după aceea merge singur.'
+                        )}
                       </span>
                       <span className="or-wallet-sub">
                         Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
