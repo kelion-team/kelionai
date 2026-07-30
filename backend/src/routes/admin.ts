@@ -39,6 +39,7 @@ import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../serv
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
+import { envCheck, envSummary, processStartedAt, stripeMode } from '../services/envCheck.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createCardEphemeralKey, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
@@ -423,6 +424,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const notConfigured = checks.filter((c) => c.status === 'not_configured').length
     const failed = checks.length - ok - notConfigured
     return reply.send({ ok, notConfigured, failed, total: checks.length, checks })
+  })
+
+  // ── CE CHEI VEDE SERVERUL CHIAR ACUM (Adrian, 30 iul: „toate cheile au fost
+  // scrise de zeci de ori") ────────────────────────────────────────────────
+  // Panoul spunea „(neconfigurat)" în timp ce omul spunea „le-am scris". Ambele
+  // pot fi adevărate: o cheie SCRISĂ nu ajunge automat în procesul care rulează
+  // — poate fi în alt fișier decât cel dat lui docker, scrisă DUPĂ pornirea
+  // containerului (deci neîncărcată până la repornire), sau pusă ca secret în
+  // GitHub fără să fi rulat `vps-set-env`. Ruta asta întreabă PROCESUL, nu omul.
+  // NU întoarce valori — doar numele, dacă e prezentă, și lungimea.
+  app.get('/api/admin/env-check', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({
+      vars: envCheck(),
+      summary: envSummary(),
+      // Ora pornirii procesului: răspunde la întrebarea care chiar contează —
+      // „am scris cheia ÎNAINTE sau DUPĂ ce a pornit aplicația?"
+      startedAt: processStartedAt(),
+      stripeMode: stripeMode(),
+    })
   })
 
   // GESTURI (Adrian, 13 iul): panoul admin citește/scrie ce gesturi are voie

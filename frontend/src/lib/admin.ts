@@ -630,6 +630,27 @@ export interface TokenChecksResult {
   checks: TokenCheck[]
 }
 
+/** Ce chei vede serverul CHIAR ACUM. Răspunde la „le-am scris de zeci de ori"
+ *  vs. „(neconfigurat)": o cheie scrisă nu ajunge automat în procesul care
+ *  rulează. NU conține valori — doar nume, prezență și lungime. */
+export interface EnvCheckResult {
+  vars: { name: string; what: string; present: boolean; length: number; breaks: string }[]
+  summary: { total: number; lipsa: number; goale: number; nume: string[] }
+  /** Ora pornirii procesului: o cheie scrisă DUPĂ asta nu e încărcată. */
+  startedAt: string
+  stripeMode: 'live' | 'test' | 'lipsă'
+}
+
+export async function fetchEnvCheck(): Promise<EnvCheckResult | null> {
+  try {
+    const r = await fetch('/api/admin/env-check', { credentials: 'include' })
+    if (!r.ok) return null
+    return (await r.json()) as EnvCheckResult
+  } catch {
+    return null
+  }
+}
+
 export async function fetchTokenChecks(): Promise<TokenChecksResult | null> {
   try {
     const r = await fetch('/api/admin/token-checks', { credentials: 'include' })

@@ -56,6 +56,8 @@ import {
   deleteVoiceprint,
   type VoiceprintRow,
   fetchTokenChecks,
+  fetchEnvCheck,
+  type EnvCheckResult,
   type TokenChecksResult,
   fetchAudit,
   type AuditReport,
@@ -271,6 +273,8 @@ export default function AdminPanel({
   }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
+  // CE CHEI VEDE SERVERUL CHIAR ACUM — răspunsul la „le-am scris de zeci de ori".
+  const [envCheck, setEnvCheck] = useState<EnvCheckResult | null>(null)
 
   // The conversation + testing profile of a clicked user (tab "Utilizatori") —
   // ce a scris (chatul) și cum a testat (browser/device/IP/sesiuni/timp), într-un
@@ -360,6 +364,7 @@ export default function AdminPanel({
         setMailboxLive(m)
         setMailboxLoading(false)
       })
+      void fetchEnvCheck().then(setEnvCheck)
     } else if (tab === 'tokenuri') {
       setTokenChecksLoading(true)
       void fetchTokenChecks().then((r) => {
@@ -1564,6 +1569,52 @@ export default function AdminPanel({
         )}
         {tab === 'tokenuri' && (
           <section className="admin-finance">
+            {/* CE VEDE SERVERUL, ÎNAINTE DE ORICE TEST DE REȚEA (Adrian, 30 iul:
+                „toate cheile au fost scrise de zeci de ori"). O cheie SCRISĂ nu
+                ajunge automat în procesul care rulează: poate fi în alt fișier
+                decât cel dat lui docker, scrisă DUPĂ pornirea containerului, sau
+                pusă ca secret în GitHub fără să fi rulat `vps-set-env`. Tabelul
+                ăsta separă „nu e scrisă" de „e scrisă dar n-a ajuns aici". */}
+            {envCheck && (
+              <div className="fin-breakdown" style={{ marginBottom: 14 }}>
+                <div className="fin-breakdown-head">
+                  Ce chei vede serverul CHIAR ACUM — {envCheck.summary.total - envCheck.summary.lipsa - envCheck.summary.goale}/
+                  {envCheck.summary.total} prezente
+                </div>
+                <div className="or-wallet-sub">
+                  Procesul a pornit la{' '}
+                  <strong>{new Date(envCheck.startedAt).toLocaleString('ro-RO')}</strong>. O cheie scrisă
+                  DUPĂ ora asta nu e încărcată până la repornirea containerului — asta e capcana în care
+                  „am scris-o de zeci de ori" și „nu o vede" sunt amândouă adevărate.
+                  {envCheck.stripeMode !== 'live' && ` · Cheia Stripe e: ${envCheck.stripeMode}.`}
+                </div>
+                {envCheck.vars
+                  .filter((v) => !v.present || v.length === 0)
+                  .map((v) => (
+                    <div className="fin-row" key={v.name}>
+                      <span style={{ color: '#e6a23c' }}>
+                        ⚠ <code>{v.name}</code> — {v.what}
+                      </span>
+                      <span className="fin-sub">{v.present ? 'prezentă dar GOALĂ' : 'nu e în proces'} · {v.breaks}</span>
+                    </div>
+                  ))}
+                {envCheck.summary.lipsa === 0 && envCheck.summary.goale === 0 && (
+                  <div className="fin-row">
+                    <span>✅ Toate cheile așteptate sunt în procesul care rulează.</span>
+                  </div>
+                )}
+                {envCheck.vars
+                  .filter((v) => v.present && v.length > 0)
+                  .map((v) => (
+                    <div className="fin-row" key={v.name}>
+                      <span>
+                        ✅ <code>{v.name}</code> — {v.what}
+                      </span>
+                      <span className="fin-sub">{v.length} caractere</span>
+                    </div>
+                  ))}
+              </div>
+            )}
             <div className="fin-breakdown">
               <div className="fin-breakdown-head">
                 Tokenuri și chei API cu drepturi — verificare LIVE
