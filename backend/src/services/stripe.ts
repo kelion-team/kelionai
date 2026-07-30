@@ -441,7 +441,15 @@ export async function autoFundIssuing(): Promise<void> {
   try {
     // Starea reală a celor două pungi.
     const r = await fetch(`${API}/balance`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
-    if (!r.ok) return
+    if (!r.ok) {
+      // IEȘIRE MUTĂ, REPARATĂ (Adrian, 30 iul: „banii nu s-au afișat nici o dată
+      // după plată"). Funcția asta rulează din oră în oră și avea patru ieșiri,
+      // dintre care două nu scriau NIMIC nicăieri. Panoul arăta „—" la ultima
+      // alimentare, iar omul n-avea de unde ști dacă a mers, dacă a picat, sau
+      // dacă nici măcar nu s-a încercat. De-acum FIECARE ieșire își lasă motivul.
+      lastAutoFund = { at: new Date().toISOString(), ok: false, detail: `nu pot citi soldul Stripe (http_${r.status})` }
+      return
+    }
     const b = (await r.json()) as {
       available?: { amount: number; currency: string }[]
       pending?: { amount: number; currency: string }[]
@@ -451,8 +459,16 @@ export async function autoFundIssuing(): Promise<void> {
     const payments = (b.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
     const pendingAmt = (b.pending ?? []).find((a) => a.currency === cur)?.amount ?? 0
     const issuing = (b.issuing?.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
-    // Punga cardului are destul → nimic de făcut.
-    if (issuing >= ISSUING_MIN * 100) return
+    // Punga cardului are destul → nimic de făcut. (Se notează oricum: „n-am
+    // făcut nimic FIINDCĂ n-a fost nevoie" e alt lucru decât „n-am făcut nimic".)
+    if (issuing >= ISSUING_MIN * 100) {
+      lastAutoFund = {
+        at: new Date().toISOString(),
+        ok: true,
+        detail: `nimic de făcut: punga cardului are £${(issuing / 100).toFixed(2)} (pragul e £${ISSUING_MIN})`,
+      }
+      return
+    }
 
     // ── REZERVA CARE NU SE ATINGE (Adrian, 30 iul) ────────────────────────
     // „Se face strict asta când avem mai mult de 100 de lire, și se corelează
@@ -466,7 +482,21 @@ export async function autoFundIssuing(): Promise<void> {
     const useri = await countWalletUsers().catch(() => 0)
     const rezerva = (REZERVA_BAZA + Math.max(0, useri - 1) * REZERVA_PER_USER) * 100
     const disponibil = payments - rezerva
-    if (disponibil <= 0) return // sub rezervă: nu se scoate nimic, punct.
+    if (disponibil <= 0) {
+      // ASTA E IEȘIREA CARE L-A COSTAT O ZI. Regula rezervei e a lui și rămâne
+      // (banii userilor, care pot cere înapoi, nu pleacă spre card) — dar când
+      // pune bani și nu se întâmplă NIMIC, trebuie să vadă DE CE: cât e în
+      // punga de plăți, cât e rezerva, deci cât lipsește ca să se miște ceva.
+      lastAutoFund = {
+        at: new Date().toISOString(),
+        ok: false,
+        detail:
+          `nu s-a transferat nimic: în punga de plăți sunt £${(payments / 100).toFixed(2)}, ` +
+          `iar rezerva intangibilă (${useri} user${useri === 1 ? '' : 'i'}) e £${(rezerva / 100).toFixed(2)}. ` +
+          `Mai trebuie £${((rezerva - payments) / 100 + 0.01).toFixed(2)} ca să înceapă alimentarea cardului.`,
+      }
+      return // sub rezervă: nu se scoate nimic, punct.
+    }
     const want = Math.min(ISSUING_TOPUP * 100, disponibil)
     if (want < 100) {
       // Punga plăților GOALĂ și nimic pe drum → depunerea automată a ownerului
