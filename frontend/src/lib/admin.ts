@@ -109,9 +109,25 @@ export async function fetchCardKey(cardId: string, nonce: string): Promise<strin
   }
 }
 
-export async function createAiCard(): Promise<{ id: string; last4: string; url: string } | null> {
+/** Adresa titularului cardului. OBLIGATORIE: era hardcodată în backend cu o
+ *  adresă inventată din Londra, ceea ce putea da refuz la verificarea de adresă
+ *  a furnizorului — și era o declarație falsă către Stripe. */
+export interface CardAddress {
+  line1: string
+  line2?: string
+  city: string
+  postal_code: string
+  country: string
+}
+
+export async function createAiCard(addr: CardAddress): Promise<{ id: string; last4: string; url: string } | null> {
   try {
-    const r = await fetch('/api/admin/money-circuit/card', { method: 'POST', credentials: 'include' })
+    const r = await fetch('/api/admin/money-circuit/card', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(addr),
+    })
     return r.ok ? ((await r.json()) as { id: string; last4: string; url: string }) : null
   } catch {
     return null

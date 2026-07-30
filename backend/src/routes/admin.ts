@@ -485,11 +485,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // motivul) intră în circuitul banilor din admin, lângă restul verigilor.
     return reply.send({ ...(await getMoneyCircuit()), autoFund: lastAutoFundStatus() })
   })
-  app.post('/api/admin/money-circuit/card', async (req, reply) => {
+  app.post<{ Body: { line1?: string; line2?: string; city?: string; postal_code?: string; country?: string } }>(
+    '/api/admin/money-circuit/card',
+    async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const r = await createKelionCard(user.email)
-    if ('error' in r) return reply.code(502).send(r)
+    // Adresa titularului vine de la owner (vezi comentariul din createKelionCard):
+    // înainte era inventată în cod, ceea ce putea da refuz la verificarea de adresă.
+    const r = await createKelionCard(user.email, {
+      line1: String(req.body?.line1 ?? ''),
+      line2: req.body?.line2 ? String(req.body.line2) : undefined,
+      city: String(req.body?.city ?? ''),
+      postal_code: String(req.body?.postal_code ?? ''),
+      country: String(req.body?.country ?? 'GB'),
+    })
+    if ('error' in r) return reply.code(r.error === 'bad_address' ? 400 : 502).send(r)
     return reply.send({ ok: true, ...r })
   })
 
