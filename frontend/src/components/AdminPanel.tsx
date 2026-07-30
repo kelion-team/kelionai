@@ -15,7 +15,6 @@ import {
   fetchFinance,
   fetchTransactions,
   type TransactionRow,
-  updatePool,
   manageUser,
   sellCredits,
   fetchMoneyCircuit,
@@ -190,8 +189,6 @@ export default function AdminPanel({
   // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
-  const [poolAmount, setPoolAmount] = useState('')
-  const [poolBusy, setPoolBusy] = useState(false)
   // Lead-uri — vizitatori care și-au lăsat emailul.
   const [leads, setLeads] = useState<Lead[]>([])
   const [demos, setDemos] = useState<DemoStats | null>(null)
@@ -925,69 +922,30 @@ export default function AdminPanel({
                     </>
                   )}
                 </div>
+                {/* PUNGA UNICĂ (Adrian, 30 iul). Aici era câmpul „+ Adaugă bani /
+                    − Scoate bani": scriai cu mâna cât credeai că ai, iar panoul
+                    afișa cifra aia ca fapt, fără s-o verifice NICIODATĂ cu
+                    Stripe sau cu furnizorul creierului. Ștearsă. Acum se ADUNĂ
+                    din cele trei surse reale; dacă una nu răspunde, se spune,
+                    nu se socotește zero. */}
                 <div className="pool-manage">
                   <div className="pool-manage-head">
-                    Pool AI — banii puși la dispoziția AI. Încărcat {sym}
-                    {finance.loaded.toFixed(2)} · rămas {sym}
-                    {finance.remaining.toFixed(2)}
+                    Punga (tot ce ai, citit de la surse): {sym}
+                    {finance.punga.total.toFixed(2)}
+                    {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
                   </div>
-                  <div className="pool-manage-row">
-                    <input
-                      className="pool-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder={`Sumă (${sym})`}
-                      value={poolAmount}
-                      onChange={(e) => setPoolAmount(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Enter în câmp = „Adaugă bani" (fluxul principal), ca să nu
-                        // pară că „nu face nimic" când apeși Enter în loc de buton.
-                        if (e.key !== 'Enter' || poolBusy || !(Number(poolAmount) > 0)) return
-                        e.preventDefault()
-                        void (async () => {
-                          setPoolBusy(true)
-                          const ok = await updatePool(Number(poolAmount), 'add')
-                          if (ok) {
-                            setPoolAmount('')
-                            await fetchFinance().then(setFinance)
-                          }
-                          setPoolBusy(false)
-                        })()
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="pool-btn add"
-                      disabled={poolBusy || !(Number(poolAmount) > 0)}
-                      onClick={async () => {
-                        setPoolBusy(true)
-                        const ok = await updatePool(Number(poolAmount), 'add')
-                        if (ok) {
-                          setPoolAmount('')
-                          await fetchFinance().then(setFinance)
-                        }
-                        setPoolBusy(false)
-                      }}
-                    >
-                      + Adaugă bani
-                    </button>
-                    <button
-                      type="button"
-                      className="pool-btn withdraw"
-                      disabled={poolBusy || !(Number(poolAmount) > 0)}
-                      onClick={async () => {
-                        setPoolBusy(true)
-                        const ok = await updatePool(Number(poolAmount), 'withdraw')
-                        if (ok) {
-                          setPoolAmount('')
-                          await fetchFinance().then(setFinance)
-                        }
-                        setPoolBusy(false)
-                      }}
-                    >
-                      − Scoate bani
-                    </button>
+                  <div className="pool-parts">
+                    {([
+                      ['Stripe — disponibil', finance.punga.parti.stripeAvailable],
+                      ['Stripe — în tranzit', finance.punga.parti.stripePending],
+                      ['Card virtual (Issuing)', finance.punga.parti.stripeIssuing],
+                      ['Credit la creier', finance.punga.parti.openrouter],
+                    ] as [string, number | null][]).map(([eticheta, val]) => (
+                      <div className="fin-row" key={eticheta}>
+                        <span>{eticheta}</span>
+                        <span>{val === null ? 'nu răspunde' : `${sym}${val.toFixed(2)}`}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <div className="fin-breakdown">
