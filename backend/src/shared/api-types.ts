@@ -158,6 +158,12 @@ export interface MoneyCircuit {
    *  (Adrian, 30 iul: „fa-l autonom"). `ok:true` = chiar a pornit ceva atunci.
    *  Se afiseaza ca sa nu fie nevoie de crezut pe cuvant ca bucla traieste. */
   autonomie?: { la: string; ok: boolean; detaliu: string } | null
+  /** Costul REAL la furnizori: total, azi, si pe ce s-a dus. Exista ca unealta —
+   *  trebuia sa INTREBI ca sa afli. Acum se vede, langa bani. Nu taie nimic. */
+  costReal?: { total: number; today: number; byKind: Record<string, number> } | null
+  /** Maneta ownerului: autonomia e oprita? O limita pe care o alege EL nu e o
+   *  bariera; una pusa de mine, da. De-aia e la vedere, si e a lui. */
+  autonomiaOprita?: boolean
   error?: string
 }
 

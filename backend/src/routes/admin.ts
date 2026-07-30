@@ -36,6 +36,7 @@ import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati } from '../services/openBanking.js'
 import { stareAutonomie } from '../services/autonomie.js'
+import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
@@ -530,8 +531,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // din același motiv ca restul: ca „bucla lucrează" să fie o citire, nu
       // o afirmație a mea.
       autonomie: stareAutonomie(),
+      // COSTUL LA VEDERE (Adrian, 30 iul: „am nevoie să văd, nu frâne").
+      // Exista ca unealtă — trebuia să ÎNTREBE ca să afle. Acum e în panou,
+      // lângă bani: total, azi, și pe ce s-a dus. Nu taie nimic; arată.
+      costReal: await getCostSummary().catch(() => null),
+      // FRÂNA E A TA, ȘI SE VEDE. „pauza-autonomie" exista de mult, dar doar ca
+      // o comandă pe care trebuia s-o știi pe de rost. O limită pe care o alegi
+      // tu nu e o barieră; una pe care ți-o pun eu, da.
+      autonomiaOprita: await isOpsPaused().catch(() => false),
     })
   })
+  // FRÂNA TA, LA UN CLICK (Adrian, 30 iul: „cele 6 trebuiesc, dar nu frâne" —
+  // asta nu e o frână pusă de mine peste el, e maneta pe care o ții TU).
+  // „pauza-autonomie" exista din 27 iul, dar numai ca o comandă pe care trebuia
+  // s-o știi pe de rost și s-o spui lui Kelion. Acum e un buton, la vedere.
+  app.post<{ Body: { oprit?: boolean } }>('/api/admin/autonomie/pauza', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const oprit = req.body?.oprit === true
+    await setOpsPaused(oprit)
+    return reply.send({ oprit })
+  })
+
   app.post<{ Body: { line1?: string; line2?: string; city?: string; postal_code?: string; country?: string } }>(
     '/api/admin/money-circuit/card',
     async (req, reply) => {
