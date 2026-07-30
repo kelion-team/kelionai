@@ -195,3 +195,33 @@ gratuite povestesc uneori în loc să folosească uneltele. Dacă un pas se bloc
 la trei încercări din motivul ăsta, se vede în panou și **singura pârghie e a ta**:
 `CONSTRUCTOR_MODEL` pe un model plătit + `CONSTRUCTOR_ALLOW_PAID=1`. Nu ți-am
 schimbat-o eu, fiindcă sunt banii tăi și regula e a ta.
+
+---
+
+## H. CELE ȘASE ALE UNUI KELION AVANSAT — livrate 30 iul, noaptea
+
+> „Ce mai trebuie să aibă un Kelion avansat?" · „fii onest și adu lumină" ·
+> **„da, și cele 6 trebuiesc, dar NU frâne."**
+
+Lista a ieșit din ce s-a **măsurat** în ziua aia, nu din broșură. Regula ta peste
+toate: niciuna nu are voie să devină limită pentru el.
+
+| # | Ce | Unde se vede | De ce nu e frână |
+|---|---|---|---|
+| 1 | **Memoria deciziilor** | tabela `cerinte` | îl scutește să reintre în ziduri, nu-l oprește |
+| 2 | **Captarea cerințelor** | `cerinta_noua` din chat și voce | notează ce ceri, cu criteriul scris înainte |
+| 3 | **Prioritatea** | `cerinta_prioritate` (1 = arde) | schimbă ORDINEA, nu ce are voie |
+| 4 | **Verificarea proprie** | probează pe live ce a livrat | dacă pică, EL repară |
+| 5 | **Costul + maneta ta** | Admin → Bani | unul măsoară, celălalt e comanda TA |
+| 6 | **Restaurarea probată** | runbook `proba-restaurare` | dovedește plasa, nu limitează munca |
+
+**Peste listă:** reanaliza continuă — când n-are ce duce, își reia ce a livrat și
+întreabă „se putea mai bine, acum?". Ce iese devine cerință nouă.
+
+**Ce NU e dovedit, și n-o ascund:** proba de restaurare **nu a fost rulată**.
+Rulează prin mașinile de build GitHub, picate de pe la 16:18 (joburile mor în
+2-3 secunde, înainte de primul pas; jurnalele dau 404, deci motivul exact nu se
+poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
+
+**Ce rămâne al tău:** B5 (cheia `sk_live`, un click în dashboardul tău) și B8
+(arderea — acum ai cifra la vedere, deci decizia e informată).
