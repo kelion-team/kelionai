@@ -29,6 +29,7 @@ import {
   decideKelionTool,
   listBuildJobs,
   listClientErrorGroups,
+  resetCostCounters,
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -451,6 +452,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!id) return reply.code(400).send({ error: 'bad_request' })
     const ok = await decideKelionTool(id, req.body?.approve === true)
     return reply.send({ ok, tools: await listKelionTools() })
+  })
+
+  // RESETAREA CONTOARELOR DE CONSUM (Adrian, 30 iul). Șterge DOAR jurnalul
+  // costurilor noastre la furnizori. Portofelele userilor, registrul plăților și
+  // istoricul de cumpărare rămân NEATINSE — creditele consumate nu se dau înapoi,
+  // iar contabilitatea nu se rescrie. Cere sesiune de admin, ca tot ce e aici.
+  app.post('/api/admin/reset-counters', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await resetCostCounters())
   })
 
   // Ruta /api/admin/pool a fost ȘTEARSĂ (Adrian, 30 iul): scria de mână cât

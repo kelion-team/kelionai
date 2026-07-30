@@ -158,6 +158,8 @@ export default function AdminPanel({
   const [gestSaved, setGestSaved] = useState(false)
   // La preview, panoul devine transparent ~3.5s ca să vezi avatarul din spate.
   const [peek, setPeek] = useState(false)
+  // Butonul „Pune pe 0” din tabul Bani: cât timp rulează, nu se apasă de două ori.
+  const [resetBusy, setResetBusy] = useState(false)
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
@@ -948,7 +950,33 @@ export default function AdminPanel({
                   </div>
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Cost per AI (real)</div>
+                  <div className="fin-breakdown-head">
+                    Cost per AI (real)
+                    {/* RESETAREA CONTOARELOR (Adrian, 30 iul). Șterge DOAR
+                        jurnalul costurilor noastre la furnizori. Portofelele
+                        userilor NU se ating: creditele consumate nu se dau
+                        înapoi. Punga nu are ce reseta — se citește live. */}
+                    <button
+                      type="button"
+                      className="pool-btn withdraw"
+                      style={{ marginLeft: 10, fontSize: 12, padding: '3px 9px' }}
+                      disabled={resetBusy}
+                      onClick={async () => {
+                        if (!window.confirm(
+                          'Pui pe 0 contoarele de consum?\n\n' +
+                          'Se șterge doar jurnalul „cât ne-a costat pe noi la furnizori".\n' +
+                          'NU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\n' +
+                          'Creditele deja consumate NU se dau înapoi.',
+                        )) return
+                        setResetBusy(true)
+                        await fetch('/api/admin/reset-counters', { method: 'POST', credentials: 'include' }).catch(() => null)
+                        await fetchFinance().then(setFinance).catch(() => {})
+                        setResetBusy(false)
+                      }}
+                    >
+                      {resetBusy ? '…' : 'Pune pe 0'}
+                    </button>
+                  </div>
                   {aiParts.length === 0 && <div className="chat-hint">Niciun consum încă.</div>}
                   {aiParts.map(([k, v]) => (
                     <div className="fin-row" key={k}>

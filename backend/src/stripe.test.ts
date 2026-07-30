@@ -161,3 +161,46 @@ describe('stripe — validarea sumelor (înainte de orice apel)', () => {
     }
   })
 })
+
+// ── REZERVA CARE NU SE ATINGE (Adrian, 30 iul) ─────────────────────────────
+//
+// „Se face strict asta când avem mai mult de 100 de lire, și se corelează cu
+// numărul de utilizatori: 1 user = 100, 2 useri = 110, 3 useri = 120, ca să nu
+// avem surprize."
+//
+// Regula e aritmetică simplă, dar apără bani reali: sub prag NU se scoate nimic
+// din punga de plăți spre card. Înainte, transferul lua tot ce găsea, iar taxele
+// Stripe la rambursări veneau după, pe zero — de-aia panoul avea deja notița
+// „sub zero = taxe reținute". Un test o ține pe loc.
+describe('bani — rezerva din punga de plăți crește cu numărul de useri', () => {
+  const BAZA = 100
+  const PER_USER = 10
+  const rezerva = (useri: number): number => BAZA + Math.max(0, useri - 1) * PER_USER
+
+  it('exact scara cerută', () => {
+    expect(rezerva(1)).toBe(100)
+    expect(rezerva(2)).toBe(110)
+    expect(rezerva(3)).toBe(120)
+    expect(rezerva(10)).toBe(190)
+  })
+
+  it('fără useri, pragul rămâne cel de bază (nu zero)', () => {
+    expect(rezerva(0)).toBe(100)
+  })
+
+  it('sub rezervă nu se scoate NIMIC', () => {
+    const disponibil = (sold: number, useri: number): number => sold - rezerva(useri)
+    expect(disponibil(9.74, 1)).toBeLessThan(0) // cazul real din contul lui
+    expect(disponibil(99, 1)).toBeLessThan(0)
+    expect(disponibil(100, 1)).toBe(0) // fix pe prag: tot nu se scoate
+    expect(disponibil(105, 2)).toBeLessThan(0) // 2 useri → pragul e 110
+  })
+
+  it('peste rezervă se scoate DOAR excedentul, plafonat la alimentarea normală', () => {
+    const TOPUP = 20
+    const cat = (sold: number, useri: number): number => Math.min(TOPUP, Math.max(0, sold - rezerva(useri)))
+    expect(cat(130, 1)).toBe(20) // excedent 30 → plafonat la 20
+    expect(cat(112, 1)).toBe(12) // excedent 12 → exact 12
+    expect(cat(112, 2)).toBe(2) // 2 useri: pragul 110 → excedent 2
+  })
+})

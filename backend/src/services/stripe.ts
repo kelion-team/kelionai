@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import type { MoneyCircuit } from '../shared/api-types.js'
 export type { MoneyCircuit }
 import { config } from '../config.js'
-import { getStripeCustomer, setStripeCustomer } from '../db.js'
+import { getStripeCustomer, setStripeCustomer, countWalletUsers } from '../db.js'
 
 // Thin Stripe client over the REST API (no SDK dependency). Handles: a customer
 // per user, a Checkout Session for a credit top-up, and webhook signature
@@ -285,6 +285,11 @@ export function lastAutoFundStatus(): { at: string; ok: boolean; detail: string 
 
 const ISSUING_MIN = Math.max(0, Number(process.env.ISSUING_MIN_GBP ?? '10') || 10)
 const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') || 20)
+// Rezerva minimă ținută în punga de plăți: de la ea în jos nu se scoate nimic
+// spre card. Creste cu fiecare user, fiindcă fiecare user in plus inseamna inca
+// un om care poate cere banii inapoi. Reglabile din mediu, fara deploy.
+const REZERVA_BAZA = Math.max(0, Number(process.env.STRIPE_RESERVE_GBP ?? '100') || 100)
+const REZERVA_PER_USER = Math.max(0, Number(process.env.STRIPE_RESERVE_PER_USER_GBP ?? '10') || 10)
 
 // DEPUNERE AUTOMATĂ A OWNERULUI (Adrian, 24 iul: „când vede că trebuiesc bani,
 // să se ducă automat"): dacă punga cardului E goală ȘI punga plăților n-are din
@@ -324,7 +329,21 @@ export async function autoFundIssuing(): Promise<void> {
     const issuing = (b.issuing?.available ?? []).find((a) => a.currency === cur)?.amount ?? 0
     // Punga cardului are destul → nimic de făcut.
     if (issuing >= ISSUING_MIN * 100) return
-    const want = Math.min(ISSUING_TOPUP * 100, payments)
+
+    // ── REZERVA CARE NU SE ATINGE (Adrian, 30 iul) ────────────────────────
+    // „Se face strict asta când avem mai mult de 100 de lire, și se corelează
+    // cu numărul de utilizatori: 1 user = 100, 2 useri = 110, 3 useri = 120,
+    // ca să nu avem surprize."
+    //
+    // Până acum transferul lua TOT ce găsea (`min(topup, payments)`), fără prag.
+    // Rambursările și taxele Stripe vin DUPĂ, pe un sold golit — de-aia panoul
+    // avea deja notița „sub zero = taxe Stripe reținute". Rezerva e banii
+    // userilor care încă pot cere înapoi; ei rămân în punga de plăți.
+    const useri = await countWalletUsers().catch(() => 0)
+    const rezerva = (REZERVA_BAZA + Math.max(0, useri - 1) * REZERVA_PER_USER) * 100
+    const disponibil = payments - rezerva
+    if (disponibil <= 0) return // sub rezervă: nu se scoate nimic, punct.
+    const want = Math.min(ISSUING_TOPUP * 100, disponibil)
     if (want < 100) {
       // Punga plăților GOALĂ și nimic pe drum → depunerea automată a ownerului
       // (cardul salvat, o dată/zi). Banii intră în pungă la decontare.
