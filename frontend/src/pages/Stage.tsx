@@ -947,28 +947,13 @@ export default function Stage({ user }: { user: User }) {
                   : '⚠ OpenRouter'}
               </button>
             )}
-            {/* PUNGA STRIPE (Adrian, 24 iul: „după OpenRouter — banii în Stripe,
-                reali"): disponibil acum + în tranzit. Roșu pulsând sub zero.
-                Click → tabul Bani din admin (circuitul complet). */}
-            {brainCredit?.stripe && (
-              <button
-                type="button"
-                className={`ghost ${brainCredit.stripe.available <= 0 ? 'blink-red' : ''}`}
-                onClick={() => openAdmin('finance')}
-                title={`Punga Stripe (banii userilor): disponibil £${brainCredit.stripe.available.toFixed(2)}, în tranzit £${brainCredit.stripe.pending.toFixed(2)} · click pentru circuitul banilor`}
-              >
-                Stripe £{brainCredit.stripe.available.toFixed(2)}
-                {brainCredit.stripe.pending > 0 && ` (+£${brainCredit.stripe.pending.toFixed(2)} în tranzit)`}
-                {/* „stripe 0? am băgat bani" — dacă soldul e ținut în ALTĂ monedă,
-                    zeroul de mai sus e adevărat doar pentru lire. Spune-o. */}
-                {(brainCredit.stripe.alteMonede ?? []).map((m) => (
-                  <span key={m.currency}>
-                    {' '}
-                    + {(m.available + m.pending).toFixed(2)} {m.currency.toUpperCase()}
-                  </span>
-                ))}
-              </button>
-            )}
+            {/* AICI A STAT PASTILA „Stripe £0.00" din bara de sus. Scoasă pe
+                30 iul, odată cu Stripe: banii userilor nu mai trec prin el —
+                plătesc pe linkul Revolut, direct în contul lui Adrian. Cifra
+                rămasă acolo n-ar fi arătat niciodată altceva decât zero, adică
+                exact genul de „0" care nu înseamnă nimic și sperie degeaba.
+                Ce a mai rămas în bară e soldul creierului (OpenRouter), singurul
+                pe care aplicația chiar îl poate citi. */}
           </>
         )}
         {/* Credit + reîncărcare pentru ORICE user logat (Adrian, 24 iul). Din
