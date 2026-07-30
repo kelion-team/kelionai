@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, toolsToOpenAI, hasActionIntent, groupCatalog } from './openrouter.js'
+import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
@@ -73,6 +73,32 @@ describe('openrouter catalog', () => {
     // context, FĂRĂ vedere — de asta garda !needsVision din chat.ts).
     expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+  })
+
+  // ── ÎNLOCUIREA CREIERULUI NU MAI E TĂCUTĂ ───────────────────────────────────
+  // Adrian, 30 iul: „Kelion nu execută cerințele". Una dintre căile prin care
+  // ajungea acolo: își alesese un model din Admin→Modele, acela dispărea din
+  // catalogul furnizorului, iar `resolveModel` întorcea în TĂCERE implicitul
+  // `:free` — model slab, care narează în loc să cheme unealta. Nimic, nicăieri,
+  // nu spunea că s-a schimbat creierul sub el.
+  it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
+    const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
+    expect(cerut.fellBack).toBe(true)
+    expect(cerut.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+  })
+
+  it('fără nicio cerere, implicitul NU e o cădere (n-a fost respins nimic)', async () => {
+    const implicit = await resolveModelChecked('work', null)
+    expect(implicit.fellBack).toBe(false)
+    expect(implicit.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+  })
+
+  it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {
+    // Paznic de compatibilitate: zeci de apeluri vechi trec prin `resolveModel`;
+    // dacă cele două ar diverge, ar fi două adevăruri despre același lucru.
+    for (const cerut of [null, 'ceva/inexistent']) {
+      expect(await resolveModel('work', cerut)).toBe((await resolveModelChecked('work', cerut)).model)
+    }
   })
 
   it('hasActionIntent (25 iul — escaladare economică: ieftin implicit, greu doar pe cereri de acțiune reală)', () => {
