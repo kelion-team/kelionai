@@ -24,6 +24,42 @@ relevant section of `AI-HANDOFF.md` (and its §13 "Starea") before you finish
 your session/PR.** There is no other auto-update mechanism — this convention is
 the mechanism. A stale handoff doc is worse than none: it misleads the next AI.
 
+## THE FOUR RULES THAT COST THE OWNER A WHOLE DAY (30 iul 2026)
+
+Every one of these is written from a real failure of that day, not from theory.
+He asked, at the end: „se poate să schimbi modul ăsta de lucru defectuos?" These
+are the answer. Read them before you report anything to him.
+
+1. **A value that did not come from a successful measurement is „nu pot
+   verifica" — never a number, never a verdict.** Three times in one day the
+   panel *asserted* a state it had never measured: „Cardul Kelion AI: necreat"
+   (the code had never looked for cards), „£0.00" (the field started at 0 and
+   stayed 0 when the request failed), and three red ❌ produced by one failed
+   call. Same shape every time: **a failed read presented as an established
+   fact.** If you cannot measure it, say so.
+
+2. **When the owner contradicts a report of yours, the FIRST place you look is
+   your own code that produced that report.** He said „toate cheile au fost
+   scrise de zeci de ori" — twice. The first time I built a diagnostic tool
+   (i.e. „go check again"). Only the second time did I open `config.ts`, where
+   the answer had been all along: three keys had name aliases, the three that
+   failed had none. He was right both times. He is usually right about his own
+   system — he is the one looking at it.
+
+3. **Never run a bulk operation on something you have not looked at.**
+   `git add -A` on a conflicted merge committed `<<<<<<<` markers into five
+   files, including running code. A reused CSS class name tore a live page
+   apart. Both were „quick". Both cost more than looking would have.
+   `scripts/verifica-sintaxa.mjs` now fails the build on committed conflict
+   markers in **every** file type — but the rule is the point, the gate is only
+   the net.
+
+4. **Before asking him to do anything by hand, prove from code or from live that
+   it is actually needed.** I sent him hunting through Stripe's permission list
+   for `Account: Read` — then discovered the app never needed it, because the
+   real blocker was my own `if` around the card lookup. His time is not the
+   place to test a hypothesis.
+
 ## Working rules (non-negotiable) — full detail in AI-HANDOFF.md §1
 - **Reply to the owner in Romanian.** Owner = adrianenc11@gmail.com, sole admin.
 - The owner **tests live** on kelionai.app, not locally. After each fixed
