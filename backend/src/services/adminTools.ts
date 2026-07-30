@@ -16,6 +16,7 @@ import { dbTablesOverview, dbQuery } from '../db.js'
 import { systemHealth } from './health.js'
 import { repoWrite, repoOpenPR, repoMergePR } from './github.js'
 import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks.js'
+import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
 
 // Numele uneltelor admin partajate (chat ∩ voce). Apelantul verifică apartenența
 // ca să știe dacă delegă aici sau tratează el (build_software, google, browser...).
@@ -24,6 +25,7 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'db_tables', 'db_query', 'system_health',
   'repo_write', 'repo_open_pr', 'repo_merge_pr',
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
+  'secret_pune', 'secret_lista', 'secret_publica',
 ])
 
 // Execută o unealtă admin PARTAJATĂ. Întoarce rezultatul (string) sau `null` dacă
@@ -44,6 +46,11 @@ export async function execSharedAdminTool(name: string, args: Record<string, unk
     case 'runbook_status': return runbookStatus(args.name ? String(args.name) : undefined)
     case 'runbook_log': return runbookLog(Number(args.run_id ?? 0))
     case 'request_repair': return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
+    // SETĂRILE LUI. `valoare` NU se pune în niciun jurnal de aici — funcția
+    // din secrete.ts raportează doar numele și lungimea.
+    case 'secret_pune': return seteazaSecret(String(args.nume ?? ''), String(args.valoare ?? ''))
+    case 'secret_lista': return listeazaSecrete()
+    case 'secret_publica': return publicaCheile()
     case 'propose_tool': {
       // AUTO-EXTINDEREA: Kelion își cere singur o unealtă nouă (owner o aprobă
       // cu un click în Admin → Unelte Kelion). Identic pe scris și pe voce.

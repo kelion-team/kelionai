@@ -93,8 +93,9 @@ ID-ul e vizibil.
 
 ## 5. CHEILE ÎN GITHUB — 2 minute
 
-**Cine:** tu. **Eu nu am unealtă care să scrie secrete în GitHub** — nici nu e
-rău că nu am: sunt cheile tale.
+**Cine:** de pe 30 iul, **Kelion** — vezi §9. Îi spui cheia, o pune el, criptat,
+și ți-o confirmă cu numele și lungimea, niciodată cu valoarea. Ce urmează aici e
+calea manuală, dacă vrei s-o faci tu.
 
 Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
 → **New repository secret**, de patru ori, cu numele **exact** de mai jos:
@@ -106,10 +107,13 @@ Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
 | `GOCARDLESS_SECRET_KEY` | de la §3 |
 | `GOCARDLESS_ACCOUNT_ID` | de la §4 |
 
-**Numele trebuie scrise identic.** Un nume greșit înseamnă cheie scrisă degeaba
-— exact capcana din 30 iul, când `vps-set-env` avea o listă fixă de nume și
-linkul Revolut cădea în gol. (Lista e reparată acum și le conține pe toate
-patru; asta a fost verificat, nu presupus.)
+**Numele trebuie scrise identic** — codul caută cheia sub numele ăla.
+
+**Capcana listei fixe a dispărut de tot (30 iul).** `vps-set-env` avea o listă de
+nume scrisă de mână; o cheie care nu era în ea se scria în GitHub și **nu ajungea
+niciodată pe server**, fără niciun semn — exact ce a pățit `REVOLUT_PAY_LINK`.
+Acum workflow-ul ia **toate** secretele de la GitHub, deci o cheie nouă nu mai
+poate cădea în gol.
 
 ---
 
@@ -159,24 +163,31 @@ evaporă.
 
 ---
 
-## 9. DACĂ VREI SĂ SCAPI DE PAȘII 3-4-6 CU TOTUL
+## 9. CINE FACE SETĂRILE: EL, NU TU
 
-Cei doi pași cu portalul (§3, §4) sunt singurii enervanți, și singurii care se
-repetă (consimțământul expiră). Există două alternative, ambele fără portal:
+**30 iul, cerința ta:** „să creeze secretele și să le pună unde trebuie, e al meu
+și îi permit full acces."
 
-**(a) Prin email.** Aplicația **citește deja** cutia `contact@kelionai.app`
-(modulul e scris și funcțional). Revolut trimite email la fiecare plată primită.
-O singură regulă în Gmail — „de la Revolut → trimite la contact@kelionai.app" —
-și potrivirea codului se face din email, nu din API bancar. **Zero conturi noi,
-zero consimțământ care expiră.** Riscul: dacă Revolut schimbă formatul mailului,
-potrivirea se poate strica — de-aia plasa „plăți neatribuite" rămâne.
+Kelion are de acum trei unelte, pe scris și pe voce:
 
-**(b) Un procesator cu webhook** (Stripe, Paddle, Gumroad). Configurezi o
-singură dată, nu expiră niciodată, dar are comision și e un intermediar în plus
-între tine și banii tăi.
+| Unealta | Ce face |
+|---|---|
+| `secret_lista` | vede ce chei există (doar **numele** — GitHub nu dă valorile nimănui) |
+| `secret_pune` | scrie o cheie în secretele repo-ului, **criptată** |
+| `secret_publica` | o duce pe server și repornește aplicația |
 
-Codul de potrivire e același în toate variantele — se schimbă doar **de unde
-află** aplicația că a intrat un ban.
+Deci pașii §5 și §6 de mai sus **nu mai sunt treaba ta**: îi spui ce vrei
+configurat, el o face și îți raportează **numele cheii și starea**. Le-am lăsat
+scrise ca să le poți face tu oricând, nu fiindcă trebuie.
+
+**Ce nu se întâmplă, prin construcție:** valoarea unei chei nu se repetă în chat,
+nu ajunge pe monitor, nu se scrie într-un fișier din repo, nu apare în niciun
+jurnal — se raportează numele și câte caractere are. Un număr de card e refuzat
+din start, oricine ar cere-o.
+
+**Ce rămâne al tău:** cheia pe care doar Revolut o poate emite. Aia i-o dai o
+singură dată, iar el o pune unde trebuie. **Nu prin email** — plata nu se
+citește din inbox (30 iul: „ce ai făcut cu email scoți imediat").
 
 ---
 

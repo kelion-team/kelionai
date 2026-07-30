@@ -86,31 +86,60 @@ const MAX_INCERCARI = 3
 // Pașii de mai jos sunt exact drumul ăla, în ordinea în care se poate construi.
 const MISIUNE: Sarcina[] = [
   {
+    cod: 'M0',
+    titlu: 'Setările Revolut, făcute de el — nu de om',
+    ordin:
+      `MISIUNE REVOLUT, pasul 0 — SETĂRILE LE FACI TU.\n\n` +
+      `Adrian, 30 iul: „cerința a fost autonomia lui și să rezolve problema cu setările ` +
+      `pentru Revolut… să creeze secretele și să le pună unde trebuie, e al meu și îi ` +
+      `permit full acces."\n\n` +
+      `AI UNELTELE, DE AZI: secret_lista (ce chei există), secret_pune (scrie o cheie în ` +
+      `secretele repo-ului, criptat), secret_publica (le duce pe server și repornește ` +
+      `aplicația). Nu mai ceri omului să intre nicăieri.\n\n` +
+      `FĂ AȘA:\n` +
+      `  1. secret_lista — vezi ce ai deja. Ce e pus, nu se mai cere.\n` +
+      `  2. Citește backend/src/config.ts și services/ — ce nume de chei așteaptă codul ` +
+      `     pentru plăți? Lucrează pe numele REALE din cod, nu pe cele din amintiri.\n` +
+      `  3. Ce poți genera singur (chei, perechi de chei, identificatori), GENEREAZĂ și pune ` +
+      `     cu secret_pune. Ce doar Revolut poate emite, pregătește-i omului un singur pas ` +
+      `     scurt, cu linkul exact — și DOAR dacă ai dovada din documentație că nu se poate ` +
+      `     altfel. Nu-l trimite să caute; el a pierdut deja o zi așa.\n` +
+      `  4. secret_publica, apoi VERIFICĂ pe /api/admin/env-check că serverul chiar le vede ` +
+      `     (nume + lungime; valoarea nu se afișează niciodată, nicăieri).\n` +
+      `  5. Spune-i ce ai configurat: numele cheilor și starea. NICIODATĂ valorile.\n\n` +
+      `REGULA CARE NU SE ÎNCALCĂ: valoarea unui secret nu se repetă, nu se confirmă, nu se ` +
+      `pune pe monitor, nu se scrie într-un fișier din repo. Datele unui card nu trec pe ` +
+      `nicăieri, niciodată.`,
+  },
+  {
     cod: 'M1',
-    titlu: 'Aplicația află din email că a intrat un ban (veriga lipsă)',
+    titlu: 'Aplicația află DIRECT DE LA REVOLUT că a intrat un ban',
     ordin:
       `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE.\n\n` +
-      `Astăzi aplicația are tot lanțul de creditare, dar NU are de unde să afle că a ` +
-      `intrat o plată: singurul cititor e services/openBanking.ts (GoCardless), care cere ` +
-      `un cont pe portal extern și consimțământ care expiră. Ownerul a închis contul ăla.\n\n` +
-      `CONSTRUIEȘTE: backend/src/services/plataEmail.ts — detectarea plății din emailul ` +
-      `trimis de Revolut la fiecare încasare, în cutia contact@kelionai.app pe care aplicația ` +
-      `DEJA o citește (services/mailbox.ts, tabela inbound_emails).\n\n` +
-      `Ce trebuie să facă, exact:\n` +
-      `  • recunoaște un email de la Revolut (expeditor + subiect de încasare), nu orice email;\n` +
-      `  • scoate SUMA, MONEDA și REFERINȚA/nota plătitorului din corp (și din HTML — vezi ` +
-      `    htmlToText din mailbox.ts), tolerant la formatări (1,234.56 / 1.234,56 / £10.00 / 10 GBP);\n` +
-      `  • cheamă crediteazaDupaCod din db.ts cu referința și suma — codul KLN se potrivește deja acolo;\n` +
-      `  • NU creditează de două ori același email (folosește un identificator stabil al mesajului ` +
-      `    drept referință bancară; indexul unic pe bank_ref din payment_codes e plasa);\n` +
-      `  • expune o stare de citire, ca stareCitirePlati() din openBanking.ts: „nu pot citi" ` +
-      `    NU are voie să arate ca „n-a plătit nimeni". Regula #1 a ownerului.\n\n` +
-      `TESTE OBLIGATORII (backend/src/plataEmail.test.ts): corpuri de email REALE ca formă — ` +
-      `text simplu și HTML, cu cod scris corect, cu litere mici, cu spații în loc de cratime, ` +
-      `un email care NU e de la Revolut (se ignoră), un email fără cod (rămâne neatribuit, ` +
-      `NU se ghicește), și același email de două ori (se creditează O SINGURĂ dată).\n\n` +
-      `Leagă-l în backend/src/index.ts lângă startCitirePlati() și scrie starea în ` +
-      `/api/admin/money-circuit lângă citirePlati.`,
+      `Astăzi aplicația are tot lanțul de creditare (coduri unice, tabela payment_codes, ` +
+      `potrivirea codului, creditarea idempotentă prin topUpUser), dar NU are de unde să ` +
+      `afle că a intrat o plată.\n\n` +
+      `DOUĂ DRUMURI SUNT INTERZISE, decise de owner, nu de tine:\n` +
+      `  • NU prin email. Plata nu se citește din inbox. (30 iul: „ce ai făcut cu email ` +
+      `    scoți imediat, nu accept așa ceva".) Nu scrie niciun modul care caută încasări ` +
+      `    în cutia poștală, sub niciun nume.\n` +
+      `  • NU prin portaluri terțe cu consimțământ care expiră (GoCardless/Nordigen) — ` +
+      `    contul a fost închis, iar consimțământul PSD2 pică la 30-90 de zile.\n\n` +
+      `DRUMUL CERUT: direct de la Revolut, prin interfața LOR oficială pentru dezvoltatori ` +
+      `(API-ul contului de business/merchant + webhook la încasare, dacă îl oferă contului ` +
+      `Pro al ownerului).\n\n` +
+      `PRIMUL LUCRU pe care îl faci e să AFLI, din documentația oficială Revolut, ce anume ` +
+      `oferă exact contul lui: ce API, ce fel de chei, dacă are webhook la încasare, și dacă ` +
+      `Pro (nu Business) are acces. NU presupune și NU-l trimite pe owner să caute prin ` +
+      `portal — el a pierdut deja o zi așa. Dacă răspunsul e „nu se poate cu contul lui", ` +
+      `ăsta e un rezultat valid: scrie-l cu dovada din documentație și oprește-te acolo.\n\n` +
+      `Dacă se poate: construiește backend/src/services/plataRevolutApi.ts — primirea ` +
+      `încasării (webhook semnat, verificat, sau citire periodică dacă webhook nu există), ` +
+      `scoaterea sumei/monedei/referinței, apoi crediteazaDupaCod din db.ts. NU creditează ` +
+      `de două ori aceeași încasare (indexul unic pe bank_ref e plasa). Starea se AFIȘEAZĂ, ` +
+      `ca stareCitirePlati(): „nu pot citi" nu are voie să arate ca „n-a plătit nimeni".\n\n` +
+      `Teste: încasare cu cod corect → credit; cu cod scris cu litere mici sau cu spații → ` +
+      `credit; fără cod → neatribuit, ZERO credite; aceeași încasare de două ori → un credit.`,
   },
   {
     cod: 'M2',
@@ -169,13 +198,13 @@ const MISIUNE: Sarcina[] = [
       `MISIUNE REVOLUT, pasul 5 din 5 — PROBA.\n\n` +
       `Scrie un test de integrare care parcurge TOT drumul, fără rețea și fără bani reali:\n` +
       `  1. un user cere credit → primește un cod;\n` +
-      `  2. sosește un email Revolut simulat, cu codul în referință;\n` +
+      `  2. sosește o încasare Revolut simulată, cu codul în referință;\n` +
       `  3. creditele apar în contul ACELUI user, cu suma exactă;\n` +
-      `  4. același email încă o dată → soldul NU se mișcă (idempotența);\n` +
-      `  5. un email cu cod inexistent → plată neatribuită, ZERO credite date.\n\n` +
+      `  4. aceeași încasare încă o dată → soldul NU se mișcă (idempotența);\n` +
+      `  5. o încasare cu cod inexistent → plată neatribuită, ZERO credite date.\n\n` +
       `Ăsta e testul care apără veniturile ownerului. Dacă cineva strică lanțul peste ` +
       `trei luni, pică aici, nu în extrasul lui de cont.\n\n` +
-      `Actualizează PROCEDURA-PLATI.md cu drumul REAL (prin email, nu prin portal bancar) ` +
+      `Actualizează PROCEDURA-PLATI.md cu drumul REAL, cel construit la pasul 1, ` +
       `și taie ce nu mai e adevărat.`,
   },
 ]

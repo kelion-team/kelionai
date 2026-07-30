@@ -62,9 +62,13 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 13 unelte partajate', () => {
-    expect(SHARED_ADMIN_TOOLS.size).toBe(13)
-    for (const n of ['list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair'])
+  it('SHARED_ADMIN_TOOLS conține exact cele 16 unelte partajate', () => {
+    expect(SHARED_ADMIN_TOOLS.size).toBe(16)
+    for (const n of [
+      'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
+      // 30 iul: își face SINGUR setările — aceleași trei pe scris și pe voce.
+      'secret_pune', 'secret_lista', 'secret_publica',
+    ])
       expect(SHARED_ADMIN_TOOLS.has(n)).toBe(true)
     expect(SHARED_ADMIN_TOOLS.has('build_software')).toBe(false)
   })

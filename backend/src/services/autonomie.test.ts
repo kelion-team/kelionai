@@ -7,7 +7,7 @@
 // TĂCUT într-o buclă automată — și care, când se strică, ori nu face nimic
 // (și pare autonom), ori face de zece ori (și costă bani):
 //
-//   1. se apucă singur, fără să-i ceară nimeni, și începe cu MISIUNEA Revolut;
+//   1. se apucă singur, fără să-i ceară nimeni, și începe cu SETĂRILE Revolut;
 //   2. cât timp are ceva în lucru, NU mai ia altceva (altfel ordinele se adună
 //      peste el și nu termină niciunul);
 //   3. dacă ordinul lui a picat, și-l ia ÎNAPOI cu jurnalul eșecului — asta e
@@ -72,14 +72,14 @@ beforeEach(() => {
 })
 
 describe('Kelion se apucă singur de treabă', () => {
-  it('prima trecere: ia PASUL 1 al misiunii Revolut, fără să-i ceară nimeni', async () => {
+  it('prima trecere: ia PASUL 0 — își face SINGUR setările Revolut', async () => {
     const r = await poateSaLucreze()
     expect(r.pornit).toBe(true)
-    expect(r.motiv).toContain('M1')
+    expect(r.motiv).toContain('M0')
     expect(jobs).toHaveLength(1)
-    // Ordinul chiar e despre veriga lipsă, nu un text generic.
+    // Ordinul îi spune să folosească uneltele LUI de setări, nu să ceară omului.
     expect(ultimulOrdin().orderText).toContain('MISIUNE REVOLUT')
-    expect(ultimulOrdin().orderText).toContain('plataEmail')
+    expect(ultimulOrdin().orderText).toContain('secret_pune')
     // Și duce cu el regulile de verificare, cu comenzile EXACTE.
     expect(ultimulOrdin().orderText).toContain('cd frontend && npm run build')
   })
@@ -96,29 +96,29 @@ describe('Kelion se apucă singur de treabă', () => {
   it('dacă ordinul lui a picat, și-l ia înapoi CU jurnalul eșecului', async () => {
     await poateSaLucreze()
     jobs[0].status = 'failed'
-    jobs[0].log = 'teste roșii: plataEmail.test.ts > nu recunoaște suma cu virgulă'
+    jobs[0].log = 'a picat la secret_publica: workflow-ul a întors 422'
 
     const r = await poateSaLucreze()
     expect(r.pornit).toBe(true)
     expect(r.motiv).toContain('reparație')
     // Reparația pornește de la CE A CĂZUT, nu de la zero.
     expect(ultimulOrdin().orderText).toContain('REPARI CE AI STRICAT TU')
-    expect(ultimulOrdin().orderText).toContain('nu recunoaște suma cu virgulă')
+    expect(ultimulOrdin().orderText).toContain('workflow-ul a întors 422')
     // Și rămâne pe aceeași sarcină — nu sare la alta.
-    expect(ultimulOrdin().orderText).toContain('plataEmail')
+    expect(ultimulOrdin().orderText).toContain('MISIUNE REVOLUT, pasul 0')
   })
 
   it('după 3 încercări pe același zid, blochează pasul și trece mai departe', async () => {
     for (let i = 0; i < 3; i++) {
       const r = await poateSaLucreze()
-      expect(r.motiv).toContain('M1')
+      expect(r.motiv).toContain('M0')
       jobs[0].status = 'failed'
       jobs[0].log = `încercarea ${i + 1} a căzut`
     }
     const r = await poateSaLucreze()
     expect(r.pornit).toBe(true)
-    expect(r.motiv).toContain('M2') // a trecut la pasul următor
-    expect(JSON.parse(kv.get('autonomie:pas:M1')!).blocat).toContain('3 încercări')
+    expect(r.motiv).toContain('M1') // a trecut la pasul următor
+    expect(JSON.parse(kv.get('autonomie:pas:M0')!).blocat).toContain('3 încercări')
   })
 
   it('când un pas iese bine, trece la următorul', async () => {
@@ -126,8 +126,8 @@ describe('Kelion se apucă singur de treabă', () => {
     jobs[0].status = 'done'
     const r = await poateSaLucreze()
     expect(r.pornit).toBe(true)
-    expect(r.motiv).toContain('M2')
-    expect(JSON.parse(kv.get('autonomie:pas:M1')!).gata).toBe(true)
+    expect(r.motiv).toContain('M1')
+    expect(JSON.parse(kv.get('autonomie:pas:M0')!).gata).toBe(true)
   })
 
   it('plafonul zilnic chiar oprește — nu mai e o limită doar declarată', async () => {

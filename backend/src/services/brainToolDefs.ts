@@ -52,6 +52,37 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── SETĂRILE LUI, PUSE DE EL (Adrian, 30 iul: „să creeze secretele și să le
+// pună unde trebuie, e al meu și îi permit full acces") ───────────────────────
+// Regula de fier, scrisă și în descriere ca s-o vadă și creierul: valoarea unui
+// secret nu se repetă, nu se confirmă, nu se scrie nicăieri. Se raportează
+// numele și câte caractere are.
+export const SECRET_PUNE_TOOL: Tool = {
+  name: 'secret_pune',
+  description:
+    "ADMIN ONLY. Set one secret (API key, token, link) in your OWN repository secrets, encrypted — this is how you configure yourself without the owner touching any portal. NEVER repeat, echo, confirm or write the value anywhere: not in your answer, not on the monitor, not in a file. Report only the NAME and its length. NEVER accept or send card numbers here. After setting one or more secrets, call secret_publica to push them to the server and restart the app, then say what you configured.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      nume: { type: 'string', description: 'Secret name, UPPERCASE with underscores, e.g. REVOLUT_API_KEY.' },
+      valoare: { type: 'string', description: 'The secret value. It is written encrypted and never returned.' },
+    },
+    required: ['nume', 'valoare'],
+  },
+}
+export const SECRET_LISTA_TOOL: Tool = {
+  name: 'secret_lista',
+  description:
+    'ADMIN ONLY. List which secrets EXIST (names + last update only — GitHub never returns values, by design). Use this to check whether a key you need is already configured, instead of asking the owner.',
+  input_schema: { type: 'object', properties: {} },
+}
+export const SECRET_PUBLICA_TOOL: Tool = {
+  name: 'secret_publica',
+  description:
+    'ADMIN ONLY. Push the repository secrets onto the production server and restart the app so it loads them (runs the vps-set-env workflow). Call this after secret_pune. Then verify with system_health or the admin panel that what you configured is now live.',
+  input_schema: { type: 'object', properties: {} },
+}
+
 // Constructorul (autonomie) — definiții mutate din ruta vocii aici, în sursa
 // COMUNĂ (CREIER UNIC §1, „fără duplicare"): aceleași definiții și pentru scris,
 // și pentru escaladarea vocii. Executorii rămân în rutele lor (createBuildJob/

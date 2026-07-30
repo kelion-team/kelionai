@@ -147,7 +147,8 @@ Pașii, în ordine, și cum se verifică fiecare:
 
 | Pas | Ce construiește | Cum vezi că e gata |
 |---|---|---|
-| M1 | **Veriga lipsă**: aplicația află din emailul Revolut că a intrat un ban (cutia `contact@kelionai.app`, pe care o citește deja) | Admin → Bani scrie ✅ la citirea plăților; testele din `plataEmail.test.ts` trec |
+| M0 | **Setările, făcute de EL**: își pune singur cheile (`secret_pune`), le duce pe server (`secret_publica`) și verifică. Tu nu mai intri nicăieri | îți spune ce a configurat — **numele** cheilor, niciodată valorile |
+| M1 | **Veriga lipsă**: aplicația află **direct de la Revolut** că a intrat un ban, prin interfața lor oficială pentru dezvoltatori. **NU prin email** (30 iul: „ce ai făcut cu email scoți imediat, nu accept așa ceva") și **nu prin portaluri terțe** cu consimțământ care expiră | Admin → Bani scrie ✅ la citirea plăților |
 | M2 | **Plasa**: o plată fără cod, sau cu cod greșit, ajunge în `plati_neatribuite` — nu dispare | Plătești fără cod → apare în panou, necreditată |
 | M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri | Le vezi în Admin → Bani |
 | M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh |
