@@ -95,10 +95,13 @@ const logLines = []
 // (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
 let beatJobId = 0
 let lastBeatAt = 0
-function beat(text) {
+function beat(text, acum = false) {
   if (!beatJobId || !BRIDGE) return
   const now = Date.now()
-  if (now - lastBeatAt < 4000) return
+  // `acum` sare peste throttle: ultimul pas dinaintea unei pauze lungi TREBUIE
+  // să ajungă pe monitor, altfel omul rămâne cu un pas vechi pe ecran 40 de
+  // minute și crede că s-a blocat ceva (D6).
+  if (!acum && now - lastBeatAt < 4000) return
   lastBeatAt = now
   fetch(`${APP}/api/constructor/progress`, {
     method: 'POST',
@@ -862,6 +865,10 @@ async function main() {
         `AMÂNAT (nu eșuat): furnizorii gratuiți sunt sugrumați (${String(e.message).slice(0, 120)}) — ` +
           'ordinul rămâne în coadă și se reia automat în ~40 min',
       )
+      // PAUZA SE VEDE (D6). Fără rândul ăsta, panoul rămânea pe „Lucrează" cu
+      // ultimul pas înghețat pe ecran 40 de minute — imposibil de deosebit de
+      // un ordin blocat. Marcajul „⏳" îl citește interfața și schimbă insigna.
+      beat('⏳ Furnizorii gratuiți sunt sugrumați acum. Ordinul NU e pierdut — se reia automat în ~40 min.', true)
       return
     }
     log(`EȘEC: ${e.message}`)
