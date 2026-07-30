@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import { buildManual, manualHtml, type ManualDoc } from '../services/manual.js'
-import { translateStrings, normalizeLang } from '../services/manualLang.js'
+import { buildManual, manualHtml, isManualLang, type ManualDoc } from '../services/manual.js'
+import { translateStrings, translationReady, normalizeLang } from '../services/manualLang.js'
 
 // ── MANUALUL, PUBLIC ────────────────────────────────────────────────────────
 // GET /api/manual?lang=xx  → manualul ca date (pagina din aplicație)
@@ -61,17 +61,43 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
   }
 }
 
+/** Manualul în limba cerută, AȘTEPTÂND traducerea (pentru descărcare: fișierul
+ *  trebuie să fie complet în limba aleasă, nu pe jumătate). */
 async function manualIn(lang: string): Promise<ManualDoc> {
   const en = buildManual()
   const cod = normalizeLang(lang)
-  if (!cod || cod === 'en') return en
+  // Doar cele 7 limbi ale manualului. O limbă în afara listei nu cheamă
+  // traducătorul deloc — altfel un singur vizitator care umblă prin selector ar
+  // porni zeci de traduceri plătite ale întregului manual.
+  if (!cod || cod === 'en' || !isManualLang(cod)) return en
   const tr = await translateStrings(cod, aplatizeaza(en)).catch(() => ({}))
   return Object.keys(tr).length ? reasambleaza(en, tr, cod) : en
 }
 
+/** Pentru ECRAN: răspunde INSTANT. Dacă limba e deja tradusă, o dă; dacă nu, dă
+ *  engleza cu `ready: false` și pornește traducerea în fundal. Pagina reîntreabă
+ *  peste câteva secunde și primește limba cerută.
+ *
+ *  Fără asta, userul alegea limba și cererea rămânea agățată zeci de secunde —
+ *  pe ecran nu se schimba nimic, deci părea că selectorul nu face nimic.
+ *  (Măsurat pe live: franceza, în serie, peste 100 de secunde.) */
+async function manualRapid(lang: string): Promise<ManualDoc & { ready: boolean }> {
+  const en = buildManual()
+  const cod = normalizeLang(lang)
+  if (!cod || cod === 'en' || !isManualLang(cod)) return { ...en, ready: true }
+  const plat = aplatizeaza(en)
+  const gata = await translationReady(cod, plat).catch(() => null)
+  if (gata && Object.keys(gata).length) return { ...reasambleaza(en, gata, cod), ready: true }
+  // Pornește traducerea și NU o aștepta. `translateStrings` are grijă ca mai
+  // multe cereri pe aceeași limbă să aștepte aceeași lucrare, nu să pornească
+  // fiecare încă una.
+  void translateStrings(cod, plat).catch(() => ({}))
+  return { ...en, lang: cod, ready: false }
+}
+
 export async function manualRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { lang?: string } }>('/api/manual', async (req, reply) => {
-    return reply.send(await manualIn(String(req.query.lang ?? 'en')))
+    return reply.send(await manualRapid(String(req.query.lang ?? 'en')))
   })
 
   app.get<{ Querystring: { lang?: string } }>('/manual.html', async (req, reply) => {

@@ -69,6 +69,23 @@ async function traduceLot(valori: string[], lang: string): Promise<string[] | nu
  * Textele date, în limba cerută. `sursa` = perechile cheie→text ENGLEZ.
  * Întoarce doar cheile traduse; apelantul le pune peste engleză.
  */
+/** E deja tradus și pus deoparte? Ruta întreabă asta ca să poată răspunde
+ *  INSTANT cu ce are, în loc să țină userul într-o cerere de un minut. */
+export async function translationReady(
+  lang: string,
+  sursa: Record<string, string>,
+): Promise<Record<string, string> | null> {
+  const cod = normalizeLang(lang)
+  if (!cod || cod === 'en') return {}
+  const salvat = await loadKv(`tr:${cod}:${amprenta(sursa)}`).catch(() => null)
+  if (!salvat) return null
+  try {
+    return JSON.parse(salvat) as Record<string, string>
+  } catch {
+    return null
+  }
+}
+
 export async function translateStrings(
   lang: string,
   sursa: Record<string, string>,
@@ -98,15 +115,23 @@ export async function translateStrings(
       const valori = chei.map((k) => sursa[k])
       // Loturi de 40: destul de mari ca să fie puține apeluri, destul de mici ca
       // modelul să nu piardă numerotarea pe drum.
+      //
+      // ÎN PARALEL, nu unul după altul (măsurat pe live: în serie, franceza a
+      // durat peste 100 de secunde și cererea a expirat — adică userul alegea
+      // limba și nu se schimba nimic pe ecran). Loturile sunt independente:
+      // fiecare are numerotarea lui. Așa durata totală e cea a celui mai lent
+      // lot, nu suma lor.
       const LOT = 40
+      const felii: string[][] = []
+      for (let i = 0; i < valori.length; i += LOT) felii.push(valori.slice(i, i + LOT))
+      const rezultate = await Promise.all(felii.map((f) => traduceLot(f, cod)))
+      if (rezultate.some((r) => r == null)) return {} // un lot ratat = manual decalat
       const out: Record<string, string> = {}
-      for (let i = 0; i < valori.length; i += LOT) {
-        const traduse = await traduceLot(valori.slice(i, i + LOT), cod)
-        if (!traduse) return {} // un lot ratat = manual decalat; mai bine engleză
-        traduse.forEach((v, j) => {
-          if (v) out[chei[i + j]] = v
+      rezultate.forEach((traduse, idxFelie) => {
+        traduse!.forEach((v, j) => {
+          if (v) out[chei[idxFelie * LOT + j]] = v
         })
-      }
+      })
       if (Object.keys(out).length === chei.length) {
         await saveKv(cheieKv, JSON.stringify(out)).catch(() => {})
       }
