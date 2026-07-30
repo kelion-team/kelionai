@@ -329,19 +329,45 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
       /* informativ */
     }
 
-    if (out.issuingStatus === 'active') {
-      const cards = await fetch(`${API}/issuing/cards?limit=5&status=active`, {
-        headers: authHeaders(),
-        signal: AbortSignal.timeout(12_000),
-      })
-      if (cards.ok) {
-        // `livemode` vine pe FIECARE obiect Stripe. Îl ducem mai departe: un card
-        // de test arată identic cu unul real în listă, dar numărul lui e refuzat
-        // de orice formular de plată adevărat. Fără steagul ăsta, panoul spune
-        // „✅ Cardul Kelion AI" despre o simulare.
-        const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string; livemode?: boolean }[] }
-        out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '', livemode: x.livemode === true }))
-      }
+    // NU CERE O PERMISIUNE DE CARE N-AI NEVOIE (Adrian, 30 iul: „la ce câmp?",
+    // căutând prin lista de permisiuni a cheii restricționate).
+    //
+    // Aici scria `if (out.issuingStatus === 'active')`. Adică: dacă nu pot CITI
+    // CONTUL, nici nu mă mai uit după carduri. Consecința pe viu: cheia n-avea
+    // dreptul `Account: Read`, `/v1/account` întorcea 403, `issuingStatus` rămânea
+    // 'fara_permisiune_cheie', lista de carduri nu se cerea NICIODATĂ — și panoul
+    // raporta „Cardul Kelion AI: necreat". Nu era o constatare; era rezultatul
+    // unei căutări care n-a avut loc. Iar întrebarea care-l bloca pe om („am card
+    // adevărat sau nu?") se răspunde exact de aici.
+    //
+    // Cardurile se cer ACUM întotdeauna. Cheia are deja voie pe Issuing (dată pe
+    // 24 iul, verificată cu apeluri reale), deci răspunsul vine fără nicio
+    // umblătură prin dashboard. Și un răspuns bun spune mai mult decât
+    // `/v1/account`: dacă Stripe îți listează carduri, Issuing E activ.
+    const cards = await fetch(`${API}/issuing/cards?limit=5&status=active`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (cards.ok) {
+      // `livemode` vine pe FIECARE obiect Stripe. Îl ducem mai departe: un card
+      // de test arată identic cu unul real în listă, dar numărul lui e refuzat
+      // de orice formular de plată adevărat. Fără steagul ăsta, panoul spune
+      // „✅ Cardul Kelion AI" despre o simulare.
+      const c = (await cards.json()) as { data?: { id: string; last4?: string; status?: string; livemode?: boolean }[] }
+      out.cards = (c.data ?? []).map((x) => ({ id: x.id, last4: x.last4 ?? '????', status: x.status ?? '', livemode: x.livemode === true }))
+      // Stripe ți-a dat carduri ⇒ Issuing e activ, oricât de oarbă ar fi cheia
+      // pe /v1/account. Nu lăsăm veriga 2 pe „nu știu" când dovada e în mână.
+      if (out.cards.length > 0 && out.issuingStatus !== 'active') out.issuingStatus = 'active'
+      // Zero carduri ACTIVE, cu răspuns bun de la Stripe: acum chiar știm.
+      else if (out.cards.length === 0) out.cardsChecked = true
+    } else {
+      // 403 aici = cheii îi lipsește Issuing Cards: Read. Spunem CARE permisiune,
+      // nu „a picat ceva" — omul are de bifat un singur rând.
+      const b = (await cards.json().catch(() => null)) as { error?: { code?: string } } | null
+      out.cardsError =
+        cards.status === 403 || b?.error?.code === 'more_permissions_required'
+          ? 'Cheia nu are „Issuing Cards: Read" — dă-i-l în Stripe → API keys → cheia restricționată → Edit key.'
+          : `Stripe /v1/issuing/cards: http_${cards.status}`
     }
     return out
   } catch (e) {

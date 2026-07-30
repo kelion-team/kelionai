@@ -89,6 +89,12 @@ export interface MoneyCircuit {
   /** Cheia Stripe din env e `live` sau `test`? Cu o cheie de test TOT panoul
    *  arată cifre simulate — solduri, carduri, tranzacții. */
   keyLivemode?: boolean
+  /** Stripe a răspuns bine la lista de carduri și n-a avut niciunul activ. Doar
+   *  cu steagul ăsta avem voie să scriem „card necreat": fără el, lista goală
+   *  poate însemna la fel de bine „n-am întrebat" sau „n-am avut voie". */
+  cardsChecked?: boolean
+  /** De ce n-am putut vedea cardurile (permisiune lipsă, eroare de rețea). */
+  cardsError?: string
   /** Cheia PUBLICĂ Stripe (pk_live_…), dacă e pusă în env. Cu ea panoul poate
    *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
    *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
