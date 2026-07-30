@@ -46,10 +46,26 @@ export interface ManualGroup {
   key: string
   items: { what: string; say: string }[]
 }
+/** „Cum funcționează", în patru pași — diagrama de la începutul manualului.
+ *  Adrian, 30 iul: „manualul e extrem de rudimentar, mă așteptam să fie cu
+ *  imagini, mult mai profesional". Nu punem capturi de ecran (se învechesc la
+ *  fiecare schimbare de interfață și cântăresc cât tot manualul); punem un
+ *  desen care explică drumul unei cereri — și care se traduce, ca restul. */
+export interface ManualFlow {
+  title: string
+  steps: {
+    /** Pictograma pasului. Emoji: nu se traduce, nu cere fișiere, se vede la fel
+     *  în pagină, la tipărire și în fișierul descărcat. */
+    icon: string
+    label: string
+    note: string
+  }[]
+}
 export interface ManualDoc {
   lang: string
   title: string
   subtitle: string
+  flow: ManualFlow
   sections: ManualSection[]
   abilitiesTitle: string
   abilitiesIntro: string
@@ -57,6 +73,27 @@ export interface ManualDoc {
   columnSay: string
   groups: ManualGroup[]
   footer: string
+}
+
+const FLOW: ManualFlow = {
+  title: 'How a request travels',
+  steps: [
+    { icon: '🗣️', label: 'You ask', note: 'Speak or type, in your own language. No commands to memorise.' },
+    { icon: '👂', label: 'Kelion hears', note: 'It listens continuously, understands accents, and knows when you have finished.' },
+    { icon: '🧠', label: 'It thinks and acts', note: 'One brain, with every skill on hand — mail, maps, web, images, code.' },
+    { icon: '💬', label: 'It answers', note: 'Out loud, and on the monitor when there is something to show you.' },
+  ],
+}
+
+/** Pictograma fiecărei grupe de capabilități. Cheia e cea din registru. */
+export const GROUP_ICONS: Record<string, string> = {
+  google: '✉️',
+  vedere: '👁️',
+  afisare: '🖥️',
+  memorie: '🧩',
+  browser: '🌐',
+  cod: '⚙️',
+  diverse: '✨',
 }
 
 const TITLE = 'Kelionai — User Manual'
@@ -210,6 +247,7 @@ export function buildManual(): ManualDoc {
     lang: 'en',
     title: TITLE,
     subtitle: SUBTITLE,
+    flow: FLOW,
     sections: SECTIONS,
     abilitiesTitle: ABILITIES_TITLE,
     abilitiesIntro: ABILITIES_INTRO,
@@ -225,39 +263,88 @@ const esc = (s: string): string =>
 
 /** Manualul ca pagină de sine stătătoare — se deschide, se tipărește, se salvează. */
 export function manualHtml(d: ManualDoc): string {
+  // Numerotăm secțiunile: un manual fără numere de capitol și fără cuprins nu
+  // se poate răsfoi, oricât de bun ar fi textul (Adrian: „extrem de rudimentar").
   const sectiuni = d.sections
-    .map((s) => `<section><h2>${esc(s.title)}</h2>${s.paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}</section>`)
+    .map(
+      (s, i) =>
+        `<section id="s${i}"><h2><span class="nr">${i + 1}</span>${esc(s.title)}</h2>${s.paragraphs
+          .map((p) => `<p>${esc(p)}</p>`)
+          .join('')}</section>`,
+    )
     .join('')
+  const pasi = d.flow.steps
+    .map(
+      (p, i) =>
+        `<li><span class="pas-nr">${i + 1}</span><span class="pas-ic" aria-hidden="true">${esc(p.icon)}</span>` +
+        `<strong>${esc(p.label)}</strong><span>${esc(p.note)}</span></li>`,
+    )
+    .join('')
+  const flux = `<section class="flux"><h2><span class="nr">•</span>${esc(d.flow.title)}</h2><ol class="pasi">${pasi}</ol></section>`
   const grupe = d.groups
     .map(
-      (g) =>
-        `<section><h3>${esc(g.title)}</h3><table><thead><tr><th>${esc(d.columnWhat)}</th><th>${esc(d.columnSay)}</th></tr></thead><tbody>` +
-        g.items.map((i) => `<tr><td>${esc(i.what)}</td><td class="say">${esc(i.say)}</td></tr>`).join('') +
+      (g, i) =>
+        `<section id="g${i}"><h3><span class="ic" aria-hidden="true">${esc(GROUP_ICONS[g.key] ?? GROUP_ICONS.diverse)}</span>${esc(g.title)}</h3>` +
+        `<table><thead><tr><th>${esc(d.columnWhat)}</th><th>${esc(d.columnSay)}</th></tr></thead><tbody>` +
+        g.items.map((i2) => `<tr><td>${esc(i2.what)}</td><td class="say">${esc(i2.say)}</td></tr>`).join('') +
         '</tbody></table></section>',
     )
     .join('')
+  const cuprins =
+    '<nav class="cuprins"><ol>' +
+    d.sections.map((s, i) => `<li><a href="#s${i}">${esc(s.title)}</a></li>`).join('') +
+    `<li><a href="#abilitati">${esc(d.abilitiesTitle)}</a><ol>` +
+    d.groups
+      .map(
+        (g, i) =>
+          `<li><a href="#g${i}"><span class="ic" aria-hidden="true">${esc(GROUP_ICONS[g.key] ?? GROUP_ICONS.diverse)}</span>${esc(g.title)}</a></li>`,
+      )
+      .join('') +
+    '</ol></li></ol></nav>'
   return `<!doctype html><html lang="${esc(d.lang)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(d.title)}</title>
 <style>
   @page { margin: 18mm 16mm; }
   body { font: 11pt/1.65 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #16181d; background: #fff; max-width: 780px; margin: 0 auto; padding: 28px 22px; }
-  h1 { font-size: 26pt; margin: 0 0 4px; letter-spacing: -0.02em; }
-  .sub { color: #5b6270; margin: 0 0 30px; font-size: 12pt; }
-  h2 { font-size: 14pt; margin: 28px 0 8px; }
-  h3 { font-size: 12pt; margin: 22px 0 6px; }
+  /* COPERTA — pagină proprie la tipărire, ca la o carte adevărată. */
+  .coperta { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; border-bottom: 3px solid #16181d; padding-bottom: 26px; margin-bottom: 30px; }
+  .marca { font-size: 34pt; line-height: 1; margin-bottom: 14px; }
+  h1 { font-size: 30pt; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: #5b6270; margin: 0; font-size: 13pt; max-width: 34em; }
+  h2 { font-size: 15pt; margin: 30px 0 8px; display: flex; align-items: baseline; gap: 10px; }
+  h2 .nr { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7em; height: 1.7em; border-radius: 999px; background: #16181d; color: #fff; font-size: 9pt; flex: none; }
+  h3 { font-size: 12.5pt; margin: 24px 0 6px; display: flex; align-items: center; gap: 8px; }
+  .ic { font-size: 14pt; }
   p { margin: 0 0 10px; }
+  /* CUPRINS */
+  .cuprins { margin: 0 0 34px; padding: 16px 18px; background: #f6f7f9; border-radius: 10px; page-break-after: always; }
+  .cuprins ol { margin: 0; padding-left: 1.3em; }
+  .cuprins ol ol { padding-left: 1.1em; margin: 4px 0 0; }
+  .cuprins li { margin: 3px 0; }
+  .cuprins a { color: #16181d; text-decoration: none; }
+  .cuprins a:hover { text-decoration: underline; }
+  /* DIAGRAMA „cum călătorește o cerere" */
+  .pasi { list-style: none; margin: 10px 0 6px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .pasi li { position: relative; padding: 14px 14px 14px 14px; border: 1px solid #d7dbe2; border-radius: 10px; background: #fbfcfd; display: flex; flex-direction: column; gap: 4px; page-break-inside: avoid; }
+  .pas-nr { position: absolute; top: -9px; left: 12px; background: #16181d; color: #fff; font-size: 8pt; width: 18px; height: 18px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }
+  .pas-ic { font-size: 20pt; line-height: 1; }
+  .pasi strong { font-size: 11pt; }
+  .pasi span:last-child { color: #5b6270; font-size: 9.5pt; line-height: 1.5; }
   table { width: 100%; border-collapse: collapse; margin: 6px 0 16px; }
   th { text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; border-bottom: 1px solid #d7dbe2; padding: 4px 10px 4px 0; }
   td { padding: 6px 10px 6px 0; border-bottom: 1px solid #eef0f4; vertical-align: top; }
   td.say { color: #3b4453; font-style: italic; }
   tr { page-break-inside: avoid; }
+  section { page-break-inside: avoid; }
   footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid #d7dbe2; color: #6b7280; font-size: 9pt; }
-  @media print { body { padding: 0; } }
+  @media print { body { padding: 0; } .coperta { min-height: 0; page-break-after: always; } }
 </style></head><body>
-<h1>${esc(d.title)}</h1><p class="sub">${esc(d.subtitle)}</p>
+<header class="coperta"><div class="marca" aria-hidden="true">🜂</div><h1>${esc(d.title)}</h1><p class="sub">${esc(d.subtitle)}</p></header>
+${cuprins}
+${flux}
 ${sectiuni}
-<section><h2>${esc(d.abilitiesTitle)}</h2><p>${esc(d.abilitiesIntro)}</p></section>
+<section id="abilitati"><h2><span class="nr">${d.sections.length + 1}</span>${esc(d.abilitiesTitle)}</h2><p>${esc(d.abilitiesIntro)}</p></section>
 ${grupe}
 <footer>${esc(d.footer)}</footer>
 </body></html>`

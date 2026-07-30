@@ -32,6 +32,7 @@ interface ManualDoc {
   lang: string
   title: string
   subtitle: string
+  flow: { title: string; steps: { icon: string; label: string; note: string }[] }
   sections: { title: string; paragraphs: string[] }[]
   abilitiesTitle: string
   abilitiesIntro: string
@@ -47,6 +48,7 @@ type Fila =
   | { fel: 'coperta'; titlu: string; subtitlu: string; cuprins: string[] }
   | { fel: 'proza'; titlu: string; paragrafe: string[] }
   | { fel: 'intro'; titlu: string; text: string }
+  | { fel: 'flux'; titlu: string; pasi: { icon: string; label: string; note: string }[] }
   | { fel: 'grup'; titlu: string; cheie: string; coloane: [string, string]; randuri: { what: string; say: string }[] }
 
 /** Taie manualul în file. Grupurile mari se rup în mai multe file, ca să nu
@@ -58,6 +60,9 @@ function inFile(d: ManualDoc): Fila[] {
   // adică trei sferturi de pagină goală.
   const cuprins = [...d.sections.map((s) => s.title), ...d.groups.map((g) => g.title)]
   const file: Fila[] = [{ fel: 'coperta', titlu: d.title, subtitlu: d.subtitle, cuprins }]
+  // „Cum călătorește o cerere" vine imediat după copertă: e singura filă care
+  // se uită ca o schemă, nu ca text, și dă tonul restului cărții.
+  file.push({ fel: 'flux', titlu: d.flow.title, pasi: d.flow.steps })
   for (const s of d.sections) file.push({ fel: 'proza', titlu: s.title, paragrafe: s.paragraphs })
   file.push({ fel: 'intro', titlu: d.abilitiesTitle, text: d.abilitiesIntro })
   for (const g of d.groups) {
@@ -215,6 +220,22 @@ export default function Manual(): React.JSX.Element {
                   <>
                     <h2>{(file[fila] as { titlu: string }).titlu}</h2>
                     <p>{(file[fila] as { text: string }).text}</p>
+                  </>
+                )}
+                {file[fila]?.fel === 'flux' && (
+                  <>
+                    <h2>{(file[fila] as { titlu: string }).titlu}</h2>
+                    <ol className="manual-pasi">
+                      {(file[fila] as { pasi: { icon: string; label: string; note: string }[] }).pasi.map((p, i) => (
+                        <li key={i}>
+                          <span className="manual-pas-ic" aria-hidden="true">
+                            {p.icon}
+                          </span>
+                          <strong>{p.label}</strong>
+                          <span className="manual-pas-nota">{p.note}</span>
+                        </li>
+                      ))}
+                    </ol>
                   </>
                 )}
                 {file[fila]?.fel === 'grup' && (
