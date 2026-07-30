@@ -1525,28 +1525,12 @@ export async function setAutoRecharge(email: string, v: AutoRecharge): Promise<v
   await saveKv(`autorecharge:${userKey(email)}`, JSON.stringify(v))
 }
 
-/** Owner loads the provider-credit pool (real money he put at the AI providers). */
-export async function loadAdminPool(amount: number): Promise<void> {
-  if (!dbEnabled() || !(amount > 0)) return
-  try {
-    await getPool().query('UPDATE admin_pool SET loaded = loaded + $1, updated_at = now() WHERE id = 1', [amount])
-  } catch {
-    /* non-fatal */
-  }
-}
+// Aici au stat `loadAdminPool` și `withdrawAdminPool` — butoanele „+ Adaugă
+// bani" / „− Scoate bani" care SCRIAU de mână cât credea omul că are în pungă.
+// Șterse (Adrian, 30 iul: „o singură pungă... nu rămâne decât real, fără
+// hardcode"). Câți bani ai se citește de la Stripe și de la OpenRouter, care
+// chiar îi țin; nu se mai declară nicăieri.
 
-/** Owner withdraws real money from the pool (records taking it back out).
- *  Clamped at 0 so the recorded pool can't go negative. */
-export async function withdrawAdminPool(amount: number): Promise<void> {
-  if (!dbEnabled() || !(amount > 0)) return
-  try {
-    await getPool().query('UPDATE admin_pool SET loaded = GREATEST(0, loaded - $1), updated_at = now() WHERE id = 1', [amount])
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/** Owner's real-money view: pool loaded, remaining (loaded − real cost) and profit. */
 // Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
 // anti-reuse: a fingerprint or IP that already tried within 30 days is refused.
 // Fails OPEN (allows the trial) if there's no DB or a transient error, so a
@@ -1798,19 +1782,31 @@ export async function getDemoStats(): Promise<DemoStats> {
   }
 }
 
-export async function getAdminAccount(): Promise<{
-  loaded: number
-  remaining: number
-  spent: number
-  profit: number
-}> {
-  const empty = { loaded: 0, remaining: 0, spent: 0, profit: 0 }
+// ── CONTABILITATEA REALĂ A OWNERULUI — NIMIC DECLARAT DE MÂNĂ ───────────────
+//
+// Adrian, 30 iul: „o singură pungă, scoate minciunile de pe platformă; nu rămâne
+// decât REAL, fără hardcode."
+//
+// Ce era înainte: `loaded` — o cifră TASTATĂ din panou („+ Adaugă bani" /
+// „− Scoate bani") — și `remaining = loaded − spent`. Nimic nu o verifica
+// vreodată cu Stripe sau cu OpenRouter. Adică panoul putea să arate „mai ai £50"
+// în timp ce contul de la furnizor era pe zero. O cifră pe care o scrie omul nu
+// e o măsurătoare, e o părere — iar la bani, o părere afișată ca fapt e o
+// minciună. ȘTEARSĂ, împreună cu butoanele care o scriau.
+//
+// Ce rămâne aici sunt DOAR măsurători:
+//   • `spent`  — suma costurilor REALE raportate de furnizori la fiecare apel
+//                (cost_events, scris de recordCost din răspunsul lor);
+//   • `profit` — suma marjelor din registrul de plăți (billing_events), care
+//                vine din plăți Stripe verificate, nu din estimări.
+// Punga propriu-zisă (cât mai ai) NU se mai ține aici: se citește LIVE de la
+// Stripe și OpenRouter — vezi services/stripe.ts getMoneyCircuit +
+// services/openrouter.ts getOpenRouterBalance. Sursa adevărului e la ei.
+export async function getAdminAccount(): Promise<{ spent: number; profit: number }> {
+  const empty = { spent: 0, profit: 0 }
   if (!dbEnabled()) return empty
   try {
     const pool = getPool()
-    const loaded = Number(
-      (await pool.query<{ loaded: string }>('SELECT loaded FROM admin_pool WHERE id = 1')).rows[0]?.loaded ?? 0,
-    )
     const costUsd = Number(
       (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
     )
@@ -1822,7 +1818,7 @@ export async function getAdminAccount(): Promise<{
         )
       ).rows[0]?.t ?? 0,
     )
-    return { loaded, remaining: loaded - spent, spent, profit }
+    return { spent, profit }
   } catch {
     return empty
   }

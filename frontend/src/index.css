@@ -3127,3 +3127,8 @@ a.card-item:hover {
 }
 .landing-alt-links a:hover { color: #cfe0ff; }
 .landing-alt-links span { color: #5c6478; }
+
+
+/* Defalcarea pungii unice (Admin → Bani): din ce surse reale s-a adunat cifra.
+   Fără ea, un total e doar încă un număr în care trebuie să ai încredere. */
+.pool-parts { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }

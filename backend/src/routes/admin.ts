@@ -10,8 +10,6 @@ import {
   getCapabilityGaps,
   setGapResolved,
   getAdminAccount,
-  loadAdminPool,
-  withdrawAdminPool,
   blockUser,
   unblockUser,
   grantCredit,
@@ -317,16 +315,38 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [stripe, account, costs, orBalance] = await Promise.all([
+    const [stripe, account, costs, orBalance, circuit] = await Promise.all([
       getStripeBalance(),
       getAdminAccount(),
       getCostSummary(),
       getOpenRouterBalance(),
+      getMoneyCircuit(),
     ])
+    // ── PUNGA UNICĂ (Adrian, 30 iul: „o singură pungă... nu rămâne decât REAL,
+    // fără hardcode") ────────────────────────────────────────────────────────
+    // Banii tăi stau, fizic, în trei locuri pe care NU le putem contopi (așa e
+    // construit Stripe: cardul virtual are obligatoriu punga lui separată, iar
+    // creditul de la furnizorul creierului e la el în cont). Ce PUTEM face — și
+    // ce lipsea — e să nu mai existe o a patra cifră, scrisă de mână.
+    //
+    // Deci: o singură valoare, ADUNATĂ din cele trei surse externe, fiecare
+    // verificabilă la sursa ei. Dacă o sursă nu răspunde, spunem că lipsește
+    // (`complete: false`) — nu o socotim zero, fiindcă „£0 pentru că n-am putut
+    // citi" arată exact ca „£0 pentru că n-ai bani", și alea două nu sunt
+    // același lucru.
+    const usdInMoneda = config.stripe.usdToCurrency
+    const parti = {
+      stripeAvailable: stripe?.available ?? null,
+      stripePending: stripe?.pending ?? null,
+      stripeIssuing: circuit.error ? null : circuit.issuingAvailable,
+      openrouter: orBalance.ok ? orBalance.balance * usdInMoneda : null,
+    }
+    const complete = Object.values(parti).every((v) => v !== null)
+    const total = Object.values(parti).reduce<number>((s, v) => s + (v ?? 0), 0)
     return reply.send({
       stripe,
-      loaded: account.loaded,
-      remaining: account.remaining,
+      // Punga: cât ai, cu defalcarea din care s-a adunat și de unde lipsește.
+      punga: { total: Math.round(total * 100) / 100, complete, parti },
       spent: account.spent,
       profit: account.profit,
       currency: stripe?.currency ?? 'gbp',
@@ -433,17 +453,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, tools: await listKelionTools() })
   })
 
-  // Record money the owner ADDS to or WITHDRAWS from the provider-credit pool
-  // (admin only). direction 'withdraw' takes money out; anything else adds.
-  app.post<{ Body: { amount?: number; direction?: string } }>('/api/admin/pool', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const amount = Number(req.body?.amount)
-    if (!(amount > 0)) return reply.code(400).send({ error: 'bad_request' })
-    if (req.body?.direction === 'withdraw') await withdrawAdminPool(amount)
-    else await loadAdminPool(amount)
-    return reply.send(await getAdminAccount())
-  })
+  // Ruta /api/admin/pool a fost ȘTEARSĂ (Adrian, 30 iul): scria de mână cât
+  // credea omul că are în pungă, iar panoul afișa cifra aia ca fapt. Câți bani
+  // ai se citește acum de la Stripe și OpenRouter, care chiar îi țin.
 
   // CIRCUITUL BANILOR din adminul Kelionai (Adrian, 24 iul): starea live a
   // fiecărei verigi Stripe→AI + crearea cardului virtual prin API. STRICT admin.

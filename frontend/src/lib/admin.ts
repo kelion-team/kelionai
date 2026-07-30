@@ -20,8 +20,21 @@ export interface HistoryRow {
 // consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
 export interface Finance {
   stripe: { available: number; pending: number; currency: string } | null
-  loaded: number
-  remaining: number
+  // PUNGA UNICĂ: cât ai, adunat din cele trei surse EXTERNE (Stripe plăți,
+  // Stripe card, creditul de la furnizorul creierului). `complete: false`
+  // înseamnă că o sursă n-a răspuns — atunci totalul e incomplet, nu „zero".
+  // Cifra tastată de mână (`loaded`/`remaining`) a fost ștearsă: nimic nu o
+  // verifica vreodată, deci putea arăta bani inexistenți.
+  punga: {
+    total: number
+    complete: boolean
+    parti: {
+      stripeAvailable: number | null
+      stripePending: number | null
+      stripeIssuing: number | null
+      openrouter: number | null
+    }
+  }
   spent: number
   profit: number
   currency: string
@@ -142,19 +155,6 @@ export async function sellCredits(
 
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
-export async function updatePool(amount: number, direction: 'add' | 'withdraw'): Promise<boolean> {
-  try {
-    const r = await fetch('/api/admin/pool', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, direction }),
-    })
-    return r.ok
-  } catch {
-    return false
-  }
-}
 
 // Market control (admin only): LIVE presence in the four install locations
 // (checked against the real store pages, not dashboards) + the verifiable
