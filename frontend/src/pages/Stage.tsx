@@ -249,7 +249,15 @@ interface BrainCredit {
       live?: boolean
     }
     // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
-    stripe?: { available: number; pending: number; currency: string } | null
+    stripe?: {
+      available: number
+      pending: number
+      currency: string
+      /** Sold REAL ținut în ALTĂ monedă decât cea a contului (Adrian, 30 iul:
+       *  „stripe 0? am băgat bani"). Fără el, „£0.00" însemna deopotrivă
+       *  „n-ai bani" și „ai bani, dar în dolari". */
+      alteMonede?: { currency: string; available: number; pending: number }[]
+    } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
   }
 
