@@ -60,6 +60,11 @@ export interface SynthOpts {
   // MP3 pentru <audio> din browser (implicit); LINEAR16 = PCM brut 24kHz.
   encoding?: 'MP3' | 'LINEAR16'
   sampleRateHertz?: number
+  /** Vocea aleasă de userul ăsta. Necunoscută sau lipsă → vocea aplicației.
+   *  Aceeași regulă ca la vocea live (`resolveVoice` din services/realtime.ts):
+   *  un nume liber n-are voie să plece spre API, fiindcă un 400 aici înseamnă
+   *  „Kelion a amuțit" pentru omul care și-a schimbat o setare. */
+  voice?: string | null
 }
 
 /**
@@ -168,7 +173,12 @@ async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> 
   const r = await ttsPost(
     OPENAI_SPEECH,
     { Authorization: `Bearer ${config.openai.key}`, 'Content-Type': 'application/json' },
-    { model: config.openai.ttsModel, voice: config.openai.ttsVoice, input: spoken, response_format: format },
+    {
+      model: config.openai.ttsModel,
+      voice: opts.voice && config.openai.realtimeVoices.includes(opts.voice) ? opts.voice : config.openai.ttsVoice,
+      input: spoken,
+      response_format: format,
+    },
   )
   if (!(r instanceof Response)) return r
   const audio = Buffer.from(await r.arrayBuffer())
