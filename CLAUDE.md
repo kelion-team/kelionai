@@ -12,6 +12,12 @@ workflows, what's dead code vs. live code, and the current state of the project.
 `HANDOFF.md` and `STATUS.md` in this folder are OLDER and PARTLY OUTDATED —
 `AI-HANDOFF.md` supersedes them; don't treat them as current without checking.
 
+**Then read `RAMAS-DE-FACUT.md`** — the owner's single list of what is NOT done
+and what does NOT work, with the evidence for each row (30 iul: „pune pe listă
+tot ce nu ai făcut din proiect, tot ce nu merge, că mă ia capul"). Cross off a
+row only with a PR *and* a live check; add new rows the moment you find them;
+write „nu pot verifica" rather than „e ok" when you cannot prove it.
+
 ## THE DOCUMENT IS LIVE — YOU MUST KEEP IT CURRENT
 If you change code, architecture, rules, or the project's state, **update the
 relevant section of `AI-HANDOFF.md` (and its §13 "Starea") before you finish
