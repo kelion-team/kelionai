@@ -48,6 +48,8 @@ import { brainCompleteWithTools } from './brain.js'
 import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
+import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
+import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { listeazaSecrete } from './secrete.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
@@ -395,6 +397,32 @@ function escaladare(incercariDeja: number): string {
   )
 }
 
+// ── CERINȚELE OWNERULUI: analiză înainte de cod, apoi execuție ───────────────
+//
+// Adrian, 30 iul: „sisteme avansate de gestiune a cerințelor, evaluări avansate
+// pe soluțiile oferite". Aici se leagă de buclă: o cerință NOUĂ nu pleacă la
+// construit — întâi i se pun variantele pe masă și se alege una, cu motiv. Abia
+// cea ANALIZATĂ devine ordin, și pleacă cu varianta aleasă și cu criteriul de
+// acceptare lipite de ea, ca ținta să nu se mute după livrare.
+async function cerinteDeDus(): Promise<Sarcina[]> {
+  const analizate = await listeazaCerinte('analizata', 20).catch(() => [])
+  return analizate.map((c) => ({
+    cod: `C${c.id}`,
+    titlu: c.text.slice(0, 90),
+    executant: 'constructor' as Executant,
+    ordin:
+      `CERINȚA OWNERULUI #${c.id}. Ai analizat-o deja și ai ALES un drum — ăsta e.\n\n` +
+      `CE A CERUT: ${c.text}\n\n` +
+      (c.criteriu ? `CUM SE DOVEDEȘTE CĂ E FĂCUTĂ (criteriul de acceptare, scris ÎNAINTE de\n` +
+        `livrare tocmai ca ținta să nu se mute): ${c.criteriu}\n\n` : '') +
+      (c.aleasa ? `VARIANTA ALEASĂ DE TINE, ȘI DE CE:\n${c.aleasa}\n\n` : '') +
+      (c.optiuni ? `Celelalte variante evaluate (ca să nu le reiei): ${c.optiuni.slice(0, 1200)}\n\n` : '') +
+      `Dacă pe parcurs descoperi că varianta aleasă e greșită, NU o duce de dragul ` +
+      `consecvenței: scrie în PR ce ai aflat și care e drumul bun. A te răzgândi cu ` +
+      `dovadă e corect; a insista pe un drum mort, nu.`,
+  }))
+}
+
 /** Regulile care se lipesc la FIECARE ordin — la fel pentru misiune și pentru listă. */
 function cuRegulile(ordin: string): string {
   return (
@@ -533,7 +561,17 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   )
   // După misiune: întâi CE ÎI LIPSEȘTE LUI (golurile pe care le-a triat singur
   // — „vede ce-i lipsește și se dezvoltă"), apoi rândurile din lista ownerului.
-  const brute = misiuneGata ? [...(await golurileLui()), ...(await randuriDeFacut())] : MISIUNE
+  // ANALIZA ÎNAINTE DE COD: o cerință nouă se evaluează întâi — variante,
+  // scoruri, una aleasă cu motiv. E o tură ieftină de creier, nu un ordin.
+  const noi = await listeazaCerinte('noua', 5).catch(() => [])
+  if (noi.length) {
+    const r = await evalueazaCerinta(noi[0]).catch((e: Error) => ({ ok: false, detaliu: e.message }))
+    return { pornit: r.ok, motiv: `cerința #${noi[0].id}: ${r.detaliu}` }
+  }
+
+  const brute = misiuneGata
+    ? [...(await cerinteDeDus()), ...(await golurileLui()), ...(await randuriDeFacut())]
+    : MISIUNE
   if (!brute.length) return { pornit: false, motiv: 'n-am ce lua: nici goluri, nici rânduri de listă' }
 
   // NIMIC NU SE ABANDONEAZĂ. Înainte, după 3 încercări pasul era marcat „blocat"
@@ -554,6 +592,14 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
         // Un gol construit se închide și în lista LUI de lipsuri — altfel l-ar
         // relua la nesfârșit, sau ar rămâne scris „nu pot" pentru ceva ce poate.
         if (/^G\d+$/.test(s.cod)) await setGapResolved(Number(s.cod.slice(1)), true).catch(() => {})
+        // O cerință dusă trece pe „livrată" — NU pe „verificată". Verificarea
+        // cere o măsurătoare pe live, nu terminarea unui ordin. Regula #1.
+        if (/^C\d+$/.test(s.cod)) {
+          await actualizeazaCerinta(Number(s.cod.slice(1)), {
+            stare: 'livrata',
+            dovada: `ordinul #${st.job} s-a terminat; rămâne de VERIFICAT pe live`,
+          }).catch(() => {})
+        }
         console.log(`[AUTONOM] ${s.cod} („${s.titlu}") — gata, ordinul #${st.job}`)
         continue // trecem la următoarea sarcină în ACEEAȘI trecere
       }
@@ -610,6 +656,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
 
     const id = await createBuildJob('kelion-autonom', ordin)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
+    if (/^C\d+$/.test(s.cod)) {
+      await actualizeazaCerinta(Number(s.cod.slice(1)), { stare: 'in_lucru', job_id: id }).catch(() => {})
+    }
     await scrieStare(s.cod, { job: id, incercari: st.incercari + 1 })
     const ziua = new Date().toISOString().slice(0, 10)
     await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
@@ -617,10 +666,12 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     console.log(`[AUTONOM] ${eticheta}: ${s.cod} („${s.titlu}") → ordinul #${id}`)
     return { pornit: true, motiv: `${s.cod} (${eticheta}): ${s.titlu}` }
   }
-  return {
-    pornit: false,
-    motiv: misiuneGata ? 'toate rândurile listei au fost trimise' : 'misiunea Revolut: toți pașii sunt închiși',
-  }
+  // N-a rămas nimic de dus. Atunci NU stă degeaba: își reanalizează ce a livrat
+  // — „se putea mai bine, ACUM?" (Adrian: „analiza și îmbunătățirea continuă a
+  // posibilităților de implementare"). Ce iese devine cerință nouă, deci munca
+  // următoarei treceri. Fără asta, sistemul livrează o dată și îngheață.
+  const imb = await imbunatatireContinua().catch(() => ({ propuneri: 0, detaliu: 'n-a mers reanaliza' }))
+  return { pornit: imb.propuneri > 0, motiv: `nimic de dus → reanaliză: ${imb.detaliu}` }
 }
 
 /** Bucla. La fiecare oră se uită dacă are ce face — și se apucă. */

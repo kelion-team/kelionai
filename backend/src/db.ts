@@ -248,6 +248,36 @@ export async function initDb(): Promise<void> {
     -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
     -- logs them here (via the log_unsupported_request tool); only the owner/admin
     -- reads them, to prioritise what to build next. Never shown to end users.
+    -- ── GESTIUNEA CERINȚELOR (Adrian, 30 iul: „am nevoie de sisteme avansate
+    -- alocate lui Kelion de gestiune a cerințelor, evaluări avansate pe
+    -- soluțiile oferite") ──────────────────────────────────────────────────
+    -- Până acum, o cerință a ownerului trăia în trei locuri care nu se vorbeau:
+    -- un rând în RAMAS-DE-FACUT.md (scris de mână), un ordin în build_jobs
+    -- (fără legătură cu cerința) și, uneori, doar în chat — de unde se pierdea.
+    -- Rezultatul: „ți-am cerut de zeci de ori" era ADEVĂRAT și nedemonstrabil.
+    -- Aici cerința are un singur loc, cu drumul ei întreg: ce s-a cerut, cum se
+    -- dovedește că e făcută, ce VARIANTE s-au evaluat și cu ce scoruri, care a
+    -- fost aleasă și de ce, ce ordin a dus-o, și ce s-a MĂSURAT la final.
+    CREATE TABLE IF NOT EXISTS cerinte (
+      id BIGSERIAL PRIMARY KEY,
+      text TEXT NOT NULL,
+      sursa TEXT NOT NULL DEFAULT 'owner',
+      -- noua → analizata (are variante evaluate) → in_lucru → livrata →
+      -- verificata (cu dovadă măsurată) | respinsa (cu motiv)
+      stare TEXT NOT NULL DEFAULT 'noua',
+      -- Cum se DOVEDEȘTE că e făcută. Scris la început, nu la sfârșit, ca să nu
+      -- se mute ținta după ce s-a livrat ceva.
+      criteriu TEXT,
+      optiuni TEXT,      -- JSON: variantele evaluate, cu scoruri și riscuri
+      aleasa TEXT,       -- varianta aleasă + DE CE
+      dovada TEXT,       -- ce s-a măsurat la final (nu ce s-a declarat)
+      job_id BIGINT,
+      pr_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, created_at);
+
     CREATE TABLE IF NOT EXISTS capability_gaps (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -2262,6 +2292,81 @@ export async function logCapabilityGap(email: string, request: string, reason = 
 }
 
 /** Open capability gaps, most-requested / most-recent first (admin only). */
+// ── CERINȚELE: un singur loc, cu drumul întreg ───────────────────────────────
+export interface Cerinta {
+  id: number
+  text: string
+  sursa: string
+  stare: string
+  criteriu: string | null
+  optiuni: string | null
+  aleasa: string | null
+  dovada: string | null
+  job_id: number | null
+  pr_url: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+/** Scrie o cerință. Dublurile nu se adaugă: aceeași cerere, același rând —
+ *  altfel lista s-ar umple cu variații ale aceluiași lucru și n-ar mai fi
+ *  gestiune, ci zgomot. */
+export async function adaugaCerinta(text: string, sursa = 'owner', criteriu?: string): Promise<number> {
+  if (!dbEnabled()) return 0
+  const t = text.trim().slice(0, 4000)
+  if (!t) return 0
+  try {
+    const dej = await getPool().query<{ id: string | number }>(
+      `SELECT id FROM cerinte WHERE lower(text) = lower($1) AND stare <> 'respinsa' LIMIT 1`,
+      [t],
+    )
+    if (dej.rows[0]) return Number(dej.rows[0].id)
+    const r = await getPool().query<{ id: string | number }>(
+      'INSERT INTO cerinte (text, sursa, criteriu) VALUES ($1,$2,$3) RETURNING id',
+      [t, sursa, criteriu ?? null],
+    )
+    return Number(r.rows[0]?.id ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+export async function listeazaCerinte(stare?: string, limit = 100): Promise<Cerinta[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = stare
+      ? await getPool().query<Cerinta>(
+          'SELECT * FROM cerinte WHERE stare = $1 ORDER BY created_at DESC LIMIT $2',
+          [stare, limit],
+        )
+      : await getPool().query<Cerinta>('SELECT * FROM cerinte ORDER BY created_at DESC LIMIT $1', [limit])
+    return r.rows
+  } catch {
+    return []
+  }
+}
+
+/** Mută cerința pe drumul ei. Doar câmpurile date se ating — restul rămân. */
+export async function actualizeazaCerinta(
+  id: number,
+  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url'>> & { job_id?: number },
+): Promise<void> {
+  if (!dbEnabled() || !id) return
+  const campuri: string[] = []
+  const val: unknown[] = [id]
+  for (const [k, v] of Object.entries(p)) {
+    if (v === undefined) continue
+    val.push(v)
+    campuri.push(`${k} = $${val.length}`)
+  }
+  if (!campuri.length) return
+  try {
+    await getPool().query(`UPDATE cerinte SET ${campuri.join(', ')}, updated_at = now() WHERE id = $1`, val)
+  } catch {
+    /* niciodată nu rupem tura pentru o scriere de evidență */
+  }
+}
+
 export async function getCapabilityGaps(includeResolved = false, limit = 200): Promise<CapabilityGap[]> {
   if (!dbEnabled()) return []
   try {

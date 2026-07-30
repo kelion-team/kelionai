@@ -52,7 +52,24 @@ vi.mock('../config.js', () => ({
 let goluri: { id: number; request: string; hits: number; reason: string | null; triage: string | null }[] = []
 const goluriInchise: number[] = []
 
+// Cerințele ownerului, cu drumul lor (noua → analizata → in_lucru → livrata).
+let cerinte: { id: number; text: string; stare: string; criteriu: string | null; aleasa: string | null; optiuni: string | null }[] = []
+const cerinteAtinse: { id: number; stare?: string }[] = []
+let evaluari = 0
+
+vi.mock('./cerinte.js', () => ({
+  evalueazaCerinta: async () => {
+    evaluari++
+    return { ok: true, detaliu: '3 variante evaluate → browser' }
+  },
+  imbunatatireContinua: async () => ({ propuneri: 0, detaliu: 'merg bine așa' }),
+}))
+
 vi.mock('../db.js', () => ({
+  listeazaCerinte: async (stare?: string) => cerinte.filter((c) => !stare || c.stare === stare),
+  actualizeazaCerinta: async (id: number, p: { stare?: string }) => {
+    cerinteAtinse.push({ id, stare: p.stare })
+  },
   getCapabilityGaps: async () => goluri,
   setGapResolved: async (id: number) => {
     goluriInchise.push(id)
@@ -125,6 +142,56 @@ beforeEach(() => {
   cerute.length = 0
   goluri = []
   goluriInchise.length = 0
+  cerinte = []
+  cerinteAtinse.length = 0
+  evaluari = 0
+})
+
+// „Sisteme avansate de gestiune a cerințelor, evaluări avansate pe soluțiile
+// oferite" (Adrian, 30 iul). Poarta care contează: o cerință NOUĂ nu pleacă la
+// construit — întâi i se pun variantele pe masă. Eu am sărit peste pasul ăsta de
+// trei ori azi (email → GoCardless → API Revolut) și de fiecare dată s-a dărâmat.
+describe('cerințele: analiză înainte de cod', () => {
+  function misiuneaInchisa(): void {
+    for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5']) pasInchis(c)
+  }
+
+  it('o cerință NOUĂ se evaluează întâi — nu se trimite direct la construit', async () => {
+    misiuneaInchisa()
+    cerinte = [{ id: 9, text: 'plata prin Revolut', stare: 'noua', criteriu: null, aleasa: null, optiuni: null }]
+
+    const r = await poateSaLucreze()
+    expect(evaluari).toBe(1)
+    expect(jobs).toHaveLength(0) // NICIUN ordin înainte de analiză
+    expect(r.motiv).toContain('cerința #9')
+  })
+
+  it('cerința ANALIZATĂ pleacă la construit cu varianta aleasă și criteriul lipite', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 9, text: 'plata prin Revolut', stare: 'analizata',
+      criteriu: 'un user plătește și primește creditele singur',
+      aleasa: 'browser pe portal — DE CE: nu-i cere nimic ownerului',
+      optiuni: '[{"nume":"email"}]',
+    }]
+
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('C9')
+    expect(jobs[0].orderText).toContain('un user plătește și primește creditele singur')
+    expect(jobs[0].orderText).toContain('browser pe portal')
+    expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'in_lucru' })
+  })
+
+  it('ordinul terminat o duce pe „livrată", NU pe „verificată"', async () => {
+    misiuneaInchisa()
+    cerinte = [{ id: 9, text: 'x', stare: 'analizata', criteriu: null, aleasa: null, optiuni: null }]
+    await poateSaLucreze()
+    jobs[0].status = 'done'
+    await poateSaLucreze()
+    // „Verificat" cere o măsurătoare pe live, nu terminarea unui ordin.
+    expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'livrata' })
+    expect(cerinteAtinse.some((c) => c.stare === 'verificata')).toBe(false)
+  })
 })
 
 // „Autonomia mai înseamnă și capacitatea de a vedea ce îi lipsește și
