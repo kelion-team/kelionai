@@ -7,6 +7,7 @@ import {
   saveDisabledGestures,
 } from '../lib/gestures'
 import BackLink from './BackLink'
+import { adminStrings } from '../lib/adminText'
 import CardReveal from './CardReveal'
 import {
   fetchUsers,
@@ -603,6 +604,8 @@ export default function AdminPanel({
     })
   }
 
+  // TEXTUL PANOULUI, in limba adminului (engleza implicit). Vezi lib/adminText.ts.
+  const A = adminStrings()
   const sym = finance?.currency === 'usd' ? '$' : '£'
   // NU CONFUNDA „nu am voie să văd" cu „nu există" (Adrian, 30 iul: panoul îi
   // arăta trei ❌ roșii — payouts, Issuing, card „necreat" — când adevărul era
@@ -639,21 +642,21 @@ export default function AdminPanel({
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}
               onClick={() => setTab('finance')}
             >
-              Bani
+              {A.tabMoney}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'users' ? 'sel' : ''}`}
               onClick={() => setTab('users')}
             >
-              Utilizatori{activity && activity.users.length > 0 ? ` (${activity.users.length})` : ''}
+              {A.tabUsers}{activity && activity.users.length > 0 ? ` (${activity.users.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'visitors' ? 'sel' : ''}`}
               onClick={() => setTab('visitors')}
             >
-              Vizitatori
+              {A.tabVisitors}
               {demos && demos.visitsToday + demos.today > 0
                 ? ` (${demos.visitsToday + demos.today})`
                 : ''}
@@ -663,84 +666,84 @@ export default function AdminPanel({
               className={`admin-tab ${tab === 'vchat' ? 'sel' : ''}`}
               onClick={() => setTab('vchat')}
             >
-              Chat live{vconvos.length > 0 ? ` (${vconvos.length})` : ''}
+              {A.tabLiveChat}{vconvos.length > 0 ? ` (${vconvos.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'history' ? 'sel' : ''}`}
               onClick={() => setTab('history')}
             >
-              Istoric chat
+              {A.tabChatHistory}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'share' ? 'sel' : ''}`}
               onClick={() => setTab('share')}
             >
-              Distribuie
+              {A.tabShare}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'gaps' ? 'sel' : ''}`}
               onClick={() => setTab('gaps')}
             >
-              Cereri neacoperite{gaps.length > 0 ? ` (${gaps.length})` : ''}
+              {A.tabGaps}{gaps.length > 0 ? ` (${gaps.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'stores' ? 'sel' : ''}`}
               onClick={() => setTab('stores')}
             >
-              Magazine
+              {A.tabStores}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'inbox' ? 'sel' : ''}`}
               onClick={() => setTab('inbox')}
             >
-              Inbox
+              {A.tabInbox}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'voiceprints' ? 'sel' : ''}`}
               onClick={() => setTab('voiceprints')}
             >
-              Amprente vocale{voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
+              {A.tabVoiceprints}{voiceprints.length > 0 ? ` (${voiceprints.length})` : ''}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'gesturi' ? 'sel' : ''}`}
               onClick={() => setTab('gesturi')}
             >
-              Gesturi
+              {A.tabGestures}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'tokenuri' ? 'sel' : ''}`}
               onClick={() => setTab('tokenuri')}
             >
-              Tokenuri
+              {A.tabTokens}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'constructor' ? 'sel' : ''}`}
               onClick={() => setTab('constructor')}
             >
-              Constructor
+              {A.tabBuilder}
             </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'recuperare' ? 'sel' : ''}`}
               onClick={() => setTab('recuperare')}
             >
-              Recuperare
+              {A.tabRecovery}
             </button>
           </div>
           <BackLink onBack={onClose} />
         </header>
         {tab === 'finance' && (
           <section className="admin-finance">
-            {!finance && <p className="chat-hint">Se încarcă…</p>}
+            {!finance && <p className="chat-hint">{A.loading}</p>}
             {finance && (
               <>
                 {/* ── PANOUL BANI, CURĂȚAT (Adrian, 30 iul: „simplifică pagina, să
@@ -842,7 +845,7 @@ export default function AdminPanel({
                   <div className="or-wallet-main">
                     <span className="or-wallet-label">Circuitul banilor: useri → Stripe → AI</span>
                   </div>
-                  {!circuit && <span className="or-wallet-sub">Se citește starea din Stripe…</span>}
+                  {!circuit && <span className="or-wallet-sub">{A.readingStripe}</span>}
                   {circuit && (
                     <>
                       {/* O SINGURĂ PROBLEMĂ REALĂ, nu trei false. Cât timp cheia
@@ -883,7 +886,7 @@ export default function AdminPanel({
                         <span className="or-wallet-sub">
                           {circuit.payoutsInterval === 'manual' ? '✅' : '❌'} 1. Banii RĂMÂN în pungă (payouts: {circuit.payoutsInterval}){' '}
                           {circuit.payoutsInterval !== 'manual' && (
-                            <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
+                            <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">{A.setManual}</a>
                           )}
                         </span>
                       )}
@@ -902,7 +905,7 @@ export default function AdminPanel({
                         <span className="or-wallet-sub">
                           {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
                           {circuit.issuingStatus !== 'active' && (
-                            <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">Activează</a>
+                            <a href="https://dashboard.stripe.com/issuing/overview" target="_blank" rel="noreferrer">{A.activate}</a>
                           )}
                         </span>
                       )}
@@ -945,7 +948,7 @@ export default function AdminPanel({
                           </button>
                         )}
                         {circuit.cards.length > 0 && (
-                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">Vezi în Stripe</a>
+                          <a href={`https://dashboard.stripe.com/issuing/cards/${circuit.cards[0].id}`} target="_blank" rel="noreferrer">{A.seeInStripe}</a>
                         )}
                       </span>
                       {/* CAPCANA CARE L-A COSTAT O ORĂ PE ADRIAN (30 iul): un card
@@ -975,7 +978,7 @@ export default function AdminPanel({
                         <span className="or-wallet-sub">
                           Ca numărul cardului să apară aici (fără drum prin Stripe): pune cheia PUBLICĂ
                           (<code>pk_live_…</code>, de la <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noreferrer">Stripe → API keys</a>)
-                          în secretul <code>STRIPE_PUBLISHABLE_KEY</code> și rulează workflow-ul <code>vps-set-env</code>.
+                          în secretul <code>STRIPE_PUBLISHABLE_KEY</code>{A.andRunWorkflow}<code>vps-set-env</code>.
                           E cheie publică, nu secretă — se poate pune liniștit.
                         </span>
                       )}
@@ -1051,7 +1054,7 @@ export default function AdminPanel({
                           {circuit.autoFund.ok ? '✅' : '⚠️'} Ultimul transfer automat plăți→card:{' '}
                           {circuit.autoFund.detail}
                           {!circuit.autoFund.ok && /permission|beta|not.*enabled|Unrecognized|unknown/i.test(circuit.autoFund.detail) && (
-                            <> — endpointul Balance Transfers e în beta la Stripe: cere accesul din <a href="https://dashboard.stripe.com/support" target="_blank" rel="noreferrer">dashboard</a> (o dată)</>
+                            <>{A.balanceTransfersBeta}<a href="https://dashboard.stripe.com/support" target="_blank" rel="noreferrer">dashboard</a>{A.once}</>
                           )}
                         </span>
                       )}
@@ -1090,7 +1093,7 @@ export default function AdminPanel({
                       {resetBusy ? '…' : 'Pune pe 0'}
                     </button>
                   </div>
-                  {aiParts.length === 0 && <div className="chat-hint">Niciun consum încă.</div>}
+                  {aiParts.length === 0 && <div className="chat-hint">{A.noSpendYet}</div>}
                   {aiParts.map(([k, v]) => (
                     <div className="fin-row" key={k}>
                       <span>{AI_LABELS[k] ?? k}</span>
@@ -1100,8 +1103,8 @@ export default function AdminPanel({
                 </div>
                 {/* Tranzacțiile Stripe REALE (alimentări credite) — cine, cât, status, când. */}
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Tranzacții — alimentări credite prin Stripe</div>
-                  {transactions.length === 0 && <div className="chat-hint">Nicio tranzacție încă.</div>}
+                  <div className="fin-breakdown-head">{A.transactionsHead}</div>
+                  {transactions.length === 0 && <div className="chat-hint">{A.noTransactionsYet}</div>}
                   {transactions.map((t) => (
                     <div className="fin-row" key={t.id}>
                       <span>
@@ -1127,7 +1130,7 @@ export default function AdminPanel({
         )}
         {tab === 'stores' && (
           <section className="admin-finance">
-            {!stores && <p className="chat-hint">Se verifică magazinele live…</p>}
+            {!stores && <p className="chat-hint">{A.checkingStores}</p>}
             {stores && (
               <>
                 <div className="fin-breakdown">
@@ -1146,7 +1149,7 @@ export default function AdminPanel({
                             ● LISTAT — deschide
                           </a>
                         ) : (
-                          <span className="store-missing">○ nelistat încă</span>
+                          <span className="store-missing">{A.notListedYet}</span>
                         )}
                       </span>
                     </div>
@@ -1172,7 +1175,7 @@ export default function AdminPanel({
                 </div>
                 {stores.downloads.recent.length > 0 && (
                   <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Cine a descărcat (ultimele 100)</div>
+                    <div className="fin-breakdown-head">{A.downloadsHead}</div>
                     {stores.downloads.recent.map((d, i) => (
                       <div className="fin-row" key={i}>
                         <span>
@@ -1203,9 +1206,9 @@ export default function AdminPanel({
                 mesajele, citite sau nu). Aici vezi tot ce e în inbox, nu doar mailul
                 nou. Ultimele 40.
               </div>
-              {mailboxLoading && <p className="chat-hint">Se citește cutia…</p>}
+              {mailboxLoading && <p className="chat-hint">{A.readingMailbox}</p>}
               {!mailboxLoading && mailboxLive.length === 0 && (
-                <p className="chat-hint">Cutia e goală sau nu s-a putut citi (verifică MAIL_PASS).</p>
+                <p className="chat-hint">{A.mailboxEmpty}</p>
               )}
               {mailboxLive.map((m) => (
                 <div className="inbox-item" key={m.uid}>
@@ -1236,7 +1239,7 @@ export default function AdminPanel({
                 emailul (MAIL_PASS) nu e configurat. Niciun mesaj nu se mai pierde.
               </div>
               {contactMsgs.length === 0 && (
-                <p className="chat-hint">Niciun mesaj de contact încă.</p>
+                <p className="chat-hint">{A.noContactMessagesYet}</p>
               )}
               {contactMsgs.map((m) => (
                 <div className="inbox-item" key={m.id}>
@@ -1270,7 +1273,7 @@ export default function AdminPanel({
                 automat de Secretar (row 19). Se citesc la fiecare 3 minute.
               </div>
               {inbound.length === 0 && (
-                <p className="chat-hint">Nicio scrisoare încă (sau MAIL_PASS nesetat).</p>
+                <p className="chat-hint">{A.noLettersYet}</p>
               )}
               {inbound.map((m) => (
                 <div className="inbox-item" key={m.id}>
@@ -1284,7 +1287,7 @@ export default function AdminPanel({
                   {m.body && <div className="inbox-body">{m.body.slice(0, 300)}</div>}
                   {m.reply && (
                     <div className="inbox-reply">
-                      <b>Răspuns:</b> {m.reply.slice(0, 300)}
+                      <b>{A.reply}</b> {m.reply.slice(0, 300)}
                     </div>
                   )}
                 </div>
@@ -1299,10 +1302,10 @@ export default function AdminPanel({
                 Amprente vocale înregistrate — identificare speaker + gen detectat
               </div>
               {voiceprintsLoading && voiceprints.length === 0 && (
-                <div className="chat-hint">Se încarcă…</div>
+                <div className="chat-hint">{A.loading}</div>
               )}
               {!voiceprintsLoading && voiceprints.length === 0 && (
-                <div className="chat-hint">Nicio amprentă vocală înregistrată încă.</div>
+                <div className="chat-hint">{A.noVoiceprintsYet}</div>
               )}
               {voiceprints.map((v) => (
                 <div className="fin-row" key={v.email}>
@@ -1329,13 +1332,13 @@ export default function AdminPanel({
                       <button
                         type="button"
                         className="ghost"
-                        title="Ascultă mostra vocii"
+                        title={A.playVoiceSample}
                         onClick={() => void playVoiceprint(v.email)}
                       >
                         {playingVp === v.email ? '⏸ oprește' : '▶ ascultă'}
                       </button>
                     ) : (
-                      <span className="muted" title="Încă nu s-a captat o mostră audio">
+                      <span className="muted" title={A.noVoiceSampleYet}>
                         fără audio
                       </span>
                     )}
@@ -1406,7 +1409,7 @@ export default function AdminPanel({
                 <input
                   value={recoveryNote}
                   onChange={(e) => setRecoveryNote(e.target.value)}
-                  placeholder="Notă (opțional): ce e această versiune"
+                  placeholder={A.versionNotePlaceholder}
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button type="submit" className="ghost">
@@ -1417,9 +1420,9 @@ export default function AdminPanel({
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
               <div className="fin-breakdown-head">Versiuni salvate ({recoveryPoints.length})</div>
-              {recoveryLoading && recoveryPoints.length === 0 && <div className="chat-hint">Se încarcă…</div>}
+              {recoveryLoading && recoveryPoints.length === 0 && <div className="chat-hint">{A.loading}</div>}
               {!recoveryLoading && recoveryPoints.length === 0 && (
-                <div className="chat-hint">Nicio versiune salvată încă.</div>
+                <div className="chat-hint">{A.noVersionsYet}</div>
               )}
               {recoveryPoints.map((p) => (
                 <div className="fin-row" key={p.tag}>
@@ -1477,7 +1480,7 @@ export default function AdminPanel({
                 <input
                   value={buildOrder}
                   onChange={(e) => setBuildOrder(e.target.value)}
-                  placeholder="Ordinul de construcție: ce, unde, cum se verifică"
+                  placeholder={A.buildOrderPlaceholder}
                   style={{ flex: 1, minWidth: 0 }}
                 />
                 <button type="submit" className="ghost">
@@ -1488,7 +1491,7 @@ export default function AdminPanel({
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
               <div className="fin-breakdown-head">Coada ordinelor</div>
-              {buildJobs.length === 0 && <div className="chat-hint">Niciun ordin încă.</div>}
+              {buildJobs.length === 0 && <div className="chat-hint">{A.noOrdersYet}</div>}
               {buildJobs.map((j) => (
                 <div className="fin-row" key={j.id}>
                   <span>
@@ -1566,8 +1569,8 @@ export default function AdminPanel({
                   Reîmprospătează
                 </button>
               </div>
-              {tokenChecksLoading && <p className="chat-hint">Se verifică tokenurile…</p>}
-              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">Nu s-au putut încărca verificările.</p>}
+              {tokenChecksLoading && <p className="chat-hint">{A.checkingTokens}</p>}
+              {!tokenChecksLoading && !tokenChecks && <p className="chat-hint">{A.tokensFailed}</p>}
               {tokenChecks && (
                 <>
                   <div className="fin-row" style={{ fontWeight: 600 }}>
@@ -1593,7 +1596,7 @@ export default function AdminPanel({
         )}
         {tab === 'users' && (
           <section className="admin-finance">
-            {!activity && <p className="chat-hint">Se încarcă…</p>}
+            {!activity && <p className="chat-hint">{A.loading}</p>}
             {activity && activity.users.length === 0 && (
               <p className="chat-hint">
                 Încă nu s-a strâns activitate pe conturi — se adună de la prima intrare a fiecărui
@@ -1616,7 +1619,7 @@ export default function AdminPanel({
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') void openUserConvo(u)
                       }}
-                      title="Vezi ce a scris și cum a testat"
+                      title={A.seeWhatTheyWrote}
                     >
                       <div className="vis-main">
                         <span className="vis-flagline">
@@ -1653,7 +1656,7 @@ export default function AdminPanel({
                         <button
                           type="button"
                           className="user-act"
-                          title="Vezi tot chatul: ce a scris și cum a răspuns Kelion"
+                          title={A.seeWholeChat}
                           onClick={() => void openUserConvo(u)}
                         >
                           💬 Vezi chat
@@ -1734,7 +1737,7 @@ export default function AdminPanel({
                   ))}
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">Sesiuni recente — cine, când, cât a stat</div>
+                  <div className="fin-breakdown-head">{A.recentSessions}</div>
                   {activity.sessions.length === 0 && <div className="chat-hint">—</div>}
                   {activity.sessions.map((s, i) => (
                     <div className="vis-row" key={i}>
@@ -1771,7 +1774,7 @@ export default function AdminPanel({
               <div className="fin-breakdown-head">
                 Contacte — vizitatori care și-au lăsat emailul ({leads.length})
               </div>
-              {leads.length === 0 && <div className="chat-hint">Niciun contact încă.</div>}
+              {leads.length === 0 && <div className="chat-hint">{A.noContactsYet}</div>}
               {leads.map((l) => (
                 <div className="lead-row" key={l.id}>
                   <div className="lead-main">
@@ -1803,7 +1806,7 @@ export default function AdminPanel({
                 </div>
               ))}
             </div>
-            {!demos && <p className="chat-hint">Se încarcă…</p>}
+            {!demos && <p className="chat-hint">{A.loading}</p>}
             {demos && (
               <>
                 <div className="fin-cards">
@@ -1818,14 +1821,14 @@ export default function AdminPanel({
                     <span className="fin-val">{demos.byCountry.filter((c) => c.code).length}</span>
                   </div>
                   <div className="fin-card">
-                    <span className="fin-label">Boți detectați</span>
+                    <span className="fin-label">{A.botsDetected}</span>
                     <span className="fin-val">{demos.bots}</span>
                   </div>
                 </div>
                 <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">După țară</div>
+                  <div className="fin-breakdown-head">{A.byCountry}</div>
                   {demos.byCountry.length === 0 && (
-                    <div className="chat-hint">Niciun vizitator încă.</div>
+                    <div className="chat-hint">{A.noVisitorsYet}</div>
                   )}
                   {demos.byCountry.map((c) => (
                     <div className="fin-row" key={`${c.country}${c.code}`}>
@@ -1884,8 +1887,8 @@ export default function AdminPanel({
         {tab === 'vchat' && (
           <section className="admin-finance vchat-admin">
             <div className="vchat-admin-list">
-              <div className="fin-breakdown-head">Conversații live cu vizitatorii</div>
-              {vconvos.length === 0 && <div className="chat-hint">Nicio conversație încă.</div>}
+              <div className="fin-breakdown-head">{A.liveVisitorChats}</div>
+              {vconvos.length === 0 && <div className="chat-hint">{A.noConversationsYet}</div>}
               {vconvos.map((c) => (
                 <div
                   key={c.conv_id}
@@ -1911,11 +1914,11 @@ export default function AdminPanel({
               ))}
             </div>
             <div className="vchat-admin-thread">
-              {!vsel && <div className="chat-hint">Alege o conversație ca să răspunzi.</div>}
+              {!vsel && <div className="chat-hint">{A.pickConversation}</div>}
               {vsel && (
                 <>
                   <div className="vchat-admin-log">
-                    {vLoading && <p className="chat-hint">Se încarcă…</p>}
+                    {vLoading && <p className="chat-hint">{A.loading}</p>}
                     {vmsgs.map((m) => (
                       <div
                         key={m.id}
@@ -1929,7 +1932,7 @@ export default function AdminPanel({
                     <input
                       className="vchat-input"
                       value={vreply}
-                      placeholder="Răspunde vizitatorului…"
+                      placeholder={A.replyToVisitor}
                       onChange={(e) => setVreply(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void sendReply()
@@ -1970,7 +1973,7 @@ export default function AdminPanel({
               return (
                 <>
                   <div className="fin-breakdown">
-                    <div className="fin-breakdown-head">Linkul aplicației</div>
+                    <div className="fin-breakdown-head">{A.appLink}</div>
                     <div className="share-row">
                       <code className="share-url">{url}</code>
                       <button
@@ -1996,9 +1999,9 @@ export default function AdminPanel({
                       )}
                     </div>
                   </div>
-                  <ShareGrid title="Trimite linkul pe rețele" items={links} />
+                  <ShareGrid title={A.shareOnSocial} items={links} />
                   <ShareGrid
-                    title="Platforme video — clipurile promo sunt în folderul Downloads; se încarcă în studioul lor"
+                    title={A.videoPlatforms}
                     items={uploads}
                   />
                 </>
@@ -2065,14 +2068,14 @@ export default function AdminPanel({
                 (sănătate sistem · erori server · erori F12 · construcții eșuate)
               </span>
             </h3>
-            {!audit && <p className="chat-hint">Se încarcă auditul…</p>}
+            {!audit && <p className="chat-hint">{A.loadingAudit}</p>}
             {audit && (
               <>
                 {(audit.health?.probleme?.length ?? 0) === 0 &&
                   (audit.serverErrors?.length ?? 0) === 0 &&
                   (audit.clientErrors?.length ?? 0) === 0 &&
                   (audit.failedJobs?.length ?? 0) === 0 && (
-                    <p className="chat-hint">Nimic căzut acum: sănătatea e verde, zero erori de server, zero erori de client, zero construcții eșuate.</p>
+                    <p className="chat-hint">{A.nothingDown}</p>
                   )}
                 {(audit.health?.probleme ?? []).map((p) => (
                   <div key={`h-${p.id}`} className="admin-gap">
@@ -2144,7 +2147,7 @@ export default function AdminPanel({
                   type="button"
                   className="user-act"
                   disabled={roBusy}
-                  title="Traduce toată conversația în română (din orice limbă), instant"
+                  title={A.translateToRo}
                   onClick={() => void toggleRo(history)}
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
@@ -2191,7 +2194,7 @@ export default function AdminPanel({
                   type="button"
                   className="user-act"
                   disabled={roBusy || userConvo.rows.length === 0}
-                  title="Traduce toată conversația în română (din orice limbă), instant"
+                  title={A.translateToRo}
                   onClick={() => void toggleRo(userConvo.rows)}
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
@@ -2202,9 +2205,9 @@ export default function AdminPanel({
               </div>
             </header>
             <div className="admin-history convo-body">
-              {userConvoLoading && <p className="chat-hint">Se încarcă…</p>}
+              {userConvoLoading && <p className="chat-hint">{A.loading}</p>}
               {!userConvoLoading && userConvo.rows.length === 0 && (
-                <p className="chat-hint">Nu a scris niciun mesaj încă.</p>
+                <p className="chat-hint">{A.noMessagesYet}</p>
               )}
               {!userConvoLoading &&
                 groupByDay(userConvo.rows).map((g) => (
