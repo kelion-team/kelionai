@@ -60,7 +60,20 @@ async function checkStripe(): Promise<TokenCheck> {
   try {
     const balance = await timed(15_000, () => getStripeBalance())
     if (balance) {
-      return { name: 'Stripe secret key', status: 'ok', detail: `balance disponibil ${balance.available} ${balance.currency}`, requiredScope: 'Balance + Checkout' }
+      // TOATE CELE TREI BUZUNARE, nu doar unul (Adrian: „Stripe e 0? am băgat
+      // bani"). Un depozit proaspăt stă în `pending` până se decontează, iar o
+      // alimentare pentru card intră direct în punga Issuing — niciuna nu apare
+      // în `available`. Afișând doar `available`, linia asta îl făcea să creadă
+      // că banii s-au evaporat.
+      const c = balance.currency.toUpperCase()
+      return {
+        name: 'Stripe secret key',
+        status: 'ok',
+        detail:
+          `disponibil ${balance.available} ${c} · în decontare ${balance.pending} ${c} · ` +
+          `punga cardului ${balance.issuing} ${c}`,
+        requiredScope: 'Balance + Checkout',
+      }
     }
     return { name: 'Stripe secret key', status: 'fail', detail: 'getStripeBalance a returnat null', requiredScope: 'Balance + Checkout' }
   } catch (e) {
