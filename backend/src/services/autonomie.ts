@@ -113,33 +113,53 @@ const MISIUNE: Sarcina[] = [
   },
   {
     cod: 'M1',
-    titlu: 'Aplicația află DIRECT DE LA REVOLUT că a intrat un ban',
+    titlu: 'Intri TU pe portal, cu browserul tău, și-ți faci singur cheile',
     ordin:
-      `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE.\n\n` +
-      `Astăzi aplicația are tot lanțul de creditare (coduri unice, tabela payment_codes, ` +
-      `potrivirea codului, creditarea idempotentă prin topUpUser), dar NU are de unde să ` +
-      `afle că a intrat o plată.\n\n` +
-      `DOUĂ DRUMURI SUNT INTERZISE, decise de owner, nu de tine:\n` +
+      `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE, ȘI CINE O FACE: TU.\n\n` +
+      `Adrian, 30 iul, cuvânt cu cuvânt: „are liber 1000000% să folosească tot ca să obțină ` +
+      `scopul meu" · „e al meu și îi permit full acces". Deci NU ceri voie, NU-l trimiți pe ` +
+      `el nicăieri, și NU te oprești la primul obstacol de pe un portal.\n\n` +
+      `CE E DEJA SCRIS (nu rescrii nimic din astea): codurile unice KLN-XXXX-XXXX ` +
+      `(db.ts → creeazaCodPlata), tabela payment_codes, potrivirea codului din referință ` +
+      `(crediteazaDupaCod), creditarea idempotentă (topUpUser), ȘI CITITORUL DE TRANZACȚII ` +
+      `— backend/src/services/openBanking.ts, gata scris. Lipsesc DOAR cheile lui.\n\n` +
+      `CE E INTERZIS, decis de owner — nu se renegociază:\n` +
       `  • NU prin email. Plata nu se citește din inbox. (30 iul: „ce ai făcut cu email ` +
-      `    scoți imediat, nu accept așa ceva".) Nu scrie niciun modul care caută încasări ` +
-      `    în cutia poștală, sub niciun nume.\n` +
-      `  • NU prin portaluri terțe cu consimțământ care expiră (GoCardless/Nordigen) — ` +
-      `    contul a fost închis, iar consimțământul PSD2 pică la 30-90 de zile.\n\n` +
-      `DRUMUL CERUT: direct de la Revolut, prin interfața LOR oficială pentru dezvoltatori ` +
-      `(API-ul contului de business/merchant + webhook la încasare, dacă îl oferă contului ` +
-      `Pro al ownerului).\n\n` +
-      `PRIMUL LUCRU pe care îl faci e să AFLI, din documentația oficială Revolut, ce anume ` +
-      `oferă exact contul lui: ce API, ce fel de chei, dacă are webhook la încasare, și dacă ` +
-      `Pro (nu Business) are acces. NU presupune și NU-l trimite pe owner să caute prin ` +
-      `portal — el a pierdut deja o zi așa. Dacă răspunsul e „nu se poate cu contul lui", ` +
-      `ăsta e un rezultat valid: scrie-l cu dovada din documentație și oprește-te acolo.\n\n` +
-      `Dacă se poate: construiește backend/src/services/plataRevolutApi.ts — primirea ` +
-      `încasării (webhook semnat, verificat, sau citire periodică dacă webhook nu există), ` +
-      `scoaterea sumei/monedei/referinței, apoi crediteazaDupaCod din db.ts. NU creditează ` +
-      `de două ori aceeași încasare (indexul unic pe bank_ref e plasa). Starea se AFIȘEAZĂ, ` +
-      `ca stareCitirePlati(): „nu pot citi" nu are voie să arate ca „n-a plătit nimeni".\n\n` +
-      `Teste: încasare cu cod corect → credit; cu cod scris cu litere mici sau cu spații → ` +
-      `credit; fără cod → neatribuit, ZERO credite; aceeași încasare de două ori → un credit.`,
+      `    scoți imediat, nu accept așa ceva".) Niciun modul care caută încasări în cutia ` +
+      `    poștală, sub niciun nume.\n` +
+      `  • NU prin API-ul Revolut: MĂSURAT din documentația lor — API-ul e doar pe Revolut ` +
+      `    Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate. Ownerul ` +
+      `    are Pro. Ușa aia e închisă; nu pierde timp pe ea.\n` +
+      `  • NU-i cere ownerului să intre pe portal. A pierdut deja o zi așa. Portalul e al tău.\n\n` +
+      `DRUMUL, ȘI E AL TĂU — BROWSERUL. Ai browser real pe server: browser_open, browser_read, ` +
+      `browser_click, browser_click_at, browser_type, browser_scroll, browser_key, ` +
+      `browser_back, browser_close. Cu el faci TOT lanțul:\n` +
+      `  1. deschizi https://bankaccountdata.gocardless.com/ — ăsta, nu „manage." și nu ` +
+      `     „developer.", alea sunt ALTE produse și n-au cheile noastre;\n` +
+      `  2. la login, PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
+      `     nu-l pornești, butoanele (inclusiv „Log in with Google") rămân MOARTE. Ăsta e ` +
+      `     motivul real pentru care ownerul n-a putut intra, nu o defecțiune;\n` +
+      `  3. Developers → User Secrets → Create new → iei Secret ID și Secret Key;\n` +
+      `  4. le pui SINGUR: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY;\n` +
+      `  5. Bank connections → Add bank → Revolut (id REVOLUT_REVOGB21) → pornești cererea ` +
+      `     de acces. AICI, și DOAR aici, e nevoie de owner: legea (PSD2) cere ca titularul ` +
+      `     să aprobe în aplicația Revolut de pe telefonul lui. Îi spui SCURT: „aprobă în ` +
+      `     Revolut, e o singură apăsare" — și aștepți. Nimic altceva nu-i ceri;\n` +
+      `  6. după aprobare iei Account ID → secret_pune GOCARDLESS_ACCOUNT_ID;\n` +
+      `  7. secret_publica — le duce pe server și repornește aplicația;\n` +
+      `  8. VERIFICI că merge: starea din stareCitirePlati() trebuie să treacă pe ✅. Dacă ` +
+      `     nu trece, e treaba ta să afli de ce, nu a lui.\n\n` +
+      `REGULI DE FIER: nu tastezi parole și nu le ceri; dacă un pas cere parola ownerului, ` +
+      `te oprești și spui exact la ce pas ai ajuns. Niciun număr de card nu trece pe nicăieri. ` +
+      `Valorile cheilor nu se repetă în chat, nu ajung pe monitor, nu se scriu în repo — ` +
+      `raportezi NUMELE și starea.\n\n` +
+      `DACĂ PORTALUL PICĂ (502, pagină albă, buton mort): reîncerci, cauți alt drum în ` +
+      `interfața lor, faci capturi pe monitor ca ownerul să vadă unde ești. Nu abandonezi ` +
+      `la prima eroare și nu i-o pasezi lui.\n\n` +
+      `CÂND CHEILE SUNT PUSE, restul merge singur: openBanking.ts citește tranzacțiile din ` +
+      `5 în 5 minute, potrivește codul KLN din referință și creditează. Scrii teste dacă ` +
+      `atingi cod; dacă a fost doar configurare, scrii în PR ce ai configurat și dovada că ` +
+      `starea a trecut pe verde.`,
   },
   {
     cod: 'M2',
