@@ -19,7 +19,14 @@ export interface HistoryRow {
 // The owner's REAL money picture (admin only): live Stripe balance, real cost
 // consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
 export interface Finance {
-  stripe: { available: number; pending: number; currency: string } | null
+  stripe: {
+    available: number
+    pending: number
+    currency: string
+    /** Sold REAL ținut în altă monedă decât cea a contului. Fără el, „£0.00"
+     *  însemna deopotrivă „n-ai bani" și „ai bani, dar în dolari". */
+    alteMonede?: { currency: string; available: number; pending: number }[]
+  } | null
   // PUNGA UNICĂ: cât ai, adunat din cele trei surse EXTERNE (Stripe plăți,
   // Stripe card, creditul de la furnizorul creierului). `complete: false`
   // înseamnă că o sursă n-a răspuns — atunci totalul e incomplet, nu „zero".

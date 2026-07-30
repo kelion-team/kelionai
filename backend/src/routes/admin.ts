@@ -305,7 +305,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // PUNGA STRIPE în bară (Adrian, 24 iul: „după OpenRouter, banii în
       // Stripe, reali") — disponibil + în tranzit, doar pentru admin.
       stripe: stripeBal
-        ? { available: stripeBal.available, pending: stripeBal.pending, currency: stripeBal.currency }
+        ? {
+            available: stripeBal.available,
+            pending: stripeBal.pending,
+            currency: stripeBal.currency,
+            // Banii care EXISTĂ, dar în altă monedă — ca „£0.00" să nu mai poată
+            // ascunde un sold real (vezi comentariul din getStripeBalance).
+            alteMonede: stripeBal.alteMonede,
+          }
         : null,
       pool,
     })

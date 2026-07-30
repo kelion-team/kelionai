@@ -639,6 +639,14 @@ export async function getStripeBalance(): Promise<{
    *  Issuing) păreau dispăruți. Trei buzunare, una singură afișată. */
   issuing: number
   currency: string
+  /** BANII CARE EXISTĂ, DAR ÎN ALTĂ MONEDĂ (Adrian, 30 iul: „stripe 0? am băgat
+   *  bani"). Stripe ține soldul separat pe fiecare monedă, iar noi numărăm doar
+   *  moneda contului (`STRIPE_CURRENCY`, implicit gbp) — altfel s-ar aduna
+   *  lire cu dolari într-o cifră fără sens. Consecința nevăzută: un sold în USD
+   *  sau EUR era filtrat afară și panoul scria „£0.00" — bani REALI, afișați ca
+   *  zero. Regula nr. 1: o citire filtrată nu e o cifră, e o citire filtrată.
+   *  Aici plecă lista celorlalte monede, ca panoul să spună adevărul întreg. */
+  alteMonede: { currency: string; available: number; pending: number }[]
 } | null> {
   if (!config.stripe.secretKey) return null
   const r = await fetch(`${API}/balance`, { headers: authHeaders() })
@@ -656,11 +664,26 @@ export async function getStripeBalance(): Promise<{
     (arr ?? [])
       .filter((x) => !x.currency || x.currency.toLowerCase() === cur)
       .reduce((s, x) => s + x.amount, 0) / 100
+  // Ce EXISTĂ în alte monede decât cea a contului. Nu se adună (ar ieși o cifră
+  // fără sens) — se ARATĂ, ca „0" să nu mai poată însemna „n-am găsit unde să mă uit".
+  const peMoneda = new Map<string, { available: number; pending: number }>()
+  const aduna = (arr: { amount: number; currency?: string }[] | undefined, camp: 'available' | 'pending'): void => {
+    for (const x of arr ?? []) {
+      const c = (x.currency ?? cur).toLowerCase()
+      if (c === cur) continue
+      const r = peMoneda.get(c) ?? { available: 0, pending: 0 }
+      r[camp] += x.amount / 100
+      peMoneda.set(c, r)
+    }
+  }
+  aduna(j.available, 'available')
+  aduna(j.pending, 'pending')
   return {
     available: sum(j.available),
     pending: sum(j.pending),
     issuing: sum(j.issuing?.available),
     currency: cur,
+    alteMonede: [...peMoneda].map(([currency, v]) => ({ currency, ...v })),
   }
 }
 
