@@ -7,7 +7,8 @@
 > dovada lângă el. **Se actualizează la fiecare sesiune** — un rând rezolvat se
 > taie cu data și PR-ul, nu se șterge.
 >
-> Ultima verificare: **30 iul 2026, 08:05**, live `cd7285f`, health 200.
+> Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
+> Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
 ---
 
@@ -87,3 +88,30 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 - Un rând se taie **doar cu dovadă**: PR + verificare pe live.
 - Un rând nou se adaugă când se descoperă, nu la sfârșit de sesiune.
 - Dacă un rând nu se poate verifica, scrie **„nu pot verifica"** — nu „e ok".
+
+---
+
+## F. MUNCĂ PARCATĂ CARE NU E ÎN COD — se pierde dacă nu e cerută
+
+Două „stash"-uri stăteau în containerul de lucru al sesiunii din 30 iul. Containerul
+se șterge singur; ce nu e într-un commit dispare. Le scriu aici ca să nu se piardă
+**informația**, chiar dacă se pierde fișierul.
+
+| Ce | Stare | Decizia ta |
+|---|---|---|
+| „editii-pre-rebazare" — cascada de modele Realtime (`realtimeModelFallbacks`) | **deja în master**, verificat: `config.ts` are câmpul. Stash-ul era o copie. | nimic de făcut |
+| **„fallback abonament liber"** — 28 iul, „nu mai dau un ban" + contul Claude blocat pe limită | **NU e în master.** Verificat: `subBrainFailed` nu apare în `chat.ts`. Era marcat de autorul lui „se aplică doar dacă Adrian zice da", fiindcă venea peste o restaurare făcută de tine. | **a ta** |
+
+**Ce făcea a doua**, exact: când tura grea a adminului mergea pe creierul de
+abonament (cheia ta Claude) și acesta pica — cheie respinsă (401/403), cont blocat
+pe limită (429), fără credit (402) sau model invalid — aplicația **dădea eroare**
+(„problemă tehnică"/„verifică cheia"). Cu ea, tura se reia **tăcut** pe creierul
+liber ($0): Gemini direct dacă e disponibil, altfel modelul `work` din punga
+centrală. Zero eroare pentru tine, zero bani cheltuiți. `brainApiKey` devine `let`
+și se golește înainte de reluare, ca să nu plece cheia de abonament spre punga
+centrală (ar fi cheie greșită). Se aplică doar dacă n-a curs încă text, altfel s-ar
+dubla răspunsul.
+
+Sunt ~23 de linii în `backend/src/routes/chat.ts`. Dacă zici „da", o rescriu într-o
+lucrare separată, cu teste. Dacă zici „nu", rândul ăsta rămâne aici ca urmă și se
+închide.
