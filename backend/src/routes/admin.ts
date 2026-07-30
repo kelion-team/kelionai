@@ -39,7 +39,7 @@ import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../serv
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
-import { envCheck, envSummary, processStartedAt, stripeMode } from '../services/envCheck.js'
+import { envCheck, envOrphans, envSummary, processStartedAt, stripeMode } from '../services/envCheck.js'
 import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createCardEphemeralKey, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
@@ -440,6 +440,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       vars: envCheck(),
       summary: envSummary(),
+      // Chei pe care LE AI în proces, dar sub un nume pe care codul nu-l citea.
+      // Ăsta e răspunsul la „am scris-o de zeci de ori": ai scris-o, eu mă
+      // uitam în altă parte. Doar NUMELE, niciodată valorile.
+      orphans: envOrphans(),
       // Ora pornirii procesului: răspunde la întrebarea care chiar contează —
       // „am scris cheia ÎNAINTE sau DUPĂ ce a pornit aplicația?"
       startedAt: processStartedAt(),

@@ -1588,6 +1588,14 @@ export default function AdminPanel({
                   „am scris-o de zeci de ori" și „nu o vede" sunt amândouă adevărate.
                   {envCheck.stripeMode !== 'live' && ` · Cheia Stripe e: ${envCheck.stripeMode}.`}
                 </div>
+                {envCheck.orphans.length > 0 && (
+                  <div className="fin-row">
+                    <span style={{ color: '#e6a23c', fontWeight: 600 }}>
+                      ⚠ Chei pe care LE AI, dar sub alt nume: <code>{envCheck.orphans.join('</code>, <code>')}</code>
+                    </span>
+                    <span className="fin-sub">redenumește-le, sau spune-mi și le citesc și așa</span>
+                  </div>
+                )}
                 {envCheck.vars
                   .filter((v) => !v.present || v.length === 0)
                   .map((v) => (
@@ -1595,7 +1603,9 @@ export default function AdminPanel({
                       <span style={{ color: '#e6a23c' }}>
                         ⚠ <code>{v.name}</code> — {v.what}
                       </span>
-                      <span className="fin-sub">{v.present ? 'prezentă dar GOALĂ' : 'nu e în proces'} · {v.breaks}</span>
+                      <span className="fin-sub" title={`Nume acceptate: ${v.accepts.join(', ')}`}>
+                        {v.present ? 'prezentă dar GOALĂ' : 'nu e în proces'} · {v.breaks}
+                      </span>
                     </div>
                   ))}
                 {envCheck.summary.lipsa === 0 && envCheck.summary.goale === 0 && (
@@ -1610,7 +1620,10 @@ export default function AdminPanel({
                       <span>
                         ✅ <code>{v.name}</code> — {v.what}
                       </span>
-                      <span className="fin-sub">{v.length} caractere</span>
+                      <span className="fin-sub" title={`Nume acceptate: ${v.accepts.join(', ')}`}>
+                        {v.foundAs && v.foundAs !== v.name ? `găsită ca ${v.foundAs} · ` : ''}
+                        {v.length} caractere
+                      </span>
                     </div>
                   ))}
               </div>
