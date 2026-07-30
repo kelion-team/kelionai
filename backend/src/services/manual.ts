@@ -40,6 +40,10 @@ export interface ManualSection {
 }
 export interface ManualGroup {
   title: string
+  /** Cheia grupei (google, vedere, browser…) — frontendul desenează pictograma
+   *  potrivită. Nu trimitem SVG prin API: forma e treaba interfeței, nu a
+   *  textului, iar traducerea n-are ce căuta pe un desen. */
+  key: string
   items: { what: string; say: string }[]
 }
 export interface ManualDoc {
@@ -200,7 +204,7 @@ export function buildManual(): ManualDoc {
     const items = CAPABILITIES.filter((c) => !c.admin && c.category === g)
       .map((c) => MANUAL_CAPS[c.name])
       .filter((x): x is { what: string; say: string } => x != null)
-    if (items.length) groups.push({ title: GROUP_TITLES[g] ?? GROUP_TITLES.diverse, items })
+    if (items.length) groups.push({ title: GROUP_TITLES[g] ?? GROUP_TITLES.diverse, key: g, items })
   }
   return {
     lang: 'en',

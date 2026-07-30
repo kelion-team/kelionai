@@ -15,6 +15,7 @@
 //     unde alege userul; nu o filă nouă din care trebuie să te descurci singur.
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import BackLink from '../components/BackLink'
+import ManualIcon from '../components/ManualIcon'
 // Cele 7 limbi ale manualului (aceeași listă ca pe server). Selectorul general
 // de limbi rămâne pentru formularul de contact, unde nu costă nimic.
 const MANUAL_LANGS: { code: string; label: string }[] = [
@@ -36,7 +37,7 @@ interface ManualDoc {
   abilitiesIntro: string
   columnWhat: string
   columnSay: string
-  groups: { title: string; items: { what: string; say: string }[] }[]
+  groups: { title: string; key: string; items: { what: string; say: string }[] }[]
   footer: string
   ready?: boolean
 }
@@ -46,7 +47,7 @@ type Fila =
   | { fel: 'coperta'; titlu: string; subtitlu: string; cuprins: string[] }
   | { fel: 'proza'; titlu: string; paragrafe: string[] }
   | { fel: 'intro'; titlu: string; text: string }
-  | { fel: 'grup'; titlu: string; coloane: [string, string]; randuri: { what: string; say: string }[] }
+  | { fel: 'grup'; titlu: string; cheie: string; coloane: [string, string]; randuri: { what: string; say: string }[] }
 
 /** Taie manualul în file. Grupurile mari se rup în mai multe file, ca să nu
  *  existe o pagină de trei ori mai lungă decât celelalte — o carte cu file
@@ -63,7 +64,7 @@ function inFile(d: ManualDoc): Fila[] {
     for (let i = 0; i < g.items.length; i += RANDURI_PE_FILA) {
       const bucata = g.items.slice(i, i + RANDURI_PE_FILA)
       const cont = i > 0 ? ' ·' : ''
-      file.push({ fel: 'grup', titlu: g.title + cont, coloane: [d.columnWhat, d.columnSay], randuri: bucata })
+      file.push({ fel: 'grup', titlu: g.title + cont, cheie: g.key, coloane: [d.columnWhat, d.columnSay], randuri: bucata })
     }
   }
   return file
@@ -191,6 +192,7 @@ export default function Manual(): React.JSX.Element {
               <div className={`manual-leaf ${intoarce ? `turn-${intoarce}` : ''}`} key={`${doc.lang}-${fila}`}>
                 {file[fila]?.fel === 'coperta' && (
                   <div className="leaf-cover">
+                    <div className="leaf-crest" aria-hidden="true">K</div>
                     <h1>{(file[fila] as { titlu: string }).titlu}</h1>
                     <p>{(file[fila] as { subtitlu: string }).subtitlu}</p>
                     <div className="leaf-toc">
@@ -217,7 +219,10 @@ export default function Manual(): React.JSX.Element {
                 )}
                 {file[fila]?.fel === 'grup' && (
                   <>
-                    <h3>{(file[fila] as { titlu: string }).titlu}</h3>
+                    <h3 className="leaf-h3">
+                      <ManualIcon k={(file[fila] as { cheie: string }).cheie} />
+                      {(file[fila] as { titlu: string }).titlu}
+                    </h3>
                     <table className="manual-table">
                       <thead>
                         <tr>
