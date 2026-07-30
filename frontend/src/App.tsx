@@ -4,6 +4,7 @@ import { PUBLIC_TEXT as PT } from './lib/publicText'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Credits from './pages/Credits'
+import Manual from './pages/Manual'
 import Stage from './pages/Stage'
 import {
   watchForUpdate,
@@ -101,7 +102,9 @@ export default function App() {
           înapoi în aplicație. /credite e PUBLICĂ pentru toți (fix 27 iul —
           înainte, userul LOGAT nu putea ajunge la ea nici tastând adresa:
           verificarea de user venea prima și-l arunca mereu în scenă). */}
-      {window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
+      {window.location.pathname === '/manual' ? (
+        <Manual />
+      ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
         <Credits />
       ) : user ? (
         <Stage user={user} />

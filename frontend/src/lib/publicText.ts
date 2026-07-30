@@ -18,6 +18,7 @@ export const PUBLIC_TEXT = {
   // Pagina de start — linkurile de sub butonul Google
   emailSignIn: 'Sign in with email',
   creditsPricing: 'Credits & pricing',
+  userManual: 'User manual',
   zoomQr: 'Enlarge the code to scan it',
 
   // Intrarea în cont
