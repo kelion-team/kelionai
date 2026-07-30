@@ -78,7 +78,17 @@ export interface Strings {
   voiceNotEnrolledHint: string
 }
 
-const dict: Record<Lang, Strings> = {
+// ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
+// Regula lui Adrian (30 iul): „100% engleză în toată aplicația; după care se
+// aplică regula per user cu limba, inclusiv admin".
+//
+// Tipul cere ENGLEZA completă și lasă restul limbilor PARȚIALE. Înainte,
+// `Record<Lang, Strings>` obliga fiecare limbă să aibă TOATE cheile — adică o
+// traducere se putea adăuga doar în bloc, sau deloc. De-aia au rămas sute de
+// texte scrise direct în cod: era mai ușor decât să traduci tot dintr-o dată.
+// Acum o cheie netradusă cade curat pe engleză, nu pe gol; traducerile se pot
+// adăuga în etape, fără ca interfața să aibă vreodată rubrici goale.
+const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   en: {
     tagline: 'Your assistant. Sign in to continue.',
     signIn: 'Sign in with Google',
@@ -698,6 +708,16 @@ export function resolveLang(locale: string | undefined | null): Lang {
   return (SUPPORTED as string[]).includes(base) ? (base as Lang) : 'en'
 }
 
+// Cache: obiectul unit se calculează O DATĂ pe limbă. `strings()` e chemată la
+// fiecare randare a fiecărei componente — un spread acolo ar face muncă inutilă
+// de zeci de ori pe secundă și ar rupe memoizarea React (obiect nou de fiecare
+// dată → re-randări în lanț).
+const cache = new Map<Lang, Strings>()
+
 export function strings(lang: Lang): Strings {
-  return dict[lang]
+  const gata = cache.get(lang)
+  if (gata) return gata
+  const unit: Strings = lang === 'en' ? dict.en : { ...dict.en, ...(dict[lang] ?? {}) }
+  cache.set(lang, unit)
+  return unit
 }
