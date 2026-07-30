@@ -148,7 +148,7 @@ Pașii, în ordine, și cum se verifică fiecare:
 | Pas | Ce construiește | Cum vezi că e gata |
 |---|---|---|
 | M0 | **Setările, făcute de EL**: își pune singur cheile (`secret_pune`), le duce pe server (`secret_publica`) și verifică. Tu nu mai intri nicăieri | îți spune ce a configurat — **numele** cheilor, niciodată valorile |
-| M1 | **Veriga lipsă**: aplicația află **direct de la Revolut** că a intrat un ban, prin interfața lor oficială pentru dezvoltatori. **NU prin email** (30 iul: „ce ai făcut cu email scoți imediat, nu accept așa ceva") și **nu prin portaluri terțe** cu consimțământ care expiră | Admin → Bani scrie ✅ la citirea plăților |
+| M1 | **Veriga lipsă, făcută de EL cu browserul**: intră singur pe `bankaccountdata.gocardless.com`, își face secretele, le pune cu `secret_pune`, leagă contul, publică. Tu apeși o singură dată: aprobarea PSD2 în Revolut, pe telefon. **NU prin email** (ordinul tău) și **nu prin API-ul Revolut** — măsurat: API-ul e doar pe Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate | Admin → Bani scrie ✅ la citirea plăților |
 | M2 | **Plasa**: o plată fără cod, sau cu cod greșit, ajunge în `plati_neatribuite` — nu dispare | Plătești fără cod → apare în panou, necreditată |
 | M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri | Le vezi în Admin → Bani |
 | M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh |
@@ -162,6 +162,13 @@ e vechi de ore, bucla nu merge; nu se presupune că merge.
 odată; plafonul `AUTONOMY_DAILY_MAX` (implicit 20/zi) — care până azi era o
 limită *declarată și necitită de nimeni*; trei încercări pe același pas, apoi
 pasul e marcat blocat, cu motivul la vedere, și trece mai departe.
+
+**Cine intră pe portal (30 iul, hotărât de tine): EL.** „Are liber 1000000% să
+folosească tot ca să obțină scopul meu." Browserul lui e real (9 unelte,
+Playwright pe server) și de azi are și mâinile ca să-și pună singur cheile. Deci
+lanțul GoCardless — cont, secrete, legarea băncii, publicarea cheilor — e al lui
+cap-coadă. **Singurul pas care rămâne al tău** e aprobarea din aplicația Revolut,
+fiindcă legea (PSD2) cere ca titularul contului s-o dea. O apăsare.
 
 **Ce NU pot promite:** că modelul constructorului duce fiecare pas din prima.
 Constructorul rulează, structural, pe un model gratuit (`:free`) — o regulă pusă
