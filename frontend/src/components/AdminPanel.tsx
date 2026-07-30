@@ -827,6 +827,17 @@ export default function AdminPanel({
                           <a href="https://dashboard.stripe.com/settings/payouts" target="_blank" rel="noreferrer">Setează Manual</a>
                         )}
                       </span>
+                      {/* DE CE E PUNGA 0. Cauza nu e in cod: Stripe scoate singur
+                          banii in banca dupa programul lui, INAINTE ca transferul
+                          orar sa apuce sa-i mute pe card. Codul NU poate schimba
+                          programul de payout — e o setare de cont. O spunem tare. */}
+                      {circuit.payoutsInterval !== 'manual' && circuit.payoutsInterval !== 'unknown' && (
+                        <span className="or-wallet-sub" style={{ color: '#e6a23c' }}>
+                          ⚠ De asta rămâne punga pe 0: Stripe îți trimite banii în bancă ({circuit.payoutsInterval}),
+                          înainte să apuce să ajungă pe card. Cât timp e așa, AI-ul NU se poate alimenta din punga
+                          userilor. Se schimbă doar din Stripe — nu există API pentru asta.
+                        </span>
+                      )}
                       <span className="or-wallet-sub">
                         {circuit.issuingStatus === 'active' ? '✅' : '❌'} 2. Carduri virtuale Stripe (Issuing: {circuit.issuingStatus}){' '}
                         {circuit.issuingStatus !== 'active' && (
@@ -887,6 +898,21 @@ export default function AdminPanel({
                           'Cardul n-a fost taxat de niciun furnizor încă — deci nu e (încă) pus în contul lor de facturare. Se pune o dată, de mână, din linkurile de mai sus; după aceea merge singur.'
                         )}
                       </span>
+                      {/* TOATE CHELTUIELILE, cu locul de unde se platesc. */}
+                      {(circuit.expenses?.length ?? 0) > 0 && (
+                        <div className="fin-breakdown" style={{ marginTop: 10 }}>
+                          <div className="fin-breakdown-head">Cheltuielile aplicației — de unde se plătesc</div>
+                          {circuit.expenses!.map((e) => (
+                            <div className="fin-row" key={e.name}>
+                              <span>
+                                {e.configured ? '' : '(neconfigurat) '}
+                                {e.name} — {e.what}
+                              </span>
+                              <span style={{ color: e.billing.startsWith('Cardul') ? undefined : '#e6a23c' }}>{e.billing}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <span className="or-wallet-sub">
                         Punga cardului (gata de cheltuit pe AI): <strong>£{circuit.issuingAvailable.toFixed(2)}</strong> — se umple
                         AUTOMAT din plățile userilor (Balance Transfer API, orar; circuit închis, nicio alimentare externă).{' '}
