@@ -10,7 +10,10 @@ import {
   loadKv,
   saveNote,
   userKey,
+  getVoicePref,
+  setVoicePref,
 } from '../db.js'
+import { config } from '../config.js'
 import { getMeserie } from '../services/meserii.js'
 
 // ARANJAREA AVATARULUI (Adrian, 11 iul: „salvează mărimea actuală a lui
@@ -81,6 +84,13 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       speechLang: await getSpeechLang(user.email),
       meserieActiva: await getMeserieActiva(user.email),
       avatarBox,
+      // VOCEA LUI, ȚINUTĂ MINTE DOAR PENTRU EL (Adrian, 30 iul: „își poate seta
+      // aplicația cu ce voce dorește… se ține minte per user. A nu se încurca cu
+      // alt user sau să afecteze alt cont"). `null` = vocea implicită a aplicației.
+      voice: await getVoicePref(user.email),
+      // Lista din care poate alege — vine de la server, ca interfața să nu aibă
+      // o listă paralelă care se învechește când se schimbă env-ul.
+      voices: config.openai.realtimeVoices,
     })
   })
 
@@ -89,6 +99,7 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       speechLang?: string
       meserieActiva?: number | null
       avatarBox?: AvatarBox
+      voice?: string | null
     }
   }>(
     '/api/prefs',
@@ -106,6 +117,17 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'bad_request' })
       }
       await setSpeechLangPref(user.email, lang)
+    }
+
+    if (req.body?.voice !== undefined) {
+      const v = req.body.voice
+      // Doar din lista cunoscută, sau null („implicita aplicației"). Un nume
+      // liber ar ajunge în sesiunea OpenAI și ar întoarce 400 — adică vocea
+      // omului ar muri din cauza unui câmp de text.
+      if (v !== null && !config.openai.realtimeVoices.includes(v)) {
+        return reply.code(400).send({ error: 'bad_request' })
+      }
+      await setVoicePref(user.email, v)
     }
 
     if (req.body?.meserieActiva !== undefined) {

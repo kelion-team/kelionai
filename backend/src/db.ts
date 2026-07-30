@@ -42,6 +42,10 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
+    -- VOCEA ALEASĂ DE FIECARE OM (Adrian, 30 iul: „își poate seta aplicația cu
+    -- ce AI dorește și ce voce dorește... se ține minte per user"). Până acum
+    -- vocea venea din mediu, deci era UNA pentru toți.
+    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS voice TEXT;
     -- Amprente vocale: timbru + gen + flag admin per cont.
     -- vectorul e normalizat client-side; meta păstrează valorile brute pentru debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
@@ -1965,6 +1969,34 @@ export async function getMeserieActiva(email: string): Promise<number | null> {
     return r.rows[0]?.meserie_activa ?? null
   } catch {
     return null
+  }
+}
+
+/** Vocea aleasă de user (null = cea implicită a aplicației). */
+export async function getVoicePref(email: string): Promise<string | null> {
+  if (!dbEnabled()) return null
+  try {
+    const r = await getPool().query<{ voice: string | null }>(
+      'SELECT voice FROM user_prefs WHERE user_email = $1',
+      [userKey(email)],
+    )
+    return r.rows[0]?.voice ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function setVoicePref(email: string, voice: string | null): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO user_prefs (user_email, voice, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_email) DO UPDATE SET voice = $2, updated_at = now()`,
+      [userKey(email), voice],
+    )
+  } catch {
+    // Nu rupem vocea dacă salvarea preferinței pică.
   }
 }
 

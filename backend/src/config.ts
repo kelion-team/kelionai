@@ -49,6 +49,15 @@ export const config = {
     // voce CLAR masculină, caldă și naturală din catalogul Realtime (gentleman,
     // nimic strident/vulgar). Editabilă din env fără deploy.
     realtimeVoice: (process.env.OPENAI_REALTIME_VOICE ?? 'ash').trim(),
+    // VOCILE PE CARE LE POATE ALEGE UN USER (Adrian, 30 iul: „își poate seta…
+    // ce voce dorește… se ține minte per user"). În env, ca lista să se poată
+    // schimba fără publicare, dacă OpenAI adaugă sau scoate o voce.
+    // Un nume greșit NU strică vocea nimănui: sesiunea se reîncearcă automat cu
+    // vocea implicită (vezi services/realtime.ts).
+    realtimeVoices: (process.env.OPENAI_REALTIME_VOICES ?? 'alloy,ash,ballad,coral,echo,sage,shimmer,verse')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean),
     // TTS pe OpenAI (aceeași cheie) — pentru salutul de pe landing + /api/tts.
     // Fără cheie Google TTS: OpenAI acoperă și asta (Adrian: „2 chei, punct").
     // `onyx` = voce masculină, consistentă cu vocea live.

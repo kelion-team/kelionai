@@ -363,6 +363,18 @@ const MAX_ATTEMPTS = 3
 // când erau doar două încercări pe aceeași conexiune spartă.
 const TOTAL_BUDGET_MS = 21_000
 
+/** VOCEA CARE PLEACĂ SPRE OPENAI, aleasă dintre cele pe care le știm.
+ *
+ *  Un nume necunoscut — dintr-o bază veche, dintr-o listă schimbată la OpenAI,
+ *  sau pur și simplu gol — cade pe vocea implicită și NU pleacă spre API. Dacă
+ *  ar pleca, sesiunea ar întoarce 400 și omul ar rămâne fără voce, fără să aibă
+ *  de unde bănui că vinovată e o preferință salvată cândva în contul lui.
+ *
+ *  Pură și exportată ca să poată fi probată fără rețea. */
+export function resolveVoice(cerut?: string | null): string {
+  return cerut && config.openai.realtimeVoices.includes(cerut) ? cerut : config.openai.realtimeVoice
+}
+
 // Relay o ofertă SDP la OpenAI Realtime și întoarce answer-ul SDP.
 export async function openaiRealtimeAnswer(
   offerSdp: string,
@@ -370,6 +382,7 @@ export async function openaiRealtimeAnswer(
   meserie?: string | null,
   hardLock = false,
   contextBlock = '',
+  voicePref?: string | null,
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key)
     return { ok: false, status: 503, code: 'realtime_not_configured', error: 'realtime_not_configured', attempts: 0 }
@@ -400,7 +413,9 @@ export async function openaiRealtimeAnswer(
   // puțin. Dacă upstreamul chiar se îneacă în corp, tot pornim cu voce
   // completă; dacă nu, n-am pierdut nimic: pe drumul fericit (încercarea 1)
   // sesiunea pleacă neatinsă.
-  const buildSession = (slim: boolean, model: string): Record<string, unknown> => ({
+  const voceAleasa = resolveVoice(voicePref)
+
+  const buildSession = (slim: boolean, model: string, voice: string): Record<string, unknown> => ({
     type: 'realtime',
     model,
     audio: {
@@ -436,7 +451,7 @@ export async function openaiRealtimeAnswer(
           interrupt_response: true,
         },
       },
-      output: { voice: config.openai.realtimeVoice },
+      output: { voice },
     },
     // O SINGURĂ injecție (25 iul — Adrian: „injectezi a mia oară, dublezi").
     // Instrucțiuni + context (memorie + istoric) intră AICI, în sesiunea inițială,
@@ -466,7 +481,7 @@ export async function openaiRealtimeAnswer(
   // asta a rupt reîncercarea din 27 iul. Îl reconstruim totuși per încercare,
   // fiindcă ultima trimite o sesiune DIFERITĂ (slăbită) — și fiindcă un corp
   // rezidit e oricum imun la orice schimbare viitoare de undici.
-  const buildForm = (slim: boolean, model: string): FormData => {
+  const buildForm = (slim: boolean, model: string, voice: string): FormData => {
     const form = new FormData()
     form.append('sdp', offerSdp)
     // CA STRING, NU CA BLOB (25 iul — al 3-lea incident „vorbește rusă" + „nu
@@ -476,7 +491,7 @@ export async function openaiRealtimeAnswer(
     // nici instrucțiunile, nici vocea, nici limba, nici uneltele nu se aplicau
     // vreodată — modelul rula pe DEFAULT (oglindea limba percepută, răspundea la
     // zgomot). String simplu = câmp de formular normal, parsat.
-    form.append('session', JSON.stringify(buildSession(slim, model)))
+    form.append('session', JSON.stringify(buildSession(slim, model, voice)))
     return form
   }
 
@@ -541,7 +556,10 @@ export async function openaiRealtimeAnswer(
         // 3-a încercare slăbea sesiunea — încercările 1-2 ardeau ~6s fiecare cu
         // corpul întreg. Dacă prima (corp complet) a picat, a doua merge deja
         // suplă: mai multe șanse reale în același buget de timp.
-        body: buildForm(attempt >= 2, model),
+        // VOCEA ALEASĂ doar la prima încercare. Dacă prima pică, a doua pleacă
+        // pe vocea implicită: preferința unui om nu are voie să-i lase vocea
+        // moartă, oricât de exotic ar fi numele salvat la el în cont.
+        body: buildForm(attempt >= 2, model, attempt === 1 ? voceAleasa : config.openai.realtimeVoice),
         signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, left)),
       })
     } catch (e) {

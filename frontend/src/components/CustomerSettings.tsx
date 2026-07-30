@@ -7,6 +7,7 @@ import {
   saveSpeechLang,
   deleteMyAccount,
   loadLocalLang,
+  saveVoicePref,
 } from '../lib/prefs'
 import { fetchBalance, type WalletStatus } from '../lib/billing'
 import { LANGS } from '../lib/languages'
@@ -27,6 +28,9 @@ interface L {
   title: string
   prefs: string
   langLabel: string
+  voiceLabel: string
+  voiceDefault: string
+  voiceNote: string
   wallet: string
   credits: string
   topUp: string
@@ -44,6 +48,9 @@ const RO: L = {
   title: 'Setări',
   prefs: 'Preferințe de bază',
   langLabel: 'Limba în care Kelion te ascultă și îți vorbește',
+  voiceLabel: 'Vocea cu care îți vorbește Kelion',
+  voiceDefault: 'Implicită (a aplicației)',
+  voiceNote: 'Se ține minte doar pentru contul tău. Se aplică de la următoarea pornire a vocii.',
   wallet: 'Credit / portofel',
   credits: 'credite disponibile',
   topUp: 'Reîncarcă',
@@ -62,6 +69,9 @@ const EN: L = {
   title: 'Settings',
   prefs: 'Basic preferences',
   langLabel: 'The language Kelion hears you in and speaks',
+  voiceLabel: 'The voice Kelion speaks to you with',
+  voiceDefault: 'Default (the app’s)',
+  voiceNote: 'Remembered for your account only. It applies the next time voice starts.',
   wallet: 'Credit / wallet',
   credits: 'credits available',
   topUp: 'Top up',
@@ -102,6 +112,10 @@ export default function CustomerSettings({
   const t = base === 'ro' ? RO : EN
 
   const [lang, setLang] = useState<string>('en-US')
+  // Vocea aleasă de omul ăsta ('' = implicita aplicației) + lista permisă,
+  // amândouă venite de la server.
+  const [voice, setVoice] = useState<string>('')
+  const [voices, setVoices] = useState<string[]>([])
   const [wallet, setWallet] = useState<WalletStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
@@ -119,6 +133,8 @@ export default function CustomerSettings({
     void (async () => {
       const [p, b] = await Promise.all([loadServerPrefs(), fetchBalance()])
       if (p?.speechLang) setLang(p.speechLang)
+      if (p?.voices?.length) setVoices(p.voices)
+      setVoice(p?.voice ?? '')
       if (b) setWallet(b)
       try {
         const [cat, s, a] = await Promise.all([
@@ -201,6 +217,34 @@ export default function CustomerSettings({
               </option>
             ))}
           </select>
+
+          {/* VOCEA, PER USER (Adrian, 30 iul: „își poate seta aplicația cu ce
+              voce dorește… se ține minte per user. A nu se încurca cu alt user
+              sau să afecteze alt cont"). Lista vine de la server — o listă
+              paralelă aici s-ar învechi când se schimbă env-ul. */}
+          {voices.length > 0 && (
+            <>
+              <label className="contact-label" style={{ marginTop: 12 }}>
+                {t.voiceLabel}
+              </label>
+              <select
+                value={voice}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setVoice(v)
+                  void saveVoicePref(v || null)
+                }}
+              >
+                <option value="">{t.voiceDefault}</option>
+                {voices.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <p className="settings-note">{t.voiceNote}</p>
+            </>
+          )}
         </section>
 
         {/* 2 — Credit / portofel (+ mențiunea 25%). Alimentarea MANUALĂ se face
