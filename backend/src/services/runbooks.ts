@@ -50,6 +50,39 @@ export const RUNBOOKS: Record<string, Runbook> = {
     inputs: { cmd: 'docker logs --tail 100 kelionai-app 2>&1' },
     desc: 'ultimele 100 de linii din jurnalul aplicației',
   },
+  // ── PROBA RESTAURĂRII (Adrian, 30 iul, din cele șase) ──────────────────────
+  // Backup se face zilnic. Că se poate REFACE din el nu a fost dovedit
+  // NICIODATĂ — iar un backup neprobat nu e o plasă, e o presupunere. Diferența
+  // se vede exact în ziua în care ai nevoie de el, adică prea târziu.
+  //
+  // Proba e cap-coadă și NEDISTRUCTIVĂ: ia cel mai recent backup criptat, îl
+  // decriptează, îl restaurează într-o bază TEMPORARĂ (niciodată peste cea
+  // vie), numără rândurile din tabelele care contează, apoi șterge baza de
+  // probă. Dacă orice pas cade, iese cu eroare — nu cu tăcere.
+  'proba-restaurare': {
+    workflow: 'vps-run.yml',
+    inputs: {
+      cmd:
+        'set -e; ' +
+        'f=$(ls -t /root/kelion/backups/*.sql.enc 2>/dev/null | head -1); ' +
+        '[ -n "$f" ] || { echo "NU EXISTĂ NICIUN BACKUP în /root/kelion/backups"; exit 1; }; ' +
+        'echo "backup probat: $f ($(stat -c %y "$f"), $(du -h "$f" | cut -f1))"; ' +
+        'PGURL=$(grep -E "^DATABASE_URL=" /root/kelion/kelionai.env | head -1 | sed "s/^DATABASE_URL=//"); ' +
+        'BAZA=kelion_proba_restaurare; ' +
+        'psql "$PGURL" -c "DROP DATABASE IF EXISTS $BAZA" >/dev/null; ' +
+        'psql "$PGURL" -c "CREATE DATABASE $BAZA" >/dev/null; ' +
+        'URLPROBA=$(echo "$PGURL" | sed "s#/[^/?]*\\(?\\|$\\)#/$BAZA\\1#"); ' +
+        'openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/root/kelion/backup.key -in "$f" ' +
+        '  | psql "$URLPROBA" -q -v ON_ERROR_STOP=1 >/dev/null; ' +
+        'echo "— RÂNDURI RECUPERATE —"; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'users: \'||count(*) FROM users"; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'payment_codes: \'||count(*) FROM payment_codes" || true; ' +
+        'psql "$URLPROBA" -t -c "SELECT \'cerinte: \'||count(*) FROM cerinte" || true; ' +
+        'psql "$PGURL" -c "DROP DATABASE $BAZA" >/dev/null; ' +
+        'echo "PROBA A TRECUT: backupul se poate restaura, iar baza de probă a fost ștearsă."',
+    },
+    desc: 'probează CĂ SE POATE RESTAURA din ultimul backup (bază temporară, nedistructiv)',
+  },
   'backup-db': {
     workflow: 'vps-run.yml',
     inputs: { cmd: '/root/kelion/backup.sh && ls -lh /root/kelion/backups 2>/dev/null | tail -3' },
