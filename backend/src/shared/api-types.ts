@@ -52,6 +52,15 @@ export interface DemoStats {
 }
 
 /** CIRCUITUL BANILOR (admin-only): starea LIVE a fiecărei verigi Stripe→AI. */
+export interface IssuingCharge {
+  /** Cine a taxat cardul (numele comerciantului, exact cum îl dă Stripe). */
+  merchant: string
+  /** Suma în moneda contului (pozitivă = cheltuit). */
+  amount: number
+  /** Data, ISO. */
+  at: string
+}
+
 export interface MoneyCircuit {
   /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
   payoutsInterval: string
@@ -60,6 +69,12 @@ export interface MoneyCircuit {
   cards: { id: string; last4: string; status: string }[]
   /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului. */
   issuingAvailable: number
+  /** DOVADA că veriga 4 (cardul pus la furnizorii de AI) chiar există: dacă
+   *  OpenRouter/OpenAI au taxat cardul, aici sunt tranzacțiile lor. Listă goală
+   *  = cardul n-a fost încă folosit de nimeni, deci nu e legat (sau nu s-a
+   *  ajuns la prima taxare). Un rând care spune „e pornit" fără asta e o
+   *  presupunere, nu o stare. */
+  issuingCharges?: IssuingCharge[]
   /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
   autoFund?: { at: string; ok: boolean; detail: string } | null
   error?: string

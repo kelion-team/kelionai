@@ -255,6 +255,27 @@ export async function getMoneyCircuit(): Promise<MoneyCircuit> {
       const b = (await bal.json()) as { issuing?: { available?: { amount: number }[] } }
       out.issuingAvailable = (b.issuing?.available?.[0]?.amount ?? 0) / 100
     }
+    // VERIGA 4, MĂSURATĂ (nu declarată): cine a taxat cardul. Dacă OpenRouter
+    // sau OpenAI l-au folosit, apar aici. Gol = cardul nu e (încă) legat la ei.
+    try {
+      const tr = await fetch(`${API}/issuing/transactions?limit=8`, {
+        headers: authHeaders(),
+        signal: AbortSignal.timeout(12_000),
+      })
+      if (tr.ok) {
+        const tj = (await tr.json()) as {
+          data?: { amount: number; created: number; merchant_data?: { name?: string } }[]
+        }
+        out.issuingCharges = (tj.data ?? []).map((x) => ({
+          merchant: x.merchant_data?.name ?? 'necunoscut',
+          amount: Math.abs(x.amount) / 100,
+          at: new Date(x.created * 1000).toISOString(),
+        }))
+      }
+    } catch {
+      /* informativ: lipsa listei nu strică restul circuitului */
+    }
+
     if (out.issuingStatus === 'active') {
       const cards = await fetch(`${API}/issuing/cards?limit=5&status=active`, {
         headers: authHeaders(),
