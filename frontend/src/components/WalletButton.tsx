@@ -191,15 +191,28 @@ export function WalletButton({
         title={
           isAdmin
             ? ro
-              ? 'Cont owner — credite nelimitate; consumul real e în Admin → Bani'
-              : 'Owner account — unlimited credits; real usage is in Admin → Money'
+              ? 'Setări și conectare Gmail · consumul real e în Admin → Bani'
+              : 'Settings and Gmail connection · real usage is in Admin → Money'
             : ro
               ? 'Creditele tale disponibile — apasă pentru a adăuga'
               : 'Your available credits — click to add more'
         }
       >
-        <span aria-hidden style={{ marginRight: 5 }}>💳</span>
-        {isAdmin ? (ro ? 'nelimitat' : 'unlimited') : credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
+        {/* LA ADMIN NU MAI SCRIE NICIO CIFRĂ (Adrian, 30 iul). „nelimitat" nu
+            spunea nimic, iar soldul lui real — cel din Revolut Pro — NU poate fi
+            citit de aplicație: API-ul de conturi e doar pe Revolut Business. Deci
+            aici ori punem o cifră măsurată, ori niciuna. Butonul rămâne, fiindcă
+            în spatele lui stau Setările și conectarea Gmail — fără el, drumul
+            spre ele dispare. La user rămâne exact ce era: soldul lui, reîmprospătat
+            la interval, la revenirea în tab și la fiecare schimbare de credite. */}
+        <span aria-hidden style={{ marginRight: 5 }}>{isAdmin ? '⚙' : '💳'}</span>
+        {isAdmin
+          ? ro
+            ? 'Setări'
+            : 'Settings'
+          : credits === null
+            ? '…'
+            : `${credits.toLocaleString()} ${t.credits}`}
       </button>
       {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
           absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
@@ -223,10 +236,14 @@ export function WalletButton({
       )}
       {open && (
         <div className="wallet-menu">
-          {/* SOLD curent, clar separat de acțiunea de adăugare. */}
-          <span className="wallet-menu-balance">
-            {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
-          </span>
+          {/* SOLD curent, clar separat de acțiunea de adăugare. La ADMIN nu se
+              arată: soldul lui din registru iese negativ pe măsură ce consumă
+              (nu cumpără credite), deci cifra ar fi falsă ca mesaj. */}
+          {!isAdmin && (
+            <span className="wallet-menu-balance">
+              {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
+            </span>
+          )}
           {/* VÂNZAREA E LA ADMIN (Adrian, 24 iul, confirmat DA: „butonul de
               credite e doar la admin; ceilalți doar afișare"). Userii obișnuiți
               văd DOAR soldul; creditele se cumpără prin linkul de plată primit

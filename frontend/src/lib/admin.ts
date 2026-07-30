@@ -98,81 +98,16 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
     return null
   }
 }
-// CHEIA EFEMERĂ pentru afișarea numărului cardului (Issuing Elements). Nonce-ul
-// îl face Stripe.js în browser; serverul îl schimbă pe o cheie de 15 minute.
-// Prin funcția asta NU trece niciun număr de card — doar nonce și secret.
-export async function fetchCardKey(cardId: string, nonce: string): Promise<string | null> {
-  try {
-    const r = await fetch('/api/admin/money-circuit/card-key', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ card_id: cardId, nonce }),
-    })
-    if (!r.ok) return null
-    return ((await r.json()) as { secret?: string }).secret ?? null
-  } catch {
-    return null
-  }
-}
+// AICI A STAT `fetchCardKey` — cheia efemera prin care se afisa numarul cardului
+// virtual Stripe (Issuing Elements). A iesit odata cu cardul: componenta care o
+// folosea (CardReveal) a fost stearsa.
 
-/** Adresa titularului cardului. OBLIGATORIE: era hardcodată în backend cu o
- *  adresă inventată din Londra, ceea ce putea da refuz la verificarea de adresă
- *  a furnizorului — și era o declarație falsă către Stripe. */
-export interface CardAddress {
-  line1: string
-  line2?: string
-  city: string
-  postal_code: string
-  country: string
-}
-
-export async function createAiCard(addr: CardAddress): Promise<{ id: string; last4: string; url: string } | null> {
-  try {
-    const r = await fetch('/api/admin/money-circuit/card', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(addr),
-    })
-    return r.ok ? ((await r.json()) as { id: string; last4: string; url: string }) : null
-  } catch {
-    return null
-  }
-}
-
-// PAYOUT ADMIN: profitul → contul bancar/cardul REAL declarat (nu cel virtual).
-export async function adminPayout(pounds: number): Promise<{ id: string; arrival: string } | null> {
-  try {
-    const r = await fetch('/api/admin/payout', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pounds }),
-    })
-    if (!r.ok) return null
-    return (await r.json()) as { id: string; arrival: string }
-  } catch {
-    return null
-  }
-}
-
-// DEPUNEREA OWNERULUI: bani în punga Stripe (fără credite) → checkout URL.
-export async function ownerDeposit(pounds: number): Promise<string | null> {
-  try {
-    const r = await fetch('/api/admin/deposit', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pounds }),
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { url?: string }
-    return j.url ?? null
-  } catch {
-    return null
-  }
-}
+// AICI AU STAT `CardAddress`, `createAiCard`, `adminPayout` si `ownerDeposit` —
+// crearea cardului virtual Stripe, retragerea profitului si depunerea in punga.
+// Toate trei mergeau prin Stripe, iar Stripe a iesit pe 30 iul: userii platesc pe
+// linkul Revolut, banii intra direct in contul lui Adrian, iar furnizorii se
+// platesc cu cardul lui. Rutele din spate raman pana cand trecerea e confirmata
+// pe viu, dar interfata nu le mai cheama.
 
 // VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
 export async function sellCredits(

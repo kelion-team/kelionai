@@ -230,6 +230,11 @@ function expenseLines(): ExpenseLine[] {
     { name: 'Google Gemini', what: 'creier de rezerva + vedere', configured: Boolean(config.geminiKey), billing: card, billingUrl: 'https://aistudio.google.com/app/plan_information' },
     { name: 'Google Maps', what: 'harti si trasee', configured: Boolean(config.googleMapsKey), billing: card, billingUrl: 'https://console.cloud.google.com/billing' },
     { name: 'Google TTS', what: 'voce sintetizata', configured: Boolean(config.googleTtsKey), billing: card, billingUrl: 'https://console.cloud.google.com/billing' },
+    // VOCEA DE CALITATE (Chirp 3 HD) merge pe contul de serviciu Google, nu pe
+    // cheia TTS simpla — deci are propriul rand si propriul link. Adrian, 30 iul:
+    // „link sa schimb si la vocea noua cardul": orice furnizor care poate tine
+    // vocea trebuie sa aiba drumul lui pana la facturare, nu doar cel de azi.
+    { name: 'Google Chirp 3 HD', what: 'vocea de calitate (auz + voce)', configured: Boolean(config.googleServiceAccountJson), billing: card, billingUrl: 'https://console.cloud.google.com/billing' },
     { name: 'Serper', what: 'cautare web', configured: Boolean(config.serperKey), billing: card, billingUrl: 'https://serper.dev/dashboard' },
     { name: 'VPS + domeniu', what: 'gazduirea aplicatiei', configured: true, billing: extern },
     { name: 'OpenStreetMap / FOSSGIS', what: 'rutare pe harta', configured: true, billing: gratuit },
