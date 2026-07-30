@@ -15,6 +15,20 @@
 // Uneltele de admin NU intră: manualul e pentru utilizatori.
 import { CAPABILITIES } from './brainCapabilities.js'
 
+// ── CELE 7 LIMBI ALE MANUALULUI ─────────────────────────────────────────────
+// Adrian, 30 iul: „la manual se vor afișa 7 limbi de circulație, traduci tot în
+// acele 7, nu mai consuma după resurse."
+//
+// Deci o listă ÎNCHISĂ, nu „orice cod de limbă". Fiecare limbă nouă înseamnă o
+// traducere plătită a întregului manual; nelimitat, un singur vizitator care
+// umblă prin selector le-ar porni pe toate. Cele 6 limbi oficiale ONU + germana.
+// Orice altceva primește engleza, fără să cheme traducătorul.
+export const MANUAL_LANGS = ['en', 'es', 'fr', 'de', 'ru', 'zh', 'ar'] as const
+
+export function isManualLang(v: string): boolean {
+  return (MANUAL_LANGS as readonly string[]).includes(String(v ?? '').trim().toLowerCase())
+}
+
 export interface ManualSection {
   title: string
   paragraphs: string[]
