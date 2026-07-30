@@ -1056,20 +1056,31 @@ export default function AdminPanel({
                           factură. Un serviciu care nu costă nimic n-are ce căuta
                           într-o listă de cheltuieli. Rămân doar cele care chiar
                           consumă bani, grupate după cine le plătește. */}
-                      {(circuit.expenses?.length ?? 0) > 0 &&
-                        (() => {
-                          const active = circuit.expenses!.filter((e) => e.configured)
-                          const dinCard = active.filter((e) => e.billing.startsWith('Cardul'))
-                          const alteleu = active.filter((e) => !e.billing.startsWith('Cardul'))
-                          return (
-                            <span className="or-wallet-sub">
-                              Plătite din cardul Kelion: {dinCard.map((e) => e.name).join(', ') || '—'}.
-                              {alteleu.length > 0 && (
-                                <> În afara cardului: {alteleu.map((e) => `${e.name} (${e.billing.toLowerCase()})`).join(' · ')}.</>
-                              )}
-                            </span>
-                          )
-                        })()}
+                      {/* UN LINK LA FIECARE FURNIZOR (Adrian, 30 iul: „link la fiecare
+                          AI, să schimb cardul"). Cardul nu mai e al aplicației, e al
+                          lui — deci singurul lucru util aici e drumul cel mai scurt
+                          până la pagina unde se schimbă. Cine n-are pagină de
+                          facturare (gratuit / plătit din altă parte) rămâne text
+                          simplu: un buton care duce în gol e mai rău decât niciunul. */}
+                      {(circuit.expenses?.length ?? 0) > 0 && (
+                        <span className="or-wallet-sub">
+                          Unde se schimbă cardul, la fiecare:{' '}
+                          {circuit.expenses!
+                            .filter((e) => e.configured)
+                            .map((e, i) => (
+                              <span key={e.name}>
+                                {i > 0 && ' · '}
+                                {e.billingUrl ? (
+                                  <a href={e.billingUrl} target="_blank" rel="noreferrer">
+                                    {e.name}
+                                  </a>
+                                ) : (
+                                  `${e.name} (${e.billing.toLowerCase()})`
+                                )}
+                              </span>
+                            ))}
+                        </span>
+                      )}
                       {circuit.autoFund && (
                         <span className="or-wallet-sub">
                           {circuit.autoFund.ok ? '✅' : '⚠️'} Ultimul transfer automat plăți→card:{' '}

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund, creditSaleExact } from '../db.js'
-import { createCheckout, createPaymentIntent, verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
+import { verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // The customer sees CREDITS (1 credit = config.stripe.creditValue) and the %
@@ -29,52 +29,32 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     return null
   }
 
-  // Preambulul comun al rutelor de plată: auth + Stripe configurat + suma +
-  // validarea top-up. Întoarce {user, amount} sau trimite deja răspunsul de eroare
-  // și dă null (apelantul se oprește). Cele două rute diferă doar prin ce creează
-  // după (Checkout vs PaymentIntent) — antetul era copiat. Sursă unică (unic, fără dup).
-  async function topUpPreamble(
-    req: FastifyRequest<{ Body: { amount?: number } }>,
-    reply: FastifyReply,
-  ): Promise<{ user: NonNullable<ReturnType<typeof getSessionUser>>; amount: number } | null> {
+  // ── PLATA TRECE PE REVOLUT (Adrian, 30 iul: „Stripe se scoate total și intră
+  // Pro", „link să înlocuim peste tot") ───────────────────────────────────────
+  //
+  // Ruta ăsta rămâne INTACTĂ ca formă (`{ url }`), fiindcă prin ea trec TOATE
+  // locurile în care se plătește: pastila de portofel, pagina /credite și
+  // paywall-ul din chat. Schimbând sursa URL-ului aici, se schimbă în toate trei
+  // deodată — „peste tot" cu o singură modificare, nu trei locuri de ținut minte.
+  //
+  // Revolut Pro n-are webhook (Merchant API e doar pe Business), deci creditele
+  // NU se mai acordă automat: userul plătește pe pagina Revolut, iar adminul îi
+  // dă creditele din panou. De-aia ruta nici nu mai pretinde că a pornit o
+  // tranzacție — doar trimite omul la plată.
+  app.post('/api/billing/checkout', async (req, reply) => {
     const user = getSessionUser(req)
-    if (!user) {
-      reply.code(401).send({ error: 'unauthorized' })
-      return null
-    }
-    if (!config.stripe.secretKey) {
-      reply.code(503).send({ error: 'stripe_not_configured' })
-      return null
-    }
-    const amount = Number(req.body?.amount ?? 10)
-    const bad = await validateTopUp(user.email, amount)
-    if (bad) {
-      reply.code(400).send({ error: bad })
-      return null
-    }
-    return { user, amount }
-  }
-
-  // Start a top-up: returns a Stripe Checkout URL to redirect the user to.
-  app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
-    const pre = await topUpPreamble(req, reply)
-    if (!pre) return reply
-    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
-    const result = await createCheckout(pre.user.email, pre.user.name ?? '', pre.amount, baseUrl)
-    if ('error' in result) return reply.code(502).send(result)
-    return reply.send(result)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    const link = config.revolut.payLink
+    // Fără link configurat NU trimitem userul nicăieri și nu tăcem: butonul
+    // spune ce lipsește (regula nr. 1 — un eșec nu se afișează ca reușită).
+    if (!link) return reply.code(503).send({ error: 'revolut_link_lipsa' })
+    return reply.send({ url: link })
   })
 
-  // ORDIN #6G: create a Stripe PaymentIntent for a direct credit top-up.
-  // Returns { client_secret, payment_intent_id, amount, currency } for the
-  // frontend to confirm with Stripe.js.
-  app.post<{ Body: { amount?: number } }>('/api/billing/payment-intent', async (req, reply) => {
-    const pre = await topUpPreamble(req, reply)
-    if (!pre) return reply
-    const result = await createPaymentIntent(pre.user.email, pre.user.name ?? '', pre.amount)
-    if ('error' in result) return reply.code(502).send(result)
-    return reply.send(result)
-  })
+  // AICI A STAT `/api/billing/payment-intent` — a doua cale de plată, pe Stripe.js
+  // direct. Scoasă odată cu Stripe: nimic din frontend n-o mai chema (singurul
+  // drum al userului trece prin `/api/billing/checkout`), iar o rută de plată
+  // vie pe care n-o folosește nimeni e o ușă lăsată deschisă degeaba.
 
   // Reîncărcare automată (ca userul să nu rămână fără credit). Userul o pornește,
   // își alege pragul (în credite) și suma de reîncărcare. Cardul se salvează la

@@ -99,27 +99,10 @@ async function offSessionCharge(
 
 export type CheckoutResult = { url: string } | { error: string }
 
-// Create a one-off Checkout Session that tops the wallet up by `pounds`.
-export async function createCheckout(
-  email: string,
-  name: string,
-  pounds: number,
-  baseUrl: string,
-): Promise<CheckoutResult> {
-  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
-  const amount = Math.max(1, Math.min(500, Math.round(pounds))) // clamp £1..£500
-  const customer = await ensureCustomer(email, name)
-  const body = checkoutBody(baseUrl, customer, amount * 100, 'Kelion credit', 'topup')
-  body.set('metadata[email]', email)
-  // Emailul și pe PaymentIntent (audit 24 iul, P2-4): PI-ul NU moștenește
-  // metadata sesiunii, iar fără email evenimentul payment_intent.succeeded nu
-  // putea fi atribuit → 400 repetat la webhook (Stripe poate dezactiva endpointul).
-  body.set('payment_intent_data[metadata][email]', email)
-  // SALVEAZĂ cardul pentru reîncărcarea automată (ca userul să nu rămână fără
-  // credit — cerința lui Adrian). Cardul devine metoda implicită a clientului.
-  body.set('payment_intent_data[setup_future_usage]', 'off_session')
-  return postCheckout(body)
-}
+// AICI A STAT `createCheckout` — sesiunea Stripe prin care userul isi alimenta
+// portofelul. Scoasa pe 30 iul, cand Adrian a mutat incasarea pe Revolut Pro:
+// „Stripe se scoate total si intra Pro". Drumul userului trece acum prin
+// `/api/billing/checkout`, care intoarce linkul de plata Revolut din config.
 
 // ── VÂNZARE DE CREDITE DE CĂTRE ADMIN (Adrian, 24 iul: „se vând X credite pe
 // bani; butonul de credite e doar la admin") ─────────────────────────────────
@@ -233,17 +216,21 @@ export async function chargeSavedCard(
  *  `configured` = cheia exista in aplicatie, deci serviciul chiar e folosit.
  *  Un serviciu neconfigurat nu costa nimic. */
 function expenseLines(): ExpenseLine[] {
-  const card = 'Cardul Kelion (punga Stripe)'
+  // CARDUL E AL LUI, NU AL APLICAȚIEI (Adrian, 30 iul: „Stripe se scoate total și
+  // intră Pro"). Nu mai există card virtual Stripe din care să plătească singură
+  // aplicația — fiecare furnizor se plătește cu cardul Revolut pus LA EL, de
+  // mână, o dată. De-aia fiecare rând are acum linkul PAGINII LUI de facturare:
+  // „link la fiecare AI, să schimb cardul" — un click, nu o căutare.
+  const card = 'Cardul tau Revolut, pus la furnizor'
   const gratuit = 'Gratuit / fara factura'
   const extern = 'Platit din alta parte — pune cardul acolo'
   return [
-    { name: 'OpenRouter', what: 'creierul (chat, gandire, traduceri)', configured: Boolean(config.openrouter.key), billing: card },
-    { name: 'OpenAI', what: 'vocea live (Realtime) + TTS', configured: Boolean(config.openai.key), billing: card },
-    { name: 'Google Gemini', what: 'creier de rezerva + vedere', configured: Boolean(config.geminiKey), billing: card },
-    { name: 'Google Maps', what: 'harti si trasee', configured: Boolean(config.googleMapsKey), billing: card },
-    { name: 'Google TTS', what: 'voce sintetizata', configured: Boolean(config.googleTtsKey), billing: card },
-    { name: 'Serper', what: 'cautare web', configured: Boolean(config.serperKey), billing: card },
-    { name: 'Stripe', what: 'comisioane pe plati', configured: Boolean(config.stripe.secretKey), billing: 'Retinute automat din punga' },
+    { name: 'OpenRouter', what: 'creierul (chat, gandire, traduceri)', configured: Boolean(config.openrouter.key), billing: card, billingUrl: 'https://openrouter.ai/settings/credits' },
+    { name: 'OpenAI', what: 'vocea live (Realtime) + TTS', configured: Boolean(config.openai.key), billing: card, billingUrl: 'https://platform.openai.com/settings/organization/billing/overview' },
+    { name: 'Google Gemini', what: 'creier de rezerva + vedere', configured: Boolean(config.geminiKey), billing: card, billingUrl: 'https://aistudio.google.com/app/plan_information' },
+    { name: 'Google Maps', what: 'harti si trasee', configured: Boolean(config.googleMapsKey), billing: card, billingUrl: 'https://console.cloud.google.com/billing' },
+    { name: 'Google TTS', what: 'voce sintetizata', configured: Boolean(config.googleTtsKey), billing: card, billingUrl: 'https://console.cloud.google.com/billing' },
+    { name: 'Serper', what: 'cautare web', configured: Boolean(config.serperKey), billing: card, billingUrl: 'https://serper.dev/dashboard' },
     { name: 'VPS + domeniu', what: 'gazduirea aplicatiei', configured: true, billing: extern },
     { name: 'OpenStreetMap / FOSSGIS', what: 'rutare pe harta', configured: true, billing: gratuit },
   ]
@@ -719,35 +706,10 @@ export async function getStripeBalance(): Promise<{
 
 // Create a PaymentIntent for a credit top-up. The frontend confirms the payment
 // with the client_secret; the backend credits the wallet on webhook.
-export type PaymentIntentResult =
-  | { client_secret: string; payment_intent_id: string; amount: number; currency: string }
-  | { error: string }
-
-export async function createPaymentIntent(
-  email: string,
-  name: string,
-  pounds: number,
-): Promise<PaymentIntentResult> {
-  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
-  const amount = Math.max(1, Math.min(500, Math.round(pounds)))
-  const customer = await ensureCustomer(email, name)
-  const body = new URLSearchParams()
-  body.set('amount', String(amount * 100))
-  body.set('currency', config.stripe.currency)
-  body.set('automatic_payment_methods[enabled]', 'true')
-  if (customer) body.set('customer', customer)
-  body.set('metadata[email]', email)
-  const r = await fetch(`${API}/payment_intents`, { method: 'POST', headers: authHeaders(), body })
-  if (!r.ok) return { error: `stripe_http_${r.status}` }
-  const j = (await r.json()) as { id?: string; client_secret?: string }
-  if (!j.id || !j.client_secret) return { error: 'no_payment_intent' }
-  return {
-    client_secret: j.client_secret,
-    payment_intent_id: j.id,
-    amount,
-    currency: config.stripe.currency,
-  }
-}
+// AICI AU STAT `PaymentIntentResult` + `createPaymentIntent` — a doua cale de
+// plata a userului (Stripe.js direct). Scoase odata cu prima: nicio ruta nu le
+// mai chema, iar cod de miscat bani lasat viu "pentru orice eventualitate" e
+// exact genul de usa uitata deschisa.
 
 export interface StripeEvent {
   type: string

@@ -55,10 +55,8 @@ vi.mock('./db.js', () => ({
 
 const {
   verifyWebhook,
-  createCheckout,
   createSaleCheckout,
   createOwnerDeposit,
-  createPaymentIntent,
   chargeSavedCard,
   createAdminPayout,
   createCardEphemeralKey,
@@ -120,21 +118,12 @@ describe('stripe — fără cheie secretă NU pleacă nicio cerere de bani', () 
     })
   })
 
-  it('createCheckout se oprește curat', async () => {
-    expect(await createCheckout('a@b.c', 'A', 20, 'https://kelionai.app')).toEqual({ error: 'stripe_not_configured' })
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-  })
-
   it('createSaleCheckout se oprește curat', async () => {
     expect(await createSaleCheckout('a@b.c', 100, 'https://kelionai.app')).toEqual({ error: 'stripe_not_configured' })
   })
 
   it('createOwnerDeposit se oprește curat', async () => {
     expect(await createOwnerDeposit('a@b.c', 50, 'https://kelionai.app')).toEqual({ error: 'stripe_not_configured' })
-  })
-
-  it('createPaymentIntent se oprește curat', async () => {
-    expect(await createPaymentIntent('a@b.c', 'A', 20)).toEqual({ error: 'stripe_not_configured' })
   })
 
   it('chargeSavedCard (debitare off-session!) se oprește curat', async () => {
