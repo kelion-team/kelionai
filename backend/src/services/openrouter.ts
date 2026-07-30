@@ -225,25 +225,56 @@ export async function bestPaidWorkModel(): Promise<string | null> {
   // GARDĂ ANTI-SPARGERE: nu ruta pe PLĂTIT dacă punga OpenRouter e goală — apelul
   // plătit ar pica (402/insufficient) și creierul s-ar rupe. Fără bani → null →
   // rămâne pe free, dumb dar FUNCȚIONAL (incident 27 iul: soldul a ajuns la minus).
+  //
+  // DAR (Adrian, 30 iul: „Kelion nu execută cerințele"): „n-am putut CITI soldul"
+  // și „soldul e zero" nu sunt același lucru, iar tratate la fel îl coborau tăcut
+  // pe owner pe un model :free care NARează în loc să execute. Garda rămâne — un
+  // apel plătit pe pungă goală chiar rupe tura — dar de acum SPUNE de ce, ca
+  // motivul să fie la o căutare distanță, nu la o zi. (Regula nr. 1.)
   const bal = await getOpenRouterBalance().catch(() => null)
-  if (!bal || !bal.ok || bal.balance <= 0) return null
+  if (!bal || !bal.ok) {
+    console.error('[CREIER] nu pot CITI soldul OpenRouter → rămân pe free (nu știu dacă ai bani)')
+    return null
+  }
+  if (bal.balance <= 0) {
+    console.error(`[CREIER] sold OpenRouter ${bal.balance} → rămân pe free (chiar n-ai credit)`)
+    return null
+  }
   const cat = await getCatalog()
   const paid = cat.work.filter(
     (m) => (m.provider === 'anthropic' || m.provider === 'openai') && !m.id.endsWith(':free'),
   )
-  if (!paid.length) return null
+  if (!paid.length) {
+    console.error(`[CREIER] catalogul nu are niciun model plătit (work=${cat.work.length}) → rămân pe free`)
+    return null
+  }
   const claude = paid.find((m) => m.provider === 'anthropic')
   return (claude ?? paid[0]).id
 }
 
-/** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul. */
-export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
+/** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul.
+ *
+ *  `fellBack` spune dacă modelul CERUT a fost respins (nu e în catalogul live —
+ *  scos de furnizor, sau catalogul n-a putut fi citit). Fără el, înlocuirea era
+ *  TĂCUTĂ: alegeai un model din Admin→Modele, el dispărea de la furnizor, iar tu
+ *  primeai în tăcere implicitul `:free` — care vorbește în loc să execute. Exact
+ *  reclamația „nu ascultă cerința, face ce vrea el". */
+export async function resolveModelChecked(
+  tier: ModelTier,
+  wanted?: string | null,
+): Promise<{ model: string; fellBack: boolean }> {
   const fallback =
     tier === 'chat' ? config.openrouter.chatDefault : tier === 'top' ? config.openrouter.topDefault : config.openrouter.workDefault
-  if (!wanted) return fallback
+  if (!wanted) return { model: fallback, fellBack: false }
   const cat = await getCatalog()
   const list = tier === 'chat' ? cat.chat : cat.work // 'work' și 'top' validează pe același catalog (vision+tools)
-  return list.some((m) => m.id === wanted) ? wanted : fallback
+  return list.some((m) => m.id === wanted)
+    ? { model: wanted, fellBack: false }
+    : { model: fallback, fellBack: true }
+}
+
+export async function resolveModel(tier: ModelTier, wanted?: string | null): Promise<string> {
+  return (await resolveModelChecked(tier, wanted)).model
 }
 
 // ── CONTRACTUL UNUI APEL LA CREIER (Lotul B) ─────────────────────────────────

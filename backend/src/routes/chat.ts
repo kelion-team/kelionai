@@ -38,7 +38,7 @@ import {
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, resolveModelChecked, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
@@ -143,8 +143,29 @@ async function selectedBrainModel(
   // ca să coboare modelul. Public/demo păstrează scara free (regula §5: costul demo
   // nu se schimbă). Dacă în catalog nu există niciun model plătit, cade pe free.
   if (isOwner) {
-    const ownerModel = sel.work ? await resolveModel('work', sel.work) : await bestPaidWorkModel()
+    // ALEGEREA LUI, DAR NU CU ORICE PREȚ (Adrian, 30 iul: „Kelion nu execută
+    // cerințele"). Înainte, `sel.work` trecea prin `resolveModel`, care —
+    // dacă modelul ales nu mai era în catalogul live (scos de furnizor, sau
+    // catalogul necitibil) — întorcea TĂCUT implicitul `:free`. Owner-ul rămânea
+    // pe un model slab, care narează în loc să cheme unealta, fără niciun semn
+    // nicăieri. Iar `bestPaidWorkModel()` nici măcar nu se încerca pe ramura asta.
+    // ACUM: dacă alegerea lui nu mai e validă, se cade pe modelul PLĂTIT capabil
+    // (are bani: nu-l coborâm la free doar fiindcă un id s-a învechit), și se
+    // spune în jurnal — o înlocuire tăcută de creier e exact tiparul zilei.
+    let ownerModel: string | null = null
+    if (sel.work) {
+      const r = await resolveModelChecked('work', sel.work)
+      if (r.fellBack) {
+        console.error(`[CREIER] modelul ales (${sel.work}) NU e în catalog → încerc plătitul capabil`)
+        ownerModel = await bestPaidWorkModel()
+      } else {
+        ownerModel = r.model
+      }
+    } else {
+      ownerModel = await bestPaidWorkModel()
+    }
     if (ownerModel) return { model: ownerModel, heavy }
+    console.error('[CREIER] owner FĂRĂ model plătit → cad pe scara free (poate nara în loc să execute)')
   }
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
   // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
