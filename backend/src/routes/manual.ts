@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { buildManual, manualHtml, isManualLang, type ManualDoc } from '../services/manual.js'
+import { buildManual, manualHtml, isManualLang, MANUAL_LANGS, type ManualDoc } from '../services/manual.js'
 import { translateStrings, translationReady, normalizeLang } from '../services/manualLang.js'
 
 // ── MANUALUL, PUBLIC ────────────────────────────────────────────────────────
@@ -53,6 +53,7 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
     })),
     groups: d.groups.map((gr, i) => ({
       title: g(`g${i}.t`, gr.title),
+      key: gr.key,
       items: gr.items.map((it, j) => ({
         what: g(`g${i}.w${j}`, it.what),
         say: g(`g${i}.s${j}`, it.say),
@@ -95,7 +96,32 @@ async function manualRapid(lang: string): Promise<ManualDoc & { ready: boolean }
   return { ...en, lang: cod, ready: false }
 }
 
+/** ── TRADUCE TOT, O DATĂ, LA PORNIRE ────────────────────────────────────────
+ *
+ *  Măsurat pe live: o limbă netradusă ia ~2 minute (verificat pe germană — la
+ *  20/40/60/80/100 secunde încă nu era gata, la 120 a apărut
+ *  „Benutzerhandbuch"). Vizitatorul vede „Translating…" și trage concluzia
+ *  corectă: că nu merge.
+ *
+ *  Deci nu-l mai punem pe el să aștepte. La pornirea serverului traducem toate
+ *  limbile, una după alta (în serie, ca să nu lovim furnizorul cu 7 deodată), și
+ *  le punem în bază. După prima pornire, orice limbă apare INSTANT.
+ *
+ *  Costă o singură dată per versiune de text: cheia include amprenta textelor
+ *  engleze, deci se re-traduce automat doar când chiar se schimbă manualul. */
+async function incalzesteTraducerile(): Promise<void> {
+  const plat = aplatizeaza(buildManual())
+  for (const lang of MANUAL_LANGS) {
+    if (lang === 'en') continue
+    const gata = await translationReady(lang, plat).catch(() => null)
+    if (gata && Object.keys(gata).length) continue
+    await translateStrings(lang, plat).catch(() => ({}))
+  }
+}
+
 export async function manualRoutes(app: FastifyInstance): Promise<void> {
+  // Pornește încălzirea fără să blocheze pornirea serverului.
+  void incalzesteTraducerile().catch(() => {})
   app.get<{ Querystring: { lang?: string } }>('/api/manual', async (req, reply) => {
     return reply.send(await manualRapid(String(req.query.lang ?? 'en')))
   })
