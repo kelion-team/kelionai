@@ -39,8 +39,33 @@
 //     motivul apare în panou, ca să-l vadă omul.
 import { config } from '../config.js'
 import { createBuildJob, listBuildJobs, loadKv, saveKv, type BuildJob } from '../db.js'
+import { brainCompleteWithTools } from './brain.js'
+import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
+import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
+import { listeazaSecrete } from './secrete.js'
+import {
+  browserOpen, browserClick, browserType, browserRead, browserBack,
+  browserScroll, browserKey, browserClickAt, browserClose,
+} from './browser.js'
+import type { AnthropicTool } from './openrouter.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+
+/** CINE duce sarcina — și ăsta NU e un detaliu, e cauza unui eșec pe care era să-l
+ *  trimit în producție (30 iul).
+ *
+ *  Sunt DOUĂ mâini diferite, cu unelte diferite:
+ *    • CONSTRUCTORUL (agentul de pe VPS, `deploy/constructor-agent.mjs`) are
+ *      exact 7 unelte: ls, grep, read, write, edit, run, finish. Scrie COD și
+ *      deschide PR. NU are browser. NU poate pune secrete.
+ *    • KELION ÎNSUȘI (creierul aplicației) are browserul live (9 unelte) și, de
+ *      azi, `secret_pune`/`secret_lista`/`secret_publica`.
+ *
+ *  Un pas de portal trimis constructorului ar fi eșuat de trei ori la rând, pe
+ *  banii ownerului, și s-ar fi terminat cu „blocat" — fiindcă îi ceream unui
+ *  agent fără browser să intre pe un site. De-aia fiecare pas spune EXPLICIT
+ *  cine îl duce, iar bucla îl trimite acolo unde există uneltele. */
+type Executant = 'maini' | 'constructor'
 
 /** Un pas din misiune, sau un rând din lista ownerului — la fel pentru buclă. */
 interface Sarcina {
@@ -48,8 +73,24 @@ interface Sarcina {
   cod: string
   /** Titlul, pe scurt — apare în panou și în jurnal. */
   titlu: string
-  /** Ordinul complet trimis constructorului. El NU vede altceva. */
+  /** Ordinul complet. Executantul NU vede altceva. */
   ordin: string
+  /** Cine îl duce: mâinile lui Kelion (browser + secrete) sau constructorul (cod). */
+  executant: Executant
+  /** Cum se DOVEDEȘTE că e gata — o măsurătoare, nu cuvântul lui.
+   *  Întoarce `true` doar dacă lucrul chiar s-a întâmplat. */
+  dovada?: () => Promise<boolean>
+}
+
+/** Cheile există cu adevărat în secretele repo-ului? (măsurătoare, nu declarație) */
+async function secreteExista(...nume: string[]): Promise<boolean> {
+  try {
+    const j = JSON.parse(await listeazaSecrete()) as { secrete?: { nume: string }[] }
+    const set = new Set((j.secrete ?? []).map((s) => s.nume))
+    return nume.every((n) => set.has(n))
+  } catch {
+    return false
+  }
 }
 
 /** Ce ținem minte despre un pas, între treceri. */
@@ -110,6 +151,10 @@ const MISIUNE: Sarcina[] = [
       `REGULA CARE NU SE ÎNCALCĂ: valoarea unui secret nu se repetă, nu se confirmă, nu se ` +
       `pune pe monitor, nu se scrie într-un fișier din repo. Datele unui card nu trec pe ` +
       `nicăieri, niciodată.`,
+    // MÂINILE LUI: are nevoie de secret_pune/secret_publica. Constructorul nu le are.
+    executant: 'maini',
+    // Dovada, nu declarația: linkul de plată chiar există în secrete.
+    dovada: () => secreteExista('REVOLUT_PAY_LINK'),
   },
   {
     cod: 'M1',
@@ -160,6 +205,10 @@ const MISIUNE: Sarcina[] = [
       `5 în 5 minute, potrivește codul KLN din referință și creditează. Scrii teste dacă ` +
       `atingi cod; dacă a fost doar configurare, scrii în PR ce ai configurat și dovada că ` +
       `starea a trecut pe verde.`,
+    // MÂINILE LUI: portal = browser + secrete. Constructorul n-are niciuna.
+    executant: 'maini',
+    // Dovada: cele trei chei chiar există. Fără ele, cititorul nu poate citi nimic.
+    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY', 'GOCARDLESS_ACCOUNT_ID'),
   },
   {
     cod: 'M2',
@@ -177,6 +226,7 @@ const MISIUNE: Sarcina[] = [
       `(idempotent), pe aceeași referință bancară — deci nu poate credita de două ori.\n\n` +
       `Teste: plată fără cod → ajunge în plati_neatribuite; aceeași plată văzută de două ori ` +
       `→ un singur rând; atribuirea manuală creditează o singură dată.`,
+    executant: 'constructor',
   },
   {
     cod: 'M3',
@@ -193,6 +243,7 @@ const MISIUNE: Sarcina[] = [
       `reușită se afișează „nu pot verifica" — NICIODATĂ 0. Un 0 pus în locul unei citiri ` +
       `picate l-a costat o zi întreagă pe 30 iul („Stripe £0.00" în timp ce avea bani).\n\n` +
       `Teste pe potrivire/totaluri. La frontend rulează comanda EXACTĂ: cd frontend && npm run build.`,
+    executant: 'constructor',
   },
   {
     cod: 'M4',
@@ -210,6 +261,7 @@ const MISIUNE: Sarcina[] = [
       `  • istoricul plăților lui în contul lui.\n\n` +
       `Verifică în același PR că nu a rămas nicio urmă de Stripe pe drumul userului ` +
       `(ownerul, 30 iul: „0 stripe").`,
+    executant: 'constructor',
   },
   {
     cod: 'M5',
@@ -226,6 +278,7 @@ const MISIUNE: Sarcina[] = [
       `trei luni, pică aici, nu în extrasul lui de cont.\n\n` +
       `Actualizează PROCEDURA-PLATI.md cu drumul REAL, cel construit la pasul 1, ` +
       `și taie ce nu mai e adevărat.`,
+    executant: 'constructor',
   },
 ]
 
@@ -262,7 +315,15 @@ async function randuriDeFacut(): Promise<Sarcina[]> {
     const titlu = titluBrut.replace(/\*\*/g, '').trim()
     if (!titlu) continue
     const context = `${titlu} — ${rest.replace(/\|/g, ' ').trim()}`.slice(0, 1800)
-    out.push({ cod, titlu, ordin: `SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT.md, rândul ${cod}.\n\n${context}` })
+    // Rândurile listei sunt muncă de COD — merg la constructor. Dacă vreunul cere
+    // portal sau chei, ordinul îi spune să deschidă PR cu analiza, nu să se
+    // chinuie cu unelte pe care nu le are.
+    out.push({
+      cod,
+      titlu,
+      executant: 'constructor',
+      ordin: `SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT.md, rândul ${cod}.\n\n${context}`,
+    })
   }
   return out
 }
@@ -316,8 +377,70 @@ function verdict(job: BuildJob | undefined): 'gata' | 'picat' | 'inLucru' {
   return 'inLucru'
 }
 
+// ── MÂINILE LUI: BROWSER + SECRETE, FĂRĂ NICIUN OM ÎN TURĂ ───────────────────
+//
+// Constructorul scrie cod. Dar un portal nu se deschide cu `write` și o cheie nu
+// se pune cu `edit`. Pentru pașii ăia, ordinul NU mai pleacă în coadă — se
+// execută AICI, în aplicație, cu exact uneltele pe care le are Kelion într-o
+// conversație: cele 9 unelte de browser și cele 3 de secrete. Diferența față de
+// o tură normală e că nu-i vorbește nimeni: prompt-ul e ordinul misiunii.
+let mainileOcupate = false
+
+/** Execută uneltele reale — aceleași funcții pe care le cheamă chatul.
+ *
+ *  EXPORTAT fiindcă le folosesc DOUĂ guri: bucla de aici, și CONSTRUCTORUL de pe
+ *  VPS, prin `/api/constructor/tool` (Adrian, 30 iul: „am cerut agenți full
+ *  echipați și tu i-ai dat doar ciurucuri"). Avea dreptate: constructorul avea 7
+ *  unelte și niciun browser. O a doua copie a dispatch-ului ar fi divergit în
+ *  două zile — deci una singură, aici. */
+export async function uneltele(name: string, args: Record<string, unknown>): Promise<string> {
+  const email = config.adminEmail
+  const baseUrl = 'https://kelionai.app'
+  // TOT setul de admin, nu o listă scrisă de mână (Adrian, 30 iul: „toate,
+  // trebuie echipat la full"). `SHARED_ADMIN_TOOLS` e sursa unică — dacă mâine
+  // apare o unealtă nouă acolo, o are și el, fără să mai umble nimeni aici.
+  if (SHARED_ADMIN_TOOLS.has(name)) {
+    return (await execSharedAdminTool(name, args)) ?? JSON.stringify({ error: 'unealtă necunoscută' })
+  }
+  // Pagina se întoarce ca text + elemente numerotate; o tăiem, ca o pagină mare
+  // să nu mănânce toată fereastra de context a creierului.
+  const scurt = (v: unknown): string => JSON.stringify(v).slice(0, 20_000)
+  switch (name) {
+    case 'browser_open': return scurt(await browserOpen(email, baseUrl, String(args.url ?? '')))
+    case 'browser_click': return scurt(await browserClick(email, baseUrl, Number(args.index ?? -1)))
+    case 'browser_type':
+      return scurt(await browserType(email, baseUrl, Number(args.index ?? -1), String(args.text ?? ''), args.submit === true))
+    case 'browser_read': return scurt(await browserRead(email, baseUrl))
+    case 'browser_back': return scurt(await browserBack(email, baseUrl))
+    case 'browser_scroll': return scurt(await browserScroll(email, baseUrl, args.direction === 'up' ? 'up' : 'down'))
+    case 'browser_key': return scurt(await browserKey(email, baseUrl, String(args.key ?? '')))
+    case 'browser_click_at': return scurt(await browserClickAt(email, baseUrl, Number(args.x ?? 0), Number(args.y ?? 0)))
+    case 'browser_close': { await browserClose(email); return JSON.stringify({ ok: true }) }
+    default: return JSON.stringify({ error: `unealtă necunoscută: ${name}` })
+  }
+}
+
+/** O tură de lucru a lui Kelion, pornită de buclă, nu de un om. */
+async function ruleazaCuMainile(s: Sarcina): Promise<string> {
+  const tools = [
+    ...BROWSER_TOOLS, SECRET_LISTA_TOOL, SECRET_PUNE_TOOL, SECRET_PUBLICA_TOOL,
+  ] as unknown as AnthropicTool[]
+  const prompt =
+    `${s.ordin}\n\n` +
+    `CUM LUCREZI AICI: nu-ți vorbește nimeni, nu aștepți răspuns de la nimeni. ` +
+    `Ai browserul (browser_open/read/click/type/scroll/key/click_at/back/close) și ` +
+    `secretele (secret_lista/secret_pune/secret_publica). Le folosești. ` +
+    `Începe cu secret_lista, ca să nu ceri ce ai deja.\n\n` +
+    `Când termini, scrie în DOUĂ-TREI rânduri ce ai făcut și ce mai lipsește. ` +
+    `Dacă ai nevoie de owner pentru un pas pe care legea îl cere doar de la el ` +
+    `(aprobarea din aplicația bancară), scrie exact: „AȘTEPT APROBAREA: <ce anume>". ` +
+    `NICIODATĂ valorile cheilor — doar numele lor.`
+  return brainCompleteWithTools(prompt, tools, uneltele, { maxRounds: 30, maxTokens: 2500 })
+}
+
 /** O trecere: se repară singur dacă a picat, altfel ia următoarea sarcină. */
 export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string }> {
+  if (mainileOcupate) return { pornit: false, motiv: 'lucrează chiar acum cu browserul' }
   const jobs = await listBuildJobs(40).catch(() => [] as BuildJob[])
   const dupaId = new Map(jobs.map((j) => [j.id, j]))
 
@@ -373,6 +496,42 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
             `nu de la zero):\n${jurnal}`,
         )
       : cuRegulile(s.ordin)
+
+    // ── PAS DE MÂINI: îl face ACUM, el, cu browserul și cu secretele ──────────
+    // Nu intră în coada constructorului: constructorul n-are browser și n-are
+    // cum să pună o cheie. Iar la final NU-l credem pe cuvânt — se măsoară.
+    if (s.executant === 'maini') {
+      mainileOcupate = true
+      const ziua = new Date().toISOString().slice(0, 10)
+      await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
+      try {
+        const spus = await ruleazaCuMainile({ ...s, ordin }).catch((e: Error) => `a crăpat: ${e.message}`)
+        const chiarAFacut = s.dovada ? await s.dovada().catch(() => false) : false
+        const incercari = st.incercari + 1
+        if (chiarAFacut) {
+          await scrieStare(s.cod, { job: 0, incercari, gata: true })
+          console.log(`[AUTONOM] ${s.cod} („${s.titlu}") — FĂCUT, dovedit prin măsurare`)
+          return { pornit: true, motiv: `${s.cod}: ${s.titlu} — gata` }
+        }
+        // N-a ieșit. Dacă a cerut aprobarea ownerului, ăsta NU e un eșec de-al
+        // lui — e singurul lucru pe care legea îl cere de la titularul contului.
+        const asteapta = /AȘTEPT APROBAREA:?\s*(.{0,160})/i.exec(spus)?.[1]?.trim()
+        if (asteapta) {
+          await scrieStare(s.cod, { job: 0, incercari: st.incercari })
+          return { pornit: true, motiv: `${s.cod}: așteaptă o apăsare de la tine — ${asteapta}` }
+        }
+        if (incercari >= MAX_INCERCARI) {
+          const blocat = `blocat după ${incercari} încercări cu mâinile lui: ${spus.slice(0, 200)}`
+          await scrieStare(s.cod, { job: 0, incercari, blocat })
+          console.error(`[AUTONOM] ${s.cod} — ${blocat}`)
+          continue
+        }
+        await scrieStare(s.cod, { job: 0, incercari })
+        return { pornit: true, motiv: `${s.cod}: încercarea ${incercari} — ${spus.slice(0, 160)}` }
+      } finally {
+        mainileOcupate = false
+      }
+    }
 
     const id = await createBuildJob('kelion-autonom', ordin)
     if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
