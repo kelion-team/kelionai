@@ -48,7 +48,15 @@ vi.mock('../config.js', () => ({
   },
 }))
 
+// Golurile pe care Kelion le-a triat singur ca „de implementat".
+let goluri: { id: number; request: string; hits: number; reason: string | null; triage: string | null }[] = []
+const goluriInchise: number[] = []
+
 vi.mock('../db.js', () => ({
+  getCapabilityGaps: async () => goluri,
+  setGapResolved: async (id: number) => {
+    goluriInchise.push(id)
+  },
   createBuildJob: async (_by: string, text: string) => {
     const j: JobFals = { id: urmatorulId++, orderText: text, status: 'queued', log: null }
     jobs.unshift(j)
@@ -113,6 +121,49 @@ beforeEach(() => {
   turiDeMaini = 0
   uneltePrimite = []
   cerute.length = 0
+  goluri = []
+  goluriInchise.length = 0
+})
+
+// „Autonomia mai înseamnă și capacitatea de a vedea ce îi lipsește și
+// capabilități extinse autonome de învățare și dezvoltare" (Adrian, 30 iul).
+// Vederea exista: `log_gap` + `triageGaps()` îl pun să-și trieze singur lista.
+// Ce lipsea era exact pasul următor — nimeni nu construia ce marcase el
+// „DE IMPLEMENTAT". Deci vedea, dar nu se dezvolta.
+describe('ce îi lipsește, luat de el și construit', () => {
+  it('un gol triat „de implementat" devine muncă pe care o ia singur', async () => {
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
+    pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    goluri = [{ id: 41, request: 'să-mi citească un cod QR din poză', hits: 3, reason: 'n-am unealtă', triage: 'DE IMPLEMENTAT: util, apare des' }]
+
+    const r = await poateSaLucreze()
+    expect(r.pornit).toBe(true)
+    expect(r.motiv).toContain('G41')
+    expect(jobs[0].orderText).toContain('cod QR din poză')
+    // Ordinul îi cere să CONSTRUIASCĂ, nu să descrie.
+    expect(jobs[0].orderText).toContain('CONSTRUIEȘTE-O')
+  })
+
+  it('golurile pe care le-a închis singur ca fără valoare NU se iau', async () => {
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
+    pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    goluri = [{ id: 7, request: 'ceva duplicat', hits: 1, reason: null, triage: 'ÎNCHIS AUTONOM: se poate deja' }]
+
+    const r = await poateSaLucreze()
+    expect(r.pornit).toBe(false)
+    expect(jobs).toHaveLength(0)
+  })
+
+  it('golul construit se închide și în lista lui de lipsuri — nu-l reia la nesfârșit', async () => {
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
+    pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    goluri = [{ id: 41, request: 'cod QR', hits: 3, reason: null, triage: 'DE IMPLEMENTAT: util' }]
+
+    await poateSaLucreze()
+    jobs[0].status = 'done'
+    await poateSaLucreze()
+    expect(goluriInchise).toEqual([41])
+  })
 })
 
 // „Am cerut agenți full echipați și tu i-ai dat doar ciurucuri" (Adrian, 30 iul).
@@ -181,12 +232,21 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(JSON.parse(kv.get('autonomie:pas:M0')!).incercari).toBe(0)
   })
 
-  it('după 3 încercări pe același zid, blochează pasul și trece mai departe', async () => {
-    for (let i = 0; i < 3; i++) await poateSaLucreze()
-    expect(JSON.parse(kv.get('autonomie:pas:M0')!).blocat).toContain('3 încercări')
+  it('NU renunță niciodată la un pas — dar nici nu blochează restul', async () => {
+    // Cinci treceri pe un pas care nu iese. Înainte, după a treia era marcat
+    // „blocat" și se renunța — o barieră pe care n-a cerut-o nimeni.
+    await poateSaLucreze()
+    const dupaPrima = JSON.parse(kv.get('autonomie:pas:M0')!) as { blocat?: string; incercari: number }
+    expect(dupaPrima.blocat).toBeUndefined() // nu există abandon, deloc
+    expect(dupaPrima.incercari).toBe(1)
 
-    const r = await poateSaLucreze()
-    expect(r.motiv).toContain('M1') // a trecut la pasul următor
+    // Trecerea următoare NU se blochează pe pasul care n-a ieșit: îl lasă în
+    // urmă pe cel încercat deja și ia unul neîncercat. Deci și insistă, și
+    // avansează — fără să renunțe la nimic.
+    const doi = await poateSaLucreze()
+    expect(doi.motiv).toContain('M1')
+    // Iar M0 rămâne în listă, neterminat, ca să fie reluat.
+    expect(JSON.parse(kv.get('autonomie:pas:M0')!).gata).toBeUndefined()
   })
 
   it('pasul de COD pleacă la constructor, cu comenzile EXACTE de verificare', async () => {
@@ -214,8 +274,7 @@ describe('Kelion se apucă singur de treabă', () => {
   })
 
   it('dacă ordinul constructorului a picat, și-l ia înapoi CU jurnalul eșecului', async () => {
-    pasInchis('M0')
-    pasInchis('M1')
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
     await poateSaLucreze()
     jobs[0].status = 'failed'
     jobs[0].log = 'teste roșii: plati_neatribuite > nu prinde plata fără cod'
@@ -226,14 +285,15 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(jobs[0].orderText).toContain('nu prinde plata fără cod')
   })
 
-  it('plafonul zilnic chiar oprește — nu mai e o limită doar declarată', async () => {
+  it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {
+    // Adrian, 30 iul: „eu plătesc, eu cer, tu execuți fără să comentezi".
+    // Plafonul îl pusesem eu, nu mi-l ceruse nimeni.
     plafon = 1
     secreteExistente = ['REVOLUT_PAY_LINK']
-    const unu = await poateSaLucreze()
-    expect(unu.pornit).toBe(true)
-
+    expect((await poateSaLucreze()).pornit).toBe(true)
+    // A doua trecere, peste „plafon": lucrează mai departe.
     const doi = await poateSaLucreze()
-    expect(doi.pornit).toBe(false)
-    expect(doi.motiv).toContain('plafon zilnic atins (1/1)')
+    expect(doi.pornit).toBe(true)
+    expect(doi.motiv).not.toContain('plafon')
   })
 })

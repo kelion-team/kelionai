@@ -31,14 +31,19 @@
 //   • UN SINGUR ordin în lucru — dacă mai are ceva pornit, nu i se mai dă nimic.
 //     Altfel, la fiecare oră s-ar aduna sarcini peste sarcini și n-ar termina
 //     niciuna.
-//   • PLAFON ZILNIC (`AUTONOMY_DAILY_MAX`, implicit 20) — variabila exista în
-//     configurare de mult, dar NU o citea nimeni: o limită declarată și
-//     neconectată. Acum chiar limitează. Fiecare ordin costă bani la creier.
-//   • TREI ÎNCERCĂRI PE PAS — se repară singur, dar nu la nesfârșit pe același
-//     zid. După a treia, pasul e marcat „blocat", se trece mai departe și
-//     motivul apare în panou, ca să-l vadă omul.
+//   • ATÂT. NIMIC ALTCEVA. (Adrian, 30 iul: „eu plătesc, eu cer, tu execuți fără
+//     să comentezi" · „dacă tu pui bariere nedorite și neaprobate de mine, nu
+//     înseamnă că-mi sabotezi munca?") Pusesem un plafon zilnic și un abandon
+//     după trei încercări — două bariere pe care nu le-a cerut nimeni. Sunt
+//     SCOASE. Nu există plafon, și nu se renunță la nicio sarcină: un pas care
+//     pică se reia, iar ordinea „cine a fost încercat de mai puține ori" face ca
+//     un pas greu să nu înfometeze restul. „Un singur ordin odată" rămâne, dar
+//     nu e o permisiune — lucrătorul ia oricum un ordin pe rând.
 import { config } from '../config.js'
-import { createBuildJob, listBuildJobs, loadKv, saveKv, type BuildJob } from '../db.js'
+import {
+  createBuildJob, listBuildJobs, loadKv, saveKv, getCapabilityGaps, setGapResolved,
+  type BuildJob,
+} from '../db.js'
 import { brainCompleteWithTools } from './brain.js'
 import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
@@ -101,11 +106,7 @@ interface StarePas {
   incercari: number
   /** Terminat cu bine — nu ne mai atingem de el. */
   gata?: boolean
-  /** Trei încercări epuizate — trecem mai departe, dar se vede în panou. */
-  blocat?: string
 }
-
-const MAX_INCERCARI = 3
 
 // ── MISIUNEA: PARTEA REVOLUT, CAP-COADĂ ──────────────────────────────────────
 //
@@ -330,6 +331,42 @@ async function randuriDeFacut(): Promise<Sarcina[]> {
   return out
 }
 
+// ── CE ÎI LIPSEȘTE LUI, LUAT DE EL ȘI CONSTRUIT ──────────────────────────────
+//
+// Adrian, 30 iul: „autonomia mai înseamnă și capacitatea de a vedea ce îi
+// lipsește și capabilități extinse autonome de învățare și dezvoltare".
+//
+// Jumătate exista deja, și mergea: când un user cere ceva ce Kelion nu poate,
+// se scrie în `capability_gaps` (unealta `log_gap`), iar `triageGaps()` îl pune
+// pe el să-și trieze SINGUR lista — „DE IMPLEMENTAT" sau închis ca duplicat.
+//
+// Jumătatea ruptă era după: NIMENI nu construia ce marcase „DE IMPLEMENTAT".
+// Lista zăcea. Deci vedea ce-i lipsește, dar nu se dezvolta — exact golul pe
+// care l-a numit el. De aici încolo, ce a marcat singur devine muncă pe care
+// tot el o ia. Cercul se închide: vede → construiește → poate.
+async function golurileLui(): Promise<Sarcina[]> {
+  const goluri = await getCapabilityGaps(false, 100).catch(() => [])
+  return goluri
+    .filter((g) => String((g as { triage?: string | null }).triage ?? '').startsWith('DE IMPLEMENTAT'))
+    .slice(0, 20)
+    .map((g) => ({
+      cod: `G${g.id}`,
+      titlu: String(g.request).slice(0, 90),
+      executant: 'constructor' as Executant,
+      ordin:
+        `CAPABILITATE CARE ÎȚI LIPSEȘTE — ai marcat-o TU „de implementat", nimeni nu ți-a cerut-o acum.\n\n` +
+        `CE A CERUT OMUL ȘI N-AI PUTUT FACE: "${String(g.request).slice(0, 600)}"\n` +
+        `De câte ori s-a cerut: ${g.hits}.\n` +
+        (g.reason ? `Ce ai notat tu atunci: ${String(g.reason).slice(0, 300)}\n` : '') +
+        (((g as { triage?: string | null }).triage) ? `Verdictul tău la triere: ${String((g as { triage?: string | null }).triage).slice(0, 300)}\n` : '') +
+        `\nCONSTRUIEȘTE-O. Nu o descrie, nu propune un plan — scrie codul, cu teste care apără ` +
+        `exact comportamentul nou, și leagă unealta în registrul de capabilități ` +
+        `(services/brainCapabilities.ts) ca să n-o poți avea „adormită".\n\n` +
+        `Dacă la a doua privire chiar NU merită (duplicat, sau se poate deja cu ce ai), ` +
+        `spune-o limpede în PR și explică de ce — a te răzgândi cu motiv nu e eșec.`,
+    }))
+}
+
 /** Regulile care se lipesc la FIECARE ordin — la fel pentru misiune și pentru listă. */
 function cuRegulile(ordin: string): string {
   return (
@@ -361,7 +398,7 @@ async function citesteStare(cod: string): Promise<StarePas> {
   if (!raw) return { job: 0, incercari: 0 }
   try {
     const v = JSON.parse(raw) as Partial<StarePas>
-    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata, blocat: v.blocat }
+    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata }
   } catch {
     return { job: 0, incercari: 0 }
   }
@@ -451,22 +488,30 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     return { pornit: false, motiv: 'are deja un ordin în lucru' }
   }
 
-  // 2. Plafonul zilnic — variabila care exista dar nu limita nimic.
+  // 2. NU EXISTĂ PLAFON. (Adrian, 30 iul: „dacă tu pui bariere nedorite și
+  // neaprobate de mine, nu înseamnă că-mi sabotezi munca?" · „eu plătesc, eu
+  // cer, tu execuți fără să comentezi".) Pusesem un plafon zilnic pe care nu
+  // mi l-a cerut nimeni. E scos. Numărul de ordine pe zi se ține doar ca să se
+  // VADĂ în panou câte a dat — nu ca să-l oprească.
   const azi = await dateAzi()
-  if (azi >= config.autonomyDailyMax) {
-    return { pornit: false, motiv: `plafon zilnic atins (${azi}/${config.autonomyDailyMax})` }
-  }
 
   // 3. Misiunea (partea Revolut) are întâietate; pe urmă lista ownerului.
   const misiuneGata = await Promise.all(MISIUNE.map((p) => citesteStare(p.cod))).then((st) =>
-    st.every((s) => s.gata || s.blocat),
+    st.every((s) => s.gata),
   )
-  const sarcini = misiuneGata ? await randuriDeFacut() : MISIUNE
-  if (!sarcini.length) return { pornit: false, motiv: 'lista nu s-a putut citi sau e goală' }
+  // După misiune: întâi CE ÎI LIPSEȘTE LUI (golurile pe care le-a triat singur
+  // — „vede ce-i lipsește și se dezvoltă"), apoi rândurile din lista ownerului.
+  const brute = misiuneGata ? [...(await golurileLui()), ...(await randuriDeFacut())] : MISIUNE
+  if (!brute.length) return { pornit: false, motiv: 'n-am ce lua: nici goluri, nici rânduri de listă' }
 
-  for (const s of sarcini) {
-    const st = await citesteStare(s.cod)
-    if (st.gata || st.blocat) continue
+  // NIMIC NU SE ABANDONEAZĂ. Înainte, după 3 încercări pasul era marcat „blocat"
+  // și se renunța la el — o barieră pe care n-a cerut-o nimeni. Acum se reia la
+  // nesfârșit; iar ca un pas greu să nu înfometeze restul, sarcinile se iau în
+  // ordinea „cine a fost încercat de mai puține ori". Deci și insistă, și avansează.
+  const cuStare = await Promise.all(brute.map(async (x) => ({ x, st: await citesteStare(x.cod) })))
+  const sarcini = cuStare.filter((e) => !e.st.gata).sort((a, b) => a.st.incercari - b.st.incercari)
+
+  for (const { x: s, st } of sarcini) {
 
     // A dat deja un ordin pe sarcina asta — ce s-a ales de el?
     if (st.job) {
@@ -474,17 +519,14 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       if (v === 'inLucru') return { pornit: false, motiv: `aștept ordinul #${st.job} (${s.cod})` }
       if (v === 'gata') {
         await scrieStare(s.cod, { ...st, job: 0, gata: true })
+        // Un gol construit se închide și în lista LUI de lipsuri — altfel l-ar
+        // relua la nesfârșit, sau ar rămâne scris „nu pot" pentru ceva ce poate.
+        if (/^G\d+$/.test(s.cod)) await setGapResolved(Number(s.cod.slice(1)), true).catch(() => {})
         console.log(`[AUTONOM] ${s.cod} („${s.titlu}") — gata, ordinul #${st.job}`)
         continue // trecem la următoarea sarcină în ACEEAȘI trecere
       }
-      // PICAT. Aici e „să se repare singur": i-l dăm înapoi, cu ce a scris el
-      // însuși în jurnal când a căzut. Dar nu la nesfârșit pe același zid.
-      if (st.incercari >= MAX_INCERCARI) {
-        const blocat = `blocat după ${st.incercari} încercări (ultimul ordin #${st.job})`
-        await scrieStare(s.cod, { ...st, job: 0, blocat })
-        console.error(`[AUTONOM] ${s.cod} — ${blocat}; trec mai departe`)
-        continue
-      }
+      // PICAT → „să se repare singur": i-l dăm ÎNAPOI, cu ce a scris el însuși
+      // în jurnal când a căzut. Fără număr maxim de încercări — nu renunțăm.
     }
 
     const picat = st.job ? dupaId.get(st.job) : undefined
@@ -492,7 +534,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     const ordin = jurnal
       ? cuRegulile(
           `REPARI CE AI STRICAT TU. Ordinul #${st.job} pe sarcina asta a picat — ` +
-            `încercarea ${st.incercari + 1} din ${MAX_INCERCARI}.\n\n` +
+            `încercarea ${st.incercari + 1}. Nu se renunță — se reia până iese.\n\n` +
             `SARCINA INIȚIALĂ:\n${s.ordin}\n\n` +
             `CE A SCRIS JURNALUL CÂND A CĂZUT (ultimele rânduri — pornește de la cauza de acolo, ` +
             `nu de la zero):\n${jurnal}`,
@@ -522,12 +564,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
           await scrieStare(s.cod, { job: 0, incercari: st.incercari })
           return { pornit: true, motiv: `${s.cod}: așteaptă o apăsare de la tine — ${asteapta}` }
         }
-        if (incercari >= MAX_INCERCARI) {
-          const blocat = `blocat după ${incercari} încercări cu mâinile lui: ${spus.slice(0, 200)}`
-          await scrieStare(s.cod, { job: 0, incercari, blocat })
-          console.error(`[AUTONOM] ${s.cod} — ${blocat}`)
-          continue
-        }
+        // N-a ieșit nici acum → se reia la trecerea următoare. Fără abandon.
         await scrieStare(s.cod, { job: 0, incercari })
         return { pornit: true, motiv: `${s.cod}: încercarea ${incercari} — ${spus.slice(0, 160)}` }
       } finally {
