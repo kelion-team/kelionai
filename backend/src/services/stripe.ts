@@ -250,7 +250,7 @@ function expenseLines(): ExpenseLine[] {
 }
 
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines() }
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
     const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
@@ -449,10 +449,52 @@ export async function autoFundIssuing(): Promise<void> {
   }
 }
 
+// ── NUMĂRUL CARDULUI, ÎN PANOU, FĂRĂ SĂ TREACĂ PRIN NOI ──────────────────────
+//
+// Adrian, 30 iul: „nu mă descurc, te rog intră și ajută-mă" / „pot pune datele
+// cardului aici?". NU — un număr de card scris în chat e un card compromis. Și
+// nici prin serverul nostru nu-l trecem: dacă PAN-ul ar veni prin backend
+// (`expand[]=number` pe API), toată aplicația ar intra în scope PCI, cu logurile
+// cu tot.
+//
+// Calea oficială Stripe pentru exact cazul ăsta e Issuing Elements: browserul
+// cere un NONCE de unică folosință de la Stripe.js, serverul schimbă nonce-ul
+// pe o CHEIE EFEMERĂ (15 minute, doar pentru cardul ăsta), iar numărul se
+// randează într-un iframe găzduit de Stripe. Serverul nu vede niciodată cifrele
+// — vede doar un nonce. Aici e singura parte care are nevoie de cheia secretă.
+//
+// Ce dă înapoi: `secret`-ul cheii efemere. Nimic sensibil pentru card.
+export async function createCardEphemeralKey(
+  cardId: string,
+  nonce: string,
+): Promise<{ secret: string } | { error: string }> {
+  if (!config.stripe.secretKey) return { error: 'stripe_not_configured' }
+  // Gărzi pe formă ÎNAINTE de rețea: `ic_…` e prefixul cardurilor Issuing, iar
+  // nonce-ul e opac dar mărginit. Fără ele, orice șir din browser ar deveni o
+  // cerere către Stripe pe cheia noastră secretă.
+  if (!/^ic_[A-Za-z0-9]+$/.test(cardId)) return { error: 'bad_card' }
+  if (!nonce || nonce.length > 200) return { error: 'bad_nonce' }
+  try {
+    const body = new URLSearchParams({ nonce, issuing_card: cardId })
+    const r = await fetch(`${API}/ephemeral_keys`, {
+      method: 'POST',
+      // Cheia efemeră cere o versiune de API EXPLICITĂ — Stripe refuză altfel.
+      headers: { ...authHeaders(), 'Stripe-Version': '2020-03-02' },
+      body,
+      signal: AbortSignal.timeout(12_000),
+    })
+    const j = (await r.json().catch(() => ({}))) as { secret?: string; error?: { message?: string } }
+    if (!r.ok || !j.secret) return { error: j.error?.message ?? `http_${r.status}` }
+    return { secret: j.secret }
+  } catch (e) {
+    return { error: String(e).slice(0, 160) }
+  }
+}
+
 // Creează cardul virtual „Kelion AI" prin API (necesită Issuing activ):
-// cardholder pe emailul adminului + card virtual GBP. Detaliile complete
-// (număr/CVC) se văd în dashboardul Stripe (API-ul le dă doar cu acces PCI
-// special) — întoarcem linkul direct la card.
+// cardholder pe emailul adminului + card virtual GBP. Numărul complet se vede
+// în panou (Issuing Elements, vezi mai sus) sau în dashboardul Stripe —
+// întoarcem și linkul direct la card.
 export async function createKelionCard(adminEmail: string): Promise<
   { id: string; last4: string; url: string } | { error: string }
 > {

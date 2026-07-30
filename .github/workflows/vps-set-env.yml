@@ -12,6 +12,10 @@
 #        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
 #        GOOGLE_API_KEY        (o cheie Google Cloud care poate acoperi TTS/Gemini)
 #        GOOGLE_MAPS_KEY       (opțional; harta merge și fără, pe OSM)
+#        STRIPE_PUBLISHABLE_KEY (pk_live_… de la Stripe → Developers → API keys.
+#                               NU e secretă — e făcută să stea în pagină. Cu ea
+#                               adminul vede NUMĂRUL cardului virtual direct în
+#                               panou, în cadre Stripe, fără drum prin dashboard.)
 #        GITHUB_TOKEN          (fin-granulat, DOAR repo kelionai, Actions:write —
 #                               mâinile lui Kelion pe runbook-uri; + Contents/PR
 #                               write dacă vrei să și scrie cod pe ramuri)
@@ -45,6 +49,7 @@ jobs:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_PASS: ${{ secrets.MAIL_PASS }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           GITHUB_TOKEN: ${{ secrets.KELION_GITHUB_TOKEN }}
           RESTART: ${{ inputs.restart }}
         run: |
@@ -64,7 +69,7 @@ jobs:
           # 26 iul, run 30190681677 — cheile scrise, containerul nerepornit).
           # De-aia e `if`, nu `&&`.
           {
-            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET GITHUB_TOKEN; do
+            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET STRIPE_PUBLISHABLE_KEY GITHUB_TOKEN; do
               val="${!name:-}"
               if [ -n "$val" ]; then printf '%s=%s\n' "$name" "$val"; fi
             done

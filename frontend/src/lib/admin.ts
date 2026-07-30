@@ -91,6 +91,24 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
     return null
   }
 }
+// CHEIA EFEMERĂ pentru afișarea numărului cardului (Issuing Elements). Nonce-ul
+// îl face Stripe.js în browser; serverul îl schimbă pe o cheie de 15 minute.
+// Prin funcția asta NU trece niciun număr de card — doar nonce și secret.
+export async function fetchCardKey(cardId: string, nonce: string): Promise<string | null> {
+  try {
+    const r = await fetch('/api/admin/money-circuit/card-key', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ card_id: cardId, nonce }),
+    })
+    if (!r.ok) return null
+    return ((await r.json()) as { secret?: string }).secret ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function createAiCard(): Promise<{ id: string; last4: string; url: string } | null> {
   try {
     const r = await fetch('/api/admin/money-circuit/card', { method: 'POST', credentials: 'include' })

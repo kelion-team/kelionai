@@ -82,6 +82,10 @@ export interface MoneyCircuit {
   /** 'active' | 'inactive' | 'pending' | 'unknown'. */
   issuingStatus: string
   cards: { id: string; last4: string; status: string }[]
+  /** Cheia PUBLICĂ Stripe (pk_live_…), dacă e pusă în env. Cu ea panoul poate
+   *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
+   *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
+  stripePk?: string
   /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului. */
   issuingAvailable: number
   /** DOVADA că veriga 4 (cardul pus la furnizorii de AI) chiar există: dacă
