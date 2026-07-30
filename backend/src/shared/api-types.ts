@@ -61,6 +61,21 @@ export interface IssuingCharge {
   at: string
 }
 
+/** O cheltuiala a aplicatiei si de unde se plateste. Adrian, 30 iul: „se pot
+ *  pune toate cheltuielile sa fie doar din punga?" — raspunsul e da, dar numai
+ *  daca fiecare furnizor are cardul virtual pus la el. Lista asta arata negru pe
+ *  alb care mai curge din buzunarul propriu. */
+export interface ExpenseLine {
+  /** Numele furnizorului, asa cum il stie omul. */
+  name: string
+  /** Pentru ce se plateste. */
+  what: string
+  /** E configurat in aplicatie? (cheia exista) */
+  configured: boolean
+  /** Unde se plateste factura lui. */
+  billing: string
+}
+
 export interface MoneyCircuit {
   /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
   payoutsInterval: string
@@ -75,6 +90,8 @@ export interface MoneyCircuit {
    *  ajuns la prima taxare). Un rând care spune „e pornit" fără asta e o
    *  presupunere, nu o stare. */
   issuingCharges?: IssuingCharge[]
+  /** Toate cheltuielile aplicatiei, cu locul de unde se platesc. */
+  expenses?: ExpenseLine[]
   /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
   autoFund?: { at: string; ok: boolean; detail: string } | null
   error?: string

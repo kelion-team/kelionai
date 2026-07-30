@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 // CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
-import type { MoneyCircuit } from '../shared/api-types.js'
+import type { MoneyCircuit, ExpenseLine } from '../shared/api-types.js'
 export type { MoneyCircuit }
 import { config } from '../config.js'
 import { getStripeCustomer, setStripeCustomer, countWalletUsers } from '../db.js'
@@ -222,8 +222,35 @@ export async function chargeSavedCard(
 // prin API se face de aici (creare card); ce cere dashboard-ul (activare
 // Issuing, introducerea cardului la OpenAI/OpenRouter) primește link direct.
 
+/** TOATE cheltuielile aplicatiei, intr-un singur loc.
+ *
+ *  Adrian, 30 iul: „se pot pune toate cheltuielile sa fie doar din punga?"
+ *  Da — cardul virtual e un card obisnuit, merge oriunde se accepta card. Dar
+ *  „poate" nu e „este": fiecare furnizor trebuie sa aiba cardul pus la el, de
+ *  mana, o data. Lista asta spune care sunt furnizorii si ce mai ramane de facut,
+ *  ca sa se vada ce curge inca din buzunarul propriu.
+ *
+ *  `configured` = cheia exista in aplicatie, deci serviciul chiar e folosit.
+ *  Un serviciu neconfigurat nu costa nimic. */
+function expenseLines(): ExpenseLine[] {
+  const card = 'Cardul Kelion (punga Stripe)'
+  const gratuit = 'Gratuit / fara factura'
+  const extern = 'Platit din alta parte — pune cardul acolo'
+  return [
+    { name: 'OpenRouter', what: 'creierul (chat, gandire, traduceri)', configured: Boolean(config.openrouter.key), billing: card },
+    { name: 'OpenAI', what: 'vocea live (Realtime) + TTS', configured: Boolean(config.openai.key), billing: card },
+    { name: 'Google Gemini', what: 'creier de rezerva + vedere', configured: Boolean(config.geminiKey), billing: card },
+    { name: 'Google Maps', what: 'harti si trasee', configured: Boolean(config.googleMapsKey), billing: card },
+    { name: 'Google TTS', what: 'voce sintetizata', configured: Boolean(config.googleTtsKey), billing: card },
+    { name: 'Serper', what: 'cautare web', configured: Boolean(config.serperKey), billing: card },
+    { name: 'Stripe', what: 'comisioane pe plati', configured: Boolean(config.stripe.secretKey), billing: 'Retinute automat din punga' },
+    { name: 'VPS + domeniu', what: 'gazduirea aplicatiei', configured: true, billing: extern },
+    { name: 'OpenStreetMap / FOSSGIS', what: 'rutare pe harta', configured: true, billing: gratuit },
+  ]
+}
+
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund }
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: 0, autoFund: lastAutoFund, expenses: expenseLines() }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
     const acc = await fetch(`${API}/account`, { headers: authHeaders(), signal: AbortSignal.timeout(12_000) })
