@@ -92,6 +92,20 @@ export interface MoneyCircuit {
   issuingCharges?: IssuingCharge[]
   /** Toate cheltuielile aplicatiei, cu locul de unde se platesc. */
   expenses?: ExpenseLine[]
+  /** REGULA BATUTA IN CUIE: platile catre AI trebuie sa iasa din punga.
+   *  Codul nu poate pune cardul in contul furnizorului (nu exista API), dar
+   *  poate PRINDE cand nu e pus: daca am consumat AI de X si cardul a fost
+   *  taxat cu 0, inseamna ca furnizorii sunt platiti din ALTA parte. */
+  pouchRule?: {
+    /** Cat am consumat la AI (masurat de noi), in moneda contului. */
+    spent: number
+    /** Cat a fost taxat cardul virtual. */
+    charged: number
+    /** Regula e respectata? */
+    ok: boolean
+    /** Ce e de facut, pe intelesul omului. */
+    verdict: string
+  }
   /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
   autoFund?: { at: string; ok: boolean; detail: string } | null
   error?: string
