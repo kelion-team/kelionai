@@ -24,6 +24,26 @@ describe('validateRunbook', () => {
     const allowed = new Set(['deploy.yml', 'vps-diag.yml', 'sentinel.yml', 'vps-run.yml'])
     for (const rb of Object.values(RUNBOOKS)) expect(allowed.has(rb.workflow)).toBe(true)
   })
+
+  // PROBA RESTAURĂRII (Adrian, 30 iul). Un backup neprobat nu e o plasă, e o
+  // presupunere. Proba TREBUIE să rămână nedistructivă: dacă cineva scapă
+  // vreodată restaurarea peste baza VIE, pierde tot exact în ziua în care avea
+  // nevoie de plasă. De-aia comanda e ținută sub test, nu doar recitită.
+  it('proba de restaurare e NEDISTRUCTIVĂ: bază temporară, ștearsă la final', () => {
+    const cmd = RUNBOOKS['proba-restaurare']?.inputs?.cmd ?? ''
+    expect(cmd).toBeTruthy()
+    // Restaurează ÎNTR-O BAZĂ DE PROBĂ, nu peste cea vie.
+    expect(cmd).toContain('CREATE DATABASE $BAZA')
+    expect(cmd).toContain('kelion_proba_restaurare')
+    // Și o șterge după ce a numărat.
+    expect(cmd).toContain('DROP DATABASE $BAZA')
+    // Se oprește la prima eroare — o restaurare „pe jumătate" nu are voie să
+    // treacă drept reușită.
+    expect(cmd).toContain('ON_ERROR_STOP=1')
+    expect(cmd.startsWith('set -e;')).toBe(true)
+    // NU are voie să scrie în baza vie.
+    expect(cmd).not.toContain('psql "$PGURL" -f')
+  })
 })
 
 describe('normalizeBranch (incident: diacriticele blocau livrarea fixului)', () => {
