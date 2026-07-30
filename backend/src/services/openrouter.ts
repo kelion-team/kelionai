@@ -93,16 +93,11 @@ export async function getCatalog(force = false): Promise<Catalog> {
  *  chei) ca să poată fi ținută sub test — filtrul ăsta decide ce vede userul în
  *  meniu, deci nu are voie să fie „verificat din ochi". */
 export function groupCatalog(models: CatalogModel[]): { chat: CatalogModel[]; work: CatalogModel[] } {
-  // Chat = GPT + Gemini (rapide, conversație). Work = GPT + Claude (raționament greu).
   // COMPATIBILITATE 100% (Adrian, 25 iul: „păstrăm în liste doar cele
   // compatibile 100% la voce și creier, vedere etc."): un cadru de cameră care
   // ajunge la creier PE VEDERE (needsVision forțează escaladarea aici — vezi
   // chat.ts) trebuie servit de un model care CHIAR vede — altfel poza ar fi
   // ignorată/ar pica. Filtru REAL pe catalogul live, nu presupunere.
-  // nvidia/cohere apar DOAR pe gratuit (:free) — restul providerilor noi ar
-  // dilua listele; cele plătite rămân pe openai/google/anthropic ca până acum.
-  const freeOnly = (m: CatalogModel): boolean =>
-    (m.provider === 'nvidia' || m.provider === 'cohere') ? m.id.endsWith(':free') : true
   // VEDEREA E OBLIGATORIE ȘI PE LISTA DE CHAT (ordinul lui Adrian, 29 iul: „se
   // afișează doar AI care respectă TOATE funcționalitățile aplicației — văz,
   // auz, voce live"). Până acum doar `work` cerea vedere; lista de chat oferea
@@ -111,11 +106,19 @@ export function groupCatalog(models: CatalogModel[]): { chat: CatalogModel[]; wo
   // incomplet e o promisiune ruptă. Acum: în AMBELE liste, doar modele care VĂD
   // (aici) și care ȘTIU UNELTE (impus în toModel, fără de care n-ar merge nici
   // Google, nici memoria, nici comenzile, nici escaladarea vocii pe creier).
-  const chat = models.filter((m) => m.vision && (m.provider === 'openai' || m.provider === 'google' || m.provider === 'nvidia' || m.provider === 'cohere') && freeOnly(m))
+  // FĂRĂ LISTĂ DE FURNIZORI (Adrian, 30 iul: „trebuie să pot decide oricare model
+  // din listă" · „dacă tu pui bariere nedorite și neaprobate de mine, nu înseamnă
+  // că-mi sabotezi munca?"). Filtrul pe firme — openai/google/anthropic, plus
+  // nvidia/cohere doar pe gratuit — era o judecată a mea („să nu se dilute
+  // listele"), nu ordinul lui. Ordinul lui, din 29 iul, era despre CAPABILITĂȚI:
+  // „se afișează doar AI care respectă TOATE funcționalitățile aplicației".
+  // Deci rămâne exact atât: vede (aici) și știe unelte (impus în toModel).
+  // Orice model de pe OpenRouter care le are, îi apare în listă.
+  const chat = models.filter((m) => m.vision)
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta work acceptă și modelele
   // GRATUITE cu vedere+tools (gemma :free, nemotron omni/vl :free) — nucleul
   // implicit e acum gratuit, iar adminul le poate alege și manual din listă.
-  const work = models.filter((m) => m.vision && (m.provider === 'openai' || m.provider === 'anthropic' || (m.id.endsWith(':free') && freeOnly(m))))
+  const work = models.filter((m) => m.vision)
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   return { chat: chat.sort(byId), work: work.sort(byId) }
 }

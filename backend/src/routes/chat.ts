@@ -46,6 +46,7 @@ import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/d
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
+import { inventarulMeu } from '../services/brainCapabilities.js'
 import { generateImage } from '../services/image.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
@@ -1224,7 +1225,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // (weather, maps, "near me", "where am I") actually work. The frontend sends
     // the live coordinates; we resolve a human place name (cached) so the brain can
     // pass it to the name-based skills.
-    let systemPrompt = SYSTEM_PROMPT + gestureOffRule
+    // CONȘTIENT DE CE ARE (Adrian, 30 iul: „trebuie să fie conștient de ce are,
+    // ce capabilități are, toate să-i fie activate în creier și apelabile
+    // direct"). Definițiile uneltelor plecau la model, dar nicăieri nu scria, pe
+    // limba lui, CE POATE — grupat, cu ce face fiecare. Un agent care nu-și
+    // cunoaște inventarul spune „nu pot" pentru ceva ce are în mână. Lista se
+    // DERIVĂ din registru (sursa unică), deci nu poate rămâne în urmă. Userul
+    // obișnuit nu vede uneltele de admin — n-ar putea oricum să le cheme.
+    let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}` + gestureOffRule
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
