@@ -70,7 +70,7 @@ export default function CardReveal({ cardId, pk, last4 }: { cardId: string; pk: 
       const ok = await incarcaStripeJs()
       if (!viu) return
       if (!ok || !window.Stripe) {
-        setMotiv('Stripe.js nu s-a încărcat (rețea sau blocare de reclame).')
+        setMotiv('Stripe.js did not load (network, or an ad blocker).')
         setStare('eroare')
         return
       }
@@ -80,7 +80,7 @@ export default function CardReveal({ cardId, pk, last4 }: { cardId: string; pk: 
         const ephemeralKeySecret = await fetchCardKey(cardId, nonce)
         if (!viu) return
         if (!ephemeralKeySecret) {
-          setMotiv('Serverul n-a dat cheia efemeră — verifică sesiunea de admin și încuietoarea.')
+          setMotiv('The server did not return the ephemeral key — check the admin session and the lock.')
           setStare('eroare')
           return
         }
@@ -137,14 +137,14 @@ export default function CardReveal({ cardId, pk, last4 }: { cardId: string; pk: 
 
   return (
     <div className="card-reveal">
-      <div className="card-reveal-title">Cardul Kelion AI •••• {last4}</div>
-      {stare === 'incarc' && <div className="or-wallet-sub">Se cere cheia de la Stripe…</div>}
-      {stare === 'eroare' && <div className="or-wallet-sub" style={{ color: '#e06c5f' }}>Nu s-a putut afișa: {motiv}</div>}
+      <div className="card-reveal-title">Kelion AI card •••• {last4}</div>
+      {stare === 'incarc' && <div className="or-wallet-sub">Asking Stripe for the key…</div>}
+      {stare === 'eroare' && <div className="or-wallet-sub" style={{ color: '#e06c5f' }}>Could not display it: {motiv}</div>}
       <div className="card-reveal-grid" style={{ display: stare === 'gata' ? 'grid' : 'none' }}>
-        <span className="card-reveal-eticheta">Număr</span>
+        <span className="card-reveal-eticheta">Number</span>
         <div className="card-reveal-camp" ref={nr} />
         <div ref={nrCopy} />
-        <span className="card-reveal-eticheta">Expiră</span>
+        <span className="card-reveal-eticheta">Expires</span>
         <div className="card-reveal-camp" ref={exp} />
         <div ref={expCopy} />
         <span className="card-reveal-eticheta">CVC</span>
@@ -153,11 +153,11 @@ export default function CardReveal({ cardId, pk, last4 }: { cardId: string; pk: 
       </div>
       {stare === 'gata' && (
         <div className="or-wallet-sub">
-          Copiază și lipește la{' '}
+          Copy and paste it at{' '}
           <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">OpenRouter → Credits</a>
           {' · '}
           <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">OpenAI → Billing</a>
-          . Cifrele vin direct de la Stripe, în cadre proprii — nu trec prin serverul Kelionai.
+          . The digits come straight from Stripe, in its own frames — they never pass through the Kelionai server.
         </div>
       )}
     </div>
