@@ -164,43 +164,46 @@ describe('stripe — validarea sumelor (înainte de orice apel)', () => {
 
 // ── REZERVA CARE NU SE ATINGE (Adrian, 30 iul) ─────────────────────────────
 //
-// „Se face strict asta când avem mai mult de 100 de lire, și se corelează cu
-// numărul de utilizatori: 1 user = 100, 2 useri = 110, 3 useri = 120, ca să nu
-// avem surprize."
+// Rezerva sunt BANII CU CARE DAI ÎNAPOI. Sub prag NU se scoate nimic din punga
+// de plăți spre card, fiindcă:
+//   • la o rambursare, dacă punga e goală, contul intră pe minus;
+//   • la o dispută, Stripe ia suma PLUS un comision care nu se returnează;
+//   • comisioanele Stripe se rețin din sold, nu din altă parte.
+// Panoul avea deja nota „sub zero = taxe reținute la rambursări/dispute".
 //
-// Regula e aritmetică simplă, dar apără bani reali: sub prag NU se scoate nimic
-// din punga de plăți spre card. Înainte, transferul lua tot ce găsea, iar taxele
-// Stripe la rambursări veneau după, pe zero — de-aia panoul avea deja notița
-// „sub zero = taxe reținute". Un test o ține pe loc.
+// £20 + £10 pe fiecare user în plus („rezerva 20, bătut în cuie", 30 iul).
 describe('bani — rezerva din punga de plăți crește cu numărul de useri', () => {
-  const BAZA = 100
+  // £20, bătut în cuie (Adrian, 30 iul). Prima valoare a fost £100 — cu un
+  // singur user și solduri mici, bloca bani degeaba: din £100 puși în pungă, pe
+  // card ajungeau zero, fiindcă tot ce e SUB prag rămâne pe loc.
+  const BAZA = 20
   const PER_USER = 10
   const rezerva = (useri: number): number => BAZA + Math.max(0, useri - 1) * PER_USER
 
   it('exact scara cerută', () => {
-    expect(rezerva(1)).toBe(100)
-    expect(rezerva(2)).toBe(110)
-    expect(rezerva(3)).toBe(120)
-    expect(rezerva(10)).toBe(190)
+    expect(rezerva(1)).toBe(20)
+    expect(rezerva(2)).toBe(30)
+    expect(rezerva(3)).toBe(40)
+    expect(rezerva(10)).toBe(110)
   })
 
   it('fără useri, pragul rămâne cel de bază (nu zero)', () => {
-    expect(rezerva(0)).toBe(100)
+    expect(rezerva(0)).toBe(20)
   })
 
   it('sub rezervă nu se scoate NIMIC', () => {
     const disponibil = (sold: number, useri: number): number => sold - rezerva(useri)
     expect(disponibil(9.74, 1)).toBeLessThan(0) // cazul real din contul lui
-    expect(disponibil(99, 1)).toBeLessThan(0)
-    expect(disponibil(100, 1)).toBe(0) // fix pe prag: tot nu se scoate
-    expect(disponibil(105, 2)).toBeLessThan(0) // 2 useri → pragul e 110
+    expect(disponibil(19, 1)).toBeLessThan(0)
+    expect(disponibil(20, 1)).toBe(0) // fix pe prag: tot nu se scoate
+    expect(disponibil(25, 2)).toBeLessThan(0) // 2 useri → pragul e 30
   })
 
   it('peste rezervă se scoate DOAR excedentul, plafonat la alimentarea normală', () => {
     const TOPUP = 20
     const cat = (sold: number, useri: number): number => Math.min(TOPUP, Math.max(0, sold - rezerva(useri)))
-    expect(cat(130, 1)).toBe(20) // excedent 30 → plafonat la 20
-    expect(cat(112, 1)).toBe(12) // excedent 12 → exact 12
-    expect(cat(112, 2)).toBe(2) // 2 useri: pragul 110 → excedent 2
+    expect(cat(100, 1)).toBe(20) // excedent 80 → plafonat la 20
+    expect(cat(32, 1)).toBe(12) // excedent 12 → exact 12
+    expect(cat(32, 2)).toBe(2) // 2 useri: pragul 30 → excedent 2
   })
 })

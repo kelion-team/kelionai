@@ -362,7 +362,7 @@ const ISSUING_TOPUP = Math.max(1, Number(process.env.ISSUING_TOPUP_GBP ?? '20') 
 // Rezerva minimă ținută în punga de plăți: de la ea în jos nu se scoate nimic
 // spre card. Creste cu fiecare user, fiindcă fiecare user in plus inseamna inca
 // un om care poate cere banii inapoi. Reglabile din mediu, fara deploy.
-const REZERVA_BAZA = Math.max(0, Number(process.env.STRIPE_RESERVE_GBP ?? '100') || 100)
+const REZERVA_BAZA = Math.max(0, Number(process.env.STRIPE_RESERVE_GBP ?? '20') || 20)
 const REZERVA_PER_USER = Math.max(0, Number(process.env.STRIPE_RESERVE_PER_USER_GBP ?? '10') || 10)
 
 // DEPUNERE AUTOMATĂ A OWNERULUI (Adrian, 24 iul: „când vede că trebuiesc bani,
