@@ -3194,13 +3194,17 @@ a.card-item:hover {
   backface-visibility: hidden;
 }
 .manual-leaf.turn-inainte { animation: fila-inainte .46s cubic-bezier(.22,.61,.36,1) both; }
-.manual-leaf.turn-inapoi { animation: fila-inapoi .46s cubic-bezier(.22,.61,.36,1) both; }
+.manual-leaf.turn-inapoi { transform-origin: right center; animation: fila-inapoi .46s cubic-bezier(.22,.61,.36,1) both; }
+/* SENSUL, corectat după ce Adrian l-a văzut pe viu: pagina se dădea invers.
+   Cartea are cotorul în STÂNGA. Mergând ÎNAINTE, fila nouă vine dinspre marginea
+   din dreapta și se așază pe cotor — deci pleacă rotită cu dreapta spre tine și
+   se aplatizează. Înapoi, exact pe dos. Semnele erau schimbate între ele. */
 @keyframes fila-inainte {
-  from { transform: rotateY(-52deg); opacity: .25; }
+  from { transform: rotateY(52deg); opacity: .25; }
   to { transform: rotateY(0deg); opacity: 1; }
 }
 @keyframes fila-inapoi {
-  from { transform: rotateY(52deg); opacity: .25; }
+  from { transform: rotateY(-52deg); opacity: .25; }
   to { transform: rotateY(0deg); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
