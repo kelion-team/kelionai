@@ -29,6 +29,7 @@ import { constructorRoutes } from './routes/constructor.js'
 import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
+import { startCitirePlati } from './services/openBanking.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
@@ -350,6 +351,11 @@ try {
   app.log.info(`Kelionai backend on :${config.port}`)
   // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
   startMailbox()
+  // CREDITAREA AUTOMATĂ A PLĂȚILOR PRIN REVOLUT PRO (Adrian, 30 iul): citește
+  // tranzacțiile intrate și potrivește codul unic din referință cu userul care
+  // aștepta să plătească. Revolut Pro n-are webhook, deci întrebăm noi periodic.
+  // Fără chei GoCardless nu face nimic (și o spune o dată, la pornire).
+  startCitirePlati()
   // PLASA BANILOR (Adrian, 24 iul: „nu e de joacă cu banii userilor"):
   // reconciliere Stripe la boot + la fiecare oră — orice plată reală rămasă
   // necreditată (webhook pierdut/respins) se aplică singură, idempotent.

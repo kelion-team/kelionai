@@ -817,6 +817,17 @@ export default function AdminPanel({
                     <div className="or-wallet-main">
                       <span className="or-wallet-label">Furnizorii plătiți cu cardul tău</span>
                     </div>
+                    {/* CREDITAREA AUTOMATĂ A PLĂȚILOR (Adrian, 30 iul). Revolut Pro
+                        n-are webhook, deci aplicația citește singură tranzacțiile
+                        și potrivește codul unic. Starea se AFIȘEAZĂ, fiindcă „nu
+                        pot citi contul" și „n-a plătit nimeni" arată identic dacă
+                        taci — exact confuzia care a costat o zi. */}
+                    {circuit?.citirePlati && (
+                      <span className="or-wallet-sub" style={{ color: circuit.citirePlati.ok ? undefined : '#e6a23c' }}>
+                        {circuit.citirePlati.ok ? '✅' : '⚠'} Citirea plăților Revolut:{' '}
+                        {circuit.citirePlati.detaliu}
+                      </span>
+                    )}
                     <span className="or-wallet-sub">
                       Unde se schimbă cardul, la fiecare:{' '}
                       {circuit!.expenses!

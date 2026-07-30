@@ -177,6 +177,17 @@ export const config = {
   revolut: {
     payLink: (process.env.REVOLUT_PAY_LINK ?? '').trim(),
   },
+  // ── CITIREA TRANZACȚIILOR DIN CONTUL REVOLUT (Open Banking) ────────────────
+  // Cum află aplicația că un user a plătit, când Revolut Pro n-are webhook:
+  // se uită în tranzacțiile contului și caută codul din referință.
+  // Cheile se iau gratuit de la bankaccountdata.gocardless.com; `accountId` e
+  // contul legat după ce owner-ul dă consimțământul. ACCES DOAR DE CITIRE —
+  // nu se poate mișca niciun ban prin ele.
+  gocardless: {
+    secretId: (process.env.GOCARDLESS_SECRET_ID ?? '').trim(),
+    secretKey: (process.env.GOCARDLESS_SECRET_KEY ?? '').trim(),
+    accountId: (process.env.GOCARDLESS_ACCOUNT_ID ?? '').trim(),
+  },
   stripe: {
     secretKey: env(...ENV_ALIASES.stripeSecretKey),
     // Cheia PUBLICĂ (pk_live_…). NU e secret: Stripe o proiectează ca să stea în

@@ -34,6 +34,7 @@ import {
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
+import { stareCitirePlati } from '../services/openBanking.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
@@ -516,7 +517,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // automată a cardului lui Kelion EȘUA, nu se vedea nicăieri: creierul rămânea
     // fără bani „din senin". Acum ultima încercare (când, reușită sau nu, cu
     // motivul) intră în circuitul banilor din admin, lângă restul verigilor.
-    return reply.send({ ...(await getMoneyCircuit()), autoFund: lastAutoFundStatus() })
+    // `citirePlati` = starea cititorului de tranzacții Revolut. Fără el, panoul
+    // n-ar putea deosebi „n-a plătit nimeni" de „nu pot citi contul" — exact
+    // confuzia care a costat o zi întreagă pe 30 iul.
+    return reply.send({
+      ...(await getMoneyCircuit()),
+      autoFund: lastAutoFundStatus(),
+      citirePlati: stareCitirePlati(),
+    })
   })
   app.post<{ Body: { line1?: string; line2?: string; city?: string; postal_code?: string; country?: string } }>(
     '/api/admin/money-circuit/card',

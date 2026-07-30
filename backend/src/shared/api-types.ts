@@ -150,6 +150,10 @@ export interface MoneyCircuit {
   }
   /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
   autoFund?: { at: string; ok: boolean; detail: string } | null
+  /** Starea cititorului de plati Revolut (Adrian, 30 iul: creditare automata cu
+   *  cod unic). `ok:false` = N-AM PUTUT CITI contul — altceva decat „n-a platit
+   *  nimeni", si de-aia se raporteaza separat, nu ca un zero linistitor. */
+  citirePlati?: { la: string; ok: boolean; detaliu: string } | null
   error?: string
 }
 
