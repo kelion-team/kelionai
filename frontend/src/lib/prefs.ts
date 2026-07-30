@@ -27,6 +27,11 @@ export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
   avatarBox?: AvatarBox | null
+  /** Vocea aleasă de user; `null` = cea implicită a aplicației. */
+  voice?: string | null
+  /** Lista din care poate alege. Vine de la server, ca interfața să nu țină o
+   *  listă paralelă care se învechește când se schimbă env-ul. */
+  voices?: string[]
 } | null> {
   try {
     const res = await fetch('/api/prefs', { credentials: 'include' })
@@ -35,9 +40,26 @@ export async function loadServerPrefs(): Promise<{
       speechLang: string | null
       meserieActiva: number | null
       avatarBox?: AvatarBox | null
+      voice?: string | null
+      voices?: string[]
     }
   } catch {
     return null
+  }
+}
+
+/** Salvează vocea aleasă. `null` = revino la vocea implicită a aplicației. */
+export async function saveVoicePref(voice: string | null): Promise<boolean> {
+  try {
+    const r = await fetch('/api/prefs', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice }),
+    })
+    return r.ok
+  } catch {
+    return false
   }
 }
 

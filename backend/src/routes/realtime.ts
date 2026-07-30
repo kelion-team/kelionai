@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoicePref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
@@ -188,7 +188,11 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         gpsBlock
 
       // hardLock = adminul (Adrian) — română MEREU, fără comutare pe italiană.
-      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock)
+      // VOCEA ALEASĂ DE OMUL ĂSTA, nu una pentru toți (Adrian, 30 iul). Citită
+      // per cerere: dacă o schimbă din Setări, următoarea sesiune o folosește,
+      // fără repornire și fără să atingă contul altcuiva.
+      const vocePref = await getVoicePref(user.email).catch(() => null)
+      const res = await openaiRealtimeAnswer(offer, lang, meserieName, isAdmin, contextBlock, vocePref)
       if (!res.ok) {
         // Motivul REAL al refuzului (corpul erorii OpenAI) intră în log — altfel
         // în F12 se vede doar „502" și diagnoza e oarbă (Adrian, 24 iul).
