@@ -1,214 +1,292 @@
-# ACCES ȘI OPERARE — tot ce-i trebuie cuiva care preia
+# ACCES APLICAȚIE — FULL
 
-Document scris la cererea lui Adrian (30 iul): „scrie absolut tot modul de
-apelare a serverului, ca să aduc pe cineva care vrea să intre și să configureze".
+Tot ce-i trebuie unui AI (sau unui om) ca să preia proiectul și să-l gestioneze
+100%, fără să întrebe pe nimeni. Scris la cererea lui Adrian, 30 iul 2026.
 
-**Despre parole:** valorile NU sunt aici și nu vor fi niciodată. Fișierul ăsta
-trăiește în git, pe GitHub — o parolă scrisă în el e o parolă pierdută în ziua în
-care repo-ul e văzut de altcineva. Documentul spune **unde stau** cheile și **cum
-se pun**; valorile le dă Adrian, direct, în momentul potrivit. Oricine vine să
-lucreze aici va cere exact același lucru.
-
----
-
-## 1. CE E, PE SCURT
-
-Asistent AI live (avatar 3D, voce, vedere, skill-uri Google), la **kelionai.app**.
-
-- `backend/` — Node 22 + Fastify + TypeScript
-- `frontend/` — React + Vite + TypeScript
-- rulează într-un container Docker, pe VPS propriu
-- publicarea se face din GitHub Actions, prin SSH
-
-Documentul de arhitectură complet: **`AI-HANDOFF.md`** (fiecare rută, serviciu,
-componentă, regulile de rutare a creierului, schema bazei, istoricul deciziilor).
-Ce nu merge și ce nu e făcut: **`RAMAS-DE-FACUT.md`**.
+**Despre parole:** valorile NU sunt aici și nu pot fi. Fișierul trăiește în git,
+pe GitHub — o parolă scrisă în el e o parolă pierdută. În plus, cine scrie
+documentul **nu le are**: secretele GitHub nu pot fi citite înapoi (așa sunt
+construite), iar env-ul de pe VPS nu e accesibil din afara serverului. Documentul
+spune **ce chei există, la ce folosesc și cum se pun**. Valorile le dă Adrian.
 
 ---
 
-## 2. SERVERUL
+# PARTEA I — CE E APLICAȚIA
+
+## 1.1 Pe scurt
+
+Asistent AI live la **kelionai.app**: avatar 3D, voce full-duplex, vedere prin
+cameră, skill-uri Google (Gmail/Calendar/Drive), căutare web, browser real,
+memorie pe termen lung, panou de administrare, sistem de credite.
+
+- **backend/** — Node 22 + Fastify + TypeScript
+- **frontend/** — React + Vite + TypeScript
+- rulează în container Docker pe VPS propriu; publicare din GitHub Actions
+- proprietar/admin unic: **adrianenc11@gmail.com**
+
+## 1.2 Harta codului
+
+**Rute** (`backend/src/routes/`) — 24:
+`admin` `asr` `asr-stream` `auth` `authLocal` `billing` `browser` `chat`
+`clientErrors` `constructor` `contact` `demo` `image` `ingest` `legal` `manual`
+`mapview` `me` `models` `ops` `ping` `prefs` `realtime` `tts` `voiceprint`
+
+**Servicii** (`backend/src/services/`) — cele care contează:
+
+| Serviciu | Ce face |
+|---|---|
+| `orchestrator` | bucla creierului: mesaj → unelte → răspuns |
+| `openrouter` | accesul la modele (catalog, alegere, cost) |
+| `geminiDirect` | creier gratuit de rezervă |
+| `brainCapabilities` | **registrul unic** al celor 69 de capabilități |
+| `brainToolDefs` | schemele uneltelor date creierului |
+| `adminTools` | uneltele de admin, comune chat ∩ voce |
+| `realtime` | vocea live (WebRTC cu OpenAI Realtime) |
+| `asr` / `tts` | transcriere / sinteză vocală |
+| `browser` | browser real pe server (9 unelte, capturi pe monitor) |
+| `google` | Gmail, Calendar, Drive, traduceri |
+| `stripe` | **istoric** — plățile au trecut pe Revolut (30 iul) |
+| `openBanking` | citirea plăților din Revolut (creditare automată) |
+| `runbooks` / `github` | mâinile lui Kelion: publică singur, rulează proceduri |
+| `recovery` | puncte de recuperare (tag-uri git + arhive pe VPS) |
+| `selfHeal` | reparare automată |
+| `envCheck` | ce chei vede procesul ACUM (nume + lungime, **niciodată valori**) |
+
+**Frontend**:
+- pagini: `Stage` (aplicația), `Landing`, `Login`, `Credits`, `Manual`
+- componente: `AdminPanel`, `ChatPanel`, `AvatarModel`, `CameraView`,
+  `WalletButton`, `CustomerSettings`, `VisitorChatWidget`, `BackLink`, ...
+
+**Baza de date** (Postgres) — 34 de tabele, cele principale:
+`messages` `user_prefs` `wallets` `transactions` `billing_events` `payment_codes`
+`memories` `voiceprints` `faceprints` `cost_events` `visits` `demo_uses`
+`local_accounts` `google_accounts` `kelion_tools` `build_jobs` `work_orders`
+`notes` `leads` `inbound_emails` `client_errors` `kv_state`
+
+## 1.3 Cum gândește (regula de rutare a creierului)
+
+- **Owner-ul** primește ÎNTOTDEAUNA modelul plătit capabil din catalogul live.
+  Dacă alegerea lui manuală nu mai e validă, cade pe alt model plătit — **nu** pe
+  gratuit — și scrie `[CREIER]` în jurnal cu motivul.
+- **Userii** merg pe scara gratuită, cu escaladare pe dificultate.
+- Fără sold la OpenRouter → totul cade pe modele `:free`, care **narează în loc să
+  execute**. Ăsta e primul lucru de verificat când „nu face ce i se cere".
+
+---
+
+# PARTEA II — ACCESUL
+
+## 2.1 Serverul
 
 | | |
 |---|---|
-| Adresă | `164.68.120.87` |
-| Utilizator | `root` |
-| Autentificare | cheie SSH (nu parolă) |
-| Cheia | secretul GitHub **`VPS_SSH_KEY`** (cheia privată, în întregime) |
-| Folderul aplicației | `/root/kelion/` |
-| Clona de cod | `/root/kelion/repo` |
-| Fișierul cu chei | `/root/kelion/kelionai.env` (chmod 600) |
-| Secretul punții | `/root/kelion/bridge-secret.txt` |
-
-### Conectare directă
+| IP | `164.68.120.87` |
+| User | `root` |
+| Auth | cheie SSH (fără parolă) |
+| Cheia | secretul GitHub **`VPS_SSH_KEY`** |
+| Aplicația | `/root/kelion/` |
+| Codul | `/root/kelion/repo` |
+| Cheile | `/root/kelion/kelionai.env` (chmod 600) |
+| Puntea | `/root/kelion/bridge-secret.txt` |
 
 ```bash
 ssh -i <cheia-privata> -o StrictHostKeyChecking=no root@164.68.120.87
 ```
 
-Cheia privată o are Adrian; e aceeași valoare care stă în secretul `VPS_SSH_KEY`.
+## 2.2 Fără cheie locală — prin Actions
 
-### Conectare FĂRĂ să ai cheia local (recomandat)
-
-Nu-ți trebuie cheia pe calculatorul tău. Există workflow-uri care rulează comenzi
-pe server, cu cheia luată din secretele repo-ului:
+Nu-ți trebuie cheia pe calculatorul tău. **Actions → workflow → Run workflow**:
 
 | Workflow | La ce e |
 |---|---|
-| `vps-run` | rulează o comandă bash oarecare, ca root |
-| `vps-enter` | intră în containerul aplicației |
-| `vps-diag` | diagnostic complet (stare container, disc, memorie, loguri) |
-| `vps-probe` | verifică dacă aplicația răspunde |
-| `vps-keys` | listează CE chei există în env (numele, nu valorile) |
-| `vps-set-env` | scrie cheile din GitHub Secrets în env-ul de pe VPS |
+| `vps-run` | orice comandă bash, ca root |
+| `vps-enter` | intră în container |
+| `vps-diag` | diagnostic: container, disc, memorie, loguri |
+| `vps-probe` | răspunde aplicația? |
+| `vps-keys` | ce chei există (numele, nu valorile) |
+| `vps-set-env` | duce cheile din GitHub Secrets pe VPS |
 | `vps-set-key` | scrie o singură cheie |
-| `vps-key-setup` | pune o cheie SSH nouă pe server |
+| `vps-key-setup` | pune o cheie SSH nouă |
 
-Se pornesc din **Actions → workflow-ul dorit → Run workflow**.
+## 2.3 GitHub
+
+Repo: `github.com/kelion-team/kelionai` · producție = ramura `master`.
+
+- Secrete: Settings → Secrets and variables → Actions
+- Publicare: Actions → `deploy`
+- Verificare PR: Actions → `pr-verify` (informativă, nu blochează)
 
 ---
 
-## 3. CUM AJUNGE CODUL ÎN PRODUCȚIE
+# PARTEA III — PUBLICAREA
 
 ```
 ramură → PR → merge în master → workflow „deploy" → VPS → verificare anti-fantomă
 ```
 
-Workflow-ul `deploy` (`.github/workflows/deploy.yml`):
+Pașii reali din `deploy.yml`:
+1. SSH la `root@164.68.120.87`;
+2. `cd /root/kelion/repo && git fetch origin master`;
+3. **rulează `deploy/deploy.sh` DIN `origin/master`, dintr-o copie în `/tmp`** —
+   nu din clonă. Motivul e o pană reală („deploy fantomă"): scriptul din clonă
+   putea publica o versiune mai veche, iar verificarea de după valida greșit;
+4. **anti-fantomă**: `/api/version` live trebuie să fie EXACT sha-ul din
+   `origin/master`, iar `/health` == 200. Altfel publicarea pică.
 
-1. se conectează prin SSH la `root@164.68.120.87`;
-2. în `/root/kelion/repo` face `git fetch origin master`;
-3. **rulează scriptul de publicare din `origin/master`, dintr-o copie în `/tmp`** —
-   nu din clonă. Motivul e o pană reală („deploy fantomă"): dacă rulezi scriptul
-   din clona locală, poți publica o versiune mai veche decât master, iar
-   verificarea de după ar valida versiunea greșită;
-4. la final verifică **anti-fantomă**: `/api/version` de pe live trebuie să fie
-   EXACT sha-ul din `origin/master`, iar `/health` trebuie să dea 200. Dacă nu,
-   publicarea pică — nu se declară „gata" ceva nepublicat.
+**Regula de aur:** producția = `master`, mereu. Nimic nu publică vreodată cod mai
+vechi decât `origin/master`.
 
-**Regula de aur a proiectului:** producția = `master`, mereu în sincron. Nimic nu
-are voie să publice cod mai vechi decât `origin/master`.
-
-### Proba, oricând, din orice terminal
-
+**Proba, din orice terminal:**
 ```bash
-curl -s https://kelionai.app/api/version   # {"v":"<sha>","at":"..."}
-curl -s -o /dev/null -w "%{http_code}\n" https://kelionai.app/health   # 200
-git rev-parse --short origin/master        # trebuie să fie ACELAȘI sha
+curl -s https://kelionai.app/api/version
+curl -s -o /dev/null -w "%{http_code}\n" https://kelionai.app/health
+git rev-parse --short origin/master     # trebuie să fie acelasi sha
 ```
 
 ---
 
-## 4. CHEILE (nume, rol — valorile la Adrian)
+# PARTEA IV — CHEILE
 
-Trăiesc în `/root/kelion/kelionai.env` pe server, și în **GitHub → Settings →
-Secrets and variables → Actions** ca sursă.
+Trăiesc în `/root/kelion/kelionai.env`; sursa e GitHub Secrets.
+**Drumul unei chei:** GitHub Secrets → `vps-set-env` → env + repornire container.
 
-**Drumul unei chei noi:** o pui în GitHub Secrets → rulezi `vps-set-env` → ea
-ajunge în env și containerul repornește ca s-o încarce.
-
-> **Capcana care a costat o zi (30 iul):** workflow-ul `vps-set-env` are o
-> **listă fixă de nume** în bucla care scrie. O cheie care nu e în listă se pune
-> degeaba în GitHub — workflow-ul zice „succes" și cheia nu ajunge nicăieri. Dacă
-> adaugi o cheie nouă, **adaug-o în trei locuri** din `vps-set-env.yml`: blocul
-> `env:`, lista buclei, și instrucțiunile din capul fișierului.
-
-### Obligatorii (fără ele aplicația nu pornește sau nu funcționează)
+## 4.1 Obligatorii
 
 | Cheie | Fără ea |
 |---|---|
-| `DATABASE_URL` | nu pornește — conturi, credite, istoric, toate |
-| `SESSION_SECRET` | nimeni nu poate rămâne logat |
+| `DATABASE_URL` | nu pornește — conturi, credite, istoric |
+| `SESSION_SECRET` | nimeni nu rămâne logat |
 | `OPENROUTER_API_KEY` | **creierul** — nu răspunde nimic |
-| `OPENAI_API_KEY` | vocea live (Realtime), TTS, transcrierea |
+| `OPENAI_API_KEY` | vocea live, TTS, transcrierea |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | login cu Google |
 
-### Utile
+## 4.2 Utile
 
-`GEMINI_API_KEY` (creier de rezervă + vedere) · `SERPER_API_KEY` (căutare web) ·
-`GOOGLE_MAPS_KEY` (hărți) · `GOOGLE_TTS_API_KEY` + `GOOGLE_SERVICE_ACCOUNT_JSON`
-(voce Chirp 3 HD) · `MAIL_USER` / `MAIL_PASS` (cutia contact@) ·
-`GITHUB_TOKEN` (Kelion publică singur; fin-granulat, doar acest repo) ·
-`BRIDGE_SECRET` (raportările constructorului — **aceeași valoare** trebuie să fie
-și în `/root/kelion/bridge-secret.txt`)
+`GEMINI_API_KEY` (creier rezervă + vedere) · `SERPER_API_KEY` (web) ·
+`GOOGLE_MAPS_KEY` · `GOOGLE_TTS_API_KEY` + `GOOGLE_SERVICE_ACCOUNT_JSON`
+(voce Chirp 3 HD) · `MAIL_USER` / `MAIL_PASS` (contact@) · `GITHUB_TOKEN`
+(Kelion publică singur) · `BRIDGE_SECRET` (**aceeași valoare** și în
+`/root/kelion/bridge-secret.txt`)
 
-### Plăți (starea de la 30 iul)
+## 4.3 Plăți
 
 `REVOLUT_PAY_LINK` · `GOCARDLESS_SECRET_ID` · `GOCARDLESS_SECRET_KEY` ·
-`GOCARDLESS_ACCOUNT_ID` — vezi **`PROCEDURA-PLATI.md`** pentru ce face fiecare și
-de unde se iau. Stripe a fost scos pe 30 iul.
+`GOCARDLESS_ACCOUNT_ID` — detalii complete în **`PROCEDURA-PLATI.md`**.
 
-### Cum vezi ce chei are procesul ACUM
+## 4.4 Cum vezi ce chei are procesul ACUM
 
-Admin → Tokenuri → tabelul „Ce chei vede serverul CHIAR ACUM": pentru fiecare
-cheie spune dacă e prezentă, **câte caractere are** (0 = prezentă dar goală) și
-**sub ce nume** a fost găsită. **Nu afișează niciodată valori** — nici trunchiate.
-Arată și ora pornirii procesului: o cheie scrisă DUPĂ acea oră nu e încărcată
-până la repornirea containerului.
+**Admin → Tokenuri** → „Ce chei vede serverul CHIAR ACUM": pentru fiecare cheie
+spune dacă e prezentă, **câte caractere are** (0 = prezentă dar goală) și **sub ce
+nume** a fost găsită. Nu afișează niciodată valori. Arată și ora pornirii
+procesului — o cheie scrisă DUPĂ acea oră nu e încărcată până la repornire.
+
+> **CAPCANĂ DOVEDITĂ:** `vps-set-env` are o **listă fixă de nume** în bucla care
+> scrie. O cheie care nu e în listă se pune degeaba — workflow-ul raportează
+> „succes" și cheia nu ajunge nicăieri. Când adaugi o cheie nouă, pune-o în
+> **trei** locuri din `vps-set-env.yml`: blocul `env:`, lista buclei, și
+> instrucțiunile din capul fișierului.
 
 ---
 
-## 5. PORȚILE DE CALITATE (rulează-le înainte de orice publicare)
+# PARTEA V — PORȚILE DE CALITATE
+
+Rulează-le **exact așa** înainte de orice publicare:
 
 ```bash
 cd backend  && npm ci && npm run typecheck && npm test
 cd frontend && npm ci && npm run build          # tsc -b && vite build
 node scripts/verifica-sintaxa.mjs               # marcaje de conflict, CSS, JSON
 node scripts/verifica-exporturi.mjs             # exporturi fără utilizator
-npx jscpd backend/src frontend/src --threshold 0.0001   # cod duplicat
+npx jscpd backend/src frontend/src --threshold 0.0001
 ```
 
-**Atenție la o capcană dovedită (30 iul):** `npx tsc --noEmit -p tsconfig.json`
-NU e același lucru cu `npm run build` la frontend (`tsc -b && vite build`).
-Verificarea greșită a lăsat o eroare de tip să treacă și a blocat publicarea 25
-de minute. **Rulează exact comenzile npm de mai sus**, nu variante.
+Referință la 30 iul: **261 teste / 33 fișiere, 0 picate · 0 clone · 0 exporturi
+orfane · sintaxă curată**.
 
-Referință: 261 de teste, 0 duplicat, 0 exporturi orfane — starea la 30 iul.
+> **CAPCANĂ DOVEDITĂ:** `npx tsc --noEmit -p tsconfig.json` **NU** e același lucru
+> cu `npm run build` la frontend (`tsc -b && vite build`). `vite build` singur nu
+> face typecheck. Verificarea greșită a lăsat o eroare de tip să treacă și a
+> blocat publicarea 25 de minute.
 
 ---
 
-## 6. CÂND CEVA NU MERGE
+# PARTEA VI — CÂND NU MERGE
 
-| Simptom | Unde te uiți întâi |
+| Simptom | Unde te uiți ÎNTÂI |
 |---|---|
-| situl nu răspunde | `vps-diag` (container pornit? disc plin?) apoi `vps-probe` |
-| răspunde dar dă 502 | containerul repornește după publicare — așteaptă ~1 min |
-| chatul nu răspunde nimic | Admin → Bani: soldul OpenRouter; apoi jurnalul, caută `[CREIER]` și `[CHAT MUT]` |
-| „nu execută ce cer" | jurnal `[CREIER]` — spune dacă a căzut pe model gratuit și de ce |
-| o cheie „lipsește" deși ai pus-o | Admin → Tokenuri (vezi §4) + verifică lista din `vps-set-env` |
-| publicarea nu ajunge live | Actions → deploy; verificarea anti-fantomă spune ce nu s-a potrivit |
+| situl nu răspunde | `vps-diag` (container pornit? disc plin?), apoi `vps-probe` |
+| 502 imediat după publicare | containerul repornește — ~1 minut |
+| chatul nu răspunde NIMIC | soldul OpenRouter (Admin → Bani); apoi jurnal: `[CHAT MUT]` |
+| „nu execută ce-i cer" | jurnal `[CREIER]` — spune dacă a căzut pe model gratuit și de ce |
+| o cheie „lipsește" deși e pusă | Admin → Tokenuri (§4.4) + lista din `vps-set-env` |
+| publicarea nu ajunge live | Actions → `deploy`; anti-fantoma spune ce nu s-a potrivit |
+| plata nu creditează | Admin → Bani → „Citirea plăților Revolut" |
 
-Jurnalul aplicației:
-```bash
-docker logs --tail 200 <container>     # prin vps-run sau ssh direct
-```
-Sau din aplicație: Admin → Jurnale (ultimele erori și avertismente).
+Jurnalul: `docker logs --tail 200 <container>` (prin `vps-run`), sau
+**Admin → Jurnale** din aplicație.
 
----
-
-## 7. RECUPERARE
-
-Punctele de recuperare sunt tag-uri git, oglindite pe VPS ca `.bundle` și
-`.tar.gz`. Se văd și se creează din **Admin → Recuperare**, iar restaurarea aduce
-`master` la starea aleasă printr-un commit nou — deci publicarea pornește singură.
+**Recuperare:** Admin → Recuperare — puncte de restaurare (tag-uri git + arhive pe
+VPS). Restaurarea aduce `master` la starea aleasă printr-un commit nou, deci
+publicarea pornește singură.
 
 ---
 
-## 8. REGULILE DE LUCRU ALE PROIECTULUI
+# PARTEA VII — STAREA REALĂ (30 iul 2026)
 
-Sunt în **`CLAUDE.md`**, scrise după eșecuri reale, nu din teorie. Cele patru care
-contează cel mai mult:
+## Merge, verificat
+Chat scris · voce live full-duplex · vedere prin cameră · skill-uri Google (cu
+acordul fiecărui user) · căutare web · browser real pe server (9 unelte, cu
+capturi pe monitor) · memorie · manual în 7 limbi · panou admin · publicare
+automată cu verificare anti-fantomă.
 
-1. O valoare care nu vine dintr-o măsurătoare reușită se scrie „nu pot verifica" —
-   niciodată o cifră sau un verdict. (Un eșec de citire afișat ca fapt a costat o
-   zi întreagă, de cinci ori în forme diferite.)
-2. Când Adrian contrazice un raport, primul loc de căutat e **codul care a produs
+## Nu merge / nefinalizat
+- **Creditarea automată a plăților** — codul e scris (coduri unice, istoric,
+  potrivire, creditare idempotentă), lipsește ultima verigă: cine anunță
+  aplicația că a intrat un ban. Vezi `PROCEDURA-PLATI.md` §9 pentru cele trei căi.
+- **Arderea creditului n-are plafon** — rândul B8 din `RAMAS-DE-FACUT.md`:
+  owner-ul primește modelul plătit la FIECARE mesaj, cu până la 4 cadre de cameră
+  pe tură, și **nu există niciun plafon pentru admin** (`chat.ts`: „adminul e
+  scutit"). Ăsta e cel mai scump lucru nerezolvat.
+- Restul, cu dovezi: **`RAMAS-DE-FACUT.md`**.
+
+---
+
+# PARTEA VIII — REGULILE DE LUCRU
+
+Sunt în **`CLAUDE.md`** și se încarcă la fiecare sesiune. Scrise după eșecuri
+reale, nu din teorie:
+
+1. **O valoare care nu vine dintr-o măsurătoare reușită se scrie „nu pot
+   verifica"** — niciodată o cifră sau un verdict. Într-o singură zi, panoul a
+   afirmat de cinci ori stări pe care nu le măsurase.
+2. **Când Adrian contrazice un raport, primul loc de căutat e codul care a produs
    raportul**, nu sistemul lui. A avut dreptate de fiecare dată.
-3. Nicio operație în masă pe ceva ce n-ai privit. (`git add -A` pe un merge cu
-   conflicte a comis marcaje `<<<<<<<` în cod care rula; un script de ștergere
+3. **Nicio operație în masă pe ceva ce n-ai privit.** (`git add -A` pe un merge cu
+   conflicte a comis `<<<<<<<` în cod care rula; un script de ștergere
    necontrolat a tăiat 1524 de linii dintr-un fișier.)
-4. Înainte să-i ceri ceva de făcut manual, dovedește din cod sau de pe live că e
-   chiar necesar. Timpul lui nu e locul unde se testează ipoteze.
+4. **Înainte să-i ceri ceva manual, dovedește din cod sau de pe live că e chiar
+   necesar.** Timpul lui nu e locul unde se testează ipoteze.
 
-Și convenția care ține totul legat: **dacă schimbi codul, actualizezi
-`AI-HANDOFF.md` înainte să închizi.** Nu există alt mecanism — convenția asta E
+**Convenția care ține totul legat:** dacă schimbi codul, actualizezi
+`AI-HANDOFF.md` înainte să închizi. Nu există alt mecanism — convenția asta E
 mecanismul.
+
+**Alte reguli:** răspunde-i lui Adrian în română · el testează live, nu local, deci
+după fiecare reparație: build → publicare → **verificare live cu dovadă** ·
+chatul/vocea rămân sub 1 secundă până la primul cuvânt · repari rescriind modulul
+responsabil, nu prin peticiri.
+
+---
+
+# PARTEA IX — DOCUMENTELE PROIECTULUI
+
+| Fișier | Ce conține |
+|---|---|
+| `acces_aplicatie_full.md` | **acesta** — acces, publicare, chei, porți, stare |
+| `AI-HANDOFF.md` | arhitectura completă + istoricul fiecărei decizii (sursa de adevăr) |
+| `RAMAS-DE-FACUT.md` | ce NU e făcut și ce NU merge, cu dovada fiecărui rând |
+| `CLAUDE.md` | regulile de lucru, încărcate automat la fiecare sesiune |
+| `PROCEDURA-PLATI.md` | plățile, de la A la Z |
+
+**Ordinea de citit la prima sesiune:** `CLAUDE.md` → acest fișier →
+`AI-HANDOFF.md` → `RAMAS-DE-FACUT.md`.
