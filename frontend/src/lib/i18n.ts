@@ -97,6 +97,7 @@ export interface Strings {
   buildWaiting: string
   buildCiOk: string
   buildCiRunning: string
+  buildThrottled: string
   adminLocked: string
   adminLockedHint: string
   adminUnlock: string
@@ -220,6 +221,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'Waiting for the worker…',
     buildCiOk: 'Independently verified by CI (build + tests on a clean machine)',
     buildCiRunning: 'CI is still running on the pull request',
+    buildThrottled: 'Waiting for quota',
     adminLocked: 'The Admin panel is locked 🔒',
     adminLockedHint: 'Talk to Kelion — your voiceprint opens it by itself — or type the unlock secret.',
     adminUnlock: 'Unlock',
@@ -330,6 +332,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'Așteaptă lucrătorul…',
     buildCiOk: 'Verificat independent de CI (build + teste pe mașină curată)',
     buildCiRunning: 'CI încă rulează pe PR',
+    buildThrottled: 'Așteaptă cotă',
     adminLocked: 'Panoul Admin e încuiat 🔒',
     adminLockedHint: 'Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.',
     adminUnlock: 'Deblochează',
@@ -440,6 +443,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'Esperando al trabajador…',
     buildCiOk: 'Verificado de forma independiente por CI (compilación + pruebas en una máquina limpia)',
     buildCiRunning: 'CI todavía se está ejecutando en el pull request',
+    buildThrottled: 'Esperando cuota',
     adminLocked: 'El panel de Admin está bloqueado 🔒',
     adminLockedHint: 'Habla con Kelion — tu huella de voz lo abre sola — o escribe el secreto de activación.',
     adminUnlock: 'Desbloquear',
@@ -550,6 +554,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'En attente du travailleur…',
     buildCiOk: 'Vérifié indépendamment par la CI (build + tests sur une machine propre)',
     buildCiRunning: 'La CI tourne encore sur la pull request',
+    buildThrottled: 'En attente de quota',
     adminLocked: 'Le panneau Admin est verrouillé 🔒',
     adminLockedHint: 'Parlez à Kelion — votre empreinte vocale l’ouvre toute seule — ou tapez le secret d’activation.',
     adminUnlock: 'Déverrouiller',
@@ -660,6 +665,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'Wartet auf den Arbeiter…',
     buildCiOk: 'Unabhängig von der CI geprüft (Build + Tests auf einer sauberen Maschine)',
     buildCiRunning: 'Die CI läuft noch am Pull Request',
+    buildThrottled: 'Wartet auf Kontingent',
     adminLocked: 'Das Admin-Panel ist gesperrt 🔒',
     adminLockedHint: 'Sprich mit Kelion — dein Stimmabdruck öffnet es von selbst — oder tippe das Freischaltgeheimnis.',
     adminUnlock: 'Entsperren',
@@ -770,6 +776,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'In attesa del lavoratore…',
     buildCiOk: 'Verificato in modo indipendente dalla CI (build + test su una macchina pulita)',
     buildCiRunning: 'La CI è ancora in esecuzione sulla pull request',
+    buildThrottled: 'In attesa di quota',
     adminLocked: 'Il pannello Admin è bloccato 🔒',
     adminLockedHint: 'Parla con Kelion — la tua impronta vocale lo apre da sola — oppure digita il segreto di attivazione.',
     adminUnlock: 'Sblocca',
@@ -880,6 +887,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     buildWaiting: 'Aguardando o trabalhador…',
     buildCiOk: 'Verificado de forma independente pela CI (build + testes numa máquina limpa)',
     buildCiRunning: 'A CI ainda está a correr no pull request',
+    buildThrottled: 'À espera de quota',
     adminLocked: 'O painel Admin está bloqueado 🔒',
     adminLockedHint: 'Fala com o Kelion — a tua impressão de voz abre-o sozinha — ou escreve o segredo de ativação.',
     adminUnlock: 'Desbloquear',

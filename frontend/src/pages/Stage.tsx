@@ -181,7 +181,15 @@ function BuildSurface({ zoom }: { zoom: number }) {
           {jobs.map((j) => (
             <li key={j.id} className={`build-item build-${j.status}`}>
               <div className="build-row">
-                <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
+                {/* PAUZA DE COTĂ, VIZIBILĂ (D6): un ordin amânat rămâne „running"
+                    în bază — corect, nu e pierdut — dar pe ecran arăta identic cu
+                    unul care lucrează, cu pasul înghețat 40 de minute. Lucrătorul
+                    marchează pauza cu „⏳"; aici devine o insignă proprie. */}
+                {j.progress?.startsWith('⏳') ? (
+                  <span className="build-badge build-badge-queued">{uiStrings().buildThrottled}</span>
+                ) : (
+                  <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
+                )}
                 {/* Verdictul verificării INDEPENDENTE (Etapa 6): „Gata" dovedit de CI. */}
                 {j.ci === 'verde' ? (
                   <span className="build-ci build-ci-ok" title={uiStrings().buildCiOk}>CI ✓</span>
