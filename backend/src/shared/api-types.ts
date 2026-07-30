@@ -154,6 +154,10 @@ export interface MoneyCircuit {
    *  cod unic). `ok:false` = N-AM PUTUT CITI contul — altceva decat „n-a platit
    *  nimeni", si de-aia se raporteaza separat, nu ca un zero linistitor. */
   citirePlati?: { la: string; ok: boolean; detaliu: string } | null
+  /** Ultima trecere a buclei care il pune pe Kelion sa se apuce SINGUR de treaba
+   *  (Adrian, 30 iul: „fa-l autonom"). `ok:true` = chiar a pornit ceva atunci.
+   *  Se afiseaza ca sa nu fie nevoie de crezut pe cuvant ca bucla traieste. */
+  autonomie?: { la: string; ok: boolean; detaliu: string } | null
   error?: string
 }
 

@@ -35,6 +35,7 @@ import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati } from '../services/openBanking.js'
+import { stareAutonomie } from '../services/autonomie.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
@@ -524,6 +525,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       ...(await getMoneyCircuit()),
       autoFund: lastAutoFundStatus(),
       citirePlati: stareCitirePlati(),
+      // `autonomie` = ultima trecere a buclei care îi dă lui Kelion de lucru
+      // FĂRĂ să-i ceară cineva (Adrian, 30 iul: „fă-l autonom"). Se afișează
+      // din același motiv ca restul: ca „bucla lucrează" să fie o citire, nu
+      // o afirmație a mea.
+      autonomie: stareAutonomie(),
     })
   })
   app.post<{ Body: { line1?: string; line2?: string; city?: string; postal_code?: string; country?: string } }>(

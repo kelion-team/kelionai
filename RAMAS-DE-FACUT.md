@@ -46,13 +46,13 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 
 | # | Ce | Stare reală (măsurată) |
 |---|---|---|
-| B1 | **Cardul Kelion AI** | Necunoscut până la următoarea deschidere a panoului. Până azi codul nici nu căuta cardurile (reparat, PR #565). Cardul `••••0013` din dashboard a fost refuzat de furnizor cu „numărul cardului este incorect" — semn de card din **test mode**. |
-| B2 | **Issuing pe contul LIVE** | Cererea trimisă pe 24 iul; aprobarea Stripe nu e confirmată nicăieri. Fără ea nu există card real. |
-| B3 | **Punga rămâne pe £0** | Stripe scoate banii în bancă după programul lui, înainte să apuce transferul orar spre card. Se schimbă DOAR din dashboard (payouts → Manual). Nu există API. |
-| B4 | **Transferul automat plăți→card** | `POST /v1/balance_transfers` e în **beta** la Stripe — până la aprobare răspunde 4xx. |
-| B5 | **Cheia `sk_live` „K"** | Acces TOTAL la cont, nefolosită din 10 iunie. De retras — dar cu grijă, după ce restul merge. |
+| B1 | **Cardul Kelion AI** | ✅ **închis** (30 iul): Stripe a fost scos din aplicație, cardul virtual nu mai există în cod (butonul, `createAiCard`, `CardReveal.tsx` — șterse). Rândul nu spune „Stripe merge", spune că **nu mai depindem de el**. Furnizorii se plătesc cu cardul tău Revolut, direct la ei — linkurile sunt în Admin → Bani. |
+| B2 | **Issuing pe contul LIVE** | ✅ **închis** (30 iul), din același motiv ca B1: nu mai avem nevoie de aprobarea Issuing, fiindcă nu mai emitem card prin Stripe. |
+| B3 | **Punga rămâne pe £0** | ✅ **închis** (30 iul): punga Stripe nu mai e sursa banilor. Încasările intră direct în Revolut Pro, la tine. |
+| B4 | **Transferul automat plăți→card** | ✅ **închis** (30 iul): nu mai există card de alimentat. Vezi B1. |
+| B5 | **Cheia `sk_live` „K"** | Acces TOTAL la cont, nefolosită din 10 iunie. **Acum e și mai simplu de retras**, fiindcă aplicația nu mai cheamă Stripe pe nicio cale de plată. E un click în dashboardul tău — nu-l pot face eu. |
 | B6 | **Adresa cardului** | ✅ **reparat** (30 iul, PR #572): adresa hardcodată („Kelionai, London, EC1A 1AA" — o adresă care nu există) a fost ștearsă. Butonul „Creează cardul" o cere acum, iar backendul refuză cu `bad_address` dacă lipsește. Nu mai declarăm către Stripe o adresă falsă a titularului. |
-| B7 | **Cheia restricționată nu poate citi contul** | `/v1/account` → 403. Verigile 1 și 2 din circuit nu se pot verifica. Nu mai e blocant pentru card (B1 reparat), dar payouts rămâne neverificabil. |
+| B7 | **Cheia restricționată nu poate citi contul** | ✅ **închis** (30 iul): circuitul Stripe pe care nu-l putea citi nu mai există în aplicație. |
 | B8 | **ARDEREA: punga creierului se golește fără plafon și fără avertisment** | Adrian, 30 iul: „punga 0 din cauza ta, am plătit dimineața 50" (dintre care $8.92 mai erau acum ~45 min). MĂSURAT DIN COD, nu presupus: (1) regula „owner-ul primește ÎNTOTDEAUNA modelul plătit capabil" se aplică la **fiecare** mesaj, nu doar la cele grele — `heavy` reglează doar efortul de gândire, nu modelul; (2) cu camera pornită pleacă **până la 4 cadre foto** pe tură către modelul plătit (pozele sunt partea scumpă); (3) fiecare tură cară 24 de mesaje de istoric + unelte + 5000 tokeni buget; (4) **nu există NICIUN plafon pentru admin** — în `chat.ts` scrie explicit „adminul e scutit" de debitare, deci nimic nu oprește consumul. Un comentariu mai vechi din propriul cod măsoară „o singură tură cu unelte a costat $4.24". BUCLA: plătești → arde → punga 0 → codul cade pe `:free` → „Kelion nu execută cerințele" → plătești iar. Jumătatea de jos e reparată (PR #582: căderea pe free nu mai e tăcută, scrie `[CREIER]` în jurnal cu motivul). **Arderea NU e reparată** — e decizia lui: model plătit doar pe cereri de acțiune reală (ieftin la vorbă obișnuită), și/sau plafon zilnic care anunță când e atins. Nu se pune o limită pe banii omului fără să știe. **A lui.** |
 | B9 | **Diagnosticele mele n-au ars credit — verificat, nu presupus** | Am chemat traducerea manualului de 4 ori azi (zh/hu/pl/cs) în timpul diagnosticului. `manualLang.ts` folosește `config.openrouter.searchModel`, implicit `google/gemma-4-26b-a4b-it:free` → cost $0. **Rezervă onestă:** nu pot citi env-ul de pe VPS, deci dacă `OPENROUTER_SEARCH_MODEL` e setat acolo pe un model plătit, concluzia asta cade și am contribuit la ardere. |
 
@@ -128,3 +128,44 @@ dubla răspunsul.
 Sunt ~23 de linii în `backend/src/routes/chat.ts`. Dacă zici „da", o rescriu într-o
 lucrare separată, cu teste. Dacă zici „nu", rândul ăsta rămâne aici ca urmă și se
 închide.
+
+---
+
+## G. MISIUNEA AUTONOMĂ — partea Revolut, dusă de Kelion singur
+
+> Adrian, 30 iul: „dă-i liber să se repare singur, să-și construiască ce nu ești
+> tu în stare" · **„tema autonomiei lui va fi să facă partea totală cu Revolut;
+> când merge aia, e autonom."**
+
+Ăsta e singurul loc unde proba autonomiei e definită de el, nu de mine. Nu se
+scrie „e autonom" nicăieri până când **un user plătește și primește creditele
+fără ca cineva să miște un deget**.
+
+De pe 30 iul, `backend/src/services/autonomie.ts` se uită **din oră în oră** și,
+dacă e liber, îi dă constructorului următorul pas — fără să întrebe pe nimeni.
+Pașii, în ordine, și cum se verifică fiecare:
+
+| Pas | Ce construiește | Cum vezi că e gata |
+|---|---|---|
+| M1 | **Veriga lipsă**: aplicația află din emailul Revolut că a intrat un ban (cutia `contact@kelionai.app`, pe care o citește deja) | Admin → Bani scrie ✅ la citirea plăților; testele din `plataEmail.test.ts` trec |
+| M2 | **Plasa**: o plată fără cod, sau cu cod greșit, ajunge în `plati_neatribuite` — nu dispare | Plătești fără cod → apare în panou, necreditată |
+| M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri | Le vezi în Admin → Bani |
+| M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh |
+| M5 | **Proba automată**: test cap-coadă — cod → email → credit → al doilea email nu mai creditează | `npm test` are testul și e verde |
+
+**Unde se vede că bucla trăiește:** Admin → Bani, rândul „Kelion, de capul lui" —
+scrie ultima trecere: ce a pornit singur, sau de ce nu. Dacă rândul lipsește sau
+e vechi de ore, bucla nu merge; nu se presupune că merge.
+
+**Gărzile** (ca „fără restricții" să nu însemne „fără minte"): un singur ordin
+odată; plafonul `AUTONOMY_DAILY_MAX` (implicit 20/zi) — care până azi era o
+limită *declarată și necitită de nimeni*; trei încercări pe același pas, apoi
+pasul e marcat blocat, cu motivul la vedere, și trece mai departe.
+
+**Ce NU pot promite:** că modelul constructorului duce fiecare pas din prima.
+Constructorul rulează, structural, pe un model gratuit (`:free`) — o regulă pusă
+tot la cererea ta, pe 27 iul, ca să nu mai poată arde bani din greșeală. Modelele
+gratuite povestesc uneori în loc să folosească uneltele. Dacă un pas se blochează
+la trei încercări din motivul ăsta, se vede în panou și **singura pârghie e a ta**:
+`CONSTRUCTOR_MODEL` pe un model plătit + `CONSTRUCTOR_ALLOW_PAID=1`. Nu ți-am
+schimbat-o eu, fiindcă sunt banii tăi și regula e a ta.

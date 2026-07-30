@@ -828,6 +828,16 @@ export default function AdminPanel({
                         {circuit.citirePlati.detaliu}
                       </span>
                     )}
+                    {/* KELION SE APUCĂ SINGUR (Adrian, 30 iul: „fă-l autonom" ·
+                        „tema autonomiei lui va fi să facă partea totală cu
+                        Revolut"). Aici se vede ULTIMA trecere a buclei: ori a
+                        pornit ceva singur, ori de ce nu. Fără rândul ăsta,
+                        „e autonom" ar fi iar o vorbă de-a mea. */}
+                    {circuit?.autonomie && (
+                      <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
+                        {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}
+                      </span>
+                    )}
                     <span className="or-wallet-sub">
                       Unde se schimbă cardul, la fiecare:{' '}
                       {circuit!.expenses!

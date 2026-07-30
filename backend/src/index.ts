@@ -30,6 +30,7 @@ import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
+import { startAutonomie } from './services/autonomie.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
@@ -356,6 +357,9 @@ try {
   // aștepta să plătească. Revolut Pro n-are webhook, deci întrebăm noi periodic.
   // Fără chei GoCardless nu face nimic (și o spune o dată, la pornire).
   startCitirePlati()
+  // KELION SE APUCA SINGUR: la fiecare ora ia urmatorul rand nefacut din
+  // RAMAS-DE-FACUT.md si il trimite constructorului. Fara sa astepte pe nimeni.
+  startAutonomie()
   // PLASA BANILOR (Adrian, 24 iul: „nu e de joacă cu banii userilor"):
   // reconciliere Stripe la boot + la fiecare oră — orice plată reală rămasă
   // necreditată (webhook pierdut/respins) se aplică singură, idempotent.
