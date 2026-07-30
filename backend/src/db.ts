@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { randomBytes } from 'node:crypto'
 // CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
 import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.js'
 export type { DemoRecent, DemoStats, UserActivityRow }
@@ -192,6 +193,34 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
     -- Ledger of top-ups (+) and usage (−). stripe_ref makes top-ups idempotent
     -- so a webhook retry can never double-credit.
+    -- ── PLĂȚI PRIN REVOLUT PRO, CU COD UNIC (Adrian, 30 iul) ─────────────────
+    -- „în ziua de azi să ai gestiune manuală la mii de potențiali useri, asta
+    -- oferi tu?" — avea dreptate. Ca plata să se crediteze SINGURĂ trebuie știut
+    -- CINE a plătit, iar Revolut Pro nu are webhook care să ne spună.
+    --
+    -- Soluția lui: „fiecare plată trebuie să fie însoțită de un cod unic".
+    -- Codul pleacă cu userul la plată și se întoarce în referința tranzacției;
+    -- aplicația citește tranzacțiile din cont și potrivește codul cu omul.
+    --
+    -- De ce cod și nu suma (prima mea idee, greșită): suma poate fi fixată de
+    -- link și poate fi modificată de comision până ajunge în cont — două lucruri
+    -- pe care nu le controlăm. Codul trece neatins prin amândouă.
+    CREATE TABLE IF NOT EXISTS payment_codes (
+      code TEXT PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      amount NUMERIC(14,6) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'gbp',
+      -- pending → paid (creditat) | expired (n-a plătit) | manual (atribuit de admin)
+      status TEXT NOT NULL DEFAULT 'pending',
+      -- referința tranzacției din bancă, ca aceeași plată să nu crediteze de două ori
+      bank_ref TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      paid_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_paycode_user ON payment_codes (user_email, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_paycode_status ON payment_codes (status, created_at DESC);
+    -- ACEEAȘI PLATĂ NU CREDITEAZĂ DE DOUĂ ORI, oricâte citiri se suprapun.
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_paycode_bankref ON payment_codes (bank_ref) WHERE bank_ref IS NOT NULL;
     CREATE TABLE IF NOT EXISTS billing_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -3037,4 +3066,136 @@ export async function dbQuery(sql: string): Promise<string> {
   } finally {
     client.release()
   }
+}
+
+// ── PLATA CU COD UNIC (Adrian, 30 iul: „fiecare plată trebuie să fie însoțită
+// de un cod unic") ──────────────────────────────────────────────────────────
+//
+// Fluxul, cap-coadă:
+//   1. userul apasă „adaugă credit"  → `creeazaCodPlata` îi dă un cod
+//   2. plătește în Revolut, cu codul în referință
+//   3. cititorul de tranzacții găsește codul → `crediteazaDupaCod` îi dă creditele
+//
+// Codul nu e un secret — e doar o etichetă care leagă plata de om. De-aia poate
+// fi scurt și ușor de tastat. Ce contează e să nu se repete cât e în așteptare.
+
+/** Alfabet FĂRĂ caracterele care se confundă la citit/tastat: 0/O, 1/I/L.
+ *  Omul îl copiază de pe ecran în aplicația de bancă — fiecare caracter ambiguu
+ *  e o plată care ajunge „neatribuită" și muncă manuală pentru admin. */
+const COD_ALFABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+function codNou(): string {
+  const b = randomBytes(8)
+  let s = ''
+  for (let i = 0; i < 8; i++) s += COD_ALFABET[b[i] % COD_ALFABET.length]
+  // Grupat 4+4: se citește și se tastează mai ușor decât un șir lung.
+  return `KLN-${s.slice(0, 4)}-${s.slice(4)}`
+}
+
+export interface CodPlata {
+  code: string
+  amount: number
+  currency: string
+}
+
+/** Dă userului un cod nou pentru plata pe care o începe ACUM. */
+export async function creeazaCodPlata(email: string, amount: number, currency = 'gbp'): Promise<CodPlata | null> {
+  if (!dbEnabled() || !email || !(amount > 0)) return null
+  const e = email.toLowerCase().trim()
+  // Coliziunea e practic imposibilă (31^8), dar „practic imposibil" nu e
+  // „imposibil", iar aici s-ar amesteca banii a doi oameni: reîncercăm.
+  for (let i = 0; i < 5; i++) {
+    const code = codNou()
+    try {
+      await getPool().query(
+        `INSERT INTO payment_codes (code, user_email, amount, currency) VALUES ($1, $2, $3, $4)`,
+        [code, e, amount, currency],
+      )
+      return { code, amount, currency }
+    } catch {
+      /* cod deja existent → mai încercăm */
+    }
+  }
+  return null
+}
+
+/** Caută codul într-un text de referință bancară și creditează, o SINGURĂ dată.
+ *
+ *  `bankRef` e identificatorul tranzacției din bancă: e ce face creditarea
+ *  idempotentă. Aceeași tranzacție citită de zece ori creditează o dată —
+ *  garantat de indexul unic, nu de grija apelantului.
+ *
+ *  Întoarce emailul creditat, sau null dacă n-a găsit cod, sau dacă plata
+ *  fusese deja creditată. */
+export async function crediteazaDupaCod(
+  referinta: string,
+  suma: number,
+  moneda: string,
+  bankRef: string,
+): Promise<string | null> {
+  if (!dbEnabled() || !referinta || !(suma > 0) || !bankRef) return null
+  // Codul poate veni lipit de alt text („plata KLN-AB12-CD34 credite"), cu
+  // litere mici, sau cu spații în loc de cratime — le acceptăm pe toate.
+  const m = referinta.toUpperCase().replace(/\s+/g, '-').match(/KLN-[A-Z2-9]{4}-[A-Z2-9]{4}/)
+  if (!m) return null
+  const code = m[0]
+  const client = await getPool().connect()
+  let email = ''
+  try {
+    await client.query('BEGIN')
+    // `FOR UPDATE` + condiția pe status: două citiri simultane nu pot lua
+    // amândouă acelasi cod.
+    const r = await client.query(
+      `SELECT user_email FROM payment_codes WHERE code = $1 AND status = 'pending' FOR UPDATE`,
+      [code],
+    )
+    const row = r.rows[0] as { user_email?: string } | undefined
+    if (!row?.user_email) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    email = row.user_email
+    await client.query('ROLLBACK') // eliberăm lacătul: creditarea își face propria tranzacție
+  } catch {
+    await client.query('ROLLBACK').catch(() => {})
+    return null
+  } finally {
+    client.release()
+  }
+  // ORDINEA CONTEAZĂ, și e aleasă dinadins: CREDITĂM ÎNTÂI, închidem codul după.
+  //
+  // `topUpUser` e idempotent pe referință (indexul unic pe `stripe_ref`), deci o
+  // a doua citire a aceleiași tranzacții nu poate credita de două ori. Dacă am
+  // închide codul întâi și creditarea ar pica, omul ar rămâne cu plata „închisă"
+  // și fără credite — adică exact plătit-dar-nelivrat. Invers, dacă creditarea
+  // reușește și închiderea codului pică, următoarea citire reia: creditarea nu
+  // se repetă (idempotentă), iar codul se închide atunci.
+  const ok = await topUpUser(email, suma, moneda, bankRef)
+  if (!ok) return null
+  await getPool()
+    .query(
+      `UPDATE payment_codes SET status = 'paid', bank_ref = $2, paid_at = now(), amount = $3
+        WHERE code = $1 AND status = 'pending'`,
+      [code, bankRef, suma],
+    )
+    .catch(() => null)
+  return email
+}
+
+/** Plățile intrate pe care NU le-am putut lega de nimeni — plasa de siguranță.
+ *  Nicio plată nu se pierde: ce nu se potrivește automat ajunge aici, iar
+ *  adminul o atribuie dintr-un click. Mai bine să întrebe decât să crediteze
+ *  pe cine nu trebuie. */
+export async function codPlataInAsteptare(email: string): Promise<CodPlata | null> {
+  if (!dbEnabled() || !email) return null
+  const r = await getPool()
+    .query(
+      `SELECT code, amount, currency FROM payment_codes
+        WHERE user_email = $1 AND status = 'pending' AND created_at > now() - interval '2 hours'
+        ORDER BY created_at DESC LIMIT 1`,
+      [email.toLowerCase().trim()],
+    )
+    .catch(() => null)
+  const row = r?.rows[0] as { code?: string; amount?: string; currency?: string } | undefined
+  return row?.code ? { code: row.code, amount: Number(row.amount ?? 0), currency: row.currency ?? 'gbp' } : null
 }

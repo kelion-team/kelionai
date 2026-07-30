@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund, creditSaleExact } from '../db.js'
+import { getWalletStatus, topUpUser, topUpUserFromPaymentIntent, listTransactionsForUser, getAutoRecharge, setAutoRecharge, revokeTopUpForRefund, creditSaleExact, creeazaCodPlata, codPlataInAsteptare } from '../db.js'
 import { verifyWebhook, verifyEventWithApi } from '../services/stripe.js'
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -37,18 +37,36 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // paywall-ul din chat. Schimbând sursa URL-ului aici, se schimbă în toate trei
   // deodată — „peste tot" cu o singură modificare, nu trei locuri de ținut minte.
   //
-  // Revolut Pro n-are webhook (Merchant API e doar pe Business), deci creditele
-  // NU se mai acordă automat: userul plătește pe pagina Revolut, iar adminul îi
-  // dă creditele din panou. De-aia ruta nici nu mai pretinde că a pornit o
-  // tranzacție — doar trimite omul la plată.
-  app.post('/api/billing/checkout', async (req, reply) => {
+  // ── COD UNIC PE FIECARE PLATĂ (Adrian, 30 iul) ──────────────────────────────
+  // „fiecare plată trebuie să fie însoțită de un cod unic" · „userul X cumpără
+  // credit de atâția bani, tranzacția are un cod alocat unic generat, la plată
+  // se trece automat la ce cod/client".
+  //
+  // Revolut Pro n-are webhook, deci nimeni nu ne anunță că s-a plătit. Codul e
+  // puntea: pleacă cu omul la plată, se întoarce în referința tranzacției, iar
+  // cititorul de tranzacții îl potrivește înapoi cu contul lui. Fără cod ar
+  // rămâne gestiunea manuală — exact ce a refuzat, pe bună dreptate.
+  //
+  // De ce COD și nu suma cu bănuți unici (prima mea idee): suma poate fi fixată
+  // de link și poate fi schimbată de comision până ajunge în cont. Codul trece
+  // neatins prin amândouă.
+  app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const link = config.revolut.payLink
     // Fără link configurat NU trimitem userul nicăieri și nu tăcem: butonul
     // spune ce lipsește (regula nr. 1 — un eșec nu se afișează ca reușită).
     if (!link) return reply.code(503).send({ error: 'revolut_link_lipsa' })
-    return reply.send({ url: link })
+    const amount = Number(req.body?.amount ?? 0)
+    const bad = await validateTopUp(user.email, amount)
+    if (bad) return reply.code(400).send({ error: bad })
+    // REFOLOSIM un cod încă nefolosit (2 ore) în loc să dăm unul nou la fiecare
+    // apăsare: altfel omul care apasă de trei ori ar avea trei coduri valabile
+    // și n-ar ști pe care să-l scrie.
+    const existent = await codPlataInAsteptare(user.email)
+    const cod = existent?.amount === amount ? existent : await creeazaCodPlata(user.email, amount, config.stripe.currency)
+    if (!cod) return reply.code(503).send({ error: 'cod_indisponibil' })
+    return reply.send({ url: link, code: cod.code, amount: cod.amount, currency: cod.currency })
   })
 
   // AICI A STAT `/api/billing/payment-intent` — a doua cale de plată, pe Stripe.js

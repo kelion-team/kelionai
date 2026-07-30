@@ -1,0 +1,388 @@
+// ── KELION SE APUCĂ SINGUR DE TREABĂ ─────────────────────────────────────────
+//
+// Adrian, 30 iul: „de ce nu îl faci full autonom?" · „are voie să facă orice,
+// fără nicio restricție" · „dă-i liber să se repare singur, să-și construiască
+// ce nu ești tu în stare" · **„tema autonomiei lui va fi să facă partea totală
+// cu Revolut; când merge aia, e autonom"**.
+//
+// Ce EXISTA deja: constructorul primea ordine și le ducea la capăt (dovedit —
+// PR #588, deschis și integrat de el singur). Ce LIPSEA: cineva care să-i DEA
+// ordinul. Adică era autonom în execuție, dar reactiv în pornire — aștepta un om.
+//
+// Aici e piesa care lipsea. La fiecare oră, bucla asta:
+//   1. se uită dacă ultimul lucru al lui a picat → i-l dă ÎNAPOI, cu jurnalul
+//      eșecului, ca să-l repare singur (asta e „să se repare singur");
+//   2. dacă nu, ia următorul pas din MISIUNE — partea Revolut, cap-coadă;
+//   3. dacă misiunea s-a terminat, trece pe `RAMAS-DE-FACUT.md`, lista ownerului.
+// Fără să întrebe pe nimeni.
+//
+// DE CE MISIUNEA E ÎNAINTEA LISTEI: pentru că el a spus care e proba. Nu „mai
+// face ceva pe undeva" — partea de plăți Revolut, întreagă, până merge.
+//
+// DE CE PE URMĂ `RAMAS-DE-FACUT.md` și nu o listă nouă: aia e deja lista LUI,
+// ținută la zi, cu dovada fiecărui rând. O a doua listă ar diverge de prima în
+// două zile, iar el ar avea două adevăruri despre același lucru.
+//
+// ── GĂRZILE, și de ce fiecare ─────────────────────────────────────────────────
+//
+// „Fără restricții" înseamnă că nu-i cerem VOIE. Nu înseamnă că-l lăsăm să se
+// calce pe picioare:
+//
+//   • UN SINGUR ordin în lucru — dacă mai are ceva pornit, nu i se mai dă nimic.
+//     Altfel, la fiecare oră s-ar aduna sarcini peste sarcini și n-ar termina
+//     niciuna.
+//   • PLAFON ZILNIC (`AUTONOMY_DAILY_MAX`, implicit 20) — variabila exista în
+//     configurare de mult, dar NU o citea nimeni: o limită declarată și
+//     neconectată. Acum chiar limitează. Fiecare ordin costă bani la creier.
+//   • TREI ÎNCERCĂRI PE PAS — se repară singur, dar nu la nesfârșit pe același
+//     zid. După a treia, pasul e marcat „blocat", se trece mai departe și
+//     motivul apare în panou, ca să-l vadă omul.
+import { config } from '../config.js'
+import { createBuildJob, listBuildJobs, loadKv, saveKv, type BuildJob } from '../db.js'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
+/** Un pas din misiune, sau un rând din lista ownerului — la fel pentru buclă. */
+interface Sarcina {
+  /** Cheia sub care ținem minte: `M1`, `B8`… */
+  cod: string
+  /** Titlul, pe scurt — apare în panou și în jurnal. */
+  titlu: string
+  /** Ordinul complet trimis constructorului. El NU vede altceva. */
+  ordin: string
+}
+
+/** Ce ținem minte despre un pas, între treceri. */
+interface StarePas {
+  /** Ordinul deschis pentru pasul ăsta (0 = niciunul acum). */
+  job: number
+  /** Câte ori am dat pasul (inclusiv reparațiile). */
+  incercari: number
+  /** Terminat cu bine — nu ne mai atingem de el. */
+  gata?: boolean
+  /** Trei încercări epuizate — trecem mai departe, dar se vede în panou. */
+  blocat?: string
+}
+
+const MAX_INCERCARI = 3
+
+// ── MISIUNEA: PARTEA REVOLUT, CAP-COADĂ ──────────────────────────────────────
+//
+// Adrian, 30 iul: „tema autonomiei lui va fi să facă partea totală cu Revolut;
+// când merge aia, e autonom." Deci proba nu e „a deschis un PR" — e „userul
+// plătește și primește creditele singur, fără ca nimeni să miște un deget".
+//
+// Ce e DEJA scris (nu se refac): codurile unice `KLN-XXXX-XXXX`, tabela
+// `payment_codes`, potrivirea codului din referință, creditarea idempotentă
+// (`topUpUser`), și cititorul bancar GoCardless (`services/openBanking.ts`).
+//
+// Ce LIPSEȘTE, și de-aia nu merge: **veriga prin care aplicația AFLĂ că a intrat
+// un ban.** Cititorul bancar cere un cont pe un portal străin, cu consimțământ
+// care expiră la 30-90 de zile — ownerul l-a închis după ce portalul i-a dat
+// 502 și login stricat, și are dreptate. Drumul care NU cere niciun cont nou:
+// **emailul de la Revolut**, pe care aplicația deja îl citește (`mailbox.ts`,
+// cutia contact@kelionai.app).
+//
+// Pașii de mai jos sunt exact drumul ăla, în ordinea în care se poate construi.
+const MISIUNE: Sarcina[] = [
+  {
+    cod: 'M0',
+    titlu: 'Setările Revolut, făcute de el — nu de om',
+    ordin:
+      `MISIUNE REVOLUT, pasul 0 — SETĂRILE LE FACI TU.\n\n` +
+      `Adrian, 30 iul: „cerința a fost autonomia lui și să rezolve problema cu setările ` +
+      `pentru Revolut… să creeze secretele și să le pună unde trebuie, e al meu și îi ` +
+      `permit full acces."\n\n` +
+      `AI UNELTELE, DE AZI: secret_lista (ce chei există), secret_pune (scrie o cheie în ` +
+      `secretele repo-ului, criptat), secret_publica (le duce pe server și repornește ` +
+      `aplicația). Nu mai ceri omului să intre nicăieri.\n\n` +
+      `FĂ AȘA:\n` +
+      `  1. secret_lista — vezi ce ai deja. Ce e pus, nu se mai cere.\n` +
+      `  2. Citește backend/src/config.ts și services/ — ce nume de chei așteaptă codul ` +
+      `     pentru plăți? Lucrează pe numele REALE din cod, nu pe cele din amintiri.\n` +
+      `  3. Ce poți genera singur (chei, perechi de chei, identificatori), GENEREAZĂ și pune ` +
+      `     cu secret_pune. Ce doar Revolut poate emite, pregătește-i omului un singur pas ` +
+      `     scurt, cu linkul exact — și DOAR dacă ai dovada din documentație că nu se poate ` +
+      `     altfel. Nu-l trimite să caute; el a pierdut deja o zi așa.\n` +
+      `  4. secret_publica, apoi VERIFICĂ pe /api/admin/env-check că serverul chiar le vede ` +
+      `     (nume + lungime; valoarea nu se afișează niciodată, nicăieri).\n` +
+      `  5. Spune-i ce ai configurat: numele cheilor și starea. NICIODATĂ valorile.\n\n` +
+      `REGULA CARE NU SE ÎNCALCĂ: valoarea unui secret nu se repetă, nu se confirmă, nu se ` +
+      `pune pe monitor, nu se scrie într-un fișier din repo. Datele unui card nu trec pe ` +
+      `nicăieri, niciodată.`,
+  },
+  {
+    cod: 'M1',
+    titlu: 'Aplicația află DIRECT DE LA REVOLUT că a intrat un ban',
+    ordin:
+      `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE.\n\n` +
+      `Astăzi aplicația are tot lanțul de creditare (coduri unice, tabela payment_codes, ` +
+      `potrivirea codului, creditarea idempotentă prin topUpUser), dar NU are de unde să ` +
+      `afle că a intrat o plată.\n\n` +
+      `DOUĂ DRUMURI SUNT INTERZISE, decise de owner, nu de tine:\n` +
+      `  • NU prin email. Plata nu se citește din inbox. (30 iul: „ce ai făcut cu email ` +
+      `    scoți imediat, nu accept așa ceva".) Nu scrie niciun modul care caută încasări ` +
+      `    în cutia poștală, sub niciun nume.\n` +
+      `  • NU prin portaluri terțe cu consimțământ care expiră (GoCardless/Nordigen) — ` +
+      `    contul a fost închis, iar consimțământul PSD2 pică la 30-90 de zile.\n\n` +
+      `DRUMUL CERUT: direct de la Revolut, prin interfața LOR oficială pentru dezvoltatori ` +
+      `(API-ul contului de business/merchant + webhook la încasare, dacă îl oferă contului ` +
+      `Pro al ownerului).\n\n` +
+      `PRIMUL LUCRU pe care îl faci e să AFLI, din documentația oficială Revolut, ce anume ` +
+      `oferă exact contul lui: ce API, ce fel de chei, dacă are webhook la încasare, și dacă ` +
+      `Pro (nu Business) are acces. NU presupune și NU-l trimite pe owner să caute prin ` +
+      `portal — el a pierdut deja o zi așa. Dacă răspunsul e „nu se poate cu contul lui", ` +
+      `ăsta e un rezultat valid: scrie-l cu dovada din documentație și oprește-te acolo.\n\n` +
+      `Dacă se poate: construiește backend/src/services/plataRevolutApi.ts — primirea ` +
+      `încasării (webhook semnat, verificat, sau citire periodică dacă webhook nu există), ` +
+      `scoaterea sumei/monedei/referinței, apoi crediteazaDupaCod din db.ts. NU creditează ` +
+      `de două ori aceeași încasare (indexul unic pe bank_ref e plasa). Starea se AFIȘEAZĂ, ` +
+      `ca stareCitirePlati(): „nu pot citi" nu are voie să arate ca „n-a plătit nimeni".\n\n` +
+      `Teste: încasare cu cod corect → credit; cu cod scris cu litere mici sau cu spații → ` +
+      `credit; fără cod → neatribuit, ZERO credite; aceeași încasare de două ori → un credit.`,
+  },
+  {
+    cod: 'M2',
+    titlu: 'Plasa: nicio plată nu se pierde, chiar dacă userul greșește codul',
+    ordin:
+      `MISIUNE REVOLUT, pasul 2 din 5 — PLASA.\n\n` +
+      `O plată intră fără cod, sau cu codul scris greșit. Azi ea dispare fără urmă. ` +
+      `Ownerul: „nicio plată nu se pierde" — trebuie să fie adevărat, nu o promisiune.\n\n` +
+      `CONSTRUIEȘTE: tabela plati_neatribuite (sumă, monedă, referința brută, sursa, data, ` +
+      `starea, cui i-a fost atribuită în final) + scrierea în ea din calea de detectare, ` +
+      `de fiecare dată când o încasare NU se potrivește cu niciun cod.\n\n` +
+      `Reguli: nu ghici userul după sumă (două plăți de £10 în aceeași zi = credit greșit ` +
+      `dat omului greșit); atribuirea rămâne o acțiune explicită de admin, dar plata trebuie ` +
+      `să fie VIZIBILĂ imediat ce a intrat. Creditarea la atribuire trece tot prin topUpUser ` +
+      `(idempotent), pe aceeași referință bancară — deci nu poate credita de două ori.\n\n` +
+      `Teste: plată fără cod → ajunge în plati_neatribuite; aceeași plată văzută de două ori ` +
+      `→ un singur rând; atribuirea manuală creditează o singură dată.`,
+  },
+  {
+    cod: 'M3',
+    titlu: 'Panoul de plăți în Admin — ce a intrat, ce așteaptă, ce n-a mers',
+    ordin:
+      `MISIUNE REVOLUT, pasul 3 din 5 — CE VEDE OWNERUL.\n\n` +
+      `CONSTRUIEȘTE în Admin (frontend/src/components/AdminPanel.tsx, secțiunea Bani) un ` +
+      `tablou al plăților, alimentat de rute noi de admin (strict admin, ca restul):\n` +
+      `  • coduri emise și neplătite (cine, cât, de când), cu cele expirate marcate;\n` +
+      `  • plăți încasate și creditate: cod, user, sumă, data, referința bancară;\n` +
+      `  • plăți neatribuite (de la pasul 2), fiecare cu un buton „atribuie userului X";\n` +
+      `  • totaluri: azi / luna asta.\n\n` +
+      `REGULA #1 A OWNERULUI, obligatorie aici: o valoare care nu a venit dintr-o citire ` +
+      `reușită se afișează „nu pot verifica" — NICIODATĂ 0. Un 0 pus în locul unei citiri ` +
+      `picate l-a costat o zi întreagă pe 30 iul („Stripe £0.00" în timp ce avea bani).\n\n` +
+      `Teste pe potrivire/totaluri. La frontend rulează comanda EXACTĂ: cd frontend && npm run build.`,
+  },
+  {
+    cod: 'M4',
+    titlu: 'Userul: apasă, plătește, primește creditele — live, fără refresh',
+    ordin:
+      `MISIUNE REVOLUT, pasul 4 din 5 — CAPĂTUL DINSPRE CLIENT.\n\n` +
+      `Ruta /api/billing/checkout dă deja {url, code, amount, currency} — linkul Revolut al ` +
+      `ownerului plus codul unic. Ce lipsește e drumul văzut de om, cap-coadă:\n` +
+      `  • sume la alegere (10 / 15 / 20 / altă sumă), nu una singură;\n` +
+      `  • codul afișat MARE, cu buton de copiere, și scris limpede unde se pune: la ` +
+      `    referință/notă, în pagina Revolut. Dacă omul nu-l scrie, plata nu se potrivește ` +
+      `    singură — deci instrucțiunea e parte din funcționalitate, nu decor;\n` +
+      `  • starea „aștept plata" care se închide SINGURĂ când creditele intră (poll rar sau ` +
+      `    prin canalul SSE existent) — fără ca userul să dea refresh;\n` +
+      `  • istoricul plăților lui în contul lui.\n\n` +
+      `Verifică în același PR că nu a rămas nicio urmă de Stripe pe drumul userului ` +
+      `(ownerul, 30 iul: „0 stripe").`,
+  },
+  {
+    cod: 'M5',
+    titlu: 'Proba automată cap-coadă — ca să nu se mai strice pe tăcute',
+    ordin:
+      `MISIUNE REVOLUT, pasul 5 din 5 — PROBA.\n\n` +
+      `Scrie un test de integrare care parcurge TOT drumul, fără rețea și fără bani reali:\n` +
+      `  1. un user cere credit → primește un cod;\n` +
+      `  2. sosește o încasare Revolut simulată, cu codul în referință;\n` +
+      `  3. creditele apar în contul ACELUI user, cu suma exactă;\n` +
+      `  4. aceeași încasare încă o dată → soldul NU se mișcă (idempotența);\n` +
+      `  5. o încasare cu cod inexistent → plată neatribuită, ZERO credite date.\n\n` +
+      `Ăsta e testul care apără veniturile ownerului. Dacă cineva strică lanțul peste ` +
+      `trei luni, pică aici, nu în extrasul lui de cont.\n\n` +
+      `Actualizează PROCEDURA-PLATI.md cu drumul REAL, cel construit la pasul 1, ` +
+      `și taie ce nu mai e adevărat.`,
+  },
+]
+
+/** Ultima trecere — panoul poate spune dacă bucla chiar lucrează. */
+let ultima: { la: string; ok: boolean; detaliu: string } | null = null
+export function stareAutonomie(): { la: string; ok: boolean; detaliu: string } | null {
+  return ultima
+}
+
+/** Citește lista ownerului și întoarce rândurile NEREZOLVATE, ca sarcini.
+ *
+ *  Formatul e un tabel Markdown: `| B8 | **titlu** | stare... |`. Rândurile
+ *  rezolvate conțin „✅" — pe alea le sărim. */
+async function randuriDeFacut(): Promise<Sarcina[]> {
+  // Fișierul stă în rădăcina proiectului; în container, sursa e lângă `dist`.
+  const cai = [
+    path.resolve(process.cwd(), 'RAMAS-DE-FACUT.md'),
+    path.resolve(process.cwd(), '..', 'RAMAS-DE-FACUT.md'),
+    '/root/kelion/repo/RAMAS-DE-FACUT.md',
+  ]
+  let text = ''
+  for (const c of cai) {
+    text = await readFile(c, 'utf8').catch(() => '')
+    if (text) break
+  }
+  if (!text) return []
+  const out: Sarcina[] = []
+  for (const linie of text.split('\n')) {
+    // `| B8 | **Titlu** | descriere |`
+    const m = linie.match(/^\|\s*([A-Z]\d+)\s*\|\s*(.+?)\s*\|(.*)\|\s*$/)
+    if (!m) continue
+    if (/✅/.test(linie)) continue // rezolvat → nu ne mai atingem de el
+    const [, cod, titluBrut, rest] = m
+    const titlu = titluBrut.replace(/\*\*/g, '').trim()
+    if (!titlu) continue
+    const context = `${titlu} — ${rest.replace(/\|/g, ' ').trim()}`.slice(0, 1800)
+    out.push({ cod, titlu, ordin: `SARCINĂ LUATĂ SINGUR din RAMAS-DE-FACUT.md, rândul ${cod}.\n\n${context}` })
+  }
+  return out
+}
+
+/** Regulile care se lipesc la FIECARE ordin — la fel pentru misiune și pentru listă. */
+function cuRegulile(ordin: string): string {
+  return (
+    `${ordin}\n\n` +
+    `Fă-o cap-coadă: găsește cauza REALĂ în sursă (search_source/read_source), rescrie ` +
+    `curat modulul responsabil — fără petice — și scrie teste care apără exact ` +
+    `comportamentul construit.\n\n` +
+    `Verifică ÎNAINTE de PR, cu comenzile EXACTE (nu variante — „tsc -p" în loc de ` +
+    `„npm run build" a blocat publicarea 25 de minute pe 30 iul):\n` +
+    `  cd backend  && npm run typecheck && npm test\n` +
+    `  cd frontend && npm run build\n` +
+    `  node scripts/verifica-sintaxa.mjs && node scripts/verifica-exporturi.mjs\n\n` +
+    `Dacă sarcina cere o decizie a ownerului (bani, plafoane, conturi noi), NU decide ` +
+    `singur și NU-l trimite pe el prin portaluri: deschide PR cu analiza și opțiunile, ` +
+    `și spune limpede ce aștepți de la el.\n\n` +
+    `Actualizează AI-HANDOFF.md în același PR.`
+  )
+}
+
+/** Câte ordine autonome s-au dat AZI (plafonul zilnic). */
+async function dateAzi(): Promise<number> {
+  const azi = new Date().toISOString().slice(0, 10)
+  const raw = await loadKv(`autonomie:zi:${azi}`).catch(() => null)
+  return Number(raw ?? 0) || 0
+}
+
+async function citesteStare(cod: string): Promise<StarePas> {
+  const raw = await loadKv(`autonomie:pas:${cod}`).catch(() => null)
+  if (!raw) return { job: 0, incercari: 0 }
+  try {
+    const v = JSON.parse(raw) as Partial<StarePas>
+    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata, blocat: v.blocat }
+  } catch {
+    return { job: 0, incercari: 0 }
+  }
+}
+
+async function scrieStare(cod: string, s: StarePas): Promise<void> {
+  await saveKv(`autonomie:pas:${cod}`, JSON.stringify(s)).catch(() => {})
+}
+
+/** Ce a ieșit din ordinul dat pentru pasul ăsta: gata, picat (cu jurnal), sau încă nimic. */
+function verdict(job: BuildJob | undefined): 'gata' | 'picat' | 'inLucru' {
+  if (!job) return 'inLucru' // nu-l mai găsim (listă scurtă) → nu presupunem nimic
+  if (job.status === 'done') return 'gata'
+  if (job.status === 'failed') return 'picat'
+  return 'inLucru'
+}
+
+/** O trecere: se repară singur dacă a picat, altfel ia următoarea sarcină. */
+export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string }> {
+  const jobs = await listBuildJobs(40).catch(() => [] as BuildJob[])
+  const dupaId = new Map(jobs.map((j) => [j.id, j]))
+
+  // 1. E deja ocupat? Un singur lucru odată — altfel nu termină nimic.
+  if (jobs.some((j) => j.status === 'running' || j.status === 'queued')) {
+    return { pornit: false, motiv: 'are deja un ordin în lucru' }
+  }
+
+  // 2. Plafonul zilnic — variabila care exista dar nu limita nimic.
+  const azi = await dateAzi()
+  if (azi >= config.autonomyDailyMax) {
+    return { pornit: false, motiv: `plafon zilnic atins (${azi}/${config.autonomyDailyMax})` }
+  }
+
+  // 3. Misiunea (partea Revolut) are întâietate; pe urmă lista ownerului.
+  const misiuneGata = await Promise.all(MISIUNE.map((p) => citesteStare(p.cod))).then((st) =>
+    st.every((s) => s.gata || s.blocat),
+  )
+  const sarcini = misiuneGata ? await randuriDeFacut() : MISIUNE
+  if (!sarcini.length) return { pornit: false, motiv: 'lista nu s-a putut citi sau e goală' }
+
+  for (const s of sarcini) {
+    const st = await citesteStare(s.cod)
+    if (st.gata || st.blocat) continue
+
+    // A dat deja un ordin pe sarcina asta — ce s-a ales de el?
+    if (st.job) {
+      const v = verdict(dupaId.get(st.job))
+      if (v === 'inLucru') return { pornit: false, motiv: `aștept ordinul #${st.job} (${s.cod})` }
+      if (v === 'gata') {
+        await scrieStare(s.cod, { ...st, job: 0, gata: true })
+        console.log(`[AUTONOM] ${s.cod} („${s.titlu}") — gata, ordinul #${st.job}`)
+        continue // trecem la următoarea sarcină în ACEEAȘI trecere
+      }
+      // PICAT. Aici e „să se repare singur": i-l dăm înapoi, cu ce a scris el
+      // însuși în jurnal când a căzut. Dar nu la nesfârșit pe același zid.
+      if (st.incercari >= MAX_INCERCARI) {
+        const blocat = `blocat după ${st.incercari} încercări (ultimul ordin #${st.job})`
+        await scrieStare(s.cod, { ...st, job: 0, blocat })
+        console.error(`[AUTONOM] ${s.cod} — ${blocat}; trec mai departe`)
+        continue
+      }
+    }
+
+    const picat = st.job ? dupaId.get(st.job) : undefined
+    const jurnal = picat?.status === 'failed' ? (picat.log ?? '').slice(-2500) : ''
+    const ordin = jurnal
+      ? cuRegulile(
+          `REPARI CE AI STRICAT TU. Ordinul #${st.job} pe sarcina asta a picat — ` +
+            `încercarea ${st.incercari + 1} din ${MAX_INCERCARI}.\n\n` +
+            `SARCINA INIȚIALĂ:\n${s.ordin}\n\n` +
+            `CE A SCRIS JURNALUL CÂND A CĂZUT (ultimele rânduri — pornește de la cauza de acolo, ` +
+            `nu de la zero):\n${jurnal}`,
+        )
+      : cuRegulile(s.ordin)
+
+    const id = await createBuildJob('kelion-autonom', ordin)
+    if (!id) return { pornit: false, motiv: 'baza de date n-a răspuns' }
+    await scrieStare(s.cod, { job: id, incercari: st.incercari + 1 })
+    const ziua = new Date().toISOString().slice(0, 10)
+    await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
+    const eticheta = jurnal ? 'reparație' : 'sarcină nouă'
+    console.log(`[AUTONOM] ${eticheta}: ${s.cod} („${s.titlu}") → ordinul #${id}`)
+    return { pornit: true, motiv: `${s.cod} (${eticheta}): ${s.titlu}` }
+  }
+  return {
+    pornit: false,
+    motiv: misiuneGata ? 'toate rândurile listei au fost trimise' : 'misiunea Revolut: toți pașii sunt închiși',
+  }
+}
+
+/** Bucla. La fiecare oră se uită dacă are ce face — și se apucă. */
+export function startAutonomie(): void {
+  const ruleaza = async (): Promise<void> => {
+    const r = await poateSaLucreze().catch((e) => ({ pornit: false, motiv: String(e).slice(0, 120) }))
+    ultima = {
+      la: new Date().toISOString(),
+      ok: r.pornit,
+      detaliu: r.pornit ? `a pornit singur: ${r.motiv}` : r.motiv,
+    }
+  }
+  // Prima trecere la 3 minute după pornire (containerul trebuie să fie gata),
+  // apoi din oră în oră.
+  setTimeout(() => {
+    void ruleaza()
+    setInterval(() => void ruleaza(), 60 * 60 * 1000)
+  }, 3 * 60 * 1000)
+}

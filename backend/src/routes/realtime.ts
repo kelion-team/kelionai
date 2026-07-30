@@ -46,6 +46,7 @@ import {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, REQUEST_REPAIR_TOOL,
   PROPOSE_TOOL, SHOW_DOCUMENT_TOOL, PROMO_TOOL,
+  SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
 } from './chat.js'
 // Dispatch UNIC al uneltelor admin partajate (chat ∩ voce) — fără duplicare (risc #4).
 import { execUserScopedTool, execSharedAdminTool } from '../services/adminTools.js'
@@ -327,6 +328,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
               REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
               RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
               REQUEST_REPAIR_TOOL,
+              // Setările lui, puse de el — aceleași pe voce ca pe scris.
+              SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
             ]
           : []),
         ]

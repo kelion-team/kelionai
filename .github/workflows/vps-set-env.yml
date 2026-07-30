@@ -4,9 +4,21 @@
 # prin STDIN — niciodată într-o comandă care apare în jurnal. Cheia nu ajunge
 # nici în git, nici în chat, nici în logul de Actions.
 #
-# CUM SE FOLOSEȘTE (Adrian):
+# DE PE 30 IUL, NU MAI E TREABA TA. Kelion își pune singur cheile: `secret_pune`
+# le scrie criptat în secretele repo-ului, `secret_publica` pornește exact
+# workflow-ul ăsta, care le duce pe server și repornește aplicația. Îi spui ce
+# vrei configurat, el o face. (Adrian: „să creeze secretele și să le pună unde
+# trebuie, e al meu și îi permit full acces".) Restul comentariului rămâne ca să
+# poți face TU orice pas, oricând, fără el.
+#
+# LISTA DE NUME NU MAI EXISTĂ. Workflow-ul ia acum TOATE secretele de la GitHub
+# (`toJSON(secrets)`), deci o cheie nouă nu mai poate cădea în gol fiindcă a
+# uitat cineva s-o treacă într-o listă — exact ce a pățit `REVOLUT_PAY_LINK`.
+#
+# CUM SE FOLOSEȘTE MANUAL (Adrian):
 #   1. Repo → Settings → Secrets and variables → Actions → New repository secret.
-#      Adaugă, cu numele EXACT, doar cheile pe care le ai:
+#      Numele de mai jos sunt cele pe care le CITEȘTE codul; orice cheie nouă e
+#      dusă pe server oricum, dar codul o folosește doar dacă o caută sub numele ăla:
 #        SERPER_API_KEY        (căutare web + youtube)
 #        GEMINI_API_KEY        (generare imagini)  + opțional GEMINI_MODEL
 #        GOOGLE_TTS_API_KEY    (voce TTS Google + salut landing)
@@ -43,17 +55,14 @@ jobs:
       - name: Scrie cheile în env-ul VPS (din Secrets, mascate, prin STDIN)
         env:
           KEY: ${{ secrets.VPS_SSH_KEY }}
-          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
-          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_KEY }}
-          MAIL_USER: ${{ secrets.MAIL_USER }}
-          MAIL_PASS: ${{ secrets.MAIL_PASS }}
-          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
-          REVOLUT_PAY_LINK: ${{ secrets.REVOLUT_PAY_LINK }}
+          # ── TOATE SECRETELE, NU O LISTĂ SCRISĂ DE MÂNĂ (30 iul) ─────────────
+          # Aici era o listă FIXĂ de nume. Orice cheie nouă — pusă de Adrian sau
+          # de Kelion însuși — cădea în gol: scrisă în GitHub, dar niciodată
+          # ajunsă pe server, fără niciun semn că lipsește. Exact ce a pățit
+          # `REVOLUT_PAY_LINK`. Acum lista vine de la GitHub, nu de la mine, deci
+          # nu mai poate rămâne în urmă. GitHub maschează valorile în TOATE
+          # logurile, iar noi nu tipărim niciuna.
+          SECRETS_JSON: ${{ toJSON(secrets) }}
           GITHUB_TOKEN: ${{ secrets.KELION_GITHUB_TOKEN }}
           RESTART: ${{ inputs.restart }}
         run: |
@@ -64,19 +73,21 @@ jobs:
           chmod 600 /tmp/vps_key
           SSH="ssh -i /tmp/vps_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 -o BatchMode=yes root@164.68.120.87"
 
-          # Construim liniile KEY=VALUE DOAR pentru secretele setate (valorile
-          # trăiesc în memoria runner-ului, mascate de GitHub). Le trimitem prin
-          # STDIN unui script remote care face upsert în /root/kelion/kelionai.env.
-          # ATENȚIE la forma buclei: cu `[ -n ] && printf` scurt, dacă ULTIMUL
-          # secret din listă e gol, bucla iese cu cod 1 și `pipefail` omoară
-          # jobul DUPĂ scriere dar ÎNAINTE de repornire (exact pana din
-          # 26 iul, run 30190681677 — cheile scrise, containerul nerepornit).
-          # De-aia e `if`, nu `&&`.
+          # Liniile NUME=valoare-în-base64, pentru TOATE secretele setate.
+          # Base64 la transport, ca o valoare cu spații, ghilimele sau `=` să
+          # ajungă întreagă; se decodează pe server. `VPS_SSH_KEY` e SCOASĂ
+          # dinadins — cheia de acces la mașină n-are ce căuta în env-ul
+          # aplicației. `KELION_GITHUB_TOKEN` se scrie sub numele pe care îl
+          # citește codul: `GITHUB_TOKEN`.
           {
-            for name in SERPER_API_KEY GEMINI_API_KEY GEMINI_MODEL GOOGLE_TTS_API_KEY GOOGLE_API_KEY GOOGLE_MAPS_KEY MAIL_USER MAIL_PASS STRIPE_WEBHOOK_SECRET STRIPE_PUBLISHABLE_KEY REVOLUT_PAY_LINK GITHUB_TOKEN; do
-              val="${!name:-}"
-              if [ -n "$val" ]; then printf '%s=%s\n' "$name" "$val"; fi
-            done
+            printf '%s' "$SECRETS_JSON" | jq -r '
+              to_entries[]
+              | select(.key | test("^(VPS_SSH_KEY|github_token|KELION_GITHUB_TOKEN)$") | not)
+              | select(.value != null and .value != "")
+              | "\(.key)=\(.value | @base64)"'
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              printf 'GITHUB_TOKEN=%s\n' "$(printf '%s' "$GITHUB_TOKEN" | base64 -w0)"
+            fi
           } | $SSH '
             set -e
             f=/root/kelion/kelionai.env
@@ -85,9 +96,15 @@ jobs:
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               name="${line%%=*}"
-              val="${line#*=}"
+              val=$(printf "%s" "${line#*=}" | base64 -d)
+              # O valoare pe mai multe rânduri ar rupe fișierul env — o sărim și
+              # o SPUNEM, în loc s-o scriem stricat și să pară pusă.
+              case "$val" in
+                *"
+"*) echo "::warning::$name are rânduri multiple — nu se poate pune în env, sărit"; continue ;;
+              esac
               grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
-              printf "%s\n" "$line" >> "$f.tmp"
+              printf "%s=%s\n" "$name" "$val" >> "$f.tmp"
               mv "$f.tmp" "$f"; chmod 600 "$f"
               echo "  $name: scris (${#val} caractere) — valoarea NU se afișează"
               c=$((c+1))

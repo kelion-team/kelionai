@@ -76,6 +76,13 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'run_runbook', category: 'ops', does: 'operații VPS (diagnostic/restart/backup...)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'runbook_status', category: 'ops', does: 'starea rulărilor', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'runbook_log', category: 'ops', does: 'jurnalul unei rulări', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  // SETĂRILE LUI, FĂCUTE DE EL (Adrian, 30 iul: „să creeze secretele și să le
+  // pună unde trebuie, e al meu și îi permit full acces"). Până azi, fiecare
+  // cheie nouă însemna ore din viața omului prin portaluri; iar eu îi spuneam
+  // că „nu am unealtă" — motiv să CONSTRUIESC unealta, nu să-l trimit pe el.
+  { name: 'secret_pune', category: 'ops', does: 'își pune singur o cheie în secretele repo-ului (valoarea nu se vede niciodată)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'secret_lista', category: 'ops', does: 'ce chei există (doar numele — GitHub nu dă valorile)', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'secret_publica', category: 'ops', does: 'duce cheile pe server și repornește aplicația', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'db_tables', category: 'cod', does: 'vede tabelele bazei de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'db_query', category: 'cod', does: 'interoghează baza de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },

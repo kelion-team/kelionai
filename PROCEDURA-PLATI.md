@@ -1,157 +1,204 @@
-# PROCEDURA-PLATI.md
+# PROCEDURA PLĂȚILOR, DE LA A LA Z
 
-Procedura de conectare a datelor bancare (GoCardless / Bank Account Data) pentru Kelion AI.
+Adrian, 30 iul: „scrie-i absolut toată procedura de la A la Z, și să pună chiar
+secretele unde trebuie".
 
-Fiecare secțiune spune trei lucruri: **cine face pasul** (Adrian sau aplicația/Kelion), **ce se face exact**, și **cum știi că a mers** (dovada, nu impresia).
-
-Regulă de aur: dacă dovada lipsește, pasul NU e făcut. Nu se trece la următorul.
-
----
-
-## §1. Ce produs ne trebuie, de fapt
-
-**Cine:** Adrian (o singură dată, la înțelegerea contextului).
-
-GoCardless are mai multe produse separate, cu portaluri separate și cu conturi separate. Ne trebuie **Bank Account Data** (fostul Nordigen) — citire de tranzacții și solduri, în regim read-only.
-
-- `bankaccountdata.gocardless.com` — **ACESTA ne trebuie.** Aici se fac Secret ID / Secret Key pentru citirea conturilor.
-- `manage.gocardless.com` — **alt produs** (încasări prin Direct Debit). Nu are cheile noastre. Un cont aici nu deschide nimic pentru noi.
-- `developer.gocardless.com` — **documentație pentru alt produs**. Tokenurile de acolo nu funcționează pe Bank Account Data.
-
-**Capcană documentată (căzută în ea azi):** am ajuns pe `manage.` și pe `developer.` și am căutat acolo secțiunea de chei. Nu există. Nu e o eroare de setare — e produs greșit. Dacă în interfață nu apare nicăieri „Bank Account Data" sau „User secrets", ești pe portalul greșit; ieși și mergi pe `bankaccountdata.gocardless.com`.
-
-**Dovada că §1 e în regulă:** adresa din bara de browser începe cu `bankaccountdata.gocardless.com`.
+Documentul ăsta e scris ca să nu mai ții minte nimic și să nu mai cauți prin
+portaluri. Fiecare pas spune **cine îl face** — tu sau aplicația — și **cum știi
+că a mers**. Dacă un pas nu iese, sări la §7 („Când ceva nu merge").
 
 ---
 
-## §2. Contul și autentificarea în portal
+## 0. CE CONSTRUIM, ÎN DOUĂ RÂNDURI
 
-**Cine:** Adrian. Kelion poate deschide pagina pe monitor, dar login-ul îl faci tu (parolă și 2FA nu se dau unei unelte).
+Userul apasă „adaugă credit" → primește un **cod unic** → plătește pe linkul tău
+Revolut, cu codul în referință → aplicația vede plata și îi dă creditele
+**singură**.
 
-Pași: deschide portalul, „Sign up" dacă nu există cont (email, parolă, confirmare pe email), altfel „Log in".
-
-**Capcană documentată (căzută în ea azi):** pe formularul de login/înregistrare **butoanele rămân moarte** — apeși și nu se întâmplă nimic, fără mesaj de eroare — până când **pornești comutatorul de acceptare a termenilor** (checkbox/toggle „I agree to the Terms"). Nu e pagină stricată și nu e buton nefuncțional: validarea blochează trimiterea în silențiu. Întâi comutatorul, apoi butonul.
-
-**Dovada că §2 a mers:** ești în portal și vezi meniul de cont (nu ecranul de login) după un refresh al paginii.
-
----
-
-## §3. Generarea cheilor (Secret ID și Secret Key)
-
-**Cine:** Adrian, în portal.
-
-În portal: secțiunea **Developers → User secrets → Create new** (denumire liberă, ex. „kelion-prod"). Se generează două valori:
-
-- `SECRET_ID`
-- `SECRET_KEY`
-
-**Atenție:** `SECRET_KEY` se afișează **o singură dată**. Dacă închizi fereastra fără să o copiezi, cheia nu se mai poate recupera — se șterge secretul și se creează altul. Nu e o pierdere gravă, doar repeți pasul.
-
-**Dovada că §3 a mers:** ai ambele valori copiate, iar în listă apare o intrare nouă de secret, cu data de azi.
+Banii intră direct la tine, în Revolut Pro. Aplicația doar **citește** ce a
+intrat — nu poate muta, plăti sau scoate niciun ban.
 
 ---
 
-## §4. Ce cere API-ul, în ordine
+## 1. CE E DEJA FĂCUT (nu ai ce face aici)
 
-**Cine:** aplicația (automat). Se trece aici doar pentru a înțelege ce se întâmplă și unde poate cădea.
+Scris, testat și publicat pe 30 iul:
 
-1. **Token de acces** — cu `SECRET_ID` și `SECRET_KEY` se cere un token `access` (valabil ~24h) și un `refresh` (~30 zile). Aplicația reînnoiește singură.
-2. **Lista de instituții** — se cere lista băncilor pentru țara ta (`GB` pentru Regatul Unit) și se alege banca.
-3. **Acord de utilizare (agreement)** — se stabilește ce se citește (tranzacții, solduri, detalii) și pe câte zile de istoric.
-4. **Cerere de conectare (requisition)** — întoarce un **link de consimțământ**, către banca ta.
-5. **Consimțământul** — pasul uman (§5).
-6. **Citirea conturilor** — după consimțământ, aplicația obține id-urile de cont și poate citi solduri și tranzacții, **doar citire**.
+| Bucata | Unde stă | Ce face |
+|---|---|---|
+| Codurile unice | `db.ts` → `creeazaCodPlata` | `KLN-XXXX-XXXX`, fără caractere confundabile (0/O, 1/I/L) |
+| Istoricul | tabela `payment_codes` | cod, user, sumă, stare, referință bancară, data plății |
+| Potrivirea | `db.ts` → `crediteazaDupaCod` | găsește codul în referință, chiar cu text în jur sau litere mici |
+| Creditarea | `topUpUser` | idempotentă — aceeași plată **nu poate** credita de două ori |
+| Cititorul | `services/openBanking.ts` | citește tranzacțiile din cont, din 5 în 5 minute |
+| Starea | Admin → Bani | scrie dacă citirea merge; **nu tace** când nu poate citi |
 
-**Dovada că §4 merge:** cererea de token întoarce cod 200 și un token `access`; lista de instituții întoarce bănci pentru `GB`.
-
----
-
-## §5. Consimțământul bancar (singurul pas care se repetă)
-
-**Cine:** Adrian. Obligatoriu uman — e autentificare la banca ta.
-
-Kelion deschide linkul de consimțământ pe monitor; tu te autentifici la bancă, confirmi accesul read-only și ești întors în aplicație.
-
-**Termen de expirare:** consimțământul e valabil între **30 și 90 de zile**, după bancă. La expirare **se repetă doar §5** — nu se refac cheile, nu se atinge portalul.
-
-**Dovada că §5 a mers:** starea cererii (requisition) devine `LINKED` și lista de conturi întoarce cel puțin un cont.
+**Nu trebuie să atingi niciun fișier.** Tot ce urmează sunt doar chei și clicuri.
 
 ---
 
-## §6. Ducerea cheilor pe server
+## 2. LINKUL DE PLATĂ REVOLUT — 2 minute
 
-**Cine:** **Kelion.** Acesta e pasul pe care nu trebuie să-l faci tu.
+**Cine:** tu (e contul tău).
 
-Tu îmi dai cele două valori și spui **„dă drumul"**. Eu:
+1. Deschizi aplicația **Revolut** pe telefon.
+2. Contul **Pro** → **Get paid** → **Payment link**.
+3. Îl lași **fără sumă fixă** (ca userul să plătească exact cât cumpără).
+4. **Copiază linkul.** Arată gen `https://revolut.me/…`.
 
-1. scriu `GOCARDLESS_SECRET_ID` și `GOCARDLESS_SECRET_KEY` în variabilele de mediu ale serverului, prin mecanismul de publicare (nu prin comenzi ad-hoc, care se pierd la redeploy);
-2. pornesc publicarea;
-3. repornesc aplicația ca să le citească;
-4. îți arăt dovada pe monitor.
-
-Reguli ferme:
-- cheile **nu se pun niciodată în cod** și nu se comit în depozit;
-- cheile **nu se scriu în chat** de către mine, niciodată, nici parțial;
-- setarea se face doar prin variabile de mediu, ca să supraviețuiască redeploy-ului.
-
-**Dovada că §6 a mers:** publicarea se încheie verde, iar verificarea de sănătate arată ambele variabile ca „prezente" (prezență, nu valoare).
+**Cum știi că e bun:** îl deschizi într-un browser și vezi pagina de plată
+Revolut, cu numele tău.
 
 ---
 
-## §7. Verificarea finală, cap-coadă
+## 3. CHEILE DE CITIRE A CONTULUI — 5 minute
 
-**Cine:** Kelion, cu raport pe monitor.
+**Cine:** tu (cere identitatea și acordul tău — nimeni altcineva nu poate).
 
-Ordinea verificărilor: token obținut → instituții listate → cerere creată → stare `LINKED` → cel puțin un cont citit → un sold citit.
+Portalul e **bankaccountdata.gocardless.com**. Atenție la capcană: `manage.` și
+`developer.` sunt ALTE produse (plăți prin Direct Debit, respectiv documentație).
+Ce ne trebuie e portalul de **Bank Account Data**, gratuit, care doar citește.
 
-**Dovada că §7 a mers:** toate șase, verzi, în același raport. Dacă una e roșie, mergi la §8 și rezolvi exact acel rând; nu se reia toată procedura.
+1. Intri pe **https://bankaccountdata.gocardless.com/**
+2. La login: **pornește întâi comutatorul** „I agree to … Terms & Conditions" —
+   până nu-l pornești, butoanele (inclusiv „Log in with Google") rămân moarte.
+3. După login: **Developers → User Secrets → Create new**.
+4. Copiază `Secret ID` și `Secret Key`.
+
+**Cum știi că ești unde trebuie:** în bara de adresă scrie
+`bankaccountdata.gocardless.com`, nu `manage.` și nu `developer.`.
 
 ---
 
-## §8. Tabelul modurilor de eșec
+## 4. LEGAREA CONTULUI REVOLUT — 3 minute
+
+**Cine:** tu (consimțământul bancar e al tău, prin lege).
+
+În același portal:
+
+1. **Bank connections** (sau „Requisitions") → **Add / Connect a bank**.
+2. Alegi **Revolut** din listă (id-ul lui e `REVOLUT_REVOGB21`).
+3. Te duce pe pagina Revolut, unde **aprobi accesul de CITIRE**. Confirmi în
+   aplicația de pe telefon.
+4. La final îți dă un **Account ID** — un șir lung. Copiază-l.
+
+**Cum știi că a mers:** contul apare în listă cu starea `LINKED`, iar Account
+ID-ul e vizibil.
+
+> **De reținut, ca să nu te ia prin surprindere:** consimțământul ăsta **expiră**
+> (regula europeană PSD2 — între 30 și 90 de zile) și trebuie reînnoit de tine,
+> cu aceiași pași. Aplicația **te anunță** când nu mai poate citi — vezi §6.
+
+---
+
+## 5. CHEILE ÎN GITHUB — 2 minute
+
+**Cine:** de pe 30 iul, **Kelion** — vezi §9. Îi spui cheia, o pune el, criptat,
+și ți-o confirmă cu numele și lungimea, niciodată cu valoarea. Ce urmează aici e
+calea manuală, dacă vrei s-o faci tu.
+
+Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
+→ **New repository secret**, de patru ori, cu numele **exact** de mai jos:
+
+| Numele secretului | Ce pui în el |
+|---|---|
+| `REVOLUT_PAY_LINK` | linkul de la §2 |
+| `GOCARDLESS_SECRET_ID` | de la §3 |
+| `GOCARDLESS_SECRET_KEY` | de la §3 |
+| `GOCARDLESS_ACCOUNT_ID` | de la §4 |
+
+**Numele trebuie scrise identic** — codul caută cheia sub numele ăla.
+
+**Capcana listei fixe a dispărut de tot (30 iul).** `vps-set-env` avea o listă de
+nume scrisă de mână; o cheie care nu era în ea se scria în GitHub și **nu ajungea
+niciodată pe server**, fără niciun semn — exact ce a pățit `REVOLUT_PAY_LINK`.
+Acum workflow-ul ia **toate** secretele de la GitHub, deci o cheie nouă nu mai
+poate cădea în gol.
+
+---
+
+## 6. DUCEREA CHEILOR PE SERVER — 0 minute pentru tine
+
+**Cine:** aplicația. **Ăsta îl pot face eu** — îmi spui „dă drumul" și pornesc
+publicarea cheilor.
+
+Dacă vrei s-o faci tu:
+**https://github.com/kelion-team/kelionai/actions/workflows/vps-set-env.yml**
+→ **Run workflow** → lași „Repornește app-ul" pe **true**.
+
+**Cum știi că a mers:** în jurnalul rulării scrie, pentru fiecare cheie,
+`scris (N caractere) — valoarea NU se afișează`. Dacă o cheie lipsește din
+listă, n-ai pus-o în GitHub sau ai greșit numele.
+
+---
+
+## 7. PROBA CĂ FUNCȚIONEAZĂ — 5 minute
+
+1. Deschizi **Admin → Bani**. La „Citirea plăților Revolut" trebuie să scrie
+   ✅ cu câte intrări a citit. Dacă e ⚠ galben, îți spune exact ce lipsește.
+2. Intri cu un cont obișnuit (nu al tău de admin), apeși **adaugă credit**,
+   alegi o sumă mică (£10).
+3. Primești un cod, gen `KLN-AB23-CD45`.
+4. Plătești pe linkul Revolut, **cu codul scris la referință/notă**.
+5. În maximum **5 minute**, creditele apar singure în contul acelui user.
+
+**Dacă nu apar:** te uiți iar la rândul din Admin → Bani. Acolo scrie de ce —
+nu rămâne tăcut.
+
+---
+
+## 8. CE POATE MERGE PROST, ȘI CE ÎNSEAMNĂ
 
 | Ce vezi | Ce înseamnă | Ce faci |
 |---|---|---|
-| Butoanele de login nu fac nimic, fără eroare | Comutatorul de termeni e oprit | Pornește acceptarea termenilor, apoi apasă din nou (§2) |
-| În portal nu găsești „User secrets" | Ești pe `manage.` sau `developer.` — alt produs | Mergi pe `bankaccountdata.gocardless.com` (§1) |
-| `401 Unauthorized` la cererea de token | Secret ID / Secret Key greșite, inversate sau cu spațiu la copiere | Recopiază-le; dacă persistă, șterge secretul și fă altul (§3) |
-| `401` după ce mergea | Token `access` expirat și `refresh` neefectuat | Reînnoiește tokenul; dacă `refresh` e mort (peste 30 zile), reia autentificarea de la §4.1 |
-| `429 Too Many Requests` | Limită de apeluri atinsă (tipic 4 citiri/cont/zi) | Aștepți fereastra următoare; nu reîncerci în buclă |
-| Starea cererii rămâne `CREATED` | Consimțământul nu a fost dus până la capăt | Redeschide linkul și finalizează la bancă (§5) |
-| Stare `EXPIRED` sau conturile nu se mai citesc | Consimțământul a expirat (30–90 zile) | Repetă **doar** §5 |
-| Stare `REJECTED` | Banca a refuzat sau ai anulat în fluxul lor | Creează o cerere nouă și reia §5 |
-| Lista de instituții e goală | Cod de țară greșit | Folosește `GB` (§4.2) |
-| Aplicația nu vede cheile după setare | Variabile de mediu nescrise sau aplicația nerepornită | Reia §6 și repornește aplicația |
-| Linkul de consimțământ dă 404 | Cererea a expirat înainte de folosire (are viață scurtă) | Creează o cerere nouă, folosește linkul imediat |
+| „nu e configurat (lipsesc cheile GoCardless)" | cheile n-au ajuns în proces | refaci §5 și §6, cu numele exacte |
+| „nu e legat contul" | lipsește `GOCARDLESS_ACCOUNT_ID` | refaci §4 |
+| „nu pot citi tranzacțiile — consimțământul poate fi expirat" | au trecut cele 30-90 de zile | refaci §4 (doar reaprobarea) |
+| plata a intrat, creditele nu | userul n-a scris codul, sau l-a scris greșit | i le dai din Admin → Utilizatori; plata apare oricum în istoric |
+| butonul de credit spune că lipsește linkul | `REVOLUT_PAY_LINK` nu e pus | refaci §2 și §5 |
+
+**Nicio plată nu se pierde.** Ce nu se potrivește automat rămâne în tabela
+`payment_codes` și în extrasul tău Revolut — se rezolvă cu un click, nu se
+evaporă.
 
 ---
 
-## §9. Cele două variante care scapă complet de portal
+## 9. CINE FACE SETĂRILE: EL, NU TU
 
-Singurii pași care se repetă sunt cei de consimțământ (§5), fiindcă expiră la 30–90 de zile. Portalul, în schimb, poate fi eliminat definitiv din rutina ta:
+**30 iul, cerința ta:** „să creeze secretele și să le pună unde trebuie, e al meu
+și îi permit full acces."
 
-**Varianta A — import de extras (fără nicio conectare).**
-Descarci din banca ta extrasul în format CSV sau OFX și îl încarci în aplicație; ea îl citește și îl clasifică. Zero portal, zero chei, zero expirare. Dezavantaj: nu e automat — încarci fișierul când vrei situația la zi. Avantaj: nu depinde de nimeni din afară și nu se strică niciodată.
+Kelion are de acum trei unelte, pe scris și pe voce:
 
-**Varianta B — unealta de browser pentru Kelion (recomandată).**
-Kelion primește un browser propriu, instalat permanent în imaginea aplicației, și deschide singur portalurile pe monitor: navighează, completează, ajunge exact la ecranul unde trebuie. Tu preiei **doar** la două momente: login-ul (parolă și 2FA) și consimțământul bancar. Restul nu-l mai umbli tu niciodată. Asta rezolvă și eșecul de azi: lansarea browserului a picat fiindcă executabilul Chromium nu e instalat pe server; instalarea se face durabil, prin imaginea aplicației, ca să reziste la redeploy.
+| Unealta | Ce face |
+|---|---|
+| `secret_lista` | vede ce chei există (doar **numele** — GitHub nu dă valorile nimănui) |
+| `secret_pune` | scrie o cheie în secretele repo-ului, **criptată** |
+| `secret_publica` | o duce pe server și repornește aplicația |
 
-Cele două variante se pot folosi împreună: B pentru rutina automată, A ca plasă de siguranță când o bancă face figuri.
+Deci pașii §5 și §6 de mai sus **nu mai sunt treaba ta**: îi spui ce vrei
+configurat, el o face și îți raportează **numele cheii și starea**. Le-am lăsat
+scrise ca să le poți face tu oricând, nu fiindcă trebuie.
+
+**Ce nu se întâmplă, prin construcție:** valoarea unei chei nu se repetă în chat,
+nu ajunge pe monitor, nu se scrie într-un fișier din repo, nu apare în niciun
+jurnal — se raportează numele și câte caractere are. Un număr de card e refuzat
+din start, oricine ar cere-o.
+
+**Ce rămâne al tău:** cheia pe care doar Revolut o poate emite. Aia i-o dai o
+singură dată, iar el o pune unde trebuie. **Nu prin email** — plata nu se
+citește din inbox (30 iul: „ce ai făcut cu email scoți imediat").
 
 ---
 
-## §10. Ce NU face aplicația cu banii tăi
+## 10. CE FACE APLICAȚIA ȘI CE NU FACE, CU BANII TĂI
 
-Scris explicit, ca să nu existe ambiguitate:
+**Face:** citește tranzacțiile intrate, potrivește codul, dă creditele.
 
-- **Nu mută bani.** Nu iniţiază plăți, nu face transferuri, nu setează Direct Debit, nu autorizează nimic. Accesul este exclusiv de tip **citire**.
-- **Nu are drept de scriere** la bancă. Produsul folosit (Bank Account Data) nu oferă tehnic posibilitatea de a plăti.
-- **Nu îți cere și nu îți păstrează credențialele bancare.** Utilizatorul și parola de bancă se introduc **doar** pe pagina băncii, în timpul consimțământului. Aplicația nu le vede, nu le stochează, nu le transmite.
-- **Nu ține cheile în cod.** Doar în variabile de mediu pe server.
-- **Nu afișează și nu trimite cheile în chat**, nici la cerere, nici parțial.
-- **Nu partajează datele** citite cu terți; sunt folosite doar pentru funcțiile pe care le ceri în aplicație.
-- **Poți retrage accesul oricând**, din banca ta sau prin ștergerea conexiunii; după retragere, citirile se opresc imediat.
-
----
-
-*Document de procedură operațională. Se actualizează când apare un mod de eșec nou — se adaugă un rând în §8.*
+**NU face, prin construcție:**
+- nu mișcă bani, nu plătește, nu scoate nimic din cont (accesul e doar de citire);
+- nu creditează pe plăți în așteptare, care se pot întoarce — doar pe cele
+  confirmate de bancă;
+- nu creditează de două ori aceeași plată (index unic pe referința bancară);
+- nu ghicește pe un cod stricat — mai bine „neatribuit" decât creditat greșit;
+- nu-ți cere niciodată datele cardului, și nu le atinge.
