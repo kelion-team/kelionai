@@ -16,7 +16,14 @@ import crypto from 'node:crypto'
 
 // Cheile se citesc din `config` la import; le punem ÎNAINTE, ca modulul să vadă
 // un secret de webhook cunoscut și NICIO cheie secretă (starea „neconfigurat").
-vi.mock('../src/config.js', () => ({}))
+//
+// AICI A STAT UN AL DOILEA `vi.mock('../src/config.js', () => ({}))` — mock GOL,
+// fără `config`. Din fișierul ăsta, `../src/config.js` și `./config.js` duc la
+// ACELAȘI modul, deci erau două înregistrări pentru aceeași țintă, iar care
+// câștiga era NEDETERMINIST: în ~1 din 4 rulări câștiga cel gol și picau toate
+// cele 16 teste cu „No «config» export is defined on the mock". Adică poarta pe
+// care ne bazăm ca să spunem „219 teste, 0 picate" mințea un sfert din timp.
+// Prins rulând suita de 8 ori la rând, nu o dată.
 
 const SECRET = 'whsec_test_kelion'
 

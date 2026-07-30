@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
-import { saveKv, loadKv } from '../db.js'
+import { saveKv, loadKv, userKey } from '../db.js'
 import { getCatalog, resolveModel, type ModelTier } from '../services/openrouter.js'
 
 // ── MODELE SELECTABILE — catalog live + selecția per-user ─────────────────────
@@ -9,7 +9,7 @@ import { getCatalog, resolveModel, type ModelTier } from '../services/openrouter
 // PUT  /api/models/selection → salvează alegerea userului (validată pe catalog)
 // Selecția se persistă în KV (fără schemă nouă), la fel ca aranjarea avatarului.
 
-const KEY = (email: string): string => `model_choice:${email}`
+const KEY = (email: string): string => `model_choice:${userKey(email)}`
 
 interface Selection {
   chat: string
