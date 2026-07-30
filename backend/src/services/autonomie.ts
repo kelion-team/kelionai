@@ -47,6 +47,7 @@ import {
 import { brainCompleteWithTools } from './brain.js'
 import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
+import { inventarulMeu } from './brainCapabilities.js'
 import { listeazaSecrete } from './secrete.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
@@ -367,6 +368,33 @@ async function golurileLui(): Promise<Sarcina[]> {
     }))
 }
 
+// ── DUPĂ TREI ÎNCERCĂRI: IESE ȘI CAUTĂ, NU SE ÎNVÂRTE ────────────────────────
+//
+// Adrian, 30 iul: „după 3 trebuie să caute soluții, să iasă, să identifice
+// soluții, să studieze problema, să-și instaleze unelte diverse — în niciun caz
+// să abandoneze sau să stea în buclă."
+//
+// Ăsta e chiar echilibrul corect, și e altceva decât ce pusesem eu: nu un
+// PLAFON (renunță) și nici o repetare oarbă (se învârte), ci o SCHIMBARE DE
+// METODĂ. Are cu ce, de la PR #591: browser real, runbook-uri, baza de date,
+// și voie să-și instaleze pachete.
+function escaladare(incercariDeja: number): string {
+  if (incercariDeja < 3) return ''
+  return (
+    `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ORI ȘI N-A IEȘIT. NU repeta ce ai făcut — ` +
+    `ai dovada că drumul ăla nu duce nicăieri. SCHIMBĂ METODA, în ordinea asta:\n` +
+    `  1. IEȘI ȘI CAUTĂ: browser_open pe mesajul EXACT de eroare și pe documentația ` +
+    `     oficială a lucrului care nu merge. Citește, nu ghici.\n` +
+    `  2. STUDIAZĂ PROBLEMA: db_query pe datele reale, system_health, runbook_log — ` +
+    `     vezi ce se întâmplă de fapt, nu ce crezi tu că se întâmplă.\n` +
+    `  3. INSTALEAZĂ-ȚI UNELTE: dacă lipsește o bibliotecă, pune-o ` +
+    `     (npm --prefix backend install <pachet>). Dacă lipsește ceva de sistem, ` +
+    `     run_runbook. Nu te opri fiindcă „nu ai".\n` +
+    `  4. ALEGE ALT DRUM și spune în PR care e și DE CE, cu ce ai aflat la pașii 1-3.\n` +
+    `Nu ai voie să abandonezi, și nu ai voie să reiei la nesfârșit același lucru.\n\n`
+  )
+}
+
 /** Regulile care se lipesc la FIECARE ordin — la fel pentru misiune și pentru listă. */
 function cuRegulile(ordin: string): string {
   return (
@@ -466,6 +494,10 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   ] as unknown as AnthropicTool[]
   const prompt =
     `${s.ordin}\n\n` +
+    // CONȘTIENT DE CE ARE (Adrian, 30 iul): inventarul lui complet, derivat din
+    // registru. Un agent care nu-și cunoaște uneltele spune „nu pot" pentru ce
+    // are în mână.
+    `${inventarulMeu()}\n\n` +
     `CUM LUCREZI AICI: nu-ți vorbește nimeni, nu aștepți răspuns de la nimeni. ` +
     `Ai browserul (browser_open/read/click/type/scroll/key/click_at/back/close) și ` +
     `secretele (secret_lista/secret_pune/secret_publica). Le folosești. ` +
@@ -535,6 +567,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       ? cuRegulile(
           `REPARI CE AI STRICAT TU. Ordinul #${st.job} pe sarcina asta a picat — ` +
             `încercarea ${st.incercari + 1}. Nu se renunță — se reia până iese.\n\n` +
+            escaladare(st.incercari) +
             `SARCINA INIȚIALĂ:\n${s.ordin}\n\n` +
             `CE A SCRIS JURNALUL CÂND A CĂZUT (ultimele rânduri — pornește de la cauza de acolo, ` +
             `nu de la zero):\n${jurnal}`,
@@ -549,7 +582,10 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       const ziua = new Date().toISOString().slice(0, 10)
       await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
       try {
-        const spus = await ruleazaCuMainile({ ...s, ordin }).catch((e: Error) => `a crăpat: ${e.message}`)
+        // Pașii de mâini nu lasă jurnal de job, deci escaladarea se lipește aici,
+        // după numărul de încercări: de la a treia, schimbă metoda.
+        const spus = await ruleazaCuMainile({ ...s, ordin: escaladare(st.incercari) + ordin })
+          .catch((e: Error) => `a crăpat: ${e.message}`)
         const chiarAFacut = s.dovada ? await s.dovada().catch(() => false) : false
         const incercari = st.incercari + 1
         if (chiarAFacut) {

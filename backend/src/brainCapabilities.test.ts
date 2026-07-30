@@ -8,6 +8,7 @@ import {
   voiceCapabilityNames,
   dormantOnVoice,
   dormantOnChat,
+  inventarulMeu,
 } from './services/brainCapabilities.js'
 import { VOICE_TOOL_NAMES } from './services/realtime.js'
 import { googleTools } from './services/google.js'
@@ -81,6 +82,25 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
       cases.has(n) || google.has(n) || special.has(n) || SHARED_ADMIN_TOOLS.has(n) || USER_SCOPED_TOOLS.has(n)
     const orfane = chatCapabilityNames().filter((n) => !areHandler(n))
     expect(orfane, `capabilități de chat FĂRĂ handler în chat.ts (adormite): ${orfane.join(', ')}`).toEqual([])
+  })
+
+  // CONȘTIENT DE CE ARE (Adrian, 30 iul: „trebuie să fie conștient de ce are, ce
+  // capabilități are, toate să-i fie activate în creier și apelabile direct").
+  // Inventarul se DERIVĂ din registru — dacă cineva adaugă o capabilitate și
+  // uită să-i spună lui că o are, testul ăsta o prinde.
+  it('își cunoaște inventarul: fiecare capabilitate de chat apare în el', () => {
+    const inv = inventarulMeu(true)
+    const lipsa = chatCapabilityNames().filter((n) => !inv.includes(n))
+    expect(lipsa, `capabilități pe care le ARE dar nu ȘTIE că le are: ${lipsa.join(', ')}`).toEqual([])
+    // Și îi spune limpede să nu refuze ce are în mână.
+    expect(inv).toContain('Nu ceri voie')
+  })
+
+  it('userul obișnuit nu vede în inventar uneltele de admin', () => {
+    const inv = inventarulMeu(false)
+    expect(inv).not.toContain('repo_merge_pr')
+    expect(inv).not.toContain('secret_pune')
+    expect(inv).toContain('send_email') // dar restul, da
   })
 
   it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {

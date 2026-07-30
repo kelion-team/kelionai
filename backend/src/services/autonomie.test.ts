@@ -69,9 +69,11 @@ vi.mock('../db.js', () => ({
   },
 }))
 
+let ultimulPrompt = ''
 vi.mock('./brain.js', () => ({
-  brainCompleteWithTools: async (_prompt: string, tools: { name: string }[]) => {
+  brainCompleteWithTools: async (prompt: string, tools: { name: string }[]) => {
     turiDeMaini++
+    ultimulPrompt = prompt
     uneltePrimite = tools.map((t) => t.name)
     return spuseCreierul
   },
@@ -283,6 +285,22 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(r.motiv).toContain('reparație')
     expect(jobs[0].orderText).toContain('REPARI CE AI STRICAT TU')
     expect(jobs[0].orderText).toContain('nu prinde plata fără cod')
+  })
+
+  it('după 3 încercări IESE ȘI CAUTĂ — nu abandonează, nu se învârte', async () => {
+    // Adrian, 30 iul: „după 3 trebuie să caute soluții, să iasă, să identifice
+    // soluții, să studieze problema, să-și instaleze unelte diverse — în niciun
+    // caz să abandoneze sau să stea în buclă."
+    // M0 e singurul rămas, și a picat de 3 ori.
+    pasInchis('M1'); pasInchis('M2'); pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    kv.set('autonomie:pas:M0', JSON.stringify({ job: 0, incercari: 3 }))
+
+    await poateSaLucreze()
+    expect(ultimulPrompt).toContain('AI ÎNCERCAT DEJA DE 3 ORI')
+    expect(ultimulPrompt).toContain('IEȘI ȘI CAUTĂ') // browser pe eroarea exactă
+    expect(ultimulPrompt).toContain('INSTALEAZĂ-ȚI UNELTE') // își pune ce-i lipsește
+    expect(ultimulPrompt).toContain('Nu ai voie să abandonezi')
+
   })
 
   it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {

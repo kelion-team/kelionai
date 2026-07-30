@@ -139,6 +139,36 @@ export function voiceCapabilityNames(): string[] {
   return CAPABILITIES.filter((c) => c.voice).map((c) => c.name)
 }
 
+/** CE ȘTIE EL CĂ ARE — inventarul propriu, pus în capul creierului.
+ *
+ *  Adrian, 30 iul: „trebuie să fie conștient de ce are, ce capabilități are,
+ *  toate să-i fie activate în creier și apelabile direct."
+ *
+ *  Uneltele îi erau date (definițiile pleacă la model la fiecare tură), dar
+ *  nicăieri nu scria, pe limba lui, CE POATE — grupat, cu ce face fiecare. Un
+ *  agent care nu-și cunoaște inventarul nu-l folosește: cere voie, sau spune
+ *  „nu pot" pentru ceva ce are în mână. Textul se DERIVĂ din registru, deci nu
+ *  poate rămâne în urmă când se adaugă sau se scoate o capabilitate.
+ *
+ *  `doarAdmin=false` → doar ce vede un user obișnuit (fără uneltele de admin). */
+export function inventarulMeu(doarAdmin = true): string {
+  const vizibile = CAPABILITIES.filter((c) => c.chat && (doarAdmin || !c.admin))
+  const grupe = new Map<string, string[]>()
+  for (const c of vizibile) {
+    const g = grupe.get(c.category) ?? []
+    g.push(`${c.name} (${c.does})`)
+    grupe.set(c.category, g)
+  }
+  const randuri = [...grupe.entries()].map(([cat, list]) => `• ${cat}: ${list.join('; ')}`)
+  return (
+    `CE POȚI, CONCRET — inventarul tău complet (${vizibile.length} capabilități, ` +
+    `toate ACTIVE și apelabile direct, chiar acum):\n${randuri.join('\n')}\n` +
+    `Nu ceri voie ca să folosești ce e în lista asta și nu spui „nu pot" pentru ` +
+    `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_gap ` +
+    `sau cere-ți unealta cu propose_tool — nu te opri la „nu am".`
+  )
+}
+
 /** ADORMITE PE VOCE: există (pe chat) dar vocea nu ajunge la ele. Ținta §1/§6
  *  e ca lista asta să ajungă GOALĂ. O expunem, nu o ascundem. */
 export function dormantOnVoice(): Capability[] {
