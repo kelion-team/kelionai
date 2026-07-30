@@ -951,6 +951,14 @@ export default function Stage({ user }: { user: User }) {
               >
                 Stripe £{brainCredit.stripe.available.toFixed(2)}
                 {brainCredit.stripe.pending > 0 && ` (+£${brainCredit.stripe.pending.toFixed(2)} în tranzit)`}
+                {/* „stripe 0? am băgat bani" — dacă soldul e ținut în ALTĂ monedă,
+                    zeroul de mai sus e adevărat doar pentru lire. Spune-o. */}
+                {(brainCredit.stripe.alteMonede ?? []).map((m) => (
+                  <span key={m.currency}>
+                    {' '}
+                    + {(m.available + m.pending).toFixed(2)} {m.currency.toUpperCase()}
+                  </span>
+                ))}
               </button>
             )}
           </>

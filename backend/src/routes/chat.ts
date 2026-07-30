@@ -629,6 +629,24 @@ export const PROMO_TOOL: Tool = {
 // \x1f{"monitor":{"url":"...","title":"..."}}\x1f
 const CTRL = String.fromCharCode(31)
 
+// A VĂZUT OMUL CEVA? (Adrian, 30 iul: „răspuns = nimic")
+//
+// Pe fir pleacă două feluri de lucruri: text vizibil și cadre de control
+// (`CTRL{...}CTRL`). O parte din cadre sunt PUR-protocol — {turn}, {heard},
+// {lang}, {receipt}, {ping}, {desync} — și pleacă la FIECARE tură, inclusiv una
+// în care creierul n-a scos o vorbă. Restul (monitor, card, doc, app, image,
+// build, nav, promo, gest, audio, device, paywall) sunt suprafețe sau acțiuni:
+// omul chiar vede ceva întâmplându-se.
+//
+// Deci „tura a produs ceva vizibil" = text ne-gol SAU măcar un cadru ne-protocol.
+const CADRE_PROTOCOL = /"(turn|heard|lang|receipt|ping|desync)"\s*:/
+export function areCevaDeVazut(chunk: string): boolean {
+  const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
+  if (chunk.replace(cadru, '').trim() !== '') return true
+  for (const f of chunk.match(cadru) ?? []) if (!CADRE_PROTOCOL.test(f)) return true
+  return false
+}
+
 // VOCEA CREIERULUI (Adrian, 4 iul): sinteza se face pe SERVER (Chirp 3 HD, limba
 // userului), audio-ul se trimite ca CADRE {audio} și aplicația doar le decodează
 // + redă la coadă (audioIO.ts). Frontul NU sintetizează nimic (TTS de front = mort).
@@ -1489,9 +1507,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // tăcere trimitem un heartbeat comentat SSE — ține conexiunea vie prin
     // Cloudflare și nu se traduce în text sau cadre de control pe client.
     let lastByteAt = Date.now()
+    // O TURĂ NU SE TERMINĂ NICIODATĂ ÎN TĂCERE (Adrian, 30 iul: „răspuns = nimic").
+    // `sawVisible` devine true la ORICE ieșire pe care omul chiar o vede: text de la
+    // creier, un cadru de suprafață (monitor/card/doc/app/imagine/build/nav/promo/
+    // gest/voce) sau o acțiune de dispozitiv. Cadrele PUR-protocol
+    // ({turn}/{heard}/{lang}/{receipt}/{ping}/{desync}) și heartbeat-ul NU contează —
+    // ele pleacă și când creierul n-a scos o vorbă. Dacă la final n-a văzut nimic,
+    // scriem un mesaj onest: o eroare tăcută e tot o eroare (regula nr. 1), nu „nimic".
+    // Interceptorul e locul potrivit — vede TOATE scrierile (text, unelte, agenți,
+    // voce) fără să atingem fiecare loc de apel.
+    let sawVisible = false
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
       if (typeof chunk === 'string' && chunk.length > 0) {
+        if (!sawVisible) sawVisible = areCevaDeVazut(chunk)
         const sse = appendTurn(user.email, turnId, chunk)
         return (rawWrite as (...a: unknown[]) => boolean)(sse, ...rest)
       }
@@ -1742,6 +1771,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           throw ge
         }
       }
+      // CREIER CARE „REUȘEȘTE" DAR NU SPUNE NIMIC (Adrian, 30 iul: „răspuns =
+      // nimic"). Un model care nu mai există la furnizor, o completare goală sau
+      // o tură care se termină fără text NU aruncă eroare — deci plasa de mai jos
+      // (catch) nu se activează niciodată, iar tura se închidea MUTĂ. Pe client,
+      // turele goale se șterg → omul vedea NIMIC: nici răspuns, nici eroare.
+      // Aceeași forma de plasă ca la gemini→secundar: dacă n-a curs text și n-a
+      // ieșit nimic vizibil, mai încercăm O DATĂ pe modelul de rezervă.
+      if (!r.text.trim() && !textFlowed && !sawVisible) {
+        const rezerva = await resolveModel('work', null)
+        if (rezerva && rezerva !== orchestratorModel) {
+          console.error(`[CHAT MUT] ${orchestratorModel} a răspuns gol → reîncerc pe ${rezerva}`)
+          orchestratorModel = rezerva
+          r = await runBrainOnce()
+        }
+      }
       assistantText += r.text
       usage.usd += r.costUsd
       // CONTABILITATE REALĂ (audit QA 24 iul, A1): costul CREIERULUI intră în
@@ -1779,6 +1823,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
 
     // ── FINAL TURN ──
+    // NICIODATĂ TĂCERE (Adrian, 30 iul: „răspuns = nimic", „nu face nimic").
+    // Ultima plasă, după TOATE căile: dacă tura n-a produs nimic vizibil — nici
+    // text, nici o suprafață — omul primește un mesaj onest, nu vid. O eroare
+    // tăcută rămâne o eroare (regula nr. 1); tăcerea e cel mai rău răspuns,
+    // fiindcă nu se poate deosebi de „aplicația e moartă".
+    if (!sawVisible) {
+      const mut = ro
+        ? 'Nu am putut produce un răspuns la tura asta (creierul a răspuns gol). Încearcă din nou — dacă se repetă, schimbă modelul din Setări.'
+        : "I couldn't produce a reply this turn (the brain returned empty). Try again — if it repeats, switch the model in Settings."
+      reply.raw.write(mut)
+      void saveMessage(user.email, 'assistant', mut)
+      console.error('[CHAT MUT] tura s-a încheiat fără nimic vizibil', {
+        model: orChatModel,
+        user: user.email,
+      })
+    }
     await voice.finish()
     reply.raw.end()
 
