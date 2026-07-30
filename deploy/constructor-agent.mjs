@@ -298,7 +298,46 @@ const TOOLS = [
   { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Termină lucrarea: dai titlul + corpul PR-ului (română). Cheam-o DOAR după build verde (și teste verzi pe backend dacă l-ai atins).', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
+  // ── UNELTELE GRELE (Adrian, 30 iul: „am cerut agenți full echipați și tu i-ai
+  // dat doar ciurucuri" · „toate, trebuie echipat la full") ───────────────────
+  // Avea dreptate: cu ls/grep/read/write/edit/run/finish poți scrie cod, dar nu
+  // poți deschide un site și nu poți pune o cheie. Un ordin care cerea un portal
+  // era IMPOSIBIL pentru el — și ar fi picat de trei ori, pe banii ownerului.
+  // Acum le are, prin aplicație (`/api/constructor/tool`, aceeași poartă
+  // x-bridge-secret): browserul e Playwright în procesul aplicației, iar
+  // secretele se scriu criptat în repo.
+  { type: 'function', function: { name: 'browser_open', description: 'Deschide un site REAL în browserul de pe server și îți întoarce textul paginii + elementele numerotate pe care poți da click.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+  { type: 'function', function: { name: 'browser_read', description: 'Recitește pagina deschisă (text + elemente numerotate).', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'browser_click', description: 'Click pe elementul cu numărul dat, din pagina deschisă.', parameters: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'] } } },
+  { type: 'function', function: { name: 'browser_type', description: 'Scrie text în câmpul cu numărul dat. submit=true apasă Enter după. NU scrie niciodată parole sau date de card.', parameters: { type: 'object', properties: { index: { type: 'number' }, text: { type: 'string' }, submit: { type: 'boolean' } }, required: ['index', 'text'] } } },
+  { type: 'function', function: { name: 'browser_scroll', description: 'Derulează pagina („down" sau „up").', parameters: { type: 'object', properties: { direction: { type: 'string' } }, required: ['direction'] } } },
+  { type: 'function', function: { name: 'browser_key', description: 'Apasă o tastă/combinație în pagină (Enter, Tab, Escape, ArrowDown, Control+A).', parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } } },
+  { type: 'function', function: { name: 'browser_click_at', description: 'Click pe coordonatele x,y din pagină (1280×800), pentru ce nu apare în lista numerotată.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } } },
+  { type: 'function', function: { name: 'browser_back', description: 'Înapoi la pagina anterioară.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'browser_close', description: 'Închide browserul când ai terminat de navigat.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'secret_lista', description: 'Ce chei există în secretele repo-ului (DOAR numele — valorile nu le dă nimeni, prin construcție).', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'secret_pune', description: 'Pune o cheie în secretele repo-ului, criptată. NU repeta niciodată valoarea în răspunsul tău, în PR sau într-un fișier — doar numele și lungimea.', parameters: { type: 'object', properties: { nume: { type: 'string' }, valoare: { type: 'string' } }, required: ['nume', 'valoare'] } } },
+  { type: 'function', function: { name: 'secret_publica', description: 'Duce cheile pe serverul de producție și repornește aplicația ca să le încarce.', parameters: { type: 'object', properties: {} } } },
+  // ȘI RESTUL — „toate, trebuie echipat la full" (Adrian, 30 iul). Baza de date
+  // reală, sănătatea proprie și operațiile de pe server. Fără ele, un ordin care
+  // cere „vezi ce e în tabelă" sau „repornește și verifică" era imposibil.
+  { type: 'function', function: { name: 'db_tables', description: 'Vezi tabelele bazei de date de producție și forma lor.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'db_query', description: 'Interoghează baza de date de producție (SQL). Folosește-o ca să VERIFICI ce ai construit, pe date reale.', parameters: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } } },
+  { type: 'function', function: { name: 'system_health', description: 'Sănătatea aplicației: sincronizarea publicării (live vs master), rulări roșii, ordine picate, disc, bază de date, punga creierului.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'run_runbook', description: 'Operație pe server, dintr-o listă fixă: diagnostic, restart-app, restart-caddy, loguri-app, backup-db, publish-master, curata-zombi, sentinel-now.', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } } },
+  { type: 'function', function: { name: 'runbook_status', description: 'Starea rulărilor de operații pornite de tine.', parameters: { type: 'object', properties: { name: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'runbook_log', description: 'Jurnalul unei rulări de operație, după id.', parameters: { type: 'object', properties: { run_id: { type: 'number' } }, required: ['run_id'] } } },
+  { type: 'function', function: { name: 'request_repair', description: 'Notează durabil un ordin de reparație pentru ce ai găsit și nu intră în lucrarea asta (nu se pierde, ajunge la owner).', parameters: { type: 'object', properties: { title: { type: 'string' }, details: { type: 'string' } }, required: ['title', 'details'] } } },
 ]
+
+// Care unelte NU se execută aici, ci în aplicație (browser Playwright în proces,
+// secrete criptate, baza de date, operațiile de pe server). Lista se DERIVĂ din
+// TOOLS, ca să nu poată rămâne în urmă: uneltele locale sunt cele 7 de fișiere,
+// tot restul trece prin `/api/constructor/tool`.
+const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'run', 'finish'])
+const UNELTE_PRIN_APLICATIE = new Set(
+  TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
+)
 
 const SYSTEM = `Ești CONSTRUCTORUL lui Kelionai — lucrătorul de cod autonom, pe serverul proiectului.
 Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (scripturi VPS).
@@ -768,6 +807,17 @@ async function main() {
             else if (c.function.name === 'finish') {
               finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
               result = 'lucrarea se închide — verific și public'
+            } else if (UNELTE_PRIN_APLICATIE.has(c.function.name)) {
+              // UNELTELE GRELE: trăiesc în aplicație (browser Playwright în
+              // proces + scrierea criptată a secretelor). Le chemăm prin aceeași
+              // poartă x-bridge-secret ca restul capătului de lucrător, cu
+              // aceleași reîncercări la 5xx — deci o repornire a aplicației nu
+              // omoară un ordin în lucru.
+              const r = await api('/api/constructor/tool', {
+                method: 'POST',
+                body: JSON.stringify({ name: c.function.name, args }),
+              })
+              result = r?.rezultat ?? 'aplicația nu a răspuns la unealtă'
             } else result = 'unealtă necunoscută'
           } catch (e) {
             result = `EROARE: ${e.message}`

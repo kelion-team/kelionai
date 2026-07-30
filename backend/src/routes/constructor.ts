@@ -4,6 +4,7 @@ import { getSessionUser } from '../session.js'
 import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
+import { uneltele } from '../services/autonomie.js'
 
 // ── CONSTRUCTORUL — conducta „ordin → cod → PR" (Adrian, 27 iul: „Kelion
 // trebuie să poată crea orice soft îi cere admin, orice modificare, orice
@@ -100,6 +101,30 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!id || !progress) return reply.code(400).send({ error: 'bad_request' })
     await updateBuildJobProgress(id, progress)
     return reply.send({ ok: true })
+  })
+
+  // ── UNELTELE GRELE, ÎN MÂNA CONSTRUCTORULUI (Adrian, 30 iul: „am cerut agenți
+  // full echipați și tu i-ai dat doar ciurucuri") ─────────────────────────────
+  // Avea dreptate. Constructorul avea 7 unelte — ls/grep/read/write/edit/run/
+  // finish — deci putea scrie cod, dar nu putea deschide un site și nu putea
+  // pune o cheie. Un ordin care cerea un portal era imposibil pentru el, și ar
+  // fi picat de trei ori pe banii ownerului.
+  //
+  // Aici își ia browserul (cele 9 unelte reale, Playwright în proces) și
+  // secretele (secret_pune/lista/publica). Dispatch-ul e ACELAȘI cu al buclei
+  // autonome — o singură implementare, importată, nu copiată.
+  //
+  // Poarta: `x-bridge-secret`, ca restul capătului de lucrător. Dincolo de ea
+  // stau unelte care ating internetul și cheile — deci nicio altă cale de acces.
+  app.post<{ Body: { name?: string; args?: Record<string, unknown> } }>('/api/constructor/tool', async (req, reply) => {
+    if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
+      return reply.code(401).send({ error: 'unauthorized' })
+    const name = String(req.body?.name ?? '')
+    if (!name) return reply.code(400).send({ error: 'bad_request' })
+    const rezultat = await uneltele(name, req.body?.args ?? {}).catch((e: Error) =>
+      JSON.stringify({ error: e.message }),
+    )
+    return reply.send({ rezultat })
   })
 
   // Joburile de afișat pe monitor (active + terminate recent) + pasul lor curent
