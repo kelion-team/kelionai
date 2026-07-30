@@ -10,8 +10,17 @@
 // tab; altfel cade pe pagina de start, ca să nu ducă nicăieri.
 import React from 'react'
 
-export default function BackLink({ label = 'Back' }: { label?: string }): React.JSX.Element {
+export default function BackLink({
+  label = 'Back',
+  onBack,
+}: {
+  label?: string
+  /** Panourile nu sunt pagini: „înapoi" înseamnă închide-mă și lasă-mă unde
+   *  eram. Când e dat, el decide; altfel ne întoarcem în istoricul paginii. */
+  onBack?: () => void
+}): React.JSX.Element {
   const inapoi = (): void => {
+    if (onBack) return onBack()
     // history.length > 1 = am ajuns aici dintr-o altă pagină din acest tab.
     // Deschis direct din link/marcaj → nu există „înapoi", mergem acasă.
     if (window.history.length > 1) window.history.back()
