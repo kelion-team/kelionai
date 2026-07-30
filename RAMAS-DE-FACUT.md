@@ -50,8 +50,8 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | # | Cerința | Cât e făcut | Ce mai e |
 |---|---|---|---|
 | C1 | **Toată aplicația în engleză, apoi limba userului** | ✅ **tot ce vede un user** (30 iul, PR #567): Stage 20 de texte + ChatPanel 3, mutate în `i18n.ts` cu **toate cele 7 limbi**. Numărătoarea de dimineață (98) era umflată — includea comentarii din cod și cuvintele-cheie ale comenzilor vocale românești, care TREBUIE să rămână românești. | rămâne **panoul de Admin: 53 de texte** (+2 în `CardReveal`), văzute doar de admin |
-| C2 | **Buton „înapoi" pe toate panourile și paginile** | Credits, Login, Manual, AdminPanel, CustomerSettings | lipsește pe **Landing**, **Stage**, **ChatPanel**, **ContactModal** |
-| C3 | **Manualul** | 7 limbi, carte cu întors pagina, descărcabil | arată rudimentar — **fără imagini, fără diagrame**; ai zis „nivel de clasă pregătitoare" și n-am revenit |
+| C2 | **Buton „înapoi" pe toate panourile și paginile** | ✅ **gata** (verificat 30 iul): `BackLink` pe Credits, Login, Manual, AdminPanel, CustomerSettings; `ContactModal` are X **și** buton „Close". Inventarul de dimineață greșea aici — se baza pe o căutare după `BackLink`, care nu vede X-ul unui modal. | **Landing** și **Stage** NU primesc buton: sunt rădăcini, n-au „pagina anterioară" |
+| C3 | **Manualul** | ✅ **refăcut** (30 iul, PR #568): copertă pe pagină proprie, cuprins cu ancore, capitole numerotate, pictogramă pe fiecare grupă de funcții, filă-schemă „cum călătorește o cerere" (4 pași). Se traduce în toate cele 7 limbi. | fără capturi de ecran, intenționat: se învechesc la fiecare schimbare de interfață. De reevaluat cu ochii tăi. |
 | C4 | **Vocea per user** | coloana în bază + citit/scris, puse deoparte | de legat la vocea live și la TTS + selector în Setări. Parcat la cererea ta. |
 | C5 | **Autonomie demonstrată live, cu dovadă** | constructorul merge (ordin #14, PR #483) | proba cap-coadă pe chat ȘI voce, cu dovadă, n-a fost făcută |
 
