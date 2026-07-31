@@ -4,25 +4,28 @@ import { googleTools } from './google.js'
 import { CAPABILITIES } from './brainCapabilities.js'
 import { OPEN_APP_VIEW_TOOL } from './brainToolDefs.js'
 
-// ── VOCE LIVE — proxy SDP către OpenAI Realtime (WebRTC) ─────────────────────
-// Arhitectura (reconstruită fidel din aplicația live, adusă în git ca sursă
-// unică): browserul face oferta WebRTC și trimite SDP-ul la backend; backendul
-// îl relayează la OpenAI cu cheia ascunsă pe server și INJECTEAZĂ server-side
-// modelul, o SINGURĂ voce masculină și persona/limba persistată a userului.
-// Clientul nu vede niciodată cheia, modelul sau vocea — le controlăm noi.
+// ── LIVE VOICE — SDP proxy to OpenAI Realtime (WebRTC) ───────────────────────
+// The architecture (faithfully reconstructed from the live app, brought into git
+// as the single source): the browser makes the WebRTC offer and sends the SDP to
+// the backend; the backend relays it to OpenAI with the key hidden on the server
+// and INJECTS server-side the model, a SINGLE male voice and the user's persisted
+// persona/language. The client never sees the key, the model or the voice — we
+// control them.
 //
-// Contract OpenAI verificat LIVE cu cheia reală (22 iul):
+// OpenAI contract verified LIVE with the real key (Jul 22):
 //   POST https://api.openai.com/v1/realtime/calls
 //   Authorization: Bearer <OPENAI_KEY>
-//   multipart/form-data: sdp=<oferta browserului>, session=<JSON config>
-//   → întoarce answer-ul SDP (text). `audio.output.voice` fixează vocea;
-//     `instructions` fixează persona + limba; `model` alege modelul realtime.
+//   multipart/form-data: sdp=<the browser's offer>, session=<JSON config>
+//   → returns the SDP answer (text). `audio.output.voice` fixes the voice;
+//     `instructions` fixes persona + language; `model` picks the realtime model.
 
 const OPENAI_CALLS = 'https://api.openai.com/v1/realtime/calls'
 
-// Persona Kelion pentru VOCE — consistentă cu voiceTurn.ts (ton cald, scurt,
-// vorbit), plus blocajul ABSOLUT de limbă (aceeași regulă ca în chat): Kelion
-// vorbește EXCLUSIV în limba persistată a userului, orice ar auzi.
+// Kelion's persona for VOICE — consistent with voiceTurn.ts (warm, short, spoken
+// tone), plus the ABSOLUTE language lock (same rule as in chat): Kelion speaks
+// EXCLUSIVELY in the user's persisted language, whatever it hears.
+// NOTE: the persona prompt itself stays in Romanian on purpose — it is
+// behavior-tuned model-facing text from live incidents, not user-visible UI.
 export function realtimeInstructions(lang: string, meserie?: string | null, hardLock = false): string {
   const rol = meserie
     ? ` Ai rolul activ ales de utilizator: „${meserie}" — răspunde din perspectiva acestui rol.`
@@ -35,26 +38,26 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `respectuos, calm — NICIODATĂ grosolan, vulgar sau strident. ` +
     `Dacă NU auzi vorbire CLARĂ (tăcere, zgomot de fundal, fragmente neinteligibile), ` +
     `TACI — nu răspunde, nu iniția tu conversația, așteaptă o propoziție reală.` +
-    // „KELION/KEI ÎN FAȚĂ" (Adrian, 26 iul: „de ce nu merge chestia cu Kelion
-    // sau Kei în față?"): numele e ADRESAREA. Când în cameră se vorbește cu
-    // altcineva, Kelion nu se bagă; numele îl cheamă înapoi. Fără asta, în
-    // full-duplex răspundea la ORICE auzea, inclusiv la discuții care nu-i
-    // erau adresate.
+    // "KELION/KEI UP FRONT" (Adrian, Jul 26: "why doesn't the Kelion-or-Kei-up-front
+    // thing work?"): the name is the ADDRESSING. When someone else is being talked
+    // to in the room, Kelion stays out; the name calls it back. Without this, in
+    // full-duplex it answered ANYTHING it heard, including conversations not
+    // addressed to it.
     ` ADRESAREA PE NUME: răspunzi când ți se adresează („Kelion" sau „Kei") ` +
     `sau când continuă firesc conversația cu tine. Dacă auzi clar că utilizatorul ` +
     `vorbește cu ALTĂ persoană (nu cu tine — alt nume, altă direcție a discuției), ` +
     `TACI și așteaptă; numele tău te recheamă imediat în conversație.` +
-    // OCHI + ESCALADARE (Adrian: „de ce nu vede, de ce nu escaladează?"). Vocea
-    // avea uneltele, dar nu i se spunea să le folosească → nu vedea, nu urca.
+    // EYES + ESCALATION (Adrian: "why doesn't it see, why doesn't it escalate?").
+    // Voice had the tools, but wasn't told to use them → didn't see, didn't climb.
     ` Ai OCHI, dar DOI diferiți — nu-i confunda (regula lui Adrian, 27 iul): ` +
     `CAMERA („look") e DOAR pentru contextul clar de cameră — „mă vezi?", „ce vezi ` +
     `pe cameră?", „uită-te la asta", „citește ce-ți arăt"; MONITORUL („get_monitor") ` +
     `e pentru „ce e pe monitor/ecran?", „ce mi-ai afișat?" — citește ce e afișat ` +
     `chiar acum și vorbește despre AIA. Să răspunzi cu camera la o întrebare ` +
     `despre monitor e greșeală gravă.` +
-    // COMENZILE DE AFIȘARE (Adrian, 27 iul, dovadă live: „deschide pe monitor
-    // youtube" → „nu e nimic pe monitor" în loc de execuție; apoi pagina
-    // youtube deschisă ca embed — fără redare). Regula: ordinul se EXECUTĂ.
+    // DISPLAY COMMANDS (Adrian, Jul 27, live proof: "open youtube on the monitor"
+    // → "there's nothing on the monitor" instead of execution; then the youtube
+    // page opened as an embed — no playback). The rule: the order gets EXECUTED.
     ` COMENZI DE AFIȘARE: „deschide/pune/arată pe monitor X" e ORDIN — deschide ` +
     `X ACUM cu unealta potrivită; nu e întrebare despre monitor: NU chema ` +
     `get_monitor înainte și NU răspunde „nu e nimic pe monitor" (gol e starea ` +
@@ -67,10 +70,10 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `arătatul spre monitor când afișezi ceva, o expresie la o veste — cheamă ` +
     `play_avatar_gesture cu gestul potrivit, cumpătat, ca un gentleman: rar și ` +
     `cu rost, niciodată teatral.` +
-    // §6 CREIER UNIC COMPLET (Adrian, 29 iul: „fă-l complet") — vocea e urechile
-    // și gura ACELUIAȘI creier ca scrisul; NU mai răspunde din capul ei la nimic
-    // cu conținut. Orice răspuns real trece prin ask_brain; direct rămân DOAR
-    // acțiunile de dispozitiv/afișare (ale browserului) și vorbele goale.
+    // §6 SINGLE COMPLETE BRAIN (Adrian, Jul 29: "make it complete") — voice is the
+    // ears and mouth of the SAME brain as writing; it no longer answers anything
+    // with content from its own head. Every real answer goes through ask_brain;
+    // only device/display actions (the browser's) and empty words stay direct.
     ` EȘTI URECHILE ȘI GURA UNUI SINGUR CREIER — NU răspunde din cunoștințele tale la ` +
     `nimic cu conținut real. Pentru ORICE cere un răspuns adevărat — un fapt, o ` +
     `explicație, o cunoștință, un sfat, o părere, o decizie, raționament, cod, matematică, ` +
@@ -83,39 +86,40 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `(lucrează pe dispozitiv/ecran, le chemi tu) — și (b) lipici de conversație: un salut, ` +
     `„da"/„nu"/„mulțumesc", o întrebare scurtă de clarificare. Tot ce are conținut trece ` +
     `prin creier — așa ești la fel de deștept pe voce ca în scris.` +
-    // ACCES LA PROPRIUL COD ȘI LA PROPRIILE DATE (Adrian, 27 iul: „Kelion nu
-    // poate vedea tot codul sursă al lui, de ce?" — putea, dar doar creierul
-    // din scris are uneltele; vocea nega accesul în loc să escaladeze).
+    // ACCESS TO ITS OWN CODE AND ITS OWN DATA (Adrian, Jul 27: "Kelion can't see
+    // all of its own source code, why?" — it could, but only the writing brain has
+    // the tools; voice denied access instead of escalating).
     ` AI ACCES INTEGRAL la propriul tău cod sursă (fiecare fișier), la baza ta de ` +
     `date permanentă și la starea proceselor tale — prin „ask_brain": expertul are ` +
     `uneltele de citit/căutat sursa, SQL pe baza de date, starea rulărilor și poate ` +
     `chiar construi/modifica soft la ordinul ownerului. NU spune NICIODATĂ „nu am ` +
     `acces la codul meu/baza mea de date" — escaladează prin ask_brain și adu răspunsul.` +
-    // REGULA FAPTEI (Adrian, 27 iul: „când zice că face ceva trebuie să și
-    // facă — rămâne doar declarativ"): zis fără unealtă = minciună.
+    // THE DEED RULE (Adrian, Jul 27: "when it says it does something it must
+    // actually do it — it's only declarative now"): said without the tool = a lie.
     ` REGULA FAPTEI: nu spune NICIODATĂ „am făcut", „trimit", „mă ocup", „am salvat" ` +
     `fără să fi chemat CHIAR ACUM unealta corespunzătoare și să ai rezultatul ei. ` +
     `Ai unealtă → o chemi întâi, apoi vorbești despre rezultatul REAL. N-ai unealtă ` +
     `pentru ce ți se cere → spui sincer că încă nu poți și mergi mai departe. ` +
     `O acțiune declarată fără dovada uneltei e minciună.` +
-    // ANCORARE ÎN REALITATE (Adrian, 29 iul: „să nu poată fi păcălit"; dovada
-    // live: „bună seara" dimineața). Regula asta exista în scris (chat.ts), NU
-    // și pe calea rapidă de voce — de-aia vocea inventa.
+    // ANCHORING IN REALITY (Adrian, Jul 29: "so it can't be fooled"; live proof:
+    // "good evening" in the morning). This rule existed in writing (chat.ts), NOT
+    // on the fast voice path — that's why voice made things up.
     ` NU INVENTA NICIODATĂ fapte, vreme, știri, prețuri, date sau rezultate pe care o unealtă ` +
     `nu ți le-a întors CHIAR ACUM. Dacă nu știi sau unealta n-a întors nimic, spune sincer, scurt ` +
     `— „nu știu" / „n-am găsit" e MEREU peste o născocire. Salutul și orice referire la partea ` +
     `zilei (bună dimineața/ziua/seara) urmează ORA REALĂ din context — niciodată ghicită.` +
     rol
-  // LIMBA (Adrian, 24 iul: „default engleză; când mă aude, schimbă TOT pe limba
-  // mea și o menține per user"). Dacă userul ARE deja o limbă stabilită, o
-  // păstrăm (consistență între sesiuni). Dacă NU (user nou, limbă nedetectată),
-  // pornim în ENGLEZĂ și OGLINDIM limba pe care o vorbește userul, stabil.
+  // LANGUAGE (Adrian, Jul 24: "default English; when it hears me, it switches
+  // EVERYTHING to my language and keeps it per user"). If the user ALREADY has an
+  // established language, we keep it (consistency across sessions). If NOT (new
+  // user, undetected language), we start in ENGLISH and MIRROR the language the
+  // user actually speaks, consistently.
   //
-  // GARDĂ DE LIMBĂ (Adrian, 24 iul: „vorbește în altă limbă" — dovadă live:
-  // Kelion răspundea în RUSĂ la vorbire românească). Fără ancoră, transcrierea
-  // audio ghicea printre TOATE limbile și auzea româna ca rusă. Constrângem
-  // vocea EXCLUSIV la cele 7 limbi ale aplicației; orice nesiguranță → ENGLEZĂ;
-  // niciodată rusă/ucraineană sau altceva din afara listei.
+  // LANGUAGE GUARD (Adrian, Jul 24: "it speaks another language" — live proof:
+  // Kelion answered in RUSSIAN to Romanian speech). Without an anchor, audio
+  // transcription guessed among ALL languages and heard Romanian as Russian. We
+  // constrain voice EXCLUSIVELY to the app's 7 languages; any uncertainty →
+  // ENGLISH; never Russian/Ukrainian or anything off the list.
   const SUPPORTED = 'English, Romanian, French, Spanish, Portuguese, Italian, German'
   const guard =
     `\n\nLANGUAGE — HARD RULES: You may speak ONLY in one of these languages: ` +
@@ -123,9 +127,10 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
     `this list. If you are ever unsure which language you heard, answer in ` +
     `English. Never mix two languages in one reply.`
   const known = /^[a-z]{2}$/.test(lang)
-  // HARD LOCK (Adrian, admin, în Italia): „adminul primește română MEREU,
-  // indiferent ce aude". Fără lock, când Adrian aude/spune italiană vocea comuta
-  // pe italiană → „2 voci: ro și italiană". Cu lock, limba NU se schimbă NICIODATĂ.
+  // HARD LOCK (Adrian, admin, in Italy): "the admin ALWAYS gets Romanian,
+  // whatever he hears". Without the lock, when Adrian hears/speaks Italian the
+  // voice switches to Italian → "2 voices: ro and Italian". With the lock, the
+  // language NEVER changes.
   const limba = hardLock && known
     ? `\n\nLIMBĂ: vorbește EXCLUSIV în ${langLabel(lang)}, MEREU — inclusiv ` +
       `SALUTUL și prima ta replică, din primul cuvânt. NU comuta NICIODATĂ pe ` +
@@ -144,21 +149,21 @@ export function realtimeInstructions(lang: string, meserie?: string | null, hard
   return persona + guard + limba
 }
 
-// ── UNELTELE VOCII (Adrian, 24 iul: „nu apelează instrumentele, îi lipsesc
-// instrumente de a afișa pe ecran... de ce nu e autonom") ────────────────────
-// Sesiunea Realtime primea DOAR persona — zero funcții → în voce Kelion nu
-// putea afișa nimic și nu era autonom. Acum primește ACELEAȘI unelte ca chatul
-// scris (subsetul relevant): clientul primește apelul pe dataChannel, îl
-// execută prin POST /api/realtime/tool (serverul rulează runGoogleTool cu
-// cheile lui) și deschide monitorul din screen_url. show_on_screen se execută
-// direct în client (monitorul e al browserului).
-// SURSA UNICĂ (CREIER UNIC §1, Adrian: „nu înzeci dublările"): numele
-// skill-urilor Google de pe voce vin ACUM din registrul unic
-// (brainCapabilities), NU dintr-o listă paralelă hardcodată. Zero duplicare,
-// zero drift — dacă se schimbă registrul, se schimbă și vocea, dintr-un singur
-// loc. Plafonul de 31 al vocii rămâne (limită MĂSURATĂ a OpenAI Realtime: la
-// 22:09/31 unelte → 201 în 0,4s; la 22:20/37 → 504 mereu). Ce nu încape pe voce
-// se vede explicit în `dormantOnVoice()`, niciodată pe ascuns.
+// ── THE VOICE'S TOOLS (Adrian, Jul 24: "it doesn't call the instruments, it's
+// missing instruments to display on screen... why isn't it autonomous") ────────
+// The Realtime session used to get ONLY the persona — zero functions → in voice
+// Kelion couldn't display anything and wasn't autonomous. Now it gets the SAME
+// tools as the written chat (the relevant subset): the client receives the call
+// on the dataChannel, executes it through POST /api/realtime/tool (the server
+// runs runGoogleTool with its keys) and opens the monitor from screen_url.
+// show_on_screen executes directly in the client (the monitor is the browser's).
+// SINGLE SOURCE (SINGLE BRAIN §1, Adrian: "don't decimate the duplications"):
+// the names of the Google skills on voice now come from the single registry
+// (brainCapabilities), NOT from a parallel hardcoded list. Zero duplication,
+// zero drift — if the registry changes, voice changes too, from one place. The
+// voice's ceiling of 31 stays (MEASURED limit of OpenAI Realtime: at 22:09 with
+// 31 tools → 201 in 0.4s; at 22:20 with 37 → 504 always). What doesn't fit on
+// voice is shown explicitly in `dormantOnVoice()`, never hidden.
 export const VOICE_TOOL_NAMES = new Set(
   CAPABILITIES.filter((c) => c.category === 'google' && c.voice).map((c) => c.name),
 )
@@ -174,15 +179,15 @@ export function realtimeTools(
       description: t.description ?? '',
       parameters: t.input_schema,
     }))
-  // AUTO-EXTINDERE: uneltele dinamice aprobate, disponibile și în voce —
-  // DAR SUB PLAFONUL DOVEDIT (audit 28 iul, găsirea #4): la 31 de unelte
-  // pornirea dă 201 în 0,4s; la 37 dă 504 la FIECARE încercare (cronologia de
-  // mai sus). Uneltele dinamice ocoleau plafonul: fiecare skill instalat prin
-  // propose_tool se adăuga PESTE cele 31 → vocea reintra în pana de 504. Lăsăm
-  // dinamicele să intre doar cât încape sub prag; restul rămân în chatul scris
-  // (unde sesiunea nu are limita asta).
+  // AUTO-EXTENSION: approved dynamic tools, available in voice too — BUT UNDER
+  // THE PROVEN CEILING (Jul 28 audit, finding #4): at 31 tools startup gives 201
+  // in 0.4s; at 37 it gives 504 on EVERY attempt (the chronology above). Dynamic
+  // tools bypassed the ceiling: every skill installed through propose_tool was
+  // added ON TOP of the 31 → voice fell back into the 504 outage. We let dynamic
+  // tools in only as long as they fit under the threshold; the rest stay in the
+  // written chat (where the session doesn't have this limit).
   const MAX_VOICE_TOOLS = 31
-  const roomForDynamic = Math.max(0, MAX_VOICE_TOOLS - fromGoogle.length - 13) // 13 = uneltele fixe de mai jos
+  const roomForDynamic = Math.max(0, MAX_VOICE_TOOLS - fromGoogle.length - 13) // 13 = the fixed tools below
   const fromDynamic = dynamic.slice(0, roomForDynamic).map((t) => ({
     type: 'function' as const,
     name: t.name,
@@ -193,11 +198,11 @@ export function realtimeTools(
     ...fromGoogle,
     ...fromDynamic,
     {
-      // GPS LA CERERE (pana din 26 iul: după scoaterea fluxului permanent —
-      // regula lui Adrian „doar când e necesară detecția locației" — vocea NU
-      // avea NICIO cale să afle poziția → „GPS nu e accesibil". Unealta asta se
-      // execută ÎN BROWSER (clientul citește GPS-ul real al dispozitivului pe
-      // loc), nu prin /api/realtime/tool.
+      // GPS ON REQUEST (the Jul 26 outage: after removing the permanent flow —
+      // Adrian's rule "only when location detection is needed" — voice had NO way
+      // to learn the position → "GPS is not accessible". This tool executes IN THE
+      // BROWSER (the client reads the device's real GPS on the spot), not through
+      // /api/realtime/tool.
       type: 'function',
       name: 'get_location',
       description:
@@ -219,8 +224,8 @@ export function realtimeTools(
       },
     },
     {
-      // PLAYGROUND DE COD ÎN VOCE (Adrian, 25 iul): Kelion scrie o pagină web
-      // completă și o rulează live pe monitor (cadru izolat), userul o poate salva.
+      // CODE PLAYGROUND IN VOICE (Adrian, Jul 25): Kelion writes a complete web
+      // page and runs it live on the monitor (sandboxed frame); the user can save it.
       type: 'function',
       name: 'run_web_app',
       description:
@@ -235,21 +240,21 @@ export function realtimeTools(
       },
     },
     {
-      // ACCES REAL LA APLICAȚIE (Adrian, 24 iul: „în full-duplex Kelion trebuie
-      // să poată intra în orice tab al aplicației, real"). Deschide panourile
-      // proprii ale aplicației prin voce — clientul execută direct (e UI-ul lui).
-      // Lotul C: declarația vine din sursa UNICĂ (brainToolDefs) și e CONVERTITĂ
-      // în formatul Realtime. Înainte era rescrisă aici literă cu literă — dacă
-      // apărea un panou nou, vocea și scrisul divergeau tăcut.
+      // REAL ACCESS TO THE APP (Adrian, Jul 24: "in full-duplex Kelion must be
+      // able to enter any tab of the app, for real"). Opens the app's own panels
+      // by voice — the client executes directly (it's its UI). Batch C: the
+      // declaration comes from the SINGLE source (brainToolDefs) and is CONVERTED
+      // to the Realtime format. Before, it was rewritten here letter by letter —
+      // if a new panel appeared, voice and writing silently diverged.
       type: 'function',
       name: OPEN_APP_VIEW_TOOL.name,
       description: OPEN_APP_VIEW_TOOL.description ?? '',
       parameters: OPEN_APP_VIEW_TOOL.input_schema,
     },
     {
-      // VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). Kelion privește prin camera
-      // userului. Clientul injectează cadrul curent în `image` înainte de a
-      // trimite apelul la server (vezi ChatPanel onToolCall).
+      // VISION IN VOICE (Adrian: "why doesn't it see?"). Kelion looks through the
+      // user's camera. The client injects the current frame into `image` before
+      // sending the call to the server (see ChatPanel onToolCall).
       type: 'function',
       name: 'get_monitor',
       description:
@@ -280,10 +285,10 @@ export function realtimeTools(
       },
     },
     {
-      // ESCALADAREA ÎN VOCE (Adrian, 24 iul: „incrementează automat modelele pe
-      // nivel de dificultate, de la chat live voce până la cereri foarte grele"):
-      // la o cerere GREA, modelul de voce predă întrebarea CREIERULUI (modelul
-      // work — Claude/GPT prin OpenRouter) și rostește răspunsul expertului.
+      // ESCALATION IN VOICE (Adrian, Jul 24: "automatically scale the models by
+      // difficulty level, from live voice chat up to very heavy requests"): on a
+      // HEAVY request, the voice model hands the question to the BRAIN (the work
+      // model — Claude/GPT through OpenRouter) and speaks the expert's answer.
       type: 'function',
       name: 'ask_brain',
       description:
@@ -296,8 +301,8 @@ export function realtimeTools(
         required: ['request'],
       },
     },
-    // PARITATE VOCE↔CHAT (Adrian, 25 iul: „tot activat, Kelion să le poată folosi"):
-    // notițe, memorie, gesturi, rol — apelabile și din voce, ca în scris.
+    // VOICE↔CHAT PARITY (Adrian, Jul 25: "all enabled, Kelion must be able to use
+    // them"): notes, memory, gestures, role — callable from voice too, as in writing.
     {
       type: 'function',
       name: 'save_note',
@@ -332,50 +337,51 @@ export function realtimeTools(
   ]
 }
 
-// MOTIVUL EȘECULUI, CITIBIL DE MAȘINĂ (28 iul): clientul primea doar „502" și
-// nu putea nici să explice userului, nici să decidă dacă merită reîncercat.
-// Codurile de aici urcă neschimbate în corpul JSON al rutei.
+// THE FAILURE REASON, MACHINE-READABLE (Jul 28): the client got only "502" and
+// could neither explain to the user nor decide whether a retry was worth it. The
+// codes from here go up unchanged in the route's JSON body.
 export type RealtimeFailCode =
-  | 'realtime_not_configured' // n-avem cheie — nu e vina upstreamului
-  | 'upstream_timeout' // am tăiat noi firul: marginea OpenAI n-a răspuns la timp
-  | 'upstream_unreachable' // rețea căzută / DNS / TLS
-  | 'upstream_5xx' // 500/502/503/504 de la marginea OpenAI (pagina Cloudflare)
-  | 'upstream_empty' // 2xx dar answer SDP gol → browserul n-are ce negocia
-  | 'upstream_refuz' // 4xx: cererea noastră e greșită (nu se reîncearcă)
+  | 'realtime_not_configured' // we have no key — not the upstream's fault
+  | 'upstream_timeout' // we cut the wire: OpenAI's edge didn't answer in time
+  | 'upstream_unreachable' // network down / DNS / TLS
+  | 'upstream_5xx' // 500/502/503/504 from OpenAI's edge (the Cloudflare page)
+  | 'upstream_empty' // 2xx but empty SDP answer → the browser has nothing to negotiate
+  | 'upstream_refuz' // 4xx: our request is wrong (don't retry)
 
 export type RealtimeAnswer =
   | { ok: true; sdp: string }
   | { ok: false; status: number; code: RealtimeFailCode; error: string; attempts: number }
 
-// ── ROBUSTEȚEA PORNIRII VOCII (28 iul) ───────────────────────────────────────
-// Bugete MĂSURATE pe trafic real, nu ghicite:
-//   • o pornire SĂNĂTOASĂ întoarce 201 în ~0,4s (3/3 reproduceri, 27 iul);
-//   • una BOLNAVĂ arde ~15s și întoarce 504 cu pagină HTML Cloudflare.
-// Deci 6s e deja de 15 ori bugetul unei porniri sănătoase: ce n-a răspuns până
-// atunci nu mai răspunde. Tăiem NOI firul înainte ca marginea să ajungă la
-// 504-ul ei de la ~15s și cheltuim secundele salvate pe o conexiune NOUĂ —
-// asta e diferența dintre 3 șanse reale și una singură lungă și inutilă.
+// ── THE ROBUSTNESS OF VOICE STARTUP (Jul 28) ──────────────────────────────────
+// Budgets MEASURED on real traffic, not guessed:
+//   • a HEALTHY start returns 201 in ~0.4s (3/3 reproductions, Jul 27);
+//   • a SICK one burns ~15s and returns 504 with a Cloudflare HTML page.
+// So 6s is already 15 times a healthy start's budget: what hasn't answered by
+// then won't answer at all. We cut the wire OURSELVES before the edge reaches
+// its own ~15s 504 and spend the saved seconds on a NEW connection — that's the
+// difference between 3 real chances and a single long useless one.
 const ATTEMPT_TIMEOUT_MS = 6_000
 const MAX_ATTEMPTS = 3
-// Plafon TOTAL al rutei: userul stă cu microfonul deschis, uitându-se la ecran.
-// 6s + 0,35s + 6s + 1s + 6s = 19,35s în cel mai rău caz — toate cele 3 încercări
-// primesc fereastra întreagă și tot ieșim mai repede decât cei 31s de dinainte,
-// când erau doar două încercări pe aceeași conexiune spartă.
+// The route's TOTAL ceiling: the user sits with the microphone open, staring at
+// the screen. 6s + 0.35s + 6s + 1s + 6s = 19.35s worst case — all 3 attempts
+// get the full window and we still exit faster than the previous 31s, when there
+// were only two attempts on the same broken connection.
 const TOTAL_BUDGET_MS = 21_000
 
-/** VOCEA CARE PLEACĂ SPRE OPENAI, aleasă dintre cele pe care le știm.
+/** THE VOICE LEAVING FOR OPENAI, chosen among the ones we know.
  *
- *  Un nume necunoscut — dintr-o bază veche, dintr-o listă schimbată la OpenAI,
- *  sau pur și simplu gol — cade pe vocea implicită și NU pleacă spre API. Dacă
- *  ar pleca, sesiunea ar întoarce 400 și omul ar rămâne fără voce, fără să aibă
- *  de unde bănui că vinovată e o preferință salvată cândva în contul lui.
+ *  An unknown name — from an old database, from a list changed at OpenAI, or
+ *  simply empty — falls back to the default voice and is NOT sent to the API. If
+ *  it were sent, the session would return 400 and the person would be left
+ *  without voice, with no way to suspect that the culprit is a preference once
+ *  saved in their account.
  *
- *  Pură și exportată ca să poată fi probată fără rețea. */
+ *  Pure and exported so it can be tested without network. */
 export function resolveVoice(cerut?: string | null): string {
   return cerut && config.openai.realtimeVoices.includes(cerut) ? cerut : config.openai.realtimeVoice
 }
 
-// Relay o ofertă SDP la OpenAI Realtime și întoarce answer-ul SDP.
+// Relay an SDP offer to OpenAI Realtime and return the SDP answer.
 export async function openaiRealtimeAnswer(
   offerSdp: string,
   lang: string,
@@ -387,63 +393,64 @@ export async function openaiRealtimeAnswer(
   if (!config.openai.key)
     return { ok: false, status: 503, code: 'realtime_not_configured', error: 'realtime_not_configured', attempts: 0 }
 
-  // Uneltele dinamice aprobate (auto-extindere) — și în voce.
+  // Approved dynamic tools (auto-extension) — in voice too.
   const { dynamicToolDefs } = await import('./dynamicTools.js')
   const dynamic = await dynamicToolDefs().catch(() => [])
 
-  // Codul ISO-639-1 al limbii userului — INDICIU pentru transcriere DOAR când
-  // limba e CUNOSCUTĂ (persistată). Când nu e (user nou), NU fixăm nimic —
-  // transcrierea detectează singură limba vorbită (altfel am fi împins-o greșit
-  // spre o limbă anume și „interpreta greșit" — bug-ul văzut live cu franceza).
+  // The ISO-639-1 code of the user's language — a HINT for transcription ONLY
+  // when the language is KNOWN (persisted). When it isn't (new user), we fix
+  // NOTHING — transcription detects the spoken language on its own (otherwise
+  // we'd have pushed it wrongly toward a specific language and "misinterpreted"
+  // it — the bug seen live with French).
   const iso = /^[a-z]{2}$/.test((lang || '').toLowerCase()) ? lang.toLowerCase() : ''
 
   const persona = realtimeInstructions(lang, meserie, hardLock)
   const ctx = contextBlock || ''
   const tools = realtimeTools(dynamic)
 
-  // SESIUNEA, CU O TREAPTĂ DE DEGRADARE (28 iul). Mărimi MĂSURATE pe sursa vie,
-  // nu estimate: persona + cele 31 de unelte = ~18KB (din care ~13,8KB uneltele
-  // și ~5,4KB doar descrierile lor), plus contextul (memorie + 20 de replici)
-  // → ~26KB în total. NU scoatem unelte din sesiune: uneltele SUNT felul în
-  // care vocea acționează, iar varianta „unelte per răspuns" a API-ului ar muta
-  // decizia în client (alt fișier, altă bucată de cod) — o rescriere mult mai
-  // mare decât problema. Pe ULTIMA încercare trimitem însă o sesiune slăbită:
-  // aceleași NUME și aceiași PARAMETRI (deci vocea poate chema în continuare
-  // ORICE unealtă), doar descrierile scurtate și contextul plafonat — ~8KB mai
-  // puțin. Dacă upstreamul chiar se îneacă în corp, tot pornim cu voce
-  // completă; dacă nu, n-am pierdut nimic: pe drumul fericit (încercarea 1)
-  // sesiunea pleacă neatinsă.
+  // THE SESSION, WITH ONE DEGRADATION STEP (Jul 28). Sizes MEASURED on the live
+  // source, not estimated: persona + the 31 tools = ~18KB (of which ~13.8KB the
+  // tools and ~5.4KB just their descriptions), plus context (memory + 20
+  // replies) → ~26KB in total. We do NOT remove tools from the session: tools
+  // ARE the way voice acts, and the API's "tools per response" variant would
+  // move the decision into the client (another file, another chunk of code) — a
+  // much bigger rewrite than the problem. On the LAST attempt, though, we send a
+  // slimmed session: the same NAMES and the same PARAMETERS (so voice can still
+  // call ANY tool), only the descriptions shortened and the context capped —
+  // ~8KB less. If the upstream really is drowning in the body, we still start
+  // with full voice; if not, we've lost nothing: on the happy path (attempt 1)
+  // the session leaves untouched.
   const voceAleasa = resolveVoice(voicePref)
 
   const buildSession = (slim: boolean, model: string, voice: string): Record<string, unknown> => ({
     type: 'realtime',
     model,
     audio: {
-      // ── DETECȚIE AUDIO ULTRA-PERFORMANTĂ (Adrian, 24 iul: „detecția audio
-      // defectă") ──────────────────────────────────────────────────────────
+      // ── ULTRA-PERFORMANT AUDIO DETECTION (Adrian, Jul 24: "audio detection
+      // broken") ─────────────────────────────────────────────────────────────
       input: {
-        // Reducere de zgomot ambiental (microfon aproape de gură) → VAD-ul și
-        // transcrierea nu se mai încurcă în fundal, cameră, ecou.
+        // Ambient noise reduction (microphone near the mouth) → VAD and
+        // transcription no longer trip over background, room, echo.
         noise_reduction: { type: 'near_field' },
-        // Transcrierea vorbirii userului cu modelul MARE (nu „mini") + indiciul
-        // de limbă DOAR când e cunoscută → transcript exact. Fără asta, GA nu
-        // emite NICIODATĂ transcriptul userului.
+        // Transcription of the user's speech with the BIG model (not "mini") +
+        // the language hint ONLY when known → exact transcript. Without this, GA
+        // NEVER emits the user's transcript.
         transcription: iso
           ? { model: config.openai.realtimeTranscribeModel, language: iso }
           : { model: config.openai.realtimeTranscribeModel },
-        // VAD SEMANTIC: un model decide când userul chiar a terminat de vorbit
-        // (nu pe tăcere brută). `interrupt_response:true` = barge-in real.
-        // POARTA NUMELUI, MECANICĂ (ordinul lui Adrian: „Kelion nu are voie să
-        // inițieze conversații; nu intră în chat dacă nu își aude numele").
-        // Regula doar în prompt pierdea mereu — cu `create_response:true`
-        // modelul primea cuvântul la ORICE frază. Acum răspunsul NU se mai
-        // creează automat: CLIENTUL (realtimeVoice.ts) îl creează DOAR dacă
-        // transcriptul conține numele („Kelion"/„Kei", regex tolerant la
-        // transcriere stâlcită) SAU conversația e deja activă (fereastră de
-        // 120s reînnoită la fiecare schimb, DESCHISĂ la pornirea sesiunii —
-        // lecția „nu mă aude" din 24/27 iul). Plase anti-surzenie în client:
-        // transcript lipsă după speech_stopped → răspunde oricum dacă e
-        // conversație activă. „STOP" închide fereastra până la următorul nume.
+        // SEMANTIC VAD: a model decides when the user has truly finished
+        // speaking (not on raw silence). `interrupt_response:true` = real barge-in.
+        // THE NAME GATE, MECHANICAL (Adrian's order: "Kelion must not initiate
+        // conversations; it doesn't enter the chat unless it hears its name").
+        // The rule in the prompt alone kept losing — with `create_response:true`
+        // the model took the floor on ANY phrase. Now the response is NOT
+        // created automatically: the CLIENT (realtimeVoice.ts) creates it ONLY if
+        // the transcript contains the name ("Kelion"/"Kei", regex tolerant of
+        // mangled transcription) OR the conversation is already active (a 120s
+        // window renewed at every exchange, OPEN at session start — the "it
+        // can't hear me" lesson from Jul 24/27). Anti-deafness nets in the
+        // client: missing transcript after speech_stopped → answer anyway if the
+        // conversation is active. "STOP" closes the window until the next name.
         turn_detection: {
           type: 'semantic_vad',
           eagerness: config.openai.realtimeVadEagerness,
@@ -453,78 +460,81 @@ export async function openaiRealtimeAnswer(
       },
       output: { voice },
     },
-    // O SINGURĂ injecție (25 iul — Adrian: „injectezi a mia oară, dublezi").
-    // Instrucțiuni + context (memorie + istoric) intră AICI, în sesiunea inițială,
-    // care e ACCEPTATĂ de OpenAI (201). Nu mai există al doilea strat prin
-    // session.update — era exact dublura.
-    // PERSONA NU SE TAIE NICIODATĂ (limba, poarta numelui, regula faptei) —
-    // plafonăm doar CONTEXTUL, partea variabilă și cea mai grasă.
+    // A SINGLE injection (Jul 25 — Adrian: "you're injecting for the umpteenth
+    // time, you're duplicating"). Instructions + context (memory + history) go in
+    // HERE, in the initial session, which is ACCEPTED by OpenAI (201). There is
+    // no second layer through session.update anymore — that was exactly the
+    // duplication.
+    // THE PERSONA IS NEVER CUT (language, the name gate, the deed rule) — we only
+    // cap the CONTEXT, the variable and fattest part.
     instructions: persona + (slim ? ctx.slice(0, 1200) : ctx),
-    // Autonomia vocii: aceleași unelte ca în chatul scris (vezi realtimeTools).
+    // Voice autonomy: the same tools as in the written chat (see realtimeTools).
     tools: slim ? tools.map((t) => ({ ...t, description: t.description.slice(0, 160) })) : tools,
-    // NU URCA ASTA LA 'required' — regulă, nu preferință. La nivel de SESIUNE,
-    // 'required' obligă modelul să cheme o unealtă la FIECARE răspuns, inclusiv
-    // pe răspunsul care procesează rezultatul uneltei dinainte → buclă de unelte
-    // din care nu mai iese și Kelion nu mai vorbește deloc.
-    // Forțarea faptei se face PER RĂSPUNS, din client, doar pe turele de ordin:
-    // { type:'response.create', response:{ tool_choice:'required' | {type:'function',name} } }
-    // Tura următoare revine singură la 'auto', fără session.update. Vezi
-    // frontend/src/lib/realtimeVoice.ts (poarta faptei în voce).
+    // DON'T RAISE THIS TO 'required' — a rule, not a preference. At SESSION level,
+    // 'required' forces the model to call a tool on EVERY response, including the
+    // response that processes the previous tool's result → a tool loop it never
+    // exits and Kelion never speaks at all.
+    // Enforcing the deed is done PER RESPONSE, from the client, only on order
+    // turns: { type:'response.create', response:{ tool_choice:'required' | {type:'function',name} } }
+    // The next turn returns to 'auto' on its own, without session.update. See
+    // frontend/src/lib/realtimeVoice.ts (the deed gate in voice).
     tool_choice: 'auto',
   })
 
-  // CORPUL SE RECONSTRUIEȘTE LA FIECARE ÎNCERCARE.
-  // Suspiciunea „un FormData se consumă o singură dată, deci reîncercarea
-  // retrimite un corp gol" a fost MĂSURATĂ, nu presupusă: pe Node 22.22.2
-  // (undici), același obiect FormData retrimis de 3 ori a pus pe fir de fiecare
-  // dată corpul ÎNTREG (19218 octeți, cu Content-Length, fără chunked). Deci NU
-  // asta a rupt reîncercarea din 27 iul. Îl reconstruim totuși per încercare,
-  // fiindcă ultima trimite o sesiune DIFERITĂ (slăbită) — și fiindcă un corp
-  // rezidit e oricum imun la orice schimbare viitoare de undici.
+  // THE BODY IS REBUILT ON EVERY ATTEMPT.
+  // The suspicion "a FormData is consumed once, so the retry resends an empty
+  // body" was MEASURED, not assumed: on Node 22.22.2 (undici), the same FormData
+  // object resent 3 times put the WHOLE body on the wire every time (19218
+  // bytes, with Content-Length, no chunked). So that's NOT what broke the Jul 27
+  // retry. We rebuild it per attempt anyway, because the last one sends a
+  // DIFFERENT (slimmed) session — and because a rebuilt body is immune to any
+  // future undici change anyway.
   const buildForm = (slim: boolean, model: string, voice: string): FormData => {
     const form = new FormData()
     form.append('sdp', offerSdp)
-    // CA STRING, NU CA BLOB (25 iul — al 3-lea incident „vorbește rusă" + „nu
-    // vede/nu escaladează în voce"): Blob-ul intra în form-data ca FIȘIER
-    // (filename="blob") și parserul OpenAI îl IGNORA — de-aia „missing_model"
-    // cerea modelul în URL deși era în JSON: sesiunea NU era citită DELOC. Deci
-    // nici instrucțiunile, nici vocea, nici limba, nici uneltele nu se aplicau
-    // vreodată — modelul rula pe DEFAULT (oglindea limba percepută, răspundea la
-    // zgomot). String simplu = câmp de formular normal, parsat.
+    // AS A STRING, NOT A BLOB (Jul 25 — the 3rd "speaks Russian" + "doesn't
+    // see/escalate in voice" incident): the Blob went into form-data as a FILE
+    // (filename="blob") and OpenAI's parser IGNORED it — that's why
+    // "missing_model" asked for the model in the URL although it was in the JSON:
+    // the session was NOT read AT ALL. So neither the instructions, nor the
+    // voice, nor the language, nor the tools ever applied — the model ran on
+    // DEFAULT (mirrored the perceived language, answered noise). A plain string =
+    // a normal form field, parsed.
     form.append('session', JSON.stringify(buildSession(slim, model, voice)))
     return form
   }
 
-  // FIX FINAL VOCE (dovadă live 24 iul: OpenAI „missing_model"): API-ul Realtime
-  // GA cere modelul ca PARAMETRU ÎN URL, nu doar în JSON-ul de sesiune.
-  // CASCADĂ DE MODELE (28 iul — dovadă live: `gpt-realtime` dădea 504 Cloudflare
-  // pe TOATE cele 3 încercări, cu cheia validă și endpointul viu; reîncercarea
-  // pe același model mort = zero șanse). Încercarea 1 = modelul principal;
-  // încercările următoare trec pe modelele de rezervă din config/env.
+  // FINAL VOICE FIX (live proof Jul 24: OpenAI "missing_model"): the GA Realtime
+  // API requires the model as a URL PARAMETER, not only in the session JSON.
+  // MODEL CASCADE (Jul 28 — live proof: `gpt-realtime` returned Cloudflare 504
+  // on ALL 3 attempts, with a valid key and a live endpoint; retrying on the
+  // same dead model = zero chances). Attempt 1 = the main model; subsequent
+  // attempts move to the fallback models from config/env.
   const models = [config.openai.realtimeModel, ...config.openai.realtimeModelFallbacks].filter(
     (m, i, a) => a.indexOf(m) === i,
   )
   const callsUrlFor = (model: string): string => `${OPENAI_CALLS}?model=${encodeURIComponent(model)}`
 
-  // ── DE CE „NU SE DECLANȘA" TIMEOUT-UL, deși ruta ținea 31s ────────────────
-  // Nu era stricat nimic: AbortSignal.timeout(20s) era armat corect, PER
-  // încercare, și pornea chiar la fetch. Doar că nicio încercare nu ajungea la
-  // 20s — marginea OpenAI (Cloudflare) închidea singură cu 504 pe la ~15s, deci
-  // fetch-ul se termina NORMAL, cu răspuns în mână. Cei 31s din log sunt exact
-  // 15s (încercarea 1) + 0,9s pauză + 15s (încercarea 2): timpul DUBLAT de
-  // reîncercarea adăugată, nu un fetch agățat. Concluzia: un plafon de 20s e mai
-  // mare decât răbdarea reală a upstreamului, deci nu apucă niciodată să
-  // folosească la ceva. Acum tăiem la 10s și cheltuim diferența pe altceva.
+  // ── WHY THE TIMEOUT "DIDN'T FIRE", although the route held 31s ─────────────
+  // Nothing was broken: AbortSignal.timeout(20s) was armed correctly, PER
+  // attempt, and started right at fetch. Only no attempt ever reached 20s —
+  // OpenAI's edge (Cloudflare) closed on its own with 504 around ~15s, so the
+  // fetch finished NORMALLY, response in hand. The 31s in the log are exactly
+  // 15s (attempt 1) + 0.9s pause + 15s (attempt 2): the time DOUBLED by the
+  // added retry, not a hung fetch. Conclusion: a 20s ceiling is greater than the
+  // upstream's real patience, so it never gets to be useful. Now we cut at 10s
+  // and spend the difference on something else.
   //
-  // ── ȘI DE CE N-A AJUTAT REÎNCERCAREA ─────────────────────────────────────
-  // Fiindcă pleca pe ACEEAȘI conexiune: undici ține socketul în pool și după un
-  // 504, iar reîncercarea la 0,9s reintra fix pe calea care tocmai picase →
-  // același 504, previzibil. De la a doua încercare cerem conexiune NOUĂ.
-  // Verificat local pe Node 22.22.2: 3 cereri fără antet = 2 socketuri
-  // (refolosire), 3 cereri cu `Connection: close` = 3 socketuri (zero refolosire).
+  // ── AND WHY THE RETRY DIDN'T HELP ───────────────────────────────────────────
+  // Because it left on the SAME connection: undici keeps the socket in the pool
+  // even after a 504, and the retry 0.9s later re-entered exactly the path that
+  // had just failed → the same 504, predictably. From the second attempt on we
+  // request a NEW connection. Verified locally on Node 22.22.2: 3 requests
+  // without the header = 2 sockets (reuse), 3 requests with `Connection: close`
+  // = 3 sockets (zero reuse).
   //
-  // Pauză scurtă și crescătoare: un hopa de câteva sute de ms al marginii îl
-  // sărim, dar dacă e pană reală nu ardem bugetul stând degeaba.
+  // Short and growing pause: we skip a few-hundred-ms hiccup of the edge, but if
+  // it's a real outage we don't burn the budget standing idle.
   const pause = (attempt: number): Promise<void> =>
     new Promise((res) => setTimeout(res, attempt === 1 ? 350 : 1_000))
 
@@ -535,16 +545,16 @@ export async function openaiRealtimeAnswer(
   let attempts = 0
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    // Nu pornim o încercare care oricum nu încape în bugetul rămas — ar ține
-    // userul agățat pe o cerere pe care o abandonăm noi înșine.
+    // Don't start an attempt that can't fit in the remaining budget anyway — it
+    // would keep the user hanging on a request we ourselves abandon.
     const left = TOTAL_BUDGET_MS - (Date.now() - startedAt)
     if (left < 2_000) break
     attempts = attempt
 
     const headers: Record<string, string> = { Authorization: `Bearer ${config.openai.key}` }
     if (attempt > 1) headers.connection = 'close'
-    // Modelul acestei încercări: 1 = principal, 2+ = rezervele din cascadă.
-    // Dacă nu-s rezerve configurate, rămâne principalul (comportamentul vechi).
+    // This attempt's model: 1 = main, 2+ = the cascade's fallbacks. If no
+    // fallbacks are configured, the main one stays (the old behavior).
     const model = models[Math.min(attempt - 1, models.length - 1)]
 
     let r: Response
@@ -552,19 +562,19 @@ export async function openaiRealtimeAnswer(
       r = await fetch(callsUrlFor(model), {
         method: 'POST',
         headers,
-        // SLIM DIN A DOUA ÎNCERCARE (audit 28 iul, găsirea #4): înainte, doar a
-        // 3-a încercare slăbea sesiunea — încercările 1-2 ardeau ~6s fiecare cu
-        // corpul întreg. Dacă prima (corp complet) a picat, a doua merge deja
-        // suplă: mai multe șanse reale în același buget de timp.
-        // VOCEA ALEASĂ doar la prima încercare. Dacă prima pică, a doua pleacă
-        // pe vocea implicită: preferința unui om nu are voie să-i lase vocea
-        // moartă, oricât de exotic ar fi numele salvat la el în cont.
+        // SLIM FROM THE SECOND ATTEMPT (Jul 28 audit, finding #4): before, only
+        // the 3rd attempt slimmed the session — attempts 1-2 each burned ~6s with
+        // the full body. If the first (full body) failed, the second already goes
+        // lean: more real chances in the same time budget.
+        // THE CHOSEN VOICE only on the first attempt. If the first fails, the
+        // second leaves on the default voice: a person's preference must not
+        // leave their voice dead, however exotic the name saved in their account.
         body: buildForm(attempt >= 2, model, attempt === 1 ? voceAleasa : config.openai.realtimeVoice),
         signal: AbortSignal.timeout(Math.min(ATTEMPT_TIMEOUT_MS, left)),
       })
     } catch (e) {
-      // AbortError/TimeoutError = plafonul NOSTRU (upstreamul era prea lent);
-      // orice altceva = rețea/DNS/TLS. Ambele se reîncearcă — asta lipsea.
+      // AbortError/TimeoutError = OUR ceiling (the upstream was too slow);
+      // anything else = network/DNS/TLS. Both are retried — that was missing.
       const nume = (e as Error | undefined)?.name ?? ''
       const expirat = nume === 'AbortError' || nume === 'TimeoutError'
       lastCode = expirat ? 'upstream_timeout' : 'upstream_unreachable'
@@ -580,11 +590,11 @@ export async function openaiRealtimeAnswer(
     const text = await r.text().catch(() => '')
     if (r.ok && text.trim()) return { ok: true, sdp: text }
     if (r.ok) {
-      // 2xx CU CORP GOL e tot o pornire moartă: browserul ar arunca pe
-      // setRemoteDescription și userul ar vedea „fără voce" la un 200 vesel.
+      // 2xx WITH AN EMPTY BODY is still a dead start: the browser would throw on
+      // setRemoteDescription and the user would see "no voice" at a cheerful 200.
       lastCode = 'upstream_empty'
       lastStatus = 502
-      lastErr = 'answer SDP gol de la upstream'
+      lastErr = 'empty SDP answer from upstream'
       if (attempt < MAX_ATTEMPTS) {
         await pause(attempt)
         continue
@@ -594,16 +604,16 @@ export async function openaiRealtimeAnswer(
 
     lastStatus = r.status
     lastErr = text.slice(0, 300)
-    // 5xx (inclusiv 504-ul cu pagină Cloudflare), 408 și 429 = necaz TRECĂTOR al
-    // marginii → mai încercăm. Restul de 4xx = cererea noastră e greșită
-    // („missing_model", cheie invalidă): reîncercarea ar doar întârzia eroarea
-    // reală cu câteva secunde, fără nicio șansă în plus.
+    // 5xx (including the 504 with the Cloudflare page), 408 and 429 = TRANSIENT
+    // edge trouble → try again. The rest of 4xx = our request is wrong
+    // ("missing_model", invalid key): retrying would only delay the real error
+    // by a few seconds, with no extra chance.
     const trecator = r.status >= 500 || r.status === 408 || r.status === 429
     lastCode = trecator ? 'upstream_5xx' : 'upstream_refuz'
-    // Cu cascadă de modele, un refuz curat (4xx) pe modelul CURENT nu îngroapă
-    // pornirea dacă următoarea încercare ar folosi ALT model (ex. un nume de
-    // rezervă greșit → 404; următorul din listă poate fi bun). Fără modele noi
-    // de încercat, comportamentul rămâne exact cel vechi: 4xx = stop.
+    // With a model cascade, a clean refusal (4xx) on the CURRENT model doesn't
+    // bury the start if the next attempt would use a DIFFERENT model (e.g. a
+    // wrong fallback name → 404; the next in the list may be good). With no new
+    // models to try, the behavior stays exactly the old one: 4xx = stop.
     const nextModel = models[Math.min(attempt, models.length - 1)]
     if (attempt < MAX_ATTEMPTS && (trecator || nextModel !== model)) {
       await pause(attempt)
