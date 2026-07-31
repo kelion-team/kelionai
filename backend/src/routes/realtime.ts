@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoicePref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoicePref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv, getHistory } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
@@ -280,8 +280,30 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const isAdmin = user.email.toLowerCase() === config.adminEmail
         let lang = isAdmin ? 'ro' : String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
         if (!/^[a-z]{2}$/.test(lang)) lang = 'en'
+        // ── CE S-A SCRIS ÎN CHAT AJUNGE ȘI PE VOCE ──────────────────────
+        // Adrian, 31 iul: „are limitări tehnice pe voce, Kelion nu vede ce se
+        // scrie în chat." Avea dreptate, și e mai grav decât plafonul de unelte:
+        // escaladarea primea DOAR fraza tocmai spusă. Îi scriai ceva, apoi îl
+        // întrebai cu vocea despre asta — și el nu știa despre ce vorbești.
+        // Nu e un Kelion, sunt doi cu amnezie reciprocă.
+        //
+        // Ultimele schimburi din chat intră acum în ordinul escaladat. Puține
+        // (fereastra de context nu e infinită) și doar text — dar destul cât o
+        // conversație începută în scris să poată continua vorbind.
+        const ultimele = await getHistory(user.email, 400)
+          .then((h) =>
+            h
+              .slice(-12)
+              .map((m) => `${m.role === 'user' ? 'EL' : 'TU'}: ${String(m.content).slice(0, 600)}`)
+              .join('\n'),
+          )
+          .catch(() => '')
         const prompt =
           `${SYSTEM_PROMPT}\n\n` +
+          (ultimele
+            ? `CE V-AȚI SCRIS ÎN CHAT ÎNAINTE (cel mai nou la urmă) — e ACEEAȘI conversație, ` +
+              `continuă din ea, nu o lua de la capăt:\n${ultimele}\n\n`
+            : '') +
           `VOICE ESCALATION: the fast voice model handed you a request it judged too hard. Answer it fully ` +
           `but CONCISELY, as plain text to be SPOKEN aloud (no markdown, no lists). Speak ONLY in ` +
           `${langLabel(lang)} — never switch, regardless of the language mixed into the request below.\n\n${request}`
