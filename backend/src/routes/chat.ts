@@ -1830,20 +1830,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Creierul a picat — onest, niciodată tăcut. Fără plasă Kimi/GLM (scoase).
       const errMsg = e instanceof Error ? e.message : String(e)
       const low = errMsg.toLowerCase()
-      const isQuota =
-        low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
+      // 402 ≠ 429. Adrian, 31 iul: „de ce ai mințit?" — avea dreptate. Le băgasem
+      // în aceeași grămadă, așa că un model GRATUIT ajuns la plafonul de cereri
+      // pe minut îi scria „reîncarcă creditul". Îi ceream bani pentru ceva ce
+      // costă zero, fără să fi măsurat vreun sold. Un plafon de cereri se trece
+      // așteptând; fondurile insuficiente se trec depunând. Nu e același mesaj.
+      const isRateLimit =
+        low.includes('429') || /rate.?limit|resourceexhausted|too many requests/.test(low) || low.includes('quota')
+      const isQuota = !isRateLimit && (low.includes('402') || low.includes('insufficient'))
       const isRefusal = low.includes('refusal')
       const spoken = ro
-        ? isQuota
-          ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
-          : isRefusal
-            ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
-            : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-        : isQuota
-          ? "I've temporarily run out of brain credit. Please top up so we can continue."
-          : isRefusal
-            ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
-            : 'I ran into a technical issue. Please try again in a moment.'
+        ? isRateLimit
+          ? 'Modelul gratuit a atins plafonul de cereri pe minut — nu e o problemă de bani. Reîncearcă în câteva secunde.'
+          : isQuota
+            ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
+            : isRefusal
+              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
+              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
+        : isRateLimit
+          ? "The free model hit its per-minute request limit — this is not a money problem. Try again in a few seconds."
+          : isQuota
+            ? "I've temporarily run out of brain credit. Please top up so we can continue."
+            : isRefusal
+              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
+              : 'I ran into a technical issue. Please try again in a moment.'
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
