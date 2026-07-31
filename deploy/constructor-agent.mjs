@@ -67,4 +67,64 @@ if (!MODEL.endsWith(':free') && !ALLOW_PAID) {
 // (mai jos, `escaladeazaPeNeputinta`) urcă pe un model plătit DUPĂ ce gratuitul
 // a dovedit că nu poate — și e intenționat neatinsă de garda asta. Regula din
 // 27 iul apăra împotriva „plătit LA FIECARE rulare"; aici se plătește doar
-// acolo unde gratuitul a picat deja, o dată pe ordin. Se st
+// acolo unde gratuitul a picat deja, o dată pe ordin. Se stinge cu
+// CONSTRUCTOR_ESCALADARE=0.
+const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
+// Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
+// contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
+// construcție, dar nici să ne țină la nesfârșit.
+const MAX_STERILE = Number(env.CONSTRUCTOR_MAX_STERILE || 8)
+// Runde de reparație după un build/test roșu (promise în system prompt, dar
+// niciodată acordate de codul vechi — vezi bucla din main()).
+const MAX_REPAIR = Number(env.CONSTRUCTOR_MAX_REPAIR || 2)
+const MAX_TOKENS = Number(env.CONSTRUCTOR_MAX_TOKENS || 900_000)
+// FEREASTRA DE CONTEXT (audit 27 iul — cauza EȘECULUI pe ORICE model): bucla
+// re-trimitea TOT istoricul la fiecare pas, cu citiri de până la 120k caractere
+// păstrate pe veci → un job trivial ajungea la ~794k tokeni, unul greu spărgea
+// plafonul. Acum: rezultatele uneltelor vechi se comprimă la un ciot; doar
+// ultimele KEEP_VERBATIM schimburi rămân întregi. Liniar, nu pătratic.
+const KEEP_VERBATIM = Number(env.CONSTRUCTOR_KEEP_VERBATIM || 6)
+const READ_CAP = 6_000 // caractere pe o citire (era 120k — sursa exploziei)
+
+// BUGETUL DE TIMP AL RULĂRII. constructor-worker.sh ne dă `timeout 1800`; dacă
+// ne prinde acolo, procesul moare SIGKILL/SIGTERM fără să raporteze, ordinul
+// rămâne „running" 40 de minute în DB și consumă o încercare degeaba (la a 3-a
+// e abandonat automat). Deci ne oprim SINGURI mai devreme și raportăm.
+const START = Date.now()
+const BUDGET_MS = Number(env.CONSTRUCTOR_BUDGET_MS || 26 * 60_000)
+const ramase = () => BUDGET_MS - (Date.now() - START)
+const dormi = (ms) => new Promise((r) => setTimeout(r, ms))
+
+const logLines = []
+// PROGRES LIVE (Etapa 4 autonomie, 29 iul): fiecare pas al constructorului
+// (clonat → editez X → build → deschid PR...) e împins spre aplicație ca să
+// apară pe monitor și ca Kelion să-l poată NARA. Fire-and-forget, throttlat la
+// ~4s și cu timeout scurt: NU are voie să mănânce din bugetul de timp al rulării
+// (lecția „un job nu poate deveni demon") — un beat pierdut nu strică nimic.
+let beatJobId = 0
+let lastBeatAt = 0
+function beat(text, acum = false) {
+  if (!beatJobId || !BRIDGE) return
+  const now = Date.now()
+  // `acum` sare peste throttle: ultimul pas dinaintea unei pauze lungi TREBUIE
+  // să ajungă pe monitor, altfel omul rămâne cu un pas vechi pe ecran 40 de
+  // minute și crede că s-a blocat ceva (D6).
+  if (!acum && now - lastBeatAt < 4000) return
+  lastBeatAt = now
+  fetch(`${APP}/api/constructor/progress`, {
+    method: 'POST',
+    headers: { 'x-bridge-secret': BRIDGE, 'content-type': 'application/json' },
+    body: JSON.stringify({ id: beatJobId, progress: String(text).slice(0, 300) }),
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => {})
+}
+
+function log(s) {
+  const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
+  console.log(line)
+  logLines.push(line)
+  beat(s) // pasul curent → monitorul lui Kelion (throttlat în beat)
+}
+
+// REÎNCERCARE PE API-UL APLICAȚIEI (dovadă live 28 iul, ordinul #9: stiva de
+// eroare arăta „connect ECONNREFUSED 1
