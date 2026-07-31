@@ -147,14 +147,29 @@ export const config = {
     // ── CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0 — creierul întreg
     // pe modele gratuite; plătită rămâne DOAR vocea OpenAI, care n-are alternativă
     // gratuită nicăieri, dovedit pe toate cele 345 de modele din catalog). ──────
-    // Treapta 'work' = NUCLEUL OMNI gratuit: text+audio+imagine+video la intrare,
-    // raționament intern și tool-calling — verificat în catalogul live. Limita
-    // cinstită (i-a fost spusă): :free are ~50–1000 cereri/zi și poate încetini
-    // la ore de vârf; revenirea la plătit = o variabilă de env, fără deploy.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free').trim(),
-    // Treapta FINALĂ 'top' — gândirea grea GRATUITĂ: 550B parametri, 1M context,
-    // raționament + tools. ATENȚIE: nu are vedere — turele cu imagini rămân pe
-    // nucleul omni (vezi selectedBrainModel din chat.ts, garda !needsVision).
+    // ── CREIERUL, PUS DE ADRIAN PE 31 IUL: „pune-l creier nemotron-3-ultra" ───
+    //
+    // Era `nemotron-3-nano-omni-30b-a3b` — 30B totali, din care doar 3B ACTIVI.
+    // Adică munca lui trecea printr-un model de treapta a treia, în timp ce cel
+    // mai capabil creier gratuit din lume stătea nefolosit pe treapta 'top', pe
+    // care se ajunge doar prin escaladare.
+    //
+    // Nemotron 3 Ultra: 550B parametri (55B activi), UN MILION de context,
+    // unelte, raționament. Singurul model gratuit din catalog cu context de un
+    // milion — următorul are 262k, de patru ori mai puțin.
+    //
+    // N-are vedere, și de-asta n-a putut fi ales până azi. Nu mai contează:
+    // vederea se DELEGĂ (bestVisionModel + chat.ts) — doar tura cu poză merge
+    // la un model care vede, restul rămân aici.
+    //
+    // CE ÎNSEAMNĂ GRATUIT AICI, măsurat, ca să nu fie surprize: $0 pe token,
+    // 20 de cereri pe minut, și 1.000 pe zi — pragul de 1.000 (față de 50) se
+    // deschide dacă s-au cumpărat vreodată $10 în cont, ceea ce e cazul.
+    // Revenirea la altceva = o variabilă de env, fără deploy.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
+    // Treapta FINALĂ 'top' — același model. Nu mai are ce escalada peste el:
+    // e cel mai capabil creier gratuit care există. Escaladarea rămâne în cod
+    // pentru ziua în care treapta de sus va fi un model plătit.
     topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
     // Imagini prin OpenRouter (aceeași cheie) — model care întoarce imagine în
     // răspuns (`message.images[].image_url.url`). Fără cheie Gemini separată.
