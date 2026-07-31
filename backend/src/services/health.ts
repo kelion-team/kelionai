@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import { getPool, dbEnabled, listBuildJobs } from '../db.js'
+import { memorieGazda, descrieMemoria, PRAG_MEMORIE_PCT } from './memorie.js'
 import { getOpenRouterBalance } from './openrouter.js'
 
 // ── OCHII LUI KELION PE PROPRIA SĂNĂTATE (Adrian, 27 iul: „Kelion trebuie să
@@ -139,6 +140,23 @@ export async function systemHealth(): Promise<string> {
       problems.push({ id: 'disc_plin', grav: 'critic', desc: `Discul e ${usedPct}% plin.`, reparabil: 'run_runbook curata-zombi sau docker system prune (cere acordul ownerului)' })
   } catch {
     /* statfs indisponibil */
+  }
+
+  // 5b. Memoria gazdei — vezi services/memorie.ts pentru de ce n-a existat
+  // până azi și de ce contează mai mult decât discul.
+  const mem = await memorieGazda()
+  if (mem) {
+    info.memorie = descrieMemoria(mem)
+    info.procesoare = mem.procesoare
+    if (mem.liberPct <= PRAG_MEMORIE_PCT)
+      problems.push({
+        id: 'memorie_putina',
+        grav: 'critic',
+        desc: `Memorie: ${descrieMemoria(mem)}. Sub pragul ăsta kernelul începe să omoare procese — aplicația e cea mai mare, deci prima victimă.`,
+        reparabil: 'run_runbook curata-zombi; docker system prune; sau oprește de pe VPS serviciile care nu sunt necesare',
+      })
+  } else {
+    info.memorie = 'nu se poate măsura de aici'
   }
 
   // 6. Punga creierului (OpenRouter).

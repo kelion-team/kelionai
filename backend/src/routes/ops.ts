@@ -10,6 +10,7 @@ import fs from 'node:fs/promises'
 import { config } from '../config.js'
 import { getPool, dbEnabled, saveKv, loadKv } from '../db.js'
 import { sendMail } from '../services/mail.js'
+import { memorieGazda, descrieMemoria, PRAG_MEMORIE_PCT } from '../services/memorie.js'
 
 // Un email pe subiect cel mult o dată pe fereastră — altfel un disc plin ar
 // bombarda inboxul adminului la fiecare 3 minute.
@@ -70,6 +71,24 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       }
     } catch {
       /* statfs indisponibil — nu e critic */
+    }
+
+    // 2b. Memoria: sub prag → alertă (o dată la 6 ore, ca la disc).
+    //
+    // Discul avea pază de la început, memoria n-avea niciuna. Diferența dintre
+    // ele e că discul plin dă erori pe care le vezi, iar memoria plină îți taie
+    // procesul fără o vorbă: kernelul alege o victimă, containerul moare,
+    // sentinela îl repornește la următoarea bătaie — și în jurnal rămâne doar
+    // „a repornit", niciodată „de ce". Mailul ăsta scrie cauza.
+    const mem = await memorieGazda()
+    if (mem && mem.liberPct <= PRAG_MEMORIE_PCT) {
+      findings.push(`memorie_${mem.liberPct}%`)
+      await alertOnce(
+        'memory',
+        6 * 3600_000,
+        `memoria VPS e la ${mem.liberPct}% liber`,
+        `Memorie: ${descrieMemoria(mem)}. Sub pragul ăsta kernelul începe să omoare procese, iar aplicația e cea mai mare — o repornire fără cauză aparentă e cel mai probabil asta. Oprește ce nu-ți trebuie pe VPS sau curăță cu docker system prune.`,
+      )
     }
 
     // 3. Val de erori client (>20 în ultima oră) → ceva e stricat în browser
