@@ -10,6 +10,7 @@ import {
   geminiDirectChat,
   geminiDirectChatStream,
 } from './geminiDirect.js'
+import { filtruRepetitie } from './fluxUnic.js'
 
 // ── ORCHESTRATORUL — un creier, orice model ─────────────────────────────────
 // Rulează o conversație CU tool-use printr-un model ales (GPT/Gemini/Claude prin
@@ -71,6 +72,25 @@ export async function runOrchestrator(
   let deedGateUsed = false
   let anyToolCalled = false
 
+  // ── NU SE SCRIE DE DOUĂ ORI ACELAȘI LUCRU ─────────────────────────────────
+  // Adrian, 31 iul: „scrie aceeași frază nonstop" / „în chat se balează
+  // răspunsul lui scris de mai multe ori".
+  // Cauza era chiar aici: bucla merge până la 8 runde, iar FIECARE rundă își
+  // trimitea textul mai departe prin `onText`, fără ca nimic să compare runda
+  // nouă cu ce ajunsese deja la om. Model împotmolit = aceeași frază, o dată pe
+  // rundă. Filtrul lasă să treacă doar ce e NOU. Vezi services/fluxUnic.ts.
+  const flux = filtruRepetitie()
+  const emite = opts.onText
+  const onTextFiltrat = emite
+    ? (txt: string): void => {
+        const nou = flux.bucata(txt)
+        if (nou) emite(nou)
+      }
+    : undefined
+  // Semnătura apelurilor de unelte din runda trecută: „aceeași frază + aceleași
+  // unelte" = se învârte în loc, nu lucrează.
+  let semnaturaTrecuta = ''
+
   for (let round = 1; round <= maxRounds; round++) {
     // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
     // apel simplu (ex: agenți în fundal care nu difuzează).
@@ -89,16 +109,23 @@ export async function runOrchestrator(
     // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
     const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
     const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
-    const res = opts.onText
+    const res = onTextFiltrat
       ? gemini
-        ? await geminiDirectChatStream(gModel, convo, tools, opts.onText, callOpts)
-        : await openrouterChatStream(model, convo, tools, opts.onText, callOpts)
+        ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
+        : await openrouterChatStream(model, convo, tools, onTextFiltrat, callOpts)
       : gemini
         ? await geminiDirectChat(gModel, convo, tools, callOpts)
         : await openrouterChat(model, convo, tools, callOpts)
     totalCost += res.costUsd
     served = res.model
-    if (res.text) allText = allText ? `${allText}\n${res.text}` : res.text
+    // Fără streaming (agenți în fundal) textul nu trece prin filtru la bucată —
+    // îl trecem întreg aici, ca dedublarea să fie aceeași pe ambele căi.
+    if (!onTextFiltrat && res.text) flux.bucata(res.text)
+    // Închide runda: ce a rămas în așteptare e o repetare curată și se aruncă.
+    const coada = flux.inchideRunda()
+    if (coada && emite) emite(coada)
+    const rundaGoala = flux.rundaAFostGoala()
+    allText = flux.emis()
 
     if (res.toolCalls.length === 0) {
       // POARTA FAPTEI (Adrian, 27 iul): dacă modelul spune că A FĂCUT o acțiune
@@ -126,6 +153,23 @@ export async function runOrchestrator(
       // La streaming textul a curs deja prin onText; nu-l re-emitem.
       return { text: allText, costUsd: totalCost, model: served, rounds: round }
     }
+
+    // ── SE ÎNVÂRTE ÎN LOC? ──────────────────────────────────────────────────
+    // Adrian, 31 iul: „scrie aceeași frază nonstop".
+    // Filtrul de mai sus face ca repetarea să nu se mai VADĂ. Dar dacă ne
+    // oprim acolo, tot plătim opt runde ca să aruncăm șapte — și pe modelele
+    // gratuite, opt apeluri într-o rafală lovesc plafonul pe minut, așa că
+    // următoarea ta întrebare primește 429, adică „problemă tehnică".
+    // Deci: rundă care n-a adus NIMIC nou ȘI cere exact aceleași unelte ca
+    // runda dinainte = model împotmolit. Nu-l mai lăsăm să se rotească.
+    const semnatura = res.toolCalls
+      .map((c) => `${c.function.name}(${(c.function.arguments || '').slice(0, 300)})`)
+      .join('|')
+    if (rundaGoala && semnatura && semnatura === semnaturaTrecuta) {
+      console.error(`[orchestrator] runda ${round}: nimic nou + aceleași unelte → opresc bucla (${served})`)
+      return { text: allText, costUsd: totalCost, model: served, rounds: round }
+    }
+    semnaturaTrecuta = semnatura
 
     anyToolCalled = true
     // Mesajul asistentului care CERE uneltele (păstrează tool_calls pentru legătură).

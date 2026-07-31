@@ -262,7 +262,20 @@ export async function* streamChat(
           }),
         })
       }
-    } catch {
+    } catch (e) {
+      // ABORTUL NU E „OFFLINE" (Adrian, 31 iul: „aude a doua întrebare, scurt o
+      // arată, dar nu o dă mai departe către creier" + „mesajul că tehnic a
+      // apărut din nou").
+      // Aici se pierdea a doua întrebare. Când scrii ceva NOU cât Kelion încă
+      // răspunde, tura veche e abortată intenționat (barge-in, ChatPanel:823).
+      // Catch-ul ăsta înghițea abortul și-l scotea ca `offline` — iar `offline`
+      // pornește mecanismul de reluare: marchează sesiunea căzută, ține minte
+      // textul, iar la următorul semnal `online` ȘTERGE ULTIMELE DOUĂ MESAJE
+      // (ChatPanel:1588) și retrimite. După barge-in, ultimele două mesaje sunt
+      // fix întrebarea ta nouă și răspunsul ei în curs. De asta o vedeai o
+      // clipă și dispărea, cu ⚠️ pe deasupra.
+      // O anulare cerută de om nu e o pană de rețea și nu se repară.
+      if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
       throw new Error('offline')
     }
 
@@ -317,7 +330,10 @@ export async function* streamChat(
           watchdog = window.setTimeout(() => rej(new Error('silent')), READ_SILENCE_MS)
         }),
       ])
-    } catch {
+    } catch (e) {
+      // Ca mai sus: o tură abortată intenționat (barge-in / „stop") nu se
+      // reconectează și nu se declară offline — s-a cerut oprirea ei.
+      if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
       if (await resume()) continue
       throw new Error('offline')
     } finally {
