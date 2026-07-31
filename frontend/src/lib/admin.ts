@@ -58,26 +58,7 @@ export interface Finance {
   }
 }
 
-export interface TransactionRow {
-  id: number
-  user_id: string
-  amount: number
-  credits: number
-  status: string
-  stripe_payment_intent_id: string | null
-  created_at: string
-}
 
-export async function fetchTransactions(): Promise<TransactionRow[]> {
-  try {
-    const r = await fetch('/api/admin/transactions', { credentials: 'include' })
-    if (!r.ok) return []
-    const j = (await r.json()) as { transactions?: TransactionRow[] }
-    return j.transactions ?? []
-  } catch {
-    return []
-  }
-}
 
 export async function fetchFinance(): Promise<Finance | null> {
   try {

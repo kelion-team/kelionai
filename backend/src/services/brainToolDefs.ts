@@ -392,3 +392,63 @@ export const OPEN_APP_VIEW_TOOL: Tool = {
     required: ['view'],
   },
 }
+
+// ── TOT PANOUL DE ADMIN, ÎN MÂNA LUI (Adrian, 31 iul, a treia oară) ──────────
+// „Kelion trebuie să poată vedea tot ce conține adminul, și să poată modifica."
+// Avea codul (read_source), datele brute (db_query) și scrisul (repo_write) —
+// dar nu ce vede ownerul pe ecran: cifrele agregate pe care le calculează
+// rutele. O singură unealtă pentru toate tab-urile, nu treizeci.
+export const ADMIN_VEZI_TOOL: Tool = {
+  name: 'admin_vezi',
+  description:
+    "ADMIN ONLY. Read ANY section of the owner's admin panel — exactly the data he sees on screen, from the same routes the panel calls. Sections: finance, users, demos (visitors), history, gaps, audit, costs, money-circuit, keys, env-check, models, backups, leads, activity, visitor-chats, contact-messages, kelion-tools, gestures, token-checks, stores, inbound, mailbox-live, autonomie/dovezi. Use it whenever he asks about anything in the panel, INSTEAD of rebuilding the numbers from db_query — the panel's numbers are the ones he is looking at.",
+  input_schema: {
+    type: 'object',
+    properties: { sectiune: { type: 'string', description: "Section name, e.g. 'finance', 'users', 'demos', 'audit'." } },
+    required: ['sectiune'],
+  },
+}
+export const ADMIN_SCHIMBA_TOOL: Tool = {
+  name: 'admin_schimba',
+  description:
+    "ADMIN ONLY. Change something in the admin panel (POST to its route) — e.g. resolve a capability gap, triage gaps, pause/resume autonomy, approve a proposed tool. Routes that move real money (deposit, payout, sell-credits, brain-credit) or restore the database are refused ON PURPOSE and tell you why: those the owner presses himself, because a mistake there cannot be undone. When refused, prepare exactly what he has to press and say what will happen.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      sectiune: { type: 'string', description: "Route, e.g. 'gaps/resolve' or 'autonomie/pauza'." },
+      date: { type: 'object', description: 'The JSON body the route expects.' },
+    },
+    required: ['sectiune'],
+  },
+}
+
+// ── TOT SETUL DE ADMIN, DERIVAT — NU SCRIS CU MÂNA ───────────────────────────
+//
+// Adrian, 31 iul: „îți lipsesc câteva elemente esențiale pentru capabilitățile
+// lui Kelion, care sunt acelea?"
+//
+// Mâinile lui primeau 15 unelte dintr-o listă scrisă de mine, deși executorul
+// (`uneltele()` → `execSharedAdminTool`) știe să ruteze tot setul. Îi lipseau
+// exact cele de care avea nevoie ca să se depaneze singur: să-și citească
+// codul, să interogheze baza, să-și ia pulsul, să deschidă PR, să citească
+// jurnalul eșecului. Iar inventarul din prompt îi spunea că le are.
+//
+// Lista asta e ordinea în care le vede modelul; ce e aici TREBUIE să existe și
+// în SHARED_ADMIN_TOOLS (are test). Nu se mai umblă în două locuri.
+export const TOATE_UNELTELE_ADMIN: Tool[] = [
+  LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
+  // repo_* și runbook_* sunt încă definite în routes/chat.ts (migrarea spre
+  // sursa unică e incrementală). Se adaugă în autonomie.ts, de-acolo.
+  SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+  CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
+  CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+  // Legate de EL: memoria, notițele, jurnalele, costul, cutia poștală, și
+  // dreptul de a-și cere singur o unealtă care-i lipsește. Fără astea nu ține
+  // minte nimic de la o tură la alta — de-aia repeta aceleași greșeli.
+  LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
+  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
+  // Tot panoul de admin — vede ce vezi tu, și poate schimba ce se poate desface.
+  ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
+]
+

@@ -38,6 +38,13 @@ export interface DemoRecent {
   session_email: string
   /** Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple. */
   topic: string
+  /** Fusul lui orar (IANA, ex. „Europe/Bucharest"). Îți spune ce oră era LA EL
+   *  când a intrat — nu ora ta. Coloana exista în tabelă și nu se citea. */
+  tz: string
+  /** De câte ori a mai fost ÎNAINTE de vizita asta (același fingerprint).
+   *  0 = prima oară. Un om care revine a treia oară nu e același lucru cu unul
+   *  care a nimerit o dată pe site. */
+  vizite_anterioare: number
 }
 
 /** Analiza vizitatorilor, agregată (admin-only): totaluri + țări + ultimele sosiri. */
@@ -167,7 +174,17 @@ export interface MoneyCircuit {
   autonomie?: { la: string; ok: boolean; detaliu: string } | null
   /** Costul REAL la furnizori: total, azi, si pe ce s-a dus. Exista ca unealta —
    *  trebuia sa INTREBI ca sa afli. Acum se vede, langa bani. Nu taie nimic. */
-  costReal?: { total: number; today: number; byKind: Record<string, number> } | null
+  // `masurat` = banii spuși de furnizor; `estimat` = tariful meu fix × cantitate.
+  // Erau amestecate într-un singur „real" — și cel mai mare rând (minutele de
+  // voce) era tocmai cel estimat. Panoul trebuie să le poată deosebi.
+  costReal?: {
+    total: number
+    today: number
+    byKind: Record<string, number>
+    masurat: number
+    estimat: number
+    felul: Record<string, 'masurat' | 'estimat'>
+  } | null
   /** Maneta ownerului: autonomia e oprita? O limita pe care o alege EL nu e o
    *  bariera; una pusa de mine, da. De-aia e la vedere, si e a lui. */
   autonomiaOprita?: boolean

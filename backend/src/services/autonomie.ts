@@ -49,9 +49,20 @@ import {
   BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
 } from './brainToolDefs.js'
+import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
+// repo_* / runbook_* / request_repair sînt încă definite în routes/chat.ts
+// (migrarea spre sursa unică e incrementală, ca să nu clatin ruta live).
+// Importate DIRECT ca să nu existe două liste care pot diverge.
+import {
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+} from '../routes/chat.js'
 import { platiAutomatePornite } from './cardFurnizor.js'
 import { voceRecenta } from './adminLock.js'
-import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
+import {
+  execSharedAdminTool, SHARED_ADMIN_TOOLS,
+  execUserScopedTool, USER_SCOPED_TOOLS,
+} from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
@@ -181,61 +192,48 @@ const MISIUNE: Sarcina[] = [
   },
   {
     cod: 'M1',
-    titlu: 'Intri TU pe portal, cu browserul tău, și-ți faci singur cheile',
+    titlu: 'Cheile GoCardless — contul e ACTIV, ia-le și pune-le',
     ordin:
-      `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE, ȘI CINE O FACE: TU.\n\n` +
-      `Adrian, 30 iul, cuvânt cu cuvânt: „are liber 1000000% să folosească tot ca să obțină ` +
-      `scopul meu" · „e al meu și îi permit full acces". Deci NU ceri voie, NU-l trimiți pe ` +
-      `el nicăieri, și NU te oprești la primul obstacol de pe un portal.\n\n` +
-      `CE E DEJA SCRIS (nu rescrii nimic din astea): codurile unice KLN-XXXX-XXXX ` +
-      `(db.ts → creeazaCodPlata), tabela payment_codes, potrivirea codului din referință ` +
-      `(crediteazaDupaCod), creditarea idempotentă (topUpUser), ȘI CITITORUL DE TRANZACȚII ` +
-      `— backend/src/services/openBanking.ts, gata scris. Lipsesc DOAR cheile lui.\n\n` +
-      `CE E INTERZIS, decis de owner — nu se renegociază:\n` +
-      `  • NU prin email. Plata nu se citește din inbox. (30 iul: „ce ai făcut cu email ` +
-      `    scoți imediat, nu accept așa ceva".) Niciun modul care caută încasări în cutia ` +
-      `    poștală, sub niciun nume.\n` +
-      `  • NU prin API-ul Revolut: MĂSURAT din documentația lor — API-ul e doar pe Revolut ` +
-      `    Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate. Ownerul ` +
-      `    are Pro. Ușa aia e închisă; nu pierde timp pe ea.\n` +
-      `  • NU-i cere ownerului să intre pe portal. A pierdut deja o zi așa. Portalul e al tău.\n\n` +
-      `DRUMUL, ȘI E AL TĂU — BROWSERUL. Ai browser real pe server: browser_open, browser_read, ` +
-      `browser_click, browser_click_at, browser_type, browser_scroll, browser_key, ` +
-      `browser_back, browser_close. Cu el faci TOT lanțul:\n` +
-      `  1. deschizi https://bankaccountdata.gocardless.com/ — ăsta, nu „manage." și nu ` +
-      `     „developer.", alea sunt ALTE produse și n-au cheile noastre;\n` +
-      `  2. la login, PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
-      `     nu-l pornești, butoanele (inclusiv „Log in with Google") rămân MOARTE. Ăsta e ` +
-      `     motivul real pentru care ownerul n-a putut intra, nu o defecțiune;\n` +
-      `  3. Developers → User Secrets → Create new → iei Secret ID și Secret Key;\n` +
-      `  4. le pui SINGUR: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY;\n` +
-      `  5. Bank connections → Add bank → Revolut (id REVOLUT_REVOGB21) → pornești cererea ` +
-      `     de acces. AICI, și DOAR aici, e nevoie de owner: legea (PSD2) cere ca titularul ` +
-      `     să aprobe în aplicația Revolut de pe telefonul lui. Îi spui SCURT: „aprobă în ` +
-      `     Revolut, e o singură apăsare" — și aștepți. Nimic altceva nu-i ceri;\n` +
-      `  6. după aprobare iei Account ID → secret_pune GOCARDLESS_ACCOUNT_ID;\n` +
-      `  7. secret_publica — le duce pe server și repornește aplicația;\n` +
-      `  8. VERIFICI că merge: starea din stareCitirePlati() trebuie să treacă pe ✅. Dacă ` +
-      `     nu trece, e treaba ta să afli de ce, nu a lui.\n\n` +
-      `REGULI DE FIER: nu tastezi parole și nu le ceri; dacă un pas cere parola ownerului, ` +
-      `te oprești și spui exact la ce pas ai ajuns. Niciun număr de card nu trece pe nicăieri. ` +
-      `Valorile cheilor nu se repetă în chat, nu ajung pe monitor, nu se scriu în repo — ` +
-      `raportezi NUMELE și starea.\n\n` +
-      `DACĂ PORTALUL PICĂ (502, pagină albă, buton mort): reîncerci, cauți alt drum în ` +
-      `interfața lor, faci capturi pe monitor ca ownerul să vadă unde ești. Nu abandonezi ` +
-      `la prima eroare și nu i-o pasezi lui.\n\n` +
-      `CÂND CHEILE SUNT PUSE, restul merge singur: openBanking.ts citește tranzacțiile din ` +
-      `5 în 5 minute, potrivește codul KLN din referință și creditează. Scrii teste dacă ` +
-      `atingi cod; dacă a fost doar configurare, scrii în PR ce ai configurat și dovada că ` +
-      `starea a trecut pe verde.`,
-    // MÂINILE LUI: portal = browser + secrete. Rulează în aplicație, unde
-    // uneltele chiar există (constructorul le are acum și el, prin
-    // /api/constructor/tool — dar pasul ăsta nu e muncă de cod).
+      `MISIUNE REVOLUT, pasul 1 — CE S-A SCHIMBAT ASTĂZI, ȘI DE CE E MULT MAI UȘOR.\n\n` +
+      `31 iul, dovadă în mâna ownerului (email GoCardless): „Your account setup is now ` +
+      `complete. Your payouts have been enabled. We're sending your funds to your bank ` +
+      `account ending ******36."\n\n` +
+      `CONTUL E DESCHIS. Pasul ăsta NU mai e „intră pe un portal străin și luptă cu ` +
+      `formularele" — e „ia două chei dintr-un cont care te așteaptă".\n\n` +
+      `CE AI DE FĂCUT, EXACT:\n` +
+      `  1. secret_lista — vezi dacă GOCARDLESS_SECRET_ID și GOCARDLESS_SECRET_KEY sunt ` +
+      `     deja puse. Dacă sunt amândouă, treci direct la pasul 5.\n` +
+      `  2. browser_open pe https://bankaccountdata.gocardless.com/ — ASTA, nu „manage." ` +
+      `     și nu „developer.", alea sunt alte produse și n-au cheile noastre.\n` +
+      `  3. La login PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
+      `     nu-l pornești, butoanele rămân MOARTE. Ăsta e motivul real pentru care ` +
+      `     ownerul n-a putut intra data trecută, nu o defecțiune.\n` +
+      `  4. Developers → User Secrets → Create new. Iei Secret ID și Secret Key și le pui ` +
+      `     pe loc: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY. ` +
+      `     NU le repeta în răspuns, NU le scrie nicăieri — doar numele și lungimea.\n` +
+      `  5. secret_publica — le duce pe server și repornește aplicația.\n` +
+      `  6. VERIFICĂ, nu presupune: admin_vezi money-circuit, apoi admin_vezi env-check. ` +
+      `     Cheile trebuie să apară ca PREZENTE, iar starea citirii plăților pe verde. ` +
+      `     Dacă nu apar: procesul a pornit ÎNAINTE ca ele să fie scrise — cere ` +
+      `     secret_publica din nou și verifică iar.\n\n` +
+      `DE CE CONTEAZĂ, ca să știi când te poți opri: fără cheile astea, ` +
+      `startCitirePlati() iese pe loc la fiecare pornire și TOT lanțul plăților rămâne ` +
+      `teoretic — userul plătește, banii intră în contul ownerului, și creditele nu apar ` +
+      `NICIODATĂ singure. Lanțul e probat cap-coadă în fluxPlati.test.ts (7 verigi, toate ` +
+      `verzi). Nu mai e nimic de construit acolo. Singurul lucru care lipsește ești TU, ` +
+      `cu două chei.\n\n` +
+      `DACĂ CONTUL CERE CEVA CE DOAR TITULARUL POATE FACE (aprobare pe telefon, o ` +
+      `verificare de identitate): scrie exact „AȘTEPT APROBAREA: <ce anume, într-o ` +
+      `propoziție>" și oprește-te. Nu-l trimite pe owner să caute — spune-i unde să apese.\n\n` +
+      `INTERZIS, decis de owner, nu se renegociază: NU prin email (plata nu se citește din ` +
+      `inbox). NU tastezi parole și nu le ceri. Valorile cheilor nu se repetă, nu ajung pe ` +
+      `monitor, nu se scriu în repo.`,
     executant: 'maini',
-    dificultate: 5, // portal străin, formulare care se schimbă, consimțământ bancar
+    dificultate: 4,
 
-    // Dovada: cele trei chei chiar există. Fără ele, cititorul nu poate citi nimic.
-    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY', 'GOCARDLESS_ACCOUNT_ID'),
+    // Dovada: cele două chei chiar există în secrete. Fără ele, cititorul nu
+    // pornește, oricâte pagini ar fi deschis.
+    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY'),
   },
   {
     cod: 'M2',
@@ -446,20 +444,27 @@ async function golurileLui(): Promise<Sarcina[]> {
     }))
 }
 
-// ── DUPĂ TREI ÎNCERCĂRI: IESE ȘI CAUTĂ, NU SE ÎNVÂRTE ────────────────────────
+// ── SCHIMBĂ ABORDAREA DE LA PRIMA RELUARE, NU DE LA A TREIA ──────────────────
 //
 // Adrian, 30 iul: „după 3 trebuie să caute soluții, să iasă, să identifice
 // soluții, să studieze problema, să-și instaleze unelte diverse — în niciun caz
 // să abandoneze sau să stea în buclă."
 //
-// Ăsta e chiar echilibrul corect, și e altceva decât ce pusesem eu: nu un
-// PLAFON (renunță) și nici o repetare oarbă (se învârte), ci o SCHIMBARE DE
-// METODĂ. Are cu ce, de la PR #591: browser real, runbook-uri, baza de date,
-// și voie să-și instaleze pachete.
+// Adrian, 31 iul, mai ascuțit: „nu cred că după 2 runde are șanse în a treia să
+// rezolve ceva, dacă nu schimbă abordarea — chiar și după prima."
+//
+// Are dreptate, și pragul de 3 era al meu, nu al lui. Un plan care a picat o
+// dată nu devine bun fiindcă îl repeți pe un model mai scump: e aceeași
+// greșeală, plătită mai mult. Ce trebuie să se schimbe la RELUARE e DRUMUL, nu
+// mâna. De-aia cererea de schimbare a metodei pleacă de la PRIMA reluare, iar
+// modelul mai bun rămâne doar un ajutor pe deasupra, nu strategia.
 function escaladare(incercariDeja: number): string {
-  if (incercariDeja < 3) return ''
+  if (incercariDeja < 1) return ''
   return (
-    `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ORI ȘI N-A IEȘIT. NU repeta ce ai făcut — ` +
+    `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ${incercariDeja === 1 ? 'DATĂ' : 'ORI'} ȘI N-A IEȘIT. ` +
+    `SCRIE ÎNTÂI, ÎN PRIMUL RÂND AL RĂSPUNSULUI, CE FACI ALTFEL DE DATA ASTA — dacă nu poți ` +
+    `numi diferența, înseamnă că repeți, iar repetarea a fost deja plătită și n-a mers. ` +
+    `NU repeta ce ai făcut — ` +
     `ai dovada că drumul ăla nu duce nicăieri. SCHIMBĂ METODA, în ordinea asta:\n` +
     `  1. IEȘI ȘI CAUTĂ: browser_open pe mesajul EXACT de eroare și pe documentația ` +
     `     oficială a lucrului care nu merge. Citește, nu ghici.\n` +
@@ -581,6 +586,15 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   if (SHARED_ADMIN_TOOLS.has(name)) {
     return (await execSharedAdminTool(name, args, { email, baseUrl })) ?? JSON.stringify({ error: 'unealtă necunoscută' })
   }
+  // UNELTELE LEGATE DE EL (memorie, notițe, jurnalele serverului, costul, cutia
+  // poștală, propose_tool). Adrian, 31 iul: „75 de capabilități pe chat, toate
+  // trebuie real să le primească." Astea n-au nevoie de nimic din cererea HTTP —
+  // doar de cine e userul — deci n-aveau niciun motiv real să lipsească când
+  // lucrează singur. Fără ele nu ține minte nimic de la o tură la alta.
+  if (USER_SCOPED_TOOLS.has(name)) {
+    const r = await execUserScopedTool(name, args, email, true)
+    if (r !== null) return r
+  }
   // Pagina se întoarce ca text + elemente numerotate; o tăiem, ca o pagină mare
   // să nu mănânce toată fereastra de context a creierului.
   const scurt = (v: unknown): string => JSON.stringify(v).slice(0, 20_000)
@@ -640,6 +654,115 @@ async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | n
   return { pornit: true, motiv: `cerința #${c.id} — n-a trecut proba, o reia: ${spus.slice(0, 160)}` }
 }
 
+// ── CÂND TOT CE DAI PICĂ, PROBLEMA NU MAI E ÎN ORDIN ─────────────────────────
+//
+// Adrian, 31 iul, patru semne de întrebare: „cum se reia sau ce se întâmplă cu
+// cele eșuate? care e logica????"
+//
+// Logica de reluare EXISTA și mergea: un ordin picat se dă înapoi cu jurnalul
+// eșecului lipit, dificultatea urcă cu fiecare încercare, după 3 iese și caută,
+// nu se abandonează niciodată. Se vede în panou: #20 → #24, a doua încercare.
+//
+// Ce LIPSEA e mai simplu și mai grav: **nimeni nu se uita la tipar.** Zece
+// ordine la rând (#15…#24), zero terminate — și bucla dădea liniștită al
+// unsprezecelea. Când TOATE pică, problema nu mai e în ordinul următor; e în
+// mâna care execută. A insista înseamnă a plăti de zece ori același eșec.
+//
+// Ce face de acum: NU se oprește din lucru (asta ar fi o barieră, și mi-a
+// interzis-o pe bună dreptate) — SCHIMBĂ ținta. În loc de al unsprezecelea
+// ordin identic către constructorul care tocmai a picat de zece ori, pune un
+// ordin de DIAGNOSTIC, dus de MÂINILE lui: „află de ce pică toate, repară
+// cauza". Mâinile au browser, jurnale și secrete; constructorul e chiar cel
+// stricat. Nu abandonează nimic — încetează doar să lovească în același zid.
+
+/** Câte ordine consecutive picate, fără NICIUN succes, până schimbă ținta.
+ *
+ *  DOUĂ, nu cinci. Adrian, 31 iul: „nu cred că după 2 runde are șanse în a
+ *  treia să rezolve ceva, dacă nu schimbă abordarea". Pragul de 5 era al meu și
+ *  însemna cinci eșecuri plătite până să observ tiparul. */
+const PRAG_ESEC = 2
+
+/** Semnătura lumii — CE s-ar putea schimba încât să merite o nouă încercare.
+ *
+ *  Se calculează GRATUIT (nimic din proces nu costă tokeni): versiunea
+ *  publicată, câte chei vede procesul, câte ordine au reușit vreodată. Cât timp
+ *  semnătura e aceeași, o reîncercare ar da exact același rezultat — deci nu se
+ *  cheltuie nimic pe ea. Când se schimbă (ai publicat cod nou, a apărut o
+ *  cheie, ceva a reușit), zidul cade singur și lucrul repornește. */
+function semnaturaLumii(cateReusite: number): string {
+  const versiune = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
+  const chei = Object.keys(process.env).filter((k) => /_KEY$|_SECRET$|_TOKEN$|_URL$|^CARD_/.test(k)).length
+  return `${versiune}|${chei}|${cateReusite}`
+}
+
+/** Ce ținem minte despre un zid, între treceri. */
+interface StareZid {
+  cate: number
+  cauza: string
+  cand: string
+  /** Lumea, așa cum era când s-a ridicat zidul. */
+  semnatura: string
+  /** Diagnosticul s-a făcut deja — costă, deci NU se repetă pe același zid. */
+  diagnosticat: boolean
+  /** Ce a găsit diagnosticul, ca să apară în panou fără să mai întrebi. */
+  raport: string
+}
+
+async function citesteZid(): Promise<StareZid | null> {
+  try {
+    const raw = await loadKv('autonomie:zid')
+    return raw ? (JSON.parse(raw) as StareZid) : null
+  } catch {
+    return null
+  }
+}
+
+/** Ce se repetă în jurnalele eșecurilor — cauza COMUNĂ, nu ultima eroare.
+ *
+ *  Normalizăm fiecare rând (scoatem cifrele, care diferă de la un job la altul)
+ *  și numărăm. Ce apare în cele mai multe jurnale e cauza; una singură care
+ *  apare într-un jurnal e zgomot. */
+function cauzaComuna(picate: BuildJob[]): string {
+  const nr = new Map<string, { n: number; exemplu: string }>()
+  for (const j of picate) {
+    const randuri = (j.log ?? '')
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r.length > 20 && /eroare|error|failed|refuz|refus|timeout|429|4\d\d|5\d\d|nu (pot|poate|are)/i.test(r))
+    // Un singur vot per job, altfel un jurnal lung câștigă singur.
+    const vazute = new Set<string>()
+    for (const r of randuri) {
+      const cheie = r.replace(/\d+/g, '#').slice(0, 120)
+      if (vazute.has(cheie)) continue
+      vazute.add(cheie)
+      const e = nr.get(cheie) ?? { n: 0, exemplu: r.slice(0, 200) }
+      e.n += 1
+      nr.set(cheie, e)
+    }
+  }
+  const top = [...nr.values()].sort((a, b) => b.n - a.n)[0]
+  if (!top || top.n < 2) return ''
+  return `„${top.exemplu}" — în ${top.n} din ${picate.length} jurnale`
+}
+
+/** Ordinele pornite de buclă (nu de om), cele mai noi primele. */
+function aleBuclei(jobs: BuildJob[]): BuildJob[] {
+  return jobs.filter((j) => String(j.orderedBy ?? '').toLowerCase().startsWith('kelion'))
+}
+
+/** Toate ordinele recente au picat? Atunci nu mai dăm al unsprezecelea la fel. */
+function zidul(jobs: BuildJob[]): { blocat: boolean; cate: number; cauza: string } {
+  const ale = aleBuclei(jobs).filter((j) => j.status === 'done' || j.status === 'failed')
+  const consecutive: BuildJob[] = []
+  for (const j of ale) {
+    if (j.status === 'done') break // un succes rupe seria — nu mai e zid
+    consecutive.push(j)
+  }
+  return consecutive.length >= PRAG_ESEC
+    ? { blocat: true, cate: consecutive.length, cauza: cauzaComuna(consecutive) }
+    : { blocat: false, cate: consecutive.length, cauza: '' }
+}
+
 /** O tură de lucru a lui Kelion, pornită de buclă, nu de un om. */
 /** Scara pentru mâinile lui, aleasă după cât de grea e sarcina.
  *
@@ -654,14 +777,41 @@ function scaraPentru(dificultate = 3): string[] | undefined {
   return top ? [top, ...restul.filter((m) => m !== top)] : restul
 }
 
+/** TOT ce primește creierul lui când lucrează singur.
+ *
+ *  Adrian, 31 iul: „trebuie să te asiguri că orice creier se schimbă primește
+ *  întotdeauna tot" · „cele 75 conștiente pentru creierul lui, oricare se pune".
+ *
+ *  De-aia e o constantă EXPORTATĂ, nu o listă locală: paznicul din
+ *  `uneltePartajate.test.ts` o compară cu ce știe executorul să ruleze, și cade
+ *  dacă cele două diverg. Capabilitățile nu depind de care model e pus astăzi. */
+export const UNELTELE_MAINILOR = [
+  ...BROWSER_TOOLS,
+  ...TOATE_UNELTELE_ADMIN,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+]
+
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
-  const tools = [
-    ...BROWSER_TOOLS, SECRET_LISTA_TOOL, SECRET_PUNE_TOOL, SECRET_PUBLICA_TOOL,
-    // Cardul la furnizori + plățile automate (M6). Nu-l „deblochează" să le aibă
-    // în listă: uneltele refuză singure dacă vocea ownerului n-a fost
-    // recunoscută în ultimele 15 minute. Poarta e în executor, nu în listă.
-    CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
-  ] as unknown as AnthropicTool[]
+  // ── TOT CE ȘTIE EXECUTORUL SĂ RUTEZE, NU O LISTĂ SCRISĂ DE MINE ────────────
+  //
+  // Adrian, 31 iul: „îți lipsesc câteva elemente esențiale pentru capabilitățile
+  // lui Kelion, care sunt acelea?" Ăsta era primul.
+  //
+  // `uneltele()` rutează TOT setul partajat. Lista de aici avea 15 din ele:
+  // browserul, secretele, cardul. Îi lipseau din mână — deși executorul le
+  // știe — read_source (să-și citească propriul cod), db_query (să interogheze
+  // baza), system_health (să-și ia pulsul), repo_write/repo_open_pr (să scrie
+  // cod și să deschidă PR), runbook_log (să citească jurnalul eșecului).
+  //
+  // Mai rău: `inventarulMeu()` din prompt îi spune că LE ARE pe toate. Deci i
+  // se spunea „ai db_query", o cerea, și unealta nu exista în listă — un „nu
+  // pot" pentru ceva ce codul de dedesubt chiar putea face.
+  //
+  // De-aia lista nu se mai scrie cu mâna: se DERIVĂ din ce știe executorul.
+  // Dacă mâine apare o unealtă nouă în dispatcher, o are și el, fără să mai
+  // umble nimeni aici.
+  const tools = UNELTELE_MAINILOR as unknown as AnthropicTool[]
   const prompt =
     `${s.ordin}\n\n` +
     // CONȘTIENT DE CE ARE (Adrian, 30 iul): inventarul lui complet, derivat din
@@ -723,6 +873,85 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     try {
       const v = await verificaLivrata().catch(() => null)
       if (v) return v
+    } finally {
+      mainileOcupate = false
+    }
+  }
+
+  // ── ZIDUL: dacă TOT ce am dat pică, nu mai dau al unsprezecelea la fel ─────
+  // Nu e abandon și nu e plafon: e schimbarea țintei. Constructorul care a picat
+  // de N ori la rând nu se repară primind al N+1-lea ordin — se repară uitându-ne
+  // la ce scrie în jurnalele lui. Ordinul ăsta îl duc MÂINILE, care au browser și
+  // jurnale; constructorul e chiar cel stricat.
+  const zid = zidul(jobs)
+  const zidVechi = await citesteZid()
+  const reusite = aleBuclei(jobs).filter((j) => j.status === 'done').length
+  const acum = semnaturaLumii(reusite)
+
+  // ZIDUL A CĂZUT? Nu fiindcă a trecut timpul — fiindcă S-A SCHIMBAT CEVA:
+  // cod nou publicat, o cheie apărută, un ordin reușit. Cât timp lumea e
+  // identică, o reîncercare ar da identic același eșec.
+  if (zidVechi && zidVechi.semnatura !== acum) {
+    await saveKv('autonomie:zid', '').catch(() => {})
+  } else if (zidVechi) {
+    // ZID ÎN PICIOARE, LUMEA NESCHIMBATĂ → NU SE CHELTUIE NIMIC. Zero apeluri de
+    // model, zero ordine. Adrian, 31 iul: „să stea în buclă să consume?" Nu.
+    // Trecerea asta costă exact cât o interogare în baza de date.
+    return {
+      pornit: false,
+      motiv:
+        `⏸ OPRIT pe zid, nu consum nimic: ${zidVechi.cate} ordine picate la rând, 0 reușite. ` +
+        (zidVechi.cauza ? `Cauza care se repetă: ${zidVechi.cauza}. ` : '') +
+        (zidVechi.raport ? `Diagnostic: ${zidVechi.raport.slice(0, 200)}. ` : '') +
+        `Repornesc SINGUR când se schimbă ceva real — publici cod nou, apare o cheie, ` +
+        `sau reușește un ordin. Până atunci, o reîncercare ar da exact același eșec, pe banii tăi.`,
+    }
+  }
+
+  if (zid.blocat && !mainileOcupate) {
+    mainileOcupate = true
+    try {
+      const spus = await ruleazaCuMainile({
+        cod: 'ZID',
+        titlu: 'De ce pică TOATE ordinele',
+        executant: 'maini',
+        dificultate: 5,
+        ordin:
+          `OPREȘTE-TE DIN A MAI DA ORDINE ȘI AFLĂ DE CE PICĂ TOATE.\n\n` +
+          `Ultimele ${zid.cate} ordine pornite de tine au picat, unul după altul, ZERO terminate. ` +
+          `Când tot ce dai pică, problema nu mai e în ordinul următor — e în mâna care execută. ` +
+          `Al ${zid.cate + 1}-lea ordin identic ar costa la fel de mult și ar pica la fel.\n\n` +
+          (zid.cauza ? `CE SE REPETĂ ÎN JURNALE: ${zid.cauza}\n\n` : '') +
+          `FĂ AȘA, în ordinea asta:\n` +
+          `  1. server_logs (errorsOnly=false) și runbook_log pe ultimele ordine — citește ce a scris ` +
+          `     lucrătorul când a căzut. Nu ghici din titlu.\n` +
+          `  2. system_health — merge puntea de pe VPS? Are cheile? Are loc pe disc?\n` +
+          `  3. db_query pe build_jobs: SELECT id, status, attempts, left(log, 400) FROM build_jobs ` +
+          `     ORDER BY id DESC LIMIT 12 — vezi tiparul cu ochii tăi.\n` +
+          `  4. Când ai găsit cauza REALĂ (una singură, nu o listă de bănuieli), REPAR-O: dacă e în ` +
+          `     cod, deschide PR; dacă e o cheie lipsă, pune-o cu secret_pune; dacă e puntea moartă, ` +
+          `     spune exact ce trebuie repornit.\n\n` +
+          `RAPORTEAZĂ ÎN DOUĂ RÂNDURI: cauza, și ce ai făcut cu ea. Dacă n-o poți repara singur, ` +
+          `scrie „AȘTEPT APROBAREA: <ce anume>" — dar numai după ce ai măsurat, nu în loc să măsori.`,
+      }).catch((e: Error) => `a crăpat: ${e.message}`)
+      // Diagnosticul se face O SINGURĂ DATĂ pe zid. De la trecerea următoare,
+      // ramura de mai sus întoarce fără să cheltuie nimic — până se schimbă
+      // lumea. Altfel n-aș fi oprit bucla, doar i-aș fi schimbat eticheta.
+      const stare: StareZid = {
+        cate: zid.cate,
+        cauza: zid.cauza,
+        cand: new Date().toISOString(),
+        semnatura: acum,
+        diagnosticat: true,
+        raport: spus.slice(0, 1000),
+      }
+      await saveKv('autonomie:zid', JSON.stringify(stare)).catch(() => {})
+      return {
+        pornit: true,
+        motiv:
+          `ZID: ${zid.cate} ordine picate la rând, 0 reușite — am oprit ordinele și am căutat cauza. ` +
+          `${spus.slice(0, 300)}`,
+      }
     } finally {
       mainileOcupate = false
     }

@@ -20,6 +20,7 @@ import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
 import { voceRecenta, minuteRamaseVoce } from './adminLock.js'
+import { adminVezi, adminSchimba } from './adminVedere.js'
 
 // Numele uneltelor admin partajate (chat ∩ voce). Apelantul verifică apartenența
 // ca să știe dacă delegă aici sau tratează el (build_software, google, browser...).
@@ -32,6 +33,9 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
   // Cardul: poarta e ÎN executor (fereastra de voce), nu aici.
   'card_stare', 'card_completeaza', 'card_gata',
+  // Tot panoul de admin (31 iul, a treia cerere): vede ce vede ownerul pe ecran
+  // și poate schimba ce se poate desface.
+  'admin_vezi', 'admin_schimba',
 ])
 
 // Execută o unealtă admin PARTAJATĂ. Întoarce rezultatul (string) sau `null` dacă
@@ -42,7 +46,7 @@ export async function execSharedAdminTool(
   args: Record<string, unknown>,
   // Cine cere și de unde — necesare DOAR uneltelor de card (browserul e per
   // user, iar poarta e „ți-am recunoscut vocea acum"). Restul le ignoră.
-  ctx: { email?: string; baseUrl?: string } = {},
+  ctx: { email?: string; baseUrl?: string; cookie?: string } = {},
 ): Promise<string | null> {
   switch (name) {
     case 'list_source': return listSource(String(args.dir ?? '.'))
@@ -112,6 +116,13 @@ export async function execSharedAdminTool(
       // Pagina se întoarce deja mascată de modul discret; nu adăugăm nimic.
       return JSON.stringify({ ok: r.ok, camp: r.camp, detaliu: r.detaliu, pagina: r.pagina })
     }
+    // ── TOT CE CONȚINE ADMINUL ─────────────────────────────────────────────
+    // Cookie-ul e al celui care cere: unealta NU ocolește poarta de admin, o
+    // folosește. Fără sesiune de admin, ruta răspunde 403 și el o spune.
+    case 'admin_vezi':
+      return adminVezi(String(args.sectiune ?? ''), ctx.cookie ?? '')
+    case 'admin_schimba':
+      return adminSchimba(String(args.sectiune ?? ''), args.date ?? {}, ctx.cookie ?? '')
     case 'card_gata': {
       const r = await terminaCard(ctx.email ?? '', ctx.baseUrl ?? 'https://kelionai.app', String(args.furnizor ?? ''))
       return JSON.stringify({ ok: true, card_la_dosar: r.card, plata_automata: r.automat, detaliu: r.detaliu, pagina: r.pagina })
