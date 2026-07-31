@@ -1,34 +1,57 @@
-# Configurație Aider — Kimi (primar)
-# Locație: .aider.conf.yml în repo
+# Configurație Aider — Kelionai
+#
+# Adrian, 31 iul 2026. Fișierul exista din 12 iulie, configurat pe Kimi
+# (`openai/kimi-k2-thinking` + `KIMI_API_KEY`) — cheie plătită. Mutat pe
+# OpenRouter, model gratuit, cu cheia pe care o ai deja.
 
-# Model
-model: openai/kimi-k2-thinking
+# ── CREIERUL ────────────────────────────────────────────────────────────────
+# Nemotron 3 Ultra, varianta GRATUITĂ: 550 de miliarde de parametri, un milion
+# de context, zero dolari. Cel mai capabil model gratuit din catalogul live
+# OpenRouter (verificat 31 iul: 364 de modele, 17 gratuite).
+# Nu are vedere — la Kelion asta l-a scos din listă, aici nu contează deloc:
+# un agent de programare lucrează cu fișiere text.
+model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
 
-# API base pentru Kimi (compatibil OpenAI)
-openai-api-base: https://api.kimi.com/coding/v1
+# Când Ultra atinge plafonul de cereri pe minut (429 — modelele gratuite au
+# unul strict), sarcinile mărunte trec pe asta. Poolside Laguna e făcut anume
+# pentru agenți de programare. Tot gratuit.
+weak-model: openrouter/poolside/laguna-s-2.1:free
 
-# API key — citit din fișier pe VPS
-openai-api-key: ${KIMI_API_KEY}
+# Cheia: OPENROUTER_API_KEY în mediu. Aceeași pe care o folosește Kelion.
+# NU se scrie aici. Un fișier de configurare ajunge în git; o cheie din el, la fel.
 
-# Fereastra de context
 max-chat-history-tokens: 262144
 
-# Comportament
-auto-commits: true
+# ── PROTECȚIA CARE A LIPSIT ─────────────────────────────────────────────────
+# `auto-commits` era `true`. Adică: modifica și comitea singur, fără ca omul
+# să vadă diff-ul. Pe 31 iulie exact asta a costat — cod intrat în istoric
+# fără ca cineva să se fi uitat la el, inclusiv un commit al meu care conținea
+# mai mult decât scria în mesajul lui.
+# Acum: modifică, îți arată, comiți TU.
+auto-commits: false
 dirty-commits: false
-watch-files: true
-
-# Unelte
-code-theme: monokai
 show-diffs: true
 
-# Lint/check la salvare
-lint-cmd: "npx eslint --fix"
+# ── PLASA ───────────────────────────────────────────────────────────────────
+# Backendul are 353 de teste. Rulează-le după fiecare modificare și dă-i
+# erorile înapoi ca să repare singur. Contează dublu acum, când CI-ul de pe
+# GitHub e blocat pe facturare — astea sunt singura plasă rămasă.
+test-cmd: cd backend && npx vitest run
+auto-test: true
 
-# Repo
+# `npx eslint --fix` (vechea valoare) nu e poarta acestui proiect. TypeScript e.
+lint-cmd: cd backend && npx tsc --noEmit
+
+# ── CONTEXTUL PROIECTULUI ───────────────────────────────────────────────────
+# Citite la fiecare pornire, ca să nu-i explici de fiecare dată unde e.
+read:
+  - CLAUDE.md
+  - AI-HANDOFF.md
+  - RAMAS-DE-FACUT.md
+
 git: true
 gitignore: true
-
-# Output
-verbose: false
 stream: true
+code-theme: monokai
+verbose: false
+analytics-disable: true
