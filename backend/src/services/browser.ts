@@ -193,19 +193,46 @@ function isNavigationRace(e: unknown): boolean {
   )
 }
 
-async function takeSnapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+// ── MODUL DISCRET: pagina în care se scrie un card nu ajunge NICĂIERI ────────
+//
+// Adrian, 31 iul: „să opereze pentru mine când îi cer doar eu, folosind
+// sistemul de recunoaștere vocală, ca securitate sporită."
+//
+// Amprenta vocală rezolvă CINE are voie. Rămâne însă scurgerea: browserul face
+// o captură la fiecare pas (care ajunge pe monitor) și întoarce textul paginii
+// către model. Pe o pagină de plată, amândouă ar căra numărul cardului — în
+// imagini, în jurnalul turei, în istoricul conversației.
+//
+// Cât timp sesiunea e „discretă": ZERO capturi, iar din textul paginii se
+// maschează orice șir de 12-19 cifre. Nu e o politețe — e diferența dintre „a
+// pus cardul" și „a lăsat cardul prin trei locuri".
+const discret = new Set<string>()
+export function setModDiscret(email: string, pornit: boolean): void {
+  if (pornit) discret.add(email)
+  else discret.delete(email)
+}
+/** Maschează șirurile lungi de cifre (card, IBAN) dintr-un text. */
+export function mascheazaCifre(text: string): string {
+  return text.replace(/\b(?:\d[ -]?){12,19}\b/g, (m) => `«${m.replace(/\D/g, '').length} cifre ascunse»`)
+}
+
+async function takeSnapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
   const title = await page.title()
   const url = page.url()
   const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
-  const text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
+  let text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
+  if (email && discret.has(email)) {
+    // Fără captură (n-ar avea ce ajunge pe monitor) și fără cifre în text.
+    return { url, title, text: mascheazaCifre(text), elements, shotUrl: '' }
+  }
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
   const id = putShot(buf)
   return { url, title, text, elements, shotUrl: `${baseUrl}/api/browser/shot/${id}` }
 }
 
-async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
+async function snapshot(page: Page, baseUrl: string, email = ''): Promise<BrowserSnapshot> {
   try {
-    return await takeSnapshot(page, baseUrl)
+    return await takeSnapshot(page, baseUrl, email)
   } catch (e) {
     if (!isNavigationRace(e)) throw e
     // Give the SPA's redirect cascade a moment to settle, then retry once —
@@ -213,7 +240,7 @@ async function snapshot(page: Page, baseUrl: string): Promise<BrowserSnapshot> {
     // fail the same way again and should propagate as before.
     await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
     await page.waitForTimeout(500)
-    return await takeSnapshot(page, baseUrl)
+    return await takeSnapshot(page, baseUrl, email)
   }
 }
 // ── public actions ───────────────────────────────────────────────────────
@@ -249,7 +276,7 @@ export async function browserOpen(
     return { error: 'navigation_failed' }
   }
   try {
-    return await snapshot(session.page, baseUrl)
+    return await snapshot(session.page, baseUrl, email)
   } catch (e) {
     console.error('[browser] snapshot failed:', e instanceof Error ? e.message.slice(0, 300) : e)
     return { error: 'snapshot_failed' }
@@ -274,7 +301,7 @@ async function withPageAction(
   }
   await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
   await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserClick(
@@ -303,7 +330,7 @@ export async function browserRead(email: string, baseUrl: string): Promise<Brows
   const session = sessions.get(email)
   if (!session) return { error: 'no_session' }
   session.lastUsed = Date.now()
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserBack(email: string, baseUrl: string): Promise<BrowserResult> {
@@ -315,7 +342,7 @@ export async function browserBack(email: string, baseUrl: string): Promise<Brows
   } catch {
     /* nothing to go back to — still return the current page */
   }
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 export async function browserScroll(
@@ -329,7 +356,7 @@ export async function browserScroll(
   const dy = direction === 'down' ? 700 : -700
   await session.page.evaluate(`window.scrollBy(0, ${dy})`).catch(() => {})
   await session.page.waitForTimeout(200)
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 // COMPUTER-USE COMPLET (Adrian, 13 iul): pe lângă click/type/scroll pe elemente
@@ -356,25 +383,17 @@ export async function browserKey(email: string, baseUrl: string, key: string): P
   }
   await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
   await session.page.waitForTimeout(250)
-  return snapshot(session.page, baseUrl)
+  return snapshot(session.page, baseUrl, email)
 }
 
 // Click pe coordonate (x,y) în viewport (1280×800). Pentru elemente pe care
 // selectorul indexat nu le prinde (canvas, hărți, UI custom).
 export async function browserClickAt(email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> {
-  const session = sessions.get(email)
-  if (!session) return { error: 'no_session' }
-  session.lastUsed = Date.now()
+  // Avea scheletul copiat de mână (sesiune → acțiune → așteptare → snapshot),
+  // deși `withPageAction` există exact pentru asta. Aici e o singură sursă.
   const cx = Math.max(0, Math.min(1280, Math.round(x)))
   const cy = Math.max(0, Math.min(800, Math.round(y)))
-  try {
-    await session.page.mouse.click(cx, cy)
-  } catch {
-    return { error: 'click_failed' }
-  }
-  await session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-  await session.page.waitForTimeout(300)
-  return snapshot(session.page, baseUrl)
+  return withPageAction(email, baseUrl, (page) => page.mouse.click(cx, cy))
 }
 
 export async function browserClose(email: string): Promise<void> {

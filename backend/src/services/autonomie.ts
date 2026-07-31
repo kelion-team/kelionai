@@ -45,7 +45,12 @@ import {
   type BuildJob,
 } from '../db.js'
 import { brainCompleteWithTools, expertModelLadder } from './brain.js'
-import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
+import {
+  BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+  CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+} from './brainToolDefs.js'
+import { platiAutomatePornite } from './cardFurnizor.js'
+import { voceRecenta } from './adminLock.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
@@ -92,6 +97,14 @@ interface Sarcina {
   /** Cum se DOVEDEȘTE că e gata — o măsurătoare, nu cuvântul lui.
    *  Întoarce `true` doar dacă lucrul chiar s-a întâmplat. */
   dovada?: () => Promise<boolean>
+  /** SE POATE LUA ACUM? Nu „are voie" — POATE. Un pas care cere fereastra de
+   *  voce a ownerului nu se poate face la 3 noaptea, oricâtă libertate ar avea.
+   *
+   *  Fără poarta asta, pasul cu cardul (M6) ar fi fost ales la fiecare trecere
+   *  — e cel mai puțin încercat, deci primul la rând — ar fi eșuat pe „nu ți-am
+   *  recunoscut vocea", și ar fi înfometat TOT restul: misiunea, cerințele,
+   *  golurile. Un pas imposibil acum nu e o sarcină, e o buclă. */
+  poate?: () => boolean | Promise<boolean>
 }
 
 /** Cheile există cu adevărat în secretele repo-ului? (măsurătoare, nu declarație) */
@@ -297,6 +310,57 @@ const MISIUNE: Sarcina[] = [
       `și taie ce nu mai e adevărat.`,
     executant: 'constructor',
     dificultate: 3,
+  },
+  {
+    cod: 'M6',
+    titlu: 'Cardul la furnizori și PLĂȚILE AUTOMATE — ca să nu te mai oprești niciodată',
+    ordin:
+      `MISIUNEA CARE DOVEDEȘTE AUTONOMIA — PLĂȚILE AUTOMATE.\n\n` +
+      `Adrian, 31 iul: „a pus cardul la furnizori? a setat tot?" · „asta era cerința care ` +
+      `dovedea autonomia reală" · „plățile automate".\n\n` +
+      `SCOPUL NU E „am completat formularul". Scopul e ca furnizorul să se încaseze SINGUR ` +
+      `— reîncărcare automată pornită — ca tu să nu rămâi niciodată fără credit și ownerul ` +
+      `să nu apese nimic. Un card pus fără plata automată nu rezolvă nimic: peste o lună ` +
+      `taci din nou, iar el află din faptul că nu-i mai răspunzi.\n\n` +
+      `POARTA, cerută de owner: „să opereze pentru mine când îi cer DOAR EU, folosind ` +
+      `sistemul de recunoaștere vocală." Uneltele de card refuză singure dacă vocea lui ` +
+      `nu a fost recunoscută în ultimele 15 minute. Deci pasul ăsta NU se face în bucla de ` +
+      `noapte — se face când îți cere el, cu vocea. Dacă bucla te aduce aici și fereastra ` +
+      `de voce e închisă, card_stare ți-o spune: atunci raportezi ce lipsește și te oprești, ` +
+      `nu forțezi.\n\n` +
+      `CUM, EXACT:\n` +
+      `  1. card_stare — vezi ce câmpuri sunt configurate pe server și dacă vocea lui e ` +
+      `     recunoscută acum. Dacă nu e: spui atât, și te oprești.\n` +
+      `  2. browser_open pe pagina de facturare a furnizorului (openrouter.ai/credits, ` +
+      `     console.anthropic.com → Billing, platform.openai.com → Billing), browser_read ` +
+      `     ca să vezi câmpurile numerotate.\n` +
+      `  3. card_completeaza, câmp cu câmp: numar, expirare, cvc, nume, cod_postal. TU NU ` +
+      `     PRIMEȘTI VALOAREA și nu ai ce cere — spui doar CE câmp și ÎN CE index. Serverul ` +
+      `     scrie. Din prima scriere, pagina nu mai ajunge pe monitor și cifrele sunt mascate.\n` +
+      `  4. Trimiți formularul (browser_click pe butonul de salvare).\n` +
+      `  5. PORNEȘTI REÎNCĂRCAREA AUTOMATĂ: „Auto-recharge" / „Auto top-up" / „Automatic ` +
+      `     payments" — comutatorul, plus pragul și suma dacă le cere („când soldul scade ` +
+      `     sub X, încarcă Y"). ĂSTA e pasul care contează.\n` +
+      `  6. card_gata cu numele furnizorului. Serverul CITEȘTE el pagina și îți spune dacă ` +
+      `     vede card la dosar ȘI plată automată. Dacă nu vede plata automată, nu te-ai ` +
+      `     terminat treaba: o pornești și chemi din nou card_gata.\n\n` +
+      `CE NU FACI, NICIODATĂ: nu ceri numărul cardului nimănui, nu-l repeți, nu-l scrii ` +
+      `într-un fișier și nu-l pui într-un secret — uneltele mele refuză din construcție ` +
+      `orice arată a card. Valorile se pun O SINGURĂ DATĂ, de mâna ownerului, ca secrete ` +
+      `(CARD_NUMAR, CARD_EXPIRARE, CARD_CVC, CARD_NUME, CARD_COD_POSTAL). Nu tastezi parole.`,
+    // MÂINILE LUI: browser + unelte de card. Constructorul n-are nici pagina, nici
+    // fereastra de voce — un ordin de card trimis lui ar fi eșuat garantat.
+    executant: 'maini',
+    dificultate: 5, // pagină de plată străină, gardă de voce, bani reali
+
+    // DOVADA: nu „a spus că a pus cardul", ci ce a MĂSURAT codul pe pagina
+    // furnizorului la închiderea sesiunii — plata automată pornită.
+    dovada: platiAutomatePornite,
+
+    // SE POATE LUA doar cât timp fereastra de voce a ownerului e deschisă —
+    // exact cum a cerut: „să opereze pentru mine când îi cer DOAR EU". În rest,
+    // bucla trece peste el fără să-l ardă în încercări eșuate.
+    poate: () => voceRecenta(config.adminEmail),
   },
 ]
 
@@ -515,7 +579,7 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   // trebuie echipat la full"). `SHARED_ADMIN_TOOLS` e sursa unică — dacă mâine
   // apare o unealtă nouă acolo, o are și el, fără să mai umble nimeni aici.
   if (SHARED_ADMIN_TOOLS.has(name)) {
-    return (await execSharedAdminTool(name, args)) ?? JSON.stringify({ error: 'unealtă necunoscută' })
+    return (await execSharedAdminTool(name, args, { email, baseUrl })) ?? JSON.stringify({ error: 'unealtă necunoscută' })
   }
   // Pagina se întoarce ca text + elemente numerotate; o tăiem, ca o pagină mare
   // să nu mănânce toată fereastra de context a creierului.
@@ -593,6 +657,10 @@ function scaraPentru(dificultate = 3): string[] | undefined {
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   const tools = [
     ...BROWSER_TOOLS, SECRET_LISTA_TOOL, SECRET_PUNE_TOOL, SECRET_PUBLICA_TOOL,
+    // Cardul la furnizori + plățile automate (M6). Nu-l „deblochează" să le aibă
+    // în listă: uneltele refuză singure dacă vocea ownerului n-a fost
+    // recunoscută în ultimele 15 minute. Poarta e în executor, nu în listă.
+    CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
   ] as unknown as AnthropicTool[]
   const prompt =
     `${s.ordin}\n\n` +
@@ -634,9 +702,18 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   const azi = await dateAzi()
 
   // 3. Misiunea (partea Revolut) are întâietate; pe urmă lista ownerului.
-  const misiuneGata = await Promise.all(MISIUNE.map((p) => citesteStare(p.cod))).then((st) =>
-    st.every((s) => s.gata),
+  // Un pas care cere fereastra de voce (M6, cardul) NU se poate lua noaptea.
+  // Îl scoatem din calcul în loc să-l lăsăm să blocheze misiunea la nesfârșit:
+  // altfel „misiunea nu e gata" ar fi rămas adevărat pe veci, iar cerințele și
+  // golurile n-ar mai fi ajuns niciodată la rând.
+  const pasii = await Promise.all(
+    MISIUNE.map(async (p) => ({
+      p,
+      st: await citesteStare(p.cod),
+      poate: p.poate ? await Promise.resolve(p.poate()).catch(() => false) : true,
+    })),
   )
+  const misiuneGata = pasii.every((e) => e.st.gata || !e.poate)
   // După misiune: întâi CE ÎI LIPSEȘTE LUI (golurile pe care le-a triat singur
   // — „vede ce-i lipsește și se dezvoltă"), apoi rândurile din lista ownerului.
   // PROBA ÎNAINTE DE ORICE ALTCEVA: ce e livrat dar neverificat nu are voie să
@@ -661,7 +738,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
 
   const brute = misiuneGata
     ? [...(await cerinteDeDus()), ...(await golurileLui()), ...(await randuriDeFacut())]
-    : MISIUNE
+    : pasii.filter((e) => e.poate).map((e) => e.p)
   if (!brute.length) return { pornit: false, motiv: 'n-am ce lua: nici goluri, nici rânduri de listă' }
 
   // NIMIC NU SE ABANDONEAZĂ. Înainte, după 3 încercări pasul era marcat „blocat"

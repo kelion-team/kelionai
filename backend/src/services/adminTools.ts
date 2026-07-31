@@ -18,6 +18,8 @@ import { repoWrite, repoOpenPR, repoMergePR } from './github.js'
 import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks.js'
 import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
+import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
+import { voceRecenta, minuteRamaseVoce } from './adminLock.js'
 
 // Numele uneltelor admin partajate (chat ∩ voce). Apelantul verifică apartenența
 // ca să știe dacă delegă aici sau tratează el (build_software, google, browser...).
@@ -28,12 +30,20 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
   'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
+  // Cardul: poarta e ÎN executor (fereastra de voce), nu aici.
+  'card_stare', 'card_completeaza', 'card_gata',
 ])
 
 // Execută o unealtă admin PARTAJATĂ. Întoarce rezultatul (string) sau `null` dacă
 // numele NU e o unealtă partajată — atunci apelantul o tratează el. Extragerea
 // argumentelor e IDENTICĂ cu cea care trăia dublat în cele două rute.
-export async function execSharedAdminTool(name: string, args: Record<string, unknown>): Promise<string | null> {
+export async function execSharedAdminTool(
+  name: string,
+  args: Record<string, unknown>,
+  // Cine cere și de unde — necesare DOAR uneltelor de card (browserul e per
+  // user, iar poarta e „ți-am recunoscut vocea acum"). Restul le ignoră.
+  ctx: { email?: string; baseUrl?: string } = {},
+): Promise<string | null> {
   switch (name) {
     case 'list_source': return listSource(String(args.dir ?? '.'))
     case 'read_source': return readSource(String(args.path ?? ''), Number(args.from_line ?? 1) || 1)
@@ -74,6 +84,37 @@ export async function execSharedAdminTool(name: string, args: Record<string, unk
           dovada: x.dovada?.slice(0, 200) ?? null,
         })),
       })
+    }
+    // ── CARDUL LA FURNIZORI ────────────────────────────────────────────────
+    // Valoarea NU trece niciodată prin model: el spune doar ce câmp și unde.
+    case 'card_stare': {
+      const c = cardConfigurat()
+      // Furnizorii vin din ce s-a MĂSURAT pe paginile lor la închiderea
+      // sesiunii, nu din ce a spus cineva că a făcut.
+      const furnizori = await stareFurnizori()
+      return JSON.stringify({
+        configurat: c.gata,
+        lipsesc: c.lipsesc,
+        vocea_recunoscuta: voceRecenta(ctx.email ?? ''),
+        minute_ramase: minuteRamaseVoce(ctx.email ?? ''),
+        furnizori,
+        plati_automate: furnizori.some((f) => f.automat),
+        nota: 'Valorile NU se pot citi de nicăieri, nici de mine — doar se scriu în pagină.',
+      })
+    }
+    case 'card_completeaza': {
+      const r = await completeazaCard(
+        ctx.email ?? '',
+        ctx.baseUrl ?? 'https://kelionai.app',
+        String(args.camp ?? '') as CampCard,
+        Number(args.index ?? -1),
+      )
+      // Pagina se întoarce deja mascată de modul discret; nu adăugăm nimic.
+      return JSON.stringify({ ok: r.ok, camp: r.camp, detaliu: r.detaliu, pagina: r.pagina })
+    }
+    case 'card_gata': {
+      const r = await terminaCard(ctx.email ?? '', ctx.baseUrl ?? 'https://kelionai.app', String(args.furnizor ?? ''))
+      return JSON.stringify({ ok: true, card_la_dosar: r.card, plata_automata: r.automat, detaliu: r.detaliu, pagina: r.pagina })
     }
     case 'cerinta_prioritate': {
       const id = Number(args.id ?? 0)
