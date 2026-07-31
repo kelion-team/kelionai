@@ -110,6 +110,10 @@ vi.mock('./brain.js', () => ({
   },
 }))
 
+// Întrerupătorul ownerului. Îl mocuim ca să putem proba AMBELE stări.
+let opritDeOwner = false
+vi.mock('./runbooks.js', () => ({ isOpsPaused: async () => opritDeOwner }))
+
 vi.mock('./secrete.js', () => ({
   listeazaSecrete: async () => JSON.stringify({ secrete: secreteExistente.map((n) => ({ nume: n })) }),
 }))
@@ -176,6 +180,31 @@ beforeEach(() => {
   // Fereastra de voce e globală pe proces: dacă rămâne deschisă de la un test
   // la altul, pasul cardului s-ar strecura în teste care n-au treabă cu el.
   uitaVocea('adrianenc11@gmail.com')
+  opritDeOwner = false
+})
+
+// ÎNTRERUPĂTORUL (Adrian, 31 iul, după ce a văzut 27,84$ arși în 3½ ore și a
+// cerut „înainte trebuie verificat că autonomia e pe stop"). Nu era: butonul
+// scria în bază, panoul afișa „OPRITĂ", și bucla lucra mai departe. Un
+// întrerupător care nu întrerupe e mai rău decât niciunul — crezi că ai oprit,
+// deci nu te mai uiți. Testul ăsta nu-l lasă să se mai strice tăcut.
+describe('întrerupătorul ownerului chiar întrerupe', () => {
+  it('pe STOP: nicio tură de creier, niciun ordin, zero cheltuit', async () => {
+    opritDeOwner = true
+    secreteExistente = []
+    const r = await poateSaLucreze()
+    expect(r.pornit).toBe(false)
+    expect(r.motiv).toContain('oprit de tine')
+    // Dovada că n-a costat nimic: creierul nu a fost chemat deloc.
+    expect(turiDeMaini).toBe(0)
+    expect(jobs.length).toBe(0)
+  })
+
+  it('pe PORNIT: lucrează ca înainte — butonul nu e o frână permanentă', async () => {
+    opritDeOwner = false
+    const r = await poateSaLucreze()
+    expect(r.motiv).not.toContain('oprit de tine')
+  })
 })
 
 // „Pe nivel de dificultate setabil automat pe cerință" — și pentru MÂINILE lui,
