@@ -4,6 +4,7 @@ import type { MoneyCircuit, ExpenseLine, StripeProbe } from '../shared/api-types
 export type { MoneyCircuit }
 import { config } from '../config.js'
 import { getStripeCustomer, setStripeCustomer, countWalletUsers, getCostSummary } from '../db.js'
+import { stareFurnizori } from './cardFurnizor.js'
 
 // Thin Stripe client over the REST API (no SDK dependency). Handles: a customer
 // per user, a Checkout Session for a credit top-up, and webhook signature
@@ -286,9 +287,27 @@ async function intreabaStripe<T>(
   }
 }
 
+/** Lipește pe fiecare furnizor ce s-a MĂSURAT pe pagina lui de facturare.
+ *
+ *  Adrian, 31 iul: „a pus cardul la furnizori? a setat tot?" — întrebarea merită
+ *  un răspuns pe care să-l vadă singur, nu unul pe care să mi-l ceară mie. Dar
+ *  numai ce s-a măsurat: un furnizor pe care Kelion nu l-a atins rămâne fără
+ *  niciun semn — nu „nu", fiindcă nimeni n-a verificat (regula #1). */
+async function cuPlatiAutomate(linii: ExpenseLine[]): Promise<ExpenseLine[]> {
+  const masurat = await stareFurnizori().catch(() => [])
+  if (!masurat.length) return linii
+  return linii.map((l) => {
+    // „Google Gemini" ↔ „gemini", „OpenAI" ↔ „openai": potrivim pe cuvinte, nu
+    // pe egalitate — furnizorul îl numește el, cu mâna lui, când închide sesiunea.
+    const cheie = l.name.toLowerCase()
+    const f = masurat.find((m) => cheie.includes(m.furnizor) || m.furnizor.includes(cheie.split(' ').pop() ?? ' '))
+    return f ? { ...l, cardPus: f.card, platiAutomate: f.automat } : l
+  })
+}
+
 export async function getMoneyCircuit(): Promise<MoneyCircuit> {
   const probes: StripeProbe[] = []
-  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: null, autoFund: lastAutoFund, expenses: expenseLines(), stripePk: config.stripe.publishableKey, keyLivemode: !/_test_/.test(config.stripe.secretKey), probes }
+  const out: MoneyCircuit = { payoutsInterval: 'unknown', issuingStatus: 'unknown', cards: [], issuingAvailable: null, autoFund: lastAutoFund, expenses: await cuPlatiAutomate(expenseLines()), stripePk: config.stripe.publishableKey, keyLivemode: !/_test_/.test(config.stripe.secretKey), probes }
   if (!config.stripe.secretKey) return { ...out, error: 'stripe_not_configured' }
   try {
     const a = await intreabaStripe<{
