@@ -67,7 +67,6 @@ import {
   type BrowserResult,
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
-import { isArmed, hasUnlock } from '../services/adminLock.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -591,16 +590,25 @@ const DELETE_NOTE_TOOL: Tool = {
 
 
 // ADMIN ONLY — the promo-clip pipeline. Kelion writes a script sized to the
-// requested standard duration (15/30/60s), shows it, and ONLY after the admin
-// explicitly authorizes it calls this tool: the script goes on the monitor as a
-// readable panel, the screen recorder arms (one click picks the screen — browser
-// law), and when recording starts the approved script is spoken aloud verbatim.
+// requested duration, shows it, and arms the recorder IN THE SAME TURN: the
+// script goes on the monitor as a readable panel, the screen recorder arms (one
+// click picks the screen — browser law), and when recording starts the script is
+// spoken aloud verbatim.
+//
+// FĂRĂ PASUL DE AUTORIZARE (Adrian, 31 iul: „nu ai scos cerința cu autorizarea,
+// de ce?"). Aici era ultima. Cererea lui de clip ESTE autorizarea; să-i mai ceri
+// un „da" după ce ți-a cerut clipul e o tură pierdută. Checkpoint-ul uman
+// rămâne acolo unde a fost mereu, și e mai bun decât o întrebare în chat:
+// butonul Rec, apăsat de el, când vrea. Vede scriptul înainte să apese; dacă nu-i
+// place, spune și-l refaci — nu s-a înregistrat nimic.
 export const PROMO_TOOL: Tool = {
   name: 'prepare_promo_clip',
   description:
     'ADMIN ONLY. Arm the screen recorder for a professional promo clip (TikTok/Instagram) with ' +
-    'an approved spoken script AND a shot list of demo scenes. Call ONLY after the admin has ' +
-    'SEEN the script in chat and explicitly said yes/da. When the recording starts, the script ' +
+    'a spoken script AND a shot list of demo scenes. When the owner asks for a clip, write the ' +
+    'script in chat AND call this tool in the same turn — his request is the authorisation, do ' +
+    'not stop to ask for a yes. He reviews the script on screen and presses Rec himself when ' +
+    'ready; nothing is recorded until he does. When the recording starts, the script ' +
     'is spoken aloud EXACTLY as written while the scenes appear on the monitor at their times — ' +
     'the script text itself is NOT shown during recording (voice only), and the site address is ' +
     'watermarked automatically.',
@@ -1323,7 +1331,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // exact anti-comportamentul). Acum: EXECUTĂ, nu promite.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and ASK whether to repair them — repair ONLY after his explicit yes, with your own tools. If everything is healthy, don't bring it up unless he asks. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`
+        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and REPAIR them straight away with your own tools — do not ask for permission first. If everything is healthy, don't bring it up unless he asks. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`
+      // FĂRĂ CONFIRMĂRI CĂTRE OWNER (Adrian, 31 iul). Regula generală de mai sus
+      // („confirm only before irreversible ones") e scrisă pentru userii publici.
+      // Aici e ownerul: dacă a cerut ceva, cererea ESTE aprobarea — să-l mai
+      // întrebi o dată e timp pierdut, nu siguranță. Singurul lucru care rămâne
+      // întrebat e ce NU a cerut: o ștergere colaterală, un pas distructiv pe
+      // care l-ai dedus tu. Aia nu e confirmare de securitate, e să nu faci ceva
+      // ce nimeni nu ți-a cerut.
+      systemPrompt +=
+        `\n\nOWNER — NO CONFIRMATIONS: this overrides the general "confirm before irreversible actions" rule, which is for public users. When the owner asks for something, the request IS the authorisation: send, delete, merge, restart, run the runbook — DO IT, then report what you did. Never answer with "shall I proceed?", "are you sure?", "do you want me to?" or any other permission question about the thing he just asked for. Also never ask him to unlock, authenticate, or confirm his identity in chat — being in this conversation already proves he is the owner. The ONE exception is an action he did NOT ask for: if carrying out his request would additionally destroy something he never mentioned (dropping a table to fix a query, deleting files to free space, force-pushing over work), name that specific side effect in one sentence and ask about THAT alone — never about the request itself. Same for the health check: if system_health reports problems, say them briefly and repair them; don't ask permission first.`
       // CANALUL DE UPDATE: Kelion știe din prompt CE a primit la ultimul deploy
       // (fișier local, cache pe prima citire — zero cost pe latență).
       const upd = await latestUpdateSummary().catch(() => '')
@@ -1332,7 +1349,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           `\n\nYOUR LATEST UPDATES (the newest commits you received at the most recent deploy, newest first):\n${upd}\nWhen the owner asks what's new, what changed, or what update you received, answer from this list — and call list_updates for the fuller recent history. Never claim you don't know what your updates were.`
       }
       systemPrompt +=
-        `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes, then ask for authorization. Do NOT call any tool yet. Step 2: ONLY when the owner explicitly approves (da / yes / autorizez): if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the approved script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
+        `\n\nPROMO CLIPS (owner only): when the owner asks for a promo clip ("filmuleț", "clip", "reclamă") about a subject, standard lengths are 15, 30 or 60 seconds — but ANY duration up to 10 minutes (600 seconds) is supported; use exactly what the owner asks for. The result must look PROFESSIONAL: a spoken script plus a shot list of live demo scenes that showcase what Kelion can do, timed to the narration; during recording the script text is NOT displayed (voice only, clean frame, admin interface hidden, site address watermarked). Step 1: WRITE the spoken script in chat, sized to the requested length (about 35 words for 15s, 75 for 30s, 150 for 60s — roughly 150 words per minute for longer clips), briefly list the planned scenes. Step 2: IN THE SAME TURN — his request for a clip IS the authorisation, never stop to ask for a "da" — if the shot list includes an image scene, FIRST call generate_image to create it, THEN call prepare_promo_clip with the script and the scenes (kind avatar/map/weather/image; avatar at second 0, scenes timed to match the words; image scenes use the /api/image/ URL from generate_image). Then tell the owner to press the pulsing red Rec button and pick the screen — everything else is automatic. If the owner asks for changes, revise and ask again. If no duration is given, ask which of 15, 30 or 60 seconds. CLIP LANGUAGE: the spoken script is written in WHATEVER language the owner asks the clip to be in (English, Spanish, Japanese — any language; you CAN do this, it is fully supported, the narration voice follows automatically via the tool's lang parameter). If no language is mentioned, use the owner's language. This is like a requested translation: your own commentary around the script stays in the owner's language, but the script content itself is in the clip's language.`
     }
 
     // Monitor awareness — Kelion works INSIDE whatever is already on screen. The
@@ -1587,13 +1604,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
 
-    // LACĂTUL ADMIN ACOPERĂ ȘI UNELTELE DIN CHAT (auditul de securitate, 27
-    // iul): gate-ul global păzea doar /api/admin/*, dar uneltele DISTRUCTIVE
-    // (repo_merge_pr, db_query, run_runbook, build_software...) trăiesc în
-    // /api/chat — un cookie de sesiune furat le folosea fără al 2-lea factor.
-    // Odată ARMAT lacătul, sesiunea nedeblocată vorbește cu Kelion ca un user
-    // obișnuit, fără uneltele de admin.
-    const isAdmin = user.role === 'admin' && (!(await isArmed()) || hasUnlock(req, user.email))
+    // ÎN CHAT, SESIUNEA DE ADMIN E DE-AJUNS (Adrian, 31 iul: „dacă m-am logat cu
+    // admin, Kelion nu mai trebuie să ceară niciun fel de confirmare de
+    // securitate în chat").
+    //
+    // Ce era înainte: lacătul din 27 iul cerea al DOILEA factor (amprentă vocală
+    // sau secretul tastat, cookie separat de 12h) ca uneltele de admin să apară
+    // în chat. Fără el, adminul logat vorbea cu Kelion ca un user oarecare — și
+    // afla asta abia când Kelion „nu putea" să citească un fișier.
+    //
+    // Ce rămâne apărat, și de ce e în regulă să cadă AICI: lacătul păzește mai
+    // departe `/api/admin/*` (panoul) și poarta de voce — vocea chiar are nevoie
+    // de amprentă, fiindcă oricine e lângă microfon poate vorbi. Chatul, nu:
+    // ca să scrii în el ca admin trebuie deja să ai sesiunea lui.
+    //
+    // Ce pierdem, scris ca să nu se piardă: un cookie de sesiune furat ajunge
+    // acum direct la uneltele distructive din chat, fără al doilea factor.
+    // Compromisul e al ownerului, cerut explicit, cu riscul spus.
+    const isAdmin = user.role === 'admin'
 
     // Modelul turei se alege AICI (înaintea listei de unelte): pe treapta CHAT,
     // modelul primește și unealta ask_brain ca să escaladeze singur ce judecă
@@ -1830,20 +1858,30 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Creierul a picat — onest, niciodată tăcut. Fără plasă Kimi/GLM (scoase).
       const errMsg = e instanceof Error ? e.message : String(e)
       const low = errMsg.toLowerCase()
-      const isQuota =
-        low.includes('402') || low.includes('429') || low.includes('quota') || low.includes('insufficient')
+      // 402 ≠ 429. Adrian, 31 iul: „de ce ai mințit?" — avea dreptate. Le băgasem
+      // în aceeași grămadă, așa că un model GRATUIT ajuns la plafonul de cereri
+      // pe minut îi scria „reîncarcă creditul". Îi ceream bani pentru ceva ce
+      // costă zero, fără să fi măsurat vreun sold. Un plafon de cereri se trece
+      // așteptând; fondurile insuficiente se trec depunând. Nu e același mesaj.
+      const isRateLimit =
+        low.includes('429') || /rate.?limit|resourceexhausted|too many requests/.test(low) || low.includes('quota')
+      const isQuota = !isRateLimit && (low.includes('402') || low.includes('insufficient'))
       const isRefusal = low.includes('refusal')
       const spoken = ro
-        ? isQuota
-          ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
-          : isRefusal
-            ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
-            : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-        : isQuota
-          ? "I've temporarily run out of brain credit. Please top up so we can continue."
-          : isRefusal
-            ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
-            : 'I ran into a technical issue. Please try again in a moment.'
+        ? isRateLimit
+          ? 'Modelul gratuit a atins plafonul de cereri pe minut — nu e o problemă de bani. Reîncearcă în câteva secunde.'
+          : isQuota
+            ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
+            : isRefusal
+              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
+              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
+        : isRateLimit
+          ? "The free model hit its per-minute request limit — this is not a money problem. Try again in a few seconds."
+          : isQuota
+            ? "I've temporarily run out of brain credit. Please top up so we can continue."
+            : isRefusal
+              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
+              : 'I ran into a technical issue. Please try again in a moment.'
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
