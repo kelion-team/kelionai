@@ -33,7 +33,33 @@ function verifyHash(secret: string, stored: string): boolean {
   return probe.length === ref.length && crypto.timingSafeEqual(probe, ref)
 }
 
+// ── DEZARMAT DE OWNER (Adrian, 31 iul) ──────────────────────────────────────
+// „scoți total te rog aprobarea, lângă mine nu e nimeni să dea comenzi".
+//
+// Lacătul a fost gândit pe 27 iul împotriva unei amenințări anume: cineva
+// ALTCINEVA — o voce lângă microfon, un cookie de sesiune furat. Adrian spune
+// că amenințarea aia nu există la el: e singur, e singurul admin, e singurul
+// care dă comenzi. Un al doilea factor care nu apără de nimeni e doar o taxă
+// pe fiecare intrare a lui în propria aplicație.
+//
+// Un singur punct de dezarmare, intenționat: toate porțile (chat, voce,
+// /api/admin/*) întreabă `isArmed()`. Un `false` aici le deschide pe toate
+// deodată — și, mai important, se REARMEAZĂ tot dintr-un singur loc, fără să
+// vânez șase call-site-uri. Restul mecanismului (secret, hash scrypt, cookie
+// de 12h, anti-brute-force) rămâne intact dedesubt.
+//
+// CA SĂ REARMEZI: `LACAT_DEZARMAT = false`. Atât. Secretul din kv e tot acolo;
+// lacătul redevine activ în clipa în care comuți linia.
+//
+// CE PIERDE, scris ca să nu se piardă: sesiunea de admin devine singurul
+// factor peste tot. Cine ajunge la ea — cookie furat, laptop deschis, cont de
+// email compromis — ajunge la codul-sursă, la secrete, la bază și la bani,
+// fără nicio a doua întrebare. Compromis cerut explicit, de două ori, cu
+// riscul spus de fiecare dată.
+const LACAT_DEZARMAT = true
+
 export async function isArmed(): Promise<boolean> {
+  if (LACAT_DEZARMAT) return false
   return !!(await loadKv(KV_SECRET))
 }
 

@@ -30,19 +30,31 @@ describe('în chat, sesiunea de admin e de-ajuns', () => {
   })
 })
 
-describe('lacătul rămâne unde chiar apără ceva', () => {
-  // Vocea: oricine e lângă microfon poate vorbi, deci acolo amprenta e singura
-  // dovadă că e chiar el. Ordinul de azi spune „în chat" — nu atinge vocea.
-  it('vocea cere mai departe al doilea factor', () => {
-    expect(voce).toMatch(/isAdmin && \(!\(await isArmed\(\)\) \|\| hasUnlock\(/)
+describe('lacătul e dezarmat de owner, dintr-un singur loc', () => {
+  // Adrian, 31 iul, a doua oară: „scoți total te rog aprobarea, lângă mine nu
+  // e nimeni să dea comenzi". Prima dată ceruse doar chatul, și lăsasem vocea
+  // păzită fiindcă oricine e lângă microfon poate vorbi. El spune că nu e
+  // nimeni. Amenințarea de care apăra lacătul nu există la el.
+  const lacat = sursa('./services/adminLock.ts')
+
+  it('isArmed() răspunde NU, deci toate porțile se deschid deodată', () => {
+    expect(lacat).toMatch(/const LACAT_DEZARMAT = true/)
+    expect(lacat).toMatch(/if \(LACAT_DEZARMAT\) return false/)
   })
 
-  it('panoul /api/admin/* cere mai departe deblocarea (423)', () => {
+  it('mecanismul rămâne întreg dedesubt — rearmarea e o singură linie', () => {
+    expect(lacat).toContain('loadKv(KV_SECRET)')
+    expect(lacat).toContain('scrypt')
+    expect(lacat).toMatch(/CA SĂ REARMEZI/)
+  })
+
+  it('porțile îl întreabă mai departe pe isArmed — nu le-am rupt, doar răspunde altfel', () => {
+    expect(voce).toMatch(/isArmed\(\)/)
     expect(panou).toMatch(/isArmed\(\)[\s\S]{0,200}423/)
   })
 
-  it('poarta globală nu atinge chatul — se aplică doar pe /api/admin/', () => {
-    expect(panou).toMatch(/startsWith\('\/api\/admin\/'\)\) return/)
+  it('riscul e scris în cod, nu doar în chat', () => {
+    expect(lacat).toMatch(/CE PIERDE[\s\S]{0,400}singurul[\s\S]{0,12}factor/)
   })
 })
 

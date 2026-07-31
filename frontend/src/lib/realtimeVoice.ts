@@ -455,7 +455,23 @@ export async function startRealtimeVoice(
     // fiindcă poarta era stricată, ci fiindcă era prea larg deschisă.
     // 45s ține conversația curgând fără să repeți numele, dar se închide destul
     // de repede cât o discuție cu altcineva să nu-i mai fie adresată.
-    const GATE_WINDOW_MS = 45_000
+    // ── REGULA LUI: „KELION" + RESTUL FRAZEI ────────────────────────────────
+    // Adrian, 31 iul: „vorbește când nu se vorbește cu el; ce aude și nu are
+    // legătură cu el, reacționează. Regula implementată — Kelion și restul
+    // frazei — nu o aplică."
+    //
+    // Avea dreptate, și dimineață tăiasem fereastra de la 120s la 45s fără să
+    // ating ce o ținea deschisă: se REÎNNOIA la fiecare frază care intra în ea,
+    // ȘI se reînnoia când vorbea Kelion însuși. O fereastră care se reînnoiește
+    // din propriul ei conținut nu se închide niciodată cât se vorbește în
+    // cameră — 45s sau 120s era același lucru.
+    //
+    // Acum poarta e per FRAZĂ, nu pe ceas: numele e în frază → restul frazei e
+    // comanda. Fără nume → tăcere. Singura excepție e cea evidentă: dacă tocmai
+    // el ți-a pus o întrebare, ai voie să răspunzi fără să-l strigi din nou —
+    // dar aia e O SINGURĂ replică, se consumă la prima folosire și nu se
+    // reînnoiește din nimic.
+    const REPLY_WINDOW_MS = 12_000
     // FEREASTRA E DESCHISĂ LA PORNIREA SESIUNII (bug găsit live de Adrian,
     // 27 iul, „parcă nu aude": userul tocmai a PORNIT microfonul — evident că
     // i se adresează lui Kelion; a cere numele chiar la prima frază, cu o
@@ -463,7 +479,7 @@ export async function startRealtimeVoice(
     // La PORNIRE fereastra e deschisă mai scurt: userul tocmai a apăsat pe
     // microfon, deci primele secunde îi sunt clar adresate — dar dacă nu-i
     // spune nimic în 15s, tăcerea redevine implicită.
-    let gateUntil = Date.now() + 15_000
+    let replyUntil = Date.now() + 15_000
     // Regex TOLERANT la transcrierea reală (dovadă live: „Kelion, ce faci" a
     // ieșit „Elioncevaci"): acceptăm și variantele fără consoana de început
     // (elion/eleon), lipite de cuvântul următor.
@@ -512,7 +528,7 @@ export async function startRealtimeVoice(
         // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
         // pornește automat CA REACȚIE la fraza „stop" însăși.
         if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
-          gateUntil = 0 // STOP închide și fereastra — până la următorul „Kelion"
+          replyUntil = 0 // STOP închide și replica — până la următorul „Kelion"
           send({ type: 'response.cancel' })
           send({ type: 'output_audio_buffer.clear' })
           send({
@@ -528,13 +544,19 @@ export async function startRealtimeVoice(
             send({ type: 'output_audio_buffer.clear' })
           }, 400)
         } else if (t.trim()) {
-          // POARTA NUMELUI: cine primește răspuns. Numele deschide/reînnoiește
-          // fereastra; fereastra deschisă lasă conversația să curgă fără nume;
-          // altfel — tăcere (discuția nu-i e adresată; numele îl recheamă).
+          // POARTA NUMELUI, PER FRAZĂ: numele e în fraza asta → restul frazei
+          // e comanda, răspunde. Nu e → tăcere, indiferent ce s-a vorbit
+          // înainte. Singura poartă care nu cere numele e replica la propria
+          // lui întrebare, și aia SE CONSUMĂ aici: `replyUntil = 0` înaintea
+          // răspunsului, ca o replică să nu poată deschide următoarea.
+          // Aici era greșeala veche: fereastra se re-împingea în viitor la
+          // FIECARE frază pe care o accepta, deci se hrănea din ce lăsa să
+          // treacă — un perpetuum mobile care nu se închidea cât timp se
+          // auzea ceva în cameră.
           const named = NAME_RE.test(t)
-          const engaged = Date.now() < gateUntil
-          if (named || engaged) {
-            gateUntil = Date.now() + GATE_WINDOW_MS
+          const answering = Date.now() < replyUntil
+          if (named || answering) {
+            replyUntil = 0
             send({ type: 'response.create' })
           }
         }
@@ -582,18 +604,31 @@ export async function startRealtimeVoice(
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
-        // Kelion a vorbit → conversația e vie: fereastra porții se reînnoiește.
-        gateUntil = Date.now() + GATE_WINDOW_MS
+        // Kelion a terminat de vorbit. AICI se decidea, până azi, că orice se
+        // aude în următoarele zeci de secunde i se adresează — el își ținea
+        // singur poarta deschisă, vorbind. Acum: dacă a pus o ÎNTREBARE, ai
+        // dreptul la o replică fără să-l strigi; dacă doar a răspuns sau a
+        // constatat ceva, poarta se închide pe loc și numele e din nou
+        // obligatoriu. O afirmație a lui nu e o invitație la vorbă.
+        replyUntil = /\?/.test(t) ? Date.now() + REPLY_WINDOW_MS : 0
       } else if (type === 'input_audio_buffer.speech_stopped') {
         // Plasa anti-„nu mă aude" (cauza scoaterii porții vechi, 24 iul): VAD-ul
         // a închis fraza; dacă transcriptul NU sosește în 2.8s (transcrierea a
         // picat) și conversația e ACTIVĂ, răspundem oricum — o defecțiune de
         // transcriere nu are voie să-l facă surd în mijlocul discuției. În
         // afara conversației (poarta închisă), tăcerea rămâne tăcere.
+        // Plasa se aplică DOAR pe replica la propria lui întrebare — singurul
+        // caz în care știm, fără transcript, că fraza îi e adresată. Fără
+        // transcript nu putem căuta numele, iar a răspunde „ca să nu pară
+        // surd" e exact cum ajungea să vorbească peste discuția din cameră.
+        // Se consumă, ca orice replică.
         if (speechStopTimer != null) clearTimeout(speechStopTimer)
         speechStopTimer = window.setTimeout(() => {
           speechStopTimer = null
-          if (Date.now() < gateUntil) send({ type: 'response.create' })
+          if (Date.now() < replyUntil) {
+            replyUntil = 0
+            send({ type: 'response.create' })
+          }
         }, 2800)
       } else if (type === 'response.output_item.added') {
         // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
