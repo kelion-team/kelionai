@@ -15,8 +15,6 @@ import {
   fetchGaps,
   runGapsTriage,
   fetchFinance,
-  fetchTransactions,
-  type TransactionRow,
   manageUser,
   sellCredits,
   fetchMoneyCircuit,
@@ -194,8 +192,9 @@ export default function AdminPanel({
   // AICI AU STAT `cardBusy` și `cardDeschis` — starea butonului „Creează cardul"
   // și a ferestrei care arăta numărul cardului virtual Stripe. Cardul Issuing a
   // ieșit odată cu Stripe (30 iul): furnizorii se plătesc cu cardul lui Adrian.
-  // Tranzacțiile Stripe reale (alimentări credite) — tabul Bani.
-  const [transactions, setTransactions] = useState<TransactionRow[]>([])
+  // Tranzacțiile Stripe au fost SCOASE din panou pe 31 iul odată cu canalul —
+  // nu se mai citesc, deci nu se mai ține starea lor (nici nu se mai cer de la
+  // server la fiecare încărcare de tab).
   // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
   // Lead-uri — vizitatori care și-au lăsat emailul.
   const [leads, setLeads] = useState<Lead[]>([])
@@ -333,7 +332,6 @@ export default function AdminPanel({
     void fetchFinance().then(setFinance)
     void fetchMoneyCircuit().then(setCircuit)
     void fetchDoveziAutonomie().then(setDovezi)
-    void fetchTransactions().then(setTransactions)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
     void fetchVisitorConvos().then(setVconvos)
@@ -395,8 +393,7 @@ export default function AdminPanel({
     if (tab !== 'finance') return
     const id = window.setInterval(() => {
       void fetchFinance().then(setFinance)
-      void fetchTransactions().then(setTransactions)
-    }, 15_000)
+      }, 15_000)
     return () => window.clearInterval(id)
   }, [tab])
 
@@ -988,29 +985,13 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
-                {/* Tranzacțiile Stripe REALE (alimentări credite) — cine, cât, status, când. */}
-                <div className="fin-breakdown">
-                  <div className="fin-breakdown-head">{A.transactionsHead}</div>
-                  {transactions.length === 0 && <div className="chat-hint">{A.noTransactionsYet}</div>}
-                  {transactions.map((t) => (
-                    <div className="fin-row" key={t.id}>
-                      <span>
-                        {t.user_id} · {t.status} ·{' '}
-                        {new Date(t.created_at).toLocaleString('ro-RO', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      <span>
-                        {sym}
-                        {Number(t.amount).toFixed(2)} · {Number(t.credits).toFixed(0)} credite
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {/* BLOCUL STRIPE — SCOS (Adrian, 31 iul: „astea nu mai există" ·
+                    „Stripe nu mai există" · „avem doar Revolut"). Singurul canal
+                    de plată e Revolut, prin card. Rândurile vechi din 24 iul erau
+                    probele lui, de pe conturile lui, plătite cu cardul lui — nu
+                    venit de la clienți. Rămân în baza de date (`transactions`),
+                    dar nu mai au ce căuta în panou: afișau un canal mort ca și
+                    cum ar fi viu. */}
               </>
             )}
           </section>
