@@ -107,7 +107,7 @@ describe('startCitirePlati — poarta care nu tace', () => {
       startCitirePlati()
       const scris = spy.mock.calls.map((c) => String(c[0])).join('\n')
       expect(scris).toContain('[PLATI]')
-      expect(scris).toMatch(/oprit|lipsesc/i)
+      expect(scris).toMatch(/off|missing/i)
     } finally {
       spy.mockRestore()
     }

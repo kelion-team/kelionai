@@ -12,13 +12,15 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const { balance, topupRef } = await getWalletStatus(user.email)
     const credits = Math.floor(balance / config.billing.creditValue)
     const percent = topupRef > 0 ? Math.max(0, Math.min(100, (balance / topupRef) * 100)) : 100
-    // firstTopUp = userul n-a alimentat niciodată (topup_ref e 0). Prima alimentare
-    // e mai mare (activarea creierului = £20 minim); apoi orice multiplu de £5.
+    // firstTopUp = the user has never topped up (topup_ref is 0). The first
+    // top-up is bigger (brain activation = £20 minimum); then any multiple of
+    // £5.
     return reply.send({ credits, percent, currency: config.billing.currency, firstTopUp: topupRef <= 0 })
   })
 
-  // Regula de alimentare (Adrian, 24 iul): prima alimentare = £20 minim (activarea
-  // creierului), apoi orice multiplu de £5. Validată pe server, nu doar în UI.
+  // The top-up rule (Adrian, 24 Jul): first top-up = £20 minimum (brain
+  // activation), then any multiple of £5. Validated on the server, not just
+  // in the UI.
   async function validateTopUp(email: string, amount: number): Promise<string | null> {
     if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
     if (amount % 5 !== 0) return 'must_be_multiple_of_5'
@@ -28,50 +30,53 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     return null
   }
 
-  // ── PLATA TRECE PE REVOLUT (Adrian, 30 iul: „Stripe se scoate total și intră
-  // Pro", „link să înlocuim peste tot") ───────────────────────────────────────
+  // ── PAYMENT GOES THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
+  // completely and Pro comes in", "a link to replace everywhere") ───────────
   //
-  // Ruta ăsta rămâne INTACTĂ ca formă (`{ url }`), fiindcă prin ea trec TOATE
-  // locurile în care se plătește: pastila de portofel, pagina /credite și
-  // paywall-ul din chat. Schimbând sursa URL-ului aici, se schimbă în toate trei
-  // deodată — „peste tot" cu o singură modificare, nu trei locuri de ținut minte.
+  // This route stays INTACT in shape (`{ url }`), because EVERY place that
+  // takes payment goes through it: the wallet pill, the /credits page and the
+  // chat paywall. Changing the URL's source here changes all three at once —
+  // "everywhere" with a single change, not three places to remember.
   //
-  // ── COD UNIC PE FIECARE PLATĂ (Adrian, 30 iul) ──────────────────────────────
-  // „fiecare plată trebuie să fie însoțită de un cod unic" · „userul X cumpără
-  // credit de atâția bani, tranzacția are un cod alocat unic generat, la plată
-  // se trece automat la ce cod/client".
+  // ── A UNIQUE CODE ON EVERY PAYMENT (Adrian, 30 Jul) ───────────────────────
+  // "every payment must come with a unique code" · "user X buys credit worth
+  // this much money, the transaction has a unique generated code assigned, at
+  // payment it automatically maps to which code/client".
   //
-  // Revolut Pro n-are webhook, deci nimeni nu ne anunță că s-a plătit. Codul e
-  // puntea: pleacă cu omul la plată, se întoarce în referința tranzacției, iar
-  // cititorul de tranzacții îl potrivește înapoi cu contul lui. Fără cod ar
-  // rămâne gestiunea manuală — exact ce a refuzat, pe bună dreptate.
+  // Revolut Pro has no webhook, so nobody notifies us the payment happened.
+  // The code is the bridge: it leaves with the person to the payment, comes
+  // back in the transaction reference, and the transaction reader matches it
+  // back to his account. Without the code, manual management would remain —
+  // exactly what he refused, rightfully.
   //
-  // De ce COD și nu suma cu bănuți unici (prima mea idee): suma poate fi fixată
-  // de link și poate fi schimbată de comision până ajunge în cont. Codul trece
-  // neatins prin amândouă.
+  // Why a CODE and not an amount with unique pennies (my first idea): the
+  // amount can be fixed by the link and can be changed by fees before it
+  // lands. The code passes untouched through both.
   app.post<{ Body: { amount?: number } }>('/api/billing/checkout', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
     const link = config.revolut.payLink
-    // Fără link configurat NU trimitem userul nicăieri și nu tăcem: butonul
-    // spune ce lipsește (regula nr. 1 — un eșec nu se afișează ca reușită).
+    // Without a configured link we send the user NOWHERE and we don't stay
+    // silent: the button says what's missing (rule no. 1 — a failure is not
+    // displayed as success).
     if (!link) return reply.code(503).send({ error: 'revolut_link_lipsa' })
     const amount = Number(req.body?.amount ?? 0)
     const bad = await validateTopUp(user.email, amount)
     if (bad) return reply.code(400).send({ error: bad })
-    // REFOLOSIM un cod încă nefolosit (2 ore) în loc să dăm unul nou la fiecare
-    // apăsare: altfel omul care apasă de trei ori ar avea trei coduri valabile
-    // și n-ar ști pe care să-l scrie.
+    // We REUSE an unused code (2 hours) instead of giving a new one on every
+    // click: otherwise the person clicking three times would have three valid
+    // codes and wouldn't know which to write.
     const existent = await codPlataInAsteptare(user.email)
     const cod = existent?.amount === amount ? existent : await creeazaCodPlata(user.email, amount, config.billing.currency)
     if (!cod) return reply.code(503).send({ error: 'cod_indisponibil' })
     return reply.send({ url: link, code: cod.code, amount: cod.amount, currency: cod.currency })
   })
 
-  // AICI A STAT `/api/billing/payment-intent` — a doua cale de plată, pe Stripe.js
-  // direct. Scoasă odată cu Stripe: nimic din frontend n-o mai chema (singurul
-  // drum al userului trece prin `/api/billing/checkout`), iar o rută de plată
-  // vie pe care n-o folosește nimeni e o ușă lăsată deschisă degeaba.
+  // HERE USED TO LIVE `/api/billing/payment-intent` — the second payment path,
+  // through Stripe.js directly. Removed together with Stripe: nothing in the
+  // frontend called it anymore (the user's only path goes through
+  // `/api/billing/checkout`), and a live payment route nobody uses is a door
+  // left open for nothing.
 
   // ORDIN #6G: user purchase history from the transactions table.
   app.get('/api/billing/history', async (req, reply) => {

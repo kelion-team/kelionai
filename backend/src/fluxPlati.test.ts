@@ -64,6 +64,6 @@ describe('fluxul plăților e legat cap-coadă — măsurat în cod, nu descris'
   // Dar o poartă închisă tăcut arată exact ca un lanț rupt, de-aia o afirmăm aici.
   it('7. fără chei, cititorul se oprește EXPLICIT și o spune — nu tace', () => {
     expect(banking).toMatch(/enableBanking\.appId[\s\S]{0,200}return/)
-    expect(banking).toMatch(/console\.log\([\s\S]{0,120}(oprit|lipsesc)/i)
+    expect(banking).toMatch(/console\.log\([\s\S]{0,120}(off|missing)/i)
   })
 })

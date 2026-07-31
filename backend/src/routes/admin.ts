@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { pollVisitorChat } from './demo.js' // poll conv vizitator din sursa comună
+import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
   listAllTransactions,
   listUsers,
@@ -92,11 +92,12 @@ async function checkStores(): Promise<StoreCheck[]> {
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
-  // ── LACĂTUL ADMIN (Adrian, 27 iul) — rutele de deblocare. Gate-ul global din
-  // index.ts scutește /api/admin/unlock*; tot ce e aici cere însă sesiune de
-  // admin. Secretul e ales de Adrian în Admin→Securitate și trăiește doar ca
-  // hash scrypt în kv; amprenta vocală potrivită deblochează automat (vezi
-  // routes/realtime.ts). Starea — clientul decide ce arată pe buton.
+  // ── THE ADMIN LOCK (Adrian, 27 Jul) — the unlock routes. The global gate in
+  // index.ts exempts /api/admin/unlock*; everything else here requires an
+  // admin session. The secret is chosen by Adrian in Admin→Security and lives
+  // only as a scrypt hash in kv; a matching voiceprint unlocks automatically
+  // (see routes/realtime.ts). The state — the client decides what to show on
+  // the button.
   app.get('/api/admin/unlock/status', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -114,8 +115,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // Setarea/schimbarea secretului. Nearmat → oricând (prima armare); armat →
-  // doar dintr-o sesiune DEJA deblocată (panoul deschis implică asta).
+  // Setting/changing the secret. Unarmed → anytime (first arming); armed →
+  // only from an ALREADY unlocked session (an open panel implies that).
   app.post<{ Body: { secret?: string } }>('/api/admin/unlock/secret', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -124,13 +125,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const secret = String(req.body?.secret ?? '').trim()
     if (secret.length < 4) return reply.code(400).send({ error: 'secret_prea_scurt' })
     await setLockSecret(secret)
-    grantUnlock(reply, user.email, 'secret') // browserul care armează rămâne deblocat
+    grantUnlock(reply, user.email, 'secret') // the browser that arms stays unlocked
     return reply.send({ ok: true })
   })
 
-  // PUNCTE DE RECUPERARE (Adrian, 27 iul): meniul „Recuperare" din admin —
-  // versiunile salvate (tag-uri git, oglindite pe VPS ca .bundle/.tar.gz) cu
-  // detalii clare, + buton de salvare a versiunii curente.
+  // RECOVERY POINTS (Adrian, 27 Jul): the "Recovery" menu in admin — the saved
+  // versions (git tags, mirrored on the VPS as .bundle/.tar.gz) with clear
+  // details, + a button to save the current version.
   app.get('/api/admin/backups', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -143,9 +144,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!r.ok) return reply.code(500).send(r)
     return reply.send(r)
   })
-  // RESTAURAREA dintr-un punct salvat (Adrian, 27 iul: butoane de selecție în
-  // admin). Aduce master la starea tag-ului cu un commit nou → publicarea pe
-  // VPS pornește singură. Acțiune grea → confirmarea e în UI, dublă.
+  // RESTORING from a saved point (Adrian, 27 Jul: selection buttons in admin).
+  // Brings master to the tag's state with a new commit → publishing to the VPS
+  // starts by itself. Heavy action → confirmation is in the UI, double.
   app.post<{ Body: { tag?: string } }>('/api/admin/backups/restore', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -161,9 +162,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ emails: await listInboundEmails(50) })
   })
 
-  // INBOX LIVE (Adrian, 10 iul) — citește cutia REALĂ contact@kelionai.app prin
-  // IMAP (ultimele mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie,
-  // nu doar mailul nou pe care l-a prins poller-ul. Doar-citire, admin only.
+  // LIVE INBOX (Adrian, 10 Jul) — reads the REAL contact@kelionai.app mailbox
+  // over IMAP (latest messages, read or not), so the admin sees everything in
+  // the mailbox, not just the new mail the poller caught. Read-only, admin
+  // only.
   app.get('/api/admin/mailbox-live', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -196,8 +198,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ history: await getHistory(email) })
   })
 
-  // Traduce în bloc mesajele unei conversații în română (buton „Tradu în română"
-  // din vizualizarea chaturilor — testerii scriu în orice limbă). Admin only.
+  // Batch-translate a conversation's messages into Romanian (the "Translate
+  // into Romanian" button in the chat viewer — testers write in any language).
+  // Admin only.
   app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -222,11 +225,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ gaps: await getCapabilityGaps(req.query.all === '1') })
   })
 
-  // AUDITUL COMPLET AL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
-  // auditurile și toate căzutele"): tabul Cereri neacoperite arată, pe lângă
-  // gaps, TOT ce a căzut — erorile de server (F12-ul de server), erorile de
-  // client (F12-ul browserului), ordinele de construcție eșuate și problemele
-  // de sănătate (live vs master, rulări roșii, disc, DB, sold creier).
+  // THE COMPLETE AUDIT OF FAILURES (Adrian, 27 Jul: "here you must see all the
+  // audits and all the failures"): the Uncovered requests tab shows, besides
+  // gaps, EVERYTHING that failed — server errors (the server F12), client
+  // errors (the browser F12), failed build orders and health problems (live vs
+  // master, red runs, disk, DB, brain balance).
   app.get('/api/admin/audit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -239,7 +242,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     try {
       health = JSON.parse(healthRaw)
     } catch {
-      /* sănătatea indisponibilă — restul auditului rămâne */
+      /* health unavailable — the rest of the audit stays */
     }
     return reply.send({
       health,
@@ -251,9 +254,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  // TRIAJUL AUTONOM (Adrian, 24 iul): Kelion decide singur pe fiecare gap —
-  // valoros (rămâne, „DE IMPLEMENTAT") sau închis automat cu motiv. Butonul din
-  // admin doar declanșează; aceeași funcție rulează și zilnic, autonom.
+  // AUTONOMOUS TRIAGE (Adrian, 24 Jul): Kelion decides by itself on each gap —
+  // valuable (stays, "TO IMPLEMENT") or automatically closed with a reason.
+  // The admin button only triggers; the same function also runs daily,
+  // autonomously.
   app.post('/api/admin/gaps/triage', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -278,11 +282,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await getAdminAccount())
   })
 
-  // Creierul e 100% OpenRouter (0 Kimi, 0 GLM). Butonul de fond din bara de admin:
-  // arată SOLDUL REAL, EXACT din contul OpenRouter — „punga lui Kelion" din care
-  // se alimentează creierul CENTRAL (Adrian, 24 iul: „OpenRouter = valoarea
-  // exactă din OpenRouter"). Plus fondul intern al adminului (loaded − cost real)
-  // și un semnal `low` când e nevoie să depună bani. STRICT admin (userii nu văd).
+  // The brain is 100% OpenRouter (0 Kimi, 0 GLM). The fund button in the admin
+  // bar: shows the REAL, EXACT balance from the OpenRouter account — "Kelion's
+  // pocket" that feeds the CENTRAL brain (Adrian, 24 Jul: "OpenRouter = the
+  // exact value from OpenRouter"). Plus the admin's internal fund (loaded −
+  // real cost) and a `low` signal when money needs to be deposited. STRICTLY
+  // admin (users don't see it).
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -293,19 +298,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ])
     return reply.send({
       active: 'openrouter',
-      // ── VPS-UL, PERMANENT ÎN BARĂ (Adrian, 31 iul: „afișează permanent VPS
-      // pe interfață în bara de sus") ───────────────────────────────────────
-      // Merge pe ruta asta, nu pe una nouă: bara o sondează oricum la 15s, iar
-      // citirea din /proc costă microsecunde. Un poller în plus ar fi fost cost
-      // fără câștig.
-      // `null` când nu se poate măsura — bara scrie „⚠ VPS", NU zerouri. Un
-      // „0.0 GB / 0%" ar arăta identic cu un server mort și ar fi exact eroarea
-      // pe care o tot reproșează: citire picată prezentată ca stare reală.
+      // ── THE VPS, PERMANENTLY IN THE BAR (Adrian, 31 Jul: "permanently show
+      // VPS on the interface in the top bar") ───────────────────────────────
+      // It rides on this route, not a new one: the bar polls it every 15s
+      // anyway, and reading /proc costs microseconds. An extra poller would
+      // have been cost with no gain.
+      // `null` when it can't be measured — the bar writes "⚠ VPS", NOT zeros.
+      // A "0.0 GB / 0%" would look identical to a dead server and would be
+      // exactly the error he keeps complaining about: a failed reading
+      // presented as real state.
       vps,
       openrouter: {
         ok: Boolean(config.openrouter.key),
         topup: 'https://openrouter.ai/credits',
-        // Soldul REAL din OpenRouter (USD), exact ca pe pagina lor.
+        // The REAL OpenRouter balance (USD), exactly as on their page.
         balance: orBalance.balance,
         totalCredits: orBalance.totalCredits,
         totalUsage: orBalance.totalUsage,
@@ -319,9 +325,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  // Imaginea REALĂ a banilor ownerului (doar admin): soldul real de la
-  // furnizorul creierului, costul real consumat la furnizori și profitul real.
-  // Nicio cifră scrisă de mână. (Stripe a ieșit total — 31 iul.)
+  // The REAL picture of the owner's money (admin only): the real balance from
+  // the brain provider, the real cost consumed at providers and the real
+  // profit. No hand-written figure. (Stripe is fully out — 31 Jul.)
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -330,12 +336,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       getCostSummary(),
       getOpenRouterBalance(),
     ])
-    // ── PUNGA UNICĂ (Adrian, 30 iul: „o singură pungă... nu rămâne decât REAL,
-    // fără hardcode") ────────────────────────────────────────────────────────
-    // O singură valoare, ADUNATĂ din sursele externe verificabile la sursa lor.
-    // Dacă o sursă nu răspunde, spunem că lipsește (`complete: false`) — nu o
-    // socotim zero, fiindcă „£0 pentru că n-am putut citi" arată exact ca
-    // „£0 pentru că n-ai bani", și alea două nu sunt același lucru.
+    // ── THE SINGLE POCKET (Adrian, 30 Jul: "one single pocket... only REAL
+    // remains, no hardcode") ───────────────────────────────────────────────
+    // A single value, ADDED UP from the external sources verifiable at their
+    // source. If a source doesn't answer, we say it's missing
+    // (`complete: false`) — we don't count it as zero, because "£0 because I
+    // couldn't read" looks exactly like "£0 because you have no money", and
+    // those two are not the same thing.
     const usdInMoneda = config.billing.usdToCurrency
     const parti = {
       openrouter: orBalance.ok ? orBalance.balance * usdInMoneda : null,
@@ -343,17 +350,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const complete = Object.values(parti).every((v) => v !== null)
     const total = Object.values(parti).reduce<number>((s, v) => s + (v ?? 0), 0)
     return reply.send({
-      // Punga: cât ai, cu defalcarea din care s-a adunat și de unde lipsește.
+      // The pocket: how much you have, with the breakdown it was added from
+      // and where it's missing.
       punga: { total: Math.round(total * 100) / 100, complete, parti },
       spent: account.spent,
       profit: account.profit,
       currency: config.billing.currency,
       byKind: costs.byKind,
-      // Consumat AZI (USD, real) — pentru cardul „Consumat azi" din tabul Bani.
+      // Consumed TODAY (USD, real) — for the "Consumed today" card in the
+      // Money tab.
       today: costs.today,
-      // „Punga lui Kelion" = soldul REAL, EXACT din contul OpenRouter (USD) din
-      // care se alimentează creierul CENTRAL (Adrian: „valoarea exactă din
-      // OpenRouter"). Doar adminul vede acest tab; userii nu ajung aici.
+      // "Kelion's pocket" = the REAL, EXACT balance from the OpenRouter
+      // account (USD) that feeds the CENTRAL brain (Adrian: "the exact value
+      // from OpenRouter"). Only the admin sees this tab; users never get here.
       openrouter: {
         balance: orBalance.balance,
         low: orBalance.low,
@@ -388,14 +397,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Which brain models actually serve right now (admin only): live ping of
-  // Kimi (primar) și GLM (rezervă). Vechiul provider scos complet (Adrian, 12 iul).
+  // Kimi (primary) and GLM (backup). The old provider fully removed (Adrian,
+  // 12 Jul).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain keys live (admin only): Kimi (primar) + GLM (rezervă). Pings
+  // Verify the brain keys live (admin only): Kimi (primary) + GLM (backup). Pings
   // each with a 1-token call; reports ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
@@ -403,10 +413,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await verifyKeys())
   })
 
-  // VERIFICARE TOATE TOKENURILE CU DREPTURI (Adrian, 14 iul): verifică LIVE toate
-  // cheile/tokenurile cu acces la servicii externe și raportează statusul fără să
-  // expună valori secrete. Include OpenRouter, OpenAI, Stripe, Google (service
-  // account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), LiveKit, PostgreSQL și SESSION_SECRET.
+  // VERIFY ALL PRIVILEGED TOKENS (Adrian, 14 Jul): verifies LIVE all the
+  // keys/tokens with access to external services and reports status without
+  // exposing secret values. Includes OpenRouter, OpenAI, Stripe, Google
+  // (service account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), LiveKit, PostgreSQL
+  // and SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -417,33 +428,34 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, notConfigured, failed, total: checks.length, checks })
   })
 
-  // ── CE CHEI VEDE SERVERUL CHIAR ACUM (Adrian, 30 iul: „toate cheile au fost
-  // scrise de zeci de ori") ────────────────────────────────────────────────
-  // Panoul spunea „(neconfigurat)" în timp ce omul spunea „le-am scris". Ambele
-  // pot fi adevărate: o cheie SCRISĂ nu ajunge automat în procesul care rulează
-  // — poate fi în alt fișier decât cel dat lui docker, scrisă DUPĂ pornirea
-  // containerului (deci neîncărcată până la repornire), sau pusă ca secret în
-  // GitHub fără să fi rulat `vps-set-env`. Ruta asta întreabă PROCESUL, nu omul.
-  // NU întoarce valori — doar numele, dacă e prezentă, și lungimea.
+  // ── WHICH KEYS THE SERVER SEES RIGHT NOW (Adrian, 30 Jul: "all the keys
+  // have been written dozens of times") ─────────────────────────────────────
+  // The panel said "(not configured)" while the man said "I wrote them". Both
+  // can be true: a WRITTEN key doesn't automatically reach the running process
+  // — it may be in a different file than the one given to docker, written
+  // AFTER the container started (so unloaded until a restart), or set as a
+  // GitHub secret without running `vps-set-env`. This route asks the PROCESS,
+  // not the man. It returns NO values — only the name, whether present, and
+  // the length.
   app.get('/api/admin/env-check', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({
       vars: envCheck(),
       summary: envSummary(),
-      // Chei pe care LE AI în proces, dar sub un nume pe care codul nu-l citea.
-      // Ăsta e răspunsul la „am scris-o de zeci de ori": ai scris-o, eu mă
-      // uitam în altă parte. Doar NUMELE, niciodată valorile.
+      // Keys you HAVE in the process, but under a name the code didn't read.
+      // That's the answer to "I wrote it dozens of times": you wrote it, I was
+      // looking elsewhere. Only NAMES, never values.
       orphans: envOrphans(),
-      // Ora pornirii procesului: răspunde la întrebarea care chiar contează —
-      // „am scris cheia ÎNAINTE sau DUPĂ ce a pornit aplicația?"
+      // The process start time: answers the question that actually matters —
+      // "did I write the key BEFORE or AFTER the app started?"
       startedAt: processStartedAt(),
     })
   })
 
-  // GESTURI (Adrian, 13 iul): panoul admin citește/scrie ce gesturi are voie
-  // Kelion să folosească contextual. Doar admin (403 altfel). Stocăm lista
-  // DEZACTIVATĂ (default: toate active).
+  // GESTURES (Adrian, 13 Jul): the admin panel reads/writes which gestures
+  // Kelion is allowed to use contextually. Admin only (403 otherwise). We
+  // store the DISABLED list (default: all active).
   app.get('/api/admin/gestures', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -457,10 +469,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, disabled: await getDisabledGestures() })
   })
 
-  // AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul): uneltele pe care Kelion și le-a
-  // PROPUS singur. Owner-ul le vede și aprobă/respinge cu UN CLICK — o unealtă
-  // aprobată devine activă instant, fără redeploy. „Independent până la deploy,
-  // cu aprobarea mea" — exact poarta cerută.
+  // KELION'S SELF-EXPANSION (Adrian, 25 Jul): the tools Kelion PROPOSED by
+  // itself. The owner sees them and approves/rejects with ONE CLICK — an
+  // approved tool becomes active instantly, no redeploy. "Independent up to
+  // deploy, with my approval" — exactly the requested gate.
   app.get('/api/admin/kelion-tools', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -475,54 +487,58 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok, tools: await listKelionTools() })
   })
 
-  // RESETAREA CONTOARELOR DE CONSUM (Adrian, 30 iul). Șterge DOAR jurnalul
-  // costurilor noastre la furnizori. Portofelele userilor, registrul plăților și
-  // istoricul de cumpărare rămân NEATINSE — creditele consumate nu se dau înapoi,
-  // iar contabilitatea nu se rescrie. Cere sesiune de admin, ca tot ce e aici.
+  // RESETTING THE CONSUMPTION COUNTERS (Adrian, 30 Jul). Deletes ONLY the
+  // journal of our costs at providers. The users' wallets, the payments ledger
+  // and the purchase history stay UNTOUCHED — consumed credits are not given
+  // back, and accounting is not rewritten. Requires an admin session, like
+  // everything here.
   app.post('/api/admin/reset-counters', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await resetCostCounters())
   })
 
-  // Ruta /api/admin/pool a fost ȘTEARSĂ (Adrian, 30 iul): scria de mână cât
-  // credea omul că are în pungă, iar panoul afișa cifra aia ca fapt. Câți bani
-  // ai se citește din contul bancar (Enable Banking) și de la OpenRouter.
+  // The /api/admin/pool route was DELETED (Adrian, 30 Jul): it hand-wrote how
+  // much the man thought he had in his pocket, and the panel displayed that
+  // figure as fact. How much money you have is read from the bank account
+  // (Enable Banking) and from OpenRouter.
 
-  // CIRCUITUL BANILOR din adminul Kelionai (Adrian, 24 iul): starea live a
-  // fiecărei verigi plată→AI. STRICT admin.
+  // THE MONEY CIRCUIT from the Kelionai admin (Adrian, 24 Jul): the live state
+  // of each payment→AI link. STRICTLY admin.
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // `citirePlati` = starea cititorului de tranzacții Revolut. Fără el, panoul
-    // n-ar putea deosebi „n-a plătit nimeni" de „nu pot citi contul" — exact
-    // confuzia care a costat o zi întreagă pe 30 iul.
+    // `citirePlati` = the state of the Revolut transaction reader. Without it,
+    // the panel couldn't tell "nobody paid" apart from "I can't read the
+    // account" — exactly the confusion that cost a whole day on 30 Jul.
     return reply.send({
       citirePlati: stareCitirePlati(),
-      // `autonomie` = ultima trecere a buclei care îi dă lui Kelion de lucru
-      // FĂRĂ să-i ceară cineva (Adrian, 30 iul: „fă-l autonom"). Se afișează
-      // din același motiv ca restul: ca „bucla lucrează" să fie o citire, nu
-      // o afirmație a mea.
+      // `autonomie` = the last pass of the loop that gives Kelion work WITHOUT
+      // anyone asking (Adrian, 30 Jul: "make it autonomous"). Shown for the
+      // same reason as the rest: so that "the loop is working" is a reading,
+      // not a claim of mine.
       autonomie: stareAutonomie(),
-      // COSTUL LA VEDERE (Adrian, 30 iul: „am nevoie să văd, nu frâne").
-      // Exista ca unealtă — trebuia să ÎNTREBE ca să afle. Acum e în panou,
-      // lângă bani: total, azi, și pe ce s-a dus. Nu taie nimic; arată.
+      // THE COST IN SIGHT (Adrian, 30 Jul: "I need to see, not brakes"). It
+      // existed as a tool — you had to ASK to find out. Now it's in the panel,
+      // next to the money: total, today, and what it went on. It cuts nothing;
+      // it shows.
       costReal: await getCostSummary().catch(() => null),
-      // FRÂNA E A TA, ȘI SE VEDE. „pauza-autonomie" exista de mult, dar doar ca
-      // o comandă pe care trebuia s-o știi pe de rost. O limită pe care o alegi
-      // tu nu e o barieră; una pe care ți-o pun eu, da.
+      // THE BRAKE IS YOURS, AND IT SHOWS. "pauza-autonomie" existed for a long
+      // time, but only as a command you had to know by heart. A limit you
+      // choose is not a barrier; one I impose on you is.
       autonomiaOprita: await isOpsPaused().catch(() => false),
     })
   })
-  // FRÂNA TA, LA UN CLICK (Adrian, 30 iul: „cele 6 trebuiesc, dar nu frâne" —
-  // asta nu e o frână pusă de mine peste el, e maneta pe care o ții TU).
-  // „pauza-autonomie" exista din 27 iul, dar numai ca o comandă pe care trebuia
-  // s-o știi pe de rost și s-o spui lui Kelion. Acum e un buton, la vedere.
-  // CELE OPT DOVEZI (Adrian, 31 iul: „trebuie 8 din 8 dovezi"). Nivelul
-  // autonomiei nu mai e o afirmație de-a mea într-un chat care se pierde: e o
-  // CITIRE din bază. Fiecare nivel își caută urma concretă — un ordin, un PR, o
-  // măsurătoare — și spune „dovedit" doar dacă a găsit-o. Altfel spune ce
-  // anume ar fi dovada. Regula #1, aplicată propriei noastre evidențe.
+  // YOUR BRAKE, ONE CLICK AWAY (Adrian, 30 Jul: "the 6 are needed, but no
+  // brakes" — this is not a brake I put over him, it's the lever YOU hold).
+  // "pauza-autonomie" existed since 27 Jul, but only as a command you had to
+  // know by heart and say to Kelion. Now it's a button, in plain sight.
+  // THE EIGHT PROOFS (Adrian, 31 Jul: "we need 8 out of 8 proofs"). The
+  // autonomy level is no longer a claim of mine in a chat that gets lost: it's
+  // a READING from the database. Each level looks for its concrete trace — an
+  // order, a PR, a measurement — and says "proven" only if it found it.
+  // Otherwise it says what exactly the proof would be. Rule #1, applied to our
+  // own evidence.
   app.get('/api/admin/autonomie/dovezi', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -537,12 +553,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ oprit })
   })
 
-  // ── LEGAREA CONTULUI REVOLUT (consimțământ PSD2, Enable Banking) ───────────
-  // Două rute care duc owner-ul prin consimțământ fără SSH:
-  //   1. start  → URL-ul de deschis în browser (aprobarea se dă în app Revolut)
-  //   2. finalizeaza → cu codul din URL-ul de întoarcere, salvăm contul legat
-  // Consimțământul expiră la max. 90 zile (PSD2) — aceleași rute îl reînnoiesc.
-  // `redirect_url` trebuie declarat în Control Panel Enable Banking.
+  // ── LINKING THE REVOLUT ACCOUNT (PSD2 consent, Enable Banking) ────────────
+  // Two routes that take the owner through consent without SSH:
+  //   1. start  → the URL to open in the browser (approval is given in the
+  //      Revolut app)
+  //   2. finalizeaza → with the code from the return URL, we save the linked
+  //      account
+  // Consent expires in max. 90 days (PSD2) — the same routes renew it.
+  // `redirect_url` must be declared in the Enable Banking Control Panel.
   app.post('/api/admin/plati/legatura/start', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -560,10 +578,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(r)
   })
 
-  // Aici au stat rutele de card virtual Stripe, depunere/payout prin Stripe și
-  // vânzarea de credite cu link de plată Stripe. Șterse odată cu Stripe (31
-  // iul): vânzarea de credite se face acum prin cod unic + transfer Revolut,
-  // iar creditarea manuală rămâne pe /api/admin/user (action: 'credit').
+  // Here used to live the Stripe virtual card routes, the Stripe
+  // deposit/payout and the credit selling with a Stripe payment link. Deleted
+  // together with Stripe (31 Jul): credit selling now happens through a unique
+  // code + Revolut transfer, and manual crediting stays on /api/admin/user
+  // (action: 'credit').
 
   // ── User management (admin only) ──────────────────────────────────────────
   // Block/unblock, grant credit, or delete a user. The ADMIN is hard-protected:
@@ -610,8 +629,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ leads: await listLeads() })
   })
 
-  // Mesajele din formularul „Contact" — salvate MEREU în DB, deci owner-ul le
-  // vede aici chiar dacă emailul nu e configurat (bug „contactul nu se trimite").
+  // The messages from the "Contact" form — ALWAYS saved in the DB, so the
+  // owner sees them here even if email is not configured (the "contact doesn't
+  // send" bug).
   app.get('/api/admin/contact-messages', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -654,8 +674,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const user = getSessionUser(req)
       if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-      // Corpul e comun cu ruta publică (sursă unică în demo.ts); aici doar poarta
-      // de admin de mai sus e în plus.
+      // The body is shared with the public route (single source in demo.ts);
+      // only the admin gate above is added here.
       return pollVisitorChat(req, reply)
     },
   )
