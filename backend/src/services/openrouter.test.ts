@@ -94,7 +94,7 @@ describe('openrouter catalog', () => {
     // lume (550B, 1M context) stătea nefolosit pe treapta 'top', la care se
     // ajunge doar prin escaladare. Acum e pe amândouă.
     // N-are vedere — nu mai contează: vederea se DELEGĂ (vezi vedereaDelegata).
-    expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(await resolveModel('work', null)).toBe('google/gemma-4-26b-a4b-it:free')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
@@ -107,13 +107,13 @@ describe('openrouter catalog', () => {
   it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
     const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
     expect(cerut.fellBack).toBe(true)
-    expect(cerut.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(cerut.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
   it('fără nicio cerere, implicitul NU e o cădere (n-a fost respins nimic)', async () => {
     const implicit = await resolveModelChecked('work', null)
     expect(implicit.fellBack).toBe(false)
-    expect(implicit.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(implicit.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
   it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {

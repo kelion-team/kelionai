@@ -166,7 +166,21 @@ export const config = {
     // 20 de cereri pe minut, și 1.000 pe zi — pragul de 1.000 (față de 50) se
     // deschide dacă s-au cumpărat vreodată $10 în cont, ceea ce e cazul.
     // Revenirea la altceva = o variabilă de env, fără deploy.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
+    // ── 31 iul, seara: „ai spart toată aplicația, nimic nu merge" ──────────
+    //
+    // Pusesem Ultra 550B și pe treapta ASTA (baza), nu doar la vârf. Adică
+    // FIECARE mesaj al ownerului — și „salut" — mergea pe un model de 550B care
+    // gândește intern secunde întregi, pe treapta gratuită cu 20 de cereri pe
+    // minut. Rezultat: lent la orice, iar o tură cu unelte (până la 8 apeluri)
+    // lovea 429 și chatul „nu mergea". Ordinul lui era „pune-l creier Ultra" —
+    // dar creier pentru MUNCĂ, nu papagal la fiecare vorbă.
+    //
+    // Corect, și era chiar rostul treptelor: BAZA rapidă (Gemma 4 26B, 4B
+    // activi — răspunde instant, vede, știe unelte), iar Ultra rămâne la 'top'
+    // și intră prin ESCALADARE automată când sarcina e grea (selectedBrainModel
+    // din chat.ts). Deci: „salut" pe Gemma, „găsește cauza bug-ului prin tot
+    // repo-ul" pe Ultra. Fără ca el să apese nimic.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
     // Treapta FINALĂ 'top' — același model. Nu mai are ce escalada peste el:
     // e cel mai capabil creier gratuit care există. Escaladarea rămâne în cod
     // pentru ziua în care treapta de sus va fi un model plătit.
