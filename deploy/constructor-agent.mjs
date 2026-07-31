@@ -12,3 +12,4 @@ const MODELE_DOVEDIT_PROASTE = new Set([
   'nvidia/nemotron-nano-12b-v2-vl:free', // status -2 în catalog: degradat ACUM
   'nvidia/nemotron-3-super-120b-a12b:free', // returnează răspunsuri goale (200 fără mesaj) — dovadă live 31 iul
 ])
+if (MODEL && !MODEL_LADDER.includes(MODEL) && !MODELE_DOVEDIT_PROASTE.has(MODEL)) MODEL_LADDER.unshift(MODEL)
