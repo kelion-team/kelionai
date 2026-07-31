@@ -28,7 +28,7 @@ const sursa = readFileSync(
 describe('soldul: lipsa se declară, nu se inventează', () => {
   it('`ok: true` cere ca AMBELE cifre să existe și să fie numere', () => {
     expect(sursa).toMatch(/!d \|\| !Number\.isFinite\(totalCredits\) \|\| !Number\.isFinite\(totalUsage\)/)
-    expect(sursa).toContain('forma_neasteptata')
+    expect(sursa).toContain('unexpected_shape')
   })
 
   it('nu mai există `?? 0` pe cifrele soldului — acolo se năștea zeroul fals', () => {
