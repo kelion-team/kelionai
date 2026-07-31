@@ -1,6 +1,6 @@
 import pg from 'pg'
 import { randomBytes } from 'node:crypto'
-// CONTRACTUL HTTP, o singură declarație (Lotul A) — vezi src/shared/api-types.ts.
+// THE HTTP CONTRACT, a single declaration (Batch A) — see src/shared/api-types.ts.
 import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.js'
 export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
@@ -12,13 +12,13 @@ export function dbEnabled(): boolean {
   return Boolean(config.databaseUrl)
 }
 
-// Exportat pentru verificarea live „PostgreSQL" din tokenChecks (SELECT 1).
+// Exported for the live "PostgreSQL" check in tokenChecks (SELECT 1).
 export function getPool(): pg.Pool {
   if (!pool) {
     const url = config.databaseUrl
-    // Local/no-TLS Postgres (VPS pe aceeași mașină, sslmode=disable explicit)
-    // se conectează fără SSL; orice altă țintă primește TLS cu certificat
-    // self-signed acceptat (proxy-uri gestionate).
+    // Local/no-TLS Postgres (VPS on the same machine, explicit sslmode=disable)
+    // connects without SSL; any other target gets TLS with a self-signed
+    // certificate accepted (managed proxies).
     const noTls = /sslmode=disable/.test(url) || /@(localhost|127\.0\.0\.1)[:/]/.test(url)
     const ssl = noTls ? false : { rejectUnauthorized: false }
     pool = new pg.Pool({ connectionString: url, ssl })
@@ -43,12 +43,13 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS meserie_activa INTEGER;
-    -- VOCEA ALEASĂ DE FIECARE OM (Adrian, 30 iul: „își poate seta aplicația cu
-    -- ce AI dorește și ce voce dorește... se ține minte per user"). Până acum
-    -- vocea venea din mediu, deci era UNA pentru toți.
+    -- THE VOICE CHOSEN BY EACH PERSON (Adrian, 30 Jul: "he can set the app with
+    -- whatever AI he wants and whatever voice he wants... it's remembered per
+    -- user"). Until now the voice came from the environment, so it was ONE for
+    -- everyone.
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS voice TEXT;
-    -- Amprente vocale: timbru + gen + flag admin per cont.
-    -- vectorul e normalizat client-side; meta păstrează valorile brute pentru debug.
+    -- Voiceprints: timbre + gender + admin flag per account.
+    -- The vector is normalized client-side; meta keeps the raw values for debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
       user_email TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
@@ -60,10 +61,11 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_voiceprints_admin ON voiceprints (is_admin, updated_at DESC);
-    -- CLIP AUDIO (Adrian, 14 iul: „trebuie să am buton play să aud vocea"): pe
-    -- lângă vectorul de identificare ținem și o mostră audio scurtă (data-URL
-    -- webm/opus, câteva secunde) a ultimei fraze, ca adminul s-o poată ASCULTA
-    -- din panou. Doar admin o citește; nu iese niciodată în chat.
+    -- AUDIO CLIP (Adrian, 14 Jul: "I need a play button to hear the voice"):
+    -- besides the identification vector we also keep a short audio sample
+    -- (webm/opus data-URL, a few seconds) of the last phrase, so the admin can
+    -- LISTEN to it from the panel. Only the admin reads it; it never goes out
+    -- to chat.
     ALTER TABLE voiceprints ADD COLUMN IF NOT EXISTS audio_clip TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS faceprints (
       user_email TEXT PRIMARY KEY,
@@ -99,23 +101,23 @@ export async function initDb(): Promise<void> {
     DROP INDEX IF EXISTS uniq_memory;
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_memory ON memories (user_email, agent, content);
     CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_email, agent, last_seen DESC);
-    -- CĂUTARE REALĂ ÎN MEMORIE (Adrian, 11 iul: „calitatea memoriei" — ILIKE pe
-    -- substring exact rata orice reformulare). Full-text nativ Postgres:
-    -- config 'simple' (fără dicționar de limbă — tokenizează orice text ro/en
-    -- mixat, fără să presupună o singură limbă), indexat GIN pentru viteză la
-    -- multe amintiri. Nu e embeddings/AI (ar cere pgvector + apel API pe scriere,
-    -- cost și risc de infra neconfirmată) — dar e potrivire pe CUVINTE reale, cu
-    -- scor de relevanță, nu doar un substring literal.
+    -- REAL MEMORY SEARCH (Adrian, 11 Jul: "memory quality" — ILIKE on an exact
+    -- substring missed any rephrasing). Native Postgres full-text: 'simple'
+    -- config (no language dictionary — tokenizes any mixed ro/en text without
+    -- assuming a single language), GIN-indexed for speed with many memories.
+    -- It's not embeddings/AI (that would require pgvector + an API call on
+    -- write, cost and unconfirmed infra risk) — but it matches real WORDS, with
+    -- a relevance score, not just a literal substring.
     CREATE INDEX IF NOT EXISTS idx_memories_fts ON memories
       USING GIN (to_tsvector('simple', content));
-    -- MEMORIE SEMANTICĂ (12 iul, foaia de parcurs #5): vectorul de înțeles al
-    -- amintirii (Gemini text-embedding-004), scris asincron la învățare.
-    -- JSONB, nu pgvector: fără extensii de instalat, cosine se calculează în
-    -- Node peste ultimele câteva sute — la volumul actual e instant.
+    -- SEMANTIC MEMORY (12 Jul, roadmap #5): the meaning vector of the memory
+    -- (Gemini text-embedding-004), written asynchronously at learning time.
+    -- JSONB, not pgvector: no extensions to install, cosine is computed in
+    -- Node over the last few hundred — instant at current volume.
     ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
-    -- Portofelul de credit preplătit. Soldul e în moneda de afișare (GBP);
-    -- topup_ref = suma creditată la ULTIMA alimentare, ca să afișăm
-    -- „% din credit rămas" pentru alertele escaladate (30/20/10/5%).
+    -- The prepaid credit wallet. The balance is in display currency (GBP);
+    -- topup_ref = the amount credited at the LAST top-up, so we can show
+    -- "% of credit left" for the escalated alerts (30/20/10/5%).
     CREATE TABLE IF NOT EXISTS wallets (
       user_email TEXT PRIMARY KEY,
       balance NUMERIC(14,6) NOT NULL DEFAULT 0,
@@ -124,8 +126,8 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0;
-    -- Stripe a ieșit total (Adrian, 31 iul: „resturile nu sunt necesare") —
-    -- coloana veche de client Stripe se șterge, nu avea istoric de păstrat.
+    -- Stripe is fully out (Adrian, 31 Jul: "the leftovers are not needed") —
+    -- the old Stripe customer column is dropped, it had no history to keep.
     ALTER TABLE wallets DROP COLUMN IF EXISTS stripe_customer_id;
     -- The owner's provider-credit pool (REAL money): the admin loads it; every
     -- AI call's real cost draws it down. remaining = loaded − total cost. Singleton.
@@ -193,38 +195,39 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
-    -- Registrul alimentărilor (+) și consumurilor (−) — structura e mai jos.
-    -- ── PLĂȚI PRIN REVOLUT PRO, CU COD UNIC (Adrian, 30 iul) ─────────────────
-    -- „în ziua de azi să ai gestiune manuală la mii de potențiali useri, asta
-    -- oferi tu?" — avea dreptate. Ca plata să se crediteze SINGURĂ trebuie știut
-    -- CINE a plătit, iar Revolut Pro nu are webhook care să ne spună.
+    -- The ledger of top-ups (+) and consumptions (−) — the structure is below.
+    -- ── PAYMENTS VIA REVOLUT PRO, WITH A UNIQUE CODE (Adrian, 30 Jul) ────────
+    -- "nowadays, having to manually manage thousands of potential users, is
+    -- that what you offer?" — he was right. For a payment to credit ITSELF you
+    -- must know WHO paid, and Revolut Pro has no webhook to tell us.
     --
-    -- Soluția lui: „fiecare plată trebuie să fie însoțită de un cod unic".
-    -- Codul pleacă cu userul la plată și se întoarce în referința tranzacției;
-    -- aplicația citește tranzacțiile din cont și potrivește codul cu omul.
+    -- His solution: "every payment must come with a unique code". The code
+    -- leaves with the user to the payment and comes back in the transaction
+    -- reference; the app reads the account transactions and matches the code
+    -- to the person.
     --
-    -- De ce cod și nu suma (prima mea idee, greșită): suma poate fi fixată de
-    -- link și poate fi modificată de comision până ajunge în cont — două lucruri
-    -- pe care nu le controlăm. Codul trece neatins prin amândouă.
+    -- Why a code and not the amount (my first idea, wrong): the amount can be
+    -- fixed by the link and can be altered by fees before it lands — two
+    -- things we don't control. The code passes untouched through both.
     CREATE TABLE IF NOT EXISTS payment_codes (
       code TEXT PRIMARY KEY,
       user_email TEXT NOT NULL,
       amount NUMERIC(14,6) NOT NULL,
       currency TEXT NOT NULL DEFAULT 'gbp',
-      -- pending → paid (creditat) | expired (n-a plătit) | manual (atribuit de admin)
+      -- pending → paid (credited) | expired (never paid) | manual (assigned by admin)
       status TEXT NOT NULL DEFAULT 'pending',
-      -- referința tranzacției din bancă, ca aceeași plată să nu crediteze de două ori
+      -- the bank transaction reference, so the same payment never credits twice
       bank_ref TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       paid_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_paycode_user ON payment_codes (user_email, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_paycode_status ON payment_codes (status, created_at DESC);
-    -- ACEEAȘI PLATĂ NU CREDITEAZĂ DE DOUĂ ORI, oricâte citiri se suprapun.
+    -- THE SAME PAYMENT NEVER CREDITS TWICE, no matter how many reads overlap.
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_paycode_bankref ON payment_codes (bank_ref) WHERE bank_ref IS NOT NULL;
-    -- Registrul alimentărilor (+) și consumurilor (−). Coloana „ref" face
-    -- alimentările idempotente: aceeași plată nu se creditează de două ori,
-    -- oricâte citiri sau reîncercări se suprapun.
+    -- The ledger of top-ups (+) and consumptions (−). The "ref" column makes
+    -- top-ups idempotent: the same payment is never credited twice, no matter
+    -- how many reads or retries overlap.
     CREATE TABLE IF NOT EXISTS billing_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -235,13 +238,13 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     -- Stripe is fully out (31 Jul): the old column is dropped entirely
-    -- (it had no history worth keeping) and replaced by „ref".
+    -- (it had no history worth keeping) and replaced by "ref".
     ALTER TABLE billing_events DROP COLUMN IF EXISTS stripe_ref CASCADE;
     ALTER TABLE billing_events ADD COLUMN IF NOT EXISTS ref TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (ref) WHERE ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
-    -- CREDITE (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
-    -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
+    -- CREDITS (ORDER #6G): dedicated table for credit purchase transactions.
+    -- user_id = the user's email (the unique identifier used across the system).
     CREATE TABLE IF NOT EXISTS transactions (
       id BIGSERIAL PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -259,39 +262,41 @@ export async function initDb(): Promise<void> {
     -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
     -- logs them here (via the log_unsupported_request tool); only the owner/admin
     -- reads them, to prioritise what to build next. Never shown to end users.
-    -- ── GESTIUNEA CERINȚELOR (Adrian, 30 iul: „am nevoie de sisteme avansate
-    -- alocate lui Kelion de gestiune a cerințelor, evaluări avansate pe
-    -- soluțiile oferite") ──────────────────────────────────────────────────
-    -- Până acum, o cerință a ownerului trăia în trei locuri care nu se vorbeau:
-    -- un rând în RAMAS-DE-FACUT.md (scris de mână), un ordin în build_jobs
-    -- (fără legătură cu cerința) și, uneori, doar în chat — de unde se pierdea.
-    -- Rezultatul: „ți-am cerut de zeci de ori" era ADEVĂRAT și nedemonstrabil.
-    -- Aici cerința are un singur loc, cu drumul ei întreg: ce s-a cerut, cum se
-    -- dovedește că e făcută, ce VARIANTE s-au evaluat și cu ce scoruri, care a
-    -- fost aleasă și de ce, ce ordin a dus-o, și ce s-a MĂSURAT la final.
+    -- ── REQUIREMENTS MANAGEMENT (Adrian, 30 Jul: "I need advanced systems
+    -- assigned to Kelion for requirements management, advanced evaluations of
+    -- the offered solutions") ────────────────────────────────────────────────
+    -- Until now, an owner requirement lived in three places that didn't talk
+    -- to each other: a row in RAMAS-DE-FACUT.md (hand-written), an order in
+    -- build_jobs (no link to the requirement) and, sometimes, only in chat —
+    -- where it got lost. The result: "I asked you dozens of times" was TRUE
+    -- and unprovable. Here a requirement has a single place, with its whole
+    -- journey: what was asked, how it's proven done, which OPTIONS were
+    -- evaluated and with what scores, which was chosen and why, which order
+    -- carried it, and what was MEASURED at the end.
     CREATE TABLE IF NOT EXISTS cerinte (
       id BIGSERIAL PRIMARY KEY,
       text TEXT NOT NULL,
       sursa TEXT NOT NULL DEFAULT 'owner',
-      -- noua → analizata (are variante evaluate) → in_lucru → livrata →
-      -- verificata (cu dovadă măsurată) | respinsa (cu motiv)
+      -- noua → analizata (has evaluated options) → in_lucru → livrata →
+      -- verificata (with measured proof) | respinsa (with reason)
       stare TEXT NOT NULL DEFAULT 'noua',
-      -- Cum se DOVEDEȘTE că e făcută. Scris la început, nu la sfârșit, ca să nu
-      -- se mute ținta după ce s-a livrat ceva.
+      -- How it's PROVEN to be done. Written at the start, not the end, so the
+      -- target doesn't move after something has been delivered.
       criteriu TEXT,
-      optiuni TEXT,      -- JSON: variantele evaluate, cu scoruri și riscuri
-      aleasa TEXT,       -- varianta aleasă + DE CE
-      dovada TEXT,       -- ce s-a măsurat la final (nu ce s-a declarat)
+      optiuni TEXT,      -- JSON: the evaluated options, with scores and risks
+      aleasa TEXT,       -- the chosen option + WHY
+      dovada TEXT,       -- what was measured at the end (not what was declared)
       job_id BIGINT,
       pr_url TEXT,
-      -- CÂT DE URGENTĂ E, pentru OWNER (1 = arde, 9 = poate aștepta). Fără ea,
-      -- lucrează în ordinea în care s-au scris lucrurile — și îți repară un
-      -- buton în timp ce plățile stau. Nu e o frână: schimbă ORDINEA, nu ce
-      -- are voie să facă.
+      -- HOW URGENT it is, for the OWNER (1 = burning, 9 = can wait). Without
+      -- it, work happens in the order things were written — and you get a
+      -- button fixed while payments are down. It's not a brake: it changes
+      -- the ORDER, not what it's allowed to do.
       prioritate INT NOT NULL DEFAULT 5,
-      -- CÂT DE GREA e (1..5), pusă de el la evaluare. Din ea se alege MÂNA care
-      -- lucrează: model mare pe sarcină grea, gratuit pe o redenumire. Fără ea,
-      -- o sarcină grea pornea pe un model mic, ardea turele povestind, și pica.
+      -- HOW HARD it is (1..5), set by it at evaluation. From it, the HAND that
+      -- works is chosen: a big model on a hard task, a free one on a rename.
+      -- Without it, a hard task started on a small model, burned turns
+      -- rambling, and failed.
       dificultate INT NOT NULL DEFAULT 3,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -314,17 +319,18 @@ export async function initDb(): Promise<void> {
     );
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
-    -- TRIAJUL AUTONOM al lui Kelion (Adrian, 24 iul): decizia lui pe fiecare
-    -- cerere neacoperită — „DE IMPLEMENTAT: ..." sau „ÎNCHIS AUTONOM: ...".
+    -- Kelion's AUTONOMOUS TRIAGE (Adrian, 24 Jul): his decision on each
+    -- uncovered request — "TO IMPLEMENT: ..." or "AUTONOMOUSLY CLOSED: ...".
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triage TEXT;
     ALTER TABLE capability_gaps ADD COLUMN IF NOT EXISTS triaged_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_gaps_open ON capability_gaps (resolved, last_seen DESC);
-    -- AUTO-EXTINDEREA LUI KELION (Adrian, 25 iul: „Kelion să-și poată instala
-    -- singur unelte, independent, până la deploy — cu aprobarea mea"). Kelion
-    -- PROPUNE o unealtă nouă (un apel HTTP, ca dată, nu cod arbitrar): nume, ce
-    -- face, parametri, metodă+URL. Owner-ul o APROBĂ cu un click în admin → devine
-    -- ACTIVĂ instant, fără redeploy. Siguranță: doar HTTPS, fără IP-uri interne,
-    -- fără cod executabil — Kelion nu poate rula decât unelte aprobate de admin.
+    -- KELION'S SELF-EXPANSION (Adrian, 25 Jul: "Kelion must be able to install
+    -- tools by itself, independently, up to deploy — with my approval"). Kelion
+    -- PROPOSES a new tool (an HTTP call, as data, not arbitrary code): name,
+    -- what it does, parameters, method+URL. The owner APPROVES it with one
+    -- click in admin → it becomes ACTIVE instantly, no redeploy. Safety: HTTPS
+    -- only, no internal IPs, no executable code — Kelion can only run tools
+    -- approved by the admin.
     CREATE TABLE IF NOT EXISTS kelion_tools (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -340,7 +346,7 @@ export async function initDb(): Promise<void> {
       decided_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_kelion_tools_status ON kelion_tools (status, created_at DESC);
-    -- Explicit user notes ("reține asta", "salvează-mi X") — distinct from the
+    -- Explicit user notes ("remember this", "save X for me") — distinct from the
     -- memories table: memories are auto-learned facts Kelion recalls silently;
     -- notes are things the user deliberately asked to save and can list/delete.
     CREATE TABLE IF NOT EXISTS notes (
@@ -367,7 +373,7 @@ export async function initDb(): Promise<void> {
       received_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_inbound_recent ON inbound_emails (received_at DESC);
-    -- SHARED MEMORY ("caietul comun"): the single brain shared by BOTH sides —
+    -- SHARED MEMORY ("the common notebook"): the single brain shared by BOTH sides —
     -- the laptop builder and the always-on server bridge. Either writes an entry;
     -- both read the latest entries. This is how "write here, appears there; write
     -- there, appears here" works: one store, two readers/writers.
@@ -392,7 +398,7 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_downloads_file ON app_downloads (file, created_at DESC);
-    -- Persistent store for images generated by Kelion (audit 9 iul 2026).
+    -- Persistent store for images generated by Kelion (audit 9 Jul 2026).
     -- Survival through redeployments: instead of in-memory Map, we use the DB.
     CREATE TABLE IF NOT EXISTS generated_images (
       id TEXT PRIMARY KEY,
@@ -408,11 +414,11 @@ export async function initDb(): Promise<void> {
       content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft
-    -- îi cere admin"). Coada ordinelor de construcție: Kelion (sau adminul din
-    -- panou) pune ordinul aici; lucrătorul de pe VPS (cron, job-uri scurte, NU
-    -- demoni) îl ia, construiește în atelier (clonă separată), rulează build +
-    -- teste și deschide PR-ul. Merge-ul rămâne la Adrian (regula lui, 27 iul).
+    -- THE BUILDER (Adrian, 27 Jul: "Kelion must be able to create any software
+    -- the admin asks"). The build-order queue: Kelion (or the admin from the
+    -- panel) puts the order here; the worker on the VPS (cron, short jobs, NOT
+    -- daemons) picks it up, builds in the workshop (separate clone), runs build
+    -- + tests and opens the PR. Merging stays with Adrian (his rule, 27 Jul).
     CREATE TABLE IF NOT EXISTS build_jobs (
       id BIGSERIAL PRIMARY KEY,
       ordered_by TEXT NOT NULL,
@@ -427,18 +433,20 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_build_jobs_status ON build_jobs (status, created_at);
-    -- PROGRES LIVE (Etapa 4 autonomie, 29 iul): pasul curent al constructorului
-    -- (clonat → editez X → build → deschid PR...) ca să apară pe monitor și ca
-    -- Kelion să-l poată NARA. Actualizat pe parcurs de POST /api/constructor/progress.
+    -- LIVE PROGRESS (autonomy Stage 4, 29 Jul): the builder's current step
+    -- (cloned → editing X → build → opening PR...) so it appears on the monitor
+    -- and Kelion can NARRATE it. Updated along the way by
+    -- POST /api/constructor/progress.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress TEXT;
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
-    -- VERDICTUL VERIFICĂRII INDEPENDENTE (Etapa 6 autonomie, 29 iul): „Gata" nu
-    -- mai e pe cuvântul lucrătorului — după PR, lucrătorul așteaptă CI-ul (verify)
-    -- pe o mașină curată și scrie aici 'verde' / 'roșu' / 'în curs'. Kelion îl
-    -- poate NARA („Gata, verificat de CI") și ownerul îl vede în raport.
+    -- THE INDEPENDENT VERIFICATION VERDICT (autonomy Stage 6, 29 Jul): "Done" is
+    -- no longer the worker's word — after the PR, the worker waits for CI
+    -- (verify) on a clean machine and writes 'green' / 'red' / 'in progress'
+    -- here. Kelion can NARRATE it ("Done, verified by CI") and the owner sees
+    -- it in the report.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS ci TEXT;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
-    -- was WIPED by every deploy (the admin's "am trimis la execuție" orders
+    -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
     -- admin can SEE the whole queue + its history in the panel.
     CREATE TABLE IF NOT EXISTS work_orders (
@@ -461,13 +469,13 @@ export async function initDb(): Promise<void> {
       approved_at TIMESTAMPTZ,
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- DRIFT DE SCHEMĂ REAL (12 iul, prins de purge-phantom: eroare Postgres
-    -- 42703 „column branch does not exist"): tabelul a fost creat înainte ca
-    -- branch să fie adăugat în definiție, iar CREATE TABLE IF NOT EXISTS
-    -- e un no-op pe un tabel deja existent — coloana rămăsese lipsă pe
-    -- producție de la introducerea ei. Plasă de siguranță, ca la memories.
+    -- REAL SCHEMA DRIFT (12 Jul, caught by purge-phantom: Postgres error 42703
+    -- "column branch does not exist"): the table had been created before branch
+    -- was added to the definition, and CREATE TABLE IF NOT EXISTS is a no-op on
+    -- an existing table — the column had stayed missing in production since its
+    -- introduction. Safety net, same as memories.
     ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '';
-    -- Când s-a aprobat release-ul — folosit la expirarea aprobărilor nepublicate.
+    -- When the release was approved — used for expiring unpublished approvals.
     ALTER TABLE staged_releases ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_releases ON staged_releases (status, at DESC);
     -- Tiny key-value state that must survive restarts (e.g. the bridge worker's
@@ -498,10 +506,10 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_vchat_conv ON visitor_chats (conv_id, id);
-    -- MESAJE DE CONTACT: se salvează MEREU aici, indiferent dacă emailul e
-    -- configurat — ca un mesaj de contact să nu se piardă NICIODATĂ (bug 10 iul:
-    -- „mesajele din contact nu se trimit"). Emailul e doar redirectare best-effort
-    -- pe deasupra; adevărul e în DB, vizibil în Inbox-ul adminului.
+    -- CONTACT MESSAGES: they are ALWAYS saved here, whether email is configured
+    -- or not — so a contact message is NEVER lost (bug 10 Jul: "contact
+    -- messages don't get sent"). Email is just best-effort forwarding on top;
+    -- the truth is in the DB, visible in the admin's Inbox.
     CREATE TABLE IF NOT EXISTS contact_messages (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
@@ -514,20 +522,21 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_messages (created_at DESC);
-    -- CONTURI LOCALE (Adrian, 26 iul: „alte soluții de logare non-Gmail... da,
-    -- pornește, inclusiv să poată crea"). Identitatea = emailul, exact ca la
-    -- Google — portofel/istoric/memorie/amprentă sunt deja legate de email,
-    -- deci un cont local are AUTOMAT toate funcțiile (mai puțin skill-urile pe
-    -- datele Google personale, imposibile fără cont Google). Parola: scrypt
-    -- (node:crypto), formatul "sare:hash" hex — zero dependențe noi.
+    -- LOCAL ACCOUNTS (Adrian, 26 Jul: "other non-Gmail login solutions... yes,
+    -- start, including letting them create one"). Identity = the email, exactly
+    -- like Google — wallet/history/memory/voiceprint are already tied to the
+    -- email, so a local account AUTOMATICALLY gets every feature (except the
+    -- skills on personal Google data, impossible without a Google account).
+    -- Password: scrypt (node:crypto), hex "salt:hash" format — zero new
+    -- dependencies.
     CREATE TABLE IF NOT EXISTS local_accounts (
       email TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT '',
       pass_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- Linkuri de unică folosință (link magic + resetare parolă): păstrăm DOAR
-    -- hash-ul tokenului (un dump de DB nu poate loga pe nimeni), cu expirare.
+    -- One-time links (magic link + password reset): we keep ONLY the token
+    -- hash (a DB dump can't log anyone in), with expiry.
     CREATE TABLE IF NOT EXISTS login_tokens (
       token_hash TEXT PRIMARY KEY,
       email TEXT NOT NULL,
@@ -536,18 +545,19 @@ export async function initDb(): Promise<void> {
       used BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- CONECTAREA GOOGLE PERSISTENTĂ (Adrian, 10 iul: „iar îmi dai să loghez
-    -- Google? reparată de 10 ori"). Cauza recurenței: refresh-token-ul trăia DOAR
-    -- în cookie-ul de sesiune, deci orice re-logare/expirare/re-emitere îl pierdea.
-    -- Acum îl ținem PERMANENT aici, per cont: conectezi o dată → se restaurează
-    -- singur din DB la fiecare logare. Nu mai cere reconectare niciodată.
+    -- PERSISTENT GOOGLE CONNECTION (Adrian, 10 Jul: "you're making me log into
+    -- Google again? fixed 10 times"). The recurrence cause: the refresh token
+    -- lived ONLY in the session cookie, so any re-login/expiry/re-issue lost
+    -- it. Now we keep it PERMANENTLY here, per account: connect once → it
+    -- restores itself from the DB at every login. Never asks to reconnect
+    -- again.
     CREATE TABLE IF NOT EXISTS google_accounts (
       email TEXT PRIMARY KEY,
       refresh_token TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    -- ERORI DE CONSOLĂ CLIENT (Adrian, 11 iul): capturăm erorile frontend
-    -- (camera, rețea, JS) ca dovezi înainte de diagnostic. Nu conțin PII.
+    -- CLIENT CONSOLE ERRORS (Adrian, 11 Jul): we capture frontend errors
+    -- (camera, network, JS) as evidence before diagnosis. They contain no PII.
     CREATE TABLE IF NOT EXISTS client_errors (
       id BIGSERIAL PRIMARY KEY,
       type TEXT NOT NULL DEFAULT '',
@@ -558,12 +568,12 @@ export async function initDb(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_client_errors_recent ON client_errors (created_at DESC);
-    -- SISTEM DE URMĂRIRE A TREPTELOR DE ABONAMENT (12 iul, ordinul lui Adrian:
-    -- „sistem de urmărit când sunt repuse valorile noi, interogare când se
-    -- alocă prin cheie, revenire la ordinea prestabilită automat"). Fiecare
-    -- comutare (kimi→glm la cotă golită) SAU revenire automată (înapoi la
-    -- treapta de sus, după cooldown) e un rând aici — worker-ul o scrie chiar
-    -- în clipa tranziției, nu doar în jurnalul systemd care se pierde.
+    -- SUBSCRIPTION-TIER TRACKING SYSTEM (12 Jul, Adrian's order: "a system to
+    -- track when new values are restored, query when allocated by key, return
+    -- to the preset order automatically"). Every switch (kimi→glm at an empty
+    -- quota) OR automatic return (back to the top tier, after cooldown) is a
+    -- row here — the worker writes it at the very moment of the transition, not
+    -- just in the systemd journal that gets lost.
     CREATE TABLE IF NOT EXISTS tier_events (
       id BIGSERIAL PRIMARY KEY,
       worker TEXT NOT NULL,
@@ -598,7 +608,7 @@ export async function saveClientError(e: {
       ],
     )
   } catch {
-    /* non-fatal: nu blocăm clientul pentru un log */
+    /* non-fatal: we don't block the client for a log */
   }
 }
 
@@ -609,13 +619,14 @@ export interface ClientErrorGroup {
   n: string
 }
 
-/** Erorile de client GRUPATE pe mesaj, pentru panoul de admin.
+/** Client errors GROUPED by message, for the admin panel.
  *
- *  Interogarea asta trăia scrisă de mână ÎN RUTĂ (admin.ts), în timp ce aici
- *  zăcea o `listClientErrors` pe care n-o chema nimeni: două locuri pentru
- *  aceeași treabă, unul mort. jscpd nu putea s-o prindă (textul diferea), dar e
- *  exact încălcarea principiului „unic, fără duplicate" — plus o rută care
- *  atingea direct baza, ocolind stratul ăsta. Acum: o singură sursă, aici. */
+ *  This query used to live hand-written IN THE ROUTE (admin.ts), while a
+ *  `listClientErrors` that nobody called lay here: two places for the same
+ *  job, one of them dead. jscpd couldn't catch it (the text differed), but
+ *  it's exactly a violation of the "single, no duplicates" principle — plus a
+ *  route that touched the database directly, bypassing this layer. Now: a
+ *  single source, here. */
 export async function listClientErrorGroups(hours = 48, limit = 30): Promise<ClientErrorGroup[]> {
   if (!dbEnabled()) return []
   try {
@@ -632,12 +643,12 @@ export async function listClientErrorGroups(hours = 48, limit = 30): Promise<Cli
   }
 }
 
-// AUTO-VINDECAREA (Adrian, 27 iul: „Kelion trebuie să poată culege err apărute
-// sub fiecare user automat și să le remedieze, dând versiunea reparată pentru
-// toți userii ulterior"). Grupăm erorile de client pe mesaj (primele 200 de
-// caractere) și întoarcem DOAR pe cele RECURENTE — apărute de multe ori, la mai
-// mulți utilizatori (ip-uri distincte) în fereastra dată. Astfel constructorul
-// nu se apucă de un incident izolat/ambiental, ci de un bug real, repetat.
+// SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to collect errors that
+// appear under each user automatically and fix them, shipping the repaired
+// version to all users afterwards"). We group client errors by message (first
+// 200 chars) and return ONLY the RECURRING ones — seen many times, by several
+// users (distinct IPs) in the given window. That way the builder doesn't take
+// on an isolated/environmental incident, but a real, repeated bug.
 export interface RecurringError {
   message: string
   count: number
@@ -669,8 +680,8 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
          FROM client_errors
         WHERE created_at > now() - ($1 || ' hours')::interval
           AND message <> ''
-          -- excludem zgomotul ne-reparabil din cod: erori cross-origin opace,
-          -- pene de rețea, extensii de browser.
+          -- exclude noise that can't be fixed in code: opaque cross-origin
+          -- errors, network outages, browser extensions.
           AND message NOT ILIKE 'Script error%'
           AND message NOT ILIKE '%NetworkError%'
           AND message NOT ILIKE '%Failed to fetch%'
@@ -696,7 +707,7 @@ export async function recurringClientErrors(hours = 24, minCount = 5, minUsers =
   }
 }
 
-// ── Conectarea Google persistentă (refresh token per cont) ──────────────────
+// ── Persistent Google connection (refresh token per account) ────────────────
 export async function saveGoogleRefreshToken(email: string, token: string): Promise<void> {
   if (!dbEnabled() || !email || !token) return
   try {
@@ -706,7 +717,7 @@ export async function saveGoogleRefreshToken(email: string, token: string): Prom
       [email.toLowerCase(), token],
     )
   } catch {
-    /* nu rupem logarea dacă salvarea token-ului dă rateu */
+    /* don't break the login if saving the token fails */
   }
 }
 
@@ -780,12 +791,12 @@ export async function listVisitorConvos(): Promise<VisitorConvo[]> {
               COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE role = 'visitor')::int AS visitor_msgs
        FROM visitor_chats
-       -- AUTOCURĂȚARE (Adrian, 31 iul: „și cu astea ce?" — trei „conversații"
-       -- din 25 iul care erau doar „Test QA automat — mesaj de verificare
-       -- (ignora)"). Probele automate nu sînt vizitatori; nu au ce căuta în
-       -- lista pe care o citești ca să vezi cine ți-a scris. Rămân în tabelă,
-       -- dar nu mai apar. Filtrul e pe TEXT, nu pe dată, ca să prindă și
-       -- probele de mâine.
+       -- SELF-CLEANING (Adrian, 31 Jul: "and what about these?" — three
+       -- "conversations" from 25 Jul that were only "Test QA automat — mesaj
+       -- de verificare (ignora)"). Automated probes are not visitors; they
+       -- have no business in the list you read to see who wrote to you. They
+       -- stay in the table, but no longer appear. The filter is on TEXT, not
+       -- date, so it also catches tomorrow's probes.
        WHERE conv_id NOT IN (
          SELECT DISTINCT conv_id FROM visitor_chats
          WHERE text ILIKE '%Test QA automat%' OR text ILIKE '%mesaj de verificare (ignora)%'
@@ -798,6 +809,7 @@ export async function listVisitorConvos(): Promise<VisitorConvo[]> {
     return []
   }
 }
+
 
 // ── Leads (visitor contact capture) ─────────────────────────────────────────
 // A visitor leaves an email on the landing so the owner can reach them (the
@@ -845,8 +857,8 @@ export async function markLeadContacted(id: number): Promise<void> {
   }
 }
 
-// ── Mesaje de contact (formularul „Contact") ────────────────────────────────
-// Se salvează MEREU (indiferent de email) ca să nu se piardă niciun mesaj.
+// ── Contact messages (the "Contact" form) ───────────────────────────────────
+// ALWAYS saved (regardless of email) so no message is ever lost.
 
 export interface ContactMessage {
   id: number
@@ -939,7 +951,7 @@ export async function unblockUser(email: string): Promise<void> {
   }
 }
 
-/** Admin grants credit straight to a user's wallet (cadou, fără split). */
+/** Admin grants credit straight to a user's wallet (a gift, no split). */
 export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
   if (!dbEnabled() || !email || !(amount !== 0)) return
   const e = email.toLowerCase()
@@ -952,9 +964,10 @@ export async function grantCredit(email: string, amount: number, currency = 'gbp
              updated_at = now()`,
       [e, amount, currency],
     )
-    // URMĂ CONTABILĂ (audit 24 iul, P2-2): cadoul adminului era invizibil — nici
-    // billing_events, nici transactions → gaură în pista de audit + userul rămânea
-    // pe „prima alimentare £20" deși avea sold. Acum ambele registre îl văd.
+    // AUDIT TRAIL (audit 24 Jul, P2-2): the admin's gift was invisible — no
+    // billing_events, no transactions → a hole in the audit trail + the user
+    // stayed on "first top-up £20" despite having a balance. Now both ledgers
+    // see it.
     await getPool().query(
       `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
        VALUES ($1, 'grant', $2, $3, 'credit admin')`,
@@ -977,11 +990,11 @@ export async function deleteUserData(email: string): Promise<void> {
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    // GDPR complet (audit 24 iul): pe lângă datele de conversație, se șterg și
-    // datele biometrice (amprente vocale/faciale), notițele și conturile Google
-    // legate. NIMIC personal nu rămâne. (Coloanele diferă pe tabele — atenție:
-    // o eroare într-o tranzacție Postgres o otrăvește pe TOATĂ, deci lista
-    // conține DOAR tabele+coloane verificate în schema de mai sus.)
+    // Full GDPR (audit 24 Jul): besides conversation data, biometric data
+    // (voice/face prints), notes and linked Google accounts are also deleted.
+    // NOTHING personal remains. (Columns differ across tables — careful: an
+    // error inside a Postgres transaction poisons ALL of it, so the list
+    // contains ONLY tables+columns verified in the schema above.)
     const targets: [string, string][] = [
       ['messages', 'user_email'], ['user_prefs', 'user_email'], ['memories', 'user_email'],
       ['wallets', 'user_email'], ['visits', 'user_email'], ['blocked_users', 'email'],
@@ -991,9 +1004,10 @@ export async function deleteUserData(email: string): Promise<void> {
     for (const [t, col] of targets) {
       await client.query(`DELETE FROM ${t} WHERE ${col} = $1`, [e])
     }
-    // EVIDENȚA FINANCIARĂ (transactions, billing_events) NU se șterge — legea
-    // cere păstrarea plăților — dar se ANONIMIZEAZĂ: emailul devine un marcaj
-    // ireversibil, deci nu mai e dată personală, iar contabilitatea rămâne întreagă.
+    // The FINANCIAL LEDGER (transactions, billing_events) is NOT deleted — the
+    // law requires keeping payments — but it is ANONYMIZED: the email becomes
+    // an irreversible marker, so it's no longer personal data, while the
+    // accounting stays whole.
     await client.query(`UPDATE transactions SET user_id = 'deleted-user' WHERE user_id = $1`, [e])
     await client.query(`UPDATE billing_events SET user_email = 'deleted-user' WHERE user_email = $1`, [e])
     await client.query('COMMIT')
@@ -1016,7 +1030,7 @@ export async function saveWorkOrder(id: string, text: string): Promise<void> {
 // ── Tiny key-value state that must SURVIVE restarts ─────────────────────────
 // (e.g. the bridge worker's last-seen beat: a deploy must not blink the light).
 
-// ── CONTURI LOCALE (email + parolă / link magic) ─────────────────────────────
+// ── LOCAL ACCOUNTS (email + password / magic link) ──────────────────────────
 export interface LocalAccount {
   email: string
   name: string
@@ -1045,7 +1059,7 @@ export async function saveLoginToken(tokenHash: string, email: string, purpose: 
     [tokenHash, email.toLowerCase().trim(), purpose, String(ttlMin)],
   )
 }
-/** Consumă tokenul (o singură folosire, neexpirat) → emailul lui, altfel null. */
+/** Consume the token (single use, unexpired) → its email, otherwise null. */
 export async function consumeLoginToken(tokenHash: string, purpose: 'magic' | 'reset'): Promise<string | null> {
   if (!dbEnabled()) return null
   const r = await getPool().query<{ email: string }>(
@@ -1074,9 +1088,10 @@ export async function loadKv(key: string): Promise<string | null> {
   return r.rows[0]?.value ?? null
 }
 
-// ── GESTURI: ce gesturi are voie Kelion să folosească CONTEXTUAL (Adrian, 13
-// iul: panou admin cu casetă per gest). Stocăm DOAR lista dezactivată (default:
-// toate active). Creierul citește lista și evită gesturile bifate ca OFF.
+// ── GESTURES: which gestures Kelion is allowed to use CONTEXTUALLY (Adrian,
+// 13 Jul: admin panel with a checkbox per gesture). We store ONLY the disabled
+// list (default: all active). The brain reads the list and avoids the gestures
+// checked OFF.
 export async function getDisabledGestures(): Promise<string[]> {
   const raw = await loadKv('gesture_disabled')
   if (!raw) return []
@@ -1156,21 +1171,23 @@ export async function getDownloadStats(): Promise<{
 
 // ── Shared memory: the common notebook both sides read + write ──
 
-// ── Prepaid wallet (portofel de credite) ──
+// ── Prepaid wallet (credit wallet) ──
 
-// ── EMAILUL UNUI OM, O SINGURĂ FORMĂ, ÎN TOT SOFTUL ─────────────────────────
+// ── ONE PERSON'S EMAIL, ONE SINGLE FORM, ACROSS THE WHOLE APP ───────────────
 //
-// Găsit întâi la portofel (teste, 30 iul): alimentările scriau de mult `lower($1)`
-// (auditul P2-3), dar CITIREA soldului și TAXAREA foloseau
-// emailul EXACT cum vine din sesiune. Logarea locală îl coboară la litere mici;
-// logarea Google NU. Pentru un email cu majuscule („Ion@Firma.ro") userul plătea,
-// creditul intra pe un rând, aplicația citea altul → îi arăta 0 credite și îl
-// oprea în paywall, iar consumul lui deschidea un AL DOILEA portofel, pe minus.
+// Found first at the wallet (tests, 30 Jul): top-ups had long been writing
+// `lower($1)` (audit P2-3), but balance READS and CHARGING used the email
+// EXACTLY as it comes from the session. Local login lowercases it; Google
+// login does NOT. For an email with capitals ("Ion@Firma.ro") the user paid,
+// the credit landed on one row, the app read another → showed him 0 credits
+// and stopped him at the paywall, while his consumption opened a SECOND
+// wallet, in the negative.
 //
-// Aceeași fisură era deschisă și la PREFERINȚE (limbă, meserie), la
-// AUTO-REÎNCĂRCARE (bani: setarea nu se mai citea → userul rămânea fără credit
-// deși o pornise), la ALEGEREA MODELULUI și la aranjarea avatarului. Toate se
-// scriu și se citesc de-acum prin cheia asta — una singură, exportată.
+// The same crack was open at PREFERENCES (language, role), at AUTO-TOP-UP
+// (money: the setting was no longer read → the user was left without credit
+// although he had enabled it), at MODEL SELECTION and at avatar layout. All
+// of them are now written and read through this single key — one only,
+// exported.
 export const userKey = (email: string): string => String(email ?? '').trim().toLowerCase()
 const walletKey = userKey
 
@@ -1205,28 +1222,27 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
       [walletKey(email), -amount, meta],
     )
   } catch (e) {
-    // Nu rupem chatul dacă taxarea pică — dar NICIODATĂ în tăcere (audit 27
-    // iul: exact catch-ul ăsta gol a mai ascuns o dată „userii consumă fără să
-    // fie taxați"). Eroarea intră în jurnal → server_logs → auditul din admin.
-    console.error(`[bani] debitWallet EȘUAT pentru ${email}, suma ${amount}: ${String(e).slice(0, 200)}`)
+    // We don't break the chat if charging fails — but NEVER silently (audit 27
+    // Jul: exactly this empty catch once hid "users consume without being
+    // charged"). The error goes into the journal → server_logs → admin audit.
+    console.error(`[money] debitWallet FAILED for ${email}, amount ${amount}: ${String(e).slice(0, 200)}`)
   }
 }
 
-// Garda de idempotență a plăților: o referință deja înregistrată NU se creditează
-// a doua oară. Apelată în interiorul unei tranzacții deschise (apelantul face
-// ROLLBACK dacă e true). O singură sursă aici (principiul permanent: unic,
-// fără duplicate).
+// The payment idempotency guard: an already-recorded reference is NOT credited
+// a second time. Called inside an open transaction (the caller ROLLBACKs if
+// true). A single source here (the permanent principle: single, no duplicates).
 async function billingRefSeen(client: pg.PoolClient, ref: string): Promise<boolean> {
   const seen = await client.query('SELECT 1 FROM billing_events WHERE ref = $1', [ref])
   return (seen.rowCount ?? 0) > 0
 }
 
 /**
- * Alimentarea portofelului userului (plată confirmată — ex. transfer Revolut
- * citit prin Enable Banking). Userul PĂSTREAZĂ `userShare` (75%) ca credit
- * cheltuibil; restul de 25% e profitul nostru, luat din start. Idempotent pe
- * `ref` (referința unică a plății). topup_ref devine noul sold complet —
- * referința pentru alertele de procent.
+ * Top up the user's wallet (payment confirmed — e.g. a Revolut transfer read
+ * through Enable Banking). The user KEEPS `userShare` (75%) as spendable
+ * credit; the remaining 25% is our profit, taken upfront. Idempotent on `ref`
+ * (the payment's unique reference). topup_ref becomes the new full balance —
+ * the reference for the percentage alerts.
  */
 export async function topUpUser(
   email: string,
@@ -1249,9 +1265,10 @@ export async function topUpUser(
        VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
       [email, userCredit, ref],
     )
-    // Email NORMALIZAT (audit P2-3: un email cu alt caz creditat aici nu mai era
-    // citit NICIODATĂ de endpoint-ul de sold) + topup_ref = NOUL SOLD complet
-    // (audit P1-3: doar ultima alimentare falsifica procentul de alertă).
+    // NORMALIZED email (audit P2-3: an email credited here with a different
+    // case was NEVER read by the balance endpoint) + topup_ref = the NEW full
+    // BALANCE (audit P1-3: only the last top-up falsified the alert
+    // percentage).
     await client.query(
       `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
        ON CONFLICT (user_email) DO UPDATE
@@ -1263,10 +1280,10 @@ export async function topUpUser(
        VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
       [email, profit, `${ref}:profit`],
     )
-    // CONTABILITATE VIZIBILĂ (Adrian, 24 iul: „să văd REAL în baza de date cine
-    // a alimentat, cât, și repartizarea banilor"). Fiecare alimentare lasă
-    // rândul contabil complet, în ACEEAȘI tranzacție SQL: suma brută plătită,
-    // creditele primite (75%), userul și referința unică a plății.
+    // VISIBLE ACCOUNTING (Adrian, 24 Jul: "to see for REAL in the database who
+    // topped up, how much, and the money split"). Every top-up leaves the full
+    // accounting row, in the SAME SQL transaction: the gross amount paid, the
+    // credits received (75%), the user and the payment's unique reference.
     await client.query(
       `INSERT INTO transactions (user_id, amount, credits, status, payment_ref)
        VALUES ($1, $2, $3, 'paid', $4)
@@ -1287,7 +1304,7 @@ export async function topUpUser(
   }
 }
 
-/** Înregistrări în tabela `transactions` (ORDIN #6G). */
+/** Records in the `transactions` table (ORDER #6G). */
 
 export interface Transaction {
   id: number
@@ -1299,7 +1316,7 @@ export interface Transaction {
   created_at: string
 }
 
-/** Istoricul de cumpărături al unui utilizator. */
+/** A user's purchase history. */
 export async function listTransactionsForUser(email: string, limit = 50): Promise<Transaction[]> {
   if (!dbEnabled() || !email) return []
   try {
@@ -1315,7 +1332,7 @@ export async function listTransactionsForUser(email: string, limit = 50): Promis
   }
 }
 
-/** Toate tranzacțiile (panou admin). */
+/** All transactions (admin panel). */
 export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
   if (!dbEnabled()) return []
   try {
@@ -1344,11 +1361,12 @@ export async function getWalletStatus(email: string): Promise<{ balance: number;
   }
 }
 
-// Aici au stat `loadAdminPool` și `withdrawAdminPool` — butoanele „+ Adaugă
-// bani" / „− Scoate bani" care SCRIAU de mână cât credea omul că are în pungă.
-// Șterse (Adrian, 30 iul: „o singură pungă... nu rămâne decât real, fără
-// hardcode"). Câți bani ai se citește din contul Revolut (prin Enable Banking)
-// și de la OpenRouter, care chiar îi țin; nu se mai declară nicăieri.
+// Here used to live `loadAdminPool` and `withdrawAdminPool` — the "+ Add
+// money" / "− Take out money" buttons that HAND-WROTE how much the man
+// thought he had in his pocket. Deleted (Adrian, 30 Jul: "one single
+// pocket... only real remains, no hardcode"). How much money you have is read
+// from the Revolut account (through Enable Banking) and from OpenRouter,
+// which actually hold it; it's no longer declared anywhere.
 
 // Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
 // anti-reuse: a fingerprint or IP that already tried within 30 days is refused.
@@ -1520,9 +1538,9 @@ export async function getUserActivity(): Promise<{
 
 // The owner's visitor analytics (admin only): EVERY site visit — totals, a
 // breakdown by country, and the latest arrivals with their full profile.
-// Jumătatea „probe demo" e MOARTĂ (nimic nu mai scrie demo_uses), deci nu mai
-// interogăm tabela; câmpurile de demo rămân 0/goale ca FORMA tipului DemoStats
-// să nu se schimbe (frontend-ul nu crapă).
+// The "demo probes" half is DEAD (nothing writes demo_uses anymore), so we no
+// longer query that table; the demo fields stay 0/empty so the SHAPE of the
+// DemoStats type doesn't change (the frontend doesn't break).
 export async function getDemoStats(): Promise<DemoStats> {
   const empty: DemoStats = {
     total: 0, today: 0, bots: 0, visitsTotal: 0, visitsToday: 0, byCountry: [], recent: [],
@@ -1567,13 +1585,13 @@ export async function getDemoStats(): Promise<DemoStats> {
         tz: string
         vizite_anterioare: number
       }>(
-        // PROFIL COMPLET AL VIZITEI (Adrian, 31 iul: „vizitatori, acest câmp
-        // trebuie să ofere full informații despre vizită"). Lipseau două
-        // lucruri care schimbă cum citești un rând: FUSUL ORAR (coloana `tz`
-        // exista în tabelă și nu se citea — îți spune ora LUI, nu a ta) și
-        // dacă e la PRIMA vizită sau a mai fost (același fingerprint mai
-        // devreme). Un vizitator care revine a treia oară nu e același lucru
-        // cu unul care a nimerit o dată pe site.
+        // FULL VISIT PROFILE (Adrian, 31 Jul: "visitors, this field must give
+        // full information about the visit"). Two things that change how you
+        // read a row were missing: the TIMEZONE (the `tz` column existed in
+        // the table and wasn't read — it tells you HIS time, not yours) and
+        // whether it's the FIRST visit or a returning one (same fingerprint
+        // earlier). A visitor coming back for the third time is not the same
+        // thing as one who landed on the site once.
         `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
                 v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
                 '' AS session_email, '' AS topic, v.tz,
@@ -1616,26 +1634,28 @@ export async function getDemoStats(): Promise<DemoStats> {
   }
 }
 
-// ── CONTABILITATEA REALĂ A OWNERULUI — NIMIC DECLARAT DE MÂNĂ ───────────────
+// ── THE OWNER'S REAL ACCOUNTING — NOTHING DECLARED BY HAND ──────────────────
 //
-// Adrian, 30 iul: „o singură pungă, scoate minciunile de pe platformă; nu rămâne
-// decât REAL, fără hardcode."
+// Adrian, 30 Jul: "one single pocket, remove the lies from the platform; only
+// REAL remains, no hardcode."
 //
-// Ce era înainte: `loaded` — o cifră TASTATĂ din panou („+ Adaugă bani" /
-// „− Scoate bani") — și `remaining = loaded − spent`. Nimic nu o verifica
-// vreodată cu Stripe sau cu OpenRouter. Adică panoul putea să arate „mai ai £50"
-// în timp ce contul de la furnizor era pe zero. O cifră pe care o scrie omul nu
-// e o măsurătoare, e o părere — iar la bani, o părere afișată ca fapt e o
-// minciună. ȘTEARSĂ, împreună cu butoanele care o scriau.
+// What there was before: `loaded` — a figure TYPED into the panel ("+ Add
+// money" / "− Take out money") — and `remaining = loaded − spent`. Nothing
+// ever checked it against Stripe or OpenRouter. Meaning the panel could show
+// "you still have £50" while the provider account was at zero. A figure the
+// man writes is not a measurement, it's an opinion — and with money, an
+// opinion displayed as fact is a lie. DELETED, together with the buttons that
+// wrote it.
 //
-// Ce rămâne aici sunt DOAR măsurători:
-//   • `spent`  — suma costurilor REALE raportate de furnizori la fiecare apel
-//                (cost_events, scris de recordCost din răspunsul lor);
-//   • `profit` — suma marjelor din registrul de plăți (billing_events), care
-//                vine din plăți reale verificate, nu din estimări.
-// Punga propriu-zisă (cât mai ai) NU se mai ține aici: se citește LIVE din
-// contul Revolut (prin Enable Banking) și de la OpenRouter — vezi
-// services/openrouter.ts getOpenRouterBalance. Sursa adevărului e la ei.
+// What remains here is ONLY measurements:
+//   • `spent`  — the sum of the REAL costs reported by providers on each call
+//                (cost_events, written by recordCost from their response);
+//   • `profit` — the sum of margins from the payments ledger (billing_events),
+//                which comes from real verified payments, not estimates.
+// The actual pocket (how much you have left) is NO LONGER kept here: it's read
+// LIVE from the Revolut account (through Enable Banking) and from OpenRouter —
+// see services/openrouter.ts getOpenRouterBalance. The source of truth is with
+// them.
 export async function getAdminAccount(): Promise<{ spent: number; profit: number }> {
   const empty = { spent: 0, profit: 0 }
   if (!dbEnabled()) return empty
@@ -1700,44 +1720,45 @@ export interface CostSummary {
   total: number
   today: number
   byKind: Record<string, number>
-  /** Cât din `total` vine dintr-o MĂSURĂTOARE a furnizorului (OpenRouter
-   *  `usage.cost` — banii pe care i-a spus el că i-a luat). */
+  /** How much of `total` comes from a provider MEASUREMENT (OpenRouter
+   *  `usage.cost` — the money it said it took). */
   masurat: number
-  /** Cât e ESTIMAREA NOASTRĂ, cu tarife fixe scrise în `cost.ts` (minute de
-   *  voce × $0.35, caractere TTS, apeluri Serper…). Nu e ce a costat — e ce
-   *  credem noi că a costat. Adrian, 31 iul: „de unde a reieșit valoarea $504?"
-   *  — de aici, și trebuia scris de la început. */
+  /** How much is OUR ESTIMATE, with fixed rates written in `cost.ts` (voice
+   *  minutes × $0.35, TTS characters, Serper calls…). It's not what it cost —
+   *  it's what we believe it cost. Adrian, 31 Jul: "where did the $504 value
+   *  come from?" — from here, and it should have been written from the
+   *  start. */
   estimat: number
-  /** Ce fel de cifră e fiecare rând, ca panoul să n-o mai poată prezenta greșit. */
+  /** What kind of figure each row is, so the panel can't present it wrong. */
   felul: Record<string, 'masurat' | 'estimat'>
 }
 
-// Singurul fel de cost care vine MĂSURAT de la furnizor: apelurile de creier,
-// unde OpenRouter întoarce `usage.cost` cu banii lui reali. Tot restul sunt
-// tarife fixe scrise de mine — utile ca ordin de mărime, false ca „real".
+// The only kind of cost that comes MEASURED from the provider: brain calls,
+// where OpenRouter returns `usage.cost` with its real money. Everything else
+// is fixed rates I wrote — useful as an order of magnitude, false as "real".
 const COSTURI_MASURATE = new Set(['chat'])
 
-/** ── RESETAREA CONTOARELOR DE CONSUM ────────────────────────────────────────
+/** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
  *
- *  Adrian, 30 iul: „resetează pe 0 toate contoarele; doar banii de la AI lasă-i
- *  să reflecte ce credite sunt acum; în rest, ce s-a consumat pune pe 0."
- *  Și, imediat: „trebuie pus în locul corect, că creditele dacă s-au consumat
- *  NU se face refund."
+ *  Adrian, 30 Jul: "reset all counters to 0; only the AI money, let it
+ *  reflect what credits are now; for the rest, zero out what was consumed."
+ *  And immediately: "it must be put in the right place, because credits once
+ *  consumed do NOT get refunded."
  *
- *  De-aia ștergem EXACT un singur lucru: `cost_events` — jurnalul costurilor
- *  noastre la furnizori, adică „cât ne-a costat pe noi". Contorul ăsta e doar
- *  istoric; nu-l citește nimeni ca să decidă ceva.
+ *  That's why we delete EXACTLY one thing: `cost_events` — the journal of our
+ *  costs at providers, i.e. "how much it cost us". This counter is only
+ *  history; nobody reads it to decide anything.
  *
- *  NU SE ATINGE, cu intenție:
- *    • `wallets`       — creditele userilor. Consumate = consumate; a le pune la
- *                        loc ar însemna un refund pe care nimeni nu l-a cerut.
- *    • `billing_events`— registrul plăților reale (alimentări, marje, refunduri).
- *                        E contabilitate; se șterge doar la ștergerea contului.
- *    • `transactions`  — istoricul de cumpărare al fiecărui om.
+ *  INTENTIONALLY UNTOUCHED:
+ *    • `wallets`       — the users' credits. Consumed = consumed; putting them
+ *                        back would mean a refund nobody asked for.
+ *    • `billing_events`— the real payments ledger (top-ups, margins, refunds).
+ *                        It's accounting; it's only deleted on account deletion.
+ *    • `transactions`  — each person's purchase history.
  *
- *  Banii de la AI (punga) nu au ce reseta: se citesc LIVE din contul bancar
- *  (prin Enable Banking) și de la furnizorul creierului, deci reflectă
- *  întotdeauna ce e acum. */
+ *  The AI money (the pocket) has nothing to reset: it's read LIVE from the
+ *  bank account (through Enable Banking) and from the brain provider, so it
+ *  always reflects what's there now. */
 export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number }> {
   if (!dbEnabled()) return { ok: false, sterse: 0 }
   try {
@@ -1831,7 +1852,7 @@ export async function getMeserieActiva(email: string): Promise<number | null> {
   }
 }
 
-/** Vocea aleasă de user (null = cea implicită a aplicației). */
+/** The voice chosen by the user (null = the app's default). */
 export async function getVoicePref(email: string): Promise<string | null> {
   if (!dbEnabled()) return null
   try {
@@ -1855,7 +1876,7 @@ export async function setVoicePref(email: string, voice: string | null): Promise
       [userKey(email), voice],
     )
   } catch {
-    // Nu rupem vocea dacă salvarea preferinței pică.
+    // Don't break the voice if saving the preference fails.
   }
 }
 
@@ -1895,8 +1916,8 @@ export interface UserSummary {
   last: string
 }
 
-/** Câți oameni au cont cu portofel. Numărăm portofelele, nu conversațiile:
- *  un cont fără portofel n-are credit de apărat. */
+/** How many people have an account with a wallet. We count wallets, not
+ *  conversations: an account without a wallet has no credit to protect. */
 export async function countWalletUsers(): Promise<number> {
   if (!dbEnabled()) return 0
   try {
@@ -1989,19 +2010,20 @@ export async function searchMemories(
 ): Promise<Memory[]> {
   if (!dbEnabled() || words.length === 0) return []
   try {
-    // Full-text real (Adrian, 11 iul): fiecare cuvânt-cheie e un termen OR în
-    // interogare, cu POTRIVIRE DE PREFIX (`:*`) — găsește amintiri care conțin
-    // ORICE cuvânt ce ÎNCEPE cu termenul căutat (cafea → cafeaua, prinde
-    // pluralul/declinarea ro fără dicționar de limbă), în ORICE ordine, nu doar
-    // un substring literal exact. DOVEDIT cu teste reale (Postgres local): config
-    // 'simple' fără prefix rata "cafeaua" la căutarea "cafea" (regresie față de
-    // ILIKE) — prefixul repară exact asta. Rezultatele sunt SORTATE după
-    // relevanță (`ts_rank`), nu doar recență — un fapt vechi dar foarte relevant
-    // nu mai e îngropat de unul recent dar nepotrivit.
-    // Fiecare token trebuie să rămână UN singur cuvânt alfanumeric — orice
-    // rest (spații, punctuație, operatori tsquery) SCOS complet, nu doar
-    // înlocuit cu spațiu (un rest de spațiu intern rupe sintaxa to_tsquery,
-    // dovedit cu un test real: "o'reilly!" → "o reilly" → eroare de sintaxă).
+    // Real full-text (Adrian, 11 Jul): each keyword is an OR term in the
+    // query, with PREFIX MATCHING (`:*`) — it finds memories containing ANY
+    // word that STARTS with the search term (cafea → cafeaua, catches the
+    // Romanian plural/declension without a language dictionary), in ANY
+    // order, not just an exact literal substring. PROVEN with real tests
+    // (local Postgres): 'simple' config without prefix missed "cafeaua" when
+    // searching "cafea" (a regression vs ILIKE) — the prefix fixes exactly
+    // that. Results are SORTED by relevance (`ts_rank`), not just recency —
+    // an old but highly relevant fact is no longer buried by a recent but
+    // off-topic one.
+    // Each token must remain ONE alphanumeric word — everything else (spaces,
+    // punctuation, tsquery operators) REMOVED completely, not just replaced
+    // with a space (a leftover internal space breaks to_tsquery syntax, proven
+    // with a real test: "o'reilly!" → "o reilly" → syntax error).
     const clean = words
       .slice(0, 8)
       .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
@@ -2024,9 +2046,10 @@ export async function searchMemories(
   }
 }
 
-// Uitare la cerere (#20, Adrian 10 iul): userul e stăpân pe memoria lui —
-// „uită că..." șterge faptele care se potrivesc fragmentului. Întoarce câte au
-// fost șterse, ca Kelion să confirme sincer (0 = n-a găsit nimic de uitat).
+// Forgetting on demand (#20, Adrian 10 Jul): the user is the master of his
+// memory — "forget that..." deletes the facts matching the fragment. Returns
+// how many were deleted, so Kelion can confirm honestly (0 = found nothing to
+// forget).
 export async function deleteMemory(
   email: string,
   fragment: string,
@@ -2054,7 +2077,7 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
-  // Decizia autonomă a lui Kelion („DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...").
+  // Kelion's autonomous decision ("TO IMPLEMENT: ..." / "AUTONOMOUSLY CLOSED: ...").
   triage?: string | null
   created_at: string
   last_seen: string
@@ -2092,7 +2115,7 @@ export async function logCapabilityGap(email: string, request: string, reason = 
 }
 
 /** Open capability gaps, most-requested / most-recent first (admin only). */
-// ── CERINȚELE: un singur loc, cu drumul întreg ───────────────────────────────
+// ── REQUIREMENTS: a single place, with the whole journey ────────────────────
 export interface Cerinta {
   id: number
   text: string
@@ -2110,9 +2133,9 @@ export interface Cerinta {
   updated_at: Date
 }
 
-/** Scrie o cerință. Dublurile nu se adaugă: aceeași cerere, același rând —
- *  altfel lista s-ar umple cu variații ale aceluiași lucru și n-ar mai fi
- *  gestiune, ci zgomot. */
+/** Write a requirement. Duplicates are not added: same request, same row —
+ *  otherwise the list would fill with variations of the same thing and it
+ *  would stop being management and become noise. */
 export async function adaugaCerinta(
   text: string,
   sursa = 'owner',
@@ -2153,7 +2176,8 @@ export async function listeazaCerinte(stare?: string, limit = 100): Promise<Ceri
   }
 }
 
-/** Mută cerința pe drumul ei. Doar câmpurile date se ating — restul rămân. */
+/** Move the requirement along its journey. Only the given fields are touched
+ *  — the rest stay. */
 export async function actualizeazaCerinta(
   id: number,
   p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate' | 'dificultate'>> & { job_id?: number },
@@ -2170,21 +2194,21 @@ export async function actualizeazaCerinta(
   try {
     await getPool().query(`UPDATE cerinte SET ${campuri.join(', ')}, updated_at = now() WHERE id = $1`, val)
   } catch {
-    /* niciodată nu rupem tura pentru o scriere de evidență */
+    /* never break the turn for a bookkeeping write */
   }
 }
 
-/** Câte zile ține un gol REZOLVAT în listă înainte să dispară singur. */
+/** How many days a RESOLVED gap stays in the list before it removes itself. */
 const ZILE_GOL_REZOLVAT = 7
 
 export async function getCapabilityGaps(includeResolved = false, limit = 200): Promise<CapabilityGap[]> {
   if (!dbEnabled()) return []
   try {
-    // AUTOCURĂȚARE (Adrian, 31 iul: „ce e cu toate astea? dacă nu mai sunt
-    // trebuie să se autocurețe"). În panou stăteau cereri marcate „Rezolvat"
-    // din 27-28 iul — unele spunând „nu am unelte de cod", pe unelte pe care
-    // le are de atunci. Un rând rezolvat rămâne o săptămână (ca să-l vezi dacă
-    // te uiți în zilele alea), apoi pleacă singur. Fără buton de apăsat.
+    // SELF-CLEANING (Adrian, 31 Jul: "what's with all these? if they're no
+    // longer needed they must self-clean"). The panel held requests marked
+    // "Resolved" from 27-28 Jul — some saying "I have no code tools", about
+    // tools it has had since. A resolved row stays a week (so you see it if
+    // you look in those days), then leaves by itself. No button to press.
     void getPool()
       .query(`DELETE FROM capability_gaps WHERE resolved = true AND last_seen < now() - interval '${ZILE_GOL_REZOLVAT} days'`)
       .catch(() => {})
@@ -2211,7 +2235,7 @@ export async function setGapResolved(id: number, resolved: boolean): Promise<voi
   }
 }
 
-/** Decizia de triaj a lui Kelion pe un gap (+ eventuala închidere automată). */
+/** Kelion's triage decision on a gap (+ any automatic closing). */
 export async function setGapTriage(id: number, triage: string, resolved: boolean): Promise<void> {
   if (!dbEnabled()) return
   try {
@@ -2234,8 +2258,8 @@ export async function addMemory(email: string, content: string, agent = 'kelion'
        ON CONFLICT (user_email, agent, content) DO UPDATE SET last_seen = now()`,
       [email, agent, c],
     )
-    // Vectorul de înțeles, ASINCRON (nu ține tura pe loc): dacă embedding-ul
-    // pică, amintirea rămâne oricum — full-text-ul o găsește după cuvinte.
+    // The meaning vector, ASYNCHRONOUSLY (doesn't hold the turn): if the
+    // embedding fails, the memory stays anyway — full-text finds it by words.
     if (embeddingsEnabled()) {
       void embedText(c)
         .then((v) => {
@@ -2253,9 +2277,9 @@ export async function addMemory(email: string, content: string, agent = 'kelion'
   }
 }
 
-// BACKFILL (12 iul): amintirile de dinaintea memoriei semantice primesc și ele
-// vector, în loturi mici (apelat periodic din index.ts) — după câteva ore tot
-// trecutul e căutabil după sens. Cost neglijabil (embeddings Gemini).
+// BACKFILL (12 Jul): memories from before semantic memory also get a vector,
+// in small batches (called periodically from index.ts) — after a few hours the
+// whole past is searchable by meaning. Negligible cost (Gemini embeddings).
 export async function backfillMemoryEmbeddings(batch = 40): Promise<number> {
   if (!dbEnabled() || !embeddingsEnabled()) return 0
   try {
@@ -2279,9 +2303,10 @@ export async function backfillMemoryEmbeddings(batch = 40): Promise<number> {
   }
 }
 
-// RECALL SEMANTIC (12 iul): amintirile cele mai apropiate ca SENS de întrebare
-// — completează full-text-ul (care cere cuvinte comune). Vectorii ultimelor
-// ~400 de amintiri se compară în Node (cosine); prag ca să nu injectăm zgomot.
+// SEMANTIC RECALL (12 Jul): the memories closest in MEANING to the question —
+// complements full-text (which requires shared words). The vectors of the last
+// ~400 memories are compared in Node (cosine); a threshold so we don't inject
+// noise.
 export async function semanticMemories(
   email: string,
   agent: string,
@@ -2312,7 +2337,7 @@ export async function semanticMemories(
   }
 }
 
-// ── Explicit user notes ("reține asta") ──
+// ── Explicit user notes ("remember this") ──
 
 export interface Note {
   id: number
@@ -2361,7 +2386,7 @@ export async function deleteNote(email: string, id: number): Promise<boolean> {
   }
 }
 
-// ── AUTO-EXTINDEREA LUI KELION — unelte propuse de el, aprobate de owner ──────
+// ── KELION'S SELF-EXPANSION — tools proposed by it, approved by the owner ───
 export interface KelionTool {
   id: number
   name: string
@@ -2375,7 +2400,7 @@ export interface KelionTool {
   createdAt: string
 }
 
-/** Kelion propune o unealtă nouă (rămâne 'pending' până aprobă owner-ul). */
+/** Kelion proposes a new tool (stays 'pending' until the owner approves). */
 export async function proposeKelionTool(t: {
   name: string
   description: string
@@ -2387,7 +2412,7 @@ export async function proposeKelionTool(t: {
 }): Promise<number | null> {
   if (!dbEnabled()) return null
   const name = t.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40)
-  if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // doar HTTPS
+  if (!name || !/^https:\/\//i.test(t.httpUrl)) return null // HTTPS only
   try {
     const r = await getPool().query<{ id: number }>(
       `INSERT INTO kelion_tools (name, description, params_json, http_method, http_url, http_headers, rationale, status)
@@ -2402,7 +2427,7 @@ export async function proposeKelionTool(t: {
   }
 }
 
-/** Uneltele lui Kelion după status ('pending' | 'approved' | 'rejected'). */
+/** Kelion's tools by status ('pending' | 'approved' | 'rejected'). */
 export async function listKelionTools(status?: string): Promise<KelionTool[]> {
   if (!dbEnabled()) return []
   try {
@@ -2420,7 +2445,7 @@ export async function listKelionTools(status?: string): Promise<KelionTool[]> {
   }
 }
 
-/** Owner-ul aprobă/respinge o unealtă propusă (un click în admin). */
+/** The owner approves/rejects a proposed tool (one click in admin). */
 export async function decideKelionTool(id: number, approve: boolean): Promise<boolean> {
   if (!dbEnabled()) return false
   try {
@@ -2469,12 +2494,12 @@ export async function saveInboundEmail(m: {
   }
 }
 
-// Care dintre aceste UID-uri sunt DEJA în inbound_emails. Pre-filtrul
-// pollerului (26 iul): îi permite să descarce corpul DOAR pentru mesajele noi,
-// nu pentru toate ultimele 100 — descărcarea în masă era cauza timeout-urilor
-// care au ținut cutia moartă. La orice eroare întoarcem mulțimea goală:
-// pollerul descarcă atunci cel mult lotul plafonat și dedupe-ul din
-// saveInboundEmail (ON CONFLICT) tot împiedică orice răspuns dublu.
+// Which of these UIDs are ALREADY in inbound_emails. The poller's pre-filter
+// (26 Jul): lets it download the body ONLY for new messages, not for all of
+// the last 100 — bulk downloading was the cause of the timeouts that kept the
+// mailbox dead. On any error we return the empty set: the poller then
+// downloads at most the capped batch and the dedupe in saveInboundEmail
+// (ON CONFLICT) still prevents any double reply.
 export async function knownInboundUids(uids: string[]): Promise<Set<string>> {
   if (!dbEnabled() || uids.length === 0) return new Set()
   try {
@@ -2578,8 +2603,9 @@ export async function saveVoiceprint(v: {
   if (!dbEnabled() || !v.email) return
   try {
     const vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
-    // Mostra audio: o păstrăm doar dacă e rezonabilă ca mărime (≤ ~600KB base64,
-    // câteva secunde webm/opus). Prea mare → n-o stocăm, dar identificarea merge.
+    // The audio sample: we only keep it if it's reasonable in size (≤ ~600KB
+    // base64, a few seconds of webm/opus). Too big → we don't store it, but
+    // identification still works.
     const clip = typeof v.audioClip === 'string' && v.audioClip.length <= 600_000 ? v.audioClip : ''
     await getPool().query(
       `INSERT INTO voiceprints
@@ -2588,7 +2614,7 @@ export async function saveVoiceprint(v: {
        ON CONFLICT (user_email) DO UPDATE
          SET name = $2, gender = $3, is_admin = $4, features = $5,
              feature_meta = $6,
-             -- clip nou doar dacă a venit unul; altfel păstrăm mostra veche.
+             -- new clip only if one arrived; otherwise keep the old sample.
              audio_clip = CASE WHEN $7 <> '' THEN $7 ELSE voiceprints.audio_clip END,
              updated_at = now()`,
       [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta), clip],
@@ -2598,7 +2624,8 @@ export async function saveVoiceprint(v: {
   }
 }
 
-// Mostra audio a unei amprente (data-URL) — doar pentru butonul „play" din admin.
+// The audio sample of a voiceprint (data-URL) — only for the "play" button in
+// admin.
 export async function getVoiceprintAudio(email: string): Promise<string | null> {
   if (!dbEnabled() || !email) return null
   try {
@@ -2653,9 +2680,10 @@ export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   }
 }
 
-// Nucleul comun al celor două distanțe (voce normalizată + față brută): suma
-// pătratelor diferențelor pe componente + lungimea comparată. Sursă unică — cele
-// două funcții diferă DOAR prin normalizarea finală (unic, fără duplicate).
+// The common core of the two distances (normalized voice + raw face): the sum
+// of squared differences across components + the compared length. Single
+// source — the two functions differ ONLY in the final normalization (single,
+// no duplicates).
 function sumSquaredDiff(a: number[], b: number[]): { sum: number; len: number } {
   const len = Math.min(a.length, b.length)
   let sum = 0
@@ -2673,16 +2701,17 @@ export function vectorDistance(a: number[], b: number[]): number {
   return Math.sqrt(sum / len)
 }
 
-// Aici a stat `identifyVoiceprint` — căuta printre TOATE amprentele „cine
-// vorbește" (1:N). N-a chemat-o niciodată nimeni. Regula produsului e O SINGURĂ
-// persoană pe cont (Adrian, 29 iul), deci recunoașterea corectă e cea care chiar
-// rulează: VERIFICARE 1:1 — „e titularul contului sau altcineva?" (chat.ts și
-// realtime.ts, prin vectorDistance). Ștearsă: cod abandonat, nu capabilitate.
+// Here used to live `identifyVoiceprint` — it searched through ALL voiceprints
+// for "who is speaking" (1:N). Nobody ever called it. The product rule is ONE
+// person per account (Adrian, 29 Jul), so the correct recognition is the one
+// that actually runs: 1:1 VERIFICATION — "is it the account holder or someone
+// else?" (chat.ts and realtime.ts, via vectorDistance). Deleted: abandoned
+// code, not capability.
 
-// ── Face identification by faceprint (128-d descriptor de la face-api) ───────
-// Camera pornită + voce = Kelion prinde automat fața vorbitorului, o compară cu
-// referința titularului contului și îi zice creierului „titular / altcineva".
-// NICIUN buton — declanșat de voce, ca la voiceprint.
+// ── Face identification by faceprint (128-d descriptor from face-api) ───────
+// Camera on + voice = Kelion automatically captures the speaker's face,
+// compares it with the account holder's reference and tells the brain
+// "holder / someone else". NO button — triggered by voice, same as voiceprint.
 
 export interface FaceprintRow {
   email: string
@@ -2716,7 +2745,8 @@ function rowToFaceprint(r: FaceprintDbRow): FaceprintRow {
   }
 }
 
-/** Distanță euclidiană BRUTĂ (nu normalizată) — convenția face-api, prag ~0.6. */
+/** RAW Euclidean distance (not normalized) — the face-api convention,
+ *  threshold ~0.6. */
 export function faceDistance(a: number[], b: number[]): number {
   const { sum, len } = sumSquaredDiff(a, b)
   if (len === 0) return Infinity
@@ -2734,7 +2764,8 @@ export async function saveFaceprint(f: {
   try {
     const vec = f.descriptor.filter((x) => Number.isFinite(x)).slice(0, 128)
     if (vec.length === 0) return
-    // Miniatura o păstrăm mică (evită umflarea DB); dacă lipsește, nu suprascriem.
+    // We keep the thumbnail small (avoids DB bloat); if missing, we don't
+    // overwrite.
     const photo = (f.photo || '').slice(0, 200_000)
     await getPool().query(
       `INSERT INTO faceprints
@@ -2765,7 +2796,7 @@ export async function getFaceprint(email: string): Promise<FaceprintRow | null> 
   }
 }
 
-// ── CONSTRUCTORUL — coada ordinelor de construcție (Adrian, 27 iul) ─────────
+// ── THE BUILDER — the build-order queue (Adrian, 27 Jul) ────────────────────
 export interface BuildJob {
   id: number
   orderedBy: string
@@ -2825,16 +2856,16 @@ export async function createBuildJob(orderedBy: string, orderText: string): Prom
   return Number(r.rows[0]?.id ?? 0)
 }
 
-// Lucrătorul ia UN ordin: cel mai vechi „queued", sau un „running" înțepenit
-// (>40 min — agentul a fost omorât de timeout). Peste 2 încercări → failed,
-// ca un ordin imposibil să nu blocheze coada la nesfârșit.
+// The worker takes ONE order: the oldest "queued", or a stuck "running"
+// (>40 min — the agent was killed by timeout). Over 2 attempts → failed, so an
+// impossible order doesn't block the queue forever.
 export async function claimNextBuildJob(): Promise<BuildJob | null> {
   if (!dbEnabled()) return null
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
     await client.query(
-      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandonat: 3 încercări epuizate]', updated_at = now()
+      `UPDATE build_jobs SET status='failed', log = COALESCE(log,'') || E'\\n[abandoned: 3 attempts exhausted]', updated_at = now()
        WHERE status='running' AND updated_at < now() - interval '40 minutes' AND attempts >= 3`,
     )
     const r = await client.query<BuildJobDbRow>(
@@ -2878,8 +2909,9 @@ export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
   }
 }
 
-// PROGRES LIVE (Etapa 4): scrie pasul curent al constructorului. DOAR pe joburi
-// active (`running`) — nu suprascrie starea terminală a unui job gata/eșuat.
+// LIVE PROGRESS (Stage 4): writes the builder's current step. ONLY on active
+// jobs (`running`) — doesn't overwrite the terminal state of a done/failed
+// job.
 export async function updateBuildJobProgress(id: number, progress: string): Promise<void> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return
   try {
@@ -2888,15 +2920,15 @@ export async function updateBuildJobProgress(id: number, progress: string): Prom
       [id, progress.slice(0, 500)],
     )
   } catch {
-    /* progresul e best-effort — nu oprește nimic dacă pică */
+    /* progress is best-effort — it stops nothing if it fails */
   }
 }
 
-// Joburile pentru AFIȘAJUL LIVE pe monitor (Etapa 4b): cele active (în coadă /
-// în lucru) PLUS cele terminate RECENT (ultimele 10 min). Fără „recent
-// terminate", panoul ar șterge jobul chiar în clipa în care devine „Gata"/
-// „Eșuat" — exact starea pe care Adrian vrea s-o VADĂ. Active primele, apoi
-// după cât de proaspăt s-au mișcat; câteva, cât încap pe ecran.
+// The jobs for the LIVE DISPLAY on the monitor (Stage 4b): the active ones
+// (queued / running) PLUS the RECENTLY finished (last 10 min). Without
+// "recently finished", the panel would delete the job at the very moment it
+// becomes "Done"/"Failed" — exactly the state Adrian wants to SEE. Active
+// first, then by how recently they moved; a few, as many as fit on screen.
 export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
   if (!dbEnabled()) return []
   try {
@@ -2915,23 +2947,24 @@ export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
   }
 }
 
-// VINDECARE AUTOMATĂ A ORDINELOR CĂZUTE PE BANI (Adrian, 27 iul: „de ce nu vede
-// sistemul de vindecare, repară? — automat?"): un ordin eșuat pentru că creierul
-// n-avea credit (402/credits) nu e un ordin imposibil — e un ordin PICAT PE
-// SĂRĂCIE. Când punga redevine pozitivă, îl repunem SINGURI în coadă, o singură
-// dată (marcaj în log ca să nu ciclăm), cu contorul de încercări resetat.
+// AUTOMATIC HEALING OF ORDERS THAT FAILED ON MONEY (Adrian, 27 Jul: "why
+// doesn't the healing system see it, fix it? — automatically?"): an order that
+// failed because the brain had no credit (402/credits) is not an impossible
+// order — it's an order that FELL TO POVERTY. When the pocket is positive
+// again, we requeue it OURSELVES, once only (a marker in the log so we don't
+// cycle), with the attempts counter reset.
 export async function requeueMoneyFailedBuildJobs(): Promise<number> {
   if (!dbEnabled()) return 0
   try {
     const r = await getPool().query<{ id: string | number }>(
       `UPDATE build_jobs
          SET status='queued', attempts=0,
-             log = COALESCE(log,'') || E'\\n[vindecător: repus în coadă — eșuase pe lipsă de credit, punga e iar plină]',
+             log = COALESCE(log,'') || E'\\n[healer: requeued — it had failed on lack of credit, the pocket is full again]',
              updated_at = now()
        WHERE status='failed'
          AND updated_at > now() - interval '72 hours'
          AND log ~* '(402|requires more credits|insufficient credits)'
-         AND log NOT LIKE '%[vindecător: repus în coadă%'
+         AND log NOT LIKE '%[healer: requeued%'
        RETURNING id`,
     )
     return r.rowCount ?? 0
@@ -2940,10 +2973,10 @@ export async function requeueMoneyFailedBuildJobs(): Promise<number> {
   }
 }
 
-// ── OCHII LUI KELION PE STOCAREA PERMANENTĂ (Adrian, 27 iul: „acces la orice
-// bază de date a aplicației") — schema completă + SQL direct, pentru uneltele
-// de admin db_tables/db_query din chat. Plafoane: 200 rânduri la ieșire și
-// statement_timeout 10s, ca o interogare grea să nu sugrume aplicația vie.
+// ── KELION'S EYES ON THE PERMANENT STORAGE (Adrian, 27 Jul: "access to any of
+// the app's databases") — the full schema + direct SQL, for the admin tools
+// db_tables/db_query in chat. Caps: 200 rows out and a 10s statement_timeout,
+// so a heavy query can't choke the live app.
 export async function dbTablesOverview(): Promise<string> {
   if (!dbEnabled()) return JSON.stringify({ error: 'db_indisponibil' })
   try {
@@ -2960,7 +2993,7 @@ export async function dbTablesOverview(): Promise<string> {
       tables[c.table_name] ??= { rows: nByTable.get(c.table_name) ?? 0, columns: [] }
       tables[c.table_name].columns.push(`${c.column_name} ${c.data_type}`)
     }
-    return JSON.stringify({ database: 'postgres (aplicația)', tables })
+    return JSON.stringify({ database: 'postgres (the app)', tables })
   } catch (e) {
     return JSON.stringify({ error: String((e as Error).message ?? e) })
   }
@@ -2991,27 +3024,30 @@ export async function dbQuery(sql: string): Promise<string> {
   }
 }
 
-// ── PLATA CU COD UNIC (Adrian, 30 iul: „fiecare plată trebuie să fie însoțită
-// de un cod unic") ──────────────────────────────────────────────────────────
+// ── PAYMENT WITH A UNIQUE CODE (Adrian, 30 Jul: "every payment must come with
+// a unique code") ─────────────────────────────────────────────────────────────
 //
-// Fluxul, cap-coadă:
-//   1. userul apasă „adaugă credit"  → `creeazaCodPlata` îi dă un cod
-//   2. plătește în Revolut, cu codul în referință
-//   3. cititorul de tranzacții găsește codul → `crediteazaDupaCod` îi dă creditele
+// The flow, end to end:
+//   1. the user presses "add credit"  → `creeazaCodPlata` gives him a code
+//   2. he pays in Revolut, with the code in the reference
+//   3. the transaction reader finds the code → `crediteazaDupaCod` gives him
+//      the credits
 //
-// Codul nu e un secret — e doar o etichetă care leagă plata de om. De-aia poate
-// fi scurt și ușor de tastat. Ce contează e să nu se repete cât e în așteptare.
+// The code is not a secret — it's just a label tying the payment to the
+// person. That's why it can be short and easy to type. What matters is that it
+// doesn't repeat while pending.
 
-/** Alfabet FĂRĂ caracterele care se confundă la citit/tastat: 0/O, 1/I/L.
- *  Omul îl copiază de pe ecran în aplicația de bancă — fiecare caracter ambiguu
- *  e o plată care ajunge „neatribuită" și muncă manuală pentru admin. */
+/** Alphabet WITHOUT the characters that get confused when read/typed:
+ *  0/O, 1/I/L. The person copies it from the screen into the banking app —
+ *  every ambiguous character is a payment that lands "unassigned" and manual
+ *  work for the admin. */
 const COD_ALFABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 
 function codNou(): string {
   const b = randomBytes(8)
   let s = ''
   for (let i = 0; i < 8; i++) s += COD_ALFABET[b[i] % COD_ALFABET.length]
-  // Grupat 4+4: se citește și se tastează mai ușor decât un șir lung.
+  // Grouped 4+4: easier to read and type than a long string.
   return `KLN-${s.slice(0, 4)}-${s.slice(4)}`
 }
 
@@ -3021,12 +3057,13 @@ export interface CodPlata {
   currency: string
 }
 
-/** Dă userului un cod nou pentru plata pe care o începe ACUM. */
+/** Give the user a new code for the payment he's starting NOW. */
 export async function creeazaCodPlata(email: string, amount: number, currency = 'gbp'): Promise<CodPlata | null> {
   if (!dbEnabled() || !email || !(amount > 0)) return null
   const e = email.toLowerCase().trim()
-  // Coliziunea e practic imposibilă (31^8), dar „practic imposibil" nu e
-  // „imposibil", iar aici s-ar amesteca banii a doi oameni: reîncercăm.
+  // Collision is practically impossible (31^8), but "practically impossible"
+  // is not "impossible", and here two people's money would get mixed: we
+  // retry.
   for (let i = 0; i < 5; i++) {
     const code = codNou()
     try {
@@ -3036,20 +3073,20 @@ export async function creeazaCodPlata(email: string, amount: number, currency = 
       )
       return { code, amount, currency }
     } catch {
-      /* cod deja existent → mai încercăm */
+      /* code already exists → try again */
     }
   }
   return null
 }
 
-/** Caută codul într-un text de referință bancară și creditează, o SINGURĂ dată.
+/** Find the code in a bank reference text and credit, ONCE only.
  *
- *  `bankRef` e identificatorul tranzacției din bancă: e ce face creditarea
- *  idempotentă. Aceeași tranzacție citită de zece ori creditează o dată —
- *  garantat de indexul unic, nu de grija apelantului.
+ *  `bankRef` is the bank's transaction identifier: it's what makes crediting
+ *  idempotent. The same transaction read ten times credits once — guaranteed
+ *  by the unique index, not by the caller's care.
  *
- *  Întoarce emailul creditat, sau null dacă n-a găsit cod, sau dacă plata
- *  fusese deja creditată. */
+ *  Returns the credited email, or null if no code was found, or if the
+ *  payment had already been credited. */
 export async function crediteazaDupaCod(
   referinta: string,
   suma: number,
@@ -3057,8 +3094,8 @@ export async function crediteazaDupaCod(
   bankRef: string,
 ): Promise<string | null> {
   if (!dbEnabled() || !referinta || !(suma > 0) || !bankRef) return null
-  // Codul poate veni lipit de alt text („plata KLN-AB12-CD34 credite"), cu
-  // litere mici, sau cu spații în loc de cratime — le acceptăm pe toate.
+  // The code may come glued to other text ("payment KLN-AB12-CD34 credits"),
+  // in lowercase, or with spaces instead of dashes — we accept them all.
   const m = referinta.toUpperCase().replace(/\s+/g, '-').match(/KLN-[A-Z2-9]{4}-[A-Z2-9]{4}/)
   if (!m) return null
   const code = m[0]
@@ -3066,8 +3103,8 @@ export async function crediteazaDupaCod(
   let email = ''
   try {
     await client.query('BEGIN')
-    // `FOR UPDATE` + condiția pe status: două citiri simultane nu pot lua
-    // amândouă acelasi cod.
+    // `FOR UPDATE` + the status condition: two simultaneous reads can't both
+    // take the same code.
     const r = await client.query(
       `SELECT user_email FROM payment_codes WHERE code = $1 AND status = 'pending' FOR UPDATE`,
       [code],
@@ -3078,21 +3115,22 @@ export async function crediteazaDupaCod(
       return null
     }
     email = row.user_email
-    await client.query('ROLLBACK') // eliberăm lacătul: creditarea își face propria tranzacție
+    await client.query('ROLLBACK') // release the lock: crediting opens its own transaction
   } catch {
     await client.query('ROLLBACK').catch(() => {})
     return null
   } finally {
     client.release()
   }
-  // ORDINEA CONTEAZĂ, și e aleasă dinadins: CREDITĂM ÎNTÂI, închidem codul după.
+  // ORDER MATTERS, and it's chosen deliberately: WE CREDIT FIRST, close the
+  // code after.
   //
-  // `topUpUser` e idempotent pe referință (indexul unic pe `ref`), deci o
-  // a doua citire a aceleiași tranzacții nu poate credita de două ori. Dacă am
-  // închide codul întâi și creditarea ar pica, omul ar rămâne cu plata „închisă"
-  // și fără credite — adică exact plătit-dar-nelivrat. Invers, dacă creditarea
-  // reușește și închiderea codului pică, următoarea citire reia: creditarea nu
-  // se repetă (idempotentă), iar codul se închide atunci.
+  // `topUpUser` is idempotent on the reference (the unique index on `ref`), so
+  // a second read of the same transaction can't credit twice. If we closed the
+  // code first and crediting failed, the person would be left with the payment
+  // "closed" and no credits — i.e. exactly paid-but-not-delivered. Conversely,
+  // if crediting succeeds and closing the code fails, the next read retries:
+  // crediting doesn't repeat (idempotent), and the code closes then.
   const ok = await topUpUser(email, suma, moneda, bankRef)
   if (!ok) return null
   await getPool()
@@ -3105,10 +3143,10 @@ export async function crediteazaDupaCod(
   return email
 }
 
-/** Plățile intrate pe care NU le-am putut lega de nimeni — plasa de siguranță.
- *  Nicio plată nu se pierde: ce nu se potrivește automat ajunge aici, iar
- *  adminul o atribuie dintr-un click. Mai bine să întrebe decât să crediteze
- *  pe cine nu trebuie. */
+/** Payments that came in and we COULDN'T tie to anyone — the safety net. No
+ *  payment is lost: whatever doesn't match automatically lands here, and the
+ *  admin assigns it with one click. Better to ask than to credit the wrong
+ *  person. */
 export async function codPlataInAsteptare(email: string): Promise<CodPlata | null> {
   if (!dbEnabled() || !email) return null
   const r = await getPool()
