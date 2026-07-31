@@ -44,7 +44,7 @@ import {
   createBuildJob, listBuildJobs, loadKv, saveKv, getCapabilityGaps, setGapResolved,
   type BuildJob,
 } from '../db.js'
-import { brainCompleteWithTools } from './brain.js'
+import { brainCompleteWithTools, expertModelLadder } from './brain.js'
 import { BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL } from './brainToolDefs.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
@@ -577,6 +577,19 @@ async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | n
 }
 
 /** O tură de lucru a lui Kelion, pornită de buclă, nu de un om. */
+/** Scara pentru mâinile lui, aleasă după cât de grea e sarcina.
+ *
+ *  Scara obișnuită începe cu modelul de LUCRU. Pentru o sarcină de dificultate
+ *  4-5 — un portal străin, ceva ce atinge banii — asta înseamnă să pornească cu
+ *  mâna a doua și să afle abia după ce a irosit turele. Aici punem TOP-ul în
+ *  cap, iar restul scării rămâne dedesubt ca plasă. */
+function scaraPentru(dificultate = 3): string[] | undefined {
+  if (dificultate < 4) return undefined // scara obișnuită e potrivită
+  const top = config.openrouter.topDefault
+  const restul = expertModelLadder()
+  return top ? [top, ...restul.filter((m) => m !== top)] : restul
+}
+
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   const tools = [
     ...BROWSER_TOOLS, SECRET_LISTA_TOOL, SECRET_PUNE_TOOL, SECRET_PUBLICA_TOOL,
@@ -595,7 +608,11 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
     `Dacă ai nevoie de owner pentru un pas pe care legea îl cere doar de la el ` +
     `(aprobarea din aplicația bancară), scrie exact: „AȘTEPT APROBAREA: <ce anume>". ` +
     `NICIODATĂ valorile cheilor — doar numele lor.`
-  return brainCompleteWithTools(prompt, tools, uneltele, { maxRounds: 30, maxTokens: 2500 })
+  return brainCompleteWithTools(prompt, tools, uneltele, {
+    maxRounds: 30,
+    maxTokens: 2500,
+    models: scaraPentru(s.dificultate),
+  })
 }
 
 /** O trecere: se repară singur dacă a picat, altfel ia următoarea sarcină. */

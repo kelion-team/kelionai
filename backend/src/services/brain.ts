@@ -181,13 +181,22 @@ export async function brainCompleteWithTools(
   prompt: string,
   tools: AnthropicTool[],
   execTool: (name: string, args: Record<string, unknown>) => Promise<string>,
-  opts: { maxTokens?: number; maxRounds?: number; onCost?: (usd: number) => void } = {},
+  opts: {
+    maxTokens?: number
+    maxRounds?: number
+    onCost?: (usd: number) => void
+    /** SCARA IMPUSĂ — pentru sarcinile grele (Adrian, 31 iul: „pe nivel de
+     *  dificultate setabil automat pe cerință"). Fără ea se merge pe scara
+     *  obișnuită, care începe cu modelul de LUCRU; o sarcină de dificultate 5
+     *  merită mâna cea mai bună din prima, nu după ce a irosit turele. */
+    models?: string[]
+  } = {},
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
   // Aceeași scară de modele ca brainComplete — fiecare RUNDĂ o încearcă, deci un
   // 429 pe o treaptă nu mai rupe toată bucla de unelte a expertului.
-  const ladder = expertModelLadder()
+  const ladder = opts.models?.length ? opts.models : expertModelLadder()
   try {
     for (let round = 0; round < maxRounds; round++) {
       const r = await runBrainLadder(ladder, (m) =>
