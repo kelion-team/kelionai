@@ -42,6 +42,19 @@ export interface Varianta {
   /** Ce o poate omorî. Scris ONEST — o variantă fără riscuri e o variantă
    *  neanalizată. */
   risc: string
+  /** CÂT DE GREA e de dus, 1..5 (Adrian, 30 iul: „pe nivel de dificultate
+   *  setabil automat pe cerință"). Nu e decor: din ea se alege MÂNA care
+   *  lucrează — un model mare pe o sarcină grea, unul gratuit pe o redenumire.
+   *  Aleasă odată cu varianta, fiindcă dificultatea depinde de DRUMUL ales, nu
+   *  doar de cerință: „prin browser pe portal" e altceva decât „schimbă un text". */
+  dificultate?: number
+}
+
+/** Nivelul cu care pleacă ordinul, mărginit. Fără el → 3: mai bine pornim cu o
+ *  mână bună decât să ardem jumătate din buget descoperind că era greu. */
+export function nivelDificultate(v: Varianta | undefined): number {
+  const n = Math.round(Number(v?.dificultate ?? 3))
+  return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3))
 }
 
 /** Scorul final. Ponderile spun ce contează în proiectul ĂSTA, în ordinea în
@@ -78,6 +91,14 @@ const AXE =
   `sigur (cât de puțin riscă să strice ce merge), ieftin (bani + timpul ownerului), ` +
   `independent (cât de puțin depinde de owner sau de terți)`
 
+// Ce înseamnă fiecare nivel — scris explicit, ca notele să nu fie după ureche.
+const SCARA_DIFICULTATE =
+  `1 = banal (un text, o culoare, o redenumire); ` +
+  `2 = simplu (o funcție mică, un câmp nou, într-un singur fișier); ` +
+  `3 = mediu (mai multe fișiere, o rută + interfață, teste noi); ` +
+  `4 = greu (integrare cu un serviciu extern, migrare de date, ceva ce atinge banii sau sesiunile); ` +
+  `5 = foarte greu (arhitectură, ceva ce poate strica producția dacă e greșit)`
+
 /** ANALIZA: pune pe masă variantele, le dă scoruri, alege una. */
 export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detaliu: string }> {
   const prompt =
@@ -87,12 +108,16 @@ export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detal
     `\nPune pe masă 2-4 variante REALE de rezolvare. Nu variații ale aceleiași idei — ` +
     `drumuri diferite. Pentru fiecare dă note de la 0 la 10 pe axele: ${AXE}. ` +
     `Și scrie RISCUL — ce o poate omorî. O variantă fără riscuri e o variantă neanalizată.\n\n` +
+    `Dă și DIFICULTATEA fiecărei variante, 1..5 — cât de greu e de DUS drumul ăla, nu cât de ` +
+    `important e: ${SCARA_DIFICULTATE}. Din ea se alege cine lucrează: o sarcină grea pleacă ` +
+    `direct pe un model puternic, una banală pe unul gratuit. Dacă o umfli, se ard bani degeaba; ` +
+    `dacă o subestimezi, munca ta pică la jumătate.\n\n` +
     `LECȚIA ZILEI DE 30 IUL, ține cont de ea: o soluție care cere ownerului să umble ` +
     `prin portaluri sau conturi noi e o soluție PROASTĂ, chiar dacă tehnic e curată — ` +
     `de-aia „independent" cântărește mult.\n\n` +
     `Răspunde DOAR cu JSON valid: ` +
     `[{"nume":"...","cum":"în 1-2 propoziții, concret","rezolva":0,"rapid":0,"sigur":0,` +
-    `"ieftin":0,"independent":0,"risc":"..."}] — fără alt text.`
+    `"ieftin":0,"independent":0,"dificultate":3,"risc":"..."}] — fără alt text.`
 
   const raw = await brainComplete(prompt, 1600)
   if (!raw) return { ok: false, detaliu: 'creierul n-a răspuns' }
@@ -110,8 +135,12 @@ export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detal
     stare: 'analizata',
     optiuni: JSON.stringify(variante).slice(0, 8000),
     aleasa: `${ales.castigatoare.nume} — ${ales.castigatoare.cum}\nDE CE: ${ales.motiv}`.slice(0, 2000),
+    // Nivelul VARIANTEI ALESE, nu al cerinței: dificultatea depinde de drumul
+    // ales. Ordinul îl duce mai departe, iar constructorul își alege mâna.
+    dificultate: nivelDificultate(ales.castigatoare),
   })
-  return { ok: true, detaliu: `${variante.length} variante evaluate → ${ales.castigatoare.nume}` }
+  const niv = nivelDificultate(ales.castigatoare)
+  return { ok: true, detaliu: `${variante.length} variante evaluate → ${ales.castigatoare.nume} (dificultate ${niv}/5)` }
 }
 
 /** ÎMBUNĂTĂȚIREA CONTINUĂ: ce e livrat se reia — „se putea mai bine, ACUM?"
