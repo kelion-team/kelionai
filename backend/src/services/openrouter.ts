@@ -160,8 +160,30 @@ export async function getOpenRouterBalance(force = false): Promise<OpenRouterBal
     const j = (await r.json().catch(() => ({}))) as {
       data?: { total_credits?: number; total_usage?: number }
     }
-    const totalCredits = Number(j.data?.total_credits ?? 0)
-    const totalUsage = Number(j.data?.total_usage ?? 0)
+    // ── UN RĂSPUNS PE CARE NU-L ÎNȚELEG NU E „ZERO DOLARI" ──────────────────
+    //
+    // Adrian, 31 iul: pagina OpenRouter îi arăta $10,00, iar bara aplicației
+    // „OpenRouter $0.00", roșu intermitent — „depune bani!". Mai rău: cu câteva
+    // ore înainte îi spusesem eu, negru pe alb, că pilula NU minte și că zeroul
+    // ăla e o măsurătoare reușită. Nu era.
+    //
+    // Cauza, aici: `ok: true` se punea imediat ce HTTP-ul era 200. Dar dacă
+    // corpul nu se parsează (`.catch(() => ({}))`), sau lipsește `data`, sau
+    // câmpurile s-au redenumit la furnizor, atunci `?? 0` transformă tăcut o
+    // CITIRE EȘUATĂ în „ai zero dolari" — cu tot cu alarma roșie. Exact tiparul
+    // „£0.00" din dimineața asta, în alt loc: un eșec de citire prezentat ca
+    // stare stabilită.
+    //
+    // Acum: dacă nu găsesc cifrele acolo unde le aștept, spun că NU POT CITI.
+    // Bara are deja ramura pentru asta și scrie „⚠ OpenRouter".
+    const d = j?.data
+    const totalCredits = Number(d?.total_credits)
+    const totalUsage = Number(d?.total_usage)
+    if (!d || !Number.isFinite(totalCredits) || !Number.isFinite(totalUsage))
+      // Punem în eroare CHEILE primite (doar numele, nicio valoare): dacă
+      // furnizorul schimbă forma răspunsului, următorul care se uită vede din
+      // prima ce a venit, în loc să caute o zi ca azi.
+      return { ...base, error: `forma_neasteptata:${Object.keys(d ?? j ?? {}).join(',').slice(0, 80) || 'gol'}` }
     const balance = Math.round((totalCredits - totalUsage) * 100) / 100
     const val: OpenRouterBalance = {
       ...base, ok: true, balance, totalCredits, totalUsage, low: balance < OR_LOW_THRESHOLD,
