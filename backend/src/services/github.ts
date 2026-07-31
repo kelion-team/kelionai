@@ -93,8 +93,44 @@ export async function repoWrite(
   if (err) return JSON.stringify({ error: err })
   // sha-ul existent (dacă fișierul există pe ramură) — cerut de API la update.
   let sha: string | undefined
+  let marimeVeche = 0
   const cur = await gh(`/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`)
-  if (cur.ok) sha = ((await cur.json()) as { sha?: string }).sha
+  if (cur.ok) {
+    const j = (await cur.json()) as { sha?: string; size?: number }
+    sha = j.sha
+    marimeVeche = Number(j.size ?? 0)
+  }
+  // ── GARDĂ ANTI-CIUNTIRE ───────────────────────────────────────────────────
+  //
+  // 31 iul 2026, ora 12:36. Kelion a deschis și și-a dat merge singur la
+  // PR #613: „exclud un model din scara constructorului" — o schimbare de două
+  // rânduri. A intrat în master cu 2 inserții și **1036 de ștergeri**, iar
+  // `deploy/constructor-agent.mjs` a rămas cu 14 rânduri din 1049. Diagnosticul
+  // lui era corect (modelul chiar întorcea răspunsuri goale la 11 ordine la
+  // rând); execuția a golit fișierul.
+  //
+  // Cauza: `repo_write` cere CONȚINUTUL COMPLET, dar ieșirea modelului e
+  // plafonată. Pe un fișier mare, răspunsul se taie — iar ce se scrie e un
+  // ciot, cu commit și mesaj care sună corect.
+  //
+  // Paznicul ăsta EXISTA de mult, dar în constructorul de pe VPS
+  // (`deploy/constructor-agent.mjs`, `toolWrite`), scris după un incident
+  // anterior de același fel. Calea din aplicație — asta — n-a primit niciodată
+  // aceeași lecție. Un paznic pus într-un singur loc apără un singur loc.
+  //
+  // 50% e pragul din constructor, păstrat identic anume: două praguri diferite
+  // pentru aceeași primejdie ar însemna că unul dintre ele e greșit.
+  const PRAG_MINIM_OCTETI = 2_000
+  const marimeNoua = Buffer.byteLength(content, 'utf8')
+  if (marimeVeche > PRAG_MINIM_OCTETI && marimeNoua < marimeVeche * 0.5)
+    return JSON.stringify({
+      error: 'refuzat_ciuntire',
+      detail:
+        `Ai trimis ${marimeNoua} octeți peste un fișier de ${marimeVeche} (${Math.round((marimeNoua / marimeVeche) * 100)}%). ` +
+        'Pare tăiat de plafonul de ieșire, nu o ștergere intenționată. ' +
+        'repo_write cere fișierul ÎNTREG: citește-l cu read_source, schimbă DOAR ce trebuie, și retrimite-l complet. ' +
+        'Dacă chiar vrei să ștergi conținutul, fă-o într-un pas separat, explicit.',
+    })
   const put = await gh(`/contents/${encodeURI(path)}`, {
     method: 'PUT',
     body: JSON.stringify({
