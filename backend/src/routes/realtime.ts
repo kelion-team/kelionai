@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoicePref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv } from '../db.js'
-import { grantUnlock, isArmed, hasUnlock } from '../services/adminLock.js'
+import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/adminLock.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
@@ -662,6 +662,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           foreignVoice = hasRef && !isHolder ? true : undefined
           if (isAdmin && hasRef && isHolder) {
             grantUnlock(reply, user.email, 'voce')
+            // ȘI PE SERVER, pentru uneltele care n-au cererea în mână: de aici
+            // pornește fereastra de 15 minute în care poate atinge cardul
+            // (Adrian, 31 iul: „să opereze când îi cer doar eu, prin voce").
+            marcheazaVoce(user.email)
             adminUnlocked = true
           }
         } catch {

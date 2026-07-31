@@ -153,6 +153,35 @@ Pașii, în ordine, și cum se verifică fiecare:
 | M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri | Le vezi în Admin → Bani |
 | M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh |
 | M5 | **Proba automată**: test cap-coadă — cod → email → credit → al doilea email nu mai creditează | `npm test` are testul și e verde |
+| M6 | **Cardul la furnizori + PLĂȚILE AUTOMATE**: îți pune cardul în pagina furnizorului (OpenRouter/Anthropic/OpenAI) fără să vadă vreodată valoarea, și **pornește reîncărcarea automată** — ca să nu mai rămână fără credit | `card_stare` scrie `plati_automate: true`, iar dovada e ce a **citit serverul** pe pagina lor („•••• 4242" + „Auto-recharge"), nu ce a spus el |
+
+**M6 — cele trei lucruri care fac diferența** (31 iul, cerința ta: „asta era
+cerința care dovedea autonomia reală" · „să opereze pentru mine când îi cer doar
+eu, folosind sistemul de recunoaștere vocală" · **„plățile automate"**):
+
+1. **Poarta e VOCEA, nu sesiunea.** Uneltele de card refuză dacă amprenta ta
+   vocală nu s-a potrivit în ultimele 15 minute — și fereastra se deschide
+   **doar** acolo unde amprenta chiar se potrivește (`realtime.ts`, unde deja se
+   dădea deblocarea). Un cookie de admin furat nu ajunge la card.
+2. **Modelul nu vede niciodată numărul.** El spune doar „câmpul 7 e numărul
+   cardului"; **serverul** ia valoarea din secret și o scrie. Din prima scriere:
+   zero capturi de ecran, iar cifrele lungi se maschează în textul paginii.
+   Altfel PAN-ul ar fi ajuns în trei jurnale deodată — conversație, monitor, text.
+3. **„Gata" e o măsurătoare.** La `card_gata`, serverul citește el pagina și
+   spune dacă vede card la dosar **și** plată automată. Card fără plată automată
+   = **neterminat**, și i-o spune: peste o lună ar tăcea din nou. Regula ta #1.
+
+**Ce rămâne al tău, o singură dată:** valorile cardului se pun **de mâna ta** ca
+secrete GitHub (`CARD_NUMAR`, `CARD_EXPIRARE`, `CARD_CVC`, `CARD_NUME`,
+`CARD_COD_POSTAL`), apoi `vps-set-env`. **NU prin Kelion** — `secret_pune`
+refuză din construcție orice arată a card (13-19 cifre + Luhn) și rămâne așa.
+Pentru cea mai sensibilă valoare din sistem, un pas manual e mai bun decât o
+automatizare care poate greși.
+
+**M6 nu se ia în bucla de noapte** — dacă fereastra de voce e închisă, bucla
+trece peste el fără să-l ardă în încercări eșuate (are test: altfel M6, fiind
+cel mai puțin încercat, ar fi fost ales primul la fiecare trecere și ar fi
+înfometat tot restul).
 
 **Unde se vede că bucla trăiește:** Admin → Bani, rândul „Kelion, de capul lui" —
 scrie ultima trecere: ce a pornit singur, sau de ce nu. Dacă rândul lipsește sau

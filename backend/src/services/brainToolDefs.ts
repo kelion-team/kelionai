@@ -125,6 +125,42 @@ export const CERINTA_PRIORITATE_TOOL: Tool = {
   },
 }
 
+// ── CARDUL LA FURNIZORI, FĂRĂ CA MODELUL SĂ-L VADĂ (Adrian, 31 iul) ─────────
+// „Asta era cerința care dovedea autonomia reală" · „să opereze pentru mine
+// când îi cer doar eu, folosind sistemul de recunoaștere vocală."
+// Descrierea îi spune limpede modelului: nu primești valoarea și nu ai ce cere.
+export const CARD_STARE_TOOL: Tool = {
+  name: 'card_stare',
+  description:
+    "ADMIN ONLY. Check whether the owner's card details are configured on the server (WHICH fields are set — never their values) and whether his voice was recognised recently enough to allow touching them. Call this FIRST, before offering to put the card anywhere.",
+  input_schema: { type: 'object', properties: {} },
+}
+export const CARD_COMPLETEAZA_TOOL: Tool = {
+  name: 'card_completeaza',
+  description:
+    "ADMIN ONLY, and only inside the window right after his VOICE was recognised. Fill ONE card field into the currently open page, by element index. You NEVER receive or see the value — you only say WHICH field goes WHERE, and the server types it. Read the page first to find the right index. From this call on, the page is no longer screenshotted and long digit runs are masked, so nothing leaks to the monitor or into this conversation. Call card_gata once the form is submitted.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      camp: { type: 'string', description: 'One of: numar, expirare, cvc, nume, cod_postal.' },
+      index: { type: 'number', description: 'The input element number, from the page you just read.' },
+    },
+    required: ['camp', 'index'],
+  },
+}
+export const CARD_GATA_TOOL: Tool = {
+  name: 'card_gata',
+  description:
+    "ADMIN ONLY. End the discreet card session. The server then READS the page itself and reports whether it can see a card on file AND automatic payments (auto-recharge / auto top-up) switched on — that, not the filled form, is the goal. Call it as soon as the form is submitted, with the provider name. If it answers that automatic payments are not visible, go and switch them on, then call it again.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      furnizor: { type: 'string', description: 'Which provider this page belongs to: openrouter, anthropic, openai…' },
+    },
+    required: ['furnizor'],
+  },
+}
+
 // Constructorul (autonomie) — definiții mutate din ruta vocii aici, în sursa
 // COMUNĂ (CREIER UNIC §1, „fără duplicare"): aceleași definiții și pentru scris,
 // și pentru escaladarea vocii. Executorii rămân în rutele lor (createBuildJob/

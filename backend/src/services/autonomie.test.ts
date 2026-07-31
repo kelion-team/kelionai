@@ -135,6 +135,9 @@ vi.mock('./browser.js', () => ({
 vi.mock('node:fs/promises', () => ({ readFile: async () => '' }))
 
 const { poateSaLucreze, uneltele } = await import('./autonomie.js')
+// Fereastra de voce e REALĂ aici (adminLock nu e mocuit): așa se probează chiar
+// poarta cerută de owner, nu o imitație a ei.
+const { marcheazaVoce, uitaVocea } = await import('./adminLock.js')
 
 /** Închide un pas, ca să ajungem la următorul fără să-l jucăm de la capăt. */
 function pasInchis(cod: string): void {
@@ -157,6 +160,9 @@ beforeEach(() => {
   cerinteAtinse.length = 0
   evaluari = 0
   scaraCeruta = undefined
+  // Fereastra de voce e globală pe proces: dacă rămâne deschisă de la un test
+  // la altul, pasul cardului s-ar strecura în teste care n-au treabă cu el.
+  uitaVocea('adrianenc11@gmail.com')
 })
 
 // „Pe nivel de dificultate setabil automat pe cerință" — și pentru MÂINILE lui,
@@ -450,6 +456,37 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(ultimulPrompt).toContain('INSTALEAZĂ-ȚI UNELTE') // își pune ce-i lipsește
     expect(ultimulPrompt).toContain('Nu ai voie să abandonezi')
 
+  })
+
+  // PASUL CARDULUI (M6) — „plățile automate", cu poarta pe voce.
+  //
+  // Aici era o capcană pe care era să o public: M6 e cel mai puțin încercat
+  // pas, deci bucla l-ar fi ales PRIMUL la fiecare trecere, ar fi picat pe
+  // „nu ți-am recunoscut vocea", și ar fi înfometat tot restul — misiunea,
+  // cerințele, golurile. Un pas imposibil ACUM nu e o sarcină, e o buclă.
+  it('fără vocea ownerului, pasul cardului NU se ia și NU blochează restul', async () => {
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
+    pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    const r = await poateSaLucreze()
+    // Misiunea e considerată trecută (M6 nu se POATE acum) → merge mai departe
+    // la cerințe/goluri/listă. Nu se învârte pe un pas imposibil.
+    expect(r.motiv).not.toContain('M6')
+    expect(turiDeMaini).toBe(0)
+    expect(JSON.parse(kv.get('autonomie:pas:M6') ?? '{"incercari":0}').incercari).toBe(0)
+  })
+
+  it('după ce i-a recunoscut vocea, ia pasul cardului — cu uneltele de card în mână', async () => {
+    pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
+    pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    marcheazaVoce('adrianenc11@gmail.com')
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('M6')
+    expect(uneltePrimite).toContain('card_completeaza')
+    expect(uneltePrimite).toContain('card_gata')
+    // Scopul scris în ordin e plata automată, nu formularul completat.
+    expect(ultimulPrompt).toContain('PLĂȚILE AUTOMATE')
+    // Dificultate 5 → pornește direct pe TOP, nu află după ce irosește turele.
+    expect(scaraCeruta?.[0]).toBe('model-top')
   })
 
   it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {

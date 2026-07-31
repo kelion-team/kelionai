@@ -62,14 +62,16 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 19 unelte partajate', () => {
-    expect(SHARED_ADMIN_TOOLS.size).toBe(19)
+  it('SHARED_ADMIN_TOOLS conține exact cele 22 unelte partajate', () => {
+    expect(SHARED_ADMIN_TOOLS.size).toBe(22)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
       // 30 iul: își face SINGUR setările — aceleași trei pe scris și pe voce.
       'secret_pune', 'secret_lista', 'secret_publica',
       // 30 iul: cerințele ownerului se prind din conversație, nu se mai pierd.
       'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
+      // 31 iul: cardul la furnizori — poarta e fereastra de voce, în executor.
+      'card_stare', 'card_completeaza', 'card_gata',
     ])
       expect(SHARED_ADMIN_TOOLS.has(n)).toBe(true)
     expect(SHARED_ADMIN_TOOLS.has('build_software')).toBe(false)

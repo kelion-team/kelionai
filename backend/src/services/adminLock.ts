@@ -73,6 +73,78 @@ export function grantUnlock(reply: FastifyReply, email: string, method: 'voce' |
   })
 }
 
+// ── „TOCMAI MI-A VORBIT, ȘI L-AM RECUNOSCUT" ────────────────────────────────
+//
+// Adrian, 31 iul: „să opereze pentru mine când îi cer doar eu, folosind
+// sistemul de recunoaștere vocală, ca securitate sporită."
+//
+// Cookie-ul de deblocare merge pe rutele care au cererea în mână. Uneltele
+// creierului nu o au — și nici nu vreau s-o car prin zece semnături ca să
+// ajungă acolo. Aici ținem minte, pe server, CÂND s-a potrivit ultima dată
+// amprenta vocală a titularului. Operațiile care ating un instrument de plată
+// cer fereastra asta: nu „ai fost admin cândva", ci „ești tu, ai vorbit ACUM".
+//
+// Fereastra e scurtă dinadins. Un cod tastat rămâne valabil cât ține cookie-ul;
+// vocea trebuie să fie proaspătă, altfel garda n-ar însemna nimic.
+const VOCE_TTL_MS = 15 * 60_000
+const voceLa = new Map<string, number>()
+
+/** Amprenta vocală a titularului tocmai s-a potrivit (chemat din ruta vocii). */
+export function marcheazaVoce(email: string): void {
+  voceLa.set(email.trim().toLowerCase(), Date.now())
+}
+
+/** A vorbit — și l-am recunoscut — în ultimele 15 minute? */
+export function voceRecenta(email: string): boolean {
+  const t = voceLa.get(email.trim().toLowerCase())
+  return !!t && Date.now() - t < VOCE_TTL_MS
+}
+
+/** Închide fereastra ACUM, fără să aștepte cele 15 minute.
+ *  Ownerul spune „gata" → poarta se închide în clipa aia, nu când expiră ea. */
+export function uitaVocea(email: string): void {
+  voceLa.delete(email.trim().toLowerCase())
+}
+
+/** Câte minute mai ține fereastra (pentru mesaje pe înțelesul omului). */
+export function minuteRamaseVoce(email: string): number {
+  const t = voceLa.get(email.trim().toLowerCase())
+  if (!t) return 0
+  return Math.max(0, Math.ceil((VOCE_TTL_MS - (Date.now() - t)) / 60_000))
+}
+
+/** Deblocat PRIN VOCE, nu prin secret tastat (Adrian, 31 iul: „să opereze
+ *  pentru mine când îi cer doar eu, folosind sistemul de recunoaștere vocală,
+ *  ca securitate sporită").
+ *
+ *  Diferența e reală: un secret tastat poate fi furat, citit peste umăr sau
+ *  scos dintr-un cookie. Amprenta vocală cere să fii TU, acolo, vorbind. De-aia
+ *  operațiile care ating instrumente de plată cer ANUME metoda asta — nu doar
+ *  „ești admin", ci „ești tu, și tocmai ai vorbit".
+ *
+ *  `method` era deja pus în token de `grantUnlock`, dar nimeni nu-l citea. */
+export function hasVoiceUnlock(req: FastifyRequest, email: string): boolean {
+  const token = tokenUnlock(req)
+  if (!token) return false
+  try {
+    const p = jwt.verify(token, config.sessionSecret) as { scope?: string; email?: string; method?: string }
+    return p.scope === 'admin-unlock' && p.email === email && p.method === 'voce'
+  } catch {
+    return false
+  }
+}
+
+/** Tokenul de deblocare, din cookie sau din antet (una singură, folosită de
+ *  ambele verificări — altfel cele două ar diverge tăcut). */
+function tokenUnlock(req: FastifyRequest): string | undefined {
+  const c = req.cookies?.[ADMIN_UNLOCK_COOKIE]
+  if (c) return c
+  const raw = req.headers.cookie
+  if (!raw) return undefined
+  const m = raw.match(/(?:^|;\s*)kelionai_admin_unlock=([^;]+)/)
+  return m ? decodeURIComponent(m[1]) : undefined
+}
+
 export function hasUnlock(req: FastifyRequest, email: string): boolean {
   let token = req.cookies?.[ADMIN_UNLOCK_COOKIE]
   if (!token) {

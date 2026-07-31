@@ -88,6 +88,12 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'cerinta_noua', category: 'ops', does: 'notează pe loc ce a cerut ownerul, cu criteriul de acceptare', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'cerinte_lista', category: 'ops', does: 'unde stă fiecare cerință (nouă/analizată/în lucru/livrată/verificată)', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'cerinta_prioritate', category: 'ops', does: 'cât de urgentă e o cerință — ordinea o dă ownerul', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  // CARDUL LA FURNIZORI (31 iul): pune cardul ownerului în pagina furnizorului
+  // FĂRĂ să vadă vreodată valoarea, și doar în fereastra de după ce i-a
+  // recunoscut vocea. „Asta era cerința care dovedea autonomia reală."
+  { name: 'card_stare', category: 'ops', does: 'ce câmpuri de card sunt configurate (nu valorile) și dacă vocea e recunoscută', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'card_completeaza', category: 'ops', does: 'scrie un câmp de card în pagină fără să-i vadă valoarea', chat: true, voice: false, voiceViaBrain: true, admin: true },
+  { name: 'card_gata', category: 'ops', does: 'închide sesiunea discretă de card', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'db_tables', category: 'cod', does: 'vede tabelele bazei de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'db_query', category: 'cod', does: 'interoghează baza de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },
