@@ -769,6 +769,16 @@ export async function listVisitorConvos(): Promise<VisitorConvo[]> {
               COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE role = 'visitor')::int AS visitor_msgs
        FROM visitor_chats
+       -- AUTOCURĂȚARE (Adrian, 31 iul: „și cu astea ce?" — trei „conversații"
+       -- din 25 iul care erau doar „Test QA automat — mesaj de verificare
+       -- (ignora)"). Probele automate nu sînt vizitatori; nu au ce căuta în
+       -- lista pe care o citești ca să vezi cine ți-a scris. Rămân în tabelă,
+       -- dar nu mai apar. Filtrul e pe TEXT, nu pe dată, ca să prindă și
+       -- probele de mâine.
+       WHERE conv_id NOT IN (
+         SELECT DISTINCT conv_id FROM visitor_chats
+         WHERE text ILIKE '%Test QA automat%' OR text ILIKE '%mesaj de verificare (ignora)%'
+       )
        GROUP BY conv_id
        ORDER BY MAX(id) DESC LIMIT 100`,
     )
@@ -1819,10 +1829,23 @@ export async function getDemoStats(): Promise<DemoStats> {
         started_at: string
         session_email: string
         topic: string
+        tz: string
+        vizite_anterioare: number
       }>(
-        `SELECT 'visit'::text AS kind, ip, country, country_code, city, region, isp,
-                browser, os, device, lang, referrer, is_bot, started_at, '' AS session_email, '' AS topic
-         FROM visits ORDER BY started_at DESC LIMIT 60`,
+        // PROFIL COMPLET AL VIZITEI (Adrian, 31 iul: „vizitatori, acest câmp
+        // trebuie să ofere full informații despre vizită"). Lipseau două
+        // lucruri care schimbă cum citești un rând: FUSUL ORAR (coloana `tz`
+        // exista în tabelă și nu se citea — îți spune ora LUI, nu a ta) și
+        // dacă e la PRIMA vizită sau a mai fost (același fingerprint mai
+        // devreme). Un vizitator care revine a treia oară nu e același lucru
+        // cu unul care a nimerit o dată pe site.
+        `SELECT 'visit'::text AS kind, v.ip, v.country, v.country_code, v.city, v.region, v.isp,
+                v.browser, v.os, v.device, v.lang, v.referrer, v.is_bot, v.started_at,
+                '' AS session_email, '' AS topic, v.tz,
+                (SELECT COUNT(*)::int - 1 FROM visits p
+                  WHERE p.fingerprint = v.fingerprint AND p.fingerprint <> ''
+                    AND p.started_at <= v.started_at) AS vizite_anterioare
+         FROM visits v ORDER BY v.started_at DESC LIMIT 60`,
       )
     ).rows.map((r) => ({
       kind: r.kind,
@@ -1841,6 +1864,8 @@ export async function getDemoStats(): Promise<DemoStats> {
       started_at: r.started_at,
       session_email: r.session_email,
       topic: r.topic ?? '',
+      tz: r.tz ?? '',
+      vizite_anterioare: Math.max(0, Number(r.vizite_anterioare ?? 0)),
     }))
     return {
       total: 0,
@@ -2413,9 +2438,20 @@ export async function actualizeazaCerinta(
   }
 }
 
+/** Câte zile ține un gol REZOLVAT în listă înainte să dispară singur. */
+const ZILE_GOL_REZOLVAT = 7
+
 export async function getCapabilityGaps(includeResolved = false, limit = 200): Promise<CapabilityGap[]> {
   if (!dbEnabled()) return []
   try {
+    // AUTOCURĂȚARE (Adrian, 31 iul: „ce e cu toate astea? dacă nu mai sunt
+    // trebuie să se autocurețe"). În panou stăteau cereri marcate „Rezolvat"
+    // din 27-28 iul — unele spunând „nu am unelte de cod", pe unelte pe care
+    // le are de atunci. Un rând rezolvat rămâne o săptămână (ca să-l vezi dacă
+    // te uiți în zilele alea), apoi pleacă singur. Fără buton de apăsat.
+    void getPool()
+      .query(`DELETE FROM capability_gaps WHERE resolved = true AND last_seen < now() - interval '${ZILE_GOL_REZOLVAT} days'`)
+      .catch(() => {})
     const where = includeResolved ? '' : 'WHERE resolved = false'
     const r = await getPool().query<CapabilityGap>(
       `SELECT id, user_email, request, reason, hits, resolved, escalated, triage, created_at, last_seen

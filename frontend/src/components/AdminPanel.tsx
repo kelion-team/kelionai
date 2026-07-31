@@ -1807,6 +1807,23 @@ export default function AdminPanel({
                           {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
                         </span>
                         {r.lang && <span>limbă {r.lang}</span>}
+                        {/* Fusul LUI + a câta oară vine (Adrian, 31 iul: „acest
+                            câmp trebuie să ofere full informații despre vizită"). */}
+                        {r.tz && (
+                          <span>
+                            {r.tz} · la el era{' '}
+                            {new Date(r.started_at).toLocaleTimeString('ro-RO', {
+                              timeZone: r.tz,
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        )}
+                        <span>
+                          {r.vizite_anterioare > 0
+                            ? `a ${r.vizite_anterioare + 1}-a vizită`
+                            : 'prima vizită'}
+                        </span>
                         <span>{r.referrer ? `sursă: ${r.referrer}` : 'acces direct'}</span>
                       </div>
                     </div>

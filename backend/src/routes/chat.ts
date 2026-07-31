@@ -1722,7 +1722,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
         return runTool(
-          block, isAdmin, token, reply, baseUrl, user.email, usage,
+          block, isAdmin, token, reply, baseUrl, user.email,
+          req.headers.cookie ?? '', usage,
           (speechPref || isAdminUser) && langName ? langName : '',
         )
       }
@@ -1910,6 +1911,9 @@ async function runTool(
   reply: { raw: { write(c: string): void } },
   baseUrl: string,
   email: string,
+  /** Sesiunea celui care cere — o dăm rutelor de admin, ca ele să-și facă
+   *  singure verificarea de admin (nu o ocolim). */
+  cookie: string,
   // Păstrați în semnătură (apelanții îi trimit), dar nefolosiți în corp de când
   // costul se contorizează în afara lui runTool: prefixul `_` o spune explicit.
   _usage: { usd: number },
@@ -1947,7 +1951,9 @@ async function runTool(
     // `email`/`baseUrl` sunt obligatorii pentru uneltele de card: browserul e al
     // userului, iar poarta e „ți-am recunoscut vocea acum". Fără ele, cardul ar
     // fi refuzat mereu, cu un motiv fals („nu te-am recunoscut").
-    const shared = await execSharedAdminTool(block.name, args, { email, baseUrl })
+    // `cookie` merge mai departe pentru admin_vezi/admin_schimba: uneltele nu
+    // ocolesc poarta de admin, o FOLOSESC — cer rutele cu sesiunea lui.
+    const shared = await execSharedAdminTool(block.name, args, { email, baseUrl, cookie })
     if (shared !== null) return shared
   }
 
