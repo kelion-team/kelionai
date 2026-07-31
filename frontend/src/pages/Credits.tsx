@@ -1,8 +1,8 @@
 // PAGINA PUBLICĂ DE CREDITE (Adrian, 26 iul: „pagină dedicată de... cumpărare
 // credite... inclusiv să poată crea și cumpăra"). Vizibilă ȘI fără cont —
 // prețuri transparente înainte de înregistrare. „Cumpără" → dacă nu e logat,
-// îl ducem la /login; dacă e logat, pornește Checkout-ul Stripe existent
-// (/api/billing/checkout — aceeași cale ca pastila de portofel din aplicație).
+// îl ducem la /login; dacă e logat, pornește plata prin /api/billing/checkout
+// (aceeași cale ca pastila de portofel din aplicație — link Revolut + cod unic).
 import React, { useEffect, useState } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
 import BackLink from '../components/BackLink'

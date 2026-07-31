@@ -55,7 +55,7 @@ export const PUBLIC_TEXT = {
   // Credite
   creditsTitle: 'Kelionai credits',
   creditsBlurb: 'Credits cover everything Kelion does: conversation, voice, vision, searches.',
-  creditsRate: (perPound: number): string => `£1 = ${perPound} credits. Payment is secured by Stripe.`,
+  creditsRate: (perPound: number): string => `£1 = ${perPound} credits. Secure payment via Revolut.`,
   creditsUnit: (n: number): string => `${n} credits`,
   creditsSignInFirst: 'You need to be signed in to buy — the buttons take you to sign-in.',
   errPaymentStart: "The payment didn't start — please try again.",

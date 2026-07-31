@@ -35,7 +35,6 @@ export interface AdminStrings {
   tabRecovery: string
   // Stări comune
   loading: string
-  readingStripe: string
   noSpendYet: string
   noTransactionsYet: string
   noContactsYet: string
@@ -50,9 +49,7 @@ export interface AdminStrings {
   // Bani
   setManual: string
   activate: string
-  seeInStripe: string
   andRunWorkflow: string
-  balanceTransfersBeta: string
   once: string
   transactionsHead: string
   // Magazine
@@ -109,7 +106,6 @@ const en: AdminStrings = {
   tabBuilder: 'Builder',
   tabRecovery: 'Recovery',
   loading: 'Loading…',
-  readingStripe: 'Reading the state from Stripe…',
   noSpendYet: 'No spend yet.',
   noTransactionsYet: 'No transactions yet.',
   noContactsYet: 'No contacts yet.',
@@ -123,11 +119,9 @@ const en: AdminStrings = {
   noLettersYet: 'No letters yet (or MAIL_PASS is not set).',
   setManual: 'Set to Manual',
   activate: 'Activate',
-  seeInStripe: 'See in Stripe',
   andRunWorkflow: ' and run the workflow ',
-  balanceTransfersBeta: ' — the Balance Transfers endpoint is in beta at Stripe: request access from ',
   once: ' (once)',
-  transactionsHead: 'History — top-ups through Stripe (channel CLOSED 30 Jul, nothing new arrives here)',
+  transactionsHead: 'History — top-ups via Revolut transfer (unique code per payment)',
   checkingStores: 'Checking the stores live…',
   notListedYet: '○ not listed yet',
   downloadsHead: 'Who downloaded (last 100)',
@@ -172,7 +166,6 @@ const ro: AdminStrings = {
   tabBuilder: 'Constructor',
   tabRecovery: 'Recuperare',
   loading: 'Se încarcă…',
-  readingStripe: 'Se citește starea din Stripe…',
   noSpendYet: 'Niciun consum încă.',
   noTransactionsYet: 'Nicio tranzacție încă.',
   noContactsYet: 'Niciun contact încă.',
@@ -186,11 +179,9 @@ const ro: AdminStrings = {
   noLettersYet: 'Nicio scrisoare încă (sau MAIL_PASS nesetat).',
   setManual: 'Setează Manual',
   activate: 'Activează',
-  seeInStripe: 'Vezi în Stripe',
   andRunWorkflow: ' și rulează workflow-ul ',
-  balanceTransfersBeta: ' — endpointul Balance Transfers e în beta la Stripe: cere accesul din ',
   once: ' (o dată)',
-  transactionsHead: 'Istoric — alimentări prin Stripe (canal ÎNCHIS pe 30 iul, nu mai intră nimic aici)',
+  transactionsHead: 'Istoric — alimentări prin transfer Revolut (cod unic la fiecare plată)',
   checkingStores: 'Se verifică magazinele live…',
   notListedYet: '○ nelistat încă',
   downloadsHead: 'Cine a descărcat (ultimele 100)',

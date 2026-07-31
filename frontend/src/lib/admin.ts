@@ -16,29 +16,19 @@ export interface HistoryRow {
   created_at: string
 }
 
-// The owner's REAL money picture (admin only): live Stripe balance, real cost
-// consumed, real profit, and per-AI cost. Replaces the old hand-typed pool.
+// The owner's REAL money picture (admin only): live OpenRouter balance, real
+// cost consumed, real profit, and per-AI cost. No hand-typed figures.
+// (Stripe is fully out — 31 Jul.)
 export interface Finance {
-  stripe: {
-    available: number
-    pending: number
-    currency: string
-    /** Sold REAL ținut în altă monedă decât cea a contului. Fără el, „£0.00"
-     *  însemna deopotrivă „n-ai bani" și „ai bani, dar în dolari". */
-    alteMonede?: { currency: string; available: number; pending: number }[]
-  } | null
-  // PUNGA UNICĂ: cât ai, adunat din cele trei surse EXTERNE (Stripe plăți,
-  // Stripe card, creditul de la furnizorul creierului). `complete: false`
-  // înseamnă că o sursă n-a răspuns — atunci totalul e incomplet, nu „zero".
-  // Cifra tastată de mână (`loaded`/`remaining`) a fost ștearsă: nimic nu o
-  // verifica vreodată, deci putea arăta bani inexistenți.
+  // SINGLE POUCH: what you have, summed from EXTERNAL sources that can each be
+  // verified at the source. `complete: false` means a source did not answer —
+  // then the total is incomplete, not "zero". The hand-typed figure
+  // (`loaded`/`remaining`) was deleted: nothing ever verified it, so it could
+  // show money that did not exist.
   punga: {
     total: number
     complete: boolean
     parti: {
-      stripeAvailable: number | null
-      stripePending: number | null
-      stripeIssuing: number | null
       openrouter: number | null
     }
   }
@@ -46,9 +36,9 @@ export interface Finance {
   profit: number
   currency: string
   byKind: Record<string, number>
-  // Consumat AZI la AI (USD, real) — cardul „Consumat azi" din tabul Bani.
+  // Consumed TODAY at the AI providers (USD, real) — the "Spent today" card.
   today: number
-  // „Punga lui Kelion" — soldul REAL, exact din contul OpenRouter (USD).
+  // "Kelion's pouch" — the REAL balance, straight from the OpenRouter account (USD).
   openrouter?: {
     balance: number
     low: boolean
@@ -132,25 +122,9 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
 // platesc cu cardul lui. Rutele din spate raman pana cand trecerea e confirmata
 // pe viu, dar interfata nu le mai cheama.
 
-// VÂNZARE DE CREDITE (admin): X credite → linkul de plată Stripe pentru user.
-export async function sellCredits(
-  email: string,
-  credits: number,
-): Promise<{ url: string; pounds: number; credits: number } | null> {
-  try {
-    const r = await fetch('/api/admin/sell-credits', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, credits }),
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { url?: string; pounds?: number; credits?: number }
-    return j.url ? { url: j.url, pounds: j.pounds ?? 0, credits: j.credits ?? credits } : null
-  } catch {
-    return null
-  }
-}
+// HERE STOOD `sellCredits` — X credits → a Stripe payment link for the user.
+// Deleted together with Stripe (31 Jul): credit sales go through the unique
+// code + Revolut transfer flow, and manual crediting stays on /api/admin/user.
 
 // Owner adds money to, or withdraws money from, the provider-credit pool.
 // Returns true on success so the caller can refresh the finance view.
@@ -603,9 +577,8 @@ export interface EnvCheckResult {
   /** Nume de chei pe care serverul le ARE, dar pe care codul nu le citea. */
   orphans: string[]
   summary: { total: number; lipsa: number; goale: number; nume: string[] }
-  /** Ora pornirii procesului: o cheie scrisă DUPĂ asta nu e încărcată. */
+  /** Process start time: a key written AFTER this is not loaded yet. */
   startedAt: string
-  stripeMode: 'live' | 'test' | 'lipsă'
 }
 
 export async function fetchEnvCheck(): Promise<EnvCheckResult | null> {

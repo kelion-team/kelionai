@@ -63,7 +63,7 @@ export function WalletButton({
     if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
     if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.'
     if (code === 'min_5') return ro ? 'Minim £5.' : 'Minimum £5.'
-    if (code === 'stripe_not_configured') return ro ? 'Plățile nu sunt configurate pe server.' : 'Payments are not configured on the server.'
+    if (code === 'revolut_link_lipsa') return ro ? 'Plățile nu sunt configurate pe server.' : 'Payments are not configured on the server.'
     if (code === 'offline') return ro ? 'Fără conexiune — încearcă din nou.' : 'No connection — try again.'
     return (ro ? 'Plata nu a pornit: ' : 'Payment failed to start: ') + code
   }

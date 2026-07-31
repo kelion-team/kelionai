@@ -248,16 +248,6 @@ interface BrainCredit {
       low?: boolean
       live?: boolean
     }
-    // Punga Stripe REALĂ (banii userilor): disponibil + în tranzit.
-    stripe?: {
-      available: number
-      pending: number
-      currency: string
-      /** Sold REAL ținut în ALTĂ monedă decât cea a contului (Adrian, 30 iul:
-       *  „stripe 0? am băgat bani"). Fără el, „£0.00" însemna deopotrivă
-       *  „n-ai bani" și „ai bani, dar în dolari". */
-      alteMonede?: { currency: string; available: number; pending: number }[]
-    } | null
     /** Resursele VPS-ului (Adrian, 31 iul: „afișează permanent VPS pe interfață
      *  în bara de sus"). `null` = nu s-au putut măsura — bara scrie „⚠ VPS",
      *  NICIODATĂ zerouri: „0.0 GB / 0%" ar arăta identic cu un server mort. */

@@ -17,7 +17,7 @@ export interface PurchaseRecord {
   amount: number
   credits: number
   status: string
-  stripe_payment_intent_id: string | null
+  payment_ref: string | null
   created_at: string
 }
 
