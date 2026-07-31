@@ -42,8 +42,27 @@ export interface FiltruRepetitie {
   emis(): string
 }
 
+// ── DE CE NU MAI COMPARĂM EXACT (Adrian, 31 iul, a doua oară) ───────────────
+//
+// El, după ce reparația din 12:25 era live: „revin cu întrebarea, de ce baleiezi
+// permanent în chat răspunsul?"
+//
+// Fiindcă am comparat EXACT. Am ales-o intenționat — „mai bine scapă o repetare
+// decât să înghită text adevărat" — dar un model nu repetă identic: schimbă o
+// virgulă, un cuvânt, un spațiu. Iar la cea mai mică diferență, filtrul îl lăsa
+// să treacă întreg. Deci reparația mea prindea exact cazul care nu se întâmplă.
+//
+// Acum comparăm pe o formă NORMALIZATĂ (litere mici, fără punctuație, spațiile
+// strânse) — dar EMITEM textul original, neatins. Normalizarea e doar ochelarii
+// cu care ne uităm dacă s-a mai spus, nu ce ajunge la om.
+const norm = (t: string): string =>
+  t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
 export function filtruRepetitie(): FiltruRepetitie {
   let emis = ''
+  // Oglinda normalizată a lui `emis`. Ținută în paralel ca să nu renormalizăm
+  // tot istoricul la fiecare bucată care vine din stream.
+  let emisNorm = ''
   // Ce a produs runda curentă și încă nu știm dacă e nou sau repetare.
   let asteptare = ''
   // Runda a divergat de ce se spusese deja → de-acum curge liber, fără cost.
@@ -60,22 +79,37 @@ export function filtruRepetitie(): FiltruRepetitie {
       if (!txt) return ''
       if (curge) {
         emis += txt
+        emisNorm = norm(emis)
         return txt
       }
       asteptare += txt
       // Încă e cuprins în ce s-a spus deja → ținem, poate e o repetare.
-      // (La prima rundă `emis` e gol, iar ''.includes(orice) e false, deci
-      // primul cuvânt curge instant — latența nu are de suferit.)
-      if (emis.includes(asteptare)) return ''
+      // Comparăm NORMALIZAT: o virgulă schimbată nu mai face dintr-o repetare
+      // un text nou. (La prima rundă `emisNorm` e gol, iar ''.includes(ceva) e
+      // false, deci primul cuvânt curge instant — latența nu are de suferit.)
+      if (emisNorm.includes(norm(asteptare))) return ''
       // A divergat. Trimitem DOAR partea nouă: căutăm cel mai lung început
-      // care fusese deja spus și tăiem exact atât.
+      // care fusese deja spus și tăiem exact atât. Căutarea e pe forma
+      // normalizată, dar tăietura se face în textul ORIGINAL — omul primește
+      // ce a scris modelul, nu forma noastră de lucru.
       let k = asteptare.length
-      while (k > 0 && !emis.includes(asteptare.slice(0, k))) k--
-      const nou = asteptare.slice(k)
+      while (k > 0 && !emisNorm.includes(norm(asteptare.slice(0, k)))) k--
+      // GRANIȚA CARE LIPSEA, și fără care reparația devenea mai rea decât boala:
+      // pe forma normalizată, un început SCURT se potrivește aproape mereu
+      // undeva în istoric („A", „Al", un spațiu). Fără pragul ăsta, filtrul a
+      // tăiat „Al" din „Altceva" la prima probă — adică exact ce jurasem să nu
+      // fac: să ciuntesc text adevărat. Tăiem doar dacă bucata deja spusă e o
+      // FRAZĂ, nu o silabă; sub prag nu tăiem nimic.
+      // Spațiul dintre repetare și textul nou aparține textului NOU: dacă îl
+      // tăiem, cuvintele se lipesc („…dimineață.Ai o ședință"). Normalizarea
+      // nu-l vede, fiindcă îl strânge — deci îl recuperăm aici, explicit.
+      while (k > 0 && /\s/.test(asteptare[k - 1] ?? '')) k--
+      const nou = k >= PRAG_REPETITIE ? asteptare.slice(k) : asteptare
       asteptare = ''
       curge = true
       aduseNou = true
       emis += nou
+      emisNorm = norm(emis)
       return nou
     },
 
@@ -89,6 +123,7 @@ export function filtruRepetitie(): FiltruRepetitie {
           // Prea scurtă ca să fim siguri („Da.", „Gata.") → o lăsăm să treacă.
           iese = asteptare
           emis += iese
+          emisNorm = norm(emis)
           aduseNou = true
         }
       }

@@ -42,6 +42,7 @@ import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
+import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -73,7 +74,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL } from '../services/brainToolDefs.js'
 // Re-exportate pentru ruta vocii, care își ia definițiile de unelte din chat.js
 // (sursă unică — CREIER UNIC §1, fără duplicare).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -156,18 +157,31 @@ async function selectedBrainModel(
     // ACUM: dacă alegerea lui nu mai e validă, se cade pe modelul PLĂTIT capabil
     // (are bani: nu-l coborâm la free doar fiindcă un id s-a învechit), și se
     // spune în jurnal — o înlocuire tăcută de creier e exact tiparul zilei.
+    // ── ORDINUL DIN 31 IUL, 15:40: „MANUAL EU NU FAC" ─────────────────────
+    //
+    // Cuvintele lui, după ce i-am cerut să-și schimbe singur modelul din Setări:
+    // „ai scris sute de linii ca escaladarea să fie automată, și tu tot manual
+    // mă pui" · „să fie clar, manual eu nu fac, rămâi pe modele performante
+    // free" · „inclusiv la escaladări".
+    //
+    // Avea o selecție veche salvată în Setări (Gemma 4 31B), care îl pironea
+    // acolo oricât de bun ar fi devenit implicitul aplicației. Iar eu îi tot
+    // raportam că are Ultra — fals, fiindcă alegerea salvată bate implicitul.
+    //
+    // De acum, pe drumul LUI: selecția salvată se IGNORĂ, iar aplicația ține
+    // singură cel mai bun model gratuit, și la treapta de lucru, și la
+    // escaladare. Nu mai are ce administra.
+    //
+    // NU se aplică nimănui altcuiva: userii publici își păstrează alegerea, ca
+    // până acum. E o regulă pentru owner, cerută de owner, în scris.
+    //
+    // DACĂ vreodată vrea din nou să aleagă cu mâna, se scoate blocul ăsta —
+    // dar numai la cererea LUI, nu fiindcă un AI viitor crede că „userul
+    // trebuie să decidă". A decis deja: nu vrea să decidă de fiecare dată.
     let ownerModel: string | null = null
     if (sel.work) {
-      const r = await resolveModelChecked('work', sel.work)
-      if (r.fellBack) {
-        // Alegerea lui s-a învechit (model scos de furnizor). Cădem pe
-        // IMPLICITUL aplicației — nu pe un model plătit: o alegere învechită
-        // nu e un motiv să înceapă să-i consume banii fără să-i spună nimeni.
-        console.error(`[CREIER] modelul ales (${sel.work}) NU e în catalog → cad pe implicitul aplicației`)
-        ownerModel = r.model
-      } else {
-        ownerModel = r.model
-      }
+      console.log(`[CREIER] owner: ignor selecția salvată (${sel.work}) — ordinul „manual eu nu fac"; țin implicitul`)
+      ownerModel = await resolveModel('work', null)
     } else {
       // ── CREIERUL LUI, ALES DE EL (Adrian, 31 iul: „pune-l creier
       // nvidia/nemotron-3-ultra-550b-a55b:free") ─────────────────────────────
@@ -194,8 +208,38 @@ async function selectedBrainModel(
       // Setări → Model, care are în continuare prioritate peste tot.
       ownerModel = await resolveModel('work', null)
     }
-    if (ownerModel) return { model: ownerModel, heavy }
-    console.error('[CREIER] owner FĂRĂ model plătit → cad pe scara free (poate nara în loc să execute)')
+    // ── ESCALADAREA URCĂ ȘI DE PE ALEGEREA LUI (Adrian, 31 iul) ────────────
+    //
+    // El: „ai scris sute de linii ca escaladarea să fie automată, și tu tot
+    // manual mă pui".
+    //
+    // Avea dreptate, și cauza era chiar aici: `return` de mai jos ieșea din
+    // funcție ÎNAINTE de blocul de escaladare. Deci pe drumul ownerului —
+    // singurul care chiar dă sarcini grele — escaladarea automată nu rula
+    // NICIODATĂ. Alegerea lui din Setări îl pironea la același model și la
+    // „salut", și la „găsește cauza acestui bug prin tot repo-ul".
+    //
+    // Regula corectă, și e simetrică:
+    //   NICIODATĂ mai jos decât ce a ales el — asta e regula de fier §14, care
+    //   apără de coborârea tăcută pe un model slab.
+    //   MEREU mai sus când sarcina o cere — asta e escaladarea pe care a
+    //   cerut-o, și pe care o ocoleam.
+    //
+    // Deci: la dificultate mare, urcă pe treapta de vârf. Dacă alegerea lui e
+    // deja acolo (sau mai sus), rămâne a lui — nu coborâm nimic.
+    if (ownerModel) {
+      const cereSusul = difficulty >= ESCALATE_TOP_AT && !needsVision
+      if (cereSusul) {
+        const varf = await resolveModel('top', null)
+        if (varf && varf !== ownerModel) {
+          // Se SPUNE. O schimbare de creier pe la spate e exact tiparul zilei.
+          console.log(`[CREIER] sarcină grea (${difficulty}) → urc de pe ${ownerModel} pe ${varf}`)
+          return { model: varf, heavy: true }
+        }
+      }
+      return { model: ownerModel, heavy }
+    }
+    console.error('[CREIER] owner FĂRĂ model → cad pe scara free (poate nara în loc să execute)')
   }
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta top (nemotron-ultra-550b:free)
   // NU are vedere — o tură cu imagine, oricât de grea, rămâne pe nucleul omni
@@ -1670,7 +1714,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Vocea din prima frază și pe drumul API (clienți): fiecare bucată difuzată
@@ -2087,6 +2131,38 @@ async function runTool(
   }
 
   switch (block.name) {
+    // ── PANOUL: TREI PROPUN, CREIERUL ALEGE (Adrian, 31 iul) ────────────────
+    // Pașii se scriu PE MONITOR pe măsură ce se întâmplă, nu la final: durează
+    // minute, iar poarta analizei spune limpede că munca trebuie să se VADĂ în
+    // timp ce se face, nu să fie povestită după.
+    case 'panou_cod': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const sarcina = String(args.sarcina ?? '').trim()
+      if (sarcina.length < 10) return JSON.stringify({ error: 'sarcina_prea_scurta' })
+      const pasi: string[] = []
+      const peMonitor = (pas: string): void => {
+        pasi.push(`${new Date().toISOString().slice(11, 19)}  ${pas}`)
+        reply.raw.write(
+          `${CTRL}${JSON.stringify({ monitor: { kind: 'doc', title: 'Panoul de lucrători', text: pasi.join('\n') } })}${CTRL}`,
+        )
+      }
+      const r = await ruleazaPanou(sarcina, peMonitor)
+      return JSON.stringify({
+        ok: r.ok,
+        motiv: r.motiv,
+        pornit: r.pornit,
+        lipsa: r.lipsa,
+        castigator: r.castigator,
+        judecata: r.judecata,
+        pr: r.pr,
+        // Numai faptele măsurate per lucrător — nu jurnalele, care ar îneca tura.
+        propuneri: r.propuneri.map((p) => ({
+          lucrator: p.lucrator, model: p.model, aSchimbat: p.aSchimbat,
+          fisiere: p.fisiere, adaugate: p.adaugate, sterse: p.sterse,
+          testeTrec: p.testeTrec, secunde: p.secunde, motiv: p.motiv, branch: p.branch,
+        })),
+      })
+    }
     case 'build_software': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
       const order = String(args.order ?? '').trim()

@@ -62,6 +62,48 @@ describe('ce s-a scris o dată nu se mai scrie', () => {
   })
 })
 
+describe('repetarea APROAPE identică — cazul care încă se vedea pe ecran', () => {
+  // Adrian, 31 iul, DUPĂ ce prima reparație era live: „revin cu întrebarea, de
+  // ce baleiezi permanent în chat răspunsul?"
+  //
+  // Fiindcă prima variantă compara EXACT. Un model nu repetă identic — schimbă
+  // o virgulă, o majusculă, un spațiu — și atunci filtrul îl lăsa să treacă
+  // întreg. Adică prindea exact cazul care nu se întâmplă.
+  const variante = [
+    ['virgulă în plus', FRAZA.replace('acum calendarul', 'acum, calendarul')],
+    ['majuscule schimbate', FRAZA.toUpperCase()],
+    ['spații duble', FRAZA.replace(/ /g, '  ')],
+    ['punct la final în loc de nimic', `${FRAZA.slice(0, -1)}!`],
+  ] as const
+
+  for (const [cum, varianta] of variante) {
+    it(`prinde repetarea cu ${cum}`, () => {
+      const f = filtruRepetitie()
+      f.bucata(FRAZA)
+      f.inchideRunda()
+      let iesit = ''
+      iesit += f.bucata(varianta)
+      iesit += f.inchideRunda()
+      expect(iesit).toBe('')
+      expect(f.rundaAFostGoala()).toBe(true)
+    })
+  }
+
+  // Granița care lipsea la prima încercare de normalizare: filtrul a tăiat
+  // „Al" din „Altceva", fiindcă pe forma normalizată un început scurt se
+  // potrivește aproape mereu undeva în istoric. Un răspuns ciuntit e mai rău
+  // decât unul repetat — de asta se taie doar o FRAZĂ, nu o silabă.
+  it('nu ciuntește începutul unui text nou care seamănă la primele litere', () => {
+    const f = filtruRepetitie()
+    f.bucata('Am verificat calendarul și nu am găsit nimic programat mâine.')
+    f.inchideRunda()
+    let iesit = ''
+    iesit += f.bucata('Amănuntul care lipsea e că ședința e poimâine, nu mâine.')
+    iesit += f.inchideRunda()
+    expect(iesit).toBe('Amănuntul care lipsea e că ședința e poimâine, nu mâine.')
+  })
+})
+
 describe('ce e NOU trece întotdeauna', () => {
   it('runda care repetă și apoi continuă — iese doar continuarea', () => {
     const f = filtruRepetitie()
