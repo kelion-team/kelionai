@@ -67,6 +67,7 @@ import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { listeazaSecrete } from './secrete.js'
+import { isOpsPaused } from './runbooks.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
@@ -835,6 +836,24 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
 
 /** O trecere: se repară singur dacă a picat, altfel ia următoarea sarcină. */
 export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string }> {
+  // ── ÎNTRERUPĂTORUL LUI, VERIFICAT ÎNAINTE DE ORICE ──────────────────────────
+  //
+  // Adrian, 31 iul, dimineața: a apăsat „Oprește" ca să taie un consum de 27,84$
+  // în trei ore și jumătate, apoi a cerut — corect — „înainte trebuie verificat
+  // că autonomia e pe stop". Bine că a cerut: NU era.
+  //
+  // `isOpsPaused()` exista în runbooks.ts din 27 iul. Bucla asta nu se uita la
+  // ea NICIODATĂ. Apăsai butonul, se scria `kelion_ops_paused=1` în bază, panoul
+  // îți afișa „⏸ Autonomia e OPRITĂ de tine" — și bucla lucra mai departe,
+  // cheltuind. Un întrerupător care nu întrerupe e mai rău decât niciunul:
+  // crezi că ai oprit, deci nu te mai uiți.
+  //
+  // Exact regula lui #1, în forma cea mai scumpă: panoul AFIRMA o stare pe care
+  // nimeni n-o măsurase. Verificarea stă prima, înaintea oricărei ture de creier,
+  // și costă o citire din bază — zero tokeni.
+  if (await isOpsPaused().catch(() => false)) {
+    return { pornit: false, motiv: '⏸ oprit de tine — nu fac nimic și nu cheltuiesc nimic' }
+  }
   if (mainileOcupate) return { pornit: false, motiv: 'lucrează chiar acum cu browserul' }
   const jobs = await listBuildJobs(40).catch(() => [] as BuildJob[])
   const dupaId = new Map(jobs.map((j) => [j.id, j]))

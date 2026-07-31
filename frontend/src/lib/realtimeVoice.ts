@@ -448,12 +448,22 @@ export async function startRealtimeVoice(
     // liber, fără să repeți numele — exact ce lipsea porții vechi din 24 iul,
     // care cerea numele la FIECARE frază și părea surdă; (3) altfel → tăcere:
     // discuția din cameră nu-i e adresată. „STOP" închide fereastra.
-    const GATE_WINDOW_MS = 120_000
+    // 45s, nu 120s (Adrian, 31 iul: „vorbește fără să respecte utilizatorul" —
+    // vorbește fără să fie chemat). Fereastra de două minute, reînnoită la
+    // fiecare schimb, însemna în practică MEREU DESCHISĂ: dacă schimbai o vorbă
+    // cu el, apoi vorbeai un minut cu altcineva în cameră, el răspundea — nu
+    // fiindcă poarta era stricată, ci fiindcă era prea larg deschisă.
+    // 45s ține conversația curgând fără să repeți numele, dar se închide destul
+    // de repede cât o discuție cu altcineva să nu-i mai fie adresată.
+    const GATE_WINDOW_MS = 45_000
     // FEREASTRA E DESCHISĂ LA PORNIREA SESIUNII (bug găsit live de Adrian,
     // 27 iul, „parcă nu aude": userul tocmai a PORNIT microfonul — evident că
     // i se adresează lui Kelion; a cere numele chiar la prima frază, cu o
     // transcriere care îl stâlcește, îl făcea complet mut la deschidere).
-    let gateUntil = Date.now() + GATE_WINDOW_MS
+    // La PORNIRE fereastra e deschisă mai scurt: userul tocmai a apăsat pe
+    // microfon, deci primele secunde îi sunt clar adresate — dar dacă nu-i
+    // spune nimic în 15s, tăcerea redevine implicită.
+    let gateUntil = Date.now() + 15_000
     // Regex TOLERANT la transcrierea reală (dovadă live: „Kelion, ce faci" a
     // ieșit „Elioncevaci"): acceptăm și variantele fără consoana de început
     // (elion/eleon), lipite de cuvântul următor.
