@@ -88,10 +88,13 @@ describe('openrouter catalog', () => {
     // Implicitul chat = un model REAL gratuit, testat live (tool-call curat +
     // vedere reală) — vezi config.ts pentru dovada testului.
     expect(await resolveModel('chat', 'ceva/inexistent')).toBe('google/gemma-4-26b-a4b-it:free')
-    // CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0): work = nucleul
-    // OMNI gratuit (vede+aude+tools), top = gândirea grea gratuită (550B, 1M
-    // context, FĂRĂ vedere — de asta garda !needsVision din chat.ts).
-    expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+    // CREIERUL, PUS DE ADRIAN PE 31 IUL: „pune-l creier nemotron-3-ultra".
+    // Era `nano-omni-30b-a3b` — 30B totali, 3B ACTIVI. Munca lui trecea printr-un
+    // model de treapta a treia, în timp ce cel mai capabil creier gratuit din
+    // lume (550B, 1M context) stătea nefolosit pe treapta 'top', la care se
+    // ajunge doar prin escaladare. Acum e pe amândouă.
+    // N-are vedere — nu mai contează: vederea se DELEGĂ (vezi vedereaDelegata).
+    expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
@@ -104,13 +107,13 @@ describe('openrouter catalog', () => {
   it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
     const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
     expect(cerut.fellBack).toBe(true)
-    expect(cerut.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+    expect(cerut.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
   it('fără nicio cerere, implicitul NU e o cădere (n-a fost respins nimic)', async () => {
     const implicit = await resolveModelChecked('work', null)
     expect(implicit.fellBack).toBe(false)
-    expect(implicit.model).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+    expect(implicit.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
   it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {
