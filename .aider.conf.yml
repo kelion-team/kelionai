@@ -34,6 +34,24 @@ editor-model: openrouter/poolside/laguna-s-2.1:free
 # Sarcini mărunte (titluri de commit, rezumate). Nu merită modelul mare.
 weak-model: openrouter/poolside/laguna-xs-2.1:free
 
+# ── CUM SCRIE: EDITĂRI PUNCTUALE, NICIODATĂ FIȘIERUL ÎNTREG ─────────────────
+#
+# 31 iul, 12:36 — lecția plătită azi. Kelion a vrut să scoată un model dintr-o
+# listă (două rânduri) și a golit `deploy/constructor-agent.mjs`: 1049 de
+# rânduri → 14. Cauza n-a fost raționamentul, care era corect, ci FORMA în care
+# scrie: unealta lui cere fișierul COMPLET, iar ieșirea modelului e plafonată.
+# Pe un fișier mare răspunsul se taie și se scrie ciotul — cu commit și mesaj
+# care sună perfect corect.
+#
+# Aider are ambele forme: `whole` (retrimite tot fișierul — aceeași primejdie)
+# și `diff` / `editor-diff` (blocuri căutare→înlocuire, doar bucata schimbată).
+# În modul architect implicitul E `editor-diff`, DAR implicitul se alege după
+# model, iar `poolside/laguna` e prea nou ca Aider să-l aibă în registru — deci
+# ar putea cădea pe `whole` fără să spună nimeni nimic.
+# Îl fixăm explicit. Un răspuns tăiat trebuie să NU se aplice, nu să golească
+# fișierul.
+editor-edit-format: editor-diff
+
 # Cheia: OPENROUTER_API_KEY în mediu. Aceeași pe care o folosește Kelion.
 # NU se scrie aici. Un fișier de configurare ajunge în git; o cheie din el, la fel.
 
