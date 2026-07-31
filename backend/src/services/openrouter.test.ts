@@ -18,12 +18,24 @@ describe('openrouter catalog', () => {
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
   })
 
-  it('în AMBELE liste apar DOAR modele care fac TOT (văd + știu unelte)', async () => {
+  it('uneltele sunt obligatorii peste tot; vederea doar pe lista de chat', async () => {
     // Ordinul lui Adrian, 29 iul: „se afișează doar AI care respectă toate
     // funcționalitățile aplicației — văz, auz, voce live". Un model orb ajuns în
     // meniu e o promisiune ruptă: userul îl alege și pe urmă camera nu merge.
     // Uneltele sunt la fel de obligatorii — fără ele cad skill-urile Google,
     // memoria, comenzile și escaladarea vocii pe creier.
+    //
+    // MODIFICAT LA ORDINUL LUI, 31 iul: „scoate filtrul de vedere".
+    // Motivul: Nemotron 3 Ultra 550B — cel mai capabil creier gratuit măsurat
+    // (550B, 1M context, unelte) — e ORB, deci filtrul îl scotea din listă și
+    // nu-l putea alege niciodată. Promisiunea din 29 iul rămâne întreagă, dar
+    // la nivelul la care conta: funcționalitatea e a APLICAȚIEI, nu a unui
+    // model singur. O tură cu poză e servită automat de un model care vede
+    // (`bestVisionModel`, chat.ts) — vezi src/vedereaDelegata.test.ts.
+    //
+    // Ce NU s-a schimbat: uneltele rămân obligatorii peste tot (fără ele nu
+    // merge nimic, și nu se pot delega), iar lista de CHAT — treapta publică,
+    // unde nu există escaladare — cere în continuare vedere.
     const vede = { input_modalities: ['text', 'image'] }
     const brut = [
       { id: 'openai/gpt-5', supported_parameters: ['tools'], architecture: vede },
@@ -38,9 +50,17 @@ describe('openrouter catalog', () => {
     const cat = groupCatalog(modele)
     const toate = [...cat.chat, ...cat.work]
     expect(toate.length).toBeGreaterThan(0)
-    for (const m of toate) expect(m.vision, `${m.id} nu vede, dar e oferit userului`).toBe(true)
-    expect(toate.map((m) => m.id)).not.toContain('openai/gpt-5-text-only')
+    // UNELTELE: obligatorii peste tot, în ambele liste. Nu se pot delega —
+    // fără ele nu merge nici Google, nici memoria, nici comenzile.
     expect(toate.map((m) => m.id)).not.toContain('google/gemini-3-vision-mut')
+    // VEDEREA: obligatorie pe lista de CHAT (treapta publică, fără escaladare).
+    for (const m of cat.chat) expect(m.vision, `${m.id} nu vede, dar e pe lista de chat`).toBe(true)
+    expect(cat.chat.map((m) => m.id)).not.toContain('openai/gpt-5-text-only')
+    // …dar NU pe treapta de muncă: acolo un creier orb e permis, fiindcă tura
+    // cu poză e servită de un model care vede. Fără asta, Nemotron Ultra 550B
+    // n-ar putea fi ales niciodată — cel mai capabil creier gratuit, invizibil
+    // în propria aplicație.
+    expect(cat.work.map((m) => m.id)).toContain('openai/gpt-5-text-only')
     // Și cele complete chiar ajung acolo unde trebuie (nu „liste goale = curat").
     expect(cat.chat.map((m) => m.id)).toContain('openai/gpt-5')
     expect(cat.chat.map((m) => m.id)).toContain('google/gemini-3-pro')
