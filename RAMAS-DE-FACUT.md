@@ -89,8 +89,23 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 
 1. Cheile din **A** — puse o dată în GitHub Secrets + `vps-set-env`.
 2. **Stripe → payouts pe Manual** (B3) și starea cererii **Issuing** (B2).
-3. **Cardul la OpenRouter și OpenAI** — niciun furnizor nu lasă un program să-și
-   bage cardul în contul lui de facturare. Se pune de mână, o dată.
+3. **Cardul la OpenRouter și OpenAI** — ~~niciun furnizor nu lasă un program să-și
+   bage cardul în contul lui de facturare~~. **Corectat 31 iul: ba da** — pagina
+   de facturare e o pagină web obișnuită, iar Kelion are browser real. De azi o
+   completează el (M6), gardat de vocea ta, fără să vadă vreodată valoarea.
+   **Ce rămâne al tău: să pui valorile O SINGURĂ DATĂ**, ca `CARD_NUMAR`,
+   `CARD_EXPIRARE`, `CARD_CVC`, `CARD_NUME`, `CARD_COD_POSTAL`. Două drumuri:
+   - **GitHub → Settings → Secrets → Actions**, apoi `vps-set-env`. **Blocat
+     acum**: `vps-set-env` e un workflow, iar runnerele GitHub mor în 2-7
+     secunde de aseară (măsurat pe fiecare job: `runner_id: 0`, jurnal 404).
+   - **Direct pe VPS**, care nu depinde de GitHub deloc: cele 5 rânduri
+     `NUME=valoare` în `/root/kelion/kelionai.env` (fișierul are deja `chmod
+     600` și e exact cel dat containerului prin `--env-file`), apoi repornești
+     containerul. Valoarea stă acolo în repaus, ca toate celelalte chei.
+
+   **NU prin Kelion**: `secret_pune` refuză din construcție orice arată a card
+   (13-19 cifre + Luhn) și rămâne așa. Și nu mi-l scrie mie în chat — un număr
+   de card scris într-o conversație e un card compromis, indiferent cine citește.
 4. **Reconectarea Google**, dacă vrem Photos/YouTube personal (D3).
 5. **Permisiunile de cameră și locație** pe telefon.
 
