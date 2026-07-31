@@ -444,7 +444,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         // ── §6 CREIER UNIC — vocea = urechile și gura ACELUIAȘI creier ────────
         // Escaladarea rulează pe EXACT același orchestrator ca scrisul
         // (runOrchestrator prin voiceBrainTurn), cu aceeași personă (SYSTEM_PROMPT),
-        // același model (Gemini direct/resolveModel('work'), ca scrisul) și poarta
+        // model rapid (Gemini direct / treapta de chat — vocea are alt ceas) și poarta
         // faptei — NU pe un motor de creier separat (brainCompleteWithTools). Așa
         // dispare dublura: un singur creier gândește și în scris, și în voce.
         // Uneltele de introspecție (sursă/DB/sănătate/constructor) rămân aceleași,
@@ -465,19 +465,32 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           return execIntrospection(tname, targs)
         }
         const brainTools = introspectionTools as unknown as AnthropicTool[]
-        // Modelul: ca la scris (§6 creier unic) — și de-asta se schimbă ODATĂ cu
-        // el. Adrian, 31 iul: „pune-l creier nemotron-3-ultra" · „modifici tot ce
-        // trebuie să fie el". Aici se alegea automat un model PLĂTIT pentru owner, adică
-        // vocea îi consuma banii pe un model plătit în timp ce scrisul mergea pe
-        // creierul ales de el. Două creiere diferite pe același om = exact ce
-        // rezolvase §6 („creier unic"), stricat din altă parte.
-        // Acum: ownerul primește pe VOCE același implicit ca pe SCRIS.
-        const ownerModel = isAdmin ? await resolveModel('work') : null
-        const primaryModel = ownerModel
-          ? ownerModel
-          : geminiDirectAvailable()
-            ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-            : await resolveModel('work')
+        // ── VOCEA ARE ALT CEAS DECÂT SCRISUL (Adrian, 31 iul) ────────────────
+        //
+        // Acum o oră am rutat vocea pe creierul de la scris, la ordinul lui
+        // („modifici tot ce trebuie să fie el"). Zece minute după ce a ajuns
+        // live: „nu poate susține chat audio". Eu am rupt-o.
+        //
+        // CAUZA, și e o limită fizică, nu o setare: creierul de la scris e
+        // Nemotron Ultra — 550 de miliarde de parametri, cu raționament intern,
+        // pe treapta gratuită cu 20 de cereri pe minut. La scris, câteva secunde
+        // de gândire sunt bune: răspunsul iese mai deștept. Într-o conversație
+        // vorbită, aceleași secunde sunt o pauză în care omul crede că a murit
+        // linia. Vocea are buget de sub o secundă până la primul cuvânt — asta
+        // NU se negociază cu un model de 550B.
+        //
+        // Deci: SCRISUL pe creierul cel mai capabil, VOCEA pe cel mai rapid.
+        // Nu sunt „două creiere" în sensul pe care îl repara §6 — acolo problema
+        // era că vocea avea altă PERSONĂ, alte unelte și altă memorie. Alea
+        // rămân identice. Doar viteza diferă, fiindcă meseria diferă.
+        //
+        // `chatDefault` (gemma-4-26b) e făcut pentru asta: 26B totali din care
+        // doar 4B activi, vede, știe unelte, gratuit. Când vocea are nevoie de
+        // gândire grea, escaladează la creierul mare prin `ask_brain` — acolo
+        // omul ȘTIE că așteaptă, fiindcă a cerut ceva greu.
+        const primaryModel = geminiDirectAvailable()
+          ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+          : await resolveModel('chat')
         let answer = ''
         try {
           answer = await voiceBrainTurn(request, {
@@ -487,11 +500,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             systemPrompt: brainSystem,
             onCost: (usd) => { toolCostUsd += usd },
           })
-          // Gemini direct a picat în cursă (fără text) → o dată pe modelul work,
-          // exact ca fallback-ul din scris (chat.ts).
+          // Gemini direct a picat în cursă (fără text) → o dată pe treapta de
+          // chat, ALT furnizor (OpenRouter, nu Google), deci o pană la unul nu
+          // e pană la amândoi.
+          // Rezerva era pe treapta 'work' — adică pe creierul mare. Într-o
+          // conversație vorbită, o rezervă lentă e la fel de stricată ca o cale
+          // principală lentă: omul tot așteaptă. Rezerva vocii trebuie să fie
+          // tot rapidă. (Vezi comentariul lung de la alegerea modelului.)
           if (!answer && primaryModel.startsWith(GEMINI_DIRECT_PREFIX)) {
             answer = await voiceBrainTurn(request, {
-              model: await resolveModel('work'),
+              model: await resolveModel('chat'),
               tools: brainTools,
               execTool: execForBrain,
               systemPrompt: brainSystem,
