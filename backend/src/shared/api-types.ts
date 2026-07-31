@@ -79,6 +79,13 @@ export interface ExpenseLine {
    *  (gratuit, sau platit din alta parte) — atunci nu se afiseaza niciun buton,
    *  ca sa nu-l trimitem pe om intr-un gol. */
   billingUrl?: string
+  /** MĂSURAT pe pagina furnizorului (31 iul): cardul e la dosar acolo. Lipsește
+   *  dacă nimeni n-a fost pe pagina aia — atunci nu se afișează nimic, fiindcă
+   *  „nu știu" nu se scrie ca „nu" (regula #1). */
+  cardPus?: boolean
+  /** MĂSURAT: reîncărcarea automată e pornită. Ăsta e scopul — un card fără
+   *  plată automată înseamnă că peste o lună Kelion tace din nou. */
+  platiAutomate?: boolean
 }
 
 /** O întrebare pusă lui Stripe și ce a răspuns. Panoul le arată pe toate, ca

@@ -910,6 +910,12 @@ export default function AdminPanel({
                         .map((e, i) => (
                           <span key={e.name}>
                             {i > 0 && ' · '}
+                            {/* CE S-A MĂSURAT pe pagina furnizorului, nu ce a
+                                spus cineva: 🔁 = reîncărcare automată pornită,
+                                💳 = doar cardul la dosar (deci NEterminat).
+                                Furnizorul pe care nu l-a atins nimeni n-are
+                                niciun semn — „nu știu" nu se scrie ca „nu". */}
+                            {e.platiAutomate ? '🔁 ' : e.cardPus ? '💳 ' : ''}
                             {e.billingUrl ? (
                               <a href={e.billingUrl} target="_blank" rel="noreferrer">
                                 {e.name}
