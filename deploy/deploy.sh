@@ -176,6 +176,17 @@ echo "== 6b. Sentinela locală (cron la 3 min — pulsul lui Kelion, zero cost) 
 install -m 700 "$REPO/deploy/sentinela-locala.sh" /root/kelion/sentinela-locala.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/sentinela-locala.sh' ; echo '*/3 * * * * /root/kelion/sentinela-locala.sh >> /root/kelion/sentinela.log 2>&1' ) | crontab -
 
+echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost) =="
+# Adrian, 31 iul: „nu poți corecta modul de lucru, pică de fiecare dată" —
+# `pr-verify.yml` a picat de 31 de ori la rând, în 3-11 secunde, cu runner_id 0
+# și loguri 404 (facturare GitHub blocată la nivel de organizație). A picat pe
+# cod, pe configurare și pe un fișier de text deopotrivă, deci roșul ăla nu
+# spune nimic despre lucrare. Aceleași porți rulate aici, pe fierul deja plătit,
+# cu verdictul scris ca un comentariu pe PR. Zero AI, zero minute GitHub.
+# Sare peste rulare dacă VPS-ul e deja încărcat — producția are prioritate.
+install -m 700 "$REPO/deploy/porti-pr.sh" /root/kelion/porti-pr.sh
+( crontab -l 2>/dev/null | grep -v '/root/kelion/porti-pr.sh' ; echo '*/10 * * * * /root/kelion/porti-pr.sh >> /root/kelion/porti-pr.log 2>&1' ) | crontab -
+
 echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
 SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
 V=""
