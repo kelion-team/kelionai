@@ -16,7 +16,7 @@
 // „primele caractere". O cheie pe jumătate e tot o cheie scursă. Se întorc doar
 // numele, dacă e prezentă, și câte caractere are — atât cât să deosebești „nu e"
 // de „e, dar e goală" sau „e, dar e trunchiată".
-import { config, ENV_ALIASES } from '../config.js'
+import { ENV_ALIASES } from '../config.js'
 
 export interface EnvVarState {
   /** Numele EXACT al variabilei, cum îl caută codul. */
@@ -43,9 +43,9 @@ const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] 
   { alias: ENV_ALIASES.openrouterKey, name: 'OPENROUTER_API_KEY', what: 'creierul (chat, gândire, traduceri)', breaks: 'nu răspunde nimic' },
   { alias: ENV_ALIASES.databaseUrl, name: 'DATABASE_URL', what: 'baza de date', breaks: 'conturi, credite, istoric — toate' },
   { alias: ENV_ALIASES.sessionSecret, name: 'SESSION_SECRET', what: 'sesiunile de login', breaks: 'nimeni nu poate rămâne logat' },
-  { alias: ENV_ALIASES.stripeSecretKey, name: 'STRIPE_SECRET_KEY', what: 'plățile', breaks: 'nu se pot cumpăra credite' },
-  { alias: ENV_ALIASES.stripeWebhookSecret, name: 'STRIPE_WEBHOOK_SECRET', what: 'confirmarea plăților de la Stripe', breaks: 'plata trece dar creditele nu intră' },
-  { alias: ENV_ALIASES.stripePublishableKey, name: 'STRIPE_PUBLISHABLE_KEY', what: 'afișarea numărului cardului în panou', breaks: 'butonul „Vezi numărul cardului" nu apare' },
+  { name: 'REVOLUT_PAY_LINK', what: 'linkul de plată Revolut (cumpărarea de credite)', breaks: 'butonul de plată nu duce nicăieri' },
+  { name: 'ENABLE_BANKING_APP_ID', what: 'citirea plăților din cont (Enable Banking)', breaks: 'plățile nu se creditează singure' },
+  { name: 'ENABLE_BANKING_PRIVATE_KEY_B64', what: 'semnătura pentru Enable Banking', breaks: 'plățile nu se creditează singure' },
   { name: 'GOOGLE_CLIENT_ID', what: 'login cu Google', breaks: 'butonul Google nu merge' },
   { name: 'GOOGLE_CLIENT_SECRET', what: 'login cu Google', breaks: 'butonul Google nu merge' },
   { alias: ENV_ALIASES.geminiKey, name: 'GEMINI_API_KEY', what: 'creier de rezervă + vedere', breaks: 'cade pe modele mai slabe' },
@@ -94,7 +94,7 @@ export function envOrphans(): string[] {
   for (const v of ASTEPTATE) for (const n of v.alias ?? [v.name]) stiute.add(n)
   for (const n of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI', 'GOOGLE_TTS_VOICE',
     'GEMINI_MODEL', 'ADMIN_EMAIL', 'ALLOWLIST', 'MAIL_USER', 'MAIL_FORWARD_TO', 'MAIL_IMAP_HOST',
-    'MAIL_IMAP_PORT', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'STRIPE_CURRENCY', 'NODE_ENV']) stiute.add(n)
+    'MAIL_IMAP_PORT', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'BILLING_CURRENCY', 'ENABLE_BANKING_ACCOUNT_UID', 'NODE_ENV']) stiute.add(n)
   return Object.keys(process.env)
     .filter((n) => CUVINTE.test(n) && !stiute.has(n) && !/^(OPENAI|OPENROUTER)_(REALTIME|TTS|TRANSCRIBE|CHAT|WORK|TOP|IMAGE|SEARCH)/.test(n))
     .sort()
@@ -119,10 +119,4 @@ export function envSummary(): { total: number; lipsa: number; goale: number; num
  *  o cheie scrisă după pornire nu intră până la repornirea containerului. */
 export function processStartedAt(): string {
   return new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString()
-}
-
-/** Cheia Stripe e de test sau de live? Aceeași întrebare, alt loc. */
-export function stripeMode(): 'live' | 'test' | 'lipsă' {
-  if (!config.stripe.secretKey) return 'lipsă'
-  return /_test_/.test(config.stripe.secretKey) ? 'test' : 'live'
 }

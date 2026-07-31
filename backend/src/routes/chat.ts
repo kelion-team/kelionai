@@ -44,7 +44,6 @@ import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiD
 import { brainComplete, describeScene } from '../services/brain.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
-import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
@@ -1221,15 +1220,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Paywall: customers need prepaid credit; the owner (admin) is exempt, and
-    // when Stripe isn't configured the app stays free/ungated. Clean binary stop
-    // in the user's language + a paywall frame so the UI shows the top-up link.
+    // when payments aren't configured (no Revolut link) the app stays
+    // free/ungated. Clean binary stop in the user's language + a paywall frame
+    // so the UI shows the top-up link.
     if (
-      config.stripe.secretKey &&
+      config.revolut.payLink &&
       user.role !== 'admin' &&
-      (await getBalance(user.email)) <= 0 &&
-      // Ultima șansă înainte de paywall: reîncărcare automată din cardul salvat
-      // (dacă userul a activat-o). Dacă reușește, continuă fără să-l blocheze.
-      !(await maybeAutoRecharge(user.email, user.name)) &&
       (await getBalance(user.email)) <= 0
     ) {
       reply.hijack()
@@ -2069,8 +2065,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       if (cost > 0) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
-      // Proactiv, în fundal: reîncărcarea automată rămâne pe clienți (cardul salvat).
-      if (user.role !== 'admin') void maybeAutoRecharge(user.email, user.name)
     }
     },
   )

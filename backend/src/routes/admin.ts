@@ -34,7 +34,7 @@ import {
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
-import { stareCitirePlati } from '../services/openBanking.js'
+import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
 import { stareAutonomie } from '../services/autonomie.js'
 import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
 import { dovezileAutonomiei } from '../services/dovezi.js'
@@ -44,8 +44,7 @@ import { getOpenRouterBalance } from '../services/openrouter.js'
 import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
-import { envCheck, envOrphans, envSummary, processStartedAt, stripeMode } from '../services/envCheck.js'
-import { getStripeBalance, createSaleCheckout, getMoneyCircuit, createKelionCard, createCardEphemeralKey, createOwnerDeposit, createAdminPayout, lastAutoFundStatus } from '../services/stripe.js'
+import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/envCheck.js'
 import { sendMail } from '../services/mail.js'
 import { fetchRecentInbox } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
@@ -287,10 +286,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, stripeBal, vps] = await Promise.all([
+    const [pool, orBalance, vps] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
-      getStripeBalance(),
       resurseGazda(),
     ])
     return reply.send({
@@ -317,68 +315,39 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         live: orBalance.ok,
         error: orBalance.error,
       },
-      // PUNGA STRIPE în bară (Adrian, 24 iul: „după OpenRouter, banii în
-      // Stripe, reali") — disponibil + în tranzit, doar pentru admin.
-      stripe: stripeBal
-        ? {
-            available: stripeBal.available,
-            pending: stripeBal.pending,
-            currency: stripeBal.currency,
-            // Banii care EXISTĂ, dar în altă monedă — ca „£0.00" să nu mai poată
-            // ascunde un sold real (vezi comentariul din getStripeBalance).
-            alteMonede: stripeBal.alteMonede,
-          }
-        : null,
       pool,
     })
   })
 
-  // The owner's REAL money picture (admin only): live Stripe balance (revenue
-  // held at Stripe), real provider cost consumed, real profit, and the per-AI
-  // cost breakdown. No hand-typed figures.
+  // Imaginea REALĂ a banilor ownerului (doar admin): soldul real de la
+  // furnizorul creierului, costul real consumat la furnizori și profitul real.
+  // Nicio cifră scrisă de mână. (Stripe a ieșit total — 31 iul.)
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [stripe, account, costs, orBalance, circuit] = await Promise.all([
-      getStripeBalance(),
+    const [account, costs, orBalance] = await Promise.all([
       getAdminAccount(),
       getCostSummary(),
       getOpenRouterBalance(),
-      getMoneyCircuit(),
     ])
     // ── PUNGA UNICĂ (Adrian, 30 iul: „o singură pungă... nu rămâne decât REAL,
     // fără hardcode") ────────────────────────────────────────────────────────
-    // Banii tăi stau, fizic, în trei locuri pe care NU le putem contopi (așa e
-    // construit Stripe: cardul virtual are obligatoriu punga lui separată, iar
-    // creditul de la furnizorul creierului e la el în cont). Ce PUTEM face — și
-    // ce lipsea — e să nu mai existe o a patra cifră, scrisă de mână.
-    //
-    // Deci: o singură valoare, ADUNATĂ din cele trei surse externe, fiecare
-    // verificabilă la sursa ei. Dacă o sursă nu răspunde, spunem că lipsește
-    // (`complete: false`) — nu o socotim zero, fiindcă „£0 pentru că n-am putut
-    // citi" arată exact ca „£0 pentru că n-ai bani", și alea două nu sunt
-    // același lucru.
-    const usdInMoneda = config.stripe.usdToCurrency
+    // O singură valoare, ADUNATĂ din sursele externe verificabile la sursa lor.
+    // Dacă o sursă nu răspunde, spunem că lipsește (`complete: false`) — nu o
+    // socotim zero, fiindcă „£0 pentru că n-am putut citi" arată exact ca
+    // „£0 pentru că n-ai bani", și alea două nu sunt același lucru.
+    const usdInMoneda = config.billing.usdToCurrency
     const parti = {
-      stripeAvailable: stripe?.available ?? null,
-      stripePending: stripe?.pending ?? null,
-      // Punga cardului: EXACT ce-a răspuns `/v1/balance`, nu ce-a răspuns altă
-      // rută. Aici scria `circuit.error ? null : …` — adică un 403 pe
-      // `/v1/account` (setările contului) făcea punga cardului să pară
-      // necitibilă, deși soldul se citise perfect. Eroarea unei întrebări
-      // otrăvea răspunsul alteia.
-      stripeIssuing: circuit.issuingAvailable,
       openrouter: orBalance.ok ? orBalance.balance * usdInMoneda : null,
     }
     const complete = Object.values(parti).every((v) => v !== null)
     const total = Object.values(parti).reduce<number>((s, v) => s + (v ?? 0), 0)
     return reply.send({
-      stripe,
       // Punga: cât ai, cu defalcarea din care s-a adunat și de unde lipsește.
       punga: { total: Math.round(total * 100) / 100, complete, parti },
       spent: account.spent,
       profit: account.profit,
-      currency: stripe?.currency ?? 'gbp',
+      currency: config.billing.currency,
       byKind: costs.byKind,
       // Consumat AZI (USD, real) — pentru cardul „Consumat azi" din tabul Bani.
       today: costs.today,
@@ -469,7 +438,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Ora pornirii procesului: răspunde la întrebarea care chiar contează —
       // „am scris cheia ÎNAINTE sau DUPĂ ce a pornit aplicația?"
       startedAt: processStartedAt(),
-      stripeMode: stripeMode(),
     })
   })
 
@@ -519,24 +487,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // Ruta /api/admin/pool a fost ȘTEARSĂ (Adrian, 30 iul): scria de mână cât
   // credea omul că are în pungă, iar panoul afișa cifra aia ca fapt. Câți bani
-  // ai se citește acum de la Stripe și OpenRouter, care chiar îi țin.
+  // ai se citește din contul bancar (Enable Banking) și de la OpenRouter.
 
   // CIRCUITUL BANILOR din adminul Kelionai (Adrian, 24 iul): starea live a
-  // fiecărei verigi Stripe→AI + crearea cardului virtual prin API. STRICT admin.
+  // fiecărei verigi plată→AI. STRICT admin.
   app.get('/api/admin/money-circuit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // ALIMENTAREA AUTOMATĂ A CARDULUI, VIZIBILĂ (audit „cod abandonat", 29 iul):
-    // `lastAutoFundStatus` exista, dar n-o citea nimeni — deci dacă alimentarea
-    // automată a cardului lui Kelion EȘUA, nu se vedea nicăieri: creierul rămânea
-    // fără bani „din senin". Acum ultima încercare (când, reușită sau nu, cu
-    // motivul) intră în circuitul banilor din admin, lângă restul verigilor.
     // `citirePlati` = starea cititorului de tranzacții Revolut. Fără el, panoul
     // n-ar putea deosebi „n-a plătit nimeni" de „nu pot citi contul" — exact
     // confuzia care a costat o zi întreagă pe 30 iul.
     return reply.send({
-      ...(await getMoneyCircuit()),
-      autoFund: lastAutoFundStatus(),
       citirePlati: stareCitirePlati(),
       // `autonomie` = ultima trecere a buclei care îi dă lui Kelion de lucru
       // FĂRĂ să-i ceară cineva (Adrian, 30 iul: „fă-l autonom"). Se afișează
@@ -576,85 +537,33 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ oprit })
   })
 
-  app.post<{ Body: { line1?: string; line2?: string; city?: string; postal_code?: string; country?: string } }>(
-    '/api/admin/money-circuit/card',
-    async (req, reply) => {
+  // ── LEGAREA CONTULUI REVOLUT (consimțământ PSD2, Enable Banking) ───────────
+  // Două rute care duc owner-ul prin consimțământ fără SSH:
+  //   1. start  → URL-ul de deschis în browser (aprobarea se dă în app Revolut)
+  //   2. finalizeaza → cu codul din URL-ul de întoarcere, salvăm contul legat
+  // Consimțământul expiră la max. 90 zile (PSD2) — aceleași rute îl reînnoiesc.
+  // `redirect_url` trebuie declarat în Control Panel Enable Banking.
+  app.post('/api/admin/plati/legatura/start', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    // Adresa titularului vine de la owner (vezi comentariul din createKelionCard):
-    // înainte era inventată în cod, ceea ce putea da refuz la verificarea de adresă.
-    const r = await createKelionCard(user.email, {
-      line1: String(req.body?.line1 ?? ''),
-      line2: req.body?.line2 ? String(req.body.line2) : undefined,
-      city: String(req.body?.city ?? ''),
-      postal_code: String(req.body?.postal_code ?? ''),
-      country: String(req.body?.country ?? 'GB'),
-    })
-    if ('error' in r) return reply.code(r.error === 'bad_address' ? 400 : 502).send(r)
-    return reply.send({ ok: true, ...r })
-  })
-
-  // NUMĂRUL CARDULUI ÎN PANOU (Adrian, 30 iul: „nu mă descurc, intră și ajută-mă").
-  // Schimbă nonce-ul făcut de Stripe.js în browser pe o cheie efemeră de 15 min.
-  // Serverul NU vede cifrele cardului — vede un nonce; numărul se randează
-  // într-un iframe Stripe. Poarta e dublă, cum cere Stripe pentru ruta asta:
-  // sesiune de admin ȘI încuietoarea de admin ridicată (dacă e armată), fiindcă
-  // dincolo de ea stă un instrument de plată.
-  app.post<{ Body: { card_id?: string; nonce?: string } }>('/api/admin/money-circuit/card-key', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    if ((await isLockArmed()) && !hasUnlock(req, user.email)) return reply.code(403).send({ error: 'locked' })
-    const r = await createCardEphemeralKey(String(req.body?.card_id ?? ''), String(req.body?.nonce ?? ''))
+    const redirectUrl = `https://${req.headers.host ?? 'kelionai.app'}/admin`
+    const r = await incepeLegaturaPlati(redirectUrl)
     if ('error' in r) return reply.code(502).send(r)
     return reply.send(r)
   })
 
-  // DEPUNEREA OWNERULUI (Adrian, 24 iul: „de unde din admin depun bani să
-  // ajungă în Stripe și din Stripe în OpenRouter?"): checkout marcat
-  // owner_deposit — bani în pungă FĂRĂ credite; transferul automat îi duce
-  // spre card → AI. STRICT admin.
-  app.post<{ Body: { pounds?: number } }>('/api/admin/deposit', async (req, reply) => {
+  app.post<{ Body: { code?: string } }>('/api/admin/plati/legatura/finalizeaza', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const pounds = Math.round(Number(req.body?.pounds ?? 0))
-    if (!(pounds > 0) || pounds > 2000) return reply.code(400).send({ error: 'bad_amount' })
-    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
-    const r = await createOwnerDeposit(user.email, pounds, baseUrl)
+    const r = await finalizeazaLegaturaPlati(String(req.body?.code ?? ''))
     if ('error' in r) return reply.code(502).send(r)
-    return reply.send({ ok: true, url: r.url, pounds })
+    return reply.send(r)
   })
 
-  // PAYOUT ADMIN (Adrian, 24 iul: „să scrie clar PAYOUT admin, către cardul
-  // declarat REAL"): declanșează payout-ul Stripe din admin — merge prin design
-  // DOAR către contul bancar/cardul real din Settings→Payouts, niciodată către
-  // cardul virtual. Pe extras: „PAYOUT ADMIN". STRICT admin.
-  app.post<{ Body: { pounds?: number } }>('/api/admin/payout', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const pounds = Number(req.body?.pounds ?? 0)
-    if (!(pounds > 0) || pounds > 10_000) return reply.code(400).send({ error: 'bad_amount' })
-    const r = await createAdminPayout(pounds)
-    if ('error' in r) return reply.code(502).send(r)
-    return reply.send({ ok: true, ...r })
-  })
-
-  // VÂNZARE DE CREDITE (Adrian, 24 iul: „se vând X credite pe bani; butonul de
-  // credite e doar la admin"). Adminul alege userul + X credite → primește
-  // linkul de plată Stripe pe care i-l trimite userului. La plată, userul
-  // primește EXACT X credite (webhook/reconciliere pe metadata sale_credits),
-  // cu tranzacția în registru. Userii NU au buton de cumpărare — doar afișare.
-  app.post<{ Body: { email?: string; credits?: number } }>('/api/admin/sell-credits', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const email = String(req.body?.email ?? '').trim().toLowerCase()
-    const credits = Math.floor(Number(req.body?.credits ?? 0))
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: 'bad_email' })
-    if (!(credits > 0) || credits > 100_000) return reply.code(400).send({ error: 'bad_credits' })
-    const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
-    const r = await createSaleCheckout(email, credits, baseUrl)
-    if ('error' in r) return reply.code(502).send(r)
-    return reply.send({ ok: true, url: r.url, pounds: r.pounds, credits, email })
-  })
+  // Aici au stat rutele de card virtual Stripe, depunere/payout prin Stripe și
+  // vânzarea de credite cu link de plată Stripe. Șterse odată cu Stripe (31
+  // iul): vânzarea de credite se face acum prin cod unic + transfer Revolut,
+  // iar creditarea manuală rămâne pe /api/admin/user (action: 'credit').
 
   // ── User management (admin only) ──────────────────────────────────────────
   // Block/unblock, grant credit, or delete a user. The ADMIN is hard-protected:
@@ -680,7 +589,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           const amount = Number(req.body?.amount)
           if (!Number.isFinite(amount) || amount === 0)
             return reply.code(400).send({ error: 'bad_amount' })
-          await grantCredit(email, amount, config.stripe.currency)
+          await grantCredit(email, amount, config.billing.currency)
           break
         }
         case 'delete':

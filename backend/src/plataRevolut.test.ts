@@ -21,7 +21,7 @@ const LINK = 'https://revolut.me/exemplu'
 vi.mock('./config.js', () => ({
   config: {
     revolut: { payLink: process.env.__TEST_REVOLUT_LINK ?? '' },
-    stripe: { secretKey: '', webhookSecret: 'whsec_x', currency: 'gbp', creditValue: 0.1, userShare: 0.75 },
+    billing: { currency: 'gbp', creditValue: 0.1, userShare: 0.75, usdToCurrency: 0.8 },
     adminEmail: 'adrianenc11@gmail.com',
     openrouter: { key: '' },
     openai: { key: '' },

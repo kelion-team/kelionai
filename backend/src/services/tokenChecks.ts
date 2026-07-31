@@ -1,7 +1,6 @@
 import { config } from '../config.js'
 import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
-import { getStripeBalance } from './stripe.js'
 import { mailEnabled, smtpTransport } from './mail.js'
 import { ImapFlow } from 'imapflow'
 
@@ -52,34 +51,17 @@ async function checkBrainKeys(): Promise<TokenCheck[]> {
   }
 }
 
-// 2. Stripe — cheia secretă trebuie să poată citi balance
-async function checkStripe(): Promise<TokenCheck> {
-  if (!config.stripe.secretKey) {
-    return { name: 'Stripe secret key', status: 'not_configured', requiredScope: 'Balance + Checkout' }
-  }
-  try {
-    const balance = await timed(15_000, () => getStripeBalance())
-    if (balance) {
-      // TOATE CELE TREI BUZUNARE, nu doar unul (Adrian: „Stripe e 0? am băgat
-      // bani"). Un depozit proaspăt stă în `pending` până se decontează, iar o
-      // alimentare pentru card intră direct în punga Issuing — niciuna nu apare
-      // în `available`. Afișând doar `available`, linia asta îl făcea să creadă
-      // că banii s-au evaporat.
-      const c = balance.currency.toUpperCase()
-      return {
-        name: 'Stripe secret key',
-        status: 'ok',
-        detail:
-          `disponibil ${balance.available} ${c} · în decontare ${balance.pending} ${c} · ` +
-          `punga cardului ${balance.issuing} ${c}`,
-        requiredScope: 'Balance + Checkout',
-      }
-    }
-    return { name: 'Stripe secret key', status: 'fail', detail: 'getStripeBalance a returnat null', requiredScope: 'Balance + Checkout' }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { name: 'Stripe secret key', status: 'fail', detail: msg, requiredScope: 'Balance + Checkout' }
-  }
+// 2. Plățile — linkul Revolut (încasare) + cheile Enable Banking (citirea
+// tranzacțiilor, pentru creditarea automată cu cod unic)
+function checkPlati(): TokenCheck[] {
+  const link: TokenCheck = config.revolut.payLink
+    ? { name: 'Revolut pay link', status: 'ok', detail: 'configurat', requiredScope: 'Payment link activ' }
+    : { name: 'Revolut pay link', status: 'not_configured', requiredScope: 'REVOLUT_PAY_LINK în env' }
+  const eb: TokenCheck =
+    config.enableBanking.appId && config.enableBanking.privateKeyB64
+      ? { name: 'Enable Banking (citire plăți)', status: 'ok', detail: 'appId + cheie privată prezente', requiredScope: 'AIS pe contul Revolut' }
+      : { name: 'Enable Banking (citire plăți)', status: 'not_configured', requiredScope: 'ENABLE_BANKING_APP_ID + ENABLE_BANKING_PRIVATE_KEY_B64' }
+  return [link, eb]
 }
 
 // 3. Google service account — folosit la TTS, ASR, Gemini, imagini
@@ -229,9 +211,8 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, stripe, googleSa, googleTts, openai, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
+  const [brain, googleSa, googleTts, openai, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
-    checkStripe(),
     checkGoogleServiceAccount(),
     checkGoogleTtsKey(),
     checkOpenAI(),
@@ -244,7 +225,7 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
   ])
   return [
     ...brain,
-    stripe,
+    ...checkPlati(),
     googleSa,
     googleTts,
     openai,

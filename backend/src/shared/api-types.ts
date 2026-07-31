@@ -2,7 +2,7 @@
 //
 // DE CE EXISTĂ (Adrian: „principiul permanent unic, fără duplicate"; „0 clone,
 // ăsta e targetul"): formele astea de date circulă prin API și erau declarate de
-// DOUĂ ori — o dată în backend (`db.ts`, `stripe.ts`) și o dată, identic, în
+// DOUĂ ori — o dată în backend (`db.ts`, serviciile de plată) și o dată, identic, în
 // frontend (`lib/admin.ts`). Detectorul le raporta ca cele mai mari clone din
 // proiect (42 + 36 + 20 = 98 de linii). Cauza nu era neglijență, ci lipsa unui
 // loc COMUN: cele două build-uri n-aveau niciun fișier partajat.
@@ -58,15 +58,9 @@ export interface DemoStats {
   recent: DemoRecent[]
 }
 
-/** CIRCUITUL BANILOR (admin-only): starea LIVE a fiecărei verigi Stripe→AI. */
-export interface IssuingCharge {
-  /** Cine a taxat cardul (numele comerciantului, exact cum îl dă Stripe). */
-  merchant: string
-  /** Suma în moneda contului (pozitivă = cheltuit). */
-  amount: number
-  /** Data, ISO. */
-  at: string
-}
+/** CIRCUITUL BANILOR (admin-only): starea LIVE a fiecărei verigi plată→AI.
+ *  Stripe a ieșit total (31 iul) — verigile vechi de card virtual au dispărut
+ *  odată cu el; ce rămâne aici sunt doar măsurători vii. */
 
 /** O cheltuiala a aplicatiei si de unde se plateste. Adrian, 30 iul: „se pot
  *  pune toate cheltuielile sa fie doar din punga?" — raspunsul e da, dar numai
@@ -95,75 +89,9 @@ export interface ExpenseLine {
   platiAutomate?: boolean
 }
 
-/** O întrebare pusă lui Stripe și ce a răspuns. Panoul le arată pe toate, ca
- *  omul să vadă DINTR-O PRIVIRE ce vede aplicația și ce nu — în loc să
- *  ghicească din cinci rânduri roșii care spun toate altceva. */
-export interface StripeProbe {
-  /** Ce am întrebat, pe înțelesul omului („soldul", „cardurile"). */
-  ce: string
-  /** Ruta exactă, pentru cine vrea să verifice singur. */
-  ruta: string
-  /** A răspuns cum trebuie? */
-  ok: boolean
-  /** Dacă nu: permisiunea care lipsește, cu numele ei din Stripe, sau codul HTTP. */
-  detaliu: string
-}
-
 export interface MoneyCircuit {
-  /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
-  payoutsInterval: string
-  /** 'active' | 'inactive' | 'pending' | 'unknown'. */
-  issuingStatus: string
-  /** `livemode:false` = CARD DE TEST. Arată exact ca unul real în dashboard, dar
-   *  numărul lui e respins de orice formular de plată real („numărul cardului
-   *  este incorect") fiindcă nu e un card, e o simulare. Adrian a pierdut o oră
-   *  pe capcana asta (30 iul) — de-aia steagul se vede în panou. */
-  cards: { id: string; last4: string; status: string; livemode: boolean }[]
-  /** Cheia Stripe din env e `live` sau `test`? Cu o cheie de test TOT panoul
-   *  arată cifre simulate — solduri, carduri, tranzacții. */
-  keyLivemode?: boolean
-  /** Stripe a răspuns bine la lista de carduri și n-a avut niciunul activ. Doar
-   *  cu steagul ăsta avem voie să scriem „card necreat": fără el, lista goală
-   *  poate însemna la fel de bine „n-am întrebat" sau „n-am avut voie". */
-  cardsChecked?: boolean
-  /** De ce n-am putut vedea cardurile (permisiune lipsă, eroare de rețea). */
-  cardsError?: string
-  /** Cheia PUBLICĂ Stripe (pk_live_…), dacă e pusă în env. Cu ea panoul poate
-   *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
-   *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
-  stripePk?: string
-  /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului.
-   *  `null` = N-AM PUTUT CITI, nu „ai zero". Erau confundate: câmpul pornea de
-   *  la 0 și rămânea 0 și când cererea pica, deci panoul arăta „£0.00" cu
-   *  aceeași încredere ca un zero adevărat. */
-  issuingAvailable: number | null
-  /** Fiecare întrebare pusă lui Stripe, cu răspunsul ei. Sursa de adevăr a
-   *  panoului: nu mai deducem starea contului dintr-un singur apel picat. */
-  probes?: StripeProbe[]
-  /** DOVADA că veriga 4 (cardul pus la furnizorii de AI) chiar există: dacă
-   *  OpenRouter/OpenAI au taxat cardul, aici sunt tranzacțiile lor. Listă goală
-   *  = cardul n-a fost încă folosit de nimeni, deci nu e legat (sau nu s-a
-   *  ajuns la prima taxare). Un rând care spune „e pornit" fără asta e o
-   *  presupunere, nu o stare. */
-  issuingCharges?: IssuingCharge[]
   /** Toate cheltuielile aplicatiei, cu locul de unde se platesc. */
   expenses?: ExpenseLine[]
-  /** REGULA BATUTA IN CUIE: platile catre AI trebuie sa iasa din punga.
-   *  Codul nu poate pune cardul in contul furnizorului (nu exista API), dar
-   *  poate PRINDE cand nu e pus: daca am consumat AI de X si cardul a fost
-   *  taxat cu 0, inseamna ca furnizorii sunt platiti din ALTA parte. */
-  pouchRule?: {
-    /** Cat am consumat la AI (masurat de noi), in moneda contului. */
-    spent: number
-    /** Cat a fost taxat cardul virtual. */
-    charged: number
-    /** Regula e respectata? */
-    ok: boolean
-    /** Ce e de facut, pe intelesul omului. */
-    verdict: string
-  }
-  /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
-  autoFund?: { at: string; ok: boolean; detail: string } | null
   /** Starea cititorului de plati Revolut (Adrian, 30 iul: creditare automata cu
    *  cod unic). `ok:false` = N-AM PUTUT CITI contul — altceva decat „n-a platit
    *  nimeni", si de-aia se raporteaza separat, nu ca un zero linistitor. */

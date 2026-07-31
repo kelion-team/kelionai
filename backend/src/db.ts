@@ -113,18 +113,20 @@ export async function initDb(): Promise<void> {
     -- JSONB, nu pgvector: fără extensii de instalat, cosine se calculează în
     -- Node peste ultimele câteva sute — la volumul actual e instant.
     ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB;
-    -- Prepaid credit wallet (Stripe). Balance is in the display currency (GBP);
-    -- topup_ref = the credited amount of the LAST top-up, so we can show the
-    -- "% of credit left" for the escalating low-credit alerts (30/20/10/5%).
+    -- Portofelul de credit preplătit. Soldul e în moneda de afișare (GBP);
+    -- topup_ref = suma creditată la ULTIMA alimentare, ca să afișăm
+    -- „% din credit rămas" pentru alertele escaladate (30/20/10/5%).
     CREATE TABLE IF NOT EXISTS wallets (
       user_email TEXT PRIMARY KEY,
       balance NUMERIC(14,6) NOT NULL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'gbp',
       topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0,
-      stripe_customer_id TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE wallets ADD COLUMN IF NOT EXISTS topup_ref NUMERIC(14,6) NOT NULL DEFAULT 0;
+    -- Stripe a ieșit total (Adrian, 31 iul: „resturile nu sunt necesare") —
+    -- coloana veche de client Stripe se șterge, nu avea istoric de păstrat.
+    ALTER TABLE wallets DROP COLUMN IF EXISTS stripe_customer_id;
     -- The owner's provider-credit pool (REAL money): the admin loads it; every
     -- AI call's real cost draws it down. remaining = loaded − total cost. Singleton.
     CREATE TABLE IF NOT EXISTS admin_pool (
@@ -191,8 +193,7 @@ export async function initDb(): Promise<void> {
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
     ALTER TABLE visits ADD COLUMN IF NOT EXISTS actions INT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_visits_email ON visits (user_email, last_seen_at DESC);
-    -- Ledger of top-ups (+) and usage (−). stripe_ref makes top-ups idempotent
-    -- so a webhook retry can never double-credit.
+    -- Registrul alimentărilor (+) și consumurilor (−) — structura e mai jos.
     -- ── PLĂȚI PRIN REVOLUT PRO, CU COD UNIC (Adrian, 30 iul) ─────────────────
     -- „în ziua de azi să ai gestiune manuală la mii de potențiali useri, asta
     -- oferi tu?" — avea dreptate. Ca plata să se crediteze SINGURĂ trebuie știut
@@ -221,18 +222,25 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_paycode_status ON payment_codes (status, created_at DESC);
     -- ACEEAȘI PLATĂ NU CREDITEAZĂ DE DOUĂ ORI, oricâte citiri se suprapun.
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_paycode_bankref ON payment_codes (bank_ref) WHERE bank_ref IS NOT NULL;
+    -- Registrul alimentărilor (+) și consumurilor (−). Coloana „ref" face
+    -- alimentările idempotente: aceeași plată nu se creditează de două ori,
+    -- oricâte citiri sau reîncercări se suprapun.
     CREATE TABLE IF NOT EXISTS billing_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
       kind TEXT NOT NULL,
       amount NUMERIC(14,6) NOT NULL,
-      stripe_ref TEXT,
+      ref TEXT,
       meta TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (stripe_ref) WHERE stripe_ref IS NOT NULL;
+    -- Stripe is fully out (31 Jul): the old column is dropped entirely
+    -- (it had no history worth keeping) and replaced by „ref".
+    ALTER TABLE billing_events DROP COLUMN IF EXISTS stripe_ref CASCADE;
+    ALTER TABLE billing_events ADD COLUMN IF NOT EXISTS ref TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_billing_ref ON billing_events (ref) WHERE ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_billing_user ON billing_events (user_email, created_at DESC);
-    -- STRIPE + CREDITS (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
+    -- CREDITE (ORDIN #6G): tabelă dedicată tranzacțiilor de cumpărare a creditelor.
     -- user_id = emailul utilizatorului (identificatorul unic folosit în tot sistemul).
     CREATE TABLE IF NOT EXISTS transactions (
       id BIGSERIAL PRIMARY KEY,
@@ -240,9 +248,12 @@ export async function initDb(): Promise<void> {
       amount NUMERIC(14,6) NOT NULL,
       credits NUMERIC(14,6) NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
-      stripe_payment_intent_id TEXT UNIQUE,
+      payment_ref TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE transactions DROP COLUMN IF EXISTS stripe_payment_intent_id CASCADE;
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_ref TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_transactions_ref ON transactions (payment_ref) WHERE payment_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions (user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions (status, created_at DESC);
     -- Capability gaps: things users asked for that Kelion CANNOT do yet. Kelion
@@ -928,7 +939,7 @@ export async function unblockUser(email: string): Promise<void> {
   }
 }
 
-/** Admin grants credit straight to a user's wallet (no Stripe, no split). */
+/** Admin grants credit straight to a user's wallet (cadou, fără split). */
 export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
   if (!dbEnabled() || !email || !(amount !== 0)) return
   const e = email.toLowerCase()
@@ -945,14 +956,14 @@ export async function grantCredit(email: string, amount: number, currency = 'gbp
     // billing_events, nici transactions → gaură în pista de audit + userul rămânea
     // pe „prima alimentare £20" deși avea sold. Acum ambele registre îl văd.
     await getPool().query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES ($1, 'grant', $2, $3, 'credit admin (fără Stripe)')`,
+      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
+       VALUES ($1, 'grant', $2, $3, 'credit admin')`,
       [e, amount, `grant:${e}:${Date.now()}`],
     )
     await getPool().query(
-      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+      `INSERT INTO transactions (user_id, amount, credits, status, payment_ref)
        VALUES ($1, $2, $3, 'admin_grant', NULL)`,
-      [e, amount, Math.floor(amount / config.stripe.creditValue)],
+      [e, amount, Math.floor(amount / config.billing.creditValue)],
     )
   } catch {
     /* non-fatal */
@@ -1145,12 +1156,12 @@ export async function getDownloadStats(): Promise<{
 
 // ── Shared memory: the common notebook both sides read + write ──
 
-// ── Prepaid wallet (Stripe credit) ──
+// ── Prepaid wallet (portofel de credite) ──
 
 // ── EMAILUL UNUI OM, O SINGURĂ FORMĂ, ÎN TOT SOFTUL ─────────────────────────
 //
 // Găsit întâi la portofel (teste, 30 iul): alimentările scriau de mult `lower($1)`
-// (auditul P2-3), dar CITIREA soldului, TAXAREA și clientul Stripe foloseau
+// (auditul P2-3), dar CITIREA soldului și TAXAREA foloseau
 // emailul EXACT cum vine din sesiune. Logarea locală îl coboară la litere mici;
 // logarea Google NU. Pentru un email cu majuscule („Ion@Firma.ro") userul plătea,
 // creditul intra pe un rând, aplicația citea altul → îi arăta 0 credite și îl
@@ -1201,66 +1212,42 @@ export async function debitWallet(email: string, amount: number, meta = ''): Pro
   }
 }
 
-export async function getStripeCustomer(email: string): Promise<string | null> {
-  if (!dbEnabled()) return null
-  try {
-    const r = await getPool().query<{ stripe_customer_id: string | null }>(
-      'SELECT stripe_customer_id FROM wallets WHERE user_email = $1',
-      [walletKey(email)],
-    )
-    return r.rows[0]?.stripe_customer_id ?? null
-  } catch {
-    return null
-  }
-}
-
-export async function setStripeCustomer(email: string, id: string): Promise<void> {
-  if (!dbEnabled()) return
-  try {
-    await getPool().query(
-      `INSERT INTO wallets (user_email, stripe_customer_id) VALUES ($1, $2)
-       ON CONFLICT (user_email) DO UPDATE SET stripe_customer_id = $2, updated_at = now()`,
-      [walletKey(email), id],
-    )
-  } catch {
-    // Non-fatal.
-  }
-}
-
-// Garda de idempotență a plăților: un stripe_ref deja înregistrat NU se creditează
+// Garda de idempotență a plăților: o referință deja înregistrată NU se creditează
 // a doua oară. Apelată în interiorul unei tranzacții deschise (apelantul face
-// ROLLBACK dacă e true). Era copiată în cele 3 credite (top-up, vânzare, refund) —
-// o singură sursă aici (principiul permanent: unic, fără duplicate).
+// ROLLBACK dacă e true). O singură sursă aici (principiul permanent: unic,
+// fără duplicate).
 async function billingRefSeen(client: pg.PoolClient, ref: string): Promise<boolean> {
-  const seen = await client.query('SELECT 1 FROM billing_events WHERE stripe_ref = $1', [ref])
+  const seen = await client.query('SELECT 1 FROM billing_events WHERE ref = $1', [ref])
   return (seen.rowCount ?? 0) > 0
 }
 
 /**
- * User top-up (Stripe). The user KEEPS `userShare` (75%) as spendable credit;
- * the remaining 25% is our profit, taken up front. Idempotent on stripeRef.
- * topup_ref becomes the new full balance — the reference for the % alerts.
+ * Alimentarea portofelului userului (plată confirmată — ex. transfer Revolut
+ * citit prin Enable Banking). Userul PĂSTREAZĂ `userShare` (75%) ca credit
+ * cheltuibil; restul de 25% e profitul nostru, luat din start. Idempotent pe
+ * `ref` (referința unică a plății). topup_ref devine noul sold complet —
+ * referința pentru alertele de procent.
  */
 export async function topUpUser(
   email: string,
   gross: number,
   currency: string,
-  stripeRef: string,
+  ref: string,
 ): Promise<boolean> {
-  if (!dbEnabled() || !(gross > 0) || !stripeRef) return false
-  const userCredit = gross * config.stripe.userShare
+  if (!dbEnabled() || !(gross > 0) || !ref) return false
+  const userCredit = gross * config.billing.userShare
   const profit = gross - userCredit
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    if (await billingRefSeen(client, stripeRef)) {
+    if (await billingRefSeen(client, ref)) {
       await client.query('ROLLBACK')
       return false
     }
     await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
        VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
-      [email, userCredit, stripeRef],
+      [email, userCredit, ref],
     )
     // Email NORMALIZAT (audit P2-3: un email cu alt caz creditat aici nu mai era
     // citit NICIODATĂ de endpoint-ul de sold) + topup_ref = NOUL SOLD complet
@@ -1272,21 +1259,19 @@ export async function topUpUser(
       [email, userCredit, currency],
     )
     await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
+      `INSERT INTO billing_events (user_email, kind, amount, ref, meta)
        VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
-      [email, profit, `${stripeRef}:profit`],
+      [email, profit, `${ref}:profit`],
     )
     // CONTABILITATE VIZIBILĂ (Adrian, 24 iul: „să văd REAL în baza de date cine
-    // a alimentat, cât, și repartizarea banilor"). Până acum, alimentările prin
-    // topUpUser (webhook + reconciliere) nu scriau NIMIC în `transactions` →
-    // tabul admin „Tranzacții" rămânea gol deși banii intrau. Acum fiecare
-    // alimentare lasă rândul contabil complet, în ACEEAȘI tranzacție SQL:
-    // suma brută plătită, creditele primite (75%), userul și referința Stripe.
+    // a alimentat, cât, și repartizarea banilor"). Fiecare alimentare lasă
+    // rândul contabil complet, în ACEEAȘI tranzacție SQL: suma brută plătită,
+    // creditele primite (75%), userul și referința unică a plății.
     await client.query(
-      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
+      `INSERT INTO transactions (user_id, amount, credits, status, payment_ref)
        VALUES ($1, $2, $3, 'paid', $4)
-       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
-      [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripeRef],
+       ON CONFLICT (payment_ref) DO UPDATE SET status = 'paid'`,
+      [email.toLowerCase(), gross, Math.floor(userCredit / config.billing.creditValue), ref],
     )
     await client.query('COMMIT')
     return true
@@ -1302,7 +1287,7 @@ export async function topUpUser(
   }
 }
 
-/** STRIPE + CREDITS (ORDIN #6G): înregistrări în tabela `transactions`. */
+/** Înregistrări în tabela `transactions` (ORDIN #6G). */
 
 export interface Transaction {
   id: number
@@ -1310,29 +1295,8 @@ export interface Transaction {
   amount: number
   credits: number
   status: string
-  stripe_payment_intent_id: string | null
+  payment_ref: string | null
   created_at: string
-}
-
-/** Actualizează statusul unei tranzacții după ID-ul Stripe PaymentIntent. */
-export async function updateTransactionStatus(
-  stripePaymentIntentId: string,
-  status: string,
-): Promise<void> {
-  if (!dbEnabled() || !stripePaymentIntentId) return
-  try {
-    // ORDINEA WEBHOOK-URILOR NU E GARANTATĂ (audit 27 iul): un
-    // `payment_failed` livrat DUPĂ `succeeded` marca pe veci o plată REUȘITĂ
-    // ca „failed" în istoricul userului și în tabul de tranzacții. O stare
-    // finală bună nu mai poate fi retrogradată.
-    await getPool().query(
-      `UPDATE transactions SET status = $2, created_at = COALESCE(created_at, now())
-       WHERE stripe_payment_intent_id = $1 AND status NOT IN ('succeeded', 'paid', 'refunded')`,
-      [stripePaymentIntentId, status],
-    )
-  } catch {
-    /* non-fatal */
-  }
 }
 
 /** Istoricul de cumpărături al unui utilizator. */
@@ -1340,7 +1304,7 @@ export async function listTransactionsForUser(email: string, limit = 50): Promis
   if (!dbEnabled() || !email) return []
   try {
     const r = await getPool().query<Transaction>(
-      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
+      `SELECT id, user_id, amount, credits, status, payment_ref, created_at::text
        FROM transactions WHERE user_id = $1
        ORDER BY created_at DESC LIMIT $2`,
       [email.toLowerCase(), Math.max(1, Math.min(500, limit))],
@@ -1356,211 +1320,13 @@ export async function listAllTransactions(limit = 200): Promise<Transaction[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<Transaction>(
-      `SELECT id, user_id, amount, credits, status, stripe_payment_intent_id, created_at::text
+      `SELECT id, user_id, amount, credits, status, payment_ref, created_at::text
        FROM transactions ORDER BY created_at DESC LIMIT $1`,
       [Math.max(1, Math.min(500, limit))],
     )
     return r.rows
   } catch {
     return []
-  }
-}
-
-/** Creditare unitară din PaymentIntent (ORDIN #6G): tranzacție + wallet + profit.
- *  Idempotent pe stripe_payment_intent_id. */
-export async function topUpUserFromPaymentIntent(
-  email: string,
-  gross: number,
-  currency: string,
-  stripePaymentIntentId: string,
-): Promise<boolean> {
-  if (!dbEnabled() || !(gross > 0) || !stripePaymentIntentId) return false
-  const userCredit = gross * config.stripe.userShare
-  const profit = gross - userCredit
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    const seen = await client.query<{ status: string }>(
-      'SELECT status FROM transactions WHERE stripe_payment_intent_id = $1',
-      [stripePaymentIntentId],
-    )
-    // CAPCANA „pending" DEZAMORSATĂ (audit 24 iul, P0-3): înainte, ORICE rând
-    // existent (inclusiv `pending` de la plasarea intenției) era tratat ca „deja
-    // creditat" → status devenea `succeeded` FĂRĂ niciun ban în portofel: user
-    // plătit, credit zero, tabelă „verde". Acum sărim peste creditare DOAR dacă
-    // statusul anterior era chiar `succeeded`; pentru pending/failed continuăm cu
-    // creditarea completă (dublarea rămâne blocată de uniq_billing_ref → ROLLBACK).
-    const priorStatus = seen.rows[0]?.status ?? null
-    if (priorStatus === 'succeeded' || priorStatus === 'paid') {
-      await client.query('COMMIT')
-      return true
-    }
-    if (priorStatus !== null) {
-      await client.query(
-        `UPDATE transactions SET status = 'succeeded' WHERE stripe_payment_intent_id = $1`,
-        [stripePaymentIntentId],
-      )
-    } else {
-      // Creditele în UNITĂȚI de credit (1 credit = £0.10), consecvent cu
-      // topUpUser și cu afișarea din admin — nu în lire (era de 10× mai mic).
-      await client.query(
-        `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
-         VALUES ($1, $2, $3, 'succeeded', $4)`,
-        [email.toLowerCase(), gross, Math.floor(userCredit / config.stripe.creditValue), stripePaymentIntentId],
-      )
-    }
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES (lower($1), 'topup', $2, $3, 'user 75%')`,
-      [email, userCredit, stripePaymentIntentId],
-    )
-    // Email NORMALIZAT (P2-3) + topup_ref = NOUL SOLD complet (P1-3), nu doar
-    // ultima alimentare — altfel procentul de alertă avea referință falsă.
-    await client.query(
-      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
-       ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
-      [email, userCredit, currency],
-    )
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES (lower($1), 'profit', $2, $3, 'margin 25%')`,
-      [email, profit, `${stripePaymentIntentId}:profit`],
-    )
-    await client.query('COMMIT')
-    return true
-  } catch {
-    try {
-      await client.query('ROLLBACK')
-    } catch {
-      /* ignore */
-    }
-    return false
-  } finally {
-    client.release()
-  }
-}
-
-/** VÂNZARE ADMIN: creditează EXACT `credits` credite (nu formula 75%, ca să nu
- *  apară erori de rotunjire — userul primește fix ce i s-a vândut). Idempotent
- *  pe stripe_ref. Diferența dintre brut și valoarea creditelor = marja, în
- *  registru ca de obicei. */
-export async function creditSaleExact(
-  email: string,
-  gross: number,
-  currency: string,
-  stripeRef: string,
-  credits: number,
-): Promise<boolean> {
-  if (!dbEnabled() || !(gross > 0) || !stripeRef || !(credits > 0)) return false
-  const userCredit = Math.round(credits * config.stripe.creditValue * 100) / 100
-  const profit = Math.max(0, Math.round((gross - userCredit) * 100) / 100)
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    if (await billingRefSeen(client, stripeRef)) {
-      await client.query('ROLLBACK')
-      return false
-    }
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES (lower($1), 'topup', $2, $3, 'vânzare admin — credite exacte')`,
-      [email, userCredit, stripeRef],
-    )
-    await client.query(
-      `INSERT INTO wallets (user_email, balance, currency, topup_ref) VALUES (lower($1), $2, $3, $2)
-       ON CONFLICT (user_email) DO UPDATE
-         SET balance = wallets.balance + $2, topup_ref = wallets.balance + $2, updated_at = now()`,
-      [email, userCredit, currency],
-    )
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES (lower($1), 'profit', $2, $3, 'marjă vânzare admin')`,
-      [email, profit, `${stripeRef}:profit`],
-    )
-    await client.query(
-      `INSERT INTO transactions (user_id, amount, credits, status, stripe_payment_intent_id)
-       VALUES (lower($1), $2, $3, 'paid', $4)
-       ON CONFLICT (stripe_payment_intent_id) DO UPDATE SET status = 'paid'`,
-      [email, gross, Math.floor(credits), stripeRef],
-    )
-    await client.query('COMMIT')
-    return true
-  } catch {
-    try {
-      await client.query('ROLLBACK')
-    } catch {
-      /* ignore */
-    }
-    return false
-  } finally {
-    client.release()
-  }
-}
-
-/** RETRAGEREA creditelor la REFUND (incident real 24 iul: plată rambursată pe
- *  card dar creditată în portofel = credite pentru bani inexistenți). Găsește
- *  alimentarea după stripe_ref, scade creditul userului din portofel, marchează
- *  tranzacția `refunded` și lasă urma `refund` în registru. Idempotent pe
- *  `<ref>:refund` — un refund retras o dată nu se mai retrage a doua oară. */
-export async function revokeTopUpForRefund(stripeRef: string): Promise<boolean> {
-  if (!dbEnabled() || !stripeRef) return false
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
-    const t = await client.query<{ user_email: string; amount: string }>(
-      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'topup'`,
-      [stripeRef],
-    )
-    if (!t.rows[0]) {
-      await client.query('ROLLBACK')
-      return false
-    }
-    if (await billingRefSeen(client, `${stripeRef}:refund`)) {
-      await client.query('ROLLBACK')
-      return false
-    }
-    const email = t.rows[0].user_email
-    const userCredit = Number(t.rows[0].amount)
-    await client.query(
-      `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-       VALUES (lower($1), 'refund', $2, $3, 'plată rambursată pe card — credit retras')`,
-      [email, userCredit, `${stripeRef}:refund`],
-    )
-    await client.query(
-      `UPDATE wallets SET balance = balance - $2, updated_at = now() WHERE user_email = lower($1)`,
-      [email, userCredit],
-    )
-    // ȘI PROFITUL SE REVERSEAZĂ (audit 27 iul): la alimentare, 25% intra ca
-    // rând 'profit' — la refund rămânea pe veci în cărți, umflând profitul
-    // raportat în Admin→Bani la fiecare rambursare. Rând compensator negativ,
-    // idempotent pe cheia :profit-refund.
-    const p = await client.query<{ user_email: string; amount: string }>(
-      `SELECT user_email, amount FROM billing_events WHERE stripe_ref = $1 AND kind = 'profit'`,
-      [`${stripeRef}:profit`],
-    )
-    if (p.rows[0]) {
-      await client.query(
-        `INSERT INTO billing_events (user_email, kind, amount, stripe_ref, meta)
-         VALUES (lower($1), 'profit', $2, $3, 'reversare profit — plată rambursată')
-         ON CONFLICT DO NOTHING`,
-        [p.rows[0].user_email, -Number(p.rows[0].amount), `${stripeRef}:profit-refund`],
-      )
-    }
-    await client.query(`UPDATE transactions SET status = 'refunded' WHERE stripe_payment_intent_id = $1`, [
-      stripeRef,
-    ])
-    await client.query('COMMIT')
-    return true
-  } catch {
-    try {
-      await client.query('ROLLBACK')
-    } catch {
-      /* ignore */
-    }
-    return false
-  } finally {
-    client.release()
   }
 }
 
@@ -1578,42 +1344,11 @@ export async function getWalletStatus(email: string): Promise<{ balance: number;
   }
 }
 
-/** Reîncărcare automată per user (ca să nu rămână fără credit — cerința Adrian).
- *  `threshold` = sub câte CREDITE se declanșează; `topupAmount` = suma de taxat
- *  (aceeași unitate ca top-up-ul manual). Stocat în KV, ca preferințele. */
-export interface AutoRecharge {
-  enabled: boolean
-  threshold: number
-  topupAmount: number
-}
-const AUTO_RECHARGE_DEFAULT: AutoRecharge = { enabled: false, threshold: 20, topupAmount: 10 }
-
-export async function getAutoRecharge(email: string): Promise<AutoRecharge> {
-  try {
-    const raw = await loadKv(`autorecharge:${userKey(email)}`)
-    if (!raw) return { ...AUTO_RECHARGE_DEFAULT }
-    const p = JSON.parse(raw) as Partial<AutoRecharge>
-    return {
-      enabled: Boolean(p.enabled),
-      threshold: Number.isFinite(p.threshold) ? Math.max(0, Number(p.threshold)) : AUTO_RECHARGE_DEFAULT.threshold,
-      topupAmount: Number.isFinite(p.topupAmount)
-        ? Math.max(1, Math.min(500, Number(p.topupAmount)))
-        : AUTO_RECHARGE_DEFAULT.topupAmount,
-    }
-  } catch {
-    return { ...AUTO_RECHARGE_DEFAULT }
-  }
-}
-
-export async function setAutoRecharge(email: string, v: AutoRecharge): Promise<void> {
-  await saveKv(`autorecharge:${userKey(email)}`, JSON.stringify(v))
-}
-
 // Aici au stat `loadAdminPool` și `withdrawAdminPool` — butoanele „+ Adaugă
 // bani" / „− Scoate bani" care SCRIAU de mână cât credea omul că are în pungă.
 // Șterse (Adrian, 30 iul: „o singură pungă... nu rămâne decât real, fără
-// hardcode"). Câți bani ai se citește de la Stripe și de la OpenRouter, care
-// chiar îi țin; nu se mai declară nicăieri.
+// hardcode"). Câți bani ai se citește din contul Revolut (prin Enable Banking)
+// și de la OpenRouter, care chiar îi țin; nu se mai declară nicăieri.
 
 // Start a free trial if allowed. Enforces the daily cap (cost guard) and a light
 // anti-reuse: a fingerprint or IP that already tried within 30 days is refused.
@@ -1897,9 +1632,9 @@ export async function getDemoStats(): Promise<DemoStats> {
 //   • `spent`  — suma costurilor REALE raportate de furnizori la fiecare apel
 //                (cost_events, scris de recordCost din răspunsul lor);
 //   • `profit` — suma marjelor din registrul de plăți (billing_events), care
-//                vine din plăți Stripe verificate, nu din estimări.
-// Punga propriu-zisă (cât mai ai) NU se mai ține aici: se citește LIVE de la
-// Stripe și OpenRouter — vezi services/stripe.ts getMoneyCircuit +
+//                vine din plăți reale verificate, nu din estimări.
+// Punga propriu-zisă (cât mai ai) NU se mai ține aici: se citește LIVE din
+// contul Revolut (prin Enable Banking) și de la OpenRouter — vezi
 // services/openrouter.ts getOpenRouterBalance. Sursa adevărului e la ei.
 export async function getAdminAccount(): Promise<{ spent: number; profit: number }> {
   const empty = { spent: 0, profit: 0 }
@@ -1909,7 +1644,7 @@ export async function getAdminAccount(): Promise<{ spent: number; profit: number
     const costUsd = Number(
       (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
     )
-    const spent = costUsd * config.stripe.usdToCurrency
+    const spent = costUsd * config.billing.usdToCurrency
     const profit = Number(
       (
         await pool.query<{ t: string | null }>(
@@ -2000,8 +1735,9 @@ const COSTURI_MASURATE = new Set(['chat'])
  *                        E contabilitate; se șterge doar la ștergerea contului.
  *    • `transactions`  — istoricul de cumpărare al fiecărui om.
  *
- *  Banii de la AI (punga) nu au ce reseta: se citesc LIVE de la Stripe și de la
- *  furnizorul creierului, deci reflectă întotdeauna ce e acum. */
+ *  Banii de la AI (punga) nu au ce reseta: se citesc LIVE din contul bancar
+ *  (prin Enable Banking) și de la furnizorul creierului, deci reflectă
+ *  întotdeauna ce e acum. */
 export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number }> {
   if (!dbEnabled()) return { ok: false, sterse: 0 }
   try {
@@ -2159,8 +1895,8 @@ export interface UserSummary {
   last: string
 }
 
-/** Câți oameni au cont cu portofel (folosit la rezerva din Stripe). Numărăm
- *  portofelele, nu conversațiile: un cont fără portofel n-are credit de apărat. */
+/** Câți oameni au cont cu portofel. Numărăm portofelele, nu conversațiile:
+ *  un cont fără portofel n-are credit de apărat. */
 export async function countWalletUsers(): Promise<number> {
   if (!dbEnabled()) return 0
   try {
@@ -3351,7 +3087,7 @@ export async function crediteazaDupaCod(
   }
   // ORDINEA CONTEAZĂ, și e aleasă dinadins: CREDITĂM ÎNTÂI, închidem codul după.
   //
-  // `topUpUser` e idempotent pe referință (indexul unic pe `stripe_ref`), deci o
+  // `topUpUser` e idempotent pe referință (indexul unic pe `ref`), deci o
   // a doua citire a aceleiași tranzacții nu poate credita de două ori. Dacă am
   // închide codul întâi și creditarea ar pica, omul ar rămâne cu plata „închisă"
   // și fără credite — adică exact plătit-dar-nelivrat. Invers, dacă creditarea

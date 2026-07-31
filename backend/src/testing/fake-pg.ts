@@ -8,7 +8,7 @@
 //
 //   • BEGIN/COMMIT/ROLLBACK reale — un ROLLBACK chiar anulează tot ce s-a scris
 //     de la BEGIN (altfel „s-a creditat pe jumătate" ar trece drept corect);
-//   • indexul UNIC pe `stripe_ref` — a doua creditare pe aceeași plată ARUNCĂ,
+//   • indexul UNIC pe `ref` — a doua creditare pe aceeași plată ARUNCĂ,
 //     exact ca Postgres (a doua linie de apărare a idempotenței);
 //   • `ON CONFLICT ... DO UPDATE SET` evaluează partea dreaptă pe rândul VECHI,
 //     ca Postgres — de asta `topup_ref = wallets.balance + $2` iese NOUL sold;
@@ -23,13 +23,12 @@ export interface WalletRow {
   balance: number
   currency: string
   topup_ref: number
-  stripe_customer_id: string | null
 }
 export interface BillingRow {
   user_email: string
   kind: string
   amount: number
-  stripe_ref: string | null
+  ref: string | null
   meta: string | null
 }
 export interface TxRow {
@@ -37,7 +36,7 @@ export interface TxRow {
   amount: number
   credits: number
   status: string
-  stripe_payment_intent_id: string | null
+  payment_ref: string | null
 }
 
 export interface Baza {
@@ -158,8 +157,8 @@ export function creeazaFakePg(): FakePg {
     })
 
     if (tabela === 'billing_events') {
-      const ref = (rand.stripe_ref as string | undefined) ?? null
-      if (ref !== null && baza.billing.some((r) => r.stripe_ref === ref)) {
+      const ref = (rand.ref as string | undefined) ?? null
+      if (ref !== null && baza.billing.some((r) => r.ref === ref)) {
         // uniq_billing_ref — a doua creditare pe aceeași plată.
         if (/ON CONFLICT DO NOTHING/i.test(coada)) return gol
         throw new Error('duplicate key value violates unique constraint "uniq_billing_ref"')
@@ -168,7 +167,7 @@ export function creeazaFakePg(): FakePg {
         user_email: String(rand.user_email ?? ''),
         kind: String(rand.kind ?? ''),
         amount: Number(rand.amount ?? 0),
-        stripe_ref: ref,
+        ref,
         meta: (rand.meta as string | undefined) ?? null,
       })
       return { rows: [], rowCount: 1 }
@@ -188,7 +187,6 @@ export function creeazaFakePg(): FakePg {
         if ('balance' in noi) vechi.balance = Number(noi.balance)
         if ('topup_ref' in noi) vechi.topup_ref = Number(noi.topup_ref)
         if ('currency' in noi) vechi.currency = String(noi.currency)
-        if ('stripe_customer_id' in noi) vechi.stripe_customer_id = String(noi.stripe_customer_id)
         return { rows: [], rowCount: 1 }
       }
       baza.wallets.set(cheie, {
@@ -196,17 +194,16 @@ export function creeazaFakePg(): FakePg {
         balance: Number(rand.balance ?? 0),
         currency: String(rand.currency ?? 'gbp'),
         topup_ref: Number(rand.topup_ref ?? 0),
-        stripe_customer_id: (rand.stripe_customer_id as string | undefined) ?? null,
       })
       return { rows: [], rowCount: 1 }
     }
 
     if (tabela === 'transactions') {
-      const pi = (rand.stripe_payment_intent_id as string | undefined) ?? null
-      const vechi = pi ? baza.tx.find((t) => t.stripe_payment_intent_id === pi) : undefined
+      const ref = (rand.payment_ref as string | undefined) ?? null
+      const vechi = ref ? baza.tx.find((t) => t.payment_ref === ref) : undefined
       if (vechi) {
         const set = coada.match(/DO UPDATE SET (.+)$/i)
-        if (!set) throw new Error('duplicate key value violates unique constraint "transactions_stripe_payment_intent_id_key"')
+        if (!set) throw new Error('duplicate key value violates unique constraint "uniq_transactions_ref"')
         for (const buc of bucati(set[1])) {
           const [col, ...rest] = buc.split('=')
           if (col.trim() === 'status') vechi.status = String(valoare(rest.join('=').trim(), p))
@@ -218,7 +215,7 @@ export function creeazaFakePg(): FakePg {
         amount: Number(rand.amount ?? 0),
         credits: Number(rand.credits ?? 0),
         status: String(rand.status ?? 'pending'),
-        stripe_payment_intent_id: pi,
+        payment_ref: ref,
       })
       return { rows: [], rowCount: 1 }
     }
@@ -250,32 +247,15 @@ export function creeazaFakePg(): FakePg {
 
     let m: RegExpMatchArray | null
 
-    if (/^SELECT 1 FROM billing_events WHERE stripe_ref = \$1$/i.test(q)) {
-      const n = baza.billing.filter((r) => r.stripe_ref === p[0]).length
+    if (/^SELECT 1 FROM billing_events WHERE ref = \$1$/i.test(q)) {
+      const n = baza.billing.filter((r) => r.ref === p[0]).length
       return { rows: Array.from({ length: n }, () => ({ '?column?': 1 })), rowCount: n }
-    }
-
-    if ((m = q.match(/^SELECT user_email, amount FROM billing_events WHERE stripe_ref = \$1 AND kind = '([^']+)'$/i))) {
-      const kind = m[1]
-      const r = baza.billing.filter((x) => x.stripe_ref === p[0] && x.kind === kind)
-      return { rows: r.map((x) => ({ user_email: x.user_email, amount: nr(x.amount) })), rowCount: r.length }
-    }
-
-    if (/^SELECT status FROM transactions WHERE stripe_payment_intent_id = \$1$/i.test(q)) {
-      const r = baza.tx.filter((t) => t.stripe_payment_intent_id === p[0])
-      return { rows: r.map((t) => ({ status: t.status })), rowCount: r.length }
     }
 
     if (/^SELECT balance FROM wallets WHERE user_email = (\$1|lower\(\$1\))$/i.test(q)) {
       const cheie = /lower/i.test(q) ? String(p[0]).toLowerCase() : String(p[0])
       const w = baza.wallets.get(cheie)
       return { rows: w ? [{ balance: nr(w.balance) }] : [], rowCount: w ? 1 : 0 }
-    }
-
-    if (/^SELECT stripe_customer_id FROM wallets WHERE user_email = (\$1|lower\(\$1\))$/i.test(q)) {
-      const cheie = /lower/i.test(q) ? String(p[0]).toLowerCase() : String(p[0])
-      const w = baza.wallets.get(cheie)
-      return { rows: w ? [{ stripe_customer_id: w.stripe_customer_id }] : [], rowCount: w ? 1 : 0 }
     }
 
     if (/^SELECT balance, topup_ref FROM wallets WHERE user_email = (\$1|lower\(\$1\))$/i.test(q)) {
@@ -285,33 +265,6 @@ export function creeazaFakePg(): FakePg {
         rows: w ? [{ balance: nr(w.balance), topup_ref: nr(w.topup_ref) }] : [],
         rowCount: w ? 1 : 0,
       }
-    }
-
-    if ((m = q.match(/^UPDATE transactions SET status = '([^']+)' WHERE stripe_payment_intent_id = \$1$/i))) {
-      const t = baza.tx.filter((x) => x.stripe_payment_intent_id === p[0])
-      t.forEach((x) => (x.status = m![1]))
-      return { rows: [], rowCount: t.length }
-    }
-
-    if (
-      /^UPDATE transactions SET status = \$2, created_at = COALESCE\(created_at, now\(\)\) WHERE stripe_payment_intent_id = \$1 AND status NOT IN \('succeeded', 'paid', 'refunded'\)$/i.test(
-        q,
-      )
-    ) {
-      const t = baza.tx.filter(
-        (x) =>
-          x.stripe_payment_intent_id === p[0] && !['succeeded', 'paid', 'refunded'].includes(x.status),
-      )
-      t.forEach((x) => (x.status = String(p[1])))
-      return { rows: [], rowCount: t.length }
-    }
-
-    if (/^UPDATE wallets SET balance = balance - \$2, updated_at = now\(\) WHERE user_email = (lower\(\$1\)|\$1)$/i.test(q)) {
-      const cheie = /lower/i.test(q.split('WHERE')[1]) ? String(p[0]).toLowerCase() : String(p[0])
-      const w = baza.wallets.get(cheie)
-      if (!w) return gol
-      w.balance -= Number(p[1])
-      return { rows: [], rowCount: 1 }
     }
 
     if (/^INSERT INTO/i.test(q)) return insereaza(q, p)

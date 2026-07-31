@@ -3,7 +3,6 @@ import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { getSpeechLang, setSpeechLangPref, getMeserieActiva, saveMessage, getBalance, debitWallet, recordCost, getRecentHistory, saveNote, listNotes, deleteNote, setMeserieActivaPref, getVoicePref, getVoiceprint, saveVoiceprint, vectorDistance, createBuildJob, listBuildJobs, loadKv, saveKv, getHistory } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/adminLock.js'
-import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang, langLabel } from '../services/lang.js'
 import { getMeserie } from '../services/meserii.js'
@@ -99,14 +98,12 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
 
       // PAYWALL PE VOCE (25 iul — gaură de bani REALĂ găsită la audit): chatul
       // scris bloca la 0 credite, dar vocea pornea sesiuni nelimitat pe cheile
-      // platformei. Aceeași regulă ca în scris: fără credit → fără sesiune
-      // (cu ultima șansă de reîncărcare automată); adminul e scutit.
+      // platformei. Aceeași regulă ca în scris: fără credit → fără sesiune;
+      // adminul e scutit. Fără link de plată configurat, aplicația e liberă.
       const isAdminPay = user.email.toLowerCase() === config.adminEmail
       if (
-        config.stripe.secretKey &&
+        config.revolut.payLink &&
         !isAdminPay &&
-        (await getBalance(user.email)) <= 0 &&
-        !(await maybeAutoRecharge(user.email, user.name)) &&
         (await getBalance(user.email)) <= 0
       ) {
         return reply.code(402).send({ error: 'no_credit' })
@@ -636,7 +633,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       void debitWallet(user.email, cost, `voice_min:${billSec}s`)
       const bal = await getBalance(user.email)
       // Semnalăm clientului dacă a rămas fără credit → oprește vocea.
-      return reply.send({ ok: true, charged: cost, balance: bal, stop: config.stripe.secretKey && user.role !== 'admin' && bal <= 0 })
+      return reply.send({ ok: true, charged: cost, balance: bal, stop: Boolean(config.revolut.payLink) && user.role !== 'admin' && bal <= 0 })
     },
   )
 

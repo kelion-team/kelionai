@@ -58,12 +58,12 @@ describe('fluxul plăților e legat cap-coadă — măsurat în cod, nu descris'
   })
 
   // UNDE SE OPREȘTE ASTĂZI, și de ce e important să fie scris, nu doar știut:
-  // fără cheile GoCardless, `startCitirePlati` iese pe loc și TOT lanțul de mai
-  // sus rămâne teoretic — userul plătește, banii intră în contul lui Adrian, și
-  // creditele nu apar niciodată singure. Nu e un bug; e o poartă. Dar o poartă
-  // închisă tăcut arată exact ca un lanț rupt, de-aia o afirmăm aici.
+  // fără cheile Enable Banking, `startCitirePlati` iese pe loc și TOT lanțul de
+  // mai sus rămâne teoretic — userul plătește, banii intră în contul lui
+  // Adrian, și creditele nu apar niciodată singure. Nu e un bug; e o poartă.
+  // Dar o poartă închisă tăcut arată exact ca un lanț rupt, de-aia o afirmăm aici.
   it('7. fără chei, cititorul se oprește EXPLICIT și o spune — nu tace', () => {
-    expect(banking).toMatch(/gocardless\.secretId[\s\S]{0,200}return/)
+    expect(banking).toMatch(/enableBanking\.appId[\s\S]{0,200}return/)
     expect(banking).toMatch(/console\.log\([\s\S]{0,120}(oprit|lipsesc)/i)
   })
 })

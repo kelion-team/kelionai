@@ -174,7 +174,7 @@ export async function systemHealth(): Promise<string> {
         id: 'creier_sarac',
         grav: 'critic',
         desc: `Soldul OpenRouter e $${b.balance.toFixed(2)} — sub prag; creierul se poate opri.`,
-        reparabil: 'doar ownerul poate alimenta (openrouter.ai/credits) până pornește circuitul automat Stripe Issuing',
+        reparabil: 'doar ownerul poate alimenta (openrouter.ai/credits)',
       })
   } catch {
     /* balanța indisponibilă */

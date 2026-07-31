@@ -193,48 +193,43 @@ const MISIUNE: Sarcina[] = [
   },
   {
     cod: 'M1',
-    titlu: 'Cheile GoCardless — contul e ACTIV, ia-le și pune-le',
+    titlu: 'Cheile Enable Banking + contul legat — citirea plăților pe verde',
     ordin:
-      `MISIUNE REVOLUT, pasul 1 — CE S-A SCHIMBAT ASTĂZI, ȘI DE CE E MULT MAI UȘOR.\n\n` +
-      `31 iul, dovadă în mâna ownerului (email GoCardless): „Your account setup is now ` +
-      `complete. Your payouts have been enabled. We're sending your funds to your bank ` +
-      `account ending ******36."\n\n` +
-      `CONTUL E DESCHIS. Pasul ăsta NU mai e „intră pe un portal străin și luptă cu ` +
-      `formularele" — e „ia două chei dintr-un cont care te așteaptă".\n\n` +
+      `MISIUNE REVOLUT, pasul 1 — FURNIZORUL S-A SCHIMBAT, ȘI DE CE.\n\n` +
+      `31 iul 2026, dovadă pe viu: GoCardless Bank Account Data (fostul Nordigen) scrie ` +
+      `„New signups are currently disabled" — a ÎNCHIS conturile noi la final de 2025 și ` +
+      `închide serviciul treptat. Emailul din 31 iul („account setup complete, payouts ` +
+      `enabled") era de la manage.gocardless.com — ALT produs (Direct Debit), o capcană ` +
+      `în care a căzut și AI-ul anterior: acolo NU există cheile de care avem nevoie.\n\n` +
+      `Furnizorul actual e ENABLE BANKING (enablebanking.com) — gratuit pentru citirea ` +
+      `contului propriu („Restricted Production"). Codul cititorului e deja rescris pe ` +
+      `API-ul lor (openBanking.ts). Tu verifici și repari, nu cauți portalul.\n\n` +
       `CE AI DE FĂCUT, EXACT:\n` +
-      `  1. secret_lista — vezi dacă GOCARDLESS_SECRET_ID și GOCARDLESS_SECRET_KEY sunt ` +
-      `     deja puse. Dacă sunt amândouă, treci direct la pasul 5.\n` +
-      `  2. browser_open pe https://bankaccountdata.gocardless.com/ — ASTA, nu „manage." ` +
-      `     și nu „developer.", alea sunt alte produse și n-au cheile noastre.\n` +
-      `  3. La login PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
-      `     nu-l pornești, butoanele rămân MOARTE. Ăsta e motivul real pentru care ` +
-      `     ownerul n-a putut intra data trecută, nu o defecțiune.\n` +
-      `  4. Developers → User Secrets → Create new. Iei Secret ID și Secret Key și le pui ` +
-      `     pe loc: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY. ` +
-      `     NU le repeta în răspuns, NU le scrie nicăieri — doar numele și lungimea.\n` +
-      `  5. secret_publica — le duce pe server și repornește aplicația.\n` +
-      `  6. VERIFICĂ, nu presupune: admin_vezi money-circuit, apoi admin_vezi env-check. ` +
-      `     Cheile trebuie să apară ca PREZENTE, iar starea citirii plăților pe verde. ` +
-      `     Dacă nu apar: procesul a pornit ÎNAINTE ca ele să fie scrise — cere ` +
-      `     secret_publica din nou și verifică iar.\n\n` +
-      `DE CE CONTEAZĂ, ca să știi când te poți opri: fără cheile astea, ` +
-      `startCitirePlati() iese pe loc la fiecare pornire și TOT lanțul plăților rămâne ` +
-      `teoretic — userul plătește, banii intră în contul ownerului, și creditele nu apar ` +
-      `NICIODATĂ singure. Lanțul e probat cap-coadă în fluxPlati.test.ts (7 verigi, toate ` +
-      `verzi). Nu mai e nimic de construit acolo. Singurul lucru care lipsește ești TU, ` +
-      `cu două chei.\n\n` +
-      `DACĂ CONTUL CERE CEVA CE DOAR TITULARUL POATE FACE (aprobare pe telefon, o ` +
-      `verificare de identitate): scrie exact „AȘTEPT APROBAREA: <ce anume, într-o ` +
-      `propoziție>" și oprește-te. Nu-l trimite pe owner să caute — spune-i unde să apese.\n\n` +
+      `  1. secret_lista — vezi dacă ENABLE_BANKING_APP_ID și ENABLE_BANKING_PRIVATE_KEY_B64 ` +
+      `     sunt puse. Dacă lipsesc: înregistrarea aplicației cere emailul titularului — ` +
+      `     scrie „AȘTEPT APROBAREA: aplicația Enable Banking se înregistrează de titular" ` +
+      `     și oprește-te. NU o face în locul lui.\n` +
+      `  2. Dacă cheile sunt puse: admin_vezi money-circuit → câmpul citirePlati. ` +
+      `     Dacă scrie „nu e legat contul": legarea se face cu consimțământul titularului ` +
+      `     prin POST /api/admin/plati/legatura/start (întoarce URL-ul de deschis) apoi ` +
+      `     /finalizeaza cu codul din URL-ul de întoarcere. Consimțământul îl dă DOAR ` +
+      `     titularul, în aplicația Revolut — tu îi dai linkul și-i spui unde să apese.\n` +
+      `  3. VERIFICĂ, nu presupune: după legare, citirePlati trebuie să scrie verde ` +
+      `     („N intrări citite"). Dacă scrie „consimțământul poate fi expirat" — PSD2 ` +
+      `     expiră la max. 90 zile, se reface cu aceleași două rute.\n\n` +
+      `DE CE CONTEAZĂ: fără chei + cont legat, startCitirePlati() iese pe loc și TOT ` +
+      `lanțul rămâne teoretic — userul plătește, banii intră la owner, creditele nu apar ` +
+      `NICIODATĂ singure. Lanțul e probat în fluxPlati.test.ts. Nu mai e nimic de ` +
+      `construit acolo — e de ținut verde.\n\n` +
       `INTERZIS, decis de owner, nu se renegociază: NU prin email (plata nu se citește din ` +
       `inbox). NU tastezi parole și nu le ceri. Valorile cheilor nu se repetă, nu ajung pe ` +
       `monitor, nu se scriu în repo.`,
     executant: 'maini',
     dificultate: 4,
 
-    // Dovada: cele două chei chiar există în secrete. Fără ele, cititorul nu
-    // pornește, oricâte pagini ar fi deschis.
-    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY'),
+    // Dovada: cheile Enable Banking chiar există în secrete. Fără ele, cititorul
+    // nu pornește, oricâte pagini ar fi deschis.
+    dovada: () => secreteExista('ENABLE_BANKING_APP_ID', 'ENABLE_BANKING_PRIVATE_KEY_B64'),
   },
   {
     cod: 'M2',

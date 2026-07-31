@@ -10,15 +10,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
-  config: { stripe: { secretKey: 'sk_live_SECRET_NU_TREBUIE_SA_IASA' } },
+  config: {},
   ENV_ALIASES: {
     openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
     openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
     databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
     sessionSecret: ['SESSION_SECRET'],
-    stripeSecretKey: ['STRIPE_SECRET_KEY', 'STRIPE_SK'],
-    stripeWebhookSecret: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_WH_SECRET'],
-    stripePublishableKey: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_PUBLIC_KEY', 'STRIPE_PK'],
     geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
     serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
     googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
@@ -30,7 +27,7 @@ vi.mock('./config.js', () => ({
   },
 }))
 
-const { envCheck, envSummary, envOrphans, stripeMode } = await import('./services/envCheck.js')
+const { envCheck, envSummary, envOrphans } = await import('./services/envCheck.js')
 
 const SECRET = 'valoare-foarte-secreta-1234567890'
 
@@ -72,9 +69,11 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(s.total).toBeGreaterThan(s.lipsa + s.goale)
   })
 
-  it('spune modul cheii Stripe fără să arate cheia', () => {
-    expect(stripeMode()).toBe('live')
-    expect(JSON.stringify(stripeMode())).not.toContain('SECRET_NU_TREBUIE')
+  it('cheile de plată noi apar în raport (Revolut + Enable Banking)', () => {
+    const byName = Object.fromEntries(envCheck().map((v) => [v.name, v]))
+    expect(byName.REVOLUT_PAY_LINK).toBeDefined()
+    expect(byName.ENABLE_BANKING_APP_ID).toBeDefined()
+    expect(byName.ENABLE_BANKING_PRIVATE_KEY_B64).toBeDefined()
   })
 
   // ── MIEZUL PROBLEMEI LUI ADRIAN, 30 iul ────────────────────────────────────

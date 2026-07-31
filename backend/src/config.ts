@@ -33,9 +33,6 @@ export const ENV_ALIASES: Record<string, string[]> = {
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
   openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
   openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
-  stripeSecretKey: ['STRIPE_SECRET_KEY', 'STRIPE_SK'],
-  stripePublishableKey: ['STRIPE_PUBLISHABLE_KEY', 'STRIPE_PUBLIC_KEY', 'STRIPE_PK'],
-  stripeWebhookSecret: ['STRIPE_WEBHOOK_SECRET', 'STRIPE_WH_SECRET'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
@@ -209,27 +206,30 @@ export const config = {
   // ── CITIREA TRANZACȚIILOR DIN CONTUL REVOLUT (Open Banking) ────────────────
   // Cum află aplicația că un user a plătit, când Revolut Pro n-are webhook:
   // se uită în tranzacțiile contului și caută codul din referință.
-  // Cheile se iau gratuit de la bankaccountdata.gocardless.com; `accountId` e
-  // contul legat după ce owner-ul dă consimțământul. ACCES DOAR DE CITIRE —
-  // nu se poate mișca niciun ban prin ele.
-  gocardless: {
-    secretId: (process.env.GOCARDLESS_SECRET_ID ?? '').trim(),
-    secretKey: (process.env.GOCARDLESS_SECRET_KEY ?? '').trim(),
-    accountId: (process.env.GOCARDLESS_ACCOUNT_ID ?? '').trim(),
+  // Furnizor: ENABLE BANKING (enablebanking.com) — GoCardless/Nordigen a închis
+  // conturile noi la final de 2025, deci e mort pentru noi (verificat 31 iul
+  // 2026). Contul Enable Banking e gratuit în modul „Restricted Production"
+  // (citirea conturilor proprii). ACCES DOAR DE CITIRE — nu se mișcă niciun ban.
+  //
+  // Autentificarea e prin JWT RS256: `appId` = id-ul aplicației din Control
+  // Panel, `privateKeyB64` = cheia privată RSA ca base64 (o linie — env-file nu
+  // duce PEM multi-linie). `accountUid` poate lipsi: contul se leagă prin
+  // consimțământ PSD2 și se salvează în kv_state (vezi openBanking.ts).
+  enableBanking: {
+    appId: (process.env.ENABLE_BANKING_APP_ID ?? '').trim(),
+    privateKeyB64: (process.env.ENABLE_BANKING_PRIVATE_KEY_B64 ?? '').trim(),
+    accountUid: (process.env.ENABLE_BANKING_ACCOUNT_UID ?? '').trim(),
+    aspspName: (process.env.ENABLE_BANKING_ASPSP_NAME ?? 'Revolut').trim(),
+    aspspCountry: (process.env.ENABLE_BANKING_ASPSP_COUNTRY ?? 'GB').trim(),
   },
-  stripe: {
-    secretKey: env(...ENV_ALIASES.stripeSecretKey),
-    // Cheia PUBLICĂ (pk_live_…). NU e secret: Stripe o proiectează ca să stea în
-    // pagina din browser. Aici e nevoie de ea pentru UN singur lucru — afișarea
-    // numărului cardului virtual în panoul de admin prin Issuing Elements, unde
-    // numărul se randează într-un iframe Stripe și NU trece prin serverul nostru.
-    publishableKey: env(...ENV_ALIASES.stripePublishableKey),
-    webhookSecret: env(...ENV_ALIASES.stripeWebhookSecret),
-    currency: (process.env.STRIPE_CURRENCY ?? 'gbp').toLowerCase(),
-    // Split banilor la fiecare alimentare: 75% devin credite pentru user, 25%
-    // intră în fondul real al adminului (care plătește cheile AI). Adrian, iul:
-    // „la admin știi ce trebuie cu 25%". Codul din topUpUser marca deja „user
-    // 75% / margin 25%", dar implicitul era 0.7 — aliniat acum la cerință.
+  // ── BANII APLICAȚIEI (Revolut + cod unic; Stripe e ISTORIE — 31 iul 2026) ──
+  // Aici stă DOAR matematica portofelului: moneda de afișare, cât valorează un
+  // credit și split-ul la alimentare (75% credite user / 25% fond admin care
+  // plătește cheile AI). Încasarea și detectarea plăților: Revolut (payLink)
+  // + cititorul Enable Banking din openBanking.ts. Niciun procesator între
+  // user și banii lui Adrian.
+  billing: {
+    currency: (process.env.BILLING_CURRENCY ?? 'gbp').toLowerCase(),
     userShare: Number(process.env.USER_SHARE ?? 0.75),
     creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
     usdToCurrency: Number(process.env.USD_TO_CURRENCY ?? 0.8),

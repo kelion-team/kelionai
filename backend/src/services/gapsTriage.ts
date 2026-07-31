@@ -18,7 +18,7 @@ YouTube; generare imagini; traduceri; Wikipedia; valute; ceas mondial; Gmail
 (citire+trimitere), Calendar, Drive, Tasks, Contacts (după Connect Google);
 memorie persistentă + note explicite; voiceprint; vedere prin cameră + analiză
 poze; afișare orice pagină pe monitor + browser live cu click/scris; gesturi
-avatar (inclusiv dans); credite Stripe cu auto-recharge.`
+avatar (inclusiv dans); credite cumpărate prin link Revolut cu cod unic.`
 
 export interface TriageOutcome {
   triaged: number

@@ -32,10 +32,8 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startAutonomie } from './services/autonomie.js'
 import { triageGaps } from './services/gapsTriage.js'
-import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { runSelfHeal } from './services/selfHeal.js'
-import { autoFundIssuing } from './services/stripe.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { manualRoutes } from './routes/manual.js'
@@ -127,14 +125,12 @@ await app.register(rateLimit, {
   },
 })
 
-// Keep the raw JSON body around (Stripe webhook signature verification needs the
-// exact bytes) while still parsing JSON for every other route.
+// Parse JSON ourselves so a malformed body is a CLIENT error (400), never a
+// 500 server crash.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
-  ;(req as unknown as { rawBody?: string }).rawBody = body as string
   try {
     done(null, body ? JSON.parse(body as string) : {})
   } catch (err) {
-    // Malformed JSON is a CLIENT error → 400, never a 500 server crash.
     ;(err as Error & { statusCode?: number }).statusCode = 400
     done(err as Error, undefined)
   }
@@ -354,33 +350,12 @@ try {
   startMailbox()
   // CREDITAREA AUTOMATĂ A PLĂȚILOR PRIN REVOLUT PRO (Adrian, 30 iul): citește
   // tranzacțiile intrate și potrivește codul unic din referință cu userul care
-  // aștepta să plătească. Revolut Pro n-are webhook, deci întrebăm noi periodic.
-  // Fără chei GoCardless nu face nimic (și o spune o dată, la pornire).
+  // aștepta să plătească. Citim prin Enable Banking (PSD2) la intervale fixe.
+  // Fără cheile Enable Banking nu face nimic (și o spune o dată, la pornire).
   startCitirePlati()
   // KELION SE APUCA SINGUR: la fiecare ora ia urmatorul rand nefacut din
   // RAMAS-DE-FACUT.md si il trimite constructorului. Fara sa astepte pe nimeni.
   startAutonomie()
-  // PLASA BANILOR (Adrian, 24 iul: „nu e de joacă cu banii userilor"):
-  // reconciliere Stripe la boot + la fiecare oră — orice plată reală rămasă
-  // necreditată (webhook pierdut/respins) se aplică singură, idempotent.
-  setTimeout(() => {
-    const run = (): void => {
-      void reconcileStripePayments()
-        .then((r) => { if (r.credited > 0) app.log.warn(r, 'stripe reconcile: plăți recuperate') })
-        .catch(() => {})
-    }
-    run()
-    setInterval(run, 60 * 60 * 1000)
-  }, 20_000)
-  // ALIMENTAREA AUTOMATĂ A PUNGII CARDULUI (Adrian, 24 iul: „tot prin Stripe,
-  // circuit unificat, nimic extern"): când punga cardului scade sub prag și
-  // punga plăților are bani, transferăm prin Balance Transfer API — banii
-  // userilor curg singuri spre cardul care hrănește AI-ul. La 60s după boot,
-  // apoi orar. (Endpoint beta la Stripe — starea apare în Circuitul banilor.)
-  setTimeout(() => {
-    void autoFundIssuing().catch(() => {})
-    setInterval(() => { void autoFundIssuing().catch(() => {}) }, 60 * 60 * 1000)
-  }, 60_000)
   // ALERTĂ SOLD OPENROUTER (Adrian, 24 iul: „se anunță admin că e nevoie să
   // depună bani"): creierul e alimentat CENTRAL din punga lui Kelion; când
   // soldul real scade sub prag, îl anunțăm pe admin pe email (o dată/zi).

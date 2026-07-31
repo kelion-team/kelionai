@@ -378,7 +378,7 @@ describe('uneltele: agentul e echipat la full, nu pe jumătate', () => {
   })
 
   it('browserul e real, nu o promisiune', async () => {
-    await uneltele('browser_open', { url: 'https://bankaccountdata.gocardless.com/' })
+    await uneltele('browser_open', { url: 'https://enablebanking.com/' })
     expect(cerute).toEqual(['browser:open'])
   })
 
