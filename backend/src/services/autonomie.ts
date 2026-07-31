@@ -192,61 +192,48 @@ const MISIUNE: Sarcina[] = [
   },
   {
     cod: 'M1',
-    titlu: 'Intri TU pe portal, cu browserul tău, și-ți faci singur cheile',
+    titlu: 'Cheile GoCardless — contul e ACTIV, ia-le și pune-le',
     ordin:
-      `MISIUNE REVOLUT, pasul 1 din 5 — VERIGA CARE LIPSEȘTE, ȘI CINE O FACE: TU.\n\n` +
-      `Adrian, 30 iul, cuvânt cu cuvânt: „are liber 1000000% să folosească tot ca să obțină ` +
-      `scopul meu" · „e al meu și îi permit full acces". Deci NU ceri voie, NU-l trimiți pe ` +
-      `el nicăieri, și NU te oprești la primul obstacol de pe un portal.\n\n` +
-      `CE E DEJA SCRIS (nu rescrii nimic din astea): codurile unice KLN-XXXX-XXXX ` +
-      `(db.ts → creeazaCodPlata), tabela payment_codes, potrivirea codului din referință ` +
-      `(crediteazaDupaCod), creditarea idempotentă (topUpUser), ȘI CITITORUL DE TRANZACȚII ` +
-      `— backend/src/services/openBanking.ts, gata scris. Lipsesc DOAR cheile lui.\n\n` +
-      `CE E INTERZIS, decis de owner — nu se renegociază:\n` +
-      `  • NU prin email. Plata nu se citește din inbox. (30 iul: „ce ai făcut cu email ` +
-      `    scoți imediat, nu accept așa ceva".) Niciun modul care caută încasări în cutia ` +
-      `    poștală, sub niciun nume.\n` +
-      `  • NU prin API-ul Revolut: MĂSURAT din documentația lor — API-ul e doar pe Revolut ` +
-      `    Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate. Ownerul ` +
-      `    are Pro. Ușa aia e închisă; nu pierde timp pe ea.\n` +
-      `  • NU-i cere ownerului să intre pe portal. A pierdut deja o zi așa. Portalul e al tău.\n\n` +
-      `DRUMUL, ȘI E AL TĂU — BROWSERUL. Ai browser real pe server: browser_open, browser_read, ` +
-      `browser_click, browser_click_at, browser_type, browser_scroll, browser_key, ` +
-      `browser_back, browser_close. Cu el faci TOT lanțul:\n` +
-      `  1. deschizi https://bankaccountdata.gocardless.com/ — ăsta, nu „manage." și nu ` +
-      `     „developer.", alea sunt ALTE produse și n-au cheile noastre;\n` +
-      `  2. la login, PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
-      `     nu-l pornești, butoanele (inclusiv „Log in with Google") rămân MOARTE. Ăsta e ` +
-      `     motivul real pentru care ownerul n-a putut intra, nu o defecțiune;\n` +
-      `  3. Developers → User Secrets → Create new → iei Secret ID și Secret Key;\n` +
-      `  4. le pui SINGUR: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY;\n` +
-      `  5. Bank connections → Add bank → Revolut (id REVOLUT_REVOGB21) → pornești cererea ` +
-      `     de acces. AICI, și DOAR aici, e nevoie de owner: legea (PSD2) cere ca titularul ` +
-      `     să aprobe în aplicația Revolut de pe telefonul lui. Îi spui SCURT: „aprobă în ` +
-      `     Revolut, e o singură apăsare" — și aștepți. Nimic altceva nu-i ceri;\n` +
-      `  6. după aprobare iei Account ID → secret_pune GOCARDLESS_ACCOUNT_ID;\n` +
-      `  7. secret_publica — le duce pe server și repornește aplicația;\n` +
-      `  8. VERIFICI că merge: starea din stareCitirePlati() trebuie să treacă pe ✅. Dacă ` +
-      `     nu trece, e treaba ta să afli de ce, nu a lui.\n\n` +
-      `REGULI DE FIER: nu tastezi parole și nu le ceri; dacă un pas cere parola ownerului, ` +
-      `te oprești și spui exact la ce pas ai ajuns. Niciun număr de card nu trece pe nicăieri. ` +
-      `Valorile cheilor nu se repetă în chat, nu ajung pe monitor, nu se scriu în repo — ` +
-      `raportezi NUMELE și starea.\n\n` +
-      `DACĂ PORTALUL PICĂ (502, pagină albă, buton mort): reîncerci, cauți alt drum în ` +
-      `interfața lor, faci capturi pe monitor ca ownerul să vadă unde ești. Nu abandonezi ` +
-      `la prima eroare și nu i-o pasezi lui.\n\n` +
-      `CÂND CHEILE SUNT PUSE, restul merge singur: openBanking.ts citește tranzacțiile din ` +
-      `5 în 5 minute, potrivește codul KLN din referință și creditează. Scrii teste dacă ` +
-      `atingi cod; dacă a fost doar configurare, scrii în PR ce ai configurat și dovada că ` +
-      `starea a trecut pe verde.`,
-    // MÂINILE LUI: portal = browser + secrete. Rulează în aplicație, unde
-    // uneltele chiar există (constructorul le are acum și el, prin
-    // /api/constructor/tool — dar pasul ăsta nu e muncă de cod).
+      `MISIUNE REVOLUT, pasul 1 — CE S-A SCHIMBAT ASTĂZI, ȘI DE CE E MULT MAI UȘOR.\n\n` +
+      `31 iul, dovadă în mâna ownerului (email GoCardless): „Your account setup is now ` +
+      `complete. Your payouts have been enabled. We're sending your funds to your bank ` +
+      `account ending ******36."\n\n` +
+      `CONTUL E DESCHIS. Pasul ăsta NU mai e „intră pe un portal străin și luptă cu ` +
+      `formularele" — e „ia două chei dintr-un cont care te așteaptă".\n\n` +
+      `CE AI DE FĂCUT, EXACT:\n` +
+      `  1. secret_lista — vezi dacă GOCARDLESS_SECRET_ID și GOCARDLESS_SECRET_KEY sunt ` +
+      `     deja puse. Dacă sunt amândouă, treci direct la pasul 5.\n` +
+      `  2. browser_open pe https://bankaccountdata.gocardless.com/ — ASTA, nu „manage." ` +
+      `     și nu „developer.", alea sunt alte produse și n-au cheile noastre.\n` +
+      `  3. La login PORNEȘTE ÎNTÂI comutatorul „I agree to … Terms & Conditions" — până ` +
+      `     nu-l pornești, butoanele rămân MOARTE. Ăsta e motivul real pentru care ` +
+      `     ownerul n-a putut intra data trecută, nu o defecțiune.\n` +
+      `  4. Developers → User Secrets → Create new. Iei Secret ID și Secret Key și le pui ` +
+      `     pe loc: secret_pune GOCARDLESS_SECRET_ID, secret_pune GOCARDLESS_SECRET_KEY. ` +
+      `     NU le repeta în răspuns, NU le scrie nicăieri — doar numele și lungimea.\n` +
+      `  5. secret_publica — le duce pe server și repornește aplicația.\n` +
+      `  6. VERIFICĂ, nu presupune: admin_vezi money-circuit, apoi admin_vezi env-check. ` +
+      `     Cheile trebuie să apară ca PREZENTE, iar starea citirii plăților pe verde. ` +
+      `     Dacă nu apar: procesul a pornit ÎNAINTE ca ele să fie scrise — cere ` +
+      `     secret_publica din nou și verifică iar.\n\n` +
+      `DE CE CONTEAZĂ, ca să știi când te poți opri: fără cheile astea, ` +
+      `startCitirePlati() iese pe loc la fiecare pornire și TOT lanțul plăților rămâne ` +
+      `teoretic — userul plătește, banii intră în contul ownerului, și creditele nu apar ` +
+      `NICIODATĂ singure. Lanțul e probat cap-coadă în fluxPlati.test.ts (7 verigi, toate ` +
+      `verzi). Nu mai e nimic de construit acolo. Singurul lucru care lipsește ești TU, ` +
+      `cu două chei.\n\n` +
+      `DACĂ CONTUL CERE CEVA CE DOAR TITULARUL POATE FACE (aprobare pe telefon, o ` +
+      `verificare de identitate): scrie exact „AȘTEPT APROBAREA: <ce anume, într-o ` +
+      `propoziție>" și oprește-te. Nu-l trimite pe owner să caute — spune-i unde să apese.\n\n` +
+      `INTERZIS, decis de owner, nu se renegociază: NU prin email (plata nu se citește din ` +
+      `inbox). NU tastezi parole și nu le ceri. Valorile cheilor nu se repetă, nu ajung pe ` +
+      `monitor, nu se scriu în repo.`,
     executant: 'maini',
-    dificultate: 5, // portal străin, formulare care se schimbă, consimțământ bancar
+    dificultate: 4,
 
-    // Dovada: cele trei chei chiar există. Fără ele, cititorul nu poate citi nimic.
-    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY', 'GOCARDLESS_ACCOUNT_ID'),
+    // Dovada: cele două chei chiar există în secrete. Fără ele, cititorul nu
+    // pornește, oricâte pagini ar fi deschis.
+    dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY'),
   },
   {
     cod: 'M2',
