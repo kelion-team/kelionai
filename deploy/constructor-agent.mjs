@@ -18,6 +18,8 @@
 // CONSTRUCTOR_MAX_STEPS (24 — pași CU UNELTE, nu ture), CONSTRUCTOR_MAX_TOKENS
 // (900000), CONSTRUCTOR_MAX_STERILE (8 — ture în care modelul doar povestește),
 // CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
+// CONSTRUCTOR_MODEL_CAPABIL (pe ce urcă atunci când gratuitul dovedește că nu
+// poate) + CONSTRUCTOR_ESCALADARE=0 ca s-o stingi,
 // CONSTRUCTOR_BUDGET_MS (1560000 = 26 min, sub timeout-ul dur de 30 min din
 // constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
 import { execSync, execFileSync } from 'node:child_process'
@@ -61,6 +63,12 @@ if (!MODEL.endsWith(':free') && !ALLOW_PAID) {
   )
   process.exit(0)
 }
+// GARDA DE MAI SUS PRIVEȘTE DOAR MODELUL DE PORNIRE. Escaladarea pe neputință
+// (mai jos, `escaladeazaPeNeputinta`) urcă pe un model plătit DUPĂ ce gratuitul
+// a dovedit că nu poate — și e intenționat neatinsă de garda asta. Regula din
+// 27 iul apăra împotriva „plătit LA FIECARE rulare"; aici se plătește doar
+// acolo unde gratuitul a picat deja, o dată pe ordin. Se stinge cu
+// CONSTRUCTOR_ESCALADARE=0.
 const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
@@ -412,7 +420,69 @@ const MODELE_DOVEDIT_PROASTE = new Set([
   'nvidia/nemotron-nano-12b-v2-vl:free', // status -2 în catalog: degradat ACUM
 ])
 if (MODEL && !MODEL_LADDER.includes(MODEL) && !MODELE_DOVEDIT_PROASTE.has(MODEL)) MODEL_LADDER.unshift(MODEL)
+// ── ESCALADAREA ÎN SUS, PE NEPUTINȚĂ (Adrian, 30 iul: „de ce nu se escaladează
+// pe model potențial? automat") ──────────────────────────────────────────────
+// Scara de mai sus e LATERALĂ: patru modele GRATUITE, între care ne rotim când
+// unul dă 429 sau moare. Escalada pe PANĂ DE FURNIZOR exista. Escalada pe
+// NEPUTINȚĂ — nu. Dacă toate patru povestesc în loc să lucreze, se roteau între
+// ele la nesfârșit și ordinul murea cu „modelul nu folosește uneltele", iar
+// cerința ownerului rămânea nefăcută.
+//
+// Acum: gratuit ÎNTÂI, mereu. Dar când gratuitul a DOVEDIT că nu poate — ture
+// sterile epuizate, sau rundele de reparație terminate — urcăm O SINGURĂ DATĂ
+// pe un model capabil, plătit, pentru ordinul ăsta.
+//
+// De ce e apărat și de regula din 27 iul („doar gratuit, să nu mai ardă bani"):
+// atunci constructorul rula PLĂTIT LA FIECARE RULARE. Aici se plătește doar
+// acolo unde gratuitul a picat deja, o dată per ordin, cu motivul scris în
+// jurnal și în PR. Se stinge cu CONSTRUCTOR_ESCALADARE=0.
+const MODEL_CAPABIL = env.CONSTRUCTOR_MODEL_CAPABIL || 'anthropic/claude-sonnet-5'
+const ESCALADARE_ON = env.CONSTRUCTOR_ESCALADARE !== '0'
+let escaladat = false
 let modelIdx = 0
+
+// ── NIVELUL DE DIFICULTATE ALEGE MÂNA, DE LA ÎNCEPUT ─────────────────────────
+// Adrian, 30 iul: „nu, în sus, pe 200" · „pe nivel de dificultate setabil
+// automat pe cerință".
+//
+// Escaladarea DUPĂ eșec (mai jos) rămâne ca plasă, dar e prea târziu ca regulă:
+// o sarcină grea pornită pe un model mic arde 8 ture povestind, apoi urcă — cu
+// jumătate din buget deja pierdut. Corect e să pornească direct pe mâna
+// potrivită.
+//
+// Ordinul poartă cu el o linie „NIVEL DE DIFICULTATE: N/5", pusă de cine îl
+// scrie (bucla autonomă o cere creierului odată cu evaluarea variantelor). De
+// aici alegem scara:
+//   1-2  banal / simplu   → doar gratuite (o redenumire nu merită bani)
+//   3    mediu            → model mediu în cap, gratuitele ca plasă
+//   4-5  greu / foarte greu → modelul mare în cap, apoi mediu, apoi gratuitele
+//
+// Dacă un model plătit nu există în catalog, logica de „model mort" îl scoate
+// și rămânem pe gratuite — deci o setare greșită degradează, nu blochează.
+const MODEL_GREU = env.CONSTRUCTOR_MODEL_GREU || 'anthropic/claude-opus-5'
+const MODEL_MEDIU = env.CONSTRUCTOR_MODEL_MEDIU || 'anthropic/claude-sonnet-5'
+
+/** Citește nivelul din textul ordinului. Fără marcaj → 3 (mediu): mai bine
+ *  pornim cu o mână bună decât să ardem bugetul descoperind că era greu. */
+function nivelDinOrdin(text) {
+  const m = /NIVEL DE DIFICULTATE:\s*(\d)/i.exec(String(text ?? ''))
+  const n = m ? Number(m[1]) : 3
+  return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3))
+}
+
+/** Pune în capul scării mâna potrivită nivelului. Gratuitele rămân dedesubt,
+ *  ca plasă — deci nici la nivel 5 nu rămânem fără opțiuni dacă plătitul pică. */
+function pregatesteScaraPentruNivel(nivel) {
+  const sus = nivel >= 4 ? [MODEL_GREU, MODEL_MEDIU] : nivel === 3 ? [MODEL_MEDIU] : []
+  for (const m of [...sus].reverse()) {
+    if (m && !MODEL_LADDER.includes(m)) MODEL_LADDER.unshift(m)
+  }
+  modelIdx = 0
+  log(
+    `nivel de dificultate ${nivel}/5 → pornesc pe „${modelCurent()}"` +
+      (sus.length ? ` (plătit, ales de dificultate; gratuitele rămân ca plasă)` : ` (gratuit — sarcina nu cere mai mult)`),
+  )
+}
 // Modele scoase din joc pentru rularea asta (nu există, n-au unelte, au context
 // prea mic) — nu le mai atingem, ca rotația să nu ne întoarcă la ele.
 const modeleMoarte = new Set()
@@ -431,6 +501,28 @@ function treciLaUrmatorulModel() {
     }
   }
   return false // toată scara e moartă
+}
+
+/** URCĂ pe modelul capabil, o singură dată per ordin, când gratuitul a DOVEDIT
+ *  că nu poate duce sarcina. Întoarce `true` dacă am urcat — atunci apelantul
+ *  NU aruncă eroarea, ci mai încearcă o dată, cu mâna bună. */
+function escaladeazaPeNeputinta(motiv) {
+  if (!ESCALADARE_ON || escaladat) return false
+  escaladat = true
+  // Îl punem în capul scării și mergem pe el ACUM. Dacă modelul nu există în
+  // catalog, logica de „model mort" existentă îl scoate și ne întoarce pe
+  // gratuite — deci o setare greșită degradează, nu blochează.
+  MODEL_LADDER.unshift(MODEL_CAPABIL)
+  modelIdx = 0
+  // NU atingem `pasiSterili` de aici: e declarat în main(), iar un modul ES e în
+  // mod strict — o atribuire din afară ar arunca ReferenceError exact în clipa
+  // escaladării, adică fix când aveam nevoie de ea. Îl resetează apelantul.
+  log(
+    `ESCALADEZ pe model capabil (${MODEL_CAPABIL}): ${motiv}. ` +
+      `Gratuitul a dovedit că nu poate — de-acum se plătește, o singură dată pe ordinul ăsta. ` +
+      `Se stinge cu CONSTRUCTOR_ESCALADARE=0.`,
+  )
+  return true
 }
 
 // CLASIFICAREA ERORILOR OPENROUTER (dovadă live 28 iul, ordinul #13: a murit
@@ -691,6 +783,11 @@ async function main() {
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
+  // MÂNA POTRIVITĂ, DE LA ÎNCEPUT — după cât de grea e sarcina, nu după ce a
+  // eșuat deja o dată (Adrian: „pe nivel de dificultate setabil automat pe
+  // cerință"). Se face AICI, nu la încărcarea modulului, fiindcă nivelul vine
+  // din ordinul pe care tocmai l-am luat.
+  pregatesteScaraPentruNivel(nivelDinOrdin(job.orderText))
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
@@ -736,10 +833,18 @@ async function main() {
       while (!finish) {
         if (pasiUtili >= MAX_STEPS)
           throw new Error(`plafon de pași atins fără finish (${pasiUtili} pași cu unelte, ${pasiSterili} sterili)`)
-        if (pasiSterili >= MAX_STERILE)
-          throw new Error(
-            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
-          )
+        // NEPUTINȚĂ DOVEDITĂ: modelul povestește în loc să lucreze. Înainte
+        // muream aici, cu cerința ownerului nefăcută. Acum urcăm o dată pe
+        // modelul capabil — și abia dacă și ăla nu poate, ne oprim.
+        if (pasiSterili >= MAX_STERILE) {
+          if (escaladeazaPeNeputinta(`${pasiSterili} ture fără nicio unealtă validă pe ${modelCurent()}`)) {
+            pasiSterili = 0 // mâna nouă pornește cu contorul curat
+          } else {
+            throw new Error(
+              `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
+            )
+          }
+        }
         // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
         // rămână timp de verificare + push + PR + RAPORT. Omorâți de timeout am
         // muri muți, iar ordinul ar rămâne „running" 40 de minute și ar arde o
@@ -852,7 +957,14 @@ async function main() {
       // scriere; asta singură explică o parte din ordinele picate „end-to-end".
       // Mărginită: MAX_REPAIR runde ȘI doar dacă mai avem timp de încă un ciclu
       // complet de npm ci/build/test (altfel murim la timeout, fără raport).
-      if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) throw new Error(problema)
+      // A DOUA NEPUTINȚĂ DOVEDITĂ: a scris cod, dar nu poate să-l facă să treacă
+      // verificarea, nici după rundele de reparație. Mai dăm o șansă, cu mâna
+      // bună — dar numai dacă mai avem timp de un ciclu complet de verificare.
+      if (reparatii >= MAX_REPAIR && ramase() >= 10 * 60_000 && escaladeazaPeNeputinta('rundele de reparație s-au terminat, verificarea tot roșie')) {
+        reparatii = 0
+      } else if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) {
+        throw new Error(problema)
+      }
       reparatii++
       finish = null
       log(`verificarea a picat — runda de reparație ${reparatii}/${MAX_REPAIR}`)

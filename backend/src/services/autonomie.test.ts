@@ -53,7 +53,7 @@ let goluri: { id: number; request: string; hits: number; reason: string | null; 
 const goluriInchise: number[] = []
 
 // Cerințele ownerului, cu drumul lor (noua → analizata → in_lucru → livrata).
-let cerinte: { id: number; text: string; stare: string; criteriu: string | null; aleasa: string | null; optiuni: string | null }[] = []
+let cerinte: { id: number; text: string; stare: string; criteriu: string | null; aleasa: string | null; optiuni: string | null; dificultate?: number }[] = []
 const cerinteAtinse: { id: number; stare?: string }[] = []
 let evaluari = 0
 
@@ -164,6 +164,36 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(evaluari).toBe(1)
     expect(jobs).toHaveLength(0) // NICIUN ordin înainte de analiză
     expect(r.motiv).toContain('cerința #9')
+  })
+
+  // „Pe nivel de dificultate setabil automat pe cerință" (Adrian, 30 iul).
+  // Marcajul din ordin e SINGURUL lucru după care constructorul își alege mâna:
+  // dacă dispare, o sarcină grea pornește pe un model mic, arde turele povestind
+  // și pică — exact ce s-a întâmplat până acum.
+  it('ordinul poartă NIVELUL DE DIFICULTATE, ca mâna să fie aleasă din start', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 9, text: 'plata prin Revolut', stare: 'analizata', dificultate: 5,
+      criteriu: 'userul primește creditele', aleasa: 'browser pe portal', optiuni: null,
+    }]
+    await poateSaLucreze()
+    expect(jobs[0].orderText.startsWith('NIVEL DE DIFICULTATE: 5/5')).toBe(true)
+  })
+
+  it('o sarcină care a picat pleacă a doua oară pe o mână mai bună', async () => {
+    misiuneaInchisa()
+    cerinte = [{
+      id: 9, text: 'x', stare: 'analizata', dificultate: 3,
+      criteriu: null, aleasa: null, optiuni: null,
+    }]
+    await poateSaLucreze()
+    expect(jobs[0].orderText).toContain('NIVEL DE DIFICULTATE: 3/5')
+    jobs[0].status = 'failed'
+    jobs[0].log = 'a picat'
+
+    await poateSaLucreze()
+    // +1 pe încercare: ce a picat o dată e mai greu decât părea.
+    expect(jobs[0].orderText).toContain('NIVEL DE DIFICULTATE: 4/5')
   })
 
   it('cerința ANALIZATĂ pleacă la construit cu varianta aleasă și criteriul lipite', async () => {

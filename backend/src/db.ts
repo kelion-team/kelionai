@@ -278,10 +278,15 @@ export async function initDb(): Promise<void> {
       -- buton în timp ce plățile stau. Nu e o frână: schimbă ORDINEA, nu ce
       -- are voie să facă.
       prioritate INT NOT NULL DEFAULT 5,
+      -- CÂT DE GREA e (1..5), pusă de el la evaluare. Din ea se alege MÂNA care
+      -- lucrează: model mare pe sarcină grea, gratuit pe o redenumire. Fără ea,
+      -- o sarcină grea pornea pe un model mic, ardea turele povestind, și pica.
+      dificultate INT NOT NULL DEFAULT 3,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS prioritate INT NOT NULL DEFAULT 5;
+    ALTER TABLE cerinte ADD COLUMN IF NOT EXISTS dificultate INT NOT NULL DEFAULT 3;
     CREATE INDEX IF NOT EXISTS idx_cerinte_stare ON cerinte (stare, prioritate, created_at);
 
     CREATE TABLE IF NOT EXISTS capability_gaps (
@@ -2306,6 +2311,7 @@ export interface Cerinta {
   stare: string
   criteriu: string | null
   prioritate: number
+  dificultate: number
   optiuni: string | null
   aleasa: string | null
   dovada: string | null
@@ -2361,7 +2367,7 @@ export async function listeazaCerinte(stare?: string, limit = 100): Promise<Ceri
 /** Mută cerința pe drumul ei. Doar câmpurile date se ating — restul rămân. */
 export async function actualizeazaCerinta(
   id: number,
-  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate'>> & { job_id?: number },
+  p: Partial<Pick<Cerinta, 'stare' | 'criteriu' | 'optiuni' | 'aleasa' | 'dovada' | 'pr_url' | 'prioritate' | 'dificultate'>> & { job_id?: number },
 ): Promise<void> {
   if (!dbEnabled() || !id) return
   const campuri: string[] = []

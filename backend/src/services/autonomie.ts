@@ -85,6 +85,10 @@ interface Sarcina {
   ordin: string
   /** Cine îl duce: mâinile lui Kelion (browser + secrete) sau constructorul (cod). */
   executant: Executant
+  /** CÂT DE GREA e, 1..5. Pleacă în ordin ca „NIVEL DE DIFICULTATE: N/5", iar
+   *  constructorul își alege MÂNA după ea: model mare pe sarcină grea, gratuit
+   *  pe una banală. Fără marcaj → 3 (mediu), pe partea sigură. */
+  dificultate?: number
   /** Cum se DOVEDEȘTE că e gata — o măsurătoare, nu cuvântul lui.
    *  Întoarce `true` doar dacă lucrul chiar s-a întâmplat. */
   dovada?: () => Promise<boolean>
@@ -157,6 +161,8 @@ const MISIUNE: Sarcina[] = [
       `nicăieri, niciodată.`,
     // MÂINILE LUI: are nevoie de secret_pune/secret_publica. Constructorul nu le are.
     executant: 'maini',
+    dificultate: 4, // configurare pe servicii externe, atinge cheile
+
     // Dovada, nu declarația: linkul de plată chiar există în secrete.
     dovada: () => secreteExista('REVOLUT_PAY_LINK'),
   },
@@ -213,6 +219,8 @@ const MISIUNE: Sarcina[] = [
     // uneltele chiar există (constructorul le are acum și el, prin
     // /api/constructor/tool — dar pasul ăsta nu e muncă de cod).
     executant: 'maini',
+    dificultate: 5, // portal străin, formulare care se schimbă, consimțământ bancar
+
     // Dovada: cele trei chei chiar există. Fără ele, cititorul nu poate citi nimic.
     dovada: () => secreteExista('GOCARDLESS_SECRET_ID', 'GOCARDLESS_SECRET_KEY', 'GOCARDLESS_ACCOUNT_ID'),
   },
@@ -233,6 +241,7 @@ const MISIUNE: Sarcina[] = [
       `Teste: plată fără cod → ajunge în plati_neatribuite; aceeași plată văzută de două ori ` +
       `→ un singur rând; atribuirea manuală creditează o singură dată.`,
     executant: 'constructor',
+    dificultate: 4, // atinge banii: o greșeală aici creditează pe cine nu trebuie
   },
   {
     cod: 'M3',
@@ -250,6 +259,7 @@ const MISIUNE: Sarcina[] = [
       `picate l-a costat o zi întreagă pe 30 iul („Stripe £0.00" în timp ce avea bani).\n\n` +
       `Teste pe potrivire/totaluri. La frontend rulează comanda EXACTĂ: cd frontend && npm run build.`,
     executant: 'constructor',
+    dificultate: 3,
   },
   {
     cod: 'M4',
@@ -268,6 +278,7 @@ const MISIUNE: Sarcina[] = [
       `Verifică în același PR că nu a rămas nicio urmă de Stripe pe drumul userului ` +
       `(ownerul, 30 iul: „0 stripe").`,
     executant: 'constructor',
+    dificultate: 3,
   },
   {
     cod: 'M5',
@@ -285,6 +296,7 @@ const MISIUNE: Sarcina[] = [
       `Actualizează PROCEDURA-PLATI.md cu drumul REAL, cel construit la pasul 1, ` +
       `și taie ce nu mai e adevărat.`,
     executant: 'constructor',
+    dificultate: 3,
   },
 ]
 
@@ -410,6 +422,8 @@ async function cerinteDeDus(): Promise<Sarcina[]> {
     cod: `C${c.id}`,
     titlu: c.text.slice(0, 90),
     executant: 'constructor' as Executant,
+    // Nivelul pe care l-a pus EL la evaluare, odată cu varianta aleasă.
+    dificultate: c.dificultate,
     ordin:
       `CERINȚA OWNERULUI #${c.id}. Ai analizat-o deja și ai ALES un drum — ăsta e.\n\n` +
       `CE A CERUT: ${c.text}\n\n` +
@@ -424,8 +438,14 @@ async function cerinteDeDus(): Promise<Sarcina[]> {
 }
 
 /** Regulile care se lipesc la FIECARE ordin — la fel pentru misiune și pentru listă. */
-function cuRegulile(ordin: string): string {
+function cuRegulile(ordin: string, dificultate = 3): string {
+  const niv = Math.max(1, Math.min(5, Math.round(Number(dificultate) || 3)))
   return (
+    // MARCAJUL CARE ALEGE MÂNA (Adrian, 30 iul: „pe nivel de dificultate setabil
+    // automat pe cerință"). Constructorul îl citește ÎNAINTE să înceapă și își
+    // pune modelul potrivit — nu după ce a ars deja jumătate din buget aflând
+    // pe pielea lui că era greu.
+    `NIVEL DE DIFICULTATE: ${niv}/5\n\n` +
     `${ordin}\n\n` +
     `Fă-o cap-coadă: găsește cauza REALĂ în sursă (search_source/read_source), rescrie ` +
     `curat modulul responsabil — fără petice — și scrie teste care apără exact ` +
@@ -670,8 +690,12 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
             `SARCINA INIȚIALĂ:\n${s.ordin}\n\n` +
             `CE A SCRIS JURNALUL CÂND A CĂZUT (ultimele rânduri — pornește de la cauza de acolo, ` +
             `nu de la zero):\n${jurnal}`,
+          // O sarcină care a picat deja e, prin definiție, mai grea decât părea.
+          // Urcăm nivelul cu fiecare încercare — deci a doua oară pleacă pe o
+          // mână mai bună, nu pe aceeași care tocmai a picat.
+          Math.min(5, (s.dificultate ?? 3) + st.incercari),
         )
-      : cuRegulile(s.ordin)
+      : cuRegulile(s.ordin, s.dificultate)
 
     // ── PAS DE MÂINI: îl face ACUM, el, cu browserul și cu secretele ──────────
     // Nu intră în coada constructorului: constructorul n-are browser și n-are
