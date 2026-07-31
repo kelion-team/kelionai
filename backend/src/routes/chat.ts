@@ -38,10 +38,10 @@ import {
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, resolveModelChecked, bestPaidWorkModel, bestVisionModel, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
-import { brainComplete } from '../services/brain.js'
+import { brainComplete, describeScene } from '../services/brain.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { maybeAutoRecharge } from '../services/autorecharge.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -152,7 +152,7 @@ async function selectedBrainModel(
     // dacă modelul ales nu mai era în catalogul live (scos de furnizor, sau
     // catalogul necitibil) — întorcea TĂCUT implicitul `:free`. Owner-ul rămânea
     // pe un model slab, care narează în loc să cheme unealta, fără niciun semn
-    // nicăieri. Iar `bestPaidWorkModel()` nici măcar nu se încerca pe ramura asta.
+    // nicăieri. Iar alegerea automată de model plătit nici măcar nu se încerca aici.
     // ACUM: dacă alegerea lui nu mai e validă, se cade pe modelul PLĂTIT capabil
     // (are bani: nu-l coborâm la free doar fiindcă un id s-a învechit), și se
     // spune în jurnal — o înlocuire tăcută de creier e exact tiparul zilei.
@@ -160,13 +160,39 @@ async function selectedBrainModel(
     if (sel.work) {
       const r = await resolveModelChecked('work', sel.work)
       if (r.fellBack) {
-        console.error(`[CREIER] modelul ales (${sel.work}) NU e în catalog → încerc plătitul capabil`)
-        ownerModel = await bestPaidWorkModel()
+        // Alegerea lui s-a învechit (model scos de furnizor). Cădem pe
+        // IMPLICITUL aplicației — nu pe un model plătit: o alegere învechită
+        // nu e un motiv să înceapă să-i consume banii fără să-i spună nimeni.
+        console.error(`[CREIER] modelul ales (${sel.work}) NU e în catalog → cad pe implicitul aplicației`)
+        ownerModel = r.model
       } else {
         ownerModel = r.model
       }
     } else {
-      ownerModel = await bestPaidWorkModel()
+      // ── CREIERUL LUI, ALES DE EL (Adrian, 31 iul: „pune-l creier
+      // nvidia/nemotron-3-ultra-550b-a55b:free") ─────────────────────────────
+      //
+      // Aici era alegerea automată de model PLĂTIT: fără o selecție manuală, primea
+      // automat cel mai bun model PLĂTIT (Claude/OpenAI). Regula de fier §14 din
+      // AI-HANDOFF spune asta anume — „pe drumul ownerului modelul NU se ciontă
+      // pe gratuit" — și e o regulă bună, fiindcă s-a născut din sesiuni în care
+      // era coborât TĂCUT pe un model slab care nara în loc să execute.
+      //
+      // Dar regula aia apără de o coborâre TĂCUTĂ, nu de alegerea LUI. Azi a
+      // ales explicit, după ce a cerut de patru ori „cel mai performant model
+      // full free din lume": Nemotron 3 Ultra — 550B (55B activi), 1M context,
+      // unelte, raționament. Nu e o ciuntire; e cel mai mare creier gratuit
+      // care există, și e de 18 ori mai mare la parametri activi decât ce avea.
+      //
+      // Efectul pe care îl voia: cei $10 din OpenRouter NU se mai consumă pe
+      // creier. Modelele `:free` costă zero; banii aceia doar țin pragul de
+      // 1.000 de cereri/zi deschis (față de 50).
+      //
+      // ORICE AI VIITOR: nu pune alegerea automată de plătit înapoi aici „ca să fie
+      // mai bun". A cerut-o el, în scris, iar comutarea la plătit e la o
+      // variabilă de env distanță (OPENROUTER_WORK_MODEL) sau la o alegere în
+      // Setări → Model, care are în continuare prioritate peste tot.
+      ownerModel = await resolveModel('work', null)
     }
     if (ownerModel) return { model: ownerModel, heavy }
     console.error('[CREIER] owner FĂRĂ model plătit → cad pe scara free (poate nara în loc să execute)')
@@ -1790,18 +1816,53 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Se face DOAR când chiar există o imagine — altfel am coborî tăcut
       // fiecare tură pe un model mai mic, adică exact „îl ciuntești pe owner
       // fără să-i spui" (regula de fier §14).
+      // ── VEDEREA TRECE PRIN CREIER, NU ÎN LOCUL LUI (Adrian, 31 iul) ───────
+      //
+      // El: „și vocea și vederea rutează-le prin creier".
+      //
+      // Prima variantă (de acum o oră) muta TOATĂ tura cu poză pe modelul care
+      // vede. Adică pe fiecare poză, creierul ales — 550B — era OCOLIT, iar tura
+      // o ducea un model de 26B. Ochii ajungeau să și decidă.
+      //
+      // Acum: ochii DESCRIU, creierul DECIDE. Modelul cu vedere se uită la
+      // imagine și scrie ce e acolo; descrierea intră în conversație ca text, iar
+      // tura rămâne pe creierul ales, cu toate uneltele lui. Un singur creier,
+      // exact ca §6 din AI-HANDOFF („creier unic") — vederea devine un simț al
+      // lui, nu un înlocuitor.
+      //
+      // Blocurile de imagine sunt scoase din ce se trimite mai departe: un model
+      // orb ori le ignoră, ori pică pe ele. Descrierea le înlocuiește.
       if (image || camFrames.length > 0) {
         const cat = await getCatalog().catch(() => null)
         const vedeAcum = cat?.chat.some((m) => m.id === orchestratorModel) ?? false
         if (!vedeAcum) {
-          const ochi = await bestVisionModel().catch(() => null)
-          if (ochi) {
-            // Se SPUNE, nu se face pe ascuns: o înlocuire tăcută de model e
-            // exact ce ne-a costat de fiecare dată când s-a întâmplat.
-            console.log(`[creier] ${orchestratorModel} nu vede → tura cu imagine merge pe ${ochi}`)
-            orchestratorModel = ochi
+          const poza = image ?? camFrames[camFrames.length - 1]
+          const descriere = poza
+            ? await describeScene(poza, lastUserText || undefined, (usd) => { usage.usd += usd }).catch(() => '')
+            : ''
+          // Scoatem imaginile din conversație și lăsăm în loc descrierea.
+          for (const m of orMsgs) {
+            if (!Array.isArray(m.content)) continue
+            const doarText = (m.content as Array<Record<string, unknown>>)
+              .filter((p) => p.type === 'text')
+              .map((p) => String(p.text ?? ''))
+              .join('\n')
+            m.content = doarText || '(imagine)'
+          }
+          if (descriere.trim()) {
+            orMsgs.push({
+              role: 'user',
+              content: `[VEDEREA TA — te-ai uitat chiar acum prin cameră/la poza trimisă și ai văzut asta:]\n${descriere.trim()}\n[Răspunde ca și cum ai văzut tu; nu spune că ți-a descris altcineva.]`,
+            })
+            console.log(`[creier] ${orchestratorModel} nu vede → am descris imaginea și am dat-o creierului (${descriere.length} car.)`)
           } else {
-            console.error('[creier] tura are imagine, creierul e orb și n-am găsit niciun model cu vedere în catalog')
+            // Regula 1: lipsa se declară, nu se ascunde. Creierul trebuie să știe
+            // că e o imagine pe care N-A putut s-o vadă, nu să tacă despre ea.
+            orMsgs.push({
+              role: 'user',
+              content: '[VEDEREA TA a eșuat: există o imagine, dar n-am putut s-o citesc. Spune-i omului sincer că nu poți vedea imaginea acum — nu inventa ce e în ea.]',
+            })
+            console.error('[creier] tura are imagine, creierul e orb, iar descrierea a eșuat')
           }
         }
       }
