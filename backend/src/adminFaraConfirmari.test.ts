@@ -71,4 +71,29 @@ describe('Kelion nu-i mai cere ownerului voie pentru ce tocmai i-a cerut', () =>
   it('rămâne întrebat DOAR efectul colateral necerut', () => {
     expect(chat).toMatch(/action he did NOT ask for[\s\S]{0,400}never about the request itself/)
   })
+
+  // Adrian, 31 iul: „nu ai scos cerința cu autorizarea, de ce?" — pusesem blocul
+  // de owner, dar lăsasem trei cereri de voie mai vechi, împrăștiate. Una era
+  // chiar în promptul de owner, în contradicție cu ce tocmai scrisesem, și încă
+  // două în fluxul de clip (prompt + descrierea uneltei, care e semnalul cel mai
+  // puternic — modelul o vede la fiecare apel). Testul le caută pe toate ca text,
+  // ca să nu se mai poată strecura una uitată prin altă parte a fișierului.
+  it('nicio cerere de autorizare nu a mai rămas nicăieri în fișier', () => {
+    expect(chat).not.toMatch(/ask for authorization/i)
+    expect(chat).not.toMatch(/explicitly authorizes/i)
+    expect(chat).not.toMatch(/explicitly said yes/i)
+    expect(chat).not.toMatch(/explicitly approves/i)
+    expect(chat).not.toMatch(/ONLY after his explicit yes/i)
+  })
+
+  it('clipul promo se scrie ȘI se armează în aceeași tură', () => {
+    // Textul e tăiat de concatenarea din sursă („...do ' + 'not stop..."), deci
+    // căutăm peste ruptură, nu litera contiguă.
+    expect(chat).toMatch(/his request is the authorisation, do[\s\S]{0,20}not stop to ask for a yes/)
+    expect(chat).toMatch(/IN THE SAME TURN — his request for a clip IS the authorisation/)
+  })
+
+  it('problemele găsite la system_health se repară, nu se raportează cu întrebare', () => {
+    expect(chat).toMatch(/REPAIR them straight away[\s\S]{0,60}do not ask for permission first/)
+  })
 })
