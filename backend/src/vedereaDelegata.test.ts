@@ -140,8 +140,8 @@ describe('vocea: aceleași unelte și aceeași personă ca scrisul, dar alt ceas
   })
 
   it('motivul e scris în cod, ca să nu fie „reparat" înapoi', () => {
-    expect(voce).toMatch(/VOCEA ARE ALT CEAS DECÂT SCRISUL/)
-    expect(voce).toMatch(/buget de sub o secundă/)
+    expect(voce).toMatch(/VOICE RUNS ON A DIFFERENT CLOCK THAN WRITING/)
+    expect(voce).toMatch(/sub-second budget/)
   })
 
   it('nici scrisul nu mai rutează ownerul pe plătit fără să ceară el', () => {
