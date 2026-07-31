@@ -23,7 +23,7 @@ import { generateImage } from '../services/image.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 // §6 CREIER UNIC: vocea escaladează pe ACELAȘI orchestrator + selecție de model ca scrisul.
 import { voiceBrainTurn } from '../services/voiceBrainTurn.js'
-import { resolveModel, bestPaidWorkModel, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, type AnthropicTool } from '../services/openrouter.js'
 import { geminiDirectAvailable, GEMINI_DIRECT_PREFIX } from '../services/geminiDirect.js'
 // CREIER UNIC §1 („fără duplicare"): definițiile uneltelor de introspecție/
 // constructor vin din sursa COMUNĂ, nu mai sunt copiate inline aici.
@@ -465,13 +465,16 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           return execIntrospection(tname, targs)
         }
         const brainTools = introspectionTools as unknown as AnthropicTool[]
-        // Modelul: ca la scris (§6 creier unic). OWNERUL primește modelul PLĂTIT
-        // capabil din catalogul live (regula de fier §14 — nu se cioantă pe free,
-        // exact ca pe chat); publicul rămâne pe free (Gemini direct / work). Dacă
-        // în catalog nu există model plătit, cade pe free ca înainte.
-        const ownerPaid = isAdmin ? await bestPaidWorkModel() : null
-        const primaryModel = ownerPaid
-          ? ownerPaid
+        // Modelul: ca la scris (§6 creier unic) — și de-asta se schimbă ODATĂ cu
+        // el. Adrian, 31 iul: „pune-l creier nemotron-3-ultra" · „modifici tot ce
+        // trebuie să fie el". Aici se alegea automat un model PLĂTIT pentru owner, adică
+        // vocea îi consuma banii pe un model plătit în timp ce scrisul mergea pe
+        // creierul ales de el. Două creiere diferite pe același om = exact ce
+        // rezolvase §6 („creier unic"), stricat din altă parte.
+        // Acum: ownerul primește pe VOCE același implicit ca pe SCRIS.
+        const ownerModel = isAdmin ? await resolveModel('work') : null
+        const primaryModel = ownerModel
+          ? ownerModel
           : geminiDirectAvailable()
             ? `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
             : await resolveModel('work')
