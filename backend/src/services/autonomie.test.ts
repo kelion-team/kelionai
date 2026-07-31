@@ -42,6 +42,7 @@ let uneltePrimite: string[] = []
 vi.mock('../config.js', () => ({
   config: {
     adminEmail: 'adrianenc11@gmail.com',
+    openrouter: { topDefault: 'model-top' },
     get autonomyDailyMax() {
       return plafon
     },
@@ -87,8 +88,18 @@ vi.mock('../db.js', () => ({
 }))
 
 let ultimulPrompt = ''
+// Scara de modele: o dăm ca listă fixă, ca testul să poată verifica DACĂ o
+// sarcină grea pleacă pe mâna cea mai bună — fără să atingem rețeaua.
+let scaraCeruta: string[] | undefined
 vi.mock('./brain.js', () => ({
-  brainCompleteWithTools: async (prompt: string, tools: { name: string }[]) => {
+  expertModelLadder: () => ['model-lucru', 'model-top', 'gratuit:free'],
+  brainCompleteWithTools: async (
+    prompt: string,
+    tools: { name: string }[],
+    _exec: unknown,
+    opts?: { models?: string[] },
+  ) => {
+    scaraCeruta = opts?.models
     turiDeMaini++
     ultimulPrompt = prompt
     uneltePrimite = tools.map((t) => t.name)
@@ -145,6 +156,18 @@ beforeEach(() => {
   cerinte = []
   cerinteAtinse.length = 0
   evaluari = 0
+  scaraCeruta = undefined
+})
+
+// „Pe nivel de dificultate setabil automat pe cerință" — și pentru MÂINILE lui,
+// nu doar pentru constructor. M1 (portalul) e dificultate 5: dacă pleacă pe
+// modelul obișnuit, află că nu poate abia după ce a irosit turele.
+describe('mâinile lui pornesc pe mâna potrivită dificultății', () => {
+  it('o sarcină grea (M1) cere TOP-ul în capul scării', async () => {
+    kv.set('autonomie:pas:M0', JSON.stringify({ job: 0, incercari: 1, gata: true }))
+    await poateSaLucreze()
+    expect(scaraCeruta?.[0]).toBe('model-top')
+  })
 })
 
 // „Sisteme avansate de gestiune a cerințelor, evaluări avansate pe soluțiile
