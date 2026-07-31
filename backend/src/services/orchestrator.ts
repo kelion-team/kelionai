@@ -47,6 +47,20 @@ export interface OrchestratorOpts {
 const DEED_CLAIM_RE =
   /\b(?:am|l-?am|le-?am|ți-?am|ti-?am)\s+(?:trimis|salvat|deschis|reparat|publicat|cre[ia]at|pornit|activat|afi[șs]at|ad[ăa]ugat|[șs]ters|configurat|instalat|rulat|executat|setat|actualizat|modificat|[îi]nchis)\b|\bi['’]?ve\s+(?:sent|saved|opened|created|fixed|published|started|deleted|done|updated|set)\b|\bhave\s+(?:sent|saved|opened|created|fixed|published)\b|(?:\b(?:m[ăa]\s+ocup|m[ăa]\s+apuc|[îi][țt]i\s+(?:deschid|ar[ăa]t|trimit|salvez|caut|pornesc|pun)|o\s+s[ăa]\s+(?:deschid|caut|trimit|salvez|pornesc|rulez|verific)|imediat\s+(?:deschid|caut|pornesc)|deschid\s+acum|pornesc\s+acum|caut\s+acum)\b)/i
 
+// ── „O SĂ ANALIZEZ" (Adrian, 31 iul) ────────────────────────────────────────
+// „când spune că o să analizez, trebuie FAPTIC să deschidă monitorul și să
+// arate ce face!"
+//
+// DEED_CLAIM_RE de mai sus prinde „AM făcut". Asta prinde promisiunea de a te
+// UITA la ceva — verbele cu care se încheia o tură fără să se întâmple nimic,
+// iar omul rămânea în fața unui ecran gol, așteptând o analiză care nu
+// începuse. „Analizez", „mă uit", „verific", „investighez", „cercetez".
+//
+// Timpul viitor ȘI prezentul de intenție („analizez acum") — fiindcă în
+// română amândouă înseamnă același lucru: încă n-am făcut-o.
+const ANALIZA_CLAIM_RE =
+  /\b(?:o\s+s[ăa]\s+)?(?:analizez|verific|investighez|cercetez|examinez|studiez|inspectez)\b|\b(?:m[ăa]\s+uit|arunc\s+o\s+privire|dau\s+o\s+cautare|caut\s+prin|sap\s+in)\b|\b(?:let\s+me\s+)?(?:analy[sz]e|investigate|examine|inspect|look\s+into|take\s+a\s+look|check\s+the)\b|\bi(?:'|’)?ll\s+(?:analy[sz]e|check|look|investigate|examine)\b/i
+
 /**
  * @param model      id OpenRouter (ex: openai/gpt-4.1-mini, anthropic/claude-sonnet-5)
  * @param messages   conversația (system + istoric + tura curentă)
@@ -70,6 +84,7 @@ export async function runOrchestrator(
   // epuizarea rundelor tura se încheia complet MUTĂ ('').
   let allText = ''
   let deedGateUsed = false
+  let analizaGateUsed = false
   let anyToolCalled = false
 
   // ── NU SE SCRIE DE DOUĂ ORI ACELAȘI LUCRU ─────────────────────────────────
@@ -147,6 +162,41 @@ export async function runOrchestrator(
             'NICIO unealtă — deci acțiunea NU s-a întâmplat. Ori cheamă ACUM ' +
             'unealta care execută cu adevărat, ori retrage sincer afirmația și ' +
             'spune clar ce anume nu poți face și de ce.',
+        })
+        continue
+      }
+      // ── POARTA ANALIZEI (Adrian, 31 iul) ─────────────────────────────────
+      //
+      // El: „când spune că o să analizez, trebuie FAPTIC să deschidă monitorul
+      // și să arate ce face!"
+      //
+      // Poarta faptei de mai sus prinde „AM făcut". Asta prinde „O SĂ fac" —
+      // „analizez", „mă uit", „verific", „investighez". Erau exact cuvintele
+      // cu care se termina o tură fără să se întâmple nimic: promisiunea suna
+      // a muncă, iar omul rămânea cu ecranul gol, așteptând.
+      //
+      // Nu-i cerem doar să execute. Îi cerem să DESCHIDĂ MONITORUL: munca
+      // trebuie să se VADĂ în timp ce se face, nu să fie povestită după.
+      // O singură dată pe tură, ca să nu intre în buclă.
+      if (
+        opts.deedGate &&
+        !analizaGateUsed &&
+        !anyToolCalled &&
+        ANALIZA_CLAIM_RE.test(res.text || '')
+      ) {
+        analizaGateUsed = true
+        convo.push({ role: 'assistant', content: res.text ?? '' })
+        convo.push({
+          role: 'user',
+          content:
+            'POARTA ANALIZEI: ai spus că analizezi / te uiți / verifici, dar ' +
+            'n-ai chemat NICIO unealtă — deci nu te-ai uitat la nimic. ' +
+            'Fă-o ACUM, cu uneltele tale (read_source, search_source, db_query, ' +
+            'system_health, runbook_log — ce se potrivește), și PUNE PE MONITOR ' +
+            'ce faci, cu show_document: ce ai deschis, ce ai găsit, unde anume ' +
+            '(fișier și linie). Munca se VEDE în timp ce se face, nu se ' +
+            'povestește după. Dacă nu ai cu ce să analizezi, spune clar asta ' +
+            'în loc să promiți.',
         })
         continue
       }
