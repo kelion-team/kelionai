@@ -38,7 +38,7 @@ import {
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, resolveModelChecked, bestPaidWorkModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, resolveModelChecked, bestPaidWorkModel, bestVisionModel, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete } from '../services/brain.js'
@@ -1775,6 +1775,36 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // tura — reluăm O DATĂ pe secundarul :free din OpenRouter. Retry-ul e
       // sigur doar dacă nu a curs încă text spre user (altfel s-ar dubla).
       let orchestratorModel = orChatModel
+      // ── CÂND CREIERUL E ORB, VEDEREA SE DELEGĂ (Adrian, 31 iul) ───────────
+      //
+      // El: „rămâne Nemotron 3 Ultra 550B, cine face vedere?"
+      //
+      // Ultra e cel mai capabil creier gratuit măsurat (550B, 1M context,
+      // unelte) și e ORB. Până azi, asta îl scotea complet din listă — un
+      // singur model trebuia să facă și gândirea, și vederea.
+      //
+      // Acum: dacă tura ASTA are o imagine (poză lipită sau cadru de cameră)
+      // iar creierul ales nu vede, tura merge la un model care vede. Doar tura
+      // cu poză. Restul rămân la creierul ales, cu toată puterea lui.
+      //
+      // Se face DOAR când chiar există o imagine — altfel am coborî tăcut
+      // fiecare tură pe un model mai mic, adică exact „îl ciuntești pe owner
+      // fără să-i spui" (regula de fier §14).
+      if (image || camFrames.length > 0) {
+        const cat = await getCatalog().catch(() => null)
+        const vedeAcum = cat?.chat.some((m) => m.id === orchestratorModel) ?? false
+        if (!vedeAcum) {
+          const ochi = await bestVisionModel().catch(() => null)
+          if (ochi) {
+            // Se SPUNE, nu se face pe ascuns: o înlocuire tăcută de model e
+            // exact ce ne-a costat de fiecare dată când s-a întâmplat.
+            console.log(`[creier] ${orchestratorModel} nu vede → tura cu imagine merge pe ${ochi}`)
+            orchestratorModel = ochi
+          } else {
+            console.error('[creier] tura are imagine, creierul e orb și n-am găsit niciun model cu vedere în catalog')
+          }
+        }
+      }
       let textFlowed = false
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,

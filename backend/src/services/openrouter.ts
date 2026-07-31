@@ -118,7 +118,26 @@ export function groupCatalog(models: CatalogModel[]): { chat: CatalogModel[]; wo
   // CREIERUL FULL FREE (Adrian, 27 iul): treapta work acceptă și modelele
   // GRATUITE cu vedere+tools (gemma :free, nemotron omni/vl :free) — nucleul
   // implicit e acum gratuit, iar adminul le poate alege și manual din listă.
-  const work = models.filter((m) => m.vision)
+  //
+  // ── VEDEREA SE DELEGĂ, NU MAI EXCLUDE (Adrian, 31 iul) ────────────────────
+  //
+  // El: „rămâne Nemotron 3 Ultra 550B, cine face vedere?"
+  //
+  // Ultra e cel mai capabil creier gratuit măsurat (550B, un milion de context,
+  // unelte, gândire) și e ORB. Cu filtrul de mai sus aplicat și aici, nu putea
+  // apărea NICIODATĂ în listă — de-asta îl tot căuta și nu-l găsea.
+  //
+  // Regula lui din 29 iul rămâne în picioare, dar la nivelul care conta de fapt:
+  // „se afișează doar AI care respectă TOATE funcționalitățile aplicației".
+  // Funcționalitatea e a APLICAȚIEI, nu a unui singur model. De acum, o tură cu
+  // poză e servită automat de un model care vede (vezi `bestVisionModel`), iar
+  // restul de creierul ales. Deci fiecare model din listă „face tot" — unele
+  // delegând vederea, ceea ce omul nu trebuie să știe ca să funcționeze.
+  //
+  // `chat` (treapta ieftină, publică) rămâne cu vedere obligatorie: acolo nu
+  // există escaladare, deci un model orb chiar ar rupe o tură cu poză.
+  const work = models
+
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   return { chat: chat.sort(byId), work: work.sort(byId) }
 }
@@ -246,6 +265,31 @@ export function hasActionIntent(text: string): boolean {
 // vedere+unelte din catalogul LIVE (deci ID garantat valid, nu inventat): preferă
 // Claude/Anthropic (creierul stabilit de owner), altfel OpenAI. null dacă în
 // catalog nu există niciun model plătit capabil (cade pe comportamentul curent).
+// ── OCHII, CÂND CREIERUL E ORB (Adrian, 31 iul: „cine face vedere?") ─────────
+//
+// Ultra gândește cel mai bine dintre gratuite și nu vede deloc. În loc să-l
+// excludem pentru asta, tura CU POZĂ merge la un model care vede; restul rămân
+// la creierul ales. Două meserii, doi specialiști — aceeași idee ca la Aider
+// (unul gândește, altul scrie).
+//
+// Alegerea se face din catalogul LIVE, nu dintr-o listă scrisă de mână: un id
+// inventat sau scos de furnizor ar rupe exact tura în care omul chiar are
+// nevoie să fie văzut ceva. Preferăm gratuit; dacă nu există niciunul gratuit
+// cu vedere, luăm cel mai ieftin care vede, ca vederea să nu dispară de tot.
+export async function bestVisionModel(): Promise<string | null> {
+  const cat = await getCatalog().catch(() => null)
+  if (!cat) return null
+  // `chat` e deja filtrată pe vedere ȘI unelte (toModel impune uneltele).
+  const vazatori = cat.chat
+  if (!vazatori.length) return null
+  const gratuite = vazatori.filter((m) => m.id.endsWith(':free'))
+  const lista = gratuite.length ? gratuite : vazatori
+  // Preferință stabilă și explicabilă: Gemma 4 31B e cel mai mare model DENS
+  // gratuit cu vedere din catalog (măsurat 31 iul). Dacă dispare, luăm primul
+  // din listă — tot din catalogul live, deci tot un id valid.
+  return lista.find((m) => m.id.startsWith('google/gemma-4-31b'))?.id ?? lista[0]?.id ?? null
+}
+
 export async function bestPaidWorkModel(): Promise<string | null> {
   // GARDĂ ANTI-SPARGERE: nu ruta pe PLĂTIT dacă punga OpenRouter e goală — apelul
   // plătit ar pica (402/insufficient) și creierul s-ar rupe. Fără bani → null →
