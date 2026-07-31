@@ -21,6 +21,8 @@ import {
   sellCredits,
   fetchMoneyCircuit,
   pauzaAutonomie,
+  fetchDoveziAutonomie,
+  type DovadaAutonomie,
   type MoneyCircuit,
   fetchLeads,
   emailLead,
@@ -316,6 +318,8 @@ export default function AdminPanel({
   // MANETA OWNERULUI: oprește / repornește autonomia, dintr-un click. După
   // apăsare recitim starea de la server — nu presupunem că a mers.
   const [pauzaBusy, setPauzaBusy] = useState(false)
+  // CELE OPT DOVEZI (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
+  const [dovezi, setDovezi] = useState<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null>(null)
   async function onPauzaAutonomie(oprit: boolean): Promise<void> {
     setPauzaBusy(true)
     await pauzaAutonomie(oprit)
@@ -328,6 +332,7 @@ export default function AdminPanel({
     void fetchGaps().then(setGaps)
     void fetchFinance().then(setFinance)
     void fetchMoneyCircuit().then(setCircuit)
+    void fetchDoveziAutonomie().then(setDovezi)
     void fetchTransactions().then(setTransactions)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
@@ -878,6 +883,21 @@ export default function AdminPanel({
                         {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
                       </button>
                     </span>
+                    {/* CELE OPT DOVEZI. Nu o listă scrisă de mine: fiecare
+                        nivel își caută în bază urma lui — un ordin, un PR, o
+                        măsurătoare — și spune „dovedit" DOAR dacă a găsit-o.
+                        Ce n-are dovadă spune ce anume ar fi dovada. */}
+                    {dovezi && (
+                      <span className="or-wallet-sub">
+                        🎯 Autonomia: <b>{dovezi.dovedite}/{dovezi.din} dovedite</b>
+                        {dovezi.dovezi.map((d) => (
+                          <span key={d.nivel} style={{ display: 'block', paddingLeft: 12, opacity: d.dovedit ? 1 : 0.65 }}>
+                            {d.dovedit ? '✅' : '⬜'} <b>{d.nivel}.</b> {d.ce} —{' '}
+                            {d.dovedit ? d.dovada : <i>{d.dovada || d.cum}</i>}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                     {circuit?.autonomie && (
                       <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
                         {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}
