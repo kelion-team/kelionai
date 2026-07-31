@@ -50,6 +50,13 @@ import {
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
 } from './brainToolDefs.js'
 import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
+// repo_* / runbook_* / request_repair sînt încă definite în routes/chat.ts
+// (migrarea spre sursa unică e incrementală, ca să nu clatin ruta live).
+// Importate DIRECT ca să nu existe două liste care pot diverge.
+import {
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+} from '../routes/chat.js'
 import { platiAutomatePornite } from './cardFurnizor.js'
 import { voceRecenta } from './adminLock.js'
 import {
@@ -783,6 +790,21 @@ function scaraPentru(dificultate = 3): string[] | undefined {
   return top ? [top, ...restul.filter((m) => m !== top)] : restul
 }
 
+/** TOT ce primește creierul lui când lucrează singur.
+ *
+ *  Adrian, 31 iul: „trebuie să te asiguri că orice creier se schimbă primește
+ *  întotdeauna tot" · „cele 75 conștiente pentru creierul lui, oricare se pune".
+ *
+ *  De-aia e o constantă EXPORTATĂ, nu o listă locală: paznicul din
+ *  `uneltePartajate.test.ts` o compară cu ce știe executorul să ruleze, și cade
+ *  dacă cele două diverg. Capabilitățile nu depind de care model e pus astăzi. */
+export const UNELTELE_MAINILOR = [
+  ...BROWSER_TOOLS,
+  ...TOATE_UNELTELE_ADMIN,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+]
+
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   // ── TOT CE ȘTIE EXECUTORUL SĂ RUTEZE, NU O LISTĂ SCRISĂ DE MINE ────────────
   //
@@ -802,10 +824,7 @@ async function ruleazaCuMainile(s: Sarcina): Promise<string> {
   // De-aia lista nu se mai scrie cu mâna: se DERIVĂ din ce știe executorul.
   // Dacă mâine apare o unealtă nouă în dispatcher, o are și el, fără să mai
   // umble nimeni aici.
-  const tools = [
-    ...BROWSER_TOOLS,
-    ...TOATE_UNELTELE_ADMIN,
-  ] as unknown as AnthropicTool[]
+  const tools = UNELTELE_MAINILOR as unknown as AnthropicTool[]
   const prompt =
     `${s.ordin}\n\n` +
     // CONȘTIENT DE CE ARE (Adrian, 30 iul): inventarul lui complet, derivat din
