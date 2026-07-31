@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import { getPool, dbEnabled, listBuildJobs } from '../db.js'
+import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
 import { getOpenRouterBalance } from './openrouter.js'
 
 // ── OCHII LUI KELION PE PROPRIA SĂNĂTATE (Adrian, 27 iul: „Kelion trebuie să
@@ -139,6 +140,29 @@ export async function systemHealth(): Promise<string> {
       problems.push({ id: 'disc_plin', grav: 'critic', desc: `Discul e ${usedPct}% plin.`, reparabil: 'run_runbook curata-zombi sau docker system prune (cere acordul ownerului)' })
   } catch {
     /* statfs indisponibil */
+  }
+
+  // 5b. Memoria și încărcarea gazdei — vezi services/resurse.ts pentru de ce
+  // n-au existat până azi și de ce contează mai mult decât discul.
+  const res = await resurseGazda()
+  if (res) {
+    info.resurse = descrieResurse(res)
+    if (res.liberPct <= PRAG_MEMORIE_PCT)
+      problems.push({
+        id: 'memorie_putina',
+        grav: 'critic',
+        desc: `Memorie: ${res.liberGb.toFixed(1)} GB liberi din ${res.totalGb.toFixed(1)} (${res.liberPct}%). Sub pragul ăsta kernelul începe să omoare procese — aplicația e cea mai mare, deci prima victimă.`,
+        reparabil: 'run_runbook curata-zombi; docker system prune; sau oprește de pe VPS serviciile care nu sunt necesare',
+      })
+    if (res.incarcarePct >= PRAG_INCARCARE_PCT)
+      problems.push({
+        id: 'incarcare_mare',
+        grav: 'mediu',
+        desc: `Încărcare ${res.incarcarePct}% din ${res.procesoare} procesoare, susținut pe 15 min. Nu moare nimic, dar tot ce face casa devine încet — inclusiv chatul, care are țintă sub o secundă.`,
+        reparabil: 'vezi ce rulează (run_runbook diagnostic); oprește ce nu e necesar, sau mărește VPS-ul',
+      })
+  } else {
+    info.resurse = 'nu se pot măsura de aici'
   }
 
   // 6. Punga creierului (OpenRouter).

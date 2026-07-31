@@ -41,6 +41,7 @@ import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
+import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { envCheck, envOrphans, envSummary, processStartedAt, stripeMode } from '../services/envCheck.js'
@@ -286,13 +287,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, stripeBal] = await Promise.all([
+    const [pool, orBalance, stripeBal, vps] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       getStripeBalance(),
+      resurseGazda(),
     ])
     return reply.send({
       active: 'openrouter',
+      // ── VPS-UL, PERMANENT ÎN BARĂ (Adrian, 31 iul: „afișează permanent VPS
+      // pe interfață în bara de sus") ───────────────────────────────────────
+      // Merge pe ruta asta, nu pe una nouă: bara o sondează oricum la 15s, iar
+      // citirea din /proc costă microsecunde. Un poller în plus ar fi fost cost
+      // fără câștig.
+      // `null` când nu se poate măsura — bara scrie „⚠ VPS", NU zerouri. Un
+      // „0.0 GB / 0%" ar arăta identic cu un server mort și ar fi exact eroarea
+      // pe care o tot reproșează: citire picată prezentată ca stare reală.
+      vps,
       openrouter: {
         ok: Boolean(config.openrouter.key),
         topup: 'https://openrouter.ai/credits',

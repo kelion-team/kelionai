@@ -926,13 +926,29 @@ export default function ChatPanel({
       if (!acc.trim()) setMessages(next)
       else suggestFacial(acc) // fața însoțește tonul replicii încheiate
     } catch (err) {
-      if (ac.signal.aborted) {
-        // OPRIT de Adrian — fără mesaj de eroare; textul deja afișat rămâne așa.
+      // O TURĂ ÎNLOCUITĂ NU MAI ARE VOIE SĂ SCRIE (Adrian, 31 iul: „aude a doua
+      // întrebare, scurt o arată, dar nu o dă mai departe" + „mesajul că tehnic
+      // a apărut din nou").
+      //
+      // `finally`-ul de mai jos verifică de mult `stillCurrent` — știe că tura
+      // poate fi înlocuită de una nouă (barge-in) și atunci nu-i mai atinge
+      // starea. `catch`-ul ăsta NU verifica nimic: eroarea turei vechi rescria
+      // lista de mesaje cu instantaneul EI, adică peste tura nouă. A doua ta
+      // întrebare apărea și dispărea, cu ⚠️ pe deasupra. Asimetria dintre catch
+      // și finally ERA bug-ul.
+      // (Scris fără literalul apelului: un paznic din aDouaIntrebare.test.ts
+      // numără scrierile cu instantaneu din fișier, iar un comentariu care le
+      // citează ar fi numărat ca una adevărată.)
+      const codErr = err instanceof Error ? err.message : 'error'
+      const inlocuita = abortRef.current !== ac
+      if (ac.signal.aborted || codErr === 'aborted' || inlocuita) {
+        // Oprită de Adrian sau înlocuită de întrebarea nouă — niciun mesaj de
+        // eroare, nicio scriere peste ce e pe ecran acum.
       } else {
         // Nu lăsa vocea să spună mai mult decât s-a scris (bug 10 iul: scrisul
         // dispărea la eroare, dar audio-ul continua).
         stopVoice()
-        const code = err instanceof Error ? err.message : 'error'
+        const code = codErr
         const spoken = strings(resolveLang(replyLang))
         const m =
           code === 'brain_not_configured'
@@ -942,10 +958,14 @@ export default function ChatPanel({
               : t.brainError
         // PĂSTREAZĂ textul deja primit (nu-l arunca) — doar adaugă o notă discretă,
         // ca scrisul să rămână complet față de ce s-a auzit.
-        setMessages([
-          ...next,
-          { role: 'assistant', content: acc.trim() ? `${acc}\n⚠️ ${m}` : `⚠️ ${m}`, ts: Date.now() },
-        ])
+        // Updater FUNCȚIONAL, nu instantaneu — aceeași lecție ca la bucla de
+        // streaming (linia ~912): un mesaj sosit între timp (transcript de voce,
+        // o întrebare nouă) nu are voie să dispară fiindcă tura asta a picat.
+        setMessages((cur) => {
+          const baza = cur.length >= next.length && cur.slice(0, next.length).every((mm, i) => mm === next[i]) ? cur : next
+          const rest = baza.slice(next.length).filter((mm) => !(mm.role === 'assistant' && mm.ts === turnTs))
+          return [...next, ...rest, { role: 'assistant', content: acc.trim() ? `${acc}\n⚠️ ${m}` : `⚠️ ${m}`, ts: Date.now() }]
+        })
         if (code === 'offline') {
           offlineRef.current = true
           retryTextRef.current = msg // resume THIS message when the signal returns

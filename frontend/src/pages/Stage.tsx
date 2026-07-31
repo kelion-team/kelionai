@@ -258,6 +258,17 @@ interface BrainCredit {
        *  „n-ai bani" și „ai bani, dar în dolari". */
       alteMonede?: { currency: string; available: number; pending: number }[]
     } | null
+    /** Resursele VPS-ului (Adrian, 31 iul: „afișează permanent VPS pe interfață
+     *  în bara de sus"). `null` = nu s-au putut măsura — bara scrie „⚠ VPS",
+     *  NICIODATĂ zerouri: „0.0 GB / 0%" ar arăta identic cu un server mort. */
+    vps?: {
+      totalGb: number
+      liberGb: number
+      liberPct: number
+      procesoare: number
+      incarcare: [number, number, number]
+      incarcarePct: number
+    } | null
     pool: { loaded: number; remaining: number; spent: number; profit: number }
   }
 
@@ -945,6 +956,35 @@ export default function Stage({ user }: { user: User }) {
                 {brainCredit.openrouter.live
                   ? `OpenRouter $${(brainCredit.openrouter.balance ?? 0).toFixed(2)}`
                   : '⚠ OpenRouter'}
+              </button>
+            )}
+            {/* VPS-UL, PERMANENT ÎN BARĂ (Adrian, 31 iul: „afișează permanent
+                VPS pe interfață în bara de sus"). Două cifre, fiindcă răspund
+                la două întrebări diferite: RAM = mai ÎNCAPE ceva pe mașină,
+                CPU = mai DUCE. Roșu când memoria scade sub 10% liber sau
+                încărcarea trece de 200% — aceleași praguri ca alarma pe email
+                din sentinelă, ca bara și mailul să nu se contrazică niciodată.
+                Când nu se poate măsura scrie „⚠ VPS", nu zerouri (vezi tipul). */}
+            {brainCredit && (
+              <button
+                type="button"
+                className={`ghost ${
+                  brainCredit.vps && (brainCredit.vps.liberPct <= 10 || brainCredit.vps.incarcarePct >= 200)
+                    ? 'blink-red'
+                    : ''
+                }`}
+                onClick={() => openAdmin()}
+                title={
+                  brainCredit.vps
+                    ? `VPS: ${brainCredit.vps.liberGb.toFixed(1)} GB liberi din ${brainCredit.vps.totalGb.toFixed(1)} GB` +
+                      ` · încărcare ${brainCredit.vps.incarcarePct}% din ${brainCredit.vps.procesoare} procesoare` +
+                      ` (${brainCredit.vps.incarcare.map((n) => n.toFixed(2)).join(' / ')} la 1/5/15 min)`
+                    : 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)'
+                }
+              >
+                {brainCredit.vps
+                  ? `VPS ${brainCredit.vps.liberGb.toFixed(1)}GB · ${brainCredit.vps.incarcarePct}%`
+                  : '⚠ VPS'}
               </button>
             )}
             {/* AICI A STAT PASTILA „Stripe £0.00" din bara de sus. Scoasă pe
