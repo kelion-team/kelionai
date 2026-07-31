@@ -172,6 +172,25 @@ export const BUILD_SOFTWARE_TOOL: Tool = {
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 
+// ── PANOUL DE LUCRĂTORI (Adrian, 31 iul) ────────────────────────────────────
+// „trebuie pornite toate 3, fiecare independent, creierul ia care e cel mai bun
+// rezultat propus de ei, după ce analizează propunerile".
+// Diferența față de `build_software`: acolo UN constructor lucrează și deschide
+// PR. Aici TREI unelte diferite, pe TREI modele diferite, rezolvă aceeași
+// sarcină fără să știe una de alta — și abia apoi creierul compară diff-urile
+// și alege, cu motiv scris. Costă de trei ori mai mult timp de mașină, deci se
+// cheamă pentru probleme care merită trei păreri, nu pentru o virgulă.
+export const PANOU_COD_TOOL: Tool = {
+  name: 'panou_cod',
+  description:
+    'ADMIN ONLY. Send ONE coding task to THREE independent workers at once (aider, cline, openhands), each on a DIFFERENT free model, each in its own clone. They never see each other. Then YOU compare the three diffs — with measured facts: files touched, lines, and whether the project tests PASS — and the best one becomes a single PR. Never merges. Use for real problems worth three opinions (a bug with an unclear cause, a design choice, a repair that already failed once) — NOT for a typo. Takes several minutes; say so and show progress on the monitor with show_document.',
+  input_schema: {
+    type: 'object',
+    properties: { sarcina: { type: 'string', description: "The task, in the owner's own words, complete enough to work from alone." } },
+    required: ['sarcina'],
+  },
+}
+
 export const CONSTRUCTOR_STATUS_TOOL: Tool = {
   name: 'constructor_status',
   description: "ADMIN ONLY. Status of the constructor's build orders (queued / working / done / failed, with the PR link).",

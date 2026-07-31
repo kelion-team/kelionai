@@ -2,10 +2,25 @@
 FROM node:22-bookworm-slim
 WORKDIR /app
 
-# System deps: python for markitdown, curl for healthchecks
+# System deps: python for markitdown, curl for healthchecks, git for the workers
+#
+# ── LUCRĂTORII (Adrian, 31 iul: „trebuie pornite toate 3, fiecare independent")
+# `git` e obligatoriu: toți trei sunt git-nativi, iar `.dockerignore` exclude
+# `.git`, deci fiecare lucrător își clonează propriul repo la cerere.
+#
+# Aider (pip) și Cline (npm) — comenzi verificate în documentația lor oficială,
+# 31 iul. Cline cere Node 20+; imaginea e pe 22.
+#
+# OpenHands NU e aici, INTENȚIONAT: documentația lui nu confirmă o comandă de
+# instalare care să dea CLI-ul headless (`openhands --headless -t`) — arată și
+# npm, și Docker, fără să spună care produce binarul. Nu pun în imagine o
+# comandă despre care nu sunt sigur; s-ar instala „ceva" și am raporta că merge.
+# Panoul îl detectează la rulare, spune că lipsește, și merge mai departe cu
+# ceilalți doi. Se adaugă aici după ce comanda e probată pe VPS.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip curl \
-    && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' \
+    && apt-get install -y --no-install-recommends python3 python3-pip curl git \
+    && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
+    && npm install -g cline \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- frontend build ---
