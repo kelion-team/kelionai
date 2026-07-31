@@ -120,19 +120,19 @@ describe('producția are prioritate', () => {
 
 describe('ordinul „manual eu nu fac"', () => {
   it('selecția salvată a ownerului se ignoră — aplicația ține implicitul', () => {
-    expect(chat).toMatch(/ignor selecția salvată/)
-    expect(chat).toMatch(/manual eu nu fac/)
+    expect(chat).toMatch(/ignoring the saved selection/)
+    expect(chat).toMatch(/I don't do manual/)
   })
 
   it('escaladarea urcă automat de pe alegerea lui, și e SPUSĂ în jurnal', () => {
     // Bug-ul reclamat: `return` ieșea din funcție înainte de escaladare, deci
     // pe drumul ownerului — singurul cu sarcini grele — nu rula niciodată.
     expect(chat).toMatch(/const cereSusul = difficulty >= ESCALATE_TOP_AT/)
-    expect(chat).toMatch(/sarcină grea \(\$\{difficulty\}\) → urc de pe/)
+    expect(chat).toMatch(/heavy task \(\$\{difficulty\}\) → climbing from/)
   })
 
   it('regula rămâne pentru owner, nu pentru toți userii', () => {
-    expect(chat).toMatch(/NU se aplică nimănui altcuiva/)
+    expect(chat).toMatch(/does NOT apply to anyone else/)
   })
 })
 
