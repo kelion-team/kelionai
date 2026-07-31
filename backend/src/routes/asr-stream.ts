@@ -6,23 +6,25 @@ import { recordCost } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
 import { normalizeLang } from '../services/tts.js'
 
-// ASR ÎN STREAMING — Google Speech-to-Text v2 `_streamingRecognize`, cu:
-//   • detecție avansată (model chirp — endpointing pe SERVER, nu prag RMS local),
-//   • rezultate PARȚIALE live (interimResults) cât vorbește Adrian,
-//   • evenimente de activitate vocală (SPEECH_ACTIVITY_BEGIN/END) → barge-in.
-// Browserul deschide un WS la /api/asr-stream, trimite audio PCM16 (LINEAR16,
-// 16kHz, mono) în cadre binare; noi îl releem la Google și împingem înapoi
-// {partial|final|speech_begin|speech_end}. Ruta batch /api/asr rămâne NEATINSĂ
-// până la cutover (zero dublură DUPĂ cutover, nu în timpul lui).
+// STREAMING ASR — Google Speech-to-Text v2 `_streamingRecognize`, with:
+//   • advanced detection (chirp model — endpointing on the SERVER, not a local
+//     RMS threshold),
+//   • live PARTIAL results (interimResults) while Adrian speaks,
+//   • voice activity events (SPEECH_ACTIVITY_BEGIN/END) → barge-in.
+// The browser opens a WS to /api/asr-stream, sends PCM16 audio (LINEAR16,
+// 16kHz, mono) in binary frames; we relay it to Google and push back
+// {partial|final|speech_begin|speech_end}. The batch route /api/asr stays
+// UNTOUCHED until cutover (zero duplication AFTER cutover, not during it).
 
-// REGIUNEA DOVEDITĂ (matrice live, 10 iul): chirp_3 NU EXISTĂ în us-central1 —
-// Google: 'The model "chirp_3" does not exist in the location named
-// "us-central1"'. Acceptat în 'us' și 'eu' (testat cu auto și ro-RO). 'eu' =
-// latență minimă pentru Adrian și utilizatorii europeni.
+// THE PROVEN REGION (live matrix, Jul 10): chirp_3 does NOT exist in
+// us-central1 — Google: 'The model "chirp_3" does not exist in the location
+// named "us-central1"'. Accepted in 'us' and 'eu' (tested with auto and
+// ro-RO). 'eu' = minimal latency for Adrian and the European users.
 const REGION = 'eu'
-// Cel mai avansat model cerut de Adrian. chirp_2 e dovedit în batch; chirp_3 e
-// Adrian confirmă: chirp_3 SUPORTĂ streaming → păstrăm chirp_3. Mic-ul mut la
-// primul deploy NU e de la model — bug-ul e pe drum (WS/auth/format), de găsit.
+// The most advanced model Adrian asked for. chirp_2 is proven in batch;
+// Adrian confirms: chirp_3 SUPPORTS streaming → we keep chirp_3. The muted mic
+// at the first deploy is NOT from the model — the bug is on the path
+// (WS/auth/format), to be found.
 const ASR_MODEL = 'chirp_3'
 
 let client: v2.SpeechClient | null = null
@@ -35,25 +37,26 @@ function getClient(): v2.SpeechClient | null {
     client = new v2.SpeechClient({
       credentials: creds as Record<string, unknown>,
       projectId: projectId || undefined,
-      // endpoint regional — chirp trăiește pe regiune, nu pe global
+      // regional endpoint — chirp lives on a region, not on global
       apiEndpoint: `${REGION}-speech.googleapis.com`,
     })
   }
   return client
 }
 
-// STT ÎN STREAMING = OPȚIONAL, iar pe gazdă (VPS) NU e configurat — dovadă live
-// (28 iul): în fișierul de mediu nu există GOOGLE_SERVICE_ACCOUNT_JSON. Fără el
-// WS-ul de mai jos se închidea instant, iar BROWSERUL (nu codul nostru) tipărea
-// în consola lui Adrian «WebSocket connection to
-// 'wss://kelionai.app/api/asr-stream' failed» la FIECARE pornire de microfon.
-// Eroarea aia nu se poate prinde din JS: singurul mod de a o face să dispară e
-// ca browserul să NU mai deschidă WS-ul degeaba. De aceea expunem capabilitatea
-// pe HTTP simplu (ruta /api/asr-stream/capability de mai jos), iar clientul o
-// întreabă O SINGURĂ DATĂ pe încărcare de pagină.
-// Predicat IEFTIN, intenționat fără `getClient()`: nu construim clientul Google
-// (și nu riscăm o excepție de JSON stricat) doar ca să răspundem la o sondă
-// publică. Oglindește exact garda din handler-ul WS (`!c || !projectId`).
+// STREAMING STT = OPTIONAL, and on the host (VPS) it is NOT configured — live
+// proof (Jul 28): the env file has no GOOGLE_SERVICE_ACCOUNT_JSON. Without it
+// the WS below closed instantly, and the BROWSER (not our code) printed
+// «WebSocket connection to 'wss://kelionai.app/api/asr-stream' failed» in
+// Adrian's console at EVERY microphone start. That error cannot be caught
+// from JS: the only way to make it disappear is for the browser to STOP
+// opening the WS in vain. That's why we expose the capability over plain HTTP
+// (the /api/asr-stream/capability route below), and the client asks it ONCE
+// per page load.
+// A CHEAP predicate, intentionally without `getClient()`: we don't build the
+// Google client (and don't risk a broken-JSON exception) just to answer a
+// public probe. It mirrors exactly the guard in the WS handler
+// (`!c || !projectId`).
 function streamingAsrConfigured(): boolean {
   if (!config.googleServiceAccountJson) return false
   try {
@@ -68,13 +71,13 @@ type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>
 type Resp = protos.google.cloud.speech.v2.IStreamingRecognizeResponse
 
 export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
-  // SONDĂ DE CAPABILITATE — HTTP simplu, fără sesiune, fără cost, fără Google.
-  // Browserul o cere înainte de a deschide microfonul: dacă `streaming:false`,
-  // nici nu mai încearcă WS-ul și trece DIRECT pe dictarea batch (/api/asr, care
-  // are fallback pe OpenAI în services/asr.ts) — deci dictarea CONTINUĂ să
-  // meargă, doar că fără parțiale live, și consola rămâne curată.
-  // Când Google E configurat întoarce `true` și streamingul merge EXACT ca până
-  // acum — ruta asta nu schimbă nimic pe calea fericită.
+  // CAPABILITY PROBE — plain HTTP, no session, no cost, no Google.
+  // The browser asks it before opening the microphone: if `streaming:false`,
+  // it doesn't even try the WS and switches DIRECTLY to batch dictation
+  // (/api/asr, which has an OpenAI fallback in services/asr.ts) — so dictation
+  // KEEPS working, just without live partials, and the console stays clean.
+  // When Google IS configured it returns `true` and streaming works EXACTLY as
+  // before — this route changes nothing on the happy path.
   app.get('/api/asr-stream/capability', async (_req, reply) => {
     reply.header('Cache-Control', 'no-store')
     return { streaming: streamingAsrConfigured() }
@@ -87,22 +90,22 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       try {
         socket.close(1008, 'unauthorized')
       } catch {
-        /* deja închis */
+        /* already closed */
       }
       return
     }
     const c = getClient()
     if (!c || !projectId) {
-      // PLASĂ DE REZERVĂ pentru clienții care n-au apucat să întrebe sonda de mai
-      // sus (pagină veche în cache, sondă căzută). Perechea (1011,
-      // 'asr_not_configured') e un CONTRACT cu frontend/src/lib/micStream.ts: la
-      // primirea ei, clientul memorează pentru toată sesiunea că streamingul nu
-      // există și cade tăcut pe batch — fără eroare, fără reîncercări.
+      // SAFETY NET for clients that didn't get to ask the probe above (old
+      // cached page, failed probe). The pair (1011, 'asr_not_configured') is a
+      // CONTRACT with frontend/src/lib/micStream.ts: on receiving it, the
+      // client remembers for the whole session that streaming doesn't exist
+      // and falls back to batch silently — no error, no retries.
       app.log.warn('asr-stream: WS refuzat — Google STT neconfigurat (fără service account)')
       try {
         socket.close(1011, 'asr_not_configured')
       } catch {
-        /* deja închis */
+        /* already closed */
       }
       return
     }
@@ -117,7 +120,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       try {
         socket.send(JSON.stringify(obj))
       } catch {
-        /* canal căzut — cleanup se ocupă */
+        /* channel down — cleanup handles it */
       }
     }
 
@@ -126,7 +129,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         try {
           gStream.end()
         } catch {
-          /* deja terminat */
+          /* already finished */
         }
         gStream = null
       }
@@ -146,7 +149,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       gStream = stream
 
       stream.on('data', (resp: Resp) => {
-        // evenimente de voce (endpointing pe server) → barge-in + „fără tăiat"
+        // voice events (server-side endpointing) → barge-in + "no cut-off"
         const ev = resp.speechEventType
         if (ev === 'SPEECH_ACTIVITY_BEGIN' || ev === 2) send({ type: 'speech_begin' })
         else if (ev === 'SPEECH_ACTIVITY_END' || ev === 3) send({ type: 'speech_end' })
@@ -162,31 +165,32 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         }
       })
       stream.on('error', (e: unknown) => {
-        // DIAGNOSTIC (Adrian, 14 iul): scoatem mesajul REAL Google la suprafață —
-        // codul de dinainte trimitea doar „asr_failed" generic, iar loggerul {err}
-        // nu apărea în jurnalul serverului. Acum mesajul intră ȘI în log (string) ȘI
-        // în răspunsul WS (`detail`), ca să vedem EXACT de ce respinge Google.
+        // DIAGNOSTIC (Adrian, Jul 14): we surface the REAL Google message —
+        // the previous code only sent a generic "asr_failed", and the {err}
+        // logger didn't show in the server journal. Now the message goes BOTH
+        // into the log (string) AND into the WS answer (`detail`), so we see
+        // EXACTLY why Google rejects.
         const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
         app.log.error('asr-stream: eroare Google streamingRecognize: ' + detail)
         send({ type: 'error', error: 'asr_failed', detail })
         gStream = null
-        started = false // permite repornirea la următorul cadru — altfel ASR rămâne mut
+        started = false // allows a restart on the next frame — otherwise ASR stays mute
       })
       stream.on('end', () => {
         gStream = null
-        started = false // permite repornirea pe același socket dacă Google închide fluxul
+        started = false // allows a restart on the same socket if Google closes the stream
       })
 
-      // PRIMA cerere = DOAR config (fără audio); apoi doar cadre {audio}.
+      // The FIRST request = config ONLY (no audio); then only {audio} frames.
       try {
         stream.write({
           recognizer,
           streamingConfig: {
             config: {
               model: ASR_MODEL,
-              // ancorează limba dacă Adrian are una stabilită; altfel auto.
+              // anchor the language if Adrian has one set; otherwise auto.
               languageCodes: langHint ? [langHint] : ['auto'],
-              // browserul trimite PCM16 brut (LINEAR16, 16kHz, mono)
+              // the browser sends raw PCM16 (LINEAR16, 16kHz, mono)
               explicitDecodingConfig: {
                 encoding: 'LINEAR16',
                 sampleRateHertz: 16000,
@@ -218,20 +222,20 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
             startGoogle()
           } else if (m.type === 'stop') {
             stopGoogle()
-            started = false // permite o nouă frază pe același WS
+            started = false // allows a new phrase on the same WS
           }
         } catch {
-          /* mesaj de control invalid — ignorat */
+          /* invalid control message — ignored */
         }
         return
       }
-      // audio binar → Google (pornește lazy dacă browserul a sărit „start")
+      // binary audio → Google (starts lazy if the browser skipped "start")
       if (!started) startGoogle()
       if (gStream) {
         try {
           gStream.write({ audio: data } as protos.google.cloud.speech.v2.IStreamingRecognizeRequest)
         } catch {
-          /* o bucată pierdută nu oprește fluxul */
+          /* one lost chunk doesn't stop the stream */
         }
       }
     })

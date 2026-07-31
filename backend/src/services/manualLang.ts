@@ -1,22 +1,24 @@
-// ── TRADUCEREA UNUI SET DE TEXTE, DINTR-UN SINGUR APEL ──────────────────────
+// ── TRANSLATING A SET OF TEXTS IN A SINGLE CALL ─────────────────────────────
 //
-// Adrian, 30 iul: „nu sunt doar 5 limbi, sunt X limbi". Deci nu un dicționar
-// scris de mână — engleza e sursa, orice altă limbă se traduce la cerere și se
-// ține în bază.
+// Adrian, Jul 30: "it's not just 5 languages, it's X languages". So no
+// hand-written dictionary — English is the source, any other language is
+// translated on demand and kept in the database.
 //
-// PRIMA VARIANTĂ N-A MERS, și merită scris de ce: folosea `translateMany`, care
-// face UN APEL DE REȚEA PER TEXT. Manualul are ~120 de texte → 120 de cereri
-// simultane la fiecare limbă nouă. Furnizorul le limitează, o parte cad, iar
-// garda „măcar jumătate traduse" respingea tot → se întorcea engleză curată.
-// Verificat pe live: /api/manual?lang=es dădea titlul în engleză. Ruta răspundea
-// 200 și nu făcea nimic — exact felul de „merge" care nu merge.
+// THE FIRST VERSION DIDN'T WORK, and it's worth writing down why: it used
+// `translateMany`, which makes ONE NETWORK CALL PER TEXT. The manual has ~120
+// texts → 120 simultaneous requests for every new language. The provider rate-
+// limits them, some fail, and the "at least half translated" guard rejected
+// everything → clean English came back. Verified live: /api/manual?lang=es
+// returned the title in English. The route answered 200 and did nothing —
+// exactly the kind of "works" that doesn't work.
 //
-// Acum: textele se trimit ÎN LOTURI NUMEROTATE, un apel per lot. 120 de texte =
-// 2 apeluri, nu 120.
+// Now: texts are sent IN NUMBERED BATCHES, one call per batch. 120 texts =
+// 2 calls, not 120.
 //
-// Cheia de cache include AMPRENTA textelor engleze: când se schimbă un text în
-// cod, amprenta se schimbă și limba se re-traduce singură. Fără asta,
-// traducerile ar îngheța la prima versiune și ar minți tăcut după fiecare deploy.
+// The cache key includes the FINGERPRINT of the English texts: when a text
+// changes in code, the fingerprint changes and the language re-translates
+// itself. Without that, translations would freeze at the first version and
+// silently lie after every deploy.
 import { createHash } from 'node:crypto'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
@@ -30,13 +32,13 @@ const amprenta = (texte: Record<string, string>): string =>
     .digest('hex')
     .slice(0, 12)
 
-/** NUMELE limbii, nu codul — bug prins verificând live pe 30 iul: italiana
- *  întorcea text SPANIOL, iar româna rămânea în engleză.
+/** The language NAME, not the code — a bug caught verifying live on Jul 30:
+ *  Italian returned SPANISH text, and Romanian stayed in English.
  *
- *  Cauza: trimiteam modelului „Translate into it" / „into ro". Pentru un model,
- *  „it" e pronumele englezesc, nu italiana; „ro" nu înseamnă nimic. Codul de
- *  limbă e pentru mașini; cererea de traducere e text pentru un cititor, deci
- *  cere numele scris. */
+ *  The cause: we sent the model "Translate into it" / "into ro". To a model,
+ *  "it" is the English pronoun, not Italian; "ro" means nothing. The language
+ *  code is for machines; the translation request is text for a reader, so ask
+ *  for the written name. */
 const NUME_LIMBA: Record<string, string> = {
   en: 'English',
   fr: 'French',
@@ -58,15 +60,15 @@ const NUME_LIMBA: Record<string, string> = {
 
 const numeLimba = (cod: string): string => NUME_LIMBA[cod] ?? cod
 
-/** Codul de limbă normalizat („pt-BR" → „pt"), fără gunoi. */
+/** The normalized language code ("pt-BR" → "pt"), without garbage. */
 export function normalizeLang(v: string): string {
   const s = String(v ?? '').trim().toLowerCase().split(/[-_]/)[0]
   return /^[a-z]{2,3}$/.test(s) ? s : ''
 }
 
-/** Traduce un lot într-un singur apel. Întoarce null dacă nu iese o listă de
- *  ACEEAȘI lungime — mai bine engleză întreagă decât o traducere decalată, în
- *  care fiecare rând ajunge sub alt titlu. */
+/** Translates one batch in a single call. Returns null unless a list of the
+ *  SAME length comes out — better full English than a shifted translation
+ *  where every line lands under the wrong heading. */
 async function traduceLot(valori: string[], lang: string): Promise<(string | null)[] | null> {
   const numerotat = valori.map((v, i) => `${i + 1}. ${v.replace(/\s*\n+\s*/g, ' ')}`).join('\n')
   const r = await openrouterComplete(
@@ -88,15 +90,15 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
   ).catch(() => null)
   if (!r?.text) return null
 
-  // POTRIVIRE DUPĂ NUMĂR, nu după numărătoare. Garda de dinainte era „totul sau
-  // nimic": dacă modelul întorcea fie și un rând în plus sau în minus, aruncam
-  // TOATĂ limba — iar limba aia se reîncerca la fiecare cerere și pica la fel.
-  // Româna a stat blocată așa (verificat live, 30 iul: „ÎNCĂ" minute la rând,
-  // în timp ce celelalte șase erau gata).
+  // MATCH BY NUMBER, not by counting. The previous guard was "all or nothing":
+  // if the model returned even one line too many or too few, we threw away the
+  // WHOLE language — and that language was retried on every request and failed
+  // the same way. Romanian stayed stuck like that (verified live, Jul 30:
+  // "STILL" for minutes on end, while the other six were done).
   //
-  // Acum fiecare rând se așază la INDEXUL lui, luat din numărul cu care începe.
-  // Ce lipsește rămâne în engleză — un rând netradus într-o pagină tradusă e
-  // supărător, o limbă întreagă blocată e o funcție moartă.
+  // Now each line sits at ITS index, taken from the number it starts with.
+  // What is missing stays in English — one untranslated line in a translated
+  // page is annoying; a whole blocked language is a dead feature.
   const out: (string | null)[] = new Array(valori.length).fill(null)
   let puse = 0
   for (const linie of r.text.split('\n')) {
@@ -107,16 +109,17 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
     out[idx] = m[2].trim()
     puse++
   }
-  // Sub trei sferturi traduse înseamnă că răspunsul e rupt, nu doar incomplet.
+  // Under three quarters translated means the answer is broken, not just incomplete.
   return puse >= Math.ceil(valori.length * 0.75) ? out : null
 }
 
 /**
- * Textele date, în limba cerută. `sursa` = perechile cheie→text ENGLEZ.
- * Întoarce doar cheile traduse; apelantul le pune peste engleză.
+ * The given texts, in the requested language. `sursa` = the key→ENGLISH text
+ * pairs. Returns only the translated keys; the caller layers them over English.
  */
-/** E deja tradus și pus deoparte? Ruta întreabă asta ca să poată răspunde
- *  INSTANT cu ce are, în loc să țină userul într-o cerere de un minut. */
+/** Already translated and put aside? The route asks this so it can answer
+ *  INSTANTLY with what it has, instead of holding the user in a one-minute
+ *  request. */
 export async function translationReady(
   lang: string,
   sursa: Record<string, string>,
@@ -141,47 +144,48 @@ export async function translateStrings(
   const chei = Object.keys(sursa)
   if (!chei.length) return {}
 
-  // v2 în cheie: traducerile salvate ÎNAINTE de reparație sunt greșite (italiana
-  // era spaniolă, româna era engleză) și ar rămâne în bază pe veci. Schimbarea
-  // versiunii le lasă acolo, dar nimeni nu le mai citește — se traduce din nou.
+  // v2 in the key: translations saved BEFORE the fix are wrong (Italian was
+  // Spanish, Romanian was English) and would stay in the database forever.
+  // Bumping the version leaves them there, but nobody reads them anymore — the
+  // translation is redone.
   const cheieKv = `tr3:${cod}:${amprenta(sursa)}`
   const salvat = await loadKv(cheieKv).catch(() => null)
   if (salvat) {
     try {
       return JSON.parse(salvat) as Record<string, string>
     } catch {
-      /* intrare coruptă → traducem din nou */
+      /* corrupted entry → translate again */
     }
   }
 
-  // Cererile sosite în timp ce se traduce așteaptă ACEEAȘI promisiune, nu
-  // pornesc încă o traducere pentru aceeași limbă.
+  // Requests arriving while a translation runs await the SAME promise instead
+  // of starting another translation for the same language.
   const inCurs = inLucru.get(cheieKv)
   if (inCurs) return inCurs
 
   const treaba = (async (): Promise<Record<string, string>> => {
     try {
       const valori = chei.map((k) => sursa[k])
-      // Loturi de 40: destul de mari ca să fie puține apeluri, destul de mici ca
-      // modelul să nu piardă numerotarea pe drum.
+      // Batches of 40: big enough to keep the call count low, small enough that
+      // the model doesn't lose the numbering along the way.
       //
-      // ÎN PARALEL, nu unul după altul (măsurat pe live: în serie, franceza a
-      // durat peste 100 de secunde și cererea a expirat — adică userul alegea
-      // limba și nu se schimba nimic pe ecran). Loturile sunt independente:
-      // fiecare are numerotarea lui. Așa durata totală e cea a celui mai lent
-      // lot, nu suma lor.
+      // IN PARALLEL, not one after another (measured live: in series, French
+      // took over 100 seconds and the request timed out — i.e. the user picked
+      // the language and nothing changed on screen). The batches are
+      // independent: each has its own numbering. That way the total time is
+      // that of the slowest batch, not their sum.
       const LOT = 40
       const felii: string[][] = []
       for (let i = 0; i < valori.length; i += LOT) felii.push(valori.slice(i, i + LOT))
       const rezultate = await Promise.all(felii.map((f) => traduceLot(f, cod)))
-      if (rezultate.some((r) => r == null)) return {} // lot rupt de tot → engleză
+      if (rezultate.some((r) => r == null)) return {} // batch broken entirely → English
       const out: Record<string, string> = {}
       rezultate.forEach((traduse, idxFelie) => {
         traduse!.forEach((v, j) => {
           if (v) out[chei[idxFelie * LOT + j]] = v
         })
       })
-      // Se salvează dacă marea majoritate e tradusă; golurile rămân engleză.
+      // Saved when the vast majority is translated; the gaps stay English.
       if (Object.keys(out).length >= Math.ceil(chei.length * 0.9)) {
         await saveKv(cheieKv, JSON.stringify(out)).catch(() => {})
       }

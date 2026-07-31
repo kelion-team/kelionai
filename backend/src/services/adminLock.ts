@@ -4,16 +4,16 @@ import jwt from 'jsonwebtoken'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
 
-// ── LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde,
-// nici butonul admin nu trebuie să se activeze") ────────────────────────────
-// Al DOILEA factor peste sesiunea de admin: panoul se deschide numai dacă
-// (a) amprenta vocală din sesiunea curentă s-a potrivit cu titularul, sau
-// (b) s-a tastat secretul de activare — ales și setat DOAR de Adrian, păstrat
-// exclusiv ca hash scrypt în kv (nimeni, nici Kelion, nu-l poate citi înapoi).
-// Lacătul se ARMEAZĂ abia când secretul există: până atunci comportamentul
-// rămâne cel vechi — fără fereastră de auto-blocare între deploy și setare.
-// Deblocarea = cookie semnat separat (12h), nu sesiunea de 30 de zile: cine
-// fură doar cookie-ul de sesiune tot nu intră în admin.
+// ── THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't
+// match, the admin button must not activate either") ────────────────────────
+// The SECOND factor on top of the admin session: the panel opens only if
+// (a) the voiceprint from the current session matched the owner, or
+// (b) the activation secret was typed — chosen and set ONLY by Adrian, kept
+// exclusively as a scrypt hash in kv (nobody, not even Kelion, can read it
+// back). The padlock ARMS only once the secret exists: until then the old
+// behavior stands — no self-lockout window between deploy and setup.
+// Unlock = a separately signed cookie (12h), not the 30-day session: whoever
+// steals only the session cookie still doesn't get into admin.
 
 const KV_SECRET = 'admin_lock_secret'
 export const ADMIN_UNLOCK_COOKIE = 'kelionai_admin_unlock'
@@ -33,29 +33,30 @@ function verifyHash(secret: string, stored: string): boolean {
   return probe.length === ref.length && crypto.timingSafeEqual(probe, ref)
 }
 
-// ── DEZARMAT DE OWNER (Adrian, 31 iul) ──────────────────────────────────────
-// „scoți total te rog aprobarea, lângă mine nu e nimeni să dea comenzi".
+// ── DISARMED BY THE OWNER (Adrian, Jul 31) ──────────────────────────────────
+// "please remove the approval completely, there's nobody next to me to give
+// orders".
 //
-// Lacătul a fost gândit pe 27 iul împotriva unei amenințări anume: cineva
-// ALTCINEVA — o voce lângă microfon, un cookie de sesiune furat. Adrian spune
-// că amenințarea aia nu există la el: e singur, e singurul admin, e singurul
-// care dă comenzi. Un al doilea factor care nu apără de nimeni e doar o taxă
-// pe fiecare intrare a lui în propria aplicație.
+// The padlock was designed on Jul 27 against a specific threat: somebody
+// ELSE — a voice near the microphone, a stolen session cookie. Adrian says
+// that threat doesn't exist for him: he is alone, the only admin, the only
+// one giving orders. A second factor that guards against nobody is just a
+// tax on every entry into his own application.
 //
-// Un singur punct de dezarmare, intenționat: toate porțile (chat, voce,
-// /api/admin/*) întreabă `isArmed()`. Un `false` aici le deschide pe toate
-// deodată — și, mai important, se REARMEAZĂ tot dintr-un singur loc, fără să
-// vânez șase call-site-uri. Restul mecanismului (secret, hash scrypt, cookie
-// de 12h, anti-brute-force) rămâne intact dedesubt.
+// A single disarm point, on purpose: all gates (chat, voice, /api/admin/*)
+// ask `isArmed()`. A `false` here opens them all at once — and, more
+// importantly, everything RE-ARMS from a single place too, without hunting
+// six call sites. The rest of the mechanism (secret, scrypt hash, 12h cookie,
+// anti-brute-force) stays intact underneath.
 //
-// CA SĂ REARMEZI: `LACAT_DEZARMAT = false`. Atât. Secretul din kv e tot acolo;
-// lacătul redevine activ în clipa în care comuți linia.
+// TO RE-ARM: `LACAT_DEZARMAT = false`. That's all. The secret in kv is still
+// there; the padlock becomes active again the moment you flip the line.
 //
-// CE PIERDE, scris ca să nu se piardă: sesiunea de admin devine singurul
-// factor peste tot. Cine ajunge la ea — cookie furat, laptop deschis, cont de
-// email compromis — ajunge la codul-sursă, la secrete, la bază și la bani,
-// fără nicio a doua întrebare. Compromis cerut explicit, de două ori, cu
-// riscul spus de fiecare dată.
+// WHAT IS LOST, written down so it isn't forgotten: the admin session becomes
+// the only factor everywhere. Whoever reaches it — stolen cookie, open laptop,
+// compromised email account — reaches the source code, the secrets, the
+// database and the money, without a second question. A compromise explicitly
+// requested, twice, with the risk stated each time.
 const LACAT_DEZARMAT = true
 
 export async function isArmed(): Promise<boolean> {
@@ -67,8 +68,8 @@ export async function setLockSecret(secret: string): Promise<void> {
   await saveKv(KV_SECRET, hashSecret(secret))
 }
 
-// Anti-brute-force: 5 încercări / 10 min per email, în memorie (un singur
-// proces; la restart contorul se pierde — acceptabil, scrypt e oricum lent).
+// Anti-brute-force: 5 attempts / 10 min per email, in memory (a single
+// process; on restart the counter is lost — acceptable, scrypt is slow anyway).
 const attempts = new Map<string, { count: number; resetAt: number }>()
 
 export async function verifyLockSecret(email: string, secret: string): Promise<boolean> {
@@ -85,7 +86,7 @@ export async function verifyLockSecret(email: string, secret: string): Promise<b
   return ok
 }
 
-// Deblocarea: JWT propriu (scope dedicat, emailul titularului), cookie separat.
+// The unlock: its own JWT (dedicated scope, the owner's email), separate cookie.
 export function grantUnlock(reply: FastifyReply, email: string, method: 'voce' | 'secret'): void {
   const token = jwt.sign({ scope: 'admin-unlock', email, method }, config.sessionSecret, {
     expiresIn: UNLOCK_TTL_SEC,
@@ -99,56 +100,57 @@ export function grantUnlock(reply: FastifyReply, email: string, method: 'voce' |
   })
 }
 
-// ── „TOCMAI MI-A VORBIT, ȘI L-AM RECUNOSCUT" ────────────────────────────────
+// ── "HE JUST SPOKE TO ME, AND I RECOGNISED HIM" ─────────────────────────────
 //
-// Adrian, 31 iul: „să opereze pentru mine când îi cer doar eu, folosind
-// sistemul de recunoaștere vocală, ca securitate sporită."
+// Adrian, Jul 31: "it should operate for me when only I ask it, using the
+// voice recognition system, as heightened security."
 //
-// Cookie-ul de deblocare merge pe rutele care au cererea în mână. Uneltele
-// creierului nu o au — și nici nu vreau s-o car prin zece semnături ca să
-// ajungă acolo. Aici ținem minte, pe server, CÂND s-a potrivit ultima dată
-// amprenta vocală a titularului. Operațiile care ating un instrument de plată
-// cer fereastra asta: nu „ai fost admin cândva", ci „ești tu, ai vorbit ACUM".
+// The unlock cookie works on routes that hold the request. The brain's tools
+// don't have it — and I don't want to carry it through ten signatures to get
+// there. Here we remember, on the server, WHEN the owner's voiceprint last
+// matched. Operations that touch a payment instrument require this window:
+// not "you were admin once", but "it's you, you spoke NOW".
 //
-// Fereastra e scurtă dinadins. Un cod tastat rămâne valabil cât ține cookie-ul;
-// vocea trebuie să fie proaspătă, altfel garda n-ar însemna nimic.
+// The window is short on purpose. A typed code stays valid as long as the
+// cookie lasts; the voice must be fresh, otherwise the guard would mean
+// nothing.
 const VOCE_TTL_MS = 15 * 60_000
 const voceLa = new Map<string, number>()
 
-/** Amprenta vocală a titularului tocmai s-a potrivit (chemat din ruta vocii). */
+/** The owner's voiceprint just matched (called from the voice route). */
 export function marcheazaVoce(email: string): void {
   voceLa.set(email.trim().toLowerCase(), Date.now())
 }
 
-/** A vorbit — și l-am recunoscut — în ultimele 15 minute? */
+/** He spoke — and we recognised him — within the last 15 minutes? */
 export function voceRecenta(email: string): boolean {
   const t = voceLa.get(email.trim().toLowerCase())
   return !!t && Date.now() - t < VOCE_TTL_MS
 }
 
-/** Închide fereastra ACUM, fără să aștepte cele 15 minute.
- *  Ownerul spune „gata" → poarta se închide în clipa aia, nu când expiră ea. */
+/** Close the window NOW, without waiting out the 15 minutes.
+ *  The owner says "done" → the gate closes that instant, not when it expires. */
 export function uitaVocea(email: string): void {
   voceLa.delete(email.trim().toLowerCase())
 }
 
-/** Câte minute mai ține fereastra (pentru mesaje pe înțelesul omului). */
+/** How many minutes the window has left (for human-readable messages). */
 export function minuteRamaseVoce(email: string): number {
   const t = voceLa.get(email.trim().toLowerCase())
   if (!t) return 0
   return Math.max(0, Math.ceil((VOCE_TTL_MS - (Date.now() - t)) / 60_000))
 }
 
-/** Deblocat PRIN VOCE, nu prin secret tastat (Adrian, 31 iul: „să opereze
- *  pentru mine când îi cer doar eu, folosind sistemul de recunoaștere vocală,
- *  ca securitate sporită").
+/** Unlocked BY VOICE, not by a typed secret (Adrian, Jul 31: "it should
+ *  operate for me when only I ask it, using the voice recognition system, as
+ *  heightened security").
  *
- *  Diferența e reală: un secret tastat poate fi furat, citit peste umăr sau
- *  scos dintr-un cookie. Amprenta vocală cere să fii TU, acolo, vorbind. De-aia
- *  operațiile care ating instrumente de plată cer ANUME metoda asta — nu doar
- *  „ești admin", ci „ești tu, și tocmai ai vorbit".
+ *  The difference is real: a typed secret can be stolen, read over a shoulder
+ *  or pulled from a cookie. The voiceprint requires you to be YOU, there,
+ *  speaking. That's why operations touching payment instruments demand exactly
+ *  this method — not just "you are admin", but "it's you, and you just spoke".
  *
- *  `method` era deja pus în token de `grantUnlock`, dar nimeni nu-l citea. */
+ *  `method` was already put into the token by `grantUnlock`, but nobody read it. */
 export function hasVoiceUnlock(req: FastifyRequest, email: string): boolean {
   const token = tokenUnlock(req)
   if (!token) return false
@@ -160,8 +162,8 @@ export function hasVoiceUnlock(req: FastifyRequest, email: string): boolean {
   }
 }
 
-/** Tokenul de deblocare, din cookie sau din antet (una singură, folosită de
- *  ambele verificări — altfel cele două ar diverge tăcut). */
+/** The unlock token, from the cookie or the header (a single one, used by both
+ *  checks — otherwise the two would silently diverge). */
 function tokenUnlock(req: FastifyRequest): string | undefined {
   const c = req.cookies?.[ADMIN_UNLOCK_COOKIE]
   if (c) return c

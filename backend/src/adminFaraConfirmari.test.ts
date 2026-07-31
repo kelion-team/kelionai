@@ -45,7 +45,7 @@ describe('lacătul e dezarmat de owner, dintr-un singur loc', () => {
   it('mecanismul rămâne întreg dedesubt — rearmarea e o singură linie', () => {
     expect(lacat).toContain('loadKv(KV_SECRET)')
     expect(lacat).toContain('scrypt')
-    expect(lacat).toMatch(/CA SĂ REARMEZI/)
+    expect(lacat).toMatch(/TO RE-ARM/)
   })
 
   it('porțile îl întreabă mai departe pe isArmed — nu le-am rupt, doar răspunde altfel', () => {
@@ -54,7 +54,7 @@ describe('lacătul e dezarmat de owner, dintr-un singur loc', () => {
   })
 
   it('riscul e scris în cod, nu doar în chat', () => {
-    expect(lacat).toMatch(/CE PIERDE[\s\S]{0,400}singurul[\s\S]{0,12}factor/)
+    expect(lacat).toMatch(/WHAT IS LOST[\s\S]{0,400}only[\s\S]{0,12}factor/)
   })
 })
 
