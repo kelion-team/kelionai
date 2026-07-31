@@ -853,20 +853,40 @@ export default function AdminPanel({
                         trebuia să întrebi ca să afli cât te costă. Acum e aici,
                         lângă bani. Nu taie nimic: arată. */}
                     {circuit?.costReal && (
+                      <>
                       <span className="or-wallet-sub">
-                        💷 Cât a costat, real: ${circuit.costReal.total.toFixed(2)} total · $
-                        {circuit.costReal.today.toFixed(2)} azi
+                        {/* SCRIA „Cât a costat, REAL". Era fals pentru ~90% din
+                            sumă: doar apelurile de creier vin cu banii spuși de
+                            furnizor (OpenRouter usage.cost). Restul — minutele
+                            de voce mai ales — sunt tariful MEU fix înmulțit cu
+                            cât a fost pornit microfonul. Adrian, 31 iul: „de
+                            unde a reieșit valoarea $504?" Exact de-acolo, și
+                            trebuia scris pe cifră, nu explicat după. */}
+                        💷 Măsurat de furnizor: <b>${circuit.costReal.masurat.toFixed(2)}</b>
+                        {' · '}estimat de mine (tarife fixe, NU facturi):{' '}
+                        <b>${circuit.costReal.estimat.toFixed(2)}</b>
+                        {' · '}azi ${circuit.costReal.today.toFixed(2)}
                         {Object.keys(circuit.costReal.byKind).length > 0 && (
                           <>
                             {' — '}
                             {Object.entries(circuit.costReal.byKind)
                               .sort((a, b) => b[1] - a[1])
                               .slice(0, 4)
-                              .map(([k, v]) => `${k} $${v.toFixed(2)}`)
+                              .map(
+                                ([k, v]) =>
+                                  `${k} $${v.toFixed(2)}${circuit.costReal!.felul[k] === 'masurat' ? '' : '~'}`,
+                              )
                               .join(' · ')}
+                            {' — „~" = estimare'}
                           </>
                         )}
                       </span>
+                      <span className="or-wallet-sub" style={{ opacity: 0.7 }}>
+                        Minutele de voce se socotesc cât a fost microfonul PORNIT × $
+                        {(0.35).toFixed(2)}/min — nu cât ți-a luat OpenAI. Suma exactă e doar în
+                        contul tău OpenAI.
+                      </span>
+                      </>
                     )}
                     {/* MANETA TA (Adrian: „cele 6 trebuiesc, dar nu frâne").
                         Comanda „pauza-autonomie" exista din 27 iul, dar trebuia

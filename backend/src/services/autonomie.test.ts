@@ -24,6 +24,9 @@ interface JobFals {
   orderText: string
   status: 'queued' | 'running' | 'done' | 'failed'
   log: string | null
+  /** CINE l-a pornit — „kelion-autonom" = bucla, un email = un om. Zidul se
+   *  uită numai la ordinele PORNITE DE EL: eșecurile date de om nu-l opresc. */
+  orderedBy?: string
 }
 
 const kv = new Map<string, string>()
@@ -76,7 +79,7 @@ vi.mock('../db.js', () => ({
     goluriInchise.push(id)
   },
   createBuildJob: async (_by: string, text: string) => {
-    const j: JobFals = { id: urmatorulId++, orderText: text, status: 'queued', log: null }
+    const j: JobFals = { id: urmatorulId++, orderText: text, status: 'queued', log: null, orderedBy: _by }
     jobs.unshift(j)
     return j.id
   },
@@ -121,6 +124,16 @@ vi.mock('./adminTools.js', () => ({
   ]),
   execSharedAdminTool: async (n: string) => {
     cerute.push(`admin:${n}`)
+    return '{}'
+  },
+  // Uneltele legate de EL — memoria, notițele, jurnalele, costul, poșta.
+  // Adrian, 31 iul: „toate trebuie real să le primească."
+  USER_SCOPED_TOOLS: new Set([
+    'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
+    'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
+  ]),
+  execUserScopedTool: async (n: string) => {
+    cerute.push(`user:${n}`)
     return '{}'
   },
 }))
@@ -487,6 +500,71 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(ultimulPrompt).toContain('PLĂȚILE AUTOMATE')
     // Dificultate 5 → pornește direct pe TOP, nu află după ce irosește turele.
     expect(scaraCeruta?.[0]).toBe('model-top')
+  })
+
+  // ZIDUL (Adrian, 31 iul: „cum se reia sau ce se întâmplă cu cele eșuate? care
+  // e logica????" · „nu se oprește, asta e logica?"). Da, asta era — și era
+  // jumătate de regulă. „Nu abandonează" nu înseamnă „repetă la nesfârșit exact
+  // același lucru". Zece ordine picate la rând, zero terminate, și al
+  // unsprezecelea pleca liniștit, pe banii lui.
+  const zidDe = (n: number, log: string): void => {
+    for (let i = 0; i < n; i++) {
+      jobs.push({ id: 100 + i, orderText: 'x', status: 'failed', log, orderedBy: 'kelion-autonom' })
+    }
+  }
+
+  it('5 ordine picate la rând → schimbă ținta: „de ce pică toate", nu al 6-lea ordin', async () => {
+    zidDe(5, 'Eroare: modelul nu folosește uneltele si raspunde cu text gol')
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('ZID')
+    expect(r.motiv).toContain('5 ordine picate la rând')
+    // Ordinul de diagnostic pleacă la MÂINILE lui — constructorul e cel stricat.
+    expect(ultimulPrompt).toContain('AFLĂ DE CE PICĂ TOATE')
+    expect(ultimulPrompt).toContain('server_logs')
+    // Și îi pune sub nas cauza care se repetă, măsurată din jurnale.
+    expect(ultimulPrompt).toContain('CE SE REPETĂ ÎN JURNALE')
+    // NU a mai pus un ordin nou în coadă — asta era risipa.
+    expect(jobs.some((j) => j.status === 'queued')).toBe(false)
+  })
+
+  it('un singur succes rupe zidul — seria se numără de la ultimul „gata"', async () => {
+    // Ordinele vin cele mai NOI primele (ORDER BY created_at DESC), deci un
+    // succes recent trebuie să stea aproape de începutul listei ca să rupă seria.
+    zidDe(1, 'Eroare X')
+    jobs.push({ id: 90, orderText: 'x', status: 'done', log: null, orderedBy: 'kelion-autonom' })
+    zidDe(4, 'Eroare X')
+    const r = await poateSaLucreze()
+    expect(r.motiv).not.toContain('ZID')
+  })
+
+  it('eșecurile cerute de OM nu opresc bucla — numai ale ei', async () => {
+    for (let i = 0; i < 6; i++) {
+      jobs.push({ id: 200 + i, orderText: 'x', status: 'failed', log: 'Eroare', orderedBy: 'adrianenc11@gmail.com' })
+    }
+    const r = await poateSaLucreze()
+    expect(r.motiv).not.toContain('ZID')
+  })
+
+  // DOVADA CERUTĂ (Adrian, 31 iul: „75 de capabilități pe chat, toate trebuie
+  // real să le primească, aștept dovezi"). Nu o afirmație de-a mea — o
+  // NUMĂRĂTOARE, care cade dacă cineva îi ia ceva din mână.
+  it('mâinile lui primesc TOT ce știe executorul să ruleze — numărat, nu spus', async () => {
+    secreteExistente = ['REVOLUT_PAY_LINK']
+    await poateSaLucreze()
+    // Browserul: toate cele 9, nu un subset.
+    for (const b of ['browser_open', 'browser_click', 'browser_type', 'browser_read',
+      'browser_back', 'browser_scroll', 'browser_key', 'browser_click_at', 'browser_close'])
+      expect(uneltePrimite, `îi lipsește ${b}`).toContain(b)
+    // Codul lui: să se poată citi și interoga singur când se blochează.
+    for (const c of ['read_source', 'search_source', 'db_query', 'system_health'])
+      expect(uneltePrimite, `îi lipsește ${c}`).toContain(c)
+    // Memoria lui: fără ea repetă la nesfârșit aceleași greșeli.
+    for (const m of ['list_memories', 'server_logs', 'get_real_cost'])
+      expect(uneltePrimite, `îi lipsește ${m}`).toContain(m)
+    // Și cardul, gardat de voce în executor.
+    expect(uneltePrimite).toContain('card_completeaza')
+    // Pragul măsurat azi: dacă scade, cineva i-a luat ceva din mână.
+    expect(uneltePrimite.length).toBeGreaterThanOrEqual(31)
   })
 
   it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {

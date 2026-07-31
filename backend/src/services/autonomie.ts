@@ -49,9 +49,13 @@ import {
   BROWSER_TOOLS, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
 } from './brainToolDefs.js'
+import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
 import { platiAutomatePornite } from './cardFurnizor.js'
 import { voceRecenta } from './adminLock.js'
-import { execSharedAdminTool, SHARED_ADMIN_TOOLS } from './adminTools.js'
+import {
+  execSharedAdminTool, SHARED_ADMIN_TOOLS,
+  execUserScopedTool, USER_SCOPED_TOOLS,
+} from './adminTools.js'
 import { inventarulMeu } from './brainCapabilities.js'
 import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
@@ -446,20 +450,27 @@ async function golurileLui(): Promise<Sarcina[]> {
     }))
 }
 
-// ── DUPĂ TREI ÎNCERCĂRI: IESE ȘI CAUTĂ, NU SE ÎNVÂRTE ────────────────────────
+// ── SCHIMBĂ ABORDAREA DE LA PRIMA RELUARE, NU DE LA A TREIA ──────────────────
 //
 // Adrian, 30 iul: „după 3 trebuie să caute soluții, să iasă, să identifice
 // soluții, să studieze problema, să-și instaleze unelte diverse — în niciun caz
 // să abandoneze sau să stea în buclă."
 //
-// Ăsta e chiar echilibrul corect, și e altceva decât ce pusesem eu: nu un
-// PLAFON (renunță) și nici o repetare oarbă (se învârte), ci o SCHIMBARE DE
-// METODĂ. Are cu ce, de la PR #591: browser real, runbook-uri, baza de date,
-// și voie să-și instaleze pachete.
+// Adrian, 31 iul, mai ascuțit: „nu cred că după 2 runde are șanse în a treia să
+// rezolve ceva, dacă nu schimbă abordarea — chiar și după prima."
+//
+// Are dreptate, și pragul de 3 era al meu, nu al lui. Un plan care a picat o
+// dată nu devine bun fiindcă îl repeți pe un model mai scump: e aceeași
+// greșeală, plătită mai mult. Ce trebuie să se schimbe la RELUARE e DRUMUL, nu
+// mâna. De-aia cererea de schimbare a metodei pleacă de la PRIMA reluare, iar
+// modelul mai bun rămâne doar un ajutor pe deasupra, nu strategia.
 function escaladare(incercariDeja: number): string {
-  if (incercariDeja < 3) return ''
+  if (incercariDeja < 1) return ''
   return (
-    `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ORI ȘI N-A IEȘIT. NU repeta ce ai făcut — ` +
+    `⚠ AI ÎNCERCAT DEJA DE ${incercariDeja} ${incercariDeja === 1 ? 'DATĂ' : 'ORI'} ȘI N-A IEȘIT. ` +
+    `SCRIE ÎNTÂI, ÎN PRIMUL RÂND AL RĂSPUNSULUI, CE FACI ALTFEL DE DATA ASTA — dacă nu poți ` +
+    `numi diferența, înseamnă că repeți, iar repetarea a fost deja plătită și n-a mers. ` +
+    `NU repeta ce ai făcut — ` +
     `ai dovada că drumul ăla nu duce nicăieri. SCHIMBĂ METODA, în ordinea asta:\n` +
     `  1. IEȘI ȘI CAUTĂ: browser_open pe mesajul EXACT de eroare și pe documentația ` +
     `     oficială a lucrului care nu merge. Citește, nu ghici.\n` +
@@ -581,6 +592,15 @@ export async function uneltele(name: string, args: Record<string, unknown>): Pro
   if (SHARED_ADMIN_TOOLS.has(name)) {
     return (await execSharedAdminTool(name, args, { email, baseUrl })) ?? JSON.stringify({ error: 'unealtă necunoscută' })
   }
+  // UNELTELE LEGATE DE EL (memorie, notițe, jurnalele serverului, costul, cutia
+  // poștală, propose_tool). Adrian, 31 iul: „75 de capabilități pe chat, toate
+  // trebuie real să le primească." Astea n-au nevoie de nimic din cererea HTTP —
+  // doar de cine e userul — deci n-aveau niciun motiv real să lipsească când
+  // lucrează singur. Fără ele nu ține minte nimic de la o tură la alta.
+  if (USER_SCOPED_TOOLS.has(name)) {
+    const r = await execUserScopedTool(name, args, email, true)
+    if (r !== null) return r
+  }
   // Pagina se întoarce ca text + elemente numerotate; o tăiem, ca o pagină mare
   // să nu mănânce toată fereastra de context a creierului.
   const scurt = (v: unknown): string => JSON.stringify(v).slice(0, 20_000)
@@ -640,6 +660,115 @@ async function verificaLivrata(): Promise<{ pornit: boolean; motiv: string } | n
   return { pornit: true, motiv: `cerința #${c.id} — n-a trecut proba, o reia: ${spus.slice(0, 160)}` }
 }
 
+// ── CÂND TOT CE DAI PICĂ, PROBLEMA NU MAI E ÎN ORDIN ─────────────────────────
+//
+// Adrian, 31 iul, patru semne de întrebare: „cum se reia sau ce se întâmplă cu
+// cele eșuate? care e logica????"
+//
+// Logica de reluare EXISTA și mergea: un ordin picat se dă înapoi cu jurnalul
+// eșecului lipit, dificultatea urcă cu fiecare încercare, după 3 iese și caută,
+// nu se abandonează niciodată. Se vede în panou: #20 → #24, a doua încercare.
+//
+// Ce LIPSEA e mai simplu și mai grav: **nimeni nu se uita la tipar.** Zece
+// ordine la rând (#15…#24), zero terminate — și bucla dădea liniștită al
+// unsprezecelea. Când TOATE pică, problema nu mai e în ordinul următor; e în
+// mâna care execută. A insista înseamnă a plăti de zece ori același eșec.
+//
+// Ce face de acum: NU se oprește din lucru (asta ar fi o barieră, și mi-a
+// interzis-o pe bună dreptate) — SCHIMBĂ ținta. În loc de al unsprezecelea
+// ordin identic către constructorul care tocmai a picat de zece ori, pune un
+// ordin de DIAGNOSTIC, dus de MÂINILE lui: „află de ce pică toate, repară
+// cauza". Mâinile au browser, jurnale și secrete; constructorul e chiar cel
+// stricat. Nu abandonează nimic — încetează doar să lovească în același zid.
+
+/** Câte ordine consecutive picate, fără NICIUN succes, până schimbă ținta.
+ *
+ *  DOUĂ, nu cinci. Adrian, 31 iul: „nu cred că după 2 runde are șanse în a
+ *  treia să rezolve ceva, dacă nu schimbă abordarea". Pragul de 5 era al meu și
+ *  însemna cinci eșecuri plătite până să observ tiparul. */
+const PRAG_ESEC = 2
+
+/** Semnătura lumii — CE s-ar putea schimba încât să merite o nouă încercare.
+ *
+ *  Se calculează GRATUIT (nimic din proces nu costă tokeni): versiunea
+ *  publicată, câte chei vede procesul, câte ordine au reușit vreodată. Cât timp
+ *  semnătura e aceeași, o reîncercare ar da exact același rezultat — deci nu se
+ *  cheltuie nimic pe ea. Când se schimbă (ai publicat cod nou, a apărut o
+ *  cheie, ceva a reușit), zidul cade singur și lucrul repornește. */
+function semnaturaLumii(cateReusite: number): string {
+  const versiune = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
+  const chei = Object.keys(process.env).filter((k) => /_KEY$|_SECRET$|_TOKEN$|_URL$|^CARD_/.test(k)).length
+  return `${versiune}|${chei}|${cateReusite}`
+}
+
+/** Ce ținem minte despre un zid, între treceri. */
+interface StareZid {
+  cate: number
+  cauza: string
+  cand: string
+  /** Lumea, așa cum era când s-a ridicat zidul. */
+  semnatura: string
+  /** Diagnosticul s-a făcut deja — costă, deci NU se repetă pe același zid. */
+  diagnosticat: boolean
+  /** Ce a găsit diagnosticul, ca să apară în panou fără să mai întrebi. */
+  raport: string
+}
+
+async function citesteZid(): Promise<StareZid | null> {
+  try {
+    const raw = await loadKv('autonomie:zid')
+    return raw ? (JSON.parse(raw) as StareZid) : null
+  } catch {
+    return null
+  }
+}
+
+/** Ce se repetă în jurnalele eșecurilor — cauza COMUNĂ, nu ultima eroare.
+ *
+ *  Normalizăm fiecare rând (scoatem cifrele, care diferă de la un job la altul)
+ *  și numărăm. Ce apare în cele mai multe jurnale e cauza; una singură care
+ *  apare într-un jurnal e zgomot. */
+function cauzaComuna(picate: BuildJob[]): string {
+  const nr = new Map<string, { n: number; exemplu: string }>()
+  for (const j of picate) {
+    const randuri = (j.log ?? '')
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r.length > 20 && /eroare|error|failed|refuz|refus|timeout|429|4\d\d|5\d\d|nu (pot|poate|are)/i.test(r))
+    // Un singur vot per job, altfel un jurnal lung câștigă singur.
+    const vazute = new Set<string>()
+    for (const r of randuri) {
+      const cheie = r.replace(/\d+/g, '#').slice(0, 120)
+      if (vazute.has(cheie)) continue
+      vazute.add(cheie)
+      const e = nr.get(cheie) ?? { n: 0, exemplu: r.slice(0, 200) }
+      e.n += 1
+      nr.set(cheie, e)
+    }
+  }
+  const top = [...nr.values()].sort((a, b) => b.n - a.n)[0]
+  if (!top || top.n < 2) return ''
+  return `„${top.exemplu}" — în ${top.n} din ${picate.length} jurnale`
+}
+
+/** Ordinele pornite de buclă (nu de om), cele mai noi primele. */
+function aleBuclei(jobs: BuildJob[]): BuildJob[] {
+  return jobs.filter((j) => String(j.orderedBy ?? '').toLowerCase().startsWith('kelion'))
+}
+
+/** Toate ordinele recente au picat? Atunci nu mai dăm al unsprezecelea la fel. */
+function zidul(jobs: BuildJob[]): { blocat: boolean; cate: number; cauza: string } {
+  const ale = aleBuclei(jobs).filter((j) => j.status === 'done' || j.status === 'failed')
+  const consecutive: BuildJob[] = []
+  for (const j of ale) {
+    if (j.status === 'done') break // un succes rupe seria — nu mai e zid
+    consecutive.push(j)
+  }
+  return consecutive.length >= PRAG_ESEC
+    ? { blocat: true, cate: consecutive.length, cauza: cauzaComuna(consecutive) }
+    : { blocat: false, cate: consecutive.length, cauza: '' }
+}
+
 /** O tură de lucru a lui Kelion, pornită de buclă, nu de un om. */
 /** Scara pentru mâinile lui, aleasă după cât de grea e sarcina.
  *
@@ -655,12 +784,27 @@ function scaraPentru(dificultate = 3): string[] | undefined {
 }
 
 async function ruleazaCuMainile(s: Sarcina): Promise<string> {
+  // ── TOT CE ȘTIE EXECUTORUL SĂ RUTEZE, NU O LISTĂ SCRISĂ DE MINE ────────────
+  //
+  // Adrian, 31 iul: „îți lipsesc câteva elemente esențiale pentru capabilitățile
+  // lui Kelion, care sunt acelea?" Ăsta era primul.
+  //
+  // `uneltele()` rutează TOT setul partajat. Lista de aici avea 15 din ele:
+  // browserul, secretele, cardul. Îi lipseau din mână — deși executorul le
+  // știe — read_source (să-și citească propriul cod), db_query (să interogheze
+  // baza), system_health (să-și ia pulsul), repo_write/repo_open_pr (să scrie
+  // cod și să deschidă PR), runbook_log (să citească jurnalul eșecului).
+  //
+  // Mai rău: `inventarulMeu()` din prompt îi spune că LE ARE pe toate. Deci i
+  // se spunea „ai db_query", o cerea, și unealta nu exista în listă — un „nu
+  // pot" pentru ceva ce codul de dedesubt chiar putea face.
+  //
+  // De-aia lista nu se mai scrie cu mâna: se DERIVĂ din ce știe executorul.
+  // Dacă mâine apare o unealtă nouă în dispatcher, o are și el, fără să mai
+  // umble nimeni aici.
   const tools = [
-    ...BROWSER_TOOLS, SECRET_LISTA_TOOL, SECRET_PUNE_TOOL, SECRET_PUBLICA_TOOL,
-    // Cardul la furnizori + plățile automate (M6). Nu-l „deblochează" să le aibă
-    // în listă: uneltele refuză singure dacă vocea ownerului n-a fost
-    // recunoscută în ultimele 15 minute. Poarta e în executor, nu în listă.
-    CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+    ...BROWSER_TOOLS,
+    ...TOATE_UNELTELE_ADMIN,
   ] as unknown as AnthropicTool[]
   const prompt =
     `${s.ordin}\n\n` +
@@ -723,6 +867,85 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     try {
       const v = await verificaLivrata().catch(() => null)
       if (v) return v
+    } finally {
+      mainileOcupate = false
+    }
+  }
+
+  // ── ZIDUL: dacă TOT ce am dat pică, nu mai dau al unsprezecelea la fel ─────
+  // Nu e abandon și nu e plafon: e schimbarea țintei. Constructorul care a picat
+  // de N ori la rând nu se repară primind al N+1-lea ordin — se repară uitându-ne
+  // la ce scrie în jurnalele lui. Ordinul ăsta îl duc MÂINILE, care au browser și
+  // jurnale; constructorul e chiar cel stricat.
+  const zid = zidul(jobs)
+  const zidVechi = await citesteZid()
+  const reusite = aleBuclei(jobs).filter((j) => j.status === 'done').length
+  const acum = semnaturaLumii(reusite)
+
+  // ZIDUL A CĂZUT? Nu fiindcă a trecut timpul — fiindcă S-A SCHIMBAT CEVA:
+  // cod nou publicat, o cheie apărută, un ordin reușit. Cât timp lumea e
+  // identică, o reîncercare ar da identic același eșec.
+  if (zidVechi && zidVechi.semnatura !== acum) {
+    await saveKv('autonomie:zid', '').catch(() => {})
+  } else if (zidVechi) {
+    // ZID ÎN PICIOARE, LUMEA NESCHIMBATĂ → NU SE CHELTUIE NIMIC. Zero apeluri de
+    // model, zero ordine. Adrian, 31 iul: „să stea în buclă să consume?" Nu.
+    // Trecerea asta costă exact cât o interogare în baza de date.
+    return {
+      pornit: false,
+      motiv:
+        `⏸ OPRIT pe zid, nu consum nimic: ${zidVechi.cate} ordine picate la rând, 0 reușite. ` +
+        (zidVechi.cauza ? `Cauza care se repetă: ${zidVechi.cauza}. ` : '') +
+        (zidVechi.raport ? `Diagnostic: ${zidVechi.raport.slice(0, 200)}. ` : '') +
+        `Repornesc SINGUR când se schimbă ceva real — publici cod nou, apare o cheie, ` +
+        `sau reușește un ordin. Până atunci, o reîncercare ar da exact același eșec, pe banii tăi.`,
+    }
+  }
+
+  if (zid.blocat && !mainileOcupate) {
+    mainileOcupate = true
+    try {
+      const spus = await ruleazaCuMainile({
+        cod: 'ZID',
+        titlu: 'De ce pică TOATE ordinele',
+        executant: 'maini',
+        dificultate: 5,
+        ordin:
+          `OPREȘTE-TE DIN A MAI DA ORDINE ȘI AFLĂ DE CE PICĂ TOATE.\n\n` +
+          `Ultimele ${zid.cate} ordine pornite de tine au picat, unul după altul, ZERO terminate. ` +
+          `Când tot ce dai pică, problema nu mai e în ordinul următor — e în mâna care execută. ` +
+          `Al ${zid.cate + 1}-lea ordin identic ar costa la fel de mult și ar pica la fel.\n\n` +
+          (zid.cauza ? `CE SE REPETĂ ÎN JURNALE: ${zid.cauza}\n\n` : '') +
+          `FĂ AȘA, în ordinea asta:\n` +
+          `  1. server_logs (errorsOnly=false) și runbook_log pe ultimele ordine — citește ce a scris ` +
+          `     lucrătorul când a căzut. Nu ghici din titlu.\n` +
+          `  2. system_health — merge puntea de pe VPS? Are cheile? Are loc pe disc?\n` +
+          `  3. db_query pe build_jobs: SELECT id, status, attempts, left(log, 400) FROM build_jobs ` +
+          `     ORDER BY id DESC LIMIT 12 — vezi tiparul cu ochii tăi.\n` +
+          `  4. Când ai găsit cauza REALĂ (una singură, nu o listă de bănuieli), REPAR-O: dacă e în ` +
+          `     cod, deschide PR; dacă e o cheie lipsă, pune-o cu secret_pune; dacă e puntea moartă, ` +
+          `     spune exact ce trebuie repornit.\n\n` +
+          `RAPORTEAZĂ ÎN DOUĂ RÂNDURI: cauza, și ce ai făcut cu ea. Dacă n-o poți repara singur, ` +
+          `scrie „AȘTEPT APROBAREA: <ce anume>" — dar numai după ce ai măsurat, nu în loc să măsori.`,
+      }).catch((e: Error) => `a crăpat: ${e.message}`)
+      // Diagnosticul se face O SINGURĂ DATĂ pe zid. De la trecerea următoare,
+      // ramura de mai sus întoarce fără să cheltuie nimic — până se schimbă
+      // lumea. Altfel n-aș fi oprit bucla, doar i-aș fi schimbat eticheta.
+      const stare: StareZid = {
+        cate: zid.cate,
+        cauza: zid.cauza,
+        cand: new Date().toISOString(),
+        semnatura: acum,
+        diagnosticat: true,
+        raport: spus.slice(0, 1000),
+      }
+      await saveKv('autonomie:zid', JSON.stringify(stare)).catch(() => {})
+      return {
+        pornit: true,
+        motiv:
+          `ZID: ${zid.cate} ordine picate la rând, 0 reușite — am oprit ordinele și am căutat cauza. ` +
+          `${spus.slice(0, 300)}`,
+      }
     } finally {
       mainileOcupate = false
     }

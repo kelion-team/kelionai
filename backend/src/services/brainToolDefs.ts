@@ -392,3 +392,31 @@ export const OPEN_APP_VIEW_TOOL: Tool = {
     required: ['view'],
   },
 }
+
+// ── TOT SETUL DE ADMIN, DERIVAT — NU SCRIS CU MÂNA ───────────────────────────
+//
+// Adrian, 31 iul: „îți lipsesc câteva elemente esențiale pentru capabilitățile
+// lui Kelion, care sunt acelea?"
+//
+// Mâinile lui primeau 15 unelte dintr-o listă scrisă de mine, deși executorul
+// (`uneltele()` → `execSharedAdminTool`) știe să ruteze tot setul. Îi lipseau
+// exact cele de care avea nevoie ca să se depaneze singur: să-și citească
+// codul, să interogheze baza, să-și ia pulsul, să deschidă PR, să citească
+// jurnalul eșecului. Iar inventarul din prompt îi spunea că le are.
+//
+// Lista asta e ordinea în care le vede modelul; ce e aici TREBUIE să existe și
+// în SHARED_ADMIN_TOOLS (are test). Nu se mai umblă în două locuri.
+export const TOATE_UNELTELE_ADMIN: Tool[] = [
+  LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
+  DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
+  // repo_* și runbook_* sunt încă definite în routes/chat.ts (migrarea spre
+  // sursa unică e incrementală). Se adaugă în autonomie.ts, de-acolo.
+  SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+  CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
+  CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+  // Legate de EL: memoria, notițele, jurnalele, costul, cutia poștală, și
+  // dreptul de a-și cere singur o unealtă care-i lipsește. Fără astea nu ține
+  // minte nimic de la o tură la alta — de-aia repeta aceleași greșeli.
+  LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
+  COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
+]

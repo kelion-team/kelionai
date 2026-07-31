@@ -1940,7 +1940,22 @@ export interface CostSummary {
   total: number
   today: number
   byKind: Record<string, number>
+  /** Cât din `total` vine dintr-o MĂSURĂTOARE a furnizorului (OpenRouter
+   *  `usage.cost` — banii pe care i-a spus el că i-a luat). */
+  masurat: number
+  /** Cât e ESTIMAREA NOASTRĂ, cu tarife fixe scrise în `cost.ts` (minute de
+   *  voce × $0.35, caractere TTS, apeluri Serper…). Nu e ce a costat — e ce
+   *  credem noi că a costat. Adrian, 31 iul: „de unde a reieșit valoarea $504?"
+   *  — de aici, și trebuia scris de la început. */
+  estimat: number
+  /** Ce fel de cifră e fiecare rând, ca panoul să n-o mai poată prezenta greșit. */
+  felul: Record<string, 'masurat' | 'estimat'>
 }
+
+// Singurul fel de cost care vine MĂSURAT de la furnizor: apelurile de creier,
+// unde OpenRouter întoarce `usage.cost` cu banii lui reali. Tot restul sunt
+// tarife fixe scrise de mine — utile ca ordin de mărime, false ca „real".
+const COSTURI_MASURATE = new Set(['chat'])
 
 /** ── RESETAREA CONTOARELOR DE CONSUM ────────────────────────────────────────
  *
@@ -1973,7 +1988,7 @@ export async function resetCostCounters(): Promise<{ ok: boolean; sterse: number
 }
 
 export async function getCostSummary(): Promise<CostSummary> {
-  const empty: CostSummary = { total: 0, today: 0, byKind: {} }
+  const empty: CostSummary = { total: 0, today: 0, byKind: {}, masurat: 0, estimat: 0, felul: {} }
   if (!dbEnabled()) return empty
   try {
     const pool = getPool()
@@ -1987,11 +2002,24 @@ export async function getCostSummary(): Promise<CostSummary> {
       'SELECT kind, SUM(cost_usd) AS sum FROM cost_events GROUP BY kind',
     )
     const byKind: Record<string, number> = {}
-    for (const r of kinds.rows) byKind[r.kind] = Number(r.sum)
+    const felul: Record<string, 'masurat' | 'estimat'> = {}
+    let masurat = 0
+    let estimat = 0
+    for (const r of kinds.rows) {
+      const v = Number(r.sum)
+      byKind[r.kind] = v
+      const e = COSTURI_MASURATE.has(r.kind)
+      felul[r.kind] = e ? 'masurat' : 'estimat'
+      if (e) masurat += v
+      else estimat += v
+    }
     return {
       total: Number(totals.rows[0]?.total ?? 0),
       today: Number(totals.rows[0]?.today ?? 0),
       byKind,
+      masurat,
+      estimat,
+      felul,
     }
   } catch {
     return empty
