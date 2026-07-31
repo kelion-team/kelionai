@@ -37,6 +37,7 @@ import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati } from '../services/openBanking.js'
 import { stareAutonomie } from '../services/autonomie.js'
 import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
+import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
@@ -545,6 +546,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // asta nu e o frână pusă de mine peste el, e maneta pe care o ții TU).
   // „pauza-autonomie" exista din 27 iul, dar numai ca o comandă pe care trebuia
   // s-o știi pe de rost și s-o spui lui Kelion. Acum e un buton, la vedere.
+  // CELE OPT DOVEZI (Adrian, 31 iul: „trebuie 8 din 8 dovezi"). Nivelul
+  // autonomiei nu mai e o afirmație de-a mea într-un chat care se pierde: e o
+  // CITIRE din bază. Fiecare nivel își caută urma concretă — un ordin, un PR, o
+  // măsurătoare — și spune „dovedit" doar dacă a găsit-o. Altfel spune ce
+  // anume ar fi dovada. Regula #1, aplicată propriei noastre evidențe.
+  app.get('/api/admin/autonomie/dovezi', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await dovezileAutonomiei())
+  })
+
   app.post<{ Body: { oprit?: boolean } }>('/api/admin/autonomie/pauza', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

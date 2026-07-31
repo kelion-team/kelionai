@@ -760,6 +760,11 @@ export function startAutonomie(): void {
       ok: r.pornit,
       detaliu: r.pornit ? `a pornit singur: ${r.motiv}` : r.motiv,
     }
+    // ȘI ÎN BAZĂ, nu doar în memorie: publicăm de câteva ori pe zi, iar fiecare
+    // repornire ștergea urma. Fără ea, pagina de dovezi n-ar putea deosebi
+    // „bucla n-a apucat încă" de „bucla nu merge deloc" — exact confuzia pe care
+    // regula #1 o interzice.
+    await saveKv('autonomie:ultima', JSON.stringify(ultima)).catch(() => {})
   }
   // Prima trecere la 3 minute după pornire (containerul trebuie să fie gata),
   // apoi din oră în oră.

@@ -109,6 +109,29 @@ export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
   }
 }
 
+/** O dovadă a autonomiei, așa cum o citește serverul din baza de date. */
+export interface DovadaAutonomie {
+  nivel: number
+  ce: string
+  cum: string
+  dovedit: boolean
+  dovada: string
+  cand: string | null
+}
+
+/** Cele opt dovezi (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
+ *
+ *  Nu e o listă scrisă de mine: fiecare nivel își caută în bază urma concretă —
+ *  un ordin, un PR, o măsurătoare — și spune „dovedit" DOAR dacă a găsit-o. */
+export async function fetchDoveziAutonomie(): Promise<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null> {
+  try {
+    const r = await fetch('/api/admin/autonomie/dovezi', { credentials: 'include' })
+    return r.ok ? await r.json() : null
+  } catch {
+    return null
+  }
+}
+
 export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   try {
     const r = await fetch('/api/admin/money-circuit', { credentials: 'include' })
