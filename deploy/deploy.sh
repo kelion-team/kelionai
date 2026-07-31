@@ -187,6 +187,18 @@ echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost)
 install -m 700 "$REPO/deploy/porti-pr.sh" /root/kelion/porti-pr.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/porti-pr.sh' ; echo '*/10 * * * * /root/kelion/porti-pr.sh >> /root/kelion/porti-pr.log 2>&1' ) | crontab -
 
+echo "== 6g. Proba modelelor free: cine GÂNDEȘTE, cine nu (email cu tabelul) =="
+# Adrian, 31 iul: „ești convins că întoarce goale? poți face proba în afara
+# Kelion și să demonstrezi asta?" · „nu simulate, eu vreau model să raționeze"
+# · „dă-i ceva extrem de greu și vezi cum abordează".
+# Cheia OpenRouter e AICI, pe VPS — deci proba se face aici, nu din altă parte.
+# Patru probleme cu răspuns exact (ceas+fus, capcană de logică, citit de cod,
+# și una grea cu trei constrângeri legate), curl direct la OpenRouter, fără
+# backendul Kelion pe traseu. Rezultatul pleacă pe email.
+# Rulează în fundal: sunt zeci de apeluri de model, iar publicarea nu are voie
+# să aștepte după ele. Eșecul probei NU strică deploy-ul.
+( bash "$REPO/deploy/proba-modele.sh" --email >> /root/kelion/proba-modele.log 2>&1 & ) || true
+
 echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
 SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
 V=""
