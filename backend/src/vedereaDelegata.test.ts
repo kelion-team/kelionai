@@ -109,7 +109,7 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   })
 })
 
-describe('vocea folosește ACELAȘI creier ca scrisul', () => {
+describe('vocea: aceleași unelte și aceeași personă ca scrisul, dar alt ceas', () => {
   // Adrian: „și vocea... rutează-le prin creier". Vocea chema
   // `bestPaidWorkModel()` pentru owner — deci scrisul mergea pe creierul ales
   // de el, iar vocea pe un model plătit. Două creiere pe același om, adică fix
@@ -118,7 +118,30 @@ describe('vocea folosește ACELAȘI creier ca scrisul', () => {
 
   it('vocea nu mai alege singură un model plătit pentru owner', () => {
     expect(voce).not.toContain('bestPaidWorkModel')
-    expect(voce).toMatch(/const ownerModel = isAdmin \? await resolveModel\('work'\) : null/)
+  })
+
+  // ── CORECTAT LA 14:45, după „nu poate susține chat audio" ─────────────────
+  //
+  // La 14:35 am rutat vocea pe creierul de la scris (Ultra 550B), la ordinul
+  // lui „modifici tot ce trebuie să fie el". Zece minute mai târziu vocea nu
+  // mai ținea o conversație. Eu am rupt-o.
+  //
+  // Cauza e o limită fizică, nu o setare: 550B cu raționament intern, pe
+  // treapta gratuită cu 20 de cereri pe minut. La scris, câteva secunde de
+  // gândire sunt bune. Într-o conversație vorbită, aceleași secunde sunt o
+  // pauză în care omul crede că a murit linia.
+  //
+  // Testul păzește acum granița corectă: vocea pe rapid, scrisul pe capabil.
+  it('vocea NU folosește creierul greu — are buget de sub o secundă', () => {
+    expect(voce).toMatch(/const primaryModel = geminiDirectAvailable\(\)/)
+    expect(voce).toMatch(/await resolveModel\('chat'\)/)
+    // Treapta 'work' (creierul mare) nu mai e calea implicită a vocii.
+    expect(voce).not.toContain("resolveModel('work')")
+  })
+
+  it('motivul e scris în cod, ca să nu fie „reparat" înapoi', () => {
+    expect(voce).toMatch(/VOCEA ARE ALT CEAS DECÂT SCRISUL/)
+    expect(voce).toMatch(/buget de sub o secundă/)
   })
 
   it('nici scrisul nu mai rutează ownerul pe plătit fără să ceară el', () => {
