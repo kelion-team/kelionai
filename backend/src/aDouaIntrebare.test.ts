@@ -86,7 +86,7 @@ describe('barge-in-ul rămâne întreg', () => {
   // allowed to bring it back.
   it('input nou cât lucrează = tura veche tăiată, tura nouă pornită pe loc', () => {
     expect(panou).toMatch(/abortRef\.current\?\.abort\(\)[^\n]*superseded/)
-    expect(panou).toMatch(/NU return — cădem mai jos și pornim tura nouă chiar acum/)
+    expect(panou).toMatch(/NO return — we fall through below and start the new turn right now/)
   })
 
   it('a doua întrebare chiar pleacă spre creier, cu ea în conversație', () => {
