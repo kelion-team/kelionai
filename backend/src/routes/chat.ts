@@ -2010,7 +2010,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // which is not what the human cares about.
         const ackText = ro ? 'Am preluat sarcina. ' : 'Task taken on. '
         noteFirstWord()
-        reply.raw.write(appendTurn(user.email, turnId, ackText))
+        // PLAIN text only — the write interceptor above frames EVERY chunk as
+        // SSE (appendTurn). Passing appendTurn() output here DOUBLE-framed it:
+        // the human saw „id: 5 data: Am preluat sarcina." (Adrian, Aug 1,
+        // live screenshot) instead of the sentence.
+        reply.raw.write(ackText)
         voice.feed(ackText)
         assistantText += ackText
       }
