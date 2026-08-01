@@ -1,11 +1,12 @@
-// ── SURSĂ UNICĂ pentru citirea unui flux SSE (`data: {json}` pe linii) ────────
-// Streaming-ul de la creier (OpenRouter format-OpenAI + Gemini direct) livrează
-// evenimentele ca linii `data: {…}`; ambele servicii parsau MANUAL exact același
-// schelet (reader + decoder + buffer + split pe \n + prefix `data:` + [DONE] +
-// JSON.parse). Aici o singură dată (principiul permanent: unic, fără duplicate).
-// `onEvent` primește fiecare eveniment JSON parsat, ÎN ORDINE și SINCRON — deci
-// latența (primul cuvânt instant) rămâne IDENTICĂ; procesarea specifică fiecărui
-// furnizor (choices/delta vs candidates/parts) stă la apelant.
+// ── SINGLE SOURCE for reading an SSE stream (`data: {json}` lines) ──────────
+// The brain's streaming (OpenRouter OpenAI-format + Gemini direct) delivers
+// events as `data: {…}` lines; both services used to MANUALLY parse the exact
+// same skeleton (reader + decoder + buffer + split on \n + `data:` prefix +
+// [DONE] + JSON.parse). Here, once (the permanent principle: unique, no
+// duplicates). `onEvent` receives each parsed JSON event, IN ORDER and
+// SYNCHRONOUSLY — so the latency (instant first word) stays IDENTICAL; the
+// provider-specific processing (choices/delta vs candidates/parts) stays
+// with the caller.
 export async function readSSE(
   body: ReadableStream<Uint8Array>,
   onEvent: (ev: unknown) => void,

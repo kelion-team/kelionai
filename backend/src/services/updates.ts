@@ -1,34 +1,34 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-// ── CANALUL DE UPDATE AL LUI KELION (Adrian, 25 iul: „canal de informare a lui
-// cu tot ce primește ca update") ─────────────────────────────────────────────
-// deploy.sh scrie `deploy/last-updates.txt` (git log-ul recent) în contextul de
-// build la FIECARE publicare, iar Dockerfile îl copiază în imagine. De aici
-// Kelion află EXACT ce a primit la fiecare update — nu ghicește din memorie.
-// Fișierul e imuabil pe viața containerului → cache pe prima citire, zero
-// latență pe calea de chat.
+// ── KELION'S UPDATE CHANNEL (Adrian, 25 Jul: "an information channel for
+// him with everything he receives as an update") ────────────────────────────
+// deploy.sh writes `deploy/last-updates.txt` (the recent git log) into the
+// build context at EVERY publish, and the Dockerfile copies it into the
+// image. From here Kelion finds out EXACTLY what he received with each
+// update — he doesn't guess from memory. The file is immutable for the
+// container's life → cached on first read, zero latency on the chat path.
 
 let cached: string | null = null
 
-/** Conținutul brut al canalului de update (gol dacă imaginea nu-l are încă). */
+/** The raw content of the update channel (empty if the image doesn't have it yet). */
 export async function updatesList(): Promise<string> {
   if (cached !== null) return cached
-  // În container: cwd=/app → ./deploy/last-updates.txt. Local: cwd=backend → ../deploy.
+  // In the container: cwd=/app → ./deploy/last-updates.txt. Locally: cwd=backend → ../deploy.
   const roots = [process.cwd(), path.resolve(process.cwd(), '..')]
   for (const r of roots) {
     try {
       cached = await fs.readFile(path.join(r, 'deploy', 'last-updates.txt'), 'utf8')
       return cached
     } catch {
-      /* următoarea rădăcină */
+      /* the next root */
     }
   }
   cached = ''
   return cached
 }
 
-/** Primele rânduri (cele mai noi update-uri) — pentru system prompt, scurt. */
+/** The first rows (the newest updates) — for the system prompt, short. */
 export async function latestUpdateSummary(maxLines = 5): Promise<string> {
   const raw = await updatesList()
   if (!raw) return ''

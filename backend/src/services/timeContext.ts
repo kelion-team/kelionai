@@ -1,10 +1,11 @@
-// Formatarea OREI reale a dispozitivului (nowIso + fus orar) într-un text uman
-// citibil — folosită IDENTIC de chat.ts și realtime.ts pentru ancora de timp
-// (fix „bună seara" dimineața, §3). Sursă UNICĂ, ca cele două să nu diveargă
-// (principiul permanent: unic, fără duplicate). Întoarce null dacă nowIso lipsește
-// sau e invalid — apelantul sare peste blocul de timp. Textul de instrucțiuni din
-// jur rămâne al fiecărei rute (engleză la chat, română la voce); AICI e doar
-// formatarea comună, care era copiată în ambele.
+// The formatting of the device's REAL time (nowIso + timezone) into a
+// human-readable text — used IDENTICALLY by chat.ts and realtime.ts for the
+// time anchor (the "good evening in the morning" fix, §3). SINGLE source, so
+// the two don't diverge (the permanent principle: unique, no duplicates).
+// Returns null if nowIso is missing or invalid — the caller skips the time
+// block. The instruction text around it stays with each route (English in
+// chat, Romanian in voice); HERE is only the shared formatting, which used
+// to be copied in both.
 export function formatDeviceTime(nowIso: unknown, tz: unknown): { human: string; tzName: string } | null {
   if (typeof nowIso !== 'string' || Number.isNaN(Date.parse(nowIso))) return null
   const tzName = typeof tz === 'string' && tz ? tz : 'UTC'
