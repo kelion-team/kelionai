@@ -15,9 +15,9 @@ import { googleTools } from './services/google.js'
 import { RUNBOOKS } from './services/runbooks.js'
 import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './services/adminTools.js'
 
-// PAZNICUL DE COMPLETITUDINE (CREIER UNIC §5). Adrian: „dacă nu înmagazinează
-// REAL tot ce are softul, nu are rost". Testul apără sursa unică: să rămână
-// adevărată față de realitate și să nu se adoarmă nimic pe ascuns.
+// THE COMPLETENESS GUARD (SINGLE BRAIN §5). Adrian: "if it doesn't store
+// REALLY everything the software has, there's no point". The test guards the
+// single source: keep it true to reality and let nothing fall asleep in secret.
 describe('brainCapabilities — registrul unic e adevărat', () => {
   it('nu are nume duplicate', () => {
     const names = allCapabilityNames()
@@ -32,10 +32,10 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     }
   })
 
-  // SURSĂ UNICĂ (§1): vocea DERIVĂ acum din registru (realtime.ts). Verificăm
-  // registrul față de lista CANONICĂ a celor 18 skill-uri Google de voce — și că
-  // derivarea produce exact setul canonic. Dacă cineva schimbă registrul pe
-  // ascuns, testul cade; nimic nu se adoarme tăcut.
+  // SINGLE SOURCE (§1): voice now DERIVES from the registry (realtime.ts). We
+  // check the registry against the CANONICAL list of the 18 Google voice skills
+  // — and that the derivation produces exactly the canonical set. If someone
+  // changes the registry in secret, the test falls; nothing falls asleep silently.
   it('skill-urile Google pe voce = cele 18 canonice, dintr-o singură sursă', () => {
     const canonic = [
       'add_contact', 'add_task', 'convert_currency', 'create_calendar_event', 'get_calendar_events',
@@ -45,54 +45,55 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     ].sort()
     const dinRegistru = CAPABILITIES.filter((c) => c.category === 'google' && c.voice).map((c) => c.name).sort()
     expect(dinRegistru).toEqual(canonic)
-    // VOICE_TOOL_NAMES (realtime.ts) derivă din registru → trebuie să fie identic.
+    // VOICE_TOOL_NAMES (realtime.ts) derives from the registry → must be identical.
     expect([...VOICE_TOOL_NAMES].sort()).toEqual(canonic)
   })
 
-  // COMPLETITUDINE FAȚĂ DE REALITATE (§5): registrul nu se verifică doar pe el
-  // însuși, ci față de SURSELE REALE. Dacă în google.ts apare/dispare un skill
-  // fără să atingă registrul, testul cade — creierul nu poate avea o rută
-  // ne-înregistrată, nici registrul o rută inexistentă.
+  // COMPLETENESS AGAINST REALITY (§5): the registry isn't checked only against
+  // itself, but against the REAL SOURCES. If a skill appears/disappears in
+  // google.ts without touching the registry, the test falls — the brain can't
+  // have an unregistered route, nor the registry a nonexistent one.
   it('categoria google din registru == skill-urile Google REALE (google.ts)', () => {
     const realGoogle = googleTools.map((t) => t.name).sort()
     const registruGoogle = CAPABILITIES.filter((c) => c.category === 'google').map((c) => c.name).sort()
     expect(registruGoogle).toEqual(realGoogle)
   })
 
-  // HANDLER REAL PENTRU FIECARE CAPABILITATE DE CHAT (întărirea paznicului, audit
-  // 29 iul, risc #5): înainte, paznicul verifica realitatea DOAR pe suprafața
-  // google; un rând nou în registru, în afara google, fără handler în chat.ts ar
-  // fi trecut verde („adormit ascuns"). Acum: fiecare capabilitate de chat TREBUIE
-  // să aibă un `case '<nume>'` în runTool (chat.ts), SAU să fie skill Google (rutat
-  // prin runGoogleTool), SAU una din cele interceptate ÎNAINTE de runTool (execTool).
+  // A REAL HANDLER FOR EVERY CHAT CAPABILITY (guard hardening, Jul 29 audit,
+  // risk #5): before, the guard checked reality ONLY on the google surface; a
+  // new registry row outside google with no handler in chat.ts would have passed
+  // green ("hidden asleep"). Now: every chat capability MUST have a
+  // `case '<name>'` in runTool (chat.ts), OR be a Google skill (routed through
+  // runGoogleTool), OR one of those intercepted BEFORE runTool (execTool).
   it('fiecare capabilitate de CHAT are un handler real în chat.ts (nu doar în registru)', () => {
     const chatSrc = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
     const cases = new Set([...chatSrc.matchAll(/case '([a-z_]+)':/g)].map((m) => m[1]))
     const google = new Set(googleTools.map((t) => t.name))
-    // Interceptate în execTool ÎNAINTE de runTool (nu sunt `case`): raționamentul
-    // greu și auto-propunerea de unealtă.
+    // Intercepted in execTool BEFORE runTool (they're not a `case`): heavy
+    // reasoning and tool self-proposal.
     const special = new Set(['ask_brain', 'propose_tool'])
-    // Uneltele admin PARTAJATE (chat ∩ voce) trec prin garda comună înainte de
-    // switch (execSharedAdminTool) → nu mai au `case`, dar SUNT tratate.
+    // The SHARED admin tools (chat ∩ voice) go through the common guard before
+    // the switch (execSharedAdminTool) → they no longer have a `case`, but they
+    // ARE handled.
     const areHandler = (n: string): boolean =>
-      // Un handler REAL poate fi: un `case` în chat.ts, o unealtă Google, una
-      // specială, sau un executor din sursa COMUNĂ (partajat cu vocea — dispatch
-      // unic, fără duplicare). Toate patru sunt căi valide; ce nu e în niciuna
-      // e cu adevărat adormit.
+      // A REAL handler can be: a `case` in chat.ts, a Google tool, a special
+      // one, or an executor from the COMMON source (shared with voice — single
+      // dispatch, no duplication). All four are valid paths; what is in none of
+      // them is truly asleep.
       cases.has(n) || google.has(n) || special.has(n) || SHARED_ADMIN_TOOLS.has(n) || USER_SCOPED_TOOLS.has(n)
     const orfane = chatCapabilityNames().filter((n) => !areHandler(n))
     expect(orfane, `capabilități de chat FĂRĂ handler în chat.ts (adormite): ${orfane.join(', ')}`).toEqual([])
   })
 
-  // CONȘTIENT DE CE ARE (Adrian, 30 iul: „trebuie să fie conștient de ce are, ce
-  // capabilități are, toate să-i fie activate în creier și apelabile direct").
-  // Inventarul se DERIVĂ din registru — dacă cineva adaugă o capabilitate și
-  // uită să-i spună lui că o are, testul ăsta o prinde.
+  // AWARE OF WHAT IT HAS (Adrian, Jul 30: "it must be aware of what it has,
+  // what capabilities it has, all of them activated in its brain and directly
+  // callable"). The inventory DERIVES from the registry — if someone adds a
+  // capability and forgets to tell it about it, this test catches it.
   it('își cunoaște inventarul: fiecare capabilitate de chat apare în el', () => {
     const inv = inventarulMeu(true)
     const lipsa = chatCapabilityNames().filter((n) => !inv.includes(n))
     expect(lipsa, `capabilități pe care le ARE dar nu ȘTIE că le are: ${lipsa.join(', ')}`).toEqual([])
-    // Și îi spune limpede să nu refuze ce are în mână.
+    // And it tells it plainly not to refuse what it holds in its hand.
     expect(inv).toContain('Nu ceri voie')
   })
 
@@ -100,32 +101,33 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     const inv = inventarulMeu(false)
     expect(inv).not.toContain('repo_merge_pr')
     expect(inv).not.toContain('secret_pune')
-    expect(inv).toContain('send_email') // dar restul, da
+    expect(inv).toContain('send_email') // but the rest, yes
   })
 
   it('runbook-urile reale (runbooks.ts) sunt acoperite prin run_runbook în registru', () => {
-    // Cele 8 runbook-uri se cheamă prin unealta run_runbook — care TREBUIE să
-    // existe în registru cât timp există runbook-uri reale.
+    // The 8 runbooks are called through the run_runbook tool — which MUST
+    // exist in the registry as long as real runbooks exist.
     expect(Object.keys(RUNBOOKS).length).toBeGreaterThan(0)
     expect(allCapabilityNames()).toContain('run_runbook')
   })
 
-  // STAREA MĂSURATĂ AZI — orice schimbare a suprafeței creierului trebuie să treacă
-  // pe AICI (altfel testul cade), deci registrul nu poate rămâne în urmă.
+  // THE STATE MEASURED TODAY — any change to the brain's surface must pass
+  // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
     expect(chatCapabilityNames().length).toBe(75) // + card_stare/card_completeaza/card_gata (31 iul: cardul la furnizori, gardat de voce)
     expect(voiceCapabilityNames().length).toBe(31) // vocea = plafon OpenAI Realtime (măsurat)
   })
 
-  // Doar cele 3 unelte de vedere (cameră/monitor/GPS) sunt native pe voce și nu pe
-  // chat (chatul vede inline). Restul „adormirii" e pe voce — ținta §1/§6 = 0.
+  // Only the 3 vision tools (camera/monitor/GPS) are native on voice and not on
+  // chat (chat sees inline). The rest of the "sleeping" is on voice — the §1/§6
+  // target = 0.
   it('adormirea e enumerată explicit, niciodată ascunsă', () => {
     expect(dormantOnChat().map((c) => c.name).sort()).toEqual(['get_location', 'get_monitor', 'look'])
-    // ȚINTA §1 ATINSĂ (30 iul): vocea ajunge la TOATE capabilitățile chatului —
-    // adormite = 0. Testul era „> 0" cât timp lista mai avea rânduri; acum e
-    // PAZNIC DE REGRESIE: dacă cineva adaugă o unealtă doar pe chat, sau taie o
-    // cale de pe voce, lista redevine nenulă și CI-ul PICĂ roșu. Nu se mai poate
-    // strecura „adormit" pe tăcute — exact garanția cerută în §5.
+    // §1 TARGET REACHED (Jul 30): voice reaches ALL chat capabilities —
+    // dormant = 0. The test was "> 0" while the list still had rows; now it is
+    // a REGRESSION GUARD: if someone adds a chat-only tool, or cuts a path from
+    // voice, the list becomes non-empty again and CI goes RED. "Asleep" can no
+    // longer sneak in quietly — exactly the guarantee required in §5.
     expect(dormantOnVoice().map((c) => c.name)).toEqual([])
     // eslint-disable-next-line no-console
     console.log(`[completitudine] adormite pe voce (de dus în §1/§6): ${dormantOnVoice().map((c) => c.name).join(', ')}`)
