@@ -19,12 +19,12 @@ export interface WorkspaceTask {
   readonly card: SkillCard | null
   readonly text?: string // a readable text deliverable (agent result), rendered as a panel
   readonly html?: string // a complete web page Kelion WROTE, run live in a sandboxed frame ('app')
-  // STAREA REALĂ DE RANDARE (Adrian, 27 iul: „Kelion trebuie să vadă nativ real
-  // ce afișează monitorul faptic, și să repare până apare ce zice că face").
-  // 'loading' = pornit, încă nu s-a confirmat; 'ok' = chiar s-a randat;
-  // 'error' = a picat (fișier inaccesibil, site care refuză încorporarea…).
-  // Randorul din Stage o setează din onLoad/onError; get_monitor o citește, deci
-  // Kelion vede FAPTIC ce e pe ecran, nu doar ce a cerut.
+  // THE REAL RENDER STATE (Adrian, Jul 27: "Kelion must natively see for real
+  // what the monitor actually displays, and fix it before what he says appears").
+  // 'loading' = started, not yet confirmed; 'ok' = it really rendered;
+  // 'error' = it failed (inaccessible file, site refusing embedding…).
+  // The renderer in Stage sets it from onLoad/onError; get_monitor reads it, so
+  // Kelion FACTUALLY sees what's on screen, not just what he asked for.
   readonly status?: 'loading' | 'ok' | 'error'
 }
 
@@ -67,7 +67,7 @@ function setTasks(tasks: WorkspaceTask[], activeId: string): void {
   emit()
 }
 
-// Randorul (Stage) confirmă starea REALĂ a unei suprafețe după onLoad/onError.
+// The renderer (Stage) confirms a surface's REAL state after onLoad/onError.
 export function setTaskStatus(id: string, status: 'loading' | 'ok' | 'error'): void {
   const tasks = state.tasks.map((t) => (t.id === id ? { ...t, status } : t))
   setTasks(tasks, state.activeId)
@@ -100,13 +100,13 @@ export function isMonitorWorking(): boolean {
   return working
 }
 
-// Classify a URL/data into a task kind so the monitor RANDEAZĂ ORICE TIP DE
-// DATĂ nativ (Adrian, 27 iul: „pe monitor trebuie să poți deschide absolut
-// orice tip de date — xls, pdf, youtube, cod, arhive, orice"). Fiecare tip are
-// randorul lui în Stage: imagine→<img>, pdf→vizor, video→<video>, audio→
+// Classify a URL/data into a task kind so the monitor RENDERS ANY DATA TYPE
+// natively (Adrian, Jul 27: "on the monitor you must be able to open absolutely
+// any data type — xls, pdf, youtube, code, archives, anything"). Each type has
+// its renderer in Stage: image→<img>, pdf→viewer, video→<video>, audio→
 // <audio>, office(xls/doc/ppt)→vizor Office online, cod/text/json/csv→text,
-// arhive→panou de descărcare. Același kind = același tab (un pdf nou îl
-// înlocuiește pe cel vechi).
+// archives→download panel. Same kind = same tab (a new pdf
+// replaces the old one).
 const EXT_KIND: Record<string, string> = {
   // imagini
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', avif: 'image', ico: 'image',
@@ -128,7 +128,7 @@ const EXT_KIND: Record<string, string> = {
 
 export function kindForUrl(raw: string): string {
   const s = String(raw ?? '').trim()
-  // data: URI → clasificăm după MIME-ul din chiar antet.
+  // data: URI → we classify by the MIME in the header itself.
   if (s.startsWith('data:')) {
     const mime = (s.slice(5).match(/^[^;,]*/)?.[0] ?? '').toLowerCase()
     if (mime.startsWith('image/')) return 'image'
@@ -146,7 +146,7 @@ export function kindForUrl(raw: string): string {
     if (u.pathname.startsWith('/api/image')) return 'image'
     if (u.pathname.startsWith('/api/route')) return 'map'
     if (host.includes('openstreetmap') || u.pathname.includes('/maps')) return 'map'
-    // După extensia fișierului (funcționează și cu ?query după ea).
+    // By file extension (works even with a ?query after it).
     const ext = (u.pathname.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
     if (ext && EXT_KIND[ext]) return EXT_KIND[ext]
   } catch {
@@ -163,8 +163,8 @@ function upsert(task: WorkspaceTask): void {
 
 export function openWorkspace(title: string, url = ''): void {
   const kind = kindForUrl(url)
-  // Arhiva randează un panou de descărcare (mereu ok); restul pornesc 'loading'
-  // și se confirmă din onLoad/onError — așa Kelion vede faptic dacă a apărut.
+  // The archive renders a download panel (always ok); the rest start 'loading'
+  // and confirm from onLoad/onError — so Kelion factually sees if it appeared.
   const status = kind === 'archive' ? 'ok' : 'loading'
   upsert({ id: kind, kind, title, url, card: null, status })
 }
@@ -181,19 +181,19 @@ export function openWorkspaceDoc(title: string, text: string): void {
   upsert({ id: 'doc', kind: 'doc', title, url: '', card: null, text, status: 'ok' })
 }
 
-// PLAYGROUND DE COD (Adrian, 25 iul: „Kelion trebuie să testeze în browser
-// softul scris, să-l poată salva"). Kelion scrie o pagină web COMPLETĂ (HTML +
-// CSS + JS inline) și o RULEAZĂ live pe monitor, într-un iframe izolat (srcdoc,
-// sandbox), fără gazdă externă — deci fără X-Frame-Options și fără „pagina nu
-// poate fi afișată aici". Userul o vede rulând și o poate salva (buton pe monitor).
+// CODE PLAYGROUND (Adrian, Jul 25: "Kelion must test the written software in
+// the browser, be able to save it"). Kelion writes a COMPLETE web page (HTML +
+// CSS + inline JS) and RUNS it live on the monitor, in an isolated iframe (srcdoc,
+// sandbox), with no external host — so no X-Frame-Options and no "this page
+// cannot be displayed here". The user sees it running and can save it (button on the monitor).
 export function openWorkspaceApp(title: string, html: string): void {
   upsert({ id: 'app', kind: 'app', title, url: '', card: null, html, status: 'ok' })
 }
 
-// PANOUL CONSTRUCTORULUI (Etapa 4b, Adrian: „afișare pe monitor a rezolvării
-// cerințelor"). O suprafață aparte (kind 'build') care NU are url/text/html — se
-// randează cu un poller propriu în Stage, abonat la /api/constructor/live, și
-// arată fiecare ordin: Preluat→pasul curent→Gata/Eșuat. Dedup pe kind: un singur
+// THE CONSTRUCTOR PANEL (Stage 4b, Adrian: "monitor display of requirement
+// resolution"). A separate surface (kind 'build') with NO url/text/html — it's
+// rendered with its own poller in Stage, subscribed to /api/constructor/live, and
+// shows each order: Taken→current step→Done/Failed. Dedup on kind: a single
 // tab de constructor, mereu cel curent.
 export function openWorkspaceBuild(title = 'Constructor'): void {
   upsert({ id: 'build', kind: 'build', title, url: '', card: null, status: 'ok' })

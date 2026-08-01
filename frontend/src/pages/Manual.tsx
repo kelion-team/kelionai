@@ -1,23 +1,23 @@
 // ── MANUALUL, CA O CARTE ────────────────────────────────────────────────────
-// Adrian: buton pe pagina de start → manualul complet; userul e ÎNTREBAT în ce
-// limbă îl vrea, îl VEDE pe ecran în limba aleasă, îl poate DESCĂRCA în acea
-// limbă și îl alege unde să-l salveze. Și: „când dai pe manual trebuie să fie ca
-// o carte cu efect de dat pagina."
+// Adrian: button on the start page → the complete manual; the user is ASKED
+// which language they want it in, SEES it on screen in the chosen language,
+// can DOWNLOAD it in that language and chooses where to save it. And: "when you open the manual it must be like a
+// a book with a page-turn effect."
 //
 // Trei lucruri reparate aici, toate raportate de el:
-//   • NU AVEA SCROLL — `body { overflow: hidden }` (shell-ul aplicației) tăia
-//     pagina; conținutul creștea sub un corp care nu derulează.
-//   • LIMBA NU SE SCHIMBA PE ECRAN — traducerea unei limbi noi dura peste 100 de
-//     secunde, cererea rămânea agățată și pe ecran nu se întâmpla nimic. Acum
-//     serverul răspunde INSTANT (engleză + `ready:false`) și traduce în fundal;
-//     pagina reîntreabă și schimbă textul când e gata, cu semn vizibil între timp.
-//   • DESCĂRCAREA — acum e un FIȘIER real, cu nume, pe care browserul îl salvează
-//     unde alege userul; nu o filă nouă din care trebuie să te descurci singur.
+//   • IT HAD NO SCROLL — `body { overflow: hidden }` (the app shell) cut the
+//     page; content grew under a body that doesn't scroll.
+//   • THE LANGUAGE DIDN'T CHANGE ON SCREEN — translating a new language took over 100
+//     seconds, the request hung and nothing happened on screen. Now
+//     the server answers INSTANTLY (English + `ready:false`) and translates in the background;
+//     the page re-asks and swaps the text when ready, with a visible sign meanwhile.
+//   • THE DOWNLOAD — now it's a real FILE, with a name, that the browser saves
+//     where the user chooses; not a new tab you have to figure out on your own.
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import BackLink from '../components/BackLink'
 import ManualIcon from '../components/ManualIcon'
-// Cele 7 limbi ale manualului (aceeași listă ca pe server). Selectorul general
-// de limbi rămâne pentru formularul de contact, unde nu costă nimic.
+// The manual's 7 languages (same list as on the server). The general
+// language selector stays for the contact form, where it costs nothing.
 const MANUAL_LANGS: { code: string; label: string }[] = [
   { code: 'en', label: 'English' },
   { code: 'fr', label: 'Français' },
@@ -43,7 +43,7 @@ interface ManualDoc {
   ready?: boolean
 }
 
-/** O „filă" a cărții: fie o secțiune de proză, fie un grup de funcții. */
+/** A "leaf" of the book: either a prose section or a group of features. */
 type Fila =
   | { fel: 'coperta'; titlu: string; subtitlu: string; cuprins: string[] }
   | { fel: 'proza'; titlu: string; paragrafe: string[] }
@@ -51,17 +51,17 @@ type Fila =
   | { fel: 'flux'; titlu: string; pasi: { icon: string; label: string; note: string }[] }
   | { fel: 'grup'; titlu: string; cheie: string; coloane: [string, string]; randuri: { what: string; say: string }[] }
 
-/** Taie manualul în file. Grupurile mari se rup în mai multe file, ca să nu
- *  existe o pagină de trei ori mai lungă decât celelalte — o carte cu file
- *  inegale nu se citește, se derulează. */
+/** Cuts the manual into leaves. Large groups break into several leaves, so no
+ *  page is three times longer than the others — a book with uneven leaves
+ *  isn't read, it's scrolled. */
 function inFile(d: ManualDoc): Fila[] {
   const RANDURI_PE_FILA = 9
-  // Coperta poartă și cuprinsul: altfel e titlu + subtitlu pe o filă întreagă,
-  // adică trei sferturi de pagină goală.
+  // The cover carries the table of contents too: otherwise it's title + subtitle on a whole leaf,
+  // i.e. three quarters of an empty page.
   const cuprins = [...d.sections.map((s) => s.title), ...d.groups.map((g) => g.title)]
   const file: Fila[] = [{ fel: 'coperta', titlu: d.title, subtitlu: d.subtitle, cuprins }]
-  // „Cum călătorește o cerere" vine imediat după copertă: e singura filă care
-  // se uită ca o schemă, nu ca text, și dă tonul restului cărții.
+  // "How a request travels" comes right after the cover: it's the only leaf that
+  // looks like a diagram, not text, and sets the tone for the rest of the book.
   file.push({ fel: 'flux', titlu: d.flow.title, pasi: d.flow.steps })
   for (const s of d.sections) file.push({ fel: 'proza', titlu: s.title, paragrafe: s.paragraphs })
   file.push({ fel: 'intro', titlu: d.abilitiesTitle, text: d.abilitiesIntro })
@@ -85,7 +85,7 @@ export default function Manual(): React.JSX.Element {
   const [descarca, setDescarca] = useState(false)
   const timer = useRef<number | null>(null)
 
-  // Aduce manualul; dacă limba încă se traduce, reîntreabă până e gata.
+  // Fetches the manual; if the language is still translating, re-asks until ready.
   useEffect(() => {
     let anulat = false
     const cere = (): void => {
@@ -123,7 +123,7 @@ export default function Manual(): React.JSX.Element {
     [ultima],
   )
 
-  // Săgeți + spațiu: o carte se citește din tastatură, nu doar din mouse.
+  // Arrows + space: a book is read from the keyboard, not only the mouse.
   useEffect(() => {
     const pe = (e: KeyboardEvent): void => {
       if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') muta(1)
@@ -133,9 +133,9 @@ export default function Manual(): React.JSX.Element {
     return () => window.removeEventListener('keydown', pe)
   }, [muta])
 
-  /** Descărcare REALĂ: aduce manualul complet în limba aleasă (aici serverul
-   *  chiar așteaptă traducerea) și-l dă browserului ca fișier cu nume, ca omul
-   *  să aleagă unde îl pune. */
+  /** REAL download: fetches the complete manual in the chosen language (here
+   *  the server really waits for the translation) and hands it to the browser
+   *  as a named file, so the person chooses where to put it. */
   const salveaza = async (): Promise<void> => {
     setDescarca(true)
     try {
@@ -150,7 +150,7 @@ export default function Manual(): React.JSX.Element {
       a.remove()
       URL.revokeObjectURL(url)
     } catch {
-      /* fără fereastră de eroare: butonul rămâne, userul poate reîncerca */
+      /* no error window: the button stays, the user can retry */
     } finally {
       setDescarca(false)
     }
@@ -181,7 +181,7 @@ export default function Manual(): React.JSX.Element {
           </div>
         </div>
 
-        {/* Semn onest cât se traduce: textul de pe ecran e încă în engleză. */}
+        {/* An honest sign while translating: the on-screen text is still in English. */}
         {traduce && (
           <div className="manual-translating" role="status">
             <span className="manual-spin" aria-hidden="true" />

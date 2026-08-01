@@ -9,8 +9,8 @@ export function mailEnabled(): boolean {
   return config.mail.pass !== '' && config.mail.user !== ''
 }
 
-// Transport SMTP configurat din env. Exportat: tokenChecks.ts îl avea copiat
-// pentru verificarea conexiunii — o singură sursă (principiul permanent: unic, fără dup).
+// SMTP transport configured from env. Exported: tokenChecks.ts had it copied
+// for the connection check — a single source (the permanent principle: unique, no dups).
 export function smtpTransport(): Transporter {
   return nodemailer.createTransport({
     host: config.mail.smtpHost,

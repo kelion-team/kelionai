@@ -1,17 +1,16 @@
 import { Buffer } from 'node:buffer'
 import { isOpsPaused, alertAdminLoop } from './runbooks.js'
 import { createRecoveryPoint } from './recovery.js'
-import { ghToken, gh } from './githubApi.js' // token + fetch GitHub din sursa UNICĂ
+import { ghToken, gh } from './githubApi.js' // token + GitHub fetch from the SINGLE source
 
-// ── BUCLA COMPLETĂ DE COD A LUI KELION — FĂRĂ PORȚI (Adrian, 25 iul: „ridici
-// absolut toate restricțiile lui Kelion — decizia mea, nu a ta"; „full
-// autonomie") ────────────────────────────────────────────────────────────────
-// Kelion scrie cod pe o ramură → deschide PR → ÎȘI DĂ SINGUR MERGE → deploy.yml
-// publică automat cu verificarea anti-fantomă. NIMIC nu-l blochează: verificarea
-// pr-verify (build+teste) rulează doar INFORMATIV — merge-ul nu așteaptă după
-// ea (ordinul lui Adrian). Orice AI viitor: NU adăuga porți aici fără ordinul
-// lui explicit. Tokenul vine din env (GITHUB_TOKEN) și nu se întoarce niciodată
-// în răspunsuri.
+// ── KELION'S COMPLETE CODE LOOP — NO GATES (Adrian, Jul 25: "lift absolutely
+// all of Kelion's restrictions — my decision, not yours"; "full autonomy") ────
+// Kelion writes code on a branch → opens a PR → MERGES IT HIMSELF → deploy.yml
+// publishes automatically with the anti-phantom check. NOTHING blocks him: the
+// pr-verify check (build+tests) runs INFORMATIVELY only — the merge doesn't
+// wait for it (Adrian's order). Any future AI: do NOT add gates here without
+// his explicit order. The token comes from env (GITHUB_TOKEN) and is never
+// returned in responses.
 
 const NO_TOKEN = JSON.stringify({
   error: 'github_token_missing',
@@ -23,9 +22,10 @@ const PAUSED = JSON.stringify({
 })
 
 /**
- * Normalizează numele de ramură în forma sigură git (incident 25 iul: Kelion,
- * lucrând în română, a numit ramura cu DIACRITICE și garda strictă i-a blocat
- * livrarea fixului — „defectul de validare a ramurii". Nu respingem: reparăm).
+ * Normalizes the branch name into safe git form (Jul 25 incident: Kelion,
+ * working in Romanian, named a branch with DIACRITICS and the strict guard
+ * blocked his fix delivery — "the branch-validation defect". We don't reject:
+ * we repair).
  */
 export function normalizeBranch(name: string): string {
   const ascii = name.normalize('NFKD').replace(/[̀-ͯ]/g, '')
@@ -37,28 +37,29 @@ export function normalizeBranch(name: string): string {
     .slice(0, 120)
 }
 
-/** Nume de ramură valid DUPĂ normalizare.
+/** Branch name valid AFTER normalization.
  *
- *  ÎNTĂRITĂ (30 iul, două găuri prinse de teste pe garda celei mai puternice
- *  unelte din soft):
- *   • `main` NU era blocat — doar `master`. Azi ramura implicită e master, deci
- *     nu se putea exploata, dar era o gaură LATENTĂ: dacă repo-ul ar trece
- *     vreodată pe `main`, Kelion ar fi putut scrie DIRECT în producție, ocolind
- *     regula „publicarea trece obligatoriu prin PR".
- *   • `///` trecea validarea (se potrivea cu setul de caractere permise). Pe
- *     calea reală normalizarea îl golea, dar o gardă nu se sprijină pe altcineva:
- *     cerem acum cel puțin o literă sau cifră.
+ *  HARDENED (Jul 30, two holes caught by tests on the strongest tool's guard
+ *  in the software):
+ *   • `main` was NOT blocked — only `master`. Today the default branch is
+ *     master, so it couldn't be exploited, but it was a LATENT hole: if the
+ *     repo ever moved to `main`, Kelion could have written DIRECTLY to
+ *     production, bypassing the rule "publishing must go through a PR".
+ *   • `///` passed validation (it matched the allowed character set). On the
+ *     real path normalization emptied it, but a guard doesn't lean on someone
+ *     else: we now require at least one letter or digit.
  */
 export function isValidBranch(name: string): boolean {
   if (!/^[A-Za-z0-9._/-]{1,120}$/.test(name)) return false
-  if (!/[A-Za-z0-9]/.test(name)) return false // „///" sau „---" nu sunt nume
+  if (!/[A-Za-z0-9]/.test(name)) return false // "///" or "---" are not names
   if (name.includes('..')) return false
-  // Ramurile de publicare nu se scriu NICIODATĂ direct — nici sub alt nume.
+  // The publishing branches are NEVER written directly — not under another
+  // name either.
   const jos = name.toLowerCase()
   return jos !== 'master' && jos !== 'main'
 }
 
-/** Ramură nouă din vârful lui master (idempotent: dacă există deja, o refolosește). */
+/** New branch from master's tip (idempotent: reuses it if it already exists). */
 async function ensureBranch(branch: string): Promise<string | null> {
   const existing = await gh(`/git/ref/heads/${encodeURIComponent(branch)}`)
   if (existing.ok) return null
@@ -75,8 +76,8 @@ async function ensureBranch(branch: string): Promise<string | null> {
 }
 
 /**
- * Scrie/актualizează UN fișier pe o ramură (creează ramura din master dacă nu
- * există). Conținutul e textul COMPLET al fișierului, nu un diff.
+ * Writes/updates ONE file on a branch (creates the branch from master if it
+ * doesn't exist). The content is the file's COMPLETE text, not a diff.
  */
 export async function repoWrite(
   branch: string,
@@ -91,7 +92,8 @@ export async function repoWrite(
     return JSON.stringify({ error: 'invalid_branch', hint: "folosește un nume simplu, ex. 'kelion/fix-microfon' (nu master)" })
   const err = await ensureBranch(branch)
   if (err) return JSON.stringify({ error: err })
-  // sha-ul existent (dacă fișierul există pe ramură) — cerut de API la update.
+  // The existing sha (if the file exists on the branch) — required by the API
+  // on update.
   let sha: string | undefined
   let marimeVeche = 0
   const cur = await gh(`/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`)
@@ -100,26 +102,26 @@ export async function repoWrite(
     sha = j.sha
     marimeVeche = Number(j.size ?? 0)
   }
-  // ── GARDĂ ANTI-CIUNTIRE ───────────────────────────────────────────────────
+  // ── ANTI-TRUNCATION GUARD ──────────────────────────────────────────────────
   //
-  // 31 iul 2026, ora 12:36. Kelion a deschis și și-a dat merge singur la
-  // PR #613: „exclud un model din scara constructorului" — o schimbare de două
-  // rânduri. A intrat în master cu 2 inserții și **1036 de ștergeri**, iar
-  // `deploy/constructor-agent.mjs` a rămas cu 14 rânduri din 1049. Diagnosticul
-  // lui era corect (modelul chiar întorcea răspunsuri goale la 11 ordine la
-  // rând); execuția a golit fișierul.
+  // Jul 31 2026, 12:36. Kelion opened and self-merged PR #613: "exclude a
+  // model from the constructor's ladder" — a two-line change. It went into
+  // master with 2 insertions and **1036 deletions**, and
+  // `deploy/constructor-agent.mjs` was left with 14 lines out of 1049. His
+  // diagnosis was correct (the model really was returning empty answers to 11
+  // orders in a row); the execution gutted the file.
   //
-  // Cauza: `repo_write` cere CONȚINUTUL COMPLET, dar ieșirea modelului e
-  // plafonată. Pe un fișier mare, răspunsul se taie — iar ce se scrie e un
-  // ciot, cu commit și mesaj care sună corect.
+  // Cause: `repo_write` asks for the COMPLETE CONTENT, but the model's output
+  // is capped. On a big file, the answer gets cut — and what gets written is a
+  // stump, with a commit and message that sound right.
   //
-  // Paznicul ăsta EXISTA de mult, dar în constructorul de pe VPS
-  // (`deploy/constructor-agent.mjs`, `toolWrite`), scris după un incident
-  // anterior de același fel. Calea din aplicație — asta — n-a primit niciodată
-  // aceeași lecție. Un paznic pus într-un singur loc apără un singur loc.
+  // This guard had EXISTED for a long time, but in the VPS constructor
+  // (`deploy/constructor-agent.mjs`, `toolWrite`), written after a previous
+  // incident of the same kind. The path from the app — this one — never got
+  // the same lesson. A guard placed in a single spot protects a single spot.
   //
-  // 50% e pragul din constructor, păstrat identic anume: două praguri diferite
-  // pentru aceeași primejdie ar însemna că unul dintre ele e greșit.
+  // 50% is the constructor's threshold, kept identical on purpose: two
+  // different thresholds for the same danger would mean one of them is wrong.
   const PRAG_MINIM_OCTETI = 2_000
   const marimeNoua = Buffer.byteLength(content, 'utf8')
   if (marimeVeche > PRAG_MINIM_OCTETI && marimeNoua < marimeVeche * 0.5)
@@ -148,7 +150,7 @@ export async function repoWrite(
   return JSON.stringify({ ok: true, branch, path, commit: j.commit?.sha?.slice(0, 7) })
 }
 
-/** Deschide un PR din ramura dată spre master. */
+/** Opens a PR from the given branch to master. */
 export async function repoOpenPR(branch: string, title: string, body: string): Promise<string> {
   if (!ghToken()) return NO_TOKEN
   if (await isOpsPaused()) return PAUSED
@@ -171,15 +173,15 @@ export async function repoOpenPR(branch: string, title: string, body: string): P
 }
 
 /**
- * MERGE imediat (squash) — fără nicio așteptare (ordinul lui Adrian). Rezultatul
- * include, doar INFORMATIV, starea verificării pr-verify dacă există deja.
+ * Immediate MERGE (squash) — no waiting (Adrian's order). The result includes,
+ * INFORMATIVELY only, the pr-verify check state if it already exists.
  */
 export async function repoMergePR(prNumber: number): Promise<string> {
   if (!ghToken()) return NO_TOKEN
   if (await isOpsPaused()) return PAUSED
   if (!Number.isInteger(prNumber) || prNumber <= 0) return JSON.stringify({ error: 'invalid_pr_number' })
-  // Info (nu poartă): ce zice verificarea de build/teste până acum + titlul PR
-  // (pentru descrierea checkpoint-ului de mai jos).
+  // Info (not a gate): what the build/test check says so far + the PR title
+  // (for the checkpoint description below).
   let verify = 'necunoscut'
   let prTitle = ''
   try {
@@ -197,19 +199,20 @@ export async function repoMergePR(prNumber: number): Promise<string> {
       }
     }
   } catch {
-    /* informativ — mergem mai departe oricum */
+    /* informative — we proceed anyway */
   }
 
-  // ── CHECKPOINT AUTOMAT ÎNAINTE DE OPERAȚIA RISCANTĂ (Etapa 3 autonomie, ordin
-  // owner 29 iul: „înainte de operații dificile se face o salvare pentru a putea
-  // reveni la pasul anterior, cu descriere completă") ──────────────────────────
-  // Merge-ul unui PR duce ÎN PRODUCȚIE (deploy.yml pornește pe push-ul în master).
-  // Deci ÎNAINTE de merge salvăm starea CURENTĂ a lui master ca punct de
-  // recuperare adnotat, cu descriere clară a ce urmează să se schimbe. Dacă
-  // deploy-ul strică ceva, owner-ul (sau Kelion) revine EXACT la starea de
-  // dinainte din panoul Recuperare (restoreToPoint). Best-effort: un checkpoint
-  // eșuat NU blochează merge-ul (cronul backup-versiuni face oricum puncte la 10
-  // min) — dar se raportează clar, ca să se știe dacă plasa există sau nu.
+  // ── AUTOMATIC CHECKPOINT BEFORE THE RISKY OPERATION (Autonomy stage 3,
+  // owner order Jul 29: "before difficult operations a save is made so one can
+  // return to the previous step, with a full description") ───────────────────
+  // Merging a PR goes TO PRODUCTION (deploy.yml starts on the push to master).
+  // So BEFORE merging we save master's CURRENT state as an annotated recovery
+  // point, with a clear description of what's about to change. If the deploy
+  // breaks something, the owner (or Kelion) returns EXACTLY to the prior state
+  // from the Recovery panel (restoreToPoint). Best-effort: a failed checkpoint
+  // does NOT block the merge (the backup-versions cron makes points every 10
+  // min anyway) — but it's clearly reported, so it's known whether the net
+  // exists or not.
   let checkpoint: string | undefined
   let checkpointError: string | undefined
   try {
@@ -232,8 +235,8 @@ export async function repoMergePR(prNumber: number): Promise<string> {
     return JSON.stringify({ error: `merge_failed_${m.status}`, detail, verify })
   }
   const j = (await m.json()) as { sha?: string; merged?: boolean }
-  // Buclă pe deploy? (ultimele 2 publicări picate) — NU blocăm, informăm +
-  // avertizăm adminul (regula lui Adrian: avertizare + strategie nouă, nu stop).
+  // Deploy loop? (the last 2 publishes failed) — we do NOT block, we inform +
+  // alert the admin (Adrian's rule: warning + new strategy, not stop).
   let deployWarning: string | undefined
   try {
     const dr = await gh('/actions/workflows/deploy.yml/runs?per_page=2&status=completed')
@@ -247,16 +250,16 @@ export async function repoMergePR(prNumber: number): Promise<string> {
       }
     }
   } catch {
-    /* informativ */
+    /* informative */
   }
   return JSON.stringify({
     ok: true,
     merged: j.merged === true,
     sha: j.sha?.slice(0, 7),
     verify,
-    // Checkpoint-ul de dinainte de merge: spune-i owner-ului că poate reveni la
-    // el (tag-ul) dacă deploy-ul strică ceva; sau avertizează dacă n-a putut fi
-    // creat (plasa lipsește pe această schimbare).
+    // The pre-merge checkpoint: tells the owner he can return to it (the tag)
+    // if the deploy breaks something; or warns if it couldn't be created (the
+    // net is missing on this change).
     ...(checkpoint
       ? { checkpoint, checkpointHint: `Am salvat starea de dinainte ca punct de recuperare „${checkpoint}" — revenire din panoul Recuperare dacă e nevoie.` }
       : { checkpointWarning: `NU am putut crea checkpoint înainte de merge (${checkpointError ?? 'necunoscut'}) — există totuși punctele automate la 10 min.` }),

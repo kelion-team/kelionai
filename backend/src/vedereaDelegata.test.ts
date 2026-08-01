@@ -3,28 +3,29 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { groupCatalog } from './services/openrouter.js'
 
-// ── CINE FACE VEDEREA, CÂND CREIERUL E ORB ──────────────────────────────────
+// ── WHO DOES THE SEEING, WHEN THE BRAIN IS BLIND ────────────────────────────
 //
-// Adrian, 31 iul, după ce a ales creierul: „rămâne Nemotron 3 Ultra 550B, cine
-// face vedere?"
+// Adrian, Jul 31, after choosing the brain: "Nemotron 3 Ultra 550B stays, who
+// does the seeing?"
 //
-// Întrebarea era exactă. Ultra e cel mai capabil creier gratuit măsurat — 550
-// de miliarde de parametri, un milion de context, unelte, gândire — și e ORB.
-// Iar `groupCatalog` filtra AMBELE liste pe `m.vision`, deci un singur model
-// trebuia să facă și gândirea, și vederea. Ultra nu putea apărea NICIODATĂ în
-// listă. De-asta îl tot căuta și nu-l găsea.
+// The question was exact. Ultra is the most capable free brain measured — 550
+// billion parameters, a million of context, tools, thinking — and it is BLIND.
+// And `groupCatalog` filtered BOTH lists on `m.vision`, so a single model had
+// to do both the thinking and the seeing. Ultra could NEVER appear in the
+// list. That's why he kept looking for it and couldn't find it.
 //
-// Reparația nu e „scoatem filtrul". E că **vederea se deleagă**: tura CU POZĂ
-// merge la un model care vede, restul rămân la creierul ales. Două meserii,
-// doi specialiști — aceeași idee ca la Aider (unul gândește, altul scrie).
+// The fix is not "remove the filter". It's that **vision gets delegated**: the
+// turn WITH A PICTURE goes to a model that sees, the rest stay with the chosen
+// brain. Two trades, two specialists — the same idea as Aider (one thinks, the
+// other writes).
 //
-// Regula lui din 29 iul („se afișează doar AI care respectă TOATE
-// funcționalitățile aplicației") rămâne întreagă, la nivelul la care conta:
-// funcționalitatea e a APLICAȚIEI, nu a unui model singur.
+// His rule from Jul 29 ("only AI that respects ALL the app's features is
+// shown") stays whole, at the level where it mattered: the feature belongs to
+// the APP, not to a single model.
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 const orouter = readFileSync(fileURLToPath(new URL('./services/openrouter.ts', import.meta.url)), 'utf8')
 
-// Catalog de probă, cu forma reală a celor măsurate pe 31 iul.
+// A sample catalog, with the real shape of those measured on Jul 31.
 const MODELE = [
   { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'Ultra', provider: 'nvidia', vision: false, free: true },
   { id: 'google/gemma-4-31b-it:free', name: 'Gemma 31B', provider: 'google', vision: true, free: true },
@@ -38,8 +39,8 @@ describe('creierul orb are voie în listă, ochii sunt separat', () => {
   })
 
   it('treapta de CHAT rămâne doar cu modele care VĂD', () => {
-    // Acolo nu există escaladare pe vedere, deci un model orb chiar ar rupe
-    // o tură cu poză. Filtrul rămâne exact unde e încă necesar.
+    // There is no vision escalation there, so a blind model really would break
+    // a turn with a picture. The filter stays exactly where it is still needed.
     const { chat: ieftin } = groupCatalog(MODELE)
     expect(ieftin.every((m) => m.vision)).toBe(true)
     expect(ieftin.map((m) => m.id)).not.toContain('nvidia/nemotron-3-ultra-550b-a55b:free')
@@ -63,11 +64,12 @@ describe('ochii se aleg din catalogul live, nu dintr-o listă scrisă de mână'
 })
 
 describe('vederea trece PRIN creier, nu în locul lui', () => {
-  // Adrian, 31 iul: „și vocea și vederea rutează-le prin creier".
+  // Adrian, Jul 31: "both voice and vision — route them through the brain".
   //
-  // Prima variantă muta TOATĂ tura cu poză pe modelul care vede. Adică la
-  // fiecare poză, creierul de 550B era OCOLIT, iar tura o ducea unul de 26B —
-  // ochii ajungeau să și decidă. Acum ochii DESCRIU, creierul DECIDE.
+  // The first variant moved the WHOLE picture turn to the model that sees.
+  // Meaning at every picture, the 550B brain was BYPASSED, and a 26B carried
+  // the turn — the eyes ended up also deciding. Now the eyes DESCRIBE, the
+  // brain DECIDES.
   it('se declanșează la imagine lipită sau cadru de cameră', () => {
     expect(chat).toMatch(/if \(image \|\| camFrames\.length > 0\) \{/)
   })
@@ -77,9 +79,9 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
     expect(chat).toMatch(/if \(!vedeAcum\)/)
   })
 
-  // MIEZUL: creierul nu se schimbă NICIODATĂ pentru o poză. Dacă cineva pune
-  // înapoi o atribuire de model în blocul ăsta, turele cu imagine încep iar să
-  // ocolească creierul ales — regresia pe care o repară testul.
+  // THE CORE: the brain NEVER changes for a picture. If someone puts a model
+  // assignment back into this block, image turns start bypassing the chosen
+  // brain again — the regression this test repairs.
   it('creierul rămâne același — nicio atribuire de model în blocul de vedere', () => {
     const bloc = /if \(image \|\| camFrames\.length > 0\) \{[\s\S]*?\n      \}\n/.exec(chat)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
@@ -92,13 +94,13 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   })
 
   it('imaginile se scot din ce ajunge la creierul orb', () => {
-    // Un model fără vedere ori le ignoră, ori pică pe ele. Descrierea le ia locul.
+    // A model without vision either ignores them or chokes on them. The description takes their place.
     expect(chat).toMatch(/\.filter\(\(p\) => p\.type === 'text'\)/)
   })
 
-  // Regula 1: o citire eșuată nu se ascunde. Dacă descrierea pică, creierul
-  // trebuie să ȘTIE că există o imagine pe care n-a văzut-o — altfel ar putea
-  // răspunde despre ea din imaginație.
+  // Rule 1: a failed reading is not hidden. If the description fails, the
+  // brain must KNOW there is an image it didn't see — otherwise it could
+  // answer about it from imagination.
   it('descrierea eșuată se declară creierului, nu se trece sub tăcere', () => {
     expect(chat).toMatch(/VEDEREA TA a eșuat/)
     expect(chat).toMatch(/nu inventa ce e în ea/)
@@ -110,38 +112,38 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
 })
 
 describe('vocea: aceleași unelte și aceeași personă ca scrisul, dar alt ceas', () => {
-  // Adrian: „și vocea... rutează-le prin creier". Vocea chema
-  // `bestPaidWorkModel()` pentru owner — deci scrisul mergea pe creierul ales
-  // de el, iar vocea pe un model plătit. Două creiere pe același om, adică fix
-  // ce rezolvase §6 „creier unic", stricat din altă parte.
+  // Adrian: "and voice... route them through the brain". Voice was calling
+  // `bestPaidWorkModel()` for the owner — so writing ran on the brain he
+  // chose, while voice ran on a paid model. Two brains on the same person,
+  // i.e. exactly what §6 "single brain" had fixed, broken from another side.
   const voce = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
 
   it('vocea nu mai alege singură un model plătit pentru owner', () => {
     expect(voce).not.toContain('bestPaidWorkModel')
   })
 
-  // ── CORECTAT LA 14:45, după „nu poate susține chat audio" ─────────────────
+  // ── FIXED AT 14:45, after "it can't sustain audio chat" ───────────────────
   //
-  // La 14:35 am rutat vocea pe creierul de la scris (Ultra 550B), la ordinul
-  // lui „modifici tot ce trebuie să fie el". Zece minute mai târziu vocea nu
-  // mai ținea o conversație. Eu am rupt-o.
+  // At 14:35 I routed voice onto the writing brain (Ultra 550B), at his order
+  // "change everything that needs to be it". Ten minutes later voice couldn't
+  // hold a conversation. I broke it.
   //
-  // Cauza e o limită fizică, nu o setare: 550B cu raționament intern, pe
-  // treapta gratuită cu 20 de cereri pe minut. La scris, câteva secunde de
-  // gândire sunt bune. Într-o conversație vorbită, aceleași secunde sunt o
-  // pauză în care omul crede că a murit linia.
+  // The cause is a physical limit, not a setting: 550B with internal reasoning,
+  // on the free tier with 20 requests per minute. In writing, a few seconds of
+  // thinking are fine. In a spoken conversation, those same seconds are a
+  // pause where the person thinks the line died.
   //
-  // Testul păzește acum granița corectă: vocea pe rapid, scrisul pe capabil.
+  // The test now guards the correct boundary: voice on fast, writing on capable.
   it('vocea NU folosește creierul greu — are buget de sub o secundă', () => {
     expect(voce).toMatch(/const primaryModel = geminiDirectAvailable\(\)/)
     expect(voce).toMatch(/await resolveModel\('chat'\)/)
-    // Treapta 'work' (creierul mare) nu mai e calea implicită a vocii.
+    // The 'work' tier (the big brain) is no longer voice's default path.
     expect(voce).not.toContain("resolveModel('work')")
   })
 
   it('motivul e scris în cod, ca să nu fie „reparat" înapoi', () => {
-    expect(voce).toMatch(/VOCEA ARE ALT CEAS DECÂT SCRISUL/)
-    expect(voce).toMatch(/buget de sub o secundă/)
+    expect(voce).toMatch(/VOICE RUNS ON A DIFFERENT CLOCK THAN WRITING/)
+    expect(voce).toMatch(/sub-second budget/)
   })
 
   it('nici scrisul nu mai rutează ownerul pe plătit fără să ceară el', () => {

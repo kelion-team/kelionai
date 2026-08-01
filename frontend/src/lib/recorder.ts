@@ -8,22 +8,22 @@ export interface RecordingHandle {
   stop(): void
 }
 
-// TOATE SETĂRILE DEFAULT (Adrian, 11 iul seara: „toate setările să fie default
-// setate cu audio și mărime specificate") — nimic de ales manual: mărimea
-// video e specificată aici (1080p/30), audio mereu pornit (tab + mic), iar
-// calitatea/bitrate-ul e fixat ca fișierul să fie previzibil pentru platforme.
+// ALL DEFAULT SETTINGS (Adrian, Jul 11 evening: "all settings should be default
+// set with specified audio and size") — nothing to choose manually: the video
+// size is specified here (1080p/30), audio always on (tab + mic), and
+// the quality/bitrate is fixed so the file is predictable for platforms.
 const VIDEO_SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } }
 const FRAME_RATE = { ideal: 30 }
 const VIDEO_BPS = 8_000_000
 const AUDIO_BPS = 128_000
 
 // Prefer an MP4 (H.264/AAC) container — accepted by TikTok/Instagram/Facebook.
-// ANTI-CRĂPARE (Adrian: „sistemul recording crapă"): `isTypeSupported` poate
-// minți — construcția propriu-zisă a MediaRecorder-ului poate arunca chiar și
-// pentru un mime „suportat". De aceea nu mai alegem mime-ul pe hârtie și
-// construim o singură dată: ÎNCERCĂM efectiv construcția pe fiecare candidat
-// și o păstrăm pe prima care chiar reușește; ultimul resort = fără opțiuni
-// (browserul își alege singur formatul, dar înregistrarea PORNEȘTE).
+// ANTI-CRASH (Adrian: "the recording system crashes"): `isTypeSupported` can
+// lie — the actual construction of the MediaRecorder can throw even
+// for a "supported" mime. That's why we no longer pick the mime on paper and
+// build once: we actually TRY the construction on each candidate
+// and keep the first that really succeeds; the last resort = no options
+// (the browser picks its own format, but the recording STARTS).
 function makeRecorder(stream: MediaStream): MediaRecorder | null {
   const candidates = [
     'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
@@ -41,7 +41,7 @@ function makeRecorder(stream: MediaStream): MediaRecorder | null {
         audioBitsPerSecond: AUDIO_BPS,
       })
     } catch {
-      /* candidatul următor */
+      /* the next candidate */
     }
   }
   try {
@@ -63,12 +63,12 @@ export async function startRecording(
 
   let display: MediaStream
   try {
-    // „SELECTARE AUTOMATĂ" (Adrian, 11 iul): browserul preselectează TABUL
-    // CURENT (aplicația, cu chatul audio) în loc să-l caute Adrian prin listă
-    // — rămâne UN singur click de confirmare, cerință de securitate a
+    // "AUTOMATIC SELECTION" (Adrian, Jul 11): the browser preselects the
+    // CURRENT TAB (the app, with the audio chat) instead of Adrian hunting through the list
+    // — one single confirmation click remains, a browser security
     // browserului care nu se poate ocoli.
     const opts = {
-      // Mărimea e SPECIFICATĂ (1080p/30) — browserul nu mai decide singur.
+      // The size is SPECIFIED (1080p/30) — the browser no longer decides on its own.
       video: { frameRate: FRAME_RATE, ...VIDEO_SIZE },
       audio: true, // tab/system audio → captures Kelion's voice
       preferCurrentTab: true,
@@ -119,8 +119,8 @@ export async function startRecording(
 
   const rec = makeRecorder(stream)
   if (!rec) {
-    // Nici măcar fără opțiuni nu se poate înregistra pe browserul ăsta —
-    // spunem clar, nu murim în tăcere cu ecranul deja capturat.
+    // Not even without options can you record on this browser —
+    // we say so clearly, we don't die silently with the screen already captured.
     cleanup()
     onError('unsupported')
     return null
@@ -140,8 +140,8 @@ export async function startRecording(
   rec.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data)
   }
-  // O eroare a encoderului MID-TAKE (disc, codec, memorie) nu mai pierde
-  // dubla: oprim și salvăm ce s-a strâns până atunci.
+  // A MID-TAKE encoder error (disc, codec, memory) no longer loses
+  // the dub: we stop and save what has been gathered so far.
   rec.onerror = () => {
     try {
       if (rec.state !== 'inactive') rec.stop()
@@ -176,10 +176,10 @@ export async function startRecording(
     if (rec.state !== 'inactive') rec.stop()
   })
 
-  // FĂRĂ LIMITE DE DURATĂ (Adrian: „nu trebuie să aibă setări de timp sau
-  // limitări"): felii de 1s — encoderul varsă datele progresiv în loc să
-  // țină toată dubla într-un singur balon până la stop, deci și dublele
-  // lungi se înregistrează fără să sufoce memoria tabului.
+  // NO DURATION LIMITS (Adrian: "it must not have time settings or
+  // limitations"): 1s slices — the encoder spills data progressively instead of
+  // holding the whole dub in a single blob until stop, so even long dubs
+  // record without suffocating the tab's memory.
   rec.start(1000)
   return {
     stop() {

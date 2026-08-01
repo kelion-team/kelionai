@@ -2,19 +2,19 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── „ANALIZEZ" NU MAI E O VORBĂ ─────────────────────────────────────────────
+// ── "I'LL ANALYSE" IS NO LONGER JUST A WORD ────────────────────────────────
 //
-// Adrian, 31 iul: „când spune că o să analizez, trebuie FAPTIC să deschidă
-// monitorul și să arate ce face!"
+// Adrian, Jul 31: "when it says it's going to analyse, it must FACTUALLY open
+// the monitor and show what it's doing!"
 //
-// Poarta faptei (27 iul) prindea „AM făcut" — o faptă declarată fără să fi
-// fost chemată vreo unealtă. Dar promisiunea de a te UITA la ceva trecea
-// nestingherită: „analizez", „mă uit", „verific" încheiau tura, sunau a
-// muncă, și nu se întâmpla nimic. Omul rămânea în fața unui ecran gol,
-// așteptând o analiză care nu începuse.
+// The deed gate (Jul 27) caught "I DID it" — a deed declared without any tool
+// having been called. But the promise to LOOK at something passed unharmed:
+// "I'll analyse", "let me look", "I'll check" ended the turn, sounded like
+// work, and nothing happened. The person was left in front of an empty
+// screen, waiting for an analysis that had never started.
 //
-// Acum sunt DOUĂ porți, iar a doua nu cere doar execuție — cere ca munca să
-// se VADĂ pe monitor în timp ce se face.
+// Now there are TWO gates, and the second doesn't just require execution —
+// it requires the work to be SEEN on the monitor while it's being done.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -36,15 +36,16 @@ describe('poarta analizei există și e separată de poarta faptei', () => {
   })
 
   it('se declanșează DOAR când n-a chemat nicio unealtă', () => {
-    // Dacă a chemat ceva, chiar s-a uitat — nu-l mai batem la cap.
+    // If it called something, it really looked — we stop nagging it.
     const bloc = /POARTA ANALIZEI[\s\S]*?continue\n/.exec(orch)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
   })
 })
 
 describe('cuvintele care erau vorbă goală sunt prinse', () => {
-  // Reconstruim tiparul din sursă și-l probăm PE BUNE — nu verificăm doar că
-  // regexul există, ci că prinde exact frazele cu care murea o tură.
+  // We rebuild the pattern from the source and test it FOR REAL — we don't
+  // just check the regex exists, but that it catches exactly the sentences a
+  // turn used to die with.
   const linia = /const ANALIZA_CLAIM_RE\s*=\s*\n?\s*(\/[\s\S]*?\/i)/.exec(orch)?.[1] ?? ''
   const re = new RegExp(linia.slice(1, linia.lastIndexOf('/')), 'i')
 
@@ -61,8 +62,8 @@ describe('cuvintele care erau vorbă goală sunt prinse', () => {
     it(`prinde: „${f}"`, () => expect(re.test(f)).toBe(true))
   }
 
-  // Nu trebuie să sară pe orice. Un răspuns care CHIAR livrează ceva, sau o
-  // constatare la trecut, n-are ce căuta în poartă.
+  // It must not jump at everything. An answer that REALLY delivers something,
+  // or a past-tense finding, has no business in the gate.
   const libere = [
     'Gata, am reparat și am pus PR-ul #612.',
     'Am analizat deja — cauza e la linia 218.',
@@ -85,7 +86,7 @@ describe('cererea e să DESCHIDĂ MONITORUL, nu doar să execute', () => {
   })
 
   it('regula e și în promptul lui, nu doar în poartă', () => {
-    // Poarta e plasa. Promptul e ca să nu se ajungă la plasă.
+    // The gate is the net. The prompt is there so we never reach the net.
     expect(chat).toMatch(/IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN/)
     expect(chat).toMatch(/call show_document FIRST/)
     expect(chat).toMatch(/call show_document AGAIN with what you FOUND/)

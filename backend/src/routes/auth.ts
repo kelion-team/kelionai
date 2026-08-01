@@ -6,9 +6,10 @@ import { isBlocked, saveGoogleRefreshToken, getGoogleRefreshToken } from '../db.
 
 const STATE_COOKIE = 'kelionai_oauth_state'
 
-// DIAGNOSTIC conectare Google (Adrian, 10 iul: „nu face ce ai zis"). Reține exact
-// ce s-a întâmplat la ultima conectare, ca să știm UNDE pică, nu să ghicim:
-// a venit refresh token de la Google? exista sesiune? s-a salvat în DB?
+// Google-connect DIAGNOSTIC (Adrian, Jul 10: "it doesn't do what you said").
+// Remembers exactly what happened at the last connect, so we know WHERE it
+// fails instead of guessing: did a refresh token come from Google? did a
+// session exist? was it saved to the DB?
 let lastConnectDiag: {
   at: string
   reachedCallback: boolean
@@ -36,9 +37,9 @@ function decodeIdToken(idToken: string): { email?: string; email_verified?: bool
   return JSON.parse(json)
 }
 
-// LOGIN = TOTUL (Adrian, 25 iul, 0 bariere): aceleași scope-uri grele ca la
-// „Connect Google", cerute direct la login. Definit înaintea rutelor ca să fie
-// folosit și de /login, și de /connect (aceeași listă, o singură sursă).
+// LOGIN = EVERYTHING (Adrian, Jul 25, 0 barriers): the same heavy scopes as
+// "Connect Google", asked directly at login. Defined before the routes so both
+// /login and /connect use it (the same list, a single source).
 const FULL_SCOPES = [
   'openid',
   'email',
@@ -50,18 +51,18 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/contacts',
-  // Skill-uri noi (Adrian, 25 iul): Sheets/Docs merg deja prin scope-ul Drive;
-  // Photos + YouTube au nevoie de scope propriu → intră la re-conectare.
+  // New skills (Adrian, Jul 25): Sheets/Docs already work through the Drive
+  // scope; Photos + YouTube need their own scope → they come in at re-connect.
   'https://www.googleapis.com/auth/photoslibrary.readonly',
   'https://www.googleapis.com/auth/youtube.readonly',
 ].join(' ')
 
-// Antetul comun al ambelor fluxuri OAuth Google (login + connect): generează
-// state-ul (cu prefix opțional „c." pentru connect, ca să știe callback-ul comun
-// să PĂSTREZE identitatea și doar să atașeze tokenii), pune cookie-ul de state și
-// pornește parametrii cu identificatorii clientului. Cele două rute diverau doar
-// prin scope/prompt — nu prin acest antet, care era copiat. Sursă unică aici
-// (principiul permanent: unic, fără duplicate).
+// The shared header of both Google OAuth flows (login + connect): generates
+// the state (with an optional "c." prefix for connect, so the shared callback
+// knows to KEEP the identity and only attach the tokens), sets the state
+// cookie and starts the params with the client identifiers. The two routes
+// diverged only in scope/prompt — not in this header, which was copied.
+// Single source here (the permanent principle: one, no duplicates).
 function beginGoogleOAuth(reply: FastifyReply, statePrefix = ''): { state: string; params: URLSearchParams } {
   const state = statePrefix + crypto.randomBytes(16).toString('hex')
   reply.setCookie(STATE_COOKIE, state, {
@@ -83,24 +84,25 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // Step 1 — kick off Google OAuth
   app.get('/auth/google/login', async (_req, reply) => {
     const { state, params } = beginGoogleOAuth(reply)
-    // DOAR IDENTITATE la login (Adrian, 25 iul — a văzut live ecranul roșu
-    // „Google hasn't verified this app" care sperie clienții). Aceste 3 scope-uri
-    // sunt NON-sensibile → Google NU arată niciun avertisment, orice vizitator se
-    // loghează liniștit. Skill-urile grele (Gmail/Calendar/Drive/Tasks/Contacts)
-    // rămân OPȚIONALE, cerute la nevoie prin „Connect Google" (doar cine le vrea
-    // trece prin ecranul de consimțământ). Singura cale ca loginul să ceară TOTUL
-    // FĂRĂ ecranul roșu e VERIFICAREA aplicației de către Google (proces extern,
-    // în Google Cloud Console — al owner-ului; vezi nota din AI-HANDOFF).
+    // IDENTITY ONLY at login (Adrian, Jul 25 — he saw live the red "Google
+    // hasn't verified this app" screen that scares clients). These 3 scopes are
+    // NON-sensitive → Google shows NO warning, any visitor signs in calmly. The
+    // heavy skills (Gmail/Calendar/Drive/Tasks/Contacts) stay OPTIONAL, asked
+    // on demand through "Connect Google" (only those who want them go through
+    // the consent screen). The only way for login to ask for EVERYTHING
+    // WITHOUT the red screen is Google APP VERIFICATION (an external process,
+    // in Google Cloud Console — the owner's; see the AI-HANDOFF note).
     params.set('scope', 'openid email profile')
-    // PROCEDURA COMPLETĂ LA LOGIN (Adrian, 26 iul: „nu trebuie automat,
-    // trebuie să facă procedura completă, să întrebe user și pass").
-    // Fără astea, un browser cu sesiune Google activă sărea DIRECT în cont:
-    //  • select_account → Google arată MEREU alegerea contului;
-    //  • max_age=0 → Google cere RE-AUTENTIFICAREA (user + parolă/pin),
-    //    nu se mulțumește cu sesiunea veche.
-    // Cine NU are cont Google: ecranul Google are propriul „Create account" —
-    // își face contul chiar în flux; alt login nu există (aplicația e
-    // Google-only prin decizie).
+    // THE FULL PROCEDURE AT LOGIN (Adrian, Jul 26: "not automatic, it must do
+    // the full procedure, ask for user and pass").
+    // Without these, a browser with an active Google session jumped STRAIGHT
+    // into the account:
+    //  • select_account → Google ALWAYS shows the account chooser;
+    //  • max_age=0 → Google asks for RE-AUTHENTICATION (user + password/pin),
+    //    it doesn't settle for the old session.
+    // Whoever has NO Google account: Google's screen has its own "Create
+    // account" — they make it right in the flow; no other login exists (the
+    // app is Google-only by decision).
     params.set('prompt', 'select_account')
     params.set('max_age', '0')
     params.set('state', state)
@@ -113,7 +115,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // refresh token so the skills keep working long-term. The state is prefixed
   // "c." so the shared callback knows to KEEP the current identity and merely
   // attach the freshly granted tokens.
-  const CONNECT_SCOPES = FULL_SCOPES // aceeași listă — o singură sursă
+  const CONNECT_SCOPES = FULL_SCOPES // the same list — a single source
   app.get('/auth/google/connect', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) {
@@ -181,8 +183,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         lastConnectDiag = {
           at: new Date().toISOString(),
           reachedCallback: true,
-          stateOk: true, // am trecut de verificarea de state de mai sus
-          tokenExchangeOk: true, // am trecut de schimbul de token de mai sus
+          stateOk: true, // passed the state check above
+          tokenExchangeOk: true, // passed the token exchange above
           gotRefreshFromGoogle: Boolean(tokens.refresh_token),
           sessionExisted: Boolean(existing),
           savedToDb: false,
@@ -190,8 +192,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         }
         if (existing) {
           const refresh = tokens.refresh_token || existing.googleRefreshToken || ''
-          // PERSISTĂ token-ul în DB (fix definitiv „iar loghez Google"): de-acum
-          // supraviețuiește oricărei re-logări/deploy, nu doar în cookie.
+          // PERSIST the token in the DB (the definitive "I'm logging into
+          // Google again" fix): from now on it survives any re-login/deploy,
+          // not just the cookie.
           if (tokens.refresh_token) {
             void saveGoogleRefreshToken(existing.email, tokens.refresh_token)
               .then(() => {
@@ -221,9 +224,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.redirect(`${config.frontendOrigin}/?error=blocked`)
       }
 
-      // O logare simplă (doar identitate) NU aduce un refresh token de la Google.
-      // Îl RESTAURĂM din DB, ca cine a conectat Google o dată să NU mai fie pus
-      // să reconecteze după fiecare logare (fix definitiv „reparat de 10 ori").
+      // A plain login (identity only) does NOT bring a refresh token from
+      // Google. We RESTORE it from the DB, so whoever connected Google once is
+      // NOT asked to reconnect after every login (the definitive "fixed 10
+      // times" fix).
       const savedRefresh = tokens.refresh_token || (await getGoogleRefreshToken(email))
       if (tokens.refresh_token) void saveGoogleRefreshToken(email, tokens.refresh_token)
       setSession(reply, {
@@ -234,8 +238,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         locale: claims.locale ?? 'en',
         googleAccessToken: tokens.access_token ?? '',
         googleTokenExp: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-        // Refresh token restaurat din DB → skill-urile Google merg în continuare
-        // fără reconectare la fiecare logare.
+        // Refresh token restored from the DB → the Google skills keep working
+        // without reconnecting at every login.
         googleRefreshToken: savedRefresh,
       })
       return reply.redirect(`${config.frontendOrigin}/`)
@@ -254,8 +258,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ authenticated: false })
-    // Dacă sesiunea curentă n-are refresh token dar DB-ul îl are (conectat cândva),
-    // îl restaurăm în sesiune ACUM — fără să te punem să reconectezi Google.
+    // If the current session has no refresh token but the DB has one
+    // (connected some time ago), we restore it into the session NOW — without
+    // asking you to reconnect Google.
     let refresh = user.googleRefreshToken || ''
     if (!refresh) {
       refresh = await getGoogleRefreshToken(user.email)

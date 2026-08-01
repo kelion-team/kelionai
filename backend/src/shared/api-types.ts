@@ -1,23 +1,26 @@
-// ── CONTRACTUL HTTP dintre backend și frontend — O SINGURĂ DECLARAȚIE ────────
+// ── THE HTTP CONTRACT between backend and frontend — ONE SINGLE DECLARATION ──
 //
-// DE CE EXISTĂ (Adrian: „principiul permanent unic, fără duplicate"; „0 clone,
-// ăsta e targetul"): formele astea de date circulă prin API și erau declarate de
-// DOUĂ ori — o dată în backend (`db.ts`, `stripe.ts`) și o dată, identic, în
-// frontend (`lib/admin.ts`). Detectorul le raporta ca cele mai mari clone din
-// proiect (42 + 36 + 20 = 98 de linii). Cauza nu era neglijență, ci lipsa unui
-// loc COMUN: cele două build-uri n-aveau niciun fișier partajat.
+// WHY IT EXISTS (Adrian: "the permanent single-source principle, no
+// duplicates"; "0 clones, that's the target"): these data shapes travel
+// through the API and were declared TWICE — once in the backend (`db.ts`, the
+// payment services) and once, identically, in the frontend (`lib/admin.ts`).
+// The detector reported them as the biggest clones in the project
+// (42 + 36 + 20 = 98 lines). The cause was not negligence but the lack of a
+// COMMON place: the two builds had no shared file.
 //
-// REGULI pentru fișierul ăsta (ca să rămână legal în ambele build-uri):
-//   • DOAR tipuri (`interface` / `type`). Zero logică, zero import de runtime.
-//     Așa dispare complet la compilare și nu contează că backend-ul e NodeNext
-//     iar frontend-ul bundler — nu se emite niciun `import` real.
-//   • Se importă cu `import type { … }`, din ambele capete.
-//   • Ce e AICI e contract PUBLIC (ce vede clientul). Formele interne de bază de
-//     date rămân în backend — nu se urcă aici doar ca să scadă un număr.
+// RULES for this file (so it stays legal in both builds):
+//   • ONLY types (`interface` / `type`). Zero logic, zero runtime imports.
+//     That way it disappears completely at compile time and it doesn't matter
+//     that the backend is NodeNext and the frontend is bundler — no real
+//     `import` is ever emitted.
+//   • Imported with `import type { … }` from both ends.
+//   • What is HERE is a PUBLIC contract (what the client sees). Internal
+//     database shapes stay in the backend — they are not promoted here just
+//     to lower a number.
 //
-// Lotul A din `PROCEDURA-REFACERE-CLONE.md`.
+// Batch A of `PROCEDURA-REFACERE-CLONE.md`.
 
-/** Un rând din analiza vizitatorilor: cine, de unde, cu ce, ce l-a interesat. */
+/** One row of the visitor analysis: who, from where, with what, what interested them. */
 export interface DemoRecent {
   kind: 'visit' | 'demo'
   ip: string
@@ -33,21 +36,22 @@ export interface DemoRecent {
   referrer: string
   is_bot: boolean
   started_at: string
-  /** La un rând DEMO: emailul temporar a cărui conversație o poate deschide
-   *  owner-ul (click pe rând). Gol la vizitele simple (n-au vorbit niciodată). */
+  /** On a DEMO row: the temporary email whose conversation the owner can
+   *  open (click on the row). Empty on simple visits (they never spoke). */
   session_email: string
-  /** Ce l-a interesat: prima întrebare/temă din proba demo. Gol la vizite simple. */
+  /** What interested them: the first question/topic of the demo trial. Empty on simple visits. */
   topic: string
-  /** Fusul lui orar (IANA, ex. „Europe/Bucharest"). Îți spune ce oră era LA EL
-   *  când a intrat — nu ora ta. Coloana exista în tabelă și nu se citea. */
+  /** Their timezone (IANA, e.g. "Europe/Bucharest"). Tells you what time it
+   *  was AT THEIR PLACE when they came in — not your time. The column existed
+   *  in the table and was never read. */
   tz: string
-  /** De câte ori a mai fost ÎNAINTE de vizita asta (același fingerprint).
-   *  0 = prima oară. Un om care revine a treia oară nu e același lucru cu unul
-   *  care a nimerit o dată pe site. */
+  /** How many times they visited BEFORE this visit (same fingerprint).
+   *  0 = first time. A person returning for the third time is not the same
+   *  thing as one who landed on the site once. */
   vizite_anterioare: number
 }
 
-/** Analiza vizitatorilor, agregată (admin-only): totaluri + țări + ultimele sosiri. */
+/** The visitor analysis, aggregated (admin-only): totals + countries + latest arrivals. */
 export interface DemoStats {
   total: number
   today: number
@@ -58,125 +62,57 @@ export interface DemoStats {
   recent: DemoRecent[]
 }
 
-/** CIRCUITUL BANILOR (admin-only): starea LIVE a fiecărei verigi Stripe→AI. */
-export interface IssuingCharge {
-  /** Cine a taxat cardul (numele comerciantului, exact cum îl dă Stripe). */
-  merchant: string
-  /** Suma în moneda contului (pozitivă = cheltuit). */
-  amount: number
-  /** Data, ISO. */
-  at: string
-}
+/** THE MONEY CIRCUIT (admin-only): the LIVE state of every payment→AI link.
+ *  Stripe left completely (31 Jul) — the old virtual-card links disappeared
+ *  with it; what remains here are only live measurements. */
 
-/** O cheltuiala a aplicatiei si de unde se plateste. Adrian, 30 iul: „se pot
- *  pune toate cheltuielile sa fie doar din punga?" — raspunsul e da, dar numai
- *  daca fiecare furnizor are cardul virtual pus la el. Lista asta arata negru pe
- *  alb care mai curge din buzunarul propriu. */
+/** An expense of the application and where it is paid from. Adrian, 30 Jul:
+ *  "can all expenses be paid only from the pouch?" — the answer is yes, but
+ *  only if each provider has the virtual card set on it. This list shows in
+ *  black and white which one still flows from our own pocket. */
 export interface ExpenseLine {
-  /** Numele furnizorului, asa cum il stie omul. */
+  /** The provider's name, as the person knows it. */
   name: string
-  /** Pentru ce se plateste. */
+  /** What it is paid for. */
   what: string
-  /** E configurat in aplicatie? (cheia exista) */
+  /** Is it configured in the app? (the key exists) */
   configured: boolean
-  /** Unde se plateste factura lui. */
+  /** Where its invoice is paid. */
   billing: string
-  /** Pagina LUI de facturare, unde se schimba cardul (Adrian, 30 iul: „link la
-   *  fiecare AI, să schimb cardul"). Gol pentru furnizorii care n-au una
-   *  (gratuit, sau platit din alta parte) — atunci nu se afiseaza niciun buton,
-   *  ca sa nu-l trimitem pe om intr-un gol. */
+  /** THEIR billing page, where the card is changed (Adrian, 30 Jul: "link
+   *  to each AI, so I can change the card"). Empty for providers that don't
+   *  have one (free, or paid from elsewhere) — then no button is shown at
+   *  all, so we don't send the person into a void. */
   billingUrl?: string
-  /** MĂSURAT pe pagina furnizorului (31 iul): cardul e la dosar acolo. Lipsește
-   *  dacă nimeni n-a fost pe pagina aia — atunci nu se afișează nimic, fiindcă
-   *  „nu știu" nu se scrie ca „nu" (regula #1). */
+  /** MEASURED on the provider's page (31 Jul): the card is on file there.
+   *  Missing if nobody has been on that page — then nothing is shown,
+   *  because "I don't know" must not be written as "no" (rule #1). */
   cardPus?: boolean
-  /** MĂSURAT: reîncărcarea automată e pornită. Ăsta e scopul — un card fără
-   *  plată automată înseamnă că peste o lună Kelion tace din nou. */
+  /** MEASURED: automatic top-up is on. That is the goal — a card without
+   *  automatic payment means that in a month Kelion goes silent again. */
   platiAutomate?: boolean
 }
 
-/** O întrebare pusă lui Stripe și ce a răspuns. Panoul le arată pe toate, ca
- *  omul să vadă DINTR-O PRIVIRE ce vede aplicația și ce nu — în loc să
- *  ghicească din cinci rânduri roșii care spun toate altceva. */
-export interface StripeProbe {
-  /** Ce am întrebat, pe înțelesul omului („soldul", „cardurile"). */
-  ce: string
-  /** Ruta exactă, pentru cine vrea să verifice singur. */
-  ruta: string
-  /** A răspuns cum trebuie? */
-  ok: boolean
-  /** Dacă nu: permisiunea care lipsește, cu numele ei din Stripe, sau codul HTTP. */
-  detaliu: string
-}
-
 export interface MoneyCircuit {
-  /** 'manual' = corect (banii rămân în pungă, nu pleacă automat). */
-  payoutsInterval: string
-  /** 'active' | 'inactive' | 'pending' | 'unknown'. */
-  issuingStatus: string
-  /** `livemode:false` = CARD DE TEST. Arată exact ca unul real în dashboard, dar
-   *  numărul lui e respins de orice formular de plată real („numărul cardului
-   *  este incorect") fiindcă nu e un card, e o simulare. Adrian a pierdut o oră
-   *  pe capcana asta (30 iul) — de-aia steagul se vede în panou. */
-  cards: { id: string; last4: string; status: string; livemode: boolean }[]
-  /** Cheia Stripe din env e `live` sau `test`? Cu o cheie de test TOT panoul
-   *  arată cifre simulate — solduri, carduri, tranzacții. */
-  keyLivemode?: boolean
-  /** Stripe a răspuns bine la lista de carduri și n-a avut niciunul activ. Doar
-   *  cu steagul ăsta avem voie să scriem „card necreat": fără el, lista goală
-   *  poate însemna la fel de bine „n-am întrebat" sau „n-am avut voie". */
-  cardsChecked?: boolean
-  /** De ce n-am putut vedea cardurile (permisiune lipsă, eroare de rețea). */
-  cardsError?: string
-  /** Cheia PUBLICĂ Stripe (pk_live_…), dacă e pusă în env. Cu ea panoul poate
-   *  afișa numărul cardului prin Issuing Elements (iframe Stripe, cifrele nu
-   *  trec prin serverul nostru). Gol = butonul „Vezi numărul" nu apare. */
-  stripePk?: string
-  /** Punga Issuing (bani gata de cheltuit pe card), în moneda contului.
-   *  `null` = N-AM PUTUT CITI, nu „ai zero". Erau confundate: câmpul pornea de
-   *  la 0 și rămânea 0 și când cererea pica, deci panoul arăta „£0.00" cu
-   *  aceeași încredere ca un zero adevărat. */
-  issuingAvailable: number | null
-  /** Fiecare întrebare pusă lui Stripe, cu răspunsul ei. Sursa de adevăr a
-   *  panoului: nu mai deducem starea contului dintr-un singur apel picat. */
-  probes?: StripeProbe[]
-  /** DOVADA că veriga 4 (cardul pus la furnizorii de AI) chiar există: dacă
-   *  OpenRouter/OpenAI au taxat cardul, aici sunt tranzacțiile lor. Listă goală
-   *  = cardul n-a fost încă folosit de nimeni, deci nu e legat (sau nu s-a
-   *  ajuns la prima taxare). Un rând care spune „e pornit" fără asta e o
-   *  presupunere, nu o stare. */
-  issuingCharges?: IssuingCharge[]
-  /** Toate cheltuielile aplicatiei, cu locul de unde se platesc. */
+  /** All the application's expenses, with the place they are paid from. */
   expenses?: ExpenseLine[]
-  /** REGULA BATUTA IN CUIE: platile catre AI trebuie sa iasa din punga.
-   *  Codul nu poate pune cardul in contul furnizorului (nu exista API), dar
-   *  poate PRINDE cand nu e pus: daca am consumat AI de X si cardul a fost
-   *  taxat cu 0, inseamna ca furnizorii sunt platiti din ALTA parte. */
-  pouchRule?: {
-    /** Cat am consumat la AI (masurat de noi), in moneda contului. */
-    spent: number
-    /** Cat a fost taxat cardul virtual. */
-    charged: number
-    /** Regula e respectata? */
-    ok: boolean
-    /** Ce e de facut, pe intelesul omului. */
-    verdict: string
-  }
-  /** Ultima încercare de alimentare AUTOMATĂ plăți→card (Balance Transfer API). */
-  autoFund?: { at: string; ok: boolean; detail: string } | null
-  /** Starea cititorului de plati Revolut (Adrian, 30 iul: creditare automata cu
-   *  cod unic). `ok:false` = N-AM PUTUT CITI contul — altceva decat „n-a platit
-   *  nimeni", si de-aia se raporteaza separat, nu ca un zero linistitor. */
+  /** The state of the Revolut payment reader (Adrian, 30 Jul: automatic
+   *  crediting with a unique code). `ok:false` = WE COULD NOT READ the
+   *  account — something other than "nobody paid", which is why it is
+   *  reported separately, not as a soothing zero. */
   citirePlati?: { la: string; ok: boolean; detaliu: string } | null
-  /** Ultima trecere a buclei care il pune pe Kelion sa se apuce SINGUR de treaba
-   *  (Adrian, 30 iul: „fa-l autonom"). `ok:true` = chiar a pornit ceva atunci.
-   *  Se afiseaza ca sa nu fie nevoie de crezut pe cuvant ca bucla traieste. */
+  /** The last pass of the loop that makes Kelion get to work BY HIMSELF
+   *  (Adrian, 30 Jul: "make him autonomous"). `ok:true` = something really
+   *  started at that moment. Shown so you don't have to take it on faith
+   *  that the loop is alive. */
   autonomie?: { la: string; ok: boolean; detaliu: string } | null
-  /** Costul REAL la furnizori: total, azi, si pe ce s-a dus. Exista ca unealta —
-   *  trebuia sa INTREBI ca sa afli. Acum se vede, langa bani. Nu taie nimic. */
-  // `masurat` = banii spuși de furnizor; `estimat` = tariful meu fix × cantitate.
-  // Erau amestecate într-un singur „real" — și cel mai mare rând (minutele de
-  // voce) era tocmai cel estimat. Panoul trebuie să le poată deosebi.
+  /** The REAL cost at the providers: total, today, and what it went on. It
+   *  existed only as a tool — you had to ASK to find out. Now it is visible,
+   *  next to the money. It cuts nothing. */
+  // `masurat` = the money stated by the provider; `estimat` = my fixed rate × quantity.
+  // They were mixed into a single "real" — and the biggest row (voice
+  // minutes) happened to be the estimated one. The panel must be able to
+  // tell them apart.
   costReal?: {
     total: number
     today: number
@@ -185,14 +121,18 @@ export interface MoneyCircuit {
     estimat: number
     felul: Record<string, 'masurat' | 'estimat'>
   } | null
-  /** Maneta ownerului: autonomia e oprita? O limita pe care o alege EL nu e o
-   *  bariera; una pusa de mine, da. De-aia e la vedere, si e a lui. */
+  /** The fixed voice rate ($/min) the estimate above is computed with — sent
+   *  by the server so the panel never shows a hand-written figure that has
+   *  drifted from the one actually used (env: VOICE_USD_PER_MINUTE). */
+  voiceUsdPerMin?: number
+  /** The owner's lever: is autonomy stopped? A limit HE chooses is not a
+   *  barrier; one set by me is. That is why it is visible, and it is his. */
   autonomiaOprita?: boolean
   error?: string
 }
 
-/** Activitatea per USER (admin-only): cine s-a conectat, ultimul IP/loc/dispozitiv,
- *  cât a stat în total și soldul lui. */
+/** Per-USER activity (admin-only): who connected, last IP/place/device,
+ *  total time spent and their balance. */
 export interface UserActivityRow {
   email: string
   sessions: number

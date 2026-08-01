@@ -3,17 +3,20 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { filtruRepetitie, PRAG_REPETITIE } from './services/fluxUnic.js'
 
-// ── „SCRIE ACEEAȘI FRAZĂ NONSTOP" ───────────────────────────────────────────
+// ── "IT WRITES THE SAME SENTENCE NONSTOP" ──────────────────────────────────
 //
-// Adrian, 31 iul: „în chat se balează răspunsul lui scris de mai multe ori, e
-// greșit, el nu mă aude din prima?" → „scrie aceeași frază nonstop".
+// Adrian, Jul 31: "in the chat its written answer drools several times, it's
+// wrong, doesn't it hear me the first time?" → "it writes the same sentence
+// nonstop".
 //
-// NU era că nu aude. orchestrator.ts rulează până la 8 runde, iar chat.ts
-// trimitea la client textul FIECĂREI runde, fără să compare cu ce ajunsese
-// deja. Model împotmolit = aceeași frază, o dată pe rundă. De opt ori.
+// It was NOT that it doesn't hear. orchestrator.ts runs up to 8 rounds, and
+// chat.ts sent EACH round's text to the client, without comparing it to what
+// had already arrived. A stuck model = the same sentence, once per round.
+// Eight times.
 //
-// Funcția e pură, deci testul e REAL: îi dăm bucăți exact cum vin din stream
-// și verificăm ce iese. Nu citim sursa sperând că face ce scrie în ea.
+// The function is pure, so the test is REAL: we give it chunks exactly as they
+// come from the stream and check what comes out. We don't read the source
+// hoping it does what it says.
 
 const FRAZA = 'Verific acum calendarul tău și îți spun imediat ce ai programat mâine dimineață.'
 
@@ -28,8 +31,9 @@ describe('ce s-a scris o dată nu se mai scrie', () => {
   })
 
   it('primul cuvânt nu e întârziat — latența nu are de suferit', () => {
-    // Contează: ținta e primul cuvânt sub o secundă. Dacă filtrul ar reține
-    // bucăți „ca să se lămurească", ar strica exact ce s-a lucrat luni de zile.
+    // It matters: the target is the first word under one second. If the
+    // filter held back chunks "to figure things out", it would break exactly
+    // what took months of work.
     const f = filtruRepetitie()
     expect(f.bucata('Salut')).toBe('Salut')
   })
@@ -40,7 +44,7 @@ describe('ce s-a scris o dată nu se mai scrie', () => {
     f.inchideRunda()
     const dupaRunda1 = f.emis()
 
-    // Runda 2: modelul spune exact același lucru.
+    // Round 2: the model says exactly the same thing.
     let iesitRunda2 = ''
     for (const b of FRAZA.match(/.{1,12}/g)!) iesitRunda2 += f.bucata(b)
     iesitRunda2 += f.inchideRunda()
@@ -57,18 +61,19 @@ describe('ce s-a scris o dată nu se mai scrie', () => {
       f.inchideRunda()
     }
     expect(f.emis()).toBe(FRAZA)
-    // Verificarea care contează cu adevărat: fraza apare o dată, nu de opt ori.
+    // The check that really matters: the sentence appears once, not eight times.
     expect(f.emis().split('Verific acum').length - 1).toBe(1)
   })
 })
 
 describe('repetarea APROAPE identică — cazul care încă se vedea pe ecran', () => {
-  // Adrian, 31 iul, DUPĂ ce prima reparație era live: „revin cu întrebarea, de
-  // ce baleiezi permanent în chat răspunsul?"
+  // Adrian, Jul 31, AFTER the first fix was live: "coming back with the
+  // question, why do you permanently drool the answer in the chat?"
   //
-  // Fiindcă prima variantă compara EXACT. Un model nu repetă identic — schimbă
-  // o virgulă, o majusculă, un spațiu — și atunci filtrul îl lăsa să treacă
-  // întreg. Adică prindea exact cazul care nu se întâmplă.
+  // Because the first variant compared EXACTLY. A model doesn't repeat
+  // identically — it changes a comma, a capital, a space — and then the
+  // filter let it through whole. Meaning it caught exactly the case that
+  // never happens.
   const variante = [
     ['virgulă în plus', FRAZA.replace('acum calendarul', 'acum, calendarul')],
     ['majuscule schimbate', FRAZA.toUpperCase()],
@@ -89,10 +94,11 @@ describe('repetarea APROAPE identică — cazul care încă se vedea pe ecran', 
     })
   }
 
-  // Granița care lipsea la prima încercare de normalizare: filtrul a tăiat
-  // „Al" din „Altceva", fiindcă pe forma normalizată un început scurt se
-  // potrivește aproape mereu undeva în istoric. Un răspuns ciuntit e mai rău
-  // decât unul repetat — de asta se taie doar o FRAZĂ, nu o silabă.
+  // The boundary missing from the first normalization attempt: the filter
+  // cut "Al" from "Altceva" ("Something"), because in normalized form a short
+  // beginning almost always matches somewhere in the history. A maimed answer
+  // is worse than a repeated one — that's why only a SENTENCE is cut, not a
+  // syllable.
   it('nu ciuntește începutul unui text nou care seamănă la primele litere', () => {
     const f = filtruRepetitie()
     f.bucata('Am verificat calendarul și nu am găsit nimic programat mâine.')
@@ -131,9 +137,9 @@ describe('ce e NOU trece întotdeauna', () => {
     expect(iesit).toBe(nou)
   })
 
-  // Fără pragul ăsta, reparația ar deveni un bug mai rău decât cel reparat: un
-  // răspuns final scurt („Da.") e mereu substring a ce s-a spus înainte și ar
-  // dispărea complet de pe ecran.
+  // Without this threshold, the fix would become a worse bug than the one
+  // fixed: a short final answer ("Yes.") is always a substring of what was
+  // said before and would disappear completely from the screen.
   it('un răspuns SCURT nu se înghite niciodată, chiar dacă s-a mai spus', () => {
     const f = filtruRepetitie()
     f.bucata('Da, am verificat și am găsit ședința. Da.')
@@ -149,18 +155,19 @@ describe('ce e NOU trece întotdeauna', () => {
 describe('bucla se rupe când modelul se învârte în loc', () => {
   const orch = readFileSync(fileURLToPath(new URL('./services/orchestrator.ts', import.meta.url)), 'utf8')
 
-  // Filtrul face ca repetarea să nu se VADĂ. Dacă ne-am opri acolo, tot am
-  // plăti opt runde ca să aruncăm șapte — iar pe modelele gratuite opt apeluri
-  // în rafală lovesc plafonul pe minut, deci următoarea întrebare a lui Adrian
-  // primește 429, adică „problemă tehnică". Astea două sunt aceeași reparație.
+  // The filter makes the repetition not be SEEN. If we stopped there, we'd
+  // still pay eight rounds to throw away seven — and on the free models eight
+  // calls in a burst hit the per-minute ceiling, so Adrian's next question
+  // gets a 429, i.e. "technical problem". These two are the same fix.
   it('nimic nou + aceleași unelte ca runda trecută → ieșire din buclă', () => {
     expect(orch).toMatch(/rundaGoala && semnatura && semnatura === semnaturaTrecuta/)
     expect(orch).toMatch(/opresc bucla/)
   })
 
   it('textul trece prin filtru pe AMBELE căi — cu streaming și fără', () => {
-    // Agenții din fundal nu streamează; dacă filtrul ar fi doar pe calea de
-    // streaming, aceeași repetare ar intra netăiată în istoric și în voce.
+    // The background agents don't stream; if the filter were only on the
+    // streaming path, the same repetition would enter the history and the
+    // voice uncut.
     expect(orch).toContain('onTextFiltrat')
     expect(orch).toMatch(/if \(!onTextFiltrat && res\.text\) flux\.bucata\(res\.text\)/)
   })

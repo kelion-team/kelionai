@@ -1,22 +1,22 @@
-// ── KELION ÎȘI PUNE SINGUR CHEILE — ce apără testul ăsta ─────────────────────
+// ── KELION PUTS ITS OWN KEYS — what this test guards ─────────────────────
 //
-// Adrian, 30 iul: „să creeze secretele și să le pună unde trebuie, e al meu și
-// îi permit full acces."
+// Adrian, Jul 30: "let it create the secrets and put them where they belong,
+// it's mine and I allow it full access."
 //
-// „Full acces" e despre AUTONOMIE, nu despre neglijență. Trei lucruri nu au voie
-// să se strice niciodată aici, și fiecare are un test:
+// "Full access" is about AUTONOMY, not about negligence. Three things are
+// never allowed to break here, and each has a test:
 //
-//   1. VALOAREA nu iese înapoi. Nici în răspuns, nici pe jumătate, nici „primele
-//      caractere". Ea intră criptată în GitHub și atât. Testul caută valoarea în
-//      TOT răspunsul — dacă vreodată cineva o pune acolo „ca să se vadă că a
-//      mers", pică roșu.
-//   2. Un NUMĂR DE CARD nu trece pe aici. Regula ownerului din 30 iul e că
-//      datele unui card nu se plimbă prin aplicație; un API care scrie „orice
-//      text" ar fi exact locul prin care s-ar strecura.
-//   3. Un NUME greșit se REFUZĂ, nu se scrie degeaba. Capcana din 30 iul:
-//      `REVOLUT_PAY_LINK` scris corect în GitHub, dar căzut în gol fiindcă lista
-//      din workflow nu-l conținea. O cheie „pusă" care nu ajunge nicăieri e mai
-//      rea decât una lipsă: pare rezolvată.
+//   1. The VALUE never comes back out. Not in the response, not half of it,
+//      not "the first characters". It goes encrypted into GitHub and that's
+//      all. The test searches the value in the WHOLE response — if someone
+//      ever puts it there "so you can see it worked", it goes red.
+//   2. A CARD NUMBER does not pass through here. The owner's rule from Jul 30
+//      is that card data doesn't travel through the app; an API that writes
+//      "any text" would be exactly the place it would sneak through.
+//   3. A wrong NAME gets REFUSED, not written for nothing. The Jul 30 trap:
+//      `REVOLUT_PAY_LINK` written correctly in GitHub, but fallen into the
+//      void because the workflow's list didn't contain it. A "placed" key that
+//      reaches nowhere is worse than a missing one: it looks solved.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import _sodium from 'libsodium-wrappers'
 
@@ -31,7 +31,7 @@ interface Cerere {
 }
 let cereri: Cerere[] = []
 let token = 'ghp_test'
-// Când e pornit, GitHub „refuză" — ca să probăm mesajul de permisiune lipsă.
+// When turned on, GitHub "refuses" — so we can prove the missing-permission message.
 let fortezaRefuz = false
 
 vi.mock('./services/githubApi.js', () => ({
@@ -61,7 +61,7 @@ vi.mock('./services/githubApi.js', () => ({
 
 const { seteazaSecret, listeazaSecrete, publicaCheile, numeSecretValid, pareCard } = await import('./services/secrete.js')
 
-const VALOARE = 'rk_live_9f3ac21b7de44c8ea5' // o „cheie" inventată, doar pentru test
+const VALOARE = 'rk_live_9f3ac21b7de44c8ea5' // an invented "key", only for the test
 
 beforeEach(() => {
   cereri = []
@@ -73,27 +73,27 @@ describe('Kelion își pune singur cheile', () => {
   it('numele: MAJUSCULE cu _, fără prefixul rezervat GITHUB_', () => {
     expect(numeSecretValid('REVOLUT_API_KEY')).toBe(true)
     expect(numeSecretValid('revolut_api_key')).toBe(false)
-    expect(numeSecretValid('GITHUB_TOKEN')).toBe(false) // GitHub îl refuză oricum
+    expect(numeSecretValid('GITHUB_TOKEN')).toBe(false) // GitHub refuses it anyway
     expect(numeSecretValid('AB')).toBe(false)
-    expect(numeSecretValid('2FA_KEY')).toBe(false) // nu poate începe cu cifră
+    expect(numeSecretValid('2FA_KEY')).toBe(false) // can't start with a digit
   })
 
   it('scrie cheia criptat și raportează NUMELE și LUNGIMEA — niciodată valoarea', async () => {
     const raspuns = await seteazaSecret('revolut_api_key', VALOARE)
     const j = JSON.parse(raspuns)
     expect(j.ok).toBe(true)
-    expect(j.nume).toBe('REVOLUT_API_KEY') // normalizat la MAJUSCULE
+    expect(j.nume).toBe('REVOLUT_API_KEY') // normalized to UPPERCASE
     expect(j.lungime).toBe(VALOARE.length)
-    // REGULA DE FIER: valoarea nu apare NICĂIERI în răspuns, nici măcar un ciot.
+    // THE IRON RULE: the value appears NOWHERE in the response, not even a stump.
     expect(raspuns).not.toContain(VALOARE)
     expect(raspuns).not.toContain(VALOARE.slice(0, 8))
 
-    // Și pe sârmă a plecat criptată, nu în clar.
+    // And on the wire it left encrypted, not in the clear.
     const scriere = cereri.find((c) => c.method === 'PUT')!
     const trimis = JSON.stringify(scriere.body)
     expect(trimis).not.toContain(VALOARE)
     expect((scriere.body as { encrypted_value: string }).encrypted_value.length).toBeGreaterThan(20)
-    // Plicul chiar se poate deschide cu perechea de chei — deci e sealed box valid.
+    // The envelope really can be opened with the keypair — so it's a valid sealed box.
     const desfacut = _sodium.crypto_box_seal_open(
       _sodium.from_base64((scriere.body as { encrypted_value: string }).encrypted_value, _sodium.base64_variants.ORIGINAL),
       pereche.publicKey,
@@ -105,7 +105,7 @@ describe('Kelion își pune singur cheile', () => {
   it('un număr de card NU trece pe aici, oricine ar cere-o', async () => {
     const j = JSON.parse(await seteazaSecret('CARD_TEST', '4242424242424242'))
     expect(j.error).toBe('arata_a_card')
-    expect(cereri).toHaveLength(0) // nici măcar n-a atins GitHub
+    expect(cereri).toHaveLength(0) // it didn't even touch GitHub
     expect(pareCard('4242 4242 4242 4242')).toBe(true)
     expect(pareCard(VALOARE)).toBe(false)
   })
@@ -124,14 +124,14 @@ describe('Kelion își pune singur cheile', () => {
   })
 
   it('un 403 spune EXACT ce permisiune lipsește — nu-l pune pe om să ghicească', async () => {
-    // Lecția din 30 iul: l-am trimis pe owner să caute o permisiune Stripe care
-    // nici măcar nu era problema. Un cod de eroare gol e o vânătoare de comori.
+    // The lesson from Jul 30: I sent the owner hunting for a Stripe permission
+    // that wasn't even the problem. An empty error code is a treasure hunt.
     token = 'ghp_fara_drepturi'
     fortezaRefuz = true
     const j = JSON.parse(await seteazaSecret('REVOLUT_API_KEY', VALOARE))
     expect(j.error).toContain('Secrets: write')
     expect(j.error).toContain('Fine-grained tokens')
-    // Și tot NU scapă valoarea în mesajul de eroare.
+    // And still the value does NOT leak into the error message.
     expect(JSON.stringify(j)).not.toContain(VALOARE)
     fortezaRefuz = false
   })

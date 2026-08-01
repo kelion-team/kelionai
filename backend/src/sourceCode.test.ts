@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { listSource, readSource, searchSource } from './services/sourceCode.js'
 
-// Aceste teste rulează pe ARBORELE REAL al repo-ului (rădăcina detectată de
-// sourceCode.ts), deci dovedesc accesul complet pe cod adevărat, nu pe mock-uri.
+// These tests run on the repo's REAL TREE (the root detected by
+// sourceCode.ts), so they prove full access to real code, not mocks.
 
 describe('Acces complet la sursă — arbore', () => {
   it('vede fișiere ADÂNCI (peste 3 niveluri) — ex. backend/src/services/brain.ts', async () => {
@@ -18,16 +18,16 @@ describe('Acces complet la sursă — arbore', () => {
 describe('Acces complet la sursă — citire integrală prin paginare', () => {
   it('un fișier mare (chat.ts) se poate citi ÎN ÎNTREGIME prin from_line', async () => {
     const first = await readSource('backend/src/routes/chat.ts')
-    expect(first).toMatch(/^1\t/) // începe de la linia 1, cu numere
-    // Fișier mare → prima pagină trebuie să anunțe continuarea.
+    expect(first).toMatch(/^1\t/) // starts at line 1, with numbers
+    // Large file → the first page must announce the continuation.
     expect(first).toMatch(/continuă: read_source/i)
-    // Extrage linia de continuare și citește pagina următoare.
+    // Extract the continuation line and read the next page.
     const m = first.match(/from_line=(\d+)/)
     expect(m).toBeTruthy()
     const next = Number(m![1])
     expect(next).toBeGreaterThan(1)
     const page2 = await readSource('backend/src/routes/chat.ts', next)
-    expect(page2).toMatch(new RegExp(`^${next}\\t`)) // pagina 2 începe fix de la linia cerută
+    expect(page2).toMatch(new RegExp(`^${next}\\t`)) // page 2 starts exactly at the requested line
   })
 })
 

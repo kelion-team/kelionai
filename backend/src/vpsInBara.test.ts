@@ -2,23 +2,24 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── VPS-UL, PERMANENT ÎN BARA DE SUS ────────────────────────────────────────
+// ── THE VPS, PERMANENTLY IN THE TOP BAR ────────────────────────────────────
 //
-// Adrian, 31 iul: „afișează permanent VPS pe interfață în bara de sus".
+// Adrian, Jul 31: "show the VPS permanently on the interface in the top bar".
 //
-// Miza reală nu e afișajul, e ONESTITATEA lui. În aceeași zi, panoul a arătat
-// de trei ori o stare pe care n-o măsurase niciodată — „£0.00" fiind cazul
-// clasic: câmpul pornea de la 0 și rămânea 0 când cererea eșua, deci un eșec de
-// citire arăta identic cu „n-ai bani". Pilula asta e nouă și are aceeași formă
-// de risc: „VPS 0.0GB · 0%" ar arăta exact ca un server care tocmai a murit.
+// The real stake is not the display, it's its HONESTY. On the same day, the
+// panel showed three times a state it had never measured — "£0.00" being the
+// classic case: the field started at 0 and stayed 0 when the request failed,
+// so a read failure looked identical to "you have no money". This pill is new
+// and has the same risk shape: "VPS 0.0GB · 0%" would look exactly like a
+// server that just died.
 //
-// De asta se măsoară aici DOUĂ lucruri:
-//   1. lipsa se afișează ca lipsă („⚠ VPS"), nu ca zero;
-//   2. pragurile din bară sunt ACELEAȘI cu cele din alarma pe email — altfel
-//      bara ar putea fi verde în timp ce sentinela trimite alertă roșie, iar
-//      atunci nu mai știi pe care s-o crezi.
+// That's why TWO things are measured here:
+//   1. absence is shown as absence ("⚠ VPS"), not as zero;
+//   2. the bar's thresholds are THE SAME as the email alarm's — otherwise the
+//      bar could be green while the sentinel sends a red alert, and then you
+//      no longer know which one to believe.
 //
-// Frontendul n-are runner de teste; îl citim de aici, ca la poartaNumelui.
+// The frontend has no test runner; we read it from here, like poartaNumelui.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -33,15 +34,15 @@ describe('pilula de VPS există și e alimentată', () => {
   })
 
   it('bara afișează și memoria, și încărcarea — două întrebări diferite', () => {
-    // RAM = mai ÎNCAPE ceva pe mașină. CPU = mai DUCE. Una fără cealaltă
-    // răspunde la jumătate din întrebarea pentru care a fost cerută pilula.
+    // RAM = does anything else FIT on the machine. CPU = can it still CARRY.
+    // One without the other answers half the question the pill was asked for.
     expect(bara).toMatch(/VPS \$\{brainCredit\.vps\.liberGb\.toFixed\(1\)\}GB/)
     expect(bara).toContain('brainCredit.vps.incarcarePct}%')
   })
 
   it('nu adaugă un poller nou — merge pe cererea care exista deja', () => {
-    // O cerere în plus la fiecare 15s, pentru două numere care se citesc din
-    // /proc în microsecunde, ar fi cost fără câștig.
+    // An extra request every 15s, for two numbers that read from /proc in
+    // microseconds, would be cost with no gain.
     const pollere = bara.match(/usePolledJson</g) ?? []
     expect(pollere.length).toBeLessThanOrEqual(2)
     expect(bara).toContain("usePolledJson<BrainCredit>('/api/admin/brain-credit'")
@@ -55,21 +56,23 @@ describe('lipsa se arată ca lipsă, nu ca zero', () => {
   })
 
   it('nicăieri un `?? 0` care să transforme lipsa într-un zero credibil', () => {
-    // Exact tiparul „£0.00": un câmp care pornește de la 0 și rămâne 0 când
-    // cererea pică. Aici cifrele se citesc DOAR din ramura în care `vps` există.
+    // Exactly the "£0.00" pattern: a field that starts at 0 and stays 0 when
+    // the request fails. Here the figures are read ONLY from the branch where
+    // `vps` exists.
     expect(bara).not.toMatch(/vps[?.]*\.liberGb\s*\?\?\s*0/)
     expect(bara).not.toMatch(/vps[?.]*\.incarcarePct\s*\?\?\s*0/)
   })
 
   it('sursa măsurătorii întoarce null la eșec, nu un obiect cu zerouri', () => {
-    expect(resurse).toMatch(/return null \/\/ fără \/proc/)
+    expect(resurse).toMatch(/return null \/\/ no \/proc/)
     expect(resurse).toMatch(/if \(!mem \|\| !load\) return null/)
   })
 })
 
 describe('bara și mailul spun același lucru', () => {
-  // Dacă pragurile diferă, poți avea bara verde și un email roșu pentru aceeași
-  // stare — și atunci n-ai cum să știi pe care s-o crezi. Le ținem legate.
+  // If the thresholds differ, you can have a green bar and a red email for the
+  // same state — and then you have no way to know which to believe. We keep
+  // them tied.
   it('pragurile din bară sunt cele din services/resurse.ts', () => {
     expect(resurse).toMatch(/PRAG_MEMORIE_PCT = 10/)
     expect(resurse).toMatch(/PRAG_INCARCARE_PCT = 200/)

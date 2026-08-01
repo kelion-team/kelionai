@@ -1,12 +1,12 @@
 // ── VOCE LIVE — client OpenAI Realtime (WebRTC) ──────────────────────────────
-// Jumătatea de FRONTEND a vocii, reconstruită fidel din aplicația live (adusă
-// în git ca sursă unică). Fluxul, verificat din bundle-ul live:
+// The FRONTEND half of voice, faithfully rebuilt from the live app (brought
+// into git as the single source). The flow, verified from the live bundle:
 //   1. RTCPeerConnection + microfon (addTrack)
-//   2. dataChannel „oai-events" → primim transcript (user + Kelion) și erori
+//   2. dataChannel "oai-events" → we receive transcripts (user + Kelion) and errors
 //   3. createOffer → POST /api/realtime/session {sdp, language} → answer SDP
-//   4. ontrack → redăm vocea lui Kelion și animăm avatarul (nivel audio)
-// Cheia OpenAI NU e niciodată aici — o ține backendul. Modelul + vocea + limba
-// se injectează server-side; clientul trimite doar limba curentă ca hint.
+//   4. ontrack → we play Kelion's voice and animate the avatar (audio level)
+// The OpenAI key is NEVER here — the backend holds it. Model + voice + language
+// are injected server-side; the client only sends the current language as a hint.
 
 import { driveVoiceLevelFromElement, registerVoiceAudioElement, buildVoiceFeatures, estimateEnergy, estimateF0, estimateZcr, estimateCentroid, estimateRolloff, type VoiceFeatures } from './audioIO'
 
@@ -15,21 +15,21 @@ export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 export interface RealtimeVoiceHandle {
   stop: () => void
   setMuted: (muted: boolean) => void
-  /** Întrerupe imediat vorbirea lui Kelion (barge-in manual). */
+  /** Immediately interrupts Kelion's speech (manual barge-in). */
   interrupt: () => void
   /**
-   * GPS LA CERERE (Adrian, 26 iul: „doar când se folosesc aplicații GPS sau e
-   * necesară detecția locației" — fluxul permanent a fost respins explicit).
-   * Poziția intră în context o dată, la pornire; când o unealtă de locație
-   * (vreme/hărți/trasee) citește poziția REALĂ a momentului, clientul o dă și
+   * GPS ON DEMAND (Adrian, Jul 26: "only when GPS apps are used or location
+   * detection is needed" — the permanent flow was explicitly rejected).
+   * The position enters the context once, at startup; when a location tool
+   * (weather/maps/routes) reads the REAL position of the moment, the client provides it too
    * sesiunii prin metoda asta — un item de sistem cu noii lat/lon, ca „aici"
-   * să însemne locul de acum, nu cel de la pornire. Nu se apelează periodic.
+   * to mean the place now, not the one from startup. Not polled periodically.
    */
   updateCoords: (c: { lat: number; lon: number }) => void
 }
 
 export interface RealtimeVoiceOpts {
-  /** Limba curentă (hint). Sursa de adevăr rămâne preferința persistată pe server. */
+  /** The current language (hint). The source of truth stays the preference persisted on the server. */
   language?: string
   onState?: (s: RealtimeVoiceState, note?: string) => void
   /** Transcriptul userului: (text, final). */
@@ -37,38 +37,38 @@ export interface RealtimeVoiceOpts {
   /** Transcriptul lui Kelion: (text, final). */
   onAssistantTranscript?: (text: string, final: boolean) => void
   /**
-   * AUTONOMIA VOCII: modelul cere o unealtă (hărți/vreme/web/Gmail/afișare pe
-   * ecran...). Handler-ul o execută (de regulă prin POST /api/realtime/tool)
-   * și întoarce rezultatul ca string — trimis înapoi modelului, care continuă
-   * vorbind. Fără handler, vocea rămâne fără unelte (doar conversație).
+   * VOICE AUTONOMY: the model requests a tool (maps/weather/web/Gmail/on-screen
+   * display...). The handler executes it (usually via POST /api/realtime/tool)
+   * and returns the result as a string — sent back to the model, which continues
+   * speaking. Without a handler, voice stays tool-less (conversation only).
    */
   onToolCall?: (name: string, argsJson: string) => Promise<string>
   /**
-   * COMANDĂ DE DISPOZITIV DIN VOCE (cameră/ecran): serverul interpretează
-   * transcriptul userului cu ACELAȘI interpretor ca în scris și întoarce comanda;
-   * clientul o execută (comută camera față/spate, închide monitorul etc.).
+   * DEVICE COMMAND FROM VOICE (camera/screen): the server interprets
+   * the user's transcript with the SAME interpreter as in writing and returns the command;
+   * the client executes it (switches camera front/back, closes the monitor etc.).
    */
   onDevice?: (device: DeviceCommandFrame) => void
-  /** GPS live de pe dispozitiv — băgat în contextul sesiunii (vreme/„unde sunt"). */
+  /** Live GPS from the device — injected into the session context (weather/"where am I"). */
   coords?: { lat: number; lon: number }
   signal?: AbortSignal
 }
 
-// Forma comenzii de dispozitiv întoarsă de server (identică cu {device} din SSE-ul
-// chatului scris) — clientul o mapează pe handleControl({ device }).
+// The shape of the device command returned by the server (identical to {device} in the written-chat
+// SSE) — the client maps it onto handleControl({ device }).
 export interface DeviceCommandFrame {
   camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
   screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
 }
 
-// TIMBRUL PE VOCEA PRINCIPALĂ (Adrian, 26 iul): robinetul de amprentă al
-// sesiunii ACTIVE (o singură sesiune — garantat de singleton). finalize()
-// întoarce amprenta frazei tocmai rostite și golește tamponul. liveInject
-// bagă un mesaj de SISTEM în sesiune (avertismentul de voce străină).
+// VOICEPRINT ON THE MAIN VOICE (Adrian, Jul 26): the voiceprint tap of the
+// ACTIVE session (one single session — guaranteed by the singleton). finalize()
+// returns the voiceprint of the just-spoken utterance and empties the buffer. liveInject
+// injects a SYSTEM message into the session (the foreign-voice warning).
 let liveVoiceTap: { finalize: () => VoiceFeatures | null } | null = null
 let liveInject: ((text: string) => void) | null = null
 
-// Salvează o tură în istoric (memorie + continuitate între sesiuni). Best-effort.
+// Saves a turn into history (memory + continuity between sessions). Best-effort.
 function persistTranscript(
   role: 'user' | 'assistant',
   text: string,
@@ -85,44 +85,44 @@ function persistTranscript(
       role,
       text: t,
       // Amprenta frazei tocmai rostite (numai pe turele userului) — serverul o
-      // compară cu referința titularului, ca în chatul scris.
+      // compares with the owner's reference, like in the written chat.
       voiceFeatures: role === 'user' ? (liveVoiceTap?.finalize() ?? undefined) : undefined,
     }),
   })
     .then(async (r) => {
-      // Serverul a COMIS limba detectată (2 mesaje consecutive) → ancorăm
-      // sesiunea live pe ea (vezi apelantul) — transcrierea nu mai ghicește.
+      // The server COMMITTED the detected language (2 consecutive messages) → we anchor
+      // the live session onto it (see the caller) — transcription no longer guesses.
       const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean; adminUnlocked?: boolean } | null
-      // VOCE STRĂINĂ (timbrul nu se potrivește cu titularul): sesiunea primește
-      // pe loc regula de protecție — nimic administrativ până la confirmare.
+      // FOREIGN VOICE (the voiceprint doesn't match the owner): the session immediately gets
+      // the protection rule — nothing administrative until confirmation.
       if (j?.foreignVoice)
         liveInject?.(
           'ATENȚIE (verificare de timbru): vocea curentă NU se potrivește cu amprenta titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive până când titularul nu confirmă ÎN SCRIS în chat.',
         )
-      // LACĂTUL ADMIN: amprenta s-a potrivit → serverul a pus cookie-ul de
-      // deblocare; anunțăm UI-ul (Stage) să aprindă butonul Admin.
+      // THE ADMIN PADLOCK: the voiceprint matched → the server set the unlock
+      // cookie; we notify the UI (Stage) to light up the Admin button.
       if (j?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
       if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
-      // Comanda verbală de cameră/ecran → clientul o execută pe loc.
+      // The verbal camera/screen command → the client executes it right away.
       if (j?.device && onDevice) onDevice(j.device)
     })
     .catch(() => {})
 }
 
-// ── O SINGURĂ SESIUNE DE VOCE, PE TOATE TABURILE (25 iul — Adrian: „rusa vine
+// ── ONE SINGLE VOICE SESSION, ACROSS ALL TABS (Jul 25 — Adrian: "the Russian comes
 // peste chatul live, mai e un canal") ────────────────────────────────────────
-// Două sesiuni Realtime în paralel (tab vechi rămas deschis, repornire în
-// cursă) = două voci suprapuse, iar cea veche fără config → rusă. Gardă dublă:
-// (1) singleton pe tab — pornirea unei sesiuni o OPREȘTE pe cea dinainte;
-// (2) BroadcastChannel între taburi — sesiunea nouă le închide pe ale altora.
+// Two Realtime sessions in parallel (an old tab left open, a restart in a
+// race) = two overlapping voices, and the old one without config → Russian. Double guard:
+// (1) per-tab singleton — starting a session STOPS the previous one;
+// (2) BroadcastChannel between tabs — the new session closes the others'.
 let activeVoice: { stop: () => void } | null = null
 const VOICE_BC = 'kelion-voice'
-// ELEMENT AUDIO PERSISTENT (25 iul — Adrian: „în setarea actuală nu are
+// PERSISTENT AUDIO ELEMENT (Jul 25 — Adrian: "in the current setup it has no
 // audio"): un `<audio>` nou creat la fiecare (re)pornire a sesiunii poate lovi
-// blocajul de autoplay al browserului dacă pornirea aia nu vine dintr-un gest
-// direct al userului. Fix: UN SINGUR element, creat o singură dată și
-// REFOLOSIT la fiecare pornire — odată deblocat de un gest real, rămâne
-// deblocat (schimbăm doar `srcObject`, nu elementul).
+// the browser's autoplay block if that start doesn't come from a direct
+// user gesture. Fix: ONE SINGLE element, created once and
+// REUSED on every start — once unlocked by a real gesture, it stays
+// unlocked (we only change `srcObject`, not the element).
 let sharedAudioEl: HTMLAudioElement | null = null
 function getSharedAudioEl(): HTMLAudioElement {
   if (sharedAudioEl && document.body.contains(sharedAudioEl)) return sharedAudioEl
@@ -134,17 +134,17 @@ function getSharedAudioEl(): HTMLAudioElement {
   return el
 }
 
-// ── IEȘIREA AUDIO PE CĂȘTI BLUETOOTH (Adrian, 29 iul: „de ce nu se poate trece
-// audio pe căști bluetooth?") ────────────────────────────────────────────────
-// Cauza (fapt din cod): aplicația NU ruta NICIODATĂ ieșirea audio — elementul
-// <audio> reda pe dispozitivul implicit și nu reacționa la conectarea căștilor.
-// setSinkId (Chromium desktop/Android) leagă elementul de un dispozitiv anume;
-// pe iOS Safari NU există (sistemul rutează singur — aici e no-op inofensiv).
-// Regula: dacă apar căști/BT, le PREFERĂM; altfel urmăm implicitul. Reaplicăm la
-// fiecare `devicechange`, ca sunetul să MIGREZE pe căști când le conectezi în
-// timpul convorbirii. Tolerant la eșec: orice pică → rămânem pe implicit, fără
-// să rupem redarea. Etichetele au nevoie de permisiunea de microfon (o avem —
-// sesiunea de voce e activă), altfel labels vin goale și rămânem pe implicit.
+// ── AUDIO OUTPUT TO BLUETOOTH HEADPHONES (Adrian, Jul 29: "why can't the
+// audio go to bluetooth headphones?") ─────────────────────────────────────────
+// The cause (code fact): the app NEVER routed audio output — the
+// <audio> element played on the default device and didn't react to headphones connecting.
+// setSinkId (Chromium desktop/Android) binds the element to a specific device;
+// on iOS Safari it does NOT exist (the system routes by itself — here it's a harmless no-op).
+// The rule: if headphones/BT appear, we PREFER them; otherwise we follow the default. We reapply on
+// every `devicechange`, so the sound MIGRATES to the headphones when you connect them
+// mid-conversation. Failure-tolerant: whatever fails → we stay on default, without
+// breaking playback. Labels need the microphone permission (we have it —
+// the voice session is active), otherwise labels come empty and we stay on default.
 const AUDIO_OUT_RE = /bluetooth|blueto|airpod|headset|headphone|c[ăa][șs]ti|wireless|buds|earbud|hands?-?free/i
 async function routeAudioOutput(el: HTMLAudioElement): Promise<void> {
   const sinkEl = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
@@ -158,7 +158,7 @@ async function routeAudioOutput(el: HTMLAudioElement): Promise<void> {
     }
     await sinkEl.setSinkId(target)
   } catch {
-    /* dispozitivul a dispărut / refuzat — rămânem pe implicit, sunetul nu se rupe */
+    /* the device disappeared / refused — we stay on default, the sound doesn't break */
   }
 }
 const voiceSessionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -166,12 +166,12 @@ let voiceBc: BroadcastChannel | null = null
 try {
   voiceBc = new BroadcastChannel(VOICE_BC)
 } catch {
-  voiceBc = null /* browser vechi — rămâne garda pe tab */
+  voiceBc = null /* old browser — the per-tab guard stays */
 }
 
 /**
- * Pornește o sesiune de voce full-duplex prin OpenAI Realtime.
- * Aruncă dacă microfonul e refuzat sau sesiunea backend eșuează.
+ * Starts a full-duplex voice session via OpenAI Realtime.
+ * Throws if the microphone is refused or the backend session fails.
  */
 export async function startRealtimeVoice(
   opts: RealtimeVoiceOpts = {},
@@ -179,10 +179,10 @@ export async function startRealtimeVoice(
   const { onState, onUserTranscript, onAssistantTranscript, onToolCall, onDevice, signal } = opts
   onState?.('connecting')
 
-  // Orice sesiune anterioară din ACEST tab moare înainte să pornească alta.
+  // Any earlier session from THIS tab dies before another starts.
   activeVoice?.stop()
   activeVoice = null
-  // Anunță celelalte taburi: sesiunea de voce e AICI de-acum.
+  // Notify the other tabs: the voice session is HERE from now on.
   const myId = voiceSessionId()
   voiceBc?.postMessage({ takeover: myId })
 
@@ -214,11 +214,11 @@ export async function startRealtimeVoice(
     onState?.('closed')
   }
 
-  // Handle-ul „umbră" pentru singleton: există înainte de return, ca stop()-ul
-  // să poată curăța referința globală pe orice drum (eroare inclusă).
+  // The "shadow" handle for the singleton: exists before the return, so stop()
+  // can clean the global reference on any path (error included).
   const handleShell = { stop }
   activeVoice = handleShell
-  // Alt tab a pornit o sesiune → a noastră se închide (o singură voce, mereu).
+  // Another tab started a session → ours closes (one voice, always).
   if (voiceBc) {
     const onTakeover = (ev: MessageEvent): void => {
       const d = ev.data as { takeover?: string } | null
@@ -240,14 +240,14 @@ export async function startRealtimeVoice(
   }
 
   try {
-    // 1) Microfon — cu anulare de ecou/zgomot ca Kelion să nu se audă în buclă.
+    // 1) Microphone — with echo/noise cancellation so Kelion doesn't hear himself in a loop.
     const mic = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     })
     cleanups.push(() => mic.getTracks().forEach((t) => t.stop()))
-    // Robinetul de amprentă: analizor paralel pe ACELAȘI microfon (nu atinge
-    // WebRTC). Colectează cadre doar când e energie de vorbire; amprenta se
-    // finalizează per frază (la transcriptul final) — ca pe calea STT.
+    // The voiceprint tap: a parallel analyser on the SAME microphone (doesn't touch
+    // WebRTC). It collects frames only when there's speech energy; the voiceprint
+    // finalizes per utterance (at the final transcript) — like on the STT path.
     try {
       const tapCtx = new AudioContext()
       const tapSrc = tapCtx.createMediaStreamSource(mic)
@@ -287,16 +287,16 @@ export async function startRealtimeVoice(
         void tapCtx.close().catch(() => {})
       })
     } catch {
-      /* fără robinet de amprentă — vocea merge normal, timbrul rămâne pe STT */
+      /* no voiceprint tap — voice works normally, voiceprinting stays on STT */
     }
-    // VINDECAREA AUZULUI ÎN LOC (Adrian, 27 iul: „sunt buguri multiple pe auzul
-    // lui"; F12 arăta `input-ended` — pista microfonului MOARE la schimbarea
-    // device-ului/suspendarea browserului). Înainte, un track încheiat omora
-    // TOATĂ sesiunea (stop + eroare + reconectare completă = secunde de surzenie
-    // + un „eșec" numărat spre căderea pe vocea robotică). Acum: RE-CERE
-    // microfonul și înlocuiește pista PE LOC (replaceTrack) — sesiunea WebRTC
-    // rămâne vie, auzul revine în sub o secundă. Doar dacă re-cererea pică
-    // (permisiune retrasă, fără device) declarăm eroarea, ca înainte.
+    // HEALING THE HEARING IN PLACE (Adrian, Jul 27: "there are multiple bugs on his
+    // hearing"; F12 showed `input-ended` — the microphone track DIES on device
+    // change/browser suspension). Before, an ended track killed
+    // the WHOLE session (stop + error + full reconnect = seconds of deafness
+    // + a counted "failure" toward falling onto the robotic voice). Now: RE-ASKS
+    // for the microphone and replaces the track IN PLACE (replaceTrack) — the WebRTC session
+    // stays alive, hearing returns in under a second. Only if the re-ask fails
+    // (permission withdrawn, no device) do we declare the error, as before.
     const bindMicTrack = (track: MediaStreamTrack, sender: RTCRtpSender): void => {
       track.addEventListener(
         'ended',
@@ -332,21 +332,21 @@ export async function startRealtimeVoice(
     }
 
     // 2) Vocea lui Kelion (pista remote) + animarea avatarului din nivelul audio.
-    // ELEMENT PARTAJAT (nu unul nou de fiecare dată) — vezi comentariul de la
-    // `getSharedAudioEl`: odată deblocat de un gest real, rămâne deblocat pe
-    // toate redeschiderile automate ulterioare (voce pe frază).
+    // SHARED ELEMENT (not a new one each time) — see the comment at
+    // `getSharedAudioEl`: once unlocked by a real gesture, it stays unlocked across
+    // all later automatic reopenings (voice per utterance).
     const audioEl = getSharedAudioEl()
-    // VOLUM CONTROLABIL (25 iul): vocea Realtime urmează volumul global al
-    // aplicației (sliderul din chat) — până azi pornea fix pe 1.0, nereglabil.
+    // CONTROLLABLE VOLUME (Jul 25): the Realtime voice follows the app's global
+    // volume (the chat slider) — until today it started fixed at 1.0, unadjustable.
     const unregisterVol = registerVoiceAudioElement(audioEl)
     cleanups.push(unregisterVol)
-    // NU elimina elementul din DOM la stop() — e partajat între sesiuni; doar
-    // sesiunea îl eliberează, elementul rămâne pentru următoarea redeschidere.
+    // Do NOT remove the element from the DOM at stop() — it's shared between sessions; only
+    // the session releases it, the element stays for the next reopening.
     cleanups.push(() => {
       audioEl.srcObject = null
     })
-    // IEȘIREA PE CĂȘTI/BT: rutează acum + reaplică ori de câte ori se schimbă
-    // dispozitivele (conectezi căștile în timpul convorbirii → sunetul migrează).
+    // HEADPHONES/BT OUTPUT: route now + reapply whenever the devices change
+    // (you connect headphones mid-conversation → the sound migrates).
     void routeAudioOutput(audioEl)
     const onDeviceChange = (): void => {
       void routeAudioOutput(audioEl)
@@ -356,11 +356,11 @@ export async function startRealtimeVoice(
     let stopLip: (() => void) | null = null
     pc.ontrack = (ev) => {
       audioEl.srcObject = ev.streams[0] ?? new MediaStream([ev.track])
-      // AUTOPLAY: browserul poate refuza redarea audio până la un gest al
-      // userului. Vechea variantă înghițea refuzul (`.catch(()=>{})`) → Kelion
-      // se conecta dar „vocea lipsea cu desăvârșire". Acum, dacă redarea e
-      // blocată, o REÎNCERCĂM la primul gest (click/tastă/atingere) și apoi
-      // curățăm ascultătorii — vocea pornește de la prima interacțiune.
+      // AUTOPLAY: the browser can refuse audio playback until a user
+      // gesture. The old variant swallowed the refusal (`.catch(()=>{})`) → Kelion
+      // connected but "the voice was completely missing". Now, if playback is
+      // blocked, we RETRY it on the first gesture (click/key/touch) and then
+      // clean up the listeners — the voice starts from the first interaction.
       const GESTURES = ['pointerdown', 'keydown', 'touchstart'] as const
       const removeUnlock = (): void => {
         for (const g of GESTURES) window.removeEventListener(g, unlock)
@@ -377,13 +377,13 @@ export async function startRealtimeVoice(
       cleanups.push(() => stopLip?.())
     }
 
-    // FIX „moare tăcut" (audit 24 iul, P2): înainte tratam DOAR `failed`.
-    // Când OpenAI închide apelul (limită de sesiune, idle, cădere server) starea
-    // trece prin `disconnected`/`closed` FĂRĂ să ajungă vreodată la `failed` →
-    // micRef rămânea instalat, UI arăta „ascult", dar nu mai exista nici auz,
-    // nici voce („audio nu există"). Acum: `closed` = fatal imediat; la
-    // `disconnected` dăm un răgaz de 4s (ICE își poate reveni) și abia apoi
-    // declarăm sesiunea moartă — handler-ul din ChatPanel repornește singur.
+    // FIX "dies silently" (Jul 24 audit, P2): before, we handled ONLY `failed`.
+    // When OpenAI closes the call (session limit, idle, server drop) the state
+    // goes through `disconnected`/`closed` WITHOUT ever reaching `failed` →
+    // micRef stayed installed, the UI showed "listening", but there was neither hearing,
+    // nor voice ("audio doesn't exist"). Now: `closed` = immediately fatal; on
+    // `disconnected` we give a 4s respite (ICE can recover) and only then
+    // declare the session dead — the ChatPanel handler restarts by itself.
     let discTimer: number | null = null
     const clearDisc = (): void => {
       if (discTimer != null) {
@@ -415,17 +415,17 @@ export async function startRealtimeVoice(
 
     // 3) dataChannel — evenimentele OpenAI Realtime (transcript + erori + barge-in).
     const dc = pc.createDataChannel('oai-events')
-    // Canalul de evenimente închis grațios de server = sesiune moartă (fără el
-    // nu mai există nici transcript, nici tool-calls) — tratăm ca eroare fatală.
+    // The events channel closed gracefully by the server = dead session (without it
+    // there are neither transcripts nor tool-calls) — treated as a fatal error.
     dc.onclose = () => {
       if (!closed) {
         stop()
         onState?.('error', 'dc-closed')
       }
     }
-    // O SINGURĂ injecție (25 iul — Adrian: „injectezi de o mie de ori, dublezi").
-    // Instrucțiunile + uneltele + contextul vin ACUM în sesiunea inițială de pe
-    // server (multipart string, acceptat de OpenAI cu 201). NU mai dublăm aici
+    // ONE SINGLE injection (Jul 25 — Adrian: "you inject a thousand times, you duplicate").
+    // The instructions + tools + context come NOW in the initial session from the
+    // server (multipart string, accepted by OpenAI with 201). We do NOT duplicate here
     // prin session.update — era exact stratul redundant.
     const send = (obj: unknown): void => {
       if (dc.readyState === 'open') {
@@ -436,66 +436,66 @@ export async function startRealtimeVoice(
         }
       }
     }
-    // Textul parțial pe id-uri, ca să salvăm turele complete în istoric.
+    // The partial text by id, so we save complete turns into history.
     const userText = new Map<string, string>()
     const asstText = new Map<string, string>()
-    // ── POARTA NUMELUI, MECANICĂ (Adrian, 27 iul: „nu intră în chat dacă nu
-    // își aude numele — e deja făcut dar nu merge") ─────────────────────────
-    // Serverul a oprit răspunsul automat (create_response:false); AICI se
-    // decide cine primește răspuns: (1) fraza conține numele („Kelion"/„Kei",
-    // tolerant la variații de transcriere) → răspunde și DESCHIDE fereastra de
-    // conversație; (2) fereastra e deschisă (schimb recent) → conversația curge
-    // liber, fără să repeți numele — exact ce lipsea porții vechi din 24 iul,
-    // care cerea numele la FIECARE frază și părea surdă; (3) altfel → tăcere:
-    // discuția din cameră nu-i e adresată. „STOP" închide fereastra.
-    // 45s, nu 120s (Adrian, 31 iul: „vorbește fără să respecte utilizatorul" —
-    // vorbește fără să fie chemat). Fereastra de două minute, reînnoită la
-    // fiecare schimb, însemna în practică MEREU DESCHISĂ: dacă schimbai o vorbă
-    // cu el, apoi vorbeai un minut cu altcineva în cameră, el răspundea — nu
-    // fiindcă poarta era stricată, ci fiindcă era prea larg deschisă.
-    // 45s ține conversația curgând fără să repeți numele, dar se închide destul
-    // de repede cât o discuție cu altcineva să nu-i mai fie adresată.
+    // ── THE NAME GATE, MECHANICAL (Adrian, Jul 27: "doesn't enter the chat unless
+    // he hears his name — it's already done but doesn't work") ───────────────────
+    // The server stopped the automatic reply (create_response:false); HERE it is
+    // decided who gets a reply: (1) the utterance contains the name ("Kelion"/"Kei",
+    // tolerant to transcription variations) → he replies and OPENS the conversation
+    // window; (2) the window is open (recent exchange) → the conversation flows
+    // freely, without repeating the name — exactly what the old Jul 24 gate lacked,
+    // which demanded the name on EVERY utterance and seemed deaf; (3) otherwise → silence:
+    // the room discussion isn't addressed to him. "STOP" closes the window.
+    // 45s, not 120s (Adrian, Jul 31: "talks without respecting the user" —
+    // talks without being called). The two-minute window, renewed on
+    // every exchange, meant in practice ALWAYS OPEN: if you exchanged a word
+    // with him, then talked for a minute with someone else in the room, he replied — not
+    // because the gate was broken, but because it was too wide open.
+    // 45s keeps the conversation flowing without repeating the name, but closes fast
+    // enough that a discussion with someone else is no longer addressed to him.
     // ── REGULA LUI: „KELION" + RESTUL FRAZEI ────────────────────────────────
-    // Adrian, 31 iul: „vorbește când nu se vorbește cu el; ce aude și nu are
-    // legătură cu el, reacționează. Regula implementată — Kelion și restul
-    // frazei — nu o aplică."
+    // Adrian, Jul 31: "talks when no one is talking to him; what he hears that has
+    // nothing to do with him, he reacts to. The implemented rule — Kelion and the rest
+    // of the utterance — he doesn't apply it."
     //
-    // Avea dreptate, și dimineață tăiasem fereastra de la 120s la 45s fără să
-    // ating ce o ținea deschisă: se REÎNNOIA la fiecare frază care intra în ea,
-    // ȘI se reînnoia când vorbea Kelion însuși. O fereastră care se reînnoiește
-    // din propriul ei conținut nu se închide niciodată cât se vorbește în
-    // cameră — 45s sau 120s era același lucru.
+    // He was right, and in the morning I had cut the window from 120s to 45s without
+    // touching what kept it open: it RENEWED on every utterance that entered it,
+    // AND it renewed when Kelion himself spoke. A window that renews
+    // from its own content never closes while people talk in the
+    // room — 45s or 120s was the same thing.
     //
-    // Acum poarta e per FRAZĂ, nu pe ceas: numele e în frază → restul frazei e
-    // comanda. Fără nume → tăcere. Singura excepție e cea evidentă: dacă tocmai
-    // el ți-a pus o întrebare, ai voie să răspunzi fără să-l strigi din nou —
-    // dar aia e O SINGURĂ replică, se consumă la prima folosire și nu se
-    // reînnoiește din nimic.
+    // Now the gate is per UTTERANCE, not on the clock: the name is in the utterance → the rest of the utterance is
+    // the command. No name → silence. The only exception is the obvious one: if he just
+    // asked you a question, you may reply without calling him again —
+    // but that's ONE SINGLE reply, consumed on first use and not
+    // renewed by anything.
     const REPLY_WINDOW_MS = 12_000
-    // FEREASTRA E DESCHISĂ LA PORNIREA SESIUNII (bug găsit live de Adrian,
-    // 27 iul, „parcă nu aude": userul tocmai a PORNIT microfonul — evident că
-    // i se adresează lui Kelion; a cere numele chiar la prima frază, cu o
-    // transcriere care îl stâlcește, îl făcea complet mut la deschidere).
-    // La PORNIRE fereastra e deschisă mai scurt: userul tocmai a apăsat pe
-    // microfon, deci primele secunde îi sunt clar adresate — dar dacă nu-i
-    // spune nimic în 15s, tăcerea redevine implicită.
+    // THE WINDOW IS OPEN AT SESSION START (bug found live by Adrian,
+    // Jul 27, "he seems not to hear": the user just STARTED the microphone — obviously
+    // they're addressing Kelion; demanding the name on the very first utterance, with a
+    // transcription that mangles it, made him completely mute at opening).
+    // At STARTUP the window is open for a shorter time: the user just pressed the
+    // microphone, so the first seconds are clearly addressed to him — but if they say
+    // nothing in 15s, silence becomes the default again.
     let replyUntil = Date.now() + 15_000
-    // Regex TOLERANT la transcrierea reală (dovadă live: „Kelion, ce faci" a
-    // ieșit „Elioncevaci"): acceptăm și variantele fără consoana de început
-    // (elion/eleon), lipite de cuvântul următor.
+    // Regex TOLERANT to real transcription (live proof: "Kelion, ce faci" came out
+    // as "Elioncevaci"): we also accept the variants without the initial consonant
+    // (elion/eleon), glued to the next word.
     const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
-    // Plasa anti-„nu mă aude": dacă VAD-ul a închis fraza dar transcriptul nu
-    // mai vine (transcrierea a picat), în conversație ACTIVĂ răspundem oricum.
+    // The anti-"he doesn't hear me" net: if the VAD closed the utterance but the transcript doesn't
+    // arrive (transcription failed), in an ACTIVE conversation we reply anyway.
     let speechStopTimer: number | null = null
     cleanups.push(() => {
       if (speechStopTimer != null) clearTimeout(speechStopTimer)
     })
-    // Ultima limbă ANCORATĂ în sesiunea live — re-ancorăm doar la schimbare.
+    // The last language ANCHORED in the live session — we re-anchor only on change.
     let anchoredLang = ''
     // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
     // function_call_arguments.done — legate prin call_id.
     const toolNames = new Map<string, string>()
-    // Injecția de sistem devine disponibilă odată cu canalul de evenimente.
+    // The system injection becomes available with the events channel.
     liveInject = (text: string) =>
       send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } })
     dc.onmessage = (ev) => {
@@ -516,17 +516,17 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? userText.get(itemId) ?? '')
         userText.delete(itemId)
         onUserTranscript?.(t, true)
-        // Transcriptul a sosit — plasa pe „transcript lipsă" nu mai e necesară.
+        // The transcript arrived — the "missing transcript" net is no longer needed.
         if (speechStopTimer != null) {
           clearTimeout(speechStopTimer)
           speechStopTimer = null
         }
-        // COMANDA „STOP" (Adrian, 27 iul: „kelion nu ascultă comanda stop"):
-        // rostită SINGURĂ („stop", „taci", „gata", „oprește-te"...), taie PE
-        // LOC și generarea și sunetul deja produs — determinist, în client,
-        // fără să aștepte bunăvoința modelului — apoi lasă ordin de tăcere.
-        // A doua tăiere la 400ms omoară și răspunsul pe care VAD-ul îl
-        // pornește automat CA REACȚIE la fraza „stop" însăși.
+        // THE "STOP" COMMAND (Adrian, Jul 27: "kelion doesn't obey the stop command"):
+        // spoken ALONE ("stop", "taci", "gata", "oprește-te"...), it cuts AT
+        // ONCE both the generation and the already-produced sound — deterministic, in the client,
+        // without waiting for the model's goodwill — then leaves a silence order.
+        // The second cut at 400ms also kills the reply the VAD
+        // starts automatically IN REACTION to the "stop" utterance itself.
         if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
           replyUntil = 0 // STOP închide și replica — până la următorul „Kelion"
           send({ type: 'response.cancel' })
@@ -544,15 +544,15 @@ export async function startRealtimeVoice(
             send({ type: 'output_audio_buffer.clear' })
           }, 400)
         } else if (t.trim()) {
-          // POARTA NUMELUI, PER FRAZĂ: numele e în fraza asta → restul frazei
-          // e comanda, răspunde. Nu e → tăcere, indiferent ce s-a vorbit
-          // înainte. Singura poartă care nu cere numele e replica la propria
-          // lui întrebare, și aia SE CONSUMĂ aici: `replyUntil = 0` înaintea
-          // răspunsului, ca o replică să nu poată deschide următoarea.
-          // Aici era greșeala veche: fereastra se re-împingea în viitor la
-          // FIECARE frază pe care o accepta, deci se hrănea din ce lăsa să
-          // treacă — un perpetuum mobile care nu se închidea cât timp se
-          // auzea ceva în cameră.
+          // THE NAME GATE, PER UTTERANCE: the name is in this utterance → the rest of the utterance
+          // is the command, reply. It isn't → silence, no matter what was said
+          // before. The only gate that doesn't demand the name is the reply to his own
+          // question, and that one gets CONSUMED here: `replyUntil = 0` before
+          // the reply, so one reply can't open the next one.
+          // Here was the old mistake: the window re-pushed itself into the future on
+          // EVERY utterance it accepted, so it fed on what it let
+          // through — a perpetuum mobile that never closed while something
+          // was heard in the room.
           const named = NAME_RE.test(t)
           const answering = Date.now() < replyUntil
           if (named || answering) {
@@ -560,13 +560,13 @@ export async function startRealtimeVoice(
             send({ type: 'response.create' })
           }
         }
-        // La limba COMISĂ de server: ancorăm transcrierea sesiunii LIVE pe ea
-        // (session.update, fără repornire) — „limba aleatoare" dispare.
+        // On the language COMMITTED by the server: we anchor the LIVE session's transcription onto it
+        // (session.update, no restart) — the "random language" disappears.
         // DOAR LA SCHIMBARE (25 iul — testul live al lui Adrian: „sacadat, voci
-        // necontrolate"): înainte, ancora rula session.update + injecție de
-        // sistem la FIECARE frază — zgâlțâia sesiunea audio în plin răspuns.
-        // Limba nu se schimbă frază de frază; ancorăm o dată și re-ancorăm
-        // numai când serverul comite ALTĂ limbă.
+        // uncontrolled"): before, the anchor ran session.update + system
+        // injection on EVERY utterance — it shook the audio session mid-reply.
+        // The language doesn't change utterance by utterance; we anchor once and re-anchor
+        // only when the server commits ANOTHER language.
         persistTranscript(
           'user',
           t,
@@ -591,8 +591,8 @@ export async function startRealtimeVoice(
               },
             })
           },
-          // COMANDĂ VERBALĂ DE CAMERĂ/ECRAN (25 iul): serverul a interpretat
-          // transcriptul → o executăm în client (comută camera, închide monitorul).
+          // VERBAL CAMERA/SCREEN COMMAND (Jul 25): the server interpreted
+          // the transcript → we execute it in the client (switch camera, close the monitor).
           onDevice,
         )
       } else if (type === 'response.output_audio_transcript.delta') {
@@ -604,24 +604,24 @@ export async function startRealtimeVoice(
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
         persistTranscript('assistant', t)
-        // Kelion a terminat de vorbit. AICI se decidea, până azi, că orice se
-        // aude în următoarele zeci de secunde i se adresează — el își ținea
-        // singur poarta deschisă, vorbind. Acum: dacă a pus o ÎNTREBARE, ai
-        // dreptul la o replică fără să-l strigi; dacă doar a răspuns sau a
-        // constatat ceva, poarta se închide pe loc și numele e din nou
-        // obligatoriu. O afirmație a lui nu e o invitație la vorbă.
+        // Kelion finished speaking. HERE it used to be decided, until today, that anything
+        // heard in the next tens of seconds is addressed to him — he kept
+        // his own gate open, by speaking. Now: if he asked a QUESTION, you
+        // have the right to one reply without calling him; if he only answered or
+        // stated something, the gate closes at once and the name is again
+        // mandatory. A statement of his is not an invitation to talk.
         replyUntil = /\?/.test(t) ? Date.now() + REPLY_WINDOW_MS : 0
       } else if (type === 'input_audio_buffer.speech_stopped') {
-        // Plasa anti-„nu mă aude" (cauza scoaterii porții vechi, 24 iul): VAD-ul
-        // a închis fraza; dacă transcriptul NU sosește în 2.8s (transcrierea a
-        // picat) și conversația e ACTIVĂ, răspundem oricum — o defecțiune de
-        // transcriere nu are voie să-l facă surd în mijlocul discuției. În
-        // afara conversației (poarta închisă), tăcerea rămâne tăcere.
-        // Plasa se aplică DOAR pe replica la propria lui întrebare — singurul
-        // caz în care știm, fără transcript, că fraza îi e adresată. Fără
-        // transcript nu putem căuta numele, iar a răspunde „ca să nu pară
-        // surd" e exact cum ajungea să vorbească peste discuția din cameră.
-        // Se consumă, ca orice replică.
+        // The anti-"he doesn't hear me" net (the reason the old gate was removed, Jul 24): the VAD
+        // closed the utterance; if the transcript does NOT arrive within 2.8s (transcription
+        // failed) and the conversation is ACTIVE, we reply anyway — a transcription
+        // failure must not make him deaf in the middle of the discussion. Outside
+        // the conversation (gate closed), silence stays silence.
+        // The net applies ONLY to the reply to his own question — the only
+        // case where we know, without a transcript, that the utterance is addressed to him. Without
+        // a transcript we can't search for the name, and replying "so he doesn't seem
+        // deaf" is exactly how he ended up talking over the room's discussion.
+        // It gets consumed, like any reply.
         if (speechStopTimer != null) clearTimeout(speechStopTimer)
         speechStopTimer = window.setTimeout(() => {
           speechStopTimer = null
@@ -631,22 +631,22 @@ export async function startRealtimeVoice(
           }
         }, 2800)
       } else if (type === 'response.output_item.added') {
-        // Numele funcției cerute — memorat pe call_id pentru pasul de argumente.
+        // The requested function's name — stored by call_id for the arguments step.
         const item = (m.item as Record<string, unknown>) ?? {}
         if (item.type === 'function_call') {
           toolNames.set(String(item.call_id ?? ''), String(item.name ?? ''))
         }
       } else if (type === 'response.function_call_arguments.done') {
-        // AUTONOMIA VOCII: execută unealta și trimite rezultatul înapoi, apoi
-        // cere continuarea răspunsului — Kelion vorbește pe baza rezultatului.
+        // VOICE AUTONOMY: executes the tool and sends the result back, then
+        // asks for the reply to continue — Kelion speaks based on the result.
         const callId = String(m.call_id ?? '')
         const name = String(m.name ?? toolNames.get(callId) ?? '')
         toolNames.delete(callId)
         const argsJson = String(m.arguments ?? '{}')
-        // ANTI-„2 VOCI" LA ESCALADARE (Adrian, 25 iul): dacă modelul rostea deja
-        // ceva când a cerut unealta (ex. „stai să verific"), `response.create` de
-        // mai jos pornea o A DOUA rostire PESTE prima → două voci suprapuse.
-        // Tăiem orice răspuns în curs ÎNAINTE de a rosti rezultatul uneltei.
+        // ANTI-"2 VOICES" ON ESCALATION (Adrian, Jul 25): if the model was already uttering
+        // something when it requested the tool (e.g. "let me check"), the `response.create`
+        // below started a SECOND utterance OVER the first → two overlapping voices.
+        // We cut any ongoing reply BEFORE uttering the tool result.
         if (name && onToolCall) {
           void onToolCall(name, argsJson)
             .catch((e) => JSON.stringify({ error: String(e).slice(0, 200) }))
@@ -659,8 +659,8 @@ export async function startRealtimeVoice(
               send({ type: 'response.create' })
             })
         } else {
-          // Nume nerezolvabil (sau fără handler): răspundem totuși — altfel
-          // modelul rămâne agățat așteptând rezultatul funcției.
+          // Unresolvable name (or no handler): we reply anyway — otherwise
+          // the model hangs waiting for the function result.
           send({ type: 'response.cancel' })
           send({
             type: 'conversation.item.create',
@@ -672,19 +672,19 @@ export async function startRealtimeVoice(
         const err = (m.error as Record<string, unknown>) ?? {}
         const msg = String(err.message ?? err.code ?? 'realtime-error')
         // Erori BENIGNE (cancellation_failed / conversation_already_has_active_
-        // response) nu dărâmă sesiunea — doar le notăm și mergem mai departe.
+        // response) doesn't tear down the session — we just note them and move on.
         if (/cancel|active_response/i.test(`${String(err.code ?? '')} ${msg}`)) {
           console.warn('realtime eroare benignă:', msg)
         } else {
-          // FATAL: oprim sesiunea ÎNAINTE de a anunța — altfel rămânea vie
-          // (mic capturat, facturare) și pornea AL DOILEA microfon în paralel.
+          // FATAL: we stop the session BEFORE announcing — otherwise it stayed alive
+          // (mic captured, billing) and a SECOND microphone started in parallel.
           stop()
           onState?.('error', msg)
         }
       }
     }
 
-    // 4) SDP: ofertă locală → backend (proxy la OpenAI) → answer.
+    // 4) SDP: local offer → backend (proxy to OpenAI) → answer.
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     const res = await fetch('/api/realtime/session', {
@@ -692,9 +692,9 @@ export async function startRealtimeVoice(
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       signal,
-      // ANCORA DE TIMP (fix „bună seara" dimineața): vocea primea GPS-ul dar NU
-      // ora — creierul de voce ghicea partea zilei. Trimitem ora reală + fusul
-      // dispozitivului, exact ca scrisul, ca salutul să urmeze ceasul adevărat.
+      // THE TIME ANCHOR (the "good evening" in the morning fix): voice got the GPS but NOT
+      // the time — the voice brain guessed the part of day. We send the real time + the device's
+      // timezone, exactly like the written chat, so the greeting follows the true clock.
       body: JSON.stringify({
         sdp: pc.localDescription?.sdp ?? '',
         language: opts.language,
@@ -704,10 +704,10 @@ export async function startRealtimeVoice(
       }),
     })
     if (!res.ok) {
-      // MOTIVUL, PE ÎNȚELESUL OMULUI (D7). Serverul trimite de mult un corp
-      // structurat (`code`, `retryable`), dar clientul îl arunca și afișa
-      // „realtime 502" — un număr care nu spune nimic și nu ajută pe nimeni să
-      // decidă dacă merită reîncercat.
+      // THE REASON, IN HUMAN TERMS (D7). The server has long been sending a structured
+      // body (`code`, `retryable`), but the client threw it away and showed
+      // "realtime 502" — a number that says nothing and helps no one
+      // decide whether retrying is worth it.
       const corp = (await res.json().catch(() => null)) as
         | { code?: string; retryable?: boolean }
         | null
@@ -726,7 +726,7 @@ export async function startRealtimeVoice(
             ? 'nu mai ai credit'
             : (corp?.code && dupaCod[corp.code]) || `realtime ${res.status}`
       const err = new Error(note)
-      // Cine prinde eroarea poate decide dacă arată butonul „încearcă din nou".
+      // Whoever catches the error can decide whether to show the "try again" button.
       ;(err as Error & { retryable?: boolean }).retryable = corp?.retryable !== false
       throw err
     }
@@ -741,10 +741,10 @@ export async function startRealtimeVoice(
           if (s.track?.kind === 'audio') s.track.enabled = !muted
         })
       },
-      // Barge-in manual: cerem modelului să taie răspunsul curent.
+      // Manual barge-in: we ask the model to cut the current reply.
       interrupt: () => send({ type: 'response.cancel' }),
-      // Poziția s-a schimbat → un item de SISTEM cu noii lat/lon (nu dublăm
-      // instrucțiunile prin session.update — regula „o singură injecție").
+      // The position changed → a SYSTEM item with the new lat/lon (we don't duplicate
+      // instructions via session.update — the "one single injection" rule).
       updateCoords: (c: { lat: number; lon: number }) =>
         send({
           type: 'conversation.item.create',
@@ -764,10 +764,10 @@ export async function startRealtimeVoice(
     }
   } catch (e) {
     stop()
-    // FIX „numărare dublă" (audit 24 iul, P3): aici NU mai chemăm onState('error')
-    // — aruncăm excepția, iar catch-ul din ChatPanel numără EL eșecul de pornire.
-    // Înainte, un singur eșec incrementa contorul de 2 ori (onState + catch) →
-    // „3 șanse" erau de fapt 2 și full-duplexul se stingea prematur pe STT.
+    // FIX "double counting" (Jul 24 audit, P3): here we NO LONGER call onState('error')
+    // — we throw the exception, and the catch in ChatPanel counts the start failure ITSELF.
+    // Before, a single failure incremented the counter twice (onState + catch) →
+    // "3 chances" were in fact 2 and full-duplex died prematurely onto STT.
     throw e
   }
 }

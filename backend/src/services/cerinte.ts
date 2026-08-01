@@ -1,66 +1,70 @@
-// ── GESTIUNEA CERINȚELOR + EVALUAREA SOLUȚIILOR ──────────────────────────────
+// ── REQUIREMENT MANAGEMENT + SOLUTION EVALUATION ─────────────────────────────
 //
-// Adrian, 30 iul: „am nevoie de sisteme avansate alocate lui Kelion de gestiune
-// a cerințelor, evaluări avansate pe soluțiile oferite" · „analiza și
-// îmbunătățirea continuă a posibilităților de implementare / rezolvare a
-// cerințelor".
+// Adrian, Jul 30: "I need advanced systems allocated to Kelion for requirement
+// management, advanced evaluations of the offered solutions" · "continuous
+// analysis and improvement of the implementation / resolution possibilities
+// for the requirements".
 //
-// DE CE E NEVOIE, măsurat din ziua de azi, nu din teorie: o cerință de-a lui
-// trăia în trei locuri care nu se vorbeau — un rând scris de mână în
-// `RAMAS-DE-FACUT.md`, un ordin în `build_jobs` fără legătură cu cerința, și
-// uneori doar în chat, de unde se pierdea. De-aia „ți-am cerut de zeci de ori"
-// era ADEVĂRAT și nedemonstrabil în același timp. Și de-aia s-a apucat cineva
-// (eu) să construiască pe prima idee care i-a venit, fără să pună alături
-// variantele — emailul, portalul, API-ul — și fiecare a căzut pe rând.
+// WHY IT'S NEEDED, measured from today, not from theory: one of his
+// requirements lived in three places that didn't talk to each other — a
+// hand-written row in `RAMAS-DE-FACUT.md`, an order in `build_jobs` with no
+// link to the requirement, and sometimes only in chat, where it got lost.
+// That's why "I asked you dozens of times" was TRUE and unprovable at the same
+// time. And that's why someone (me) started building on the first idea that
+// came to mind, without laying the options side by side — email, portal, API —
+// and each one fell in turn.
 //
-// Aici cerința are UN drum, cu trei porți:
-//   1. ANALIZA — înainte să se scrie o linie de cod, se pun pe masă 2-4 variante
-//      REALE, fiecare cu scor pe cinci axe și cu ce o poate omorî. Se alege una,
-//      cu motiv scris. O variantă care depinde de owner e marcată ca atare.
-//   2. EXECUȚIA — ordinul pleacă cu varianta aleasă și cu criteriul de acceptare
-//      lipit de el, ca ținta să nu se mute după ce s-a livrat ceva.
-//   3. ÎMBUNĂTĂȚIREA CONTINUĂ — ce e livrat se reia periodic: „se putea mai
-//      bine, acum, cu ce știm în plus?" Dacă da, iese o cerință nouă, legată de
-//      prima. Fără asta, sistemul livrează o dată și îngheață.
+// Here the requirement has ONE path, with three gates:
+//   1. ANALYSIS — before a line of code is written, 2-4 REAL options are laid
+//      on the table, each scored on five axes and with what can kill it. One
+//      is chosen, with a written reason. An option that depends on the owner
+//      is marked as such.
+//   2. EXECUTION — the order ships with the chosen variant and the acceptance
+//      criterion glued to it, so the target doesn't move after delivery.
+//   3. CONTINUOUS IMPROVEMENT — what's delivered gets revisited periodically:
+//      "could it be better, now, with what we know in addition?" If yes, a new
+//      requirement comes out, linked to the first. Without this, the system
+//      delivers once and freezes.
 import { brainComplete } from './brain.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta, type Cerinta } from '../db.js'
 
-/** O variantă de rezolvare, așa cum o pune pe masă. */
+/** A resolution option, as it gets laid on the table. */
 export interface Varianta {
   nume: string
   cum: string
-  /** 0-10: cât de COMPLET rezolvă cerința (nu cât de elegant e). */
+  /** 0-10: how COMPLETELY it resolves the requirement (not how elegant it is). */
   rezolva: number
-  /** 0-10: cât de repede se poate livra (10 = azi). */
+  /** 0-10: how fast it can be delivered (10 = today). */
   rapid: number
-  /** 0-10: cât de puțin riscă să strice ce merge deja (10 = zero risc). */
+  /** 0-10: how little it risks breaking what already works (10 = zero risk). */
   sigur: number
-  /** 0-10: cât de puțin costă, în bani și în timpul ownerului (10 = gratis). */
+  /** 0-10: how little it costs, in money and in the owner's time (10 = free). */
   ieftin: number
-  /** 0-10: cât de puțin depinde de owner sau de terți (10 = deloc). */
+  /** 0-10: how little it depends on the owner or third parties (10 = not at all). */
   independent: number
-  /** Ce o poate omorî. Scris ONEST — o variantă fără riscuri e o variantă
-   *  neanalizată. */
+  /** What can kill it. Written HONESTLY — an option without risks is an
+   *  unanalyzed option. */
   risc: string
-  /** CÂT DE GREA e de dus, 1..5 (Adrian, 30 iul: „pe nivel de dificultate
-   *  setabil automat pe cerință"). Nu e decor: din ea se alege MÂNA care
-   *  lucrează — un model mare pe o sarcină grea, unul gratuit pe o redenumire.
-   *  Aleasă odată cu varianta, fiindcă dificultatea depinde de DRUMUL ales, nu
-   *  doar de cerință: „prin browser pe portal" e altceva decât „schimbă un text". */
+  /** HOW HARD it is to carry, 1..5 (Adrian, Jul 30: "by difficulty level, set
+   *  automatically per requirement"). Not decoration: the HAND that works is
+   *  chosen from it — a big model on a heavy task, a free one on a rename.
+   *  Chosen together with the variant, because difficulty depends on the
+   *  CHOSEN PATH, not just the requirement: "through the browser on the
+   *  portal" is a different thing from "change a text". */
   dificultate?: number
 }
 
-/** Nivelul cu care pleacă ordinul, mărginit. Fără el → 3: mai bine pornim cu o
- *  mână bună decât să ardem jumătate din buget descoperind că era greu. */
+/** The level the order starts with, clamped. Without it → 3: better to start
+ *  with a good hand than to burn half the budget discovering it was heavy. */
 export function nivelDificultate(v: Varianta | undefined): number {
   const n = Math.round(Number(v?.dificultate ?? 3))
   return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3))
 }
 
-/** Scorul final. Ponderile spun ce contează în proiectul ĂSTA, în ordinea în
- *  care le-a spus ownerul de-a lungul zilei: să REZOLVE (altfel n-are rost), să
- *  nu-i mai ceară LUI timp (a pierdut o zi prin portaluri), să nu strice ce
- *  merge, să fie repede, să nu coste. */
+/** The final score. The weights say what matters in THIS project, in the
+ *  order the owner said it throughout the day: must RESOLVE (otherwise no
+ *  point), must not ask HIM for time anymore (he lost a day in portals), must
+ *  not break what works, must be fast, must not cost. */
 export function scor(v: Varianta): number {
   const n = (x: number): number => Math.max(0, Math.min(10, Number(x) || 0))
   return (
@@ -72,8 +76,8 @@ export function scor(v: Varianta): number {
   )
 }
 
-/** Cea mai bună variantă + de ce. Pură, deci se poate ține sub test: alegerea
- *  NU are voie să depindă de dispoziția modelului. */
+/** The best option + why. Pure, so it can be kept under test: the choice must
+ *  NOT depend on the model's mood. */
 export function alege(variante: Varianta[]): { castigatoare: Varianta; motiv: string } | null {
   if (!variante.length) return null
   const cu = variante.map((v) => ({ v, s: scor(v) })).sort((a, b) => b.s - a.s)
@@ -91,7 +95,7 @@ const AXE =
   `sigur (cât de puțin riscă să strice ce merge), ieftin (bani + timpul ownerului), ` +
   `independent (cât de puțin depinde de owner sau de terți)`
 
-// Ce înseamnă fiecare nivel — scris explicit, ca notele să nu fie după ureche.
+// What each level means — written explicitly, so the grades aren't by ear.
 const SCARA_DIFICULTATE =
   `1 = banal (un text, o culoare, o redenumire); ` +
   `2 = simplu (o funcție mică, un câmp nou, într-un singur fișier); ` +
@@ -99,7 +103,7 @@ const SCARA_DIFICULTATE =
   `4 = greu (integrare cu un serviciu extern, migrare de date, ceva ce atinge banii sau sesiunile); ` +
   `5 = foarte greu (arhitectură, ceva ce poate strica producția dacă e greșit)`
 
-/** ANALIZA: pune pe masă variantele, le dă scoruri, alege una. */
+/** ANALYSIS: lays the options on the table, scores them, picks one. */
 export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detaliu: string }> {
   const prompt =
     `Ești Kelion și îți evaluezi SINGUR soluțiile, înainte să scrii o linie de cod.\n\n` +
@@ -135,20 +139,23 @@ export async function evalueazaCerinta(c: Cerinta): Promise<{ ok: boolean; detal
     stare: 'analizata',
     optiuni: JSON.stringify(variante).slice(0, 8000),
     aleasa: `${ales.castigatoare.nume} — ${ales.castigatoare.cum}\nDE CE: ${ales.motiv}`.slice(0, 2000),
-    // Nivelul VARIANTEI ALESE, nu al cerinței: dificultatea depinde de drumul
-    // ales. Ordinul îl duce mai departe, iar constructorul își alege mâna.
+    // The level of the CHOSEN VARIANT, not of the requirement: difficulty
+    // depends on the chosen path. The order carries it forward, and the
+    // constructor picks its hand from it.
     dificultate: nivelDificultate(ales.castigatoare),
   })
   const niv = nivelDificultate(ales.castigatoare)
   return { ok: true, detaliu: `${variante.length} variante evaluate → ${ales.castigatoare.nume} (dificultate ${niv}/5)` }
 }
 
-/** ÎMBUNĂTĂȚIREA CONTINUĂ: ce e livrat se reia — „se putea mai bine, ACUM?"
+/** CONTINUOUS IMPROVEMENT: what's delivered gets revisited — "could it be
+ *  better, NOW?"
  *
- *  Nu e cosmetică: o soluție bună acum șase săptămâni poate fi cea proastă azi,
- *  fiindcă între timp au apărut unelte noi (browserul, secretele) sau s-a
- *  închis un drum (API-ul care nu există pentru contul lui). Dacă iese ceva,
- *  devine o cerință NOUĂ, legată de prima — nu o rescriere tăcută a istoriei. */
+ *  Not cosmetics: a solution that was good six weeks ago can be the bad one
+ *  today, because in the meantime new tools appeared (the browser, the
+ *  secrets) or a path closed (the API that doesn't exist for his account).
+ *  If something comes out, it becomes a NEW requirement, linked to the first
+ *  — not a silent rewrite of history. */
 export async function imbunatatireContinua(limita = 5): Promise<{ propuneri: number; detaliu: string }> {
   const livrate = (await listeazaCerinte('verificata', 50)).slice(0, limita)
   if (!livrate.length) return { propuneri: 0, detaliu: 'nimic livrat încă de reanalizat' }

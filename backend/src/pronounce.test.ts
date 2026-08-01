@@ -13,7 +13,7 @@ describe('academicPronounce', () => {
 
   it('leaves ordinary words and non-listed caps untouched', () => {
     expect(academicPronounce('ADRIAN a spus STOP', 'ro')).toBe('ADRIAN a spus STOP')
-    // OK / AI sunt ambigue (citite ca acronime) — lăsate anume neatinse
+    // OK / AI are ambiguous (read as acronyms) — deliberately left untouched
     expect(academicPronounce('e OK, folosim AI', 'ro')).toBe('e OK, folosim AI')
   })
 

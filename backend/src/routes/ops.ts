@@ -1,10 +1,11 @@
-// PULSUL LUI KELION (Adrian, 26 iul: „verificare automată dar să nu coste sau
-// să mănânce resurse" + „toate punctele" pentru autonomie deplină). Sentinela
-// LOCALĂ de pe VPS (deploy/sentinela-locala.sh, cron la 3 min) bate AICI cu
-// secretul punții. Totul e DETERMINIST — zero apeluri de model, zero cost:
-// verificări de sănătate + email către admin DOAR la anomalie, cu prag anti-spam
-// (kv). Repornirea containerului o face sentinela bash (aplicația moartă nu-și
-// poate face singură restart); aici doar raportăm și verificăm interiorul.
+// KELION'S PULSE (Adrian, 26 Jul: "automatic checking but it must not cost
+// or eat resources" + "all the points" for full autonomy). The LOCAL sentinel
+// on the VPS (deploy/sentinela-locala.sh, cron every 3 min) beats HERE with
+// the bridge secret. Everything is DETERMINISTIC — zero model calls, zero
+// cost: health checks + email to the admin ONLY on anomaly, with an
+// anti-spam threshold (kv). The container restart is done by the bash
+// sentinel (a dead application cannot restart itself); here we only report
+// and check the inside.
 import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs/promises'
 import { config } from '../config.js'
@@ -12,15 +13,15 @@ import { getPool, dbEnabled, saveKv, loadKv } from '../db.js'
 import { sendMail } from '../services/mail.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from '../services/resurse.js'
 
-// Un email pe subiect cel mult o dată pe fereastră — altfel un disc plin ar
-// bombarda inboxul adminului la fiecare 3 minute.
+// One email per subject at most once per window — otherwise a full disk
+// would bombard the admin's inbox every 3 minutes.
 async function alertOnce(key: string, windowMs: number, subject: string, body: string): Promise<boolean> {
   try {
     const last = Number((await loadKv(`ops_alert_${key}`)) ?? '0')
     if (Date.now() - last < windowMs) return false
     await saveKv(`ops_alert_${key}`, String(Date.now()))
   } catch {
-    /* fără kv (DB moartă) tot trimitem — mai bine dublu decât deloc */
+    /* without kv (dead DB) we still send — better duplicated than never */
   }
   return sendMail({
     to: config.adminEmail,
@@ -37,8 +38,9 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
 
     const findings: string[] = []
 
-    // Sentinela tocmai a REPORNIT aplicația (a găsit /health mort de 2 ori la
-    // rând) — adminul află imediat, nu la următorul test manual.
+    // The sentinel has just RESTARTED the application (it found /health
+    // dead twice in a row) — the admin finds out immediately, not at the
+    // next manual test.
     if (req.body?.event === 'restart') {
       await alertOnce(
         'restart',
@@ -49,7 +51,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       findings.push('restart_raportat')
     }
 
-    // 1. Baza de date răspunde? (SELECT 1 — dacă pică, e anomalia cea mare.)
+    // 1. Does the database answer? (SELECT 1 — if it fails, that's the big anomaly.)
     let dbOk = false
     try {
       if (dbEnabled()) {
@@ -61,7 +63,7 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       await alertOnce('db', 60 * 60_000, 'baza de date nu răspunde', 'SELECT 1 a eșuat din aplicație. Verifică serviciul postgres pe VPS (systemctl status postgresql).')
     }
 
-    // 2. Discul: peste 90% ocupat → alertă (o dată la 6 ore).
+    // 2. Disk: over 90% used → alert (once every 6 hours).
     try {
       const s = await fs.statfs('/')
       const usedPct = 100 - Math.round((Number(s.bavail) / Number(s.blocks)) * 100)
@@ -70,17 +72,18 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
         await alertOnce('disk', 6 * 3600_000, `discul VPS e ${usedPct}% plin`, `Spațiul pe disc a ajuns la ${usedPct}%. Curăță imaginile Docker vechi (docker system prune) sau logurile.`)
       }
     } catch {
-      /* statfs indisponibil — nu e critic */
+      /* statfs unavailable — not critical */
     }
 
-    // 2b. Memoria și încărcarea → alertă (o dată la 6 ore, ca la disc).
+    // 2b. Memory and load → alert (once every 6 hours, like the disk).
     //
-    // Discul avea pază de la început, astea două n-aveau niciuna. Diferența e
-    // că discul plin dă erori pe care le vezi, iar celelalte două nu spun
-    // nimic: memoria plină îți taie procesul (kernelul alege o victimă,
-    // containerul moare, sentinela îl repornește — și în jurnal rămâne doar
-    // „a repornit", niciodată „de ce"), iar încărcarea mare nu omoară nimic,
-    // doar face totul încet. Mailurile astea scriu cauza.
+    // The disk had a guard from the start, these two had none. The
+    // difference is that a full disk gives errors you can see, while the
+    // other two say nothing: full memory kills your process (the kernel
+    // picks a victim, the container dies, the sentinel restarts it — and
+    // the log is left with only "restarted", never "why"), and high load
+    // kills nothing, it just makes everything slow. These emails write down
+    // the cause.
     const res = await resurseGazda()
     if (res && res.liberPct <= PRAG_MEMORIE_PCT) {
       findings.push(`memorie_${res.liberPct}%`)
@@ -101,8 +104,9 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
       )
     }
 
-    // 3. Val de erori client (>20 în ultima oră) → ceva e stricat în browser
-    //    pentru useri reali; adminul află fără să aștepte plângeri.
+    // 3. Wave of client errors (>20 in the last hour) → something is
+    //    broken in the browser for real users; the admin finds out without
+    //    waiting for complaints.
     if (dbOk) {
       try {
         const r = await getPool().query<{ n: string }>(
@@ -114,17 +118,18 @@ export async function opsRoutes(app: FastifyInstance): Promise<void> {
           await alertOnce('client_errors', 3 * 3600_000, `${n} erori de client în ultima oră`, `S-au strâns ${n} erori în client_errors în ultima oră — ceva e rupt în interfață pentru utilizatori. Vezi Admin sau tabela client_errors.`)
         }
       } catch {
-        /* interogarea a picat — db_moarta e deja raportată mai sus */
+        /* the query failed — db_moarta is already reported above */
       }
     }
 
     return reply.send({ ok: true, findings })
   })
 
-  // ALERTĂ GENERICĂ DE LA PAZNICII DETERMINIȘTI (27 iul, pentru vindecătorul
-  // de rulări roșii): orice script de pe VPS cu secretul punții poate cere un
-  // email către admin — tot prin alertOnce, deci cu prag anti-spam pe cheie
-  // (6h). Nu e pentru useri, nu e pentru AI — doar mașinăria internă.
+  // GENERIC ALERT FROM THE DETERMINISTIC GUARDS (27 Jul, for the red-run
+  // healer): any script on the VPS holding the bridge secret can request an
+  // email to the admin — still through alertOnce, so with an anti-spam
+  // threshold per key (6h). Not for users, not for AI — internal machinery
+  // only.
   app.post<{ Body: { key?: string; subject?: string; body?: string } }>('/api/ops/alert', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(403).send({ error: 'forbidden' })

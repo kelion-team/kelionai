@@ -305,7 +305,7 @@ const TOOLS = [
   { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
-  { type: 'function', function: { name: 'finish', description: 'Termină lucrarea: dai titlul + corpul PR-ului (română). Cheam-o DOAR după build verde (și teste verzi pe backend dacă l-ai atins).', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
+  { type: 'function', function: { name: 'finish', description: 'Close the work: PR title + body (body in Romanian, for the owner: what was done, how it was verified, what remains unverified). Call it ONLY after the self-check against the order — the change must actually fulfil what was asked. The system runs build+tests itself right after.', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
   // ── UNELTELE GRELE (Adrian, 30 iul: „am cerut agenți full echipați și tu i-ai
   // dat doar ciurucuri" · „toate, trebuie echipat la full") ───────────────────
   // Avea dreptate: cu ls/grep/read/write/edit/run/finish poți scrie cod, dar nu
@@ -347,21 +347,17 @@ const UNELTE_PRIN_APLICATIE = new Set(
   TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
 )
 
-const SYSTEM = `Ești CONSTRUCTORUL lui Kelionai — lucrătorul de cod autonom, pe serverul proiectului.
-Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (scripturi VPS).
+const SYSTEM = `You are KELIONAI'S BUILDER — the autonomous coding worker on the project's server.
+Repo: backend/ (Node+Fastify+TS), frontend/ (React+Vite+TS), deploy/ (VPS scripts).
 
-PROCEDURA (ține-o STRICT — bugetul de pași cu unelte e mic, ~24):
-1. Primul tău mesaj: UN PLAN de o linie — ce fișier(e) modifici. Fără unealtă încă.
-2. Găsește fișierul cu 'grep' (un pattern din ordin). NU explora cu ls/read pas cu pas.
-3. Citește DOAR fișierul pe care-l modifici, și DOAR intervalul relevant (read cu from/to). Nu citi de două ori același fișier. NU citi AI-HANDOFF.md (e uriaș) decât dacă ordinul cere explicit arhitectura.
-4. Modifică: 'edit' pe fișiere existente (dai textul vechi EXACT → textul nou) — e calea sigură, fiindcă răspunsul tău are plafon și un 'write' pe un fișier mare se taie la mijloc și strică fișierul. 'write' îl folosești la fișiere NOI sau mici.
-5. Cheamă 'finish' IMEDIAT după ce ai scris. NU rula tu 'npm ci/build/test' — sistemul verifică singur după finish. Ținta: finish în ≤3 unelte după ce ai găsit fișierul.
-   EXCEPȚIE — bibliotecă NOUĂ: dacă ordinul are nevoie de un pachet care nu există încă, rulează 'run' cu „npm --prefix backend install <pachet>" (sau frontend) ÎNAINTE de finish — așa package.json + lock rămân sincronizate și verificarea trece.
-
-REGULILE CASEI:
-- Rescrii curat modulul responsabil — fără petice band-aid; potrivește stilul din jur (comentarii în română).
-- Schimbări STRICT în perimetrul ordinului — nimic „din zbor"; nu atingi contoare financiare, nu ștergi date.
-- finish: titlu + corp de PR în română (ce, de ce). Dacă sistemul îți spune că buildul a picat, repari și re-finish (ai un număr mic de runde).`
+THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step budget is small, ~24; spend it on work, never on wandering):
+1. UNDERSTAND. First message: restate the order in ONE line and name what proves it done. No tool call yet.
+2. CHECK REALITY. Find the file with 'grep' (a pattern from the order) — do NOT explore with ls/read step by step. NEVER assume what the code says: read the actual lines ('read' with from/to, only the relevant range). Never read the same file twice. Do NOT read AI-HANDOFF.md (it is huge) unless the order explicitly asks about architecture.
+3. PLAN. One line: which file(s) change and how the change will be verified.
+4. EXECUTE. 'edit' on existing files (EXACT old text → new text) — the safe path, because your output has a cap and a 'write' on a large file gets cut in half and corrupts it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
+5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
+   EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
+6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.`
 
 // REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
 // „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
@@ -893,7 +889,7 @@ async function main() {
           pasiSterili++
           messages.push({
             role: 'user',
-            content: `Continuă cu uneltele (grep/read/edit/write/run) sau cheamă finish. Nu povesti — lucrează. (${pasiSterili}/${MAX_STERILE} ture irosite)`,
+            content: `Continue with the tools (grep/read/edit/write/run) or call finish. Don't narrate — work. (${pasiSterili}/${MAX_STERILE} wasted turns)`,
           })
           compactHistory(messages)
           continue
@@ -975,7 +971,7 @@ async function main() {
       log(`verificarea a picat — runda de reparație ${reparatii}/${MAX_REPAIR}`)
       messages.push({
         role: 'user',
-        content: `VERIFICAREA A PICAT în atelier. Repară CAUZA (nu peticește) și cheamă din nou 'finish'.\n\n${problema.slice(-3000)}`,
+        content: `THE VERIFICATION FAILED in the workshop. Repair the CAUSE (do not patch over it) and call 'finish' again.\n\n${problema.slice(-3000)}`,
       })
       compactHistory(messages)
     }

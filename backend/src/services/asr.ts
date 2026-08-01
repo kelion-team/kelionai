@@ -9,9 +9,9 @@ import { normalizeLang } from './tts.js'
 // config. Speech is Google-only per spec. Region + model must match asr.ts's
 // original proven values (chirp_3, region 'eu', automatic punctuation).
 
-// REGIUNEA DOVEDITĂ (matrice live, 10 iul): chirp_3 NU EXISTĂ în us-central1 —
-// există în multi-regiunile 'us' și 'eu'. 'eu' = latență minimă pentru
-// utilizatorii europeni. Aceeași regiune și la streaming (asr-stream.ts).
+// THE PROVEN REGION (live matrix, 10 Jul): chirp_3 does NOT EXIST in
+// us-central1 — it exists in the 'us' and 'eu' multi-regions. 'eu' = minimum
+// latency for European users. The same region for streaming (asr-stream.ts).
 const REGION = 'eu'
 
 let auth: GoogleAuth | null = null
@@ -42,18 +42,20 @@ export interface TranscribeOpts {
   // encoded container, so Google needs to be told the format explicitly. When
   // omitted we use autoDecodingConfig (browser WAV/encoded blob).
   pcm?: { sampleRateHertz: number; channels?: number }
-  // Containerul real al MediaRecorder-ului din browser (ex. 'audio/mp4' pe
-  // Safari) — pe calea OpenAI alege extensia fișierului trimis la transcriere.
+  // The real container of the browser's MediaRecorder (e.g. 'audio/mp4' on
+  // Safari) — on the OpenAI path it chooses the extension of the file sent
+  // to transcription.
   mime?: string
 }
 
-// ── REZERVĂ OpenAI (aceeași cheie ca vocea) ──────────────────────────────────
-// AUZUL NU ARE VOIE SĂ MOARĂ (Adrian, 24 iul: „nu mă aude"): dacă Realtime pică
-// pe client, calea batch STT era singura plasă — dar cerea Google STT, care nu
-// e configurat pe VPS → Kelion rămânea surd. Acum: Google primar (dacă există
-// service account), altfel OpenAI /v1/audio/transcriptions pe cheia existentă.
+// ── OpenAI BACKUP (the same key as the voice) ───────────────────────────────
+// HEARING MUST NOT DIE (Adrian, 24 Jul: "he can't hear me"): if Realtime
+// fails on the client, the batch STT path was the only net — but it required
+// Google STT, which is not configured on the VPS → Kelion stayed deaf. Now:
+// Google first (if a service account exists), otherwise OpenAI
+// /v1/audio/transcriptions on the existing key.
 
-// PCM brut → WAV minim (antet 44 bytes), ca OpenAI să-l poată decoda.
+// Raw PCM → minimal WAV (44-byte header), so OpenAI can decode it.
 function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number): Uint8Array {
   const h = Buffer.alloc(44)
   h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8)
@@ -67,11 +69,11 @@ function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number): Uint8A
 async function transcribeOpenAI(audioBase64: string, opts: TranscribeOpts): Promise<TranscribeResult> {
   if (!config.openai.key) return { ok: false, status: 503, error: 'asr_not_configured' }
   let buf: Uint8Array = Buffer.from(audioBase64, 'base64')
-  // OpenAI decodează după EXTENSIA numelui de fișier — o alegem din mimetype-ul
-  // real al browserului (Safari trimite audio/mp4, nu webm), altfel transcrierea
-  // pica exact pe dispozitivele Apple.
+  // OpenAI decodes by the file name's EXTENSION — we choose it from the
+  // browser's real mimetype (Safari sends audio/mp4, not webm), otherwise
+  // transcription failed exactly on Apple devices.
   const mime = (opts.mime ?? '').toLowerCase()
-  let filename = 'audio.webm' // implicit: blob-ul Chrome/Firefox
+  let filename = 'audio.webm' // default: the Chrome/Firefox blob
   if (mime.includes('audio/mp4')) filename = 'audio.mp4'
   else if (mime.includes('audio/ogg')) filename = 'audio.ogg'
   else if (mime.includes('audio/wav')) filename = 'audio.wav'
@@ -100,9 +102,10 @@ async function transcribeOpenAI(audioBase64: string, opts: TranscribeOpts): Prom
 }
 
 /**
- * Transcribe base64 audio. Google STT v2 chirp_3 când există service account
- * (calea originală, dovedită); altfel — sau dacă Google pică — OpenAI pe aceeași
- * cheie ca vocea. Rezultat tipat; fără auth-gate/cost aici (rămân în apelant).
+ * Transcribe base64 audio. Google STT v2 chirp_3 when a service account
+ * exists (the original, proven path); otherwise — or if Google fails —
+ * OpenAI on the same key as the voice. Typed result; no auth-gate/cost here
+ * (they stay with the caller).
  */
 export async function transcribe(audioBase64: string, opts: TranscribeOpts = {}): Promise<TranscribeResult> {
   const audio = audioBase64.trim()
@@ -132,8 +135,9 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         config: {
-          // chirp_3 PESTE TOT (Adrian, 10 iul). Streamingul e deja chirp_3;
-          // calea batch și vocea full-duplex folosesc același model.
+          // chirp_3 EVERYWHERE (Adrian, 10 Jul). Streaming is already
+          // chirp_3; the batch path and the full-duplex voice use the same
+          // model.
           model: 'chirp_3',
           languageCodes: langHint ? [langHint] : ['auto'],
           ...decodingConfig,
@@ -143,7 +147,7 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       }),
     })
     if (!res.ok) {
-      // Google a refuzat — nu rămânem surzi: încercăm OpenAI pe aceeași cheie.
+      // Google refused — we don't stay deaf: we try OpenAI on the same key.
       return transcribeOpenAI(audio, opts)
     }
     const j = (await res.json()) as {

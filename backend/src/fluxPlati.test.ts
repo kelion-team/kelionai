@@ -2,20 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── DOVADA CĂ LANȚUL BANILOR E LEGAT, VERIGĂ CU VERIGĂ ──────────────────────
+// ── PROOF THAT THE MONEY CHAIN IS LINKED, LINK BY LINK ────────────────────
 //
-// Adrian, 31 iul: „verifică că Kelion vede ce e în interior și tot e legat în
-// fluxul plăților" · „dovezi la tot ce rezolvi".
+// Adrian, Jul 31: "check that Kelion sees what's inside and everything is
+// linked in the payments flow" · "proof for everything you solve".
 //
-// Un lanț de plăți se poate rupe în două feluri, și amândouă sunt tăcute:
-// o funcție există dar n-o cheamă nimeni, sau o cheamă cineva care nu rulează
-// niciodată. Testul ăsta citește codul REAL și verifică fiecare legătură —
-// nu descrie fluxul, îl măsoară.
+// A payment chain can break in two ways, and both are silent: a function
+// exists but nobody calls it, or someone who never runs calls it. This test
+// reads the REAL code and checks every link — it doesn't describe the flow,
+// it measures it.
 //
-// Ce a prins la scriere: căutarea naivă după `verificaPlatiNoi` nu găsea niciun
-// apelant, ceea ce părea o ruptură. Nu era: e chemată prin `startCitirePlati()`,
-// pornit la boot. De-aia testul urmărește lanțul prin numele care leagă efectiv,
-// nu prin căutarea unei singure funcții.
+// What it caught at writing time: naively searching for `verificaPlatiNoi`
+// found no caller, which looked like a break. It wasn't: it's called through
+// `startCitirePlati()`, started at boot. That's why the test follows the
+// chain through the names that actually link, not through searching a single
+// function.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -43,12 +44,12 @@ describe('fluxul plăților e legat cap-coadă — măsurat în cod, nu descris'
   it('4. ce citește se potrivește cu codul emis, și potrivirea creditează', () => {
     expect(banking).toContain('crediteazaDupaCod')
     expect(db).toContain('export async function crediteazaDupaCod')
-    // Creditarea trece prin topUpUser — singurul loc care mișcă soldul.
+    // Crediting goes through topUpUser — the only place that moves the balance.
     expect(db).toMatch(/crediteazaDupaCod[\s\S]{0,3000}topUpUser/)
   })
 
   it('5. aceeași plată văzută de două ori NU creditează de două ori', () => {
-    // Idempotența e apărată de referința bancară, nu de noroc.
+    // Idempotency is guarded by the bank reference, not by luck.
     expect(db).toMatch(/crediteazaDupaCod[\s\S]{0,3000}(bank_ref|ON CONFLICT|already|deja)/i)
   })
 
@@ -57,13 +58,14 @@ describe('fluxul plăților e legat cap-coadă — măsurat în cod, nu descris'
     expect(sursa('./routes/admin.ts')).toContain('stareCitirePlati')
   })
 
-  // UNDE SE OPREȘTE ASTĂZI, și de ce e important să fie scris, nu doar știut:
-  // fără cheile GoCardless, `startCitirePlati` iese pe loc și TOT lanțul de mai
-  // sus rămâne teoretic — userul plătește, banii intră în contul lui Adrian, și
-  // creditele nu apar niciodată singure. Nu e un bug; e o poartă. Dar o poartă
-  // închisă tăcut arată exact ca un lanț rupt, de-aia o afirmăm aici.
+  // WHERE IT STOPS TODAY, and why it matters that it's written, not just
+  // known: without the Enable Banking keys, `startCitirePlati` exits
+  // immediately and the WHOLE chain above stays theoretical — the user pays,
+  // the money enters Adrian's account, and the credits never appear by
+  // themselves. It's not a bug; it's a gate. But a silently closed gate looks
+  // exactly like a broken chain, that's why we assert it here.
   it('7. fără chei, cititorul se oprește EXPLICIT și o spune — nu tace', () => {
-    expect(banking).toMatch(/gocardless\.secretId[\s\S]{0,200}return/)
-    expect(banking).toMatch(/console\.log\([\s\S]{0,120}(oprit|lipsesc)/i)
+    expect(banking).toMatch(/enableBanking\.appId[\s\S]{0,200}return/)
+    expect(banking).toMatch(/console\.log\([\s\S]{0,120}(off|missing)/i)
   })
 })

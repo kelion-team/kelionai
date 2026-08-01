@@ -2,23 +2,24 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── „KELION" + RESTUL FRAZEI ────────────────────────────────────────────────
+// ── "KELION" + THE REST OF THE SENTENCE ────────────────────────────────────
 //
-// Adrian, 31 iul: „vorbește când nu se vorbește cu el; ce aude și nu are
-// legătură cu el, reacționează. Regula implementată — Kelion și restul frazei
-// — nu o aplică."
+// Adrian, Jul 31: "it speaks when nobody is talking to it; what it hears that
+// has nothing to do with it, it reacts to. The implemented rule — Kelion and
+// the rest of the sentence — it doesn't apply it."
 //
-// Ce era: o fereastră de timp care se REÎNNOIA din propriul ei conținut —
-// la fiecare frază pe care o lăsa să treacă, ȘI la fiecare frază spusă de
-// Kelion însuși. Se hrănea din ce accepta, deci nu se închidea cât se auzea
-// ceva în cameră. Dimineață îi tăiasem durata de la 120s la 45s; n-a ajutat,
-// fiindcă problema nu era durata, ci reînnoirea.
+// What it was: a time window that RENEWED itself from its own content — at
+// every sentence it let through, AND at every sentence spoken by Kelion
+// itself. It fed on what it accepted, so it never closed while something was
+// heard in the room. In the morning I had cut its duration from 120s to 45s;
+// it didn't help, because the problem wasn't the duration, but the renewal.
 //
-// Ce e: poarta se judecă PER FRAZĂ. Numele în frază → răspunde. Fără nume →
-// tăcere. O singură excepție, consumabilă: replica la propria lui întrebare.
+// What it is: the gate is judged PER SENTENCE. The name in the sentence →
+// answer. No name → silence. A single, consumable exception: the reply to its
+// own question.
 //
-// Frontendul n-are runner de teste; îl citim de aici, ca la fluxPlati.test.ts.
-// Regresia pe care o păzește e scumpă (vorbește peste oameni) și tăcută.
+// The frontend has no test runner; we read it from here, like fluxPlati.test.ts.
+// The regression it guards is expensive (it talks over people) and silent.
 const voce = readFileSync(
   fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)),
   'utf8',
@@ -46,7 +47,7 @@ describe('Kelion nu-și mai ține singur poarta deschisă', () => {
   })
 
   it('o afirmație a lui închide poarta pe loc (numele redevine obligatoriu)', () => {
-    // Ramura `: 0` din linia de mai sus e chiar asta — o afirmație nu invită.
+    // The `: 0` branch in the line above is exactly this — a statement doesn't invite.
     expect(voce).toMatch(/REPLY_WINDOW_MS : 0/)
   })
 

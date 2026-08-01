@@ -3,11 +3,11 @@ import { getSessionUser } from '../session.js'
 import { saveKv, loadKv, userKey } from '../db.js'
 import { getCatalog, resolveModel, type ModelTier } from '../services/openrouter.js'
 
-// ── MODELE SELECTABILE — catalog live + selecția per-user ─────────────────────
-// GET  /api/models/catalog   → modelele selectabile, grupate pe tier (auto-update)
-// GET  /api/models/selection → ce modele are userul alese acum (chat + work)
-// PUT  /api/models/selection → salvează alegerea userului (validată pe catalog)
-// Selecția se persistă în KV (fără schemă nouă), la fel ca aranjarea avatarului.
+// ── SELECTABLE MODELS — live catalog + the per-user selection ───────────────
+// GET  /api/models/catalog   → the selectable models, grouped by tier (auto-update)
+// GET  /api/models/selection → which models the user has chosen now (chat + work)
+// PUT  /api/models/selection → saves the user's choice (validated on the catalog)
+// The selection is persisted in KV (no new schema), like the avatar layout.
 
 const KEY = (email: string): string => `model_choice:${userKey(email)}`
 
@@ -27,9 +27,9 @@ async function readSelection(email: string): Promise<Selection> {
       work = typeof p.work === 'string' ? p.work : null
     }
   } catch {
-    /* fallback pe implicit */
+    /* fall back to the default */
   }
-  // Validăm pe catalog: dacă modelul salvat nu mai există, cade pe implicit.
+  // We validate on the catalog: if the saved model no longer exists, it falls back to the default.
   return {
     chat: await resolveModel('chat', chat),
     work: await resolveModel('work', work),
@@ -58,7 +58,7 @@ export async function modelRoutes(app: FastifyInstance): Promise<void> {
       if ((tier !== 'chat' && tier !== 'work') || !model) {
         return reply.code(400).send({ error: 'bad_request' })
       }
-      // Acceptăm doar un model existent în tier-ul cerut (altfel s-ar salva gunoi).
+      // We only accept a model that exists in the requested tier (otherwise garbage would be saved).
       const resolved = await resolveModel(tier, model)
       if (resolved !== model) return reply.code(400).send({ error: 'model_not_in_tier' })
 

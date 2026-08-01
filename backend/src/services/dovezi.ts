@@ -1,31 +1,33 @@
-// ── CELE OPT DOVEZI ALE AUTONOMIEI ───────────────────────────────────────────
+// ── THE EIGHT PROOFS OF AUTONOMY ────────────────────────────────────────────
 //
-// Adrian, 31 iul: „trebuie 8 din 8 dovezi."
+// Adrian, 31 Jul: "it must be 8 out of 8 proofs."
 //
-// Până acum, nivelul autonomiei era o afirmație de-a mea, într-un chat care se
-// pierde. Aici e o CITIRE: fiecare nivel se uită în baza de date după urma lui
-// concretă — un ordin, un PR, o măsurătoare, o oră — și spune „dovedit" doar
-// dacă a găsit-o. Dacă nu, spune „nedovedit" și CE anume ar fi dovada.
+// Until now, the autonomy level was an assertion of mine, in a chat that gets
+// lost. Here is a READING: each level looks into the database for its
+// concrete trace — an order, a PR, a measurement, a timestamp — and says
+// "proven" only if it found it. If not, it says "unproven" and WHAT exactly
+// the proof would be.
 //
-// Regula #1 a ownerului, aplicată propriei mele evidențe: nimic aici nu se
-// bifează pe cuvântul cuiva. O dovadă lipsă e o dovadă lipsă, nu „probabil merge".
+// The owner's rule #1, applied to my own evidence: nothing here gets checked
+// off on anyone's word. A missing proof is a missing proof, not "it probably
+// works".
 import { listBuildJobs, listeazaCerinte, loadKv, getCapabilityGaps } from '../db.js'
 
 export interface Dovada {
-  /** 1..8 — scara din discuția din 30-31 iul. */
+  /** 1..8 — the scale from the 30-31 Jul discussion. */
   nivel: number
-  /** Ce înseamnă nivelul, pe limba omului. */
+  /** What the level means, in the person's language. */
   ce: string
-  /** Ce ANUME ar dovedi-o — scris ÎNAINTE, ca ținta să nu se mute. */
+  /** What EXACTLY would prove it — written BEFOREHAND, so the target doesn't move. */
   cum: string
   dovedit: boolean
-  /** Urma găsită în bază: ordin, PR, măsurătoare. Gol dacă nu există. */
+  /** The trace found in the database: order, PR, measurement. Empty if there is none. */
   dovada: string
-  /** Când s-a întâmplat. */
+  /** When it happened. */
   cand: string | null
 }
 
-/** Un job pornit de bucla autonomă (nu de om). */
+/** A job started by the autonomous loop (not by a human). */
 function alLui(j: { orderedBy?: string }): boolean {
   return String(j.orderedBy ?? '').toLowerCase().startsWith('kelion')
 }
@@ -43,8 +45,9 @@ export async function dovezileAutonomiei(): Promise<{ dovedite: number; din: num
   const golRezolvat = goluri.find((g) => g.resolved && String(g.triage ?? '').includes('DE IMPLEMENTAT'))
   const trecereBucla = await loadKv('autonomie:ultima').catch(() => null)
 
-  // Nivelul 8: un lanț ÎNTREG, fără nicio atingere de om — o cerință care a
-  // trecut singură prin analiză, construcție, PR și verificare pe live.
+  // Level 8: an ENTIRE chain, with no human touch — a requirement that
+  // went by itself through analysis, construction, PR and verification on
+  // live.
   const capCoada = verificate.find((c) => c.aleasa && c.dovada && c.job_id)
 
   const d: Dovada[] = [
@@ -122,8 +125,9 @@ export async function dovezileAutonomiei(): Promise<{ dovedite: number; din: num
     },
   ]
 
-  // Ce n-a fost găsit rămâne gol — dar spunem MĂCAR dacă bucla trăiește, ca să
-  // se deosebească „n-a apucat încă" de „nu merge deloc".
+  // What wasn't found stays empty — but we say AT LEAST whether the loop
+  // is alive, so "hasn't got here yet" can be told apart from "doesn't work
+  // at all".
   for (const x of d) {
     if (!x.dovedit && !x.dovada) {
       x.dovada = trecereBucla ? 'încă nedovedit — bucla merge, dar n-a ajuns aici' : 'încă nedovedit'

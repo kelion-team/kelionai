@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { validateRunbook, RUNBOOKS } from './runbooks.js'
 import { isValidBranch, normalizeBranch } from './github.js'
 
-// FĂRĂ RESTRICȚII (ordinul lui Adrian, 25 iul): nu există aprobare, plafoane
-// sau blocări — gărzile rămase sunt pur TEHNICE (nume valide), nu de politică.
+// NO RESTRICTIONS (Adrian's order, Jul 25): there is no approval, no
+// ceilings and no blocks — the remaining guards are purely TECHNICAL (valid
+// names), not policy.
 describe('validateRunbook', () => {
   it('refuză un runbook necunoscut și listează ce există', () => {
     const r = validateRunbook('sterge-tot')
@@ -25,23 +26,24 @@ describe('validateRunbook', () => {
     for (const rb of Object.values(RUNBOOKS)) expect(allowed.has(rb.workflow)).toBe(true)
   })
 
-  // PROBA RESTAURĂRII (Adrian, 30 iul). Un backup neprobat nu e o plasă, e o
-  // presupunere. Proba TREBUIE să rămână nedistructivă: dacă cineva scapă
-  // vreodată restaurarea peste baza VIE, pierde tot exact în ziua în care avea
-  // nevoie de plasă. De-aia comanda e ținută sub test, nu doar recitită.
+  // THE RESTORE DRILL (Adrian, Jul 30). An untested backup is not a net, it's
+  // an assumption. The drill MUST stay non-destructive: if someone ever lets
+  // the restore slip over the LIVE database, they lose everything exactly on
+  // the day they needed the net. That's why the command is kept under test,
+  // not just recited.
   it('proba de restaurare e NEDISTRUCTIVĂ: bază temporară, ștearsă la final', () => {
     const cmd = RUNBOOKS['proba-restaurare']?.inputs?.cmd ?? ''
     expect(cmd).toBeTruthy()
-    // Restaurează ÎNTR-O BAZĂ DE PROBĂ, nu peste cea vie.
+    // It restores INTO A DRILL DATABASE, not over the live one.
     expect(cmd).toContain('CREATE DATABASE $BAZA')
     expect(cmd).toContain('kelion_proba_restaurare')
-    // Și o șterge după ce a numărat.
+    // And it drops it after counting.
     expect(cmd).toContain('DROP DATABASE $BAZA')
-    // Se oprește la prima eroare — o restaurare „pe jumătate" nu are voie să
-    // treacă drept reușită.
+    // It stops at the first error — a "half" restore is not allowed to pass
+    // as a success.
     expect(cmd).toContain('ON_ERROR_STOP=1')
     expect(cmd.startsWith('set -e;')).toBe(true)
-    // NU are voie să scrie în baza vie.
+    // It is NOT allowed to write into the live database.
     expect(cmd).not.toContain('psql "$PGURL" -f')
   })
 })

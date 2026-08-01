@@ -2,20 +2,21 @@ import { config } from '../config.js'
 import { getOpenRouterBalance } from './openrouter.js'
 import { sendMail } from './mail.js'
 
-// ── ALERTĂ „punga lui Kelion e pe terminate" (Adrian, 24 iul) ────────────────
-// Creierul (OpenRouter) e alimentat CENTRAL din contul lui Kelion. Când soldul
-// REAL scade sub prag, ANUNȚĂM adminul pe email că e nevoie să depună bani —
-// înainte să pice creierul în mijlocul unei conversații reale. Un mail/zi cât
-// timp e jos (fără spam); când soldul se reface, resetăm și putem alerta din nou.
+// ── ALERT "Kelion's pouch is running out" (Adrian, 24 Jul) ──────────────────
+// The brain (OpenRouter) is fed CENTRALLY from Kelion's account. When the
+// REAL balance drops below the threshold, we NOTIFY the admin by email that
+// he needs to deposit money — before the brain drops in the middle of a
+// real conversation. One mail/day while it's low (no spam); when the balance
+// recovers, we reset and can alert again.
 
 let lastAlertAt = 0
 const ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000
 
 export async function checkOpenRouterBalance(): Promise<void> {
-  const bal = await getOpenRouterBalance(true) // valoarea LIVE, nu din cache
-  if (!bal.ok) return // cheie lipsă / OpenRouter inaccesibil → nu alarmăm fals
+  const bal = await getOpenRouterBalance(true) // the LIVE value, not from cache
+  if (!bal.ok) return // missing key / OpenRouter unreachable → no false alarm
   if (!bal.low) {
-    lastAlertAt = 0 // s-a realimentat → permite o alertă nouă data viitoare
+    lastAlertAt = 0 // topped up again → allow a new alert next time
     return
   }
   if (Date.now() - lastAlertAt < ALERT_COOLDOWN_MS) return

@@ -1,17 +1,18 @@
 import { config } from '../config.js'
 import { readSSE } from './sse.js'
 
-// ── MODELE SELECTABILE — OpenRouter (o singură cheie pentru tot creierul) ─────
-// O cheie OpenRouter dă acces la GPT/Gemini/Claude. Catalogul se ia LIVE și se
-// pune în cache scurt: modele noi apar AUTOMAT, fără deploy (Adrian: „autoupdate").
-// Costul REAL per apel vine din răspuns (usage.cost, în USD) → ledger precis.
-// Vocea NU trece pe aici (OpenRouter n-are model realtime) — rămâne OpenAI direct.
+// ── SELECTABLE MODELS — OpenRouter (one key for the whole brain) ─────────────
+// One OpenRouter key gives access to GPT/Gemini/Claude. The catalog is fetched
+// LIVE and cached briefly: new models appear AUTOMATICALLY, no deploy needed
+// (Adrian: "autoupdate").
+// The REAL per-call cost comes from the response (usage.cost, in USD) → precise ledger.
+// Voice does NOT go through here (OpenRouter has no realtime model) — stays on OpenAI direct.
 
 const OR_BASE = 'https://openrouter.ai/api/v1'
 const CATALOG_TTL_MS = 10 * 60 * 1000
 
-// 'top' = treapta finală a ladder-ului (Fable 5, doar dificultate extremă) —
-// validează pe ACELAȘI catalog filtrat vision+tools ca 'work', fallback diferit.
+// 'top' = the final rung of the ladder (Fable 5, only for extreme difficulty) —
+// validated against the SAME vision+tools filtered catalog as 'work', different fallback.
 export type ModelTier = 'chat' | 'work' | 'top'
 
 export interface CatalogModel {
@@ -42,15 +43,15 @@ function providerOf(id: string): CatalogModel['provider'] | null {
   if (id.startsWith('openai/')) return 'openai'
   if (id.startsWith('google/')) return 'google'
   if (id.startsWith('anthropic/')) return 'anthropic'
-  // CREIERUL FULL FREE (Adrian, 27 iul: „da" pe schema $0): nvidia (nemotron
-  // omni/ultra) și cohere (north-mini-code) intră în catalog DOAR pentru
-  // variantele lor gratuite cu tools — vezi filtrarea pe liste mai jos.
+  // THE FULL FREE BRAIN (Adrian, Jul 27: "yes" on the $0 schema): nvidia (nemotron
+  // omni/ultra) and cohere (north-mini-code) enter the catalog ONLY for their
+  // free variants with tools — see the list filtering below.
   if (id.startsWith('nvidia/')) return 'nvidia'
   if (id.startsWith('cohere/')) return 'cohere'
   return null
 }
 
-// Excludem variantele vechi/ieftine irelevante ca lista să fie curată pentru user.
+// Exclude old/cheap irrelevant variants so the list stays clean for the user.
 function isSelectable(id: string): boolean {
   return !/gpt-3\.5|gpt-4-turbo-preview|claude-3-haiku|-0613|-16k|preview-\d|customtools/.test(id)
 }
@@ -59,7 +60,7 @@ export function toModel(m: RawModel): CatalogModel | null {
   const provider = providerOf(m.id)
   if (!provider) return null
   const sp = m.supported_parameters ?? []
-  if (!sp.includes('tools')) return null // toate capabilitățile cer tool-use
+  if (!sp.includes('tools')) return null // all capabilities require tool-use
   if (!isSelectable(m.id)) return null
   return {
     id: m.id,
@@ -70,7 +71,7 @@ export function toModel(m: RawModel): CatalogModel | null {
   }
 }
 
-/** Ia catalogul live (cu cache scurt) și-l grupează pe tier-uri selectabile. */
+/** Fetches the live catalog (with short cache) and groups it into selectable tiers. */
 export async function getCatalog(force = false): Promise<Catalog> {
   if (!force && cache && Date.now() - cache.fetchedAt < CATALOG_TTL_MS) return cache
   if (!config.openrouter.key) {
@@ -89,72 +90,74 @@ export async function getCatalog(force = false): Promise<Catalog> {
   return cache
 }
 
-/** Împarte modelele pe cele două liste oferite userului. Pură (fără rețea, fără
- *  chei) ca să poată fi ținută sub test — filtrul ăsta decide ce vede userul în
- *  meniu, deci nu are voie să fie „verificat din ochi". */
+/** Splits the models into the two lists offered to the user. Pure (no network, no
+ *  keys) so it can be kept under test — this filter decides what the user sees in
+ *  the menu, so it must never be "verified by eye". */
 export function groupCatalog(models: CatalogModel[]): { chat: CatalogModel[]; work: CatalogModel[] } {
-  // COMPATIBILITATE 100% (Adrian, 25 iul: „păstrăm în liste doar cele
-  // compatibile 100% la voce și creier, vedere etc."): un cadru de cameră care
-  // ajunge la creier PE VEDERE (needsVision forțează escaladarea aici — vezi
-  // chat.ts) trebuie servit de un model care CHIAR vede — altfel poza ar fi
-  // ignorată/ar pica. Filtru REAL pe catalogul live, nu presupunere.
-  // VEDEREA E OBLIGATORIE ȘI PE LISTA DE CHAT (ordinul lui Adrian, 29 iul: „se
-  // afișează doar AI care respectă TOATE funcționalitățile aplicației — văz,
-  // auz, voce live"). Până acum doar `work` cerea vedere; lista de chat oferea
-  // și modele oarbe. Escaladarea pe vedere le acoperea din spate, dar userul tot
-  // vedea în meniu un model care nu poate tot — iar o listă în care alegi ceva
-  // incomplet e o promisiune ruptă. Acum: în AMBELE liste, doar modele care VĂD
-  // (aici) și care ȘTIU UNELTE (impus în toModel, fără de care n-ar merge nici
-  // Google, nici memoria, nici comenzile, nici escaladarea vocii pe creier).
-  // FĂRĂ LISTĂ DE FURNIZORI (Adrian, 30 iul: „trebuie să pot decide oricare model
-  // din listă" · „dacă tu pui bariere nedorite și neaprobate de mine, nu înseamnă
-  // că-mi sabotezi munca?"). Filtrul pe firme — openai/google/anthropic, plus
-  // nvidia/cohere doar pe gratuit — era o judecată a mea („să nu se dilute
-  // listele"), nu ordinul lui. Ordinul lui, din 29 iul, era despre CAPABILITĂȚI:
-  // „se afișează doar AI care respectă TOATE funcționalitățile aplicației".
-  // Deci rămâne exact atât: vede (aici) și știe unelte (impus în toModel).
-  // Orice model de pe OpenRouter care le are, îi apare în listă.
+  // 100% COMPATIBILITY (Adrian, Jul 25: "keep in the lists only those 100%
+  // compatible with voice and brain, vision etc."): a camera frame that reaches
+  // the brain THROUGH VISION (needsVision forces escalation here — see chat.ts)
+  // must be served by a model that ACTUALLY sees — otherwise the picture would be
+  // ignored/would crash. A REAL filter on the live catalog, not an assumption.
+  // VISION IS MANDATORY ON THE CHAT LIST TOO (Adrian's order, Jul 29: "only AI
+  // that respects ALL the application's features is shown — sight, hearing, live
+  // voice"). Until now only `work` required vision; the chat list also offered
+  // blind models. Vision escalation covered them from behind, but the user still
+  // saw in the menu a model that can't do everything — and a list where you pick
+  // something incomplete is a broken promise. Now: in BOTH lists, only models
+  // that SEE (here) and KNOW TOOLS (enforced in toModel, without which neither
+  // Google, nor memory, nor commands, nor voice-to-brain escalation would work).
+  // NO PROVIDER LIST (Adrian, Jul 30: "I must be able to decide any model from
+  // the list" · "if you put up unwanted barriers not approved by me, doesn't that
+  // mean you're sabotaging my work?"). The per-company filter — openai/google/
+  // anthropic, plus nvidia/cohere only on free — was my judgment ("so the lists
+  // don't get diluted"), not his order. His order, from Jul 29, was about
+  // CAPABILITIES: "only AI that respects ALL the application's features is shown".
+  // So exactly that remains: sees (here) and knows tools (enforced in toModel).
+  // Any model on OpenRouter that has them appears in the list.
   const chat = models.filter((m) => m.vision)
-  // CREIERUL FULL FREE (Adrian, 27 iul): treapta work acceptă și modelele
-  // GRATUITE cu vedere+tools (gemma :free, nemotron omni/vl :free) — nucleul
-  // implicit e acum gratuit, iar adminul le poate alege și manual din listă.
+  // THE FULL FREE BRAIN (Adrian, Jul 27): the work tier also accepts FREE models
+  // with vision+tools (gemma :free, nemotron omni/vl :free) — the default core is
+  // now free, and the admin can also pick them manually from the list.
   //
-  // ── VEDEREA SE DELEGĂ, NU MAI EXCLUDE (Adrian, 31 iul) ────────────────────
+  // ── VISION IS DELEGATED, NO LONGER EXCLUDES (Adrian, Jul 31) ────────────────
   //
-  // El: „rămâne Nemotron 3 Ultra 550B, cine face vedere?"
+  // Him: "Nemotron 3 Ultra 550B stays, who does the seeing?"
   //
-  // Ultra e cel mai capabil creier gratuit măsurat (550B, un milion de context,
-  // unelte, gândire) și e ORB. Cu filtrul de mai sus aplicat și aici, nu putea
-  // apărea NICIODATĂ în listă — de-asta îl tot căuta și nu-l găsea.
+  // Ultra is the most capable free brain measured (550B, one million context,
+  // tools, thinking) and it is BLIND. With the filter above applied here too, it
+  // could NEVER appear in the list — that's why he kept looking for it and not
+  // finding it.
   //
-  // Regula lui din 29 iul rămâne în picioare, dar la nivelul care conta de fapt:
-  // „se afișează doar AI care respectă TOATE funcționalitățile aplicației".
-  // Funcționalitatea e a APLICAȚIEI, nu a unui singur model. De acum, o tură cu
-  // poză e servită automat de un model care vede (vezi `bestVisionModel`), iar
-  // restul de creierul ales. Deci fiecare model din listă „face tot" — unele
-  // delegând vederea, ceea ce omul nu trebuie să știe ca să funcționeze.
+  // His rule from Jul 29 still stands, but at the level that actually mattered:
+  // "only AI that respects ALL the application's features is shown". The feature
+  // belongs to the APPLICATION, not to a single model. From now on, a turn with
+  // a picture is automatically served by a model that sees (see `bestVisionModel`),
+  // and the rest by the chosen brain. So every model in the list "does everything"
+  // — some by delegating vision, which the human doesn't need to know about for
+  // it to work.
   //
-  // `chat` (treapta ieftină, publică) rămâne cu vedere obligatorie: acolo nu
-  // există escaladare, deci un model orb chiar ar rupe o tură cu poză.
+  // `chat` (the cheap, public tier) keeps vision mandatory: there is no
+  // escalation there, so a blind model really would break a turn with a picture.
   const work = models
 
   const byId = (a: CatalogModel, b: CatalogModel): number => a.id.localeCompare(b.id)
   return { chat: chat.sort(byId), work: work.sort(byId) }
 }
 
-// ── SOLDUL REAL AL CONTULUI OPENROUTER = „punga lui Kelion" (Adrian, 24 iul) ──
-// Creierul (OpenRouter) e alimentat CENTRAL din contul lui Kelion, nu de fiecare
-// user separat. Adminul trebuie să vadă VALOAREA EXACTĂ rămasă (ca pe pagina
-// openrouter.ai/credits: „$5,83") ca să știe când să depună bani. Userii NU văd
-// asta niciodată (ruta e admin-only). Endpoint oficial: GET /credits →
-// { data: { total_credits, total_usage } }; rămas = total_credits − total_usage.
+// ── THE REAL BALANCE OF THE OPENROUTER ACCOUNT = "Kelion's wallet" (Adrian, Jul 24)
+// The brain (OpenRouter) is funded CENTRALLY from Kelion's account, not by each
+// user separately. The admin must see the EXACT remaining VALUE (like on the
+// openrouter.ai/credits page: "$5.83") so he knows when to top up. Users NEVER
+// see this (the route is admin-only). Official endpoint: GET /credits →
+// { data: { total_credits, total_usage } }; remaining = total_credits − total_usage.
 export interface OpenRouterBalance {
   ok: boolean
-  balance: number // USD rămași, exact (total_credits − total_usage)
+  balance: number // USD remaining, exact (total_credits − total_usage)
   totalCredits: number
   totalUsage: number
   currency: 'usd'
-  low: boolean // sub prag → adminul trebuie să depună bani
+  low: boolean // below threshold → the admin must top up
   threshold: number
   topup: string
   error?: string
@@ -179,30 +182,30 @@ export async function getOpenRouterBalance(force = false): Promise<OpenRouterBal
     const j = (await r.json().catch(() => ({}))) as {
       data?: { total_credits?: number; total_usage?: number }
     }
-    // ── UN RĂSPUNS PE CARE NU-L ÎNȚELEG NU E „ZERO DOLARI" ──────────────────
+    // ── A RESPONSE I DON'T UNDERSTAND IS NOT "ZERO DOLLARS" ───────────────────
     //
-    // Adrian, 31 iul: pagina OpenRouter îi arăta $10,00, iar bara aplicației
-    // „OpenRouter $0.00", roșu intermitent — „depune bani!". Mai rău: cu câteva
-    // ore înainte îi spusesem eu, negru pe alb, că pilula NU minte și că zeroul
-    // ăla e o măsurătoare reușită. Nu era.
+    // Adrian, Jul 31: the OpenRouter page showed him $10.00, while the app bar
+    // showed "OpenRouter $0.00", flashing red — "top up!". Worse: a few hours
+    // earlier I had told him, in black and white, that the pill does NOT lie and
+    // that the zero was a successful measurement. It wasn't.
     //
-    // Cauza, aici: `ok: true` se punea imediat ce HTTP-ul era 200. Dar dacă
-    // corpul nu se parsează (`.catch(() => ({}))`), sau lipsește `data`, sau
-    // câmpurile s-au redenumit la furnizor, atunci `?? 0` transformă tăcut o
-    // CITIRE EȘUATĂ în „ai zero dolari" — cu tot cu alarma roșie. Exact tiparul
-    // „£0.00" din dimineața asta, în alt loc: un eșec de citire prezentat ca
-    // stare stabilită.
+    // The cause, here: `ok: true` was set as soon as the HTTP was 200. But if
+    // the body doesn't parse (`.catch(() => ({}))`), or `data` is missing, or
+    // the fields got renamed at the provider, then `?? 0` silently turns a
+    // FAILED READ into "you have zero dollars" — red alarm included. Exactly the
+    // "£0.00" pattern from this morning, elsewhere: a read failure presented as
+    // an established state.
     //
-    // Acum: dacă nu găsesc cifrele acolo unde le aștept, spun că NU POT CITI.
-    // Bara are deja ramura pentru asta și scrie „⚠ OpenRouter".
+    // Now: if I don't find the figures where I expect them, I say I CANNOT READ.
+    // The bar already has the branch for that and writes "⚠ OpenRouter".
     const d = j?.data
     const totalCredits = Number(d?.total_credits)
     const totalUsage = Number(d?.total_usage)
     if (!d || !Number.isFinite(totalCredits) || !Number.isFinite(totalUsage))
-      // Punem în eroare CHEILE primite (doar numele, nicio valoare): dacă
-      // furnizorul schimbă forma răspunsului, următorul care se uită vede din
-      // prima ce a venit, în loc să caute o zi ca azi.
-      return { ...base, error: `forma_neasteptata:${Object.keys(d ?? j ?? {}).join(',').slice(0, 80) || 'gol'}` }
+      // Put the RECEIVED KEYS in the error (names only, no values): if the
+      // provider changes the response shape, the next person looking sees right
+      // away what came in, instead of searching for a day like today.
+      return { ...base, error: `unexpected_shape:${Object.keys(d ?? j ?? {}).join(',').slice(0, 80) || 'empty'}` }
     const balance = Math.round((totalCredits - totalUsage) * 100) / 100
     const val: OpenRouterBalance = {
       ...base, ok: true, balance, totalCredits, totalUsage, low: balance < OR_LOW_THRESHOLD,
@@ -214,99 +217,102 @@ export async function getOpenRouterBalance(force = false): Promise<OpenRouterBal
   }
 }
 
-// Dificultatea cerută de sarcină (0-100), pur euristic din text (0 cost/latență).
-// Semnale: lungime, raționament/analiză, cod/depanare, multi-pas. Pe baza ei
-// ESCALADĂM chat→creier (Adrian: „legate, escaladează singur").
+// The difficulty demanded by the task (0-100), purely heuristic from text (0
+// cost/latency). Signals: length, reasoning/analysis, code/debugging, multi-step.
+// Based on it we ESCALATE chat→brain (Adrian: "linked, escalate on your own").
 export function taskDifficulty(text: string): number {
   const t = (text || '').toLowerCase()
-  let d = 15 // conversație simplă: salut, întrebare scurtă, mulțumire
+  let d = 15 // simple conversation: greeting, short question, thanks
   const len = t.length
   if (len > 1000) d += 65
   else if (len > 500) d += 45
   else if (len > 200) d += 20
-  // Raționament / analiză / explicație aprofundată.
+  // Reasoning / analysis / in-depth explanation.
   if (/(analiz[ăae]|demonstr|rezolv[ăa]|[îi]n detaliu|pas cu pas|g[âa]nde[șs]te|ra[țt]ion|argument[ea]|compar[ăa]|evalu[eaă]|de ce\b|cum func[țt]ion|strategi[ea]|plan detaliat|explic)/.test(t)) d += 65
-  // Cod / software / depanare — cel mai exigent.
+  // Code / software / debugging — the most demanding.
   if (/(algoritm|debug|\bcod\b|\bprogram|func[țt]i|script|\bbug\b|refactor|optimiz|compil|stack ?trace|except|sql|regex)/.test(t)) d += 70
-  // Multi-pas.
+  // Multi-step.
   if ((t.match(/\?/g) || []).length >= 3 || /(și apoi|dup[ăa] care|mai [îi]nt[âa]i)/.test(t)) d += 12
   return Math.min(100, Math.max(0, d))
 }
 
-// Prag de escaladare: peste el, cererea urcă de la CHAT la CREIER.
+// Escalation threshold: above it, the request climbs from CHAT to BRAIN.
 export const ESCALATE_AT = 60
-// LADDER PE 3 TREPTE (Adrian, 25 iul: „la creier gpt-5-mini până la Fable"):
-// gratuit (chat) → ieftin-capabil (creier, implicit) → Fable 5 DOAR pe
-// dificultate cu adevărat extremă. Sub acest prag suplimentar, creierul
-// folosește modelul ieftin (workDefault/sel.work); peste el, urcă la
-// TOP_DEFAULT indiferent ce a ales userul — rezervat pentru cazurile chiar grele.
+// 3-RUNG LADDER (Adrian, Jul 25: "at the brain, gpt-5-mini up to Fable"):
+// free (chat) → cheap-capable (brain, default) → Fable 5 ONLY on truly extreme
+// difficulty. Below this extra threshold, the brain uses the cheap model
+// (workDefault/sel.work); above it, it climbs to TOP_DEFAULT regardless of what
+// the user picked — reserved for the genuinely hard cases.
 export const ESCALATE_TOP_AT = 85
 
-// INTENȚIE DE EXECUȚIE (Adrian, 25 iul: „escaladarea se face de la cel mai
-// ieftin și capabil model până la sarcini cu adevărat grele, și se revine la
-// chat live") — analiza reală a arătat că modelul ieftin de chat pur și simplu
-// NU chema unelte la ordinele de execuție ale proprietarului (le vorbea, nu le
-// făcea), în timp ce forțarea creierului mare pe FIECARE tură de admin a ars
-// $23+/oră doar pe conversație obișnuită. Soluția corectă: rămâi ieftin
-// implicit, escaladează DOAR pe cererile de acțiune reală — și revii automat
-// la treapta ieftină la următoarea replică (heavy se calculează per-tură, din
-// textul curent, nu se ține agățat).
-// LĂRGIT (Adrian, 27 iul seara: „nu știe ce să facă, doar spune că face" —
-// comenzile de zi cu zi: „deschide youtube", „pune o melodie", „caută X",
-// „fă un audit" NU erau recunoscute ca ordine → rămâneau pe modelul de
-// conversație, care doar povestește. Orice verb de comandă = tura de EXECUȚIE.)
+// EXECUTION INTENT (Adrian, Jul 25: "escalation goes from the cheapest capable
+// model up to truly hard tasks, and returns to live chat") — real analysis showed
+// that the cheap chat model simply did NOT call tools on the owner's execution
+// orders (it talked about them instead of doing them), while forcing the big
+// brain on EVERY admin turn burned $23+/hour on ordinary conversation alone.
+// The correct solution: stay cheap by default, escalate ONLY on real action
+// requests — and automatically return to the cheap rung on the next reply (heavy
+// is computed per-turn, from the current text, not kept latched).
+// WIDENED (Adrian, Jul 27 evening: "it doesn't know what to do, it just says
+// it's doing it" — everyday commands: "open youtube", "play a song", "search X",
+// "run an audit" were NOT recognized as orders → they stayed on the conversation
+// model, which only narrates. Any command verb = an EXECUTION turn.)
 const ACTION_INTENT = /(repar[ăa]|remediaz|execut[ăa]?|ruleaz[ăa]|public[ăa]|deploy|livrez|livreaz[ăa]|scrie\s*cod|corecteaz[ăa]|\bfix\b|adaug[ăa]|schimb[ăa]|instaleaz[ăa]|creeaz[ăa]|[șs]terge|modific[ăa]|\bcommit\b|\bmerge\b|\bpr\b|\bbranch\b|runbook|workflow|restart|backup|afi[șs]eaz[ăa]|arat[ăa](-mi)?\b|diagnostic|deschide|porne[șs]te|opre[șs]te|\bpune\b|caut[ăa]|c[âa]nt[ăa]|salveaz[ăa]|trimite|cite[șs]te|verific[ăa]|uit[ăa]-te|ascult[ăa]|deseneaz[ăa]|genereaz[ăa]|construie[șs]te|\bf[ăa]\b|\baudit\b|raporteaz[ăa]|\braport\b|noteaz[ăa]|programeaz[ăa]|tradu\b|calculeaz[ăa]|rezerv[ăa]|comand[ăa]|monitorizeaz[ăa])/i
 export function hasActionIntent(text: string): boolean {
   return ACTION_INTENT.test(text || '')
 }
 
-// CREIERUL OWNERULUI = AGENT PUTERNIC (regula de fier §14, AI-HANDOFF): pe drumul
-// ownerului modelul NU se cioantă pe gratuit. Alege cel mai bun model PLĂTIT cu
-// vedere+unelte din catalogul LIVE (deci ID garantat valid, nu inventat): preferă
-// Claude/Anthropic (creierul stabilit de owner), altfel OpenAI. null dacă în
-// catalog nu există niciun model plătit capabil (cade pe comportamentul curent).
-// ── OCHII, CÂND CREIERUL E ORB (Adrian, 31 iul: „cine face vedere?") ─────────
+// THE OWNER'S BRAIN = POWERFUL AGENT (iron rule §14, AI-HANDOFF): on the owner's
+// path the model does NOT skimp on free. It picks the best PAID model with
+// vision+tools from the LIVE catalog (so the ID is guaranteed valid, not
+// invented): prefers Claude/Anthropic (the brain settled on by the owner),
+// otherwise OpenAI. null if the catalog has no capable paid model (falls back to
+// current behavior).
+// ── THE EYES, WHEN THE BRAIN IS BLIND (Adrian, Jul 31: "who does the seeing?") ──
 //
-// Ultra gândește cel mai bine dintre gratuite și nu vede deloc. În loc să-l
-// excludem pentru asta, tura CU POZĂ merge la un model care vede; restul rămân
-// la creierul ales. Două meserii, doi specialiști — aceeași idee ca la Aider
-// (unul gândește, altul scrie).
+// Ultra thinks the best of the free ones and sees nothing at all. Instead of
+// excluding it for that, the turn WITH A PICTURE goes to a model that sees; the
+// rest stays with the chosen brain. Two trades, two specialists — the same idea
+// as Aider (one thinks, the other writes).
 //
-// Alegerea se face din catalogul LIVE, nu dintr-o listă scrisă de mână: un id
-// inventat sau scos de furnizor ar rupe exact tura în care omul chiar are
-// nevoie să fie văzut ceva. Preferăm gratuit; dacă nu există niciunul gratuit
-// cu vedere, luăm cel mai ieftin care vede, ca vederea să nu dispară de tot.
+// The choice is made from the LIVE catalog, not from a hand-written list: an
+// invented id or one removed by the provider would break exactly the turn in
+// which the human really needs something to be seen. We prefer free; if no free
+// one with vision exists, we take the cheapest that sees, so vision doesn't
+// disappear altogether.
 export async function bestVisionModel(): Promise<string | null> {
   const cat = await getCatalog().catch(() => null)
   if (!cat) return null
-  // `chat` e deja filtrată pe vedere ȘI unelte (toModel impune uneltele).
+  // `chat` is already filtered on vision AND tools (toModel enforces tools).
   const vazatori = cat.chat
   if (!vazatori.length) return null
   const gratuite = vazatori.filter((m) => m.id.endsWith(':free'))
   const lista = gratuite.length ? gratuite : vazatori
-  // Preferință stabilă și explicabilă: Gemma 4 31B e cel mai mare model DENS
-  // gratuit cu vedere din catalog (măsurat 31 iul). Dacă dispare, luăm primul
-  // din listă — tot din catalogul live, deci tot un id valid.
+  // Stable, explainable preference: Gemma 4 31B is the largest free DENSE model
+  // with vision in the catalog (measured Jul 31). If it disappears, we take the
+  // first in the list — still from the live catalog, so still a valid id.
   return lista.find((m) => m.id.startsWith('google/gemma-4-31b'))?.id ?? lista[0]?.id ?? null
 }
 
 export async function bestPaidWorkModel(): Promise<string | null> {
-  // GARDĂ ANTI-SPARGERE: nu ruta pe PLĂTIT dacă punga OpenRouter e goală — apelul
-  // plătit ar pica (402/insufficient) și creierul s-ar rupe. Fără bani → null →
-  // rămâne pe free, dumb dar FUNCȚIONAL (incident 27 iul: soldul a ajuns la minus).
+  // ANTI-BREAKAGE GUARD: don't route to PAID if the OpenRouter wallet is empty —
+  // the paid call would fail (402/insufficient) and the brain would break. No
+  // money → null → stays on free, dumb but FUNCTIONAL (Jul 27 incident: the
+  // balance went negative).
   //
-  // DAR (Adrian, 30 iul: „Kelion nu execută cerințele"): „n-am putut CITI soldul"
-  // și „soldul e zero" nu sunt același lucru, iar tratate la fel îl coborau tăcut
-  // pe owner pe un model :free care NARează în loc să execute. Garda rămâne — un
-  // apel plătit pe pungă goală chiar rupe tura — dar de acum SPUNE de ce, ca
-  // motivul să fie la o căutare distanță, nu la o zi. (Regula nr. 1.)
+  // BUT (Adrian, Jul 30: "Kelion doesn't execute requirements"): "I couldn't READ
+  // the balance" and "the balance is zero" are not the same thing, and treated
+  // alike they silently demoted the owner to a :free model that NARRATES instead
+  // of executing. The guard stays — a paid call on an empty wallet really does
+  // break the turn — but from now on it SAYS why, so the reason is one search
+  // away, not one day away. (Rule no. 1.)
   const bal = await getOpenRouterBalance().catch(() => null)
   if (!bal || !bal.ok) {
-    console.error('[CREIER] nu pot CITI soldul OpenRouter → rămân pe free (nu știu dacă ai bani)')
+    console.error('[BRAIN] cannot READ the OpenRouter balance → staying on free (unknown whether you have funds)')
     return null
   }
   if (bal.balance <= 0) {
-    console.error(`[CREIER] sold OpenRouter ${bal.balance} → rămân pe free (chiar n-ai credit)`)
+    console.error(`[BRAIN] OpenRouter balance ${bal.balance} → staying on free (you really have no credit)`)
     return null
   }
   const cat = await getCatalog()
@@ -314,20 +320,21 @@ export async function bestPaidWorkModel(): Promise<string | null> {
     (m) => (m.provider === 'anthropic' || m.provider === 'openai') && !m.id.endsWith(':free'),
   )
   if (!paid.length) {
-    console.error(`[CREIER] catalogul nu are niciun model plătit (work=${cat.work.length}) → rămân pe free`)
+    console.error(`[BRAIN] catalog has no paid model (work=${cat.work.length}) → staying on free`)
     return null
   }
   const claude = paid.find((m) => m.provider === 'anthropic')
   return (claude ?? paid[0]).id
 }
 
-/** Validează că un model ales de user e în tier-ul respectiv; altfel implicitul.
+/** Validates that a user-picked model is in the respective tier; otherwise the default.
  *
- *  `fellBack` spune dacă modelul CERUT a fost respins (nu e în catalogul live —
- *  scos de furnizor, sau catalogul n-a putut fi citit). Fără el, înlocuirea era
- *  TĂCUTĂ: alegeai un model din Admin→Modele, el dispărea de la furnizor, iar tu
- *  primeai în tăcere implicitul `:free` — care vorbește în loc să execute. Exact
- *  reclamația „nu ascultă cerința, face ce vrea el". */
+ *  `fellBack` says whether the REQUESTED model was rejected (not in the live
+ *  catalog — removed by the provider, or the catalog couldn't be read). Without
+ *  it, the replacement was SILENT: you'd pick a model in Admin→Models, it would
+ *  disappear from the provider, and you'd silently get the `:free` default —
+ *  which talks instead of executing. Exactly the complaint "it doesn't follow
+ *  the requirement, it does what it wants". */
 export async function resolveModelChecked(
   tier: ModelTier,
   wanted?: string | null,
@@ -336,7 +343,7 @@ export async function resolveModelChecked(
     tier === 'chat' ? config.openrouter.chatDefault : tier === 'top' ? config.openrouter.topDefault : config.openrouter.workDefault
   if (!wanted) return { model: fallback, fellBack: false }
   const cat = await getCatalog()
-  const list = tier === 'chat' ? cat.chat : cat.work // 'work' și 'top' validează pe același catalog (vision+tools)
+  const list = tier === 'chat' ? cat.chat : cat.work // 'work' and 'top' validate against the same catalog (vision+tools)
   return list.some((m) => m.id === wanted)
     ? { model: wanted, fellBack: false }
     : { model: fallback, fellBack: true }
@@ -346,34 +353,34 @@ export async function resolveModel(tier: ModelTier, wanted?: string | null): Pro
   return (await resolveModelChecked(tier, wanted)).model
 }
 
-// ── CONTRACTUL UNUI APEL LA CREIER (Lotul B) ─────────────────────────────────
-// Reglajele unei ture erau scrise LITERAL în 7 semnături, în ambele motoare
-// (OpenRouter și Gemini direct). Nu era neglijență: cele două IMPLEMENTEAZĂ
-// același contract, ca orchestratorul să le cheme interschimbabil. Dar scris de
-// mână de 7 ori, contractul putea diverge tăcut — adăugai un reglaj într-un
-// motor și celălalt îl ignora. Acum e UN singur tip; ambele îl folosesc.
+// ── THE CONTRACT OF A BRAIN CALL (Batch B) ────────────────────────────────────
+// A turn's knobs were written LITERALLY in 7 signatures, in both engines
+// (OpenRouter and Gemini direct). It wasn't negligence: the two IMPLEMENT the
+// same contract, so the orchestrator can call them interchangeably. But written
+// by hand 7 times, the contract could silently diverge — you'd add a knob in one
+// engine and the other would ignore it. Now it's ONE type; both use it.
 export interface BrainCallOpts {
-  /** Plafonul de tokeni al răspunsului. */
+  /** The response's token ceiling. */
   maxTokens?: number
-  /** Cât de „liber" răspunde (0 = strict, 1 = creativ). */
+  /** How "free" the response is (0 = strict, 1 = creative). */
   temperature?: number
-  /** Cât de mult gândește intern modelele cu raționament. */
+  /** How much reasoning models think internally. */
   reasoning?: 'low' | 'medium' | 'high'
-  /** `required` = trebuie să cheme o unealtă; `auto` = decide singur. */
+  /** `required` = must call a tool; `auto` = decides on its own. */
   toolChoice?: 'auto' | 'required'
 }
 
 export interface OrMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  // String pentru text simplu; array pentru multimodal în format OpenAI
-  // (blocuri {type:'text'|'image_url'}) — așa VĂD modelele pozele/camera.
+  // String for plain text; array for multimodal in OpenAI format
+  // ({type:'text'|'image_url'} blocks) — this is how models SEE pictures/camera.
   content: string | { type: 'text'; text: string }[] | { type: string; [k: string]: unknown }[]
-  // Pentru tura de tool: legătura cu apelul cerut de model.
+  // For the tool turn: the link to the call requested by the model.
   tool_call_id?: string
   tool_calls?: OrToolCall[]
 }
 
-// Unealtă în format Anthropic (cum sunt definite în chat.ts).
+// Tool in Anthropic format (as defined in chat.ts).
 export interface AnthropicTool {
   name: string
   description: string
@@ -386,7 +393,7 @@ export interface OrToolCall {
   function: { name: string; arguments: string }
 }
 
-// Conversie Anthropic → OpenAI (OpenRouter): input_schema → parameters.
+// Anthropic → OpenAI (OpenRouter) conversion: input_schema → parameters.
 export function toolsToOpenAI(tools: AnthropicTool[]): unknown[] {
   return tools.map((t) => ({
     type: 'function',
@@ -402,11 +409,11 @@ export interface OrChatResult {
   stop: string
 }
 
-// ── SURSĂ UNICĂ pentru cererea OpenRouter (antete + fetch + corp) ────────────
-// Antetele + fetch-ul erau copiate în fiecare funcție (stream/chat/complete/
-// image); corpul de chat (model/mesaje/tokeni/temperatură/usage + raționament +
-// unelte) era copiat în stream și chat. Aici, o singură dată (principiul
-// unic-fără-duplicate). Comportament IDENTIC — doar mutat.
+// ── SINGLE SOURCE for the OpenRouter request (headers + fetch + body) ─────────
+// Headers + fetch were copied into every function (stream/chat/complete/image);
+// the chat body (model/messages/tokens/temperature/usage + reasoning + tools)
+// was copied into stream and chat. Here, exactly once (the single-source
+// no-duplicates principle). IDENTICAL behavior — just moved.
 function orFetch(body: unknown, timeoutMs = 120_000): Promise<Response> {
   return fetch(`${OR_BASE}/chat/completions`, {
     method: 'POST',
@@ -447,9 +454,9 @@ function orBody(
   return body
 }
 
-// Garda de cheie + apelul, într-un singur loc: fără cheie NU se cheamă rețeaua,
-// se întoarce un rezultat gol marcat `no_key` (apelantul îl dă mai departe ca
-// atare). Cele două ture — cu flux și fără — aveau garda și apelul copiate.
+// The key guard + the call, in one place: without a key the network is NOT
+// called; an empty result marked `no_key` is returned (the caller passes it on
+// as such). Both turns — streaming and not — had the guard and the call copied.
 async function orCall(
   model: string,
   messages: OrMessage[],
@@ -461,8 +468,8 @@ async function orCall(
   return orFetch(orBody(model, messages, tools, opts, stream))
 }
 
-// Variantă STREAMING: textul curge prin `onText` (primul cuvânt instant, ca pe
-// vechiul Kimi), iar apelurile de unelte se asamblează pe index din delte.
+// STREAMING variant: text flows through `onText` (first word instant, like the
+// old Kimi), and tool calls are assembled by index from deltas.
 export async function openrouterChatStream(
   model: string,
   messages: OrMessage[],
@@ -481,11 +488,11 @@ export async function openrouterChatStream(
   let costUsd = 0
   let served = model
   let stop = 'stop'
-  // Apelurile de unelte vin fragmentat, pe index; le asamblăm.
+  // Tool calls arrive fragmented, by index; we assemble them.
   const calls = new Map<number, { id: string; name: string; args: string }>()
 
-  // Citirea fluxului SSE din sursa comună (services/sse.ts); procesarea
-  // evenimentului (format OpenAI: choices/delta) rămâne aici.
+  // SSE stream reading from the shared source (services/sse.ts); event
+  // processing (OpenAI format: choices/delta) stays here.
   await readSSE(r.body, (raw) => {
     const ev = raw as {
       choices?: {
@@ -522,9 +529,9 @@ export async function openrouterChatStream(
 }
 
 /**
- * O tură de chat prin OpenRouter CU tool-use (format OpenAI). Întoarce textul,
- * eventualele apeluri de unelte cerute de model, și costul REAL. Cheamă-l în
- * buclă: execuți uneltele, adaugi rezultatele ca mesaje role:'tool', re-apelezi.
+ * One chat turn through OpenRouter WITH tool-use (OpenAI format). Returns the
+ * text, any tool calls requested by the model, and the REAL cost. Call it in a
+ * loop: execute the tools, append the results as role:'tool' messages, call again.
  */
 export async function openrouterChat(
   model: string,
@@ -553,14 +560,14 @@ export async function openrouterChat(
 
 export interface OrResult {
   text: string
-  /** Cost REAL în USD raportat de OpenRouter (0 dacă indisponibil). */
+  /** REAL cost in USD reported by OpenRouter (0 if unavailable). */
   costUsd: number
   model: string
 }
 
 /**
- * Completare printr-un model OpenRouter, cu cost REAL în răspuns (usage.cost).
- * `usage:{include:true}` cere OpenRouter să întoarcă costul exact al apelului.
+ * Completion through an OpenRouter model, with REAL cost in the response (usage.cost).
+ * `usage:{include:true}` asks OpenRouter to return the exact cost of the call.
  */
 export async function openrouterComplete(
   model: string,
@@ -568,7 +575,7 @@ export async function openrouterComplete(
   opts: { maxTokens?: number; temperature?: number } = {},
 ): Promise<OrResult> {
   if (!config.openrouter.key) return { text: '', costUsd: 0, model }
-  // Antete + fetch din sursa comună; corp simplu (fără unelte/raționament).
+  // Headers + fetch from the shared source; simple body (no tools/reasoning).
   const r = await orFetch({
     model,
     messages,
@@ -592,15 +599,15 @@ export async function openrouterComplete(
   }
 }
 
-// ── IMAGINE prin OpenRouter (aceeași cheie ca creierul; fără Gemini separat) ──
-// Modelul de imagini întoarce imaginea inline în `message.images[].image_url.url`
-// (data URL). Întoarcem mime + bytes; costul REAL vine din usage.cost.
+// ── IMAGE through OpenRouter (same key as the brain; no separate Gemini) ──────
+// The image model returns the image inline in `message.images[].image_url.url`
+// (data URL). We return mime + bytes; the REAL cost comes from usage.cost.
 export type OrImage = { mime: string; buf: Buffer; costUsd: number } | { error: string }
 export async function openrouterImage(prompt: string): Promise<OrImage> {
   if (!config.openrouter.key) return { error: 'image_not_configured' }
   let r: Response
   try {
-    // Antete + fetch din sursa comună; corp specific de imagine (modalities).
+    // Headers + fetch from the shared source; image-specific body (modalities).
     r = await orFetch({
       model: config.openrouter.imageModel,
       messages: [{ role: 'user', content: prompt }],
@@ -621,9 +628,10 @@ export async function openrouterImage(prompt: string): Promise<OrImage> {
   return { mime: m[1], buf: Buffer.from(m[2], 'base64'), costUsd: Number(j.usage?.cost ?? 0) }
 }
 
-// ── CĂUTARE WEB prin OpenRouter (plugin `web`; fără Serper) ───────────────────
-// Orice model acceptă plugin-ul `web`: OpenRouter caută pe web și dă modelului
-// rezultatele, iar răspunsul include text + citări (annotations url_citation).
+// ── WEB SEARCH through OpenRouter (`web` plugin; no Serper) ───────────────────
+// Any model accepts the `web` plugin: OpenRouter searches the web and feeds the
+// results to the model, and the response includes text + citations (url_citation
+// annotations).
 export interface OrSearchResult {
   text: string
   sources: { title: string; url: string }[]
@@ -634,7 +642,7 @@ export async function openrouterWebSearch(query: string, instruction?: string): 
   const sys = instruction ?? 'Search the web and answer concisely with the most current, factual information. Cite sources.'
   let r: Response
   try {
-    // Antete + fetch din sursa comună; corp specific de căutare (plugin web).
+    // Headers + fetch from the shared source; search-specific body (web plugin).
     r = await orFetch({
       model: config.openrouter.searchModel,
       plugins: [{ id: 'web' }],

@@ -2,17 +2,17 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── 402 NU E 429 ────────────────────────────────────────────────────────────
+// ── 402 IS NOT 429 ──────────────────────────────────────────────────────────
 //
-// Adrian, 31 iul: „credit creier epuizat […] de ce ai mințit?"
+// Adrian, Jul 31: "brain credit exhausted […] why did you lie?"
 //
-// Avea dreptate. Un model gratuit care atinge plafonul de cereri pe minut
-// întoarce 429. Codul băga 429 în aceeași condiție cu 402 și-i scria pe ecran
-// „reîncarcă creditul" — bani ceruți pentru un model care costă ZERO, fără ca
-// aplicația să fi citit vreodată un sold. Exact regula lui #1: o stare afirmată,
-// nemăsurată.
+// He was right. A free model that hits the per-minute request limit returns
+// 429. The code lumped 429 into the same condition as 402 and wrote "top up
+// your credit" on screen — money demanded for a model that costs ZERO, without
+// the app ever having read a balance. Exactly his rule #1: an asserted,
+// unmeasured state.
 //
-// Testul citește codul REAL. Dacă cineva pune 429 înapoi lângă 402, pică aici.
+// The test reads the REAL code. If someone puts 429 back next to 402, it fails here.
 const sursa = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
 describe('mesajul de eroare al creierului nu mai cere bani pentru un plafon de cereri', () => {

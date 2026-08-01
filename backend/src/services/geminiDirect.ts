@@ -2,14 +2,17 @@ import { config } from '../config.js'
 import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall } from './openrouter.js'
 import { readSSE } from './sse.js'
 
-// ── CREIERUL PRINCIPAL: GEMINI DIRECT DE LA GOOGLE (Adrian, 27 iul: „comută la
-// celălalt free... gemini... principal, și ce e acum secundar") ───────────────
-// Treapta gratuită REALĂ de vârf: cheia gratuită din AI Studio (contul Google al
-// ownerului) dă gemini-2.5-flash cu vedere+unelte+gândire, peste orice model
-// :free din OpenRouter. Aici e clientul direct pe API-ul Google (generatelanguage),
-// cu ACELEAȘI forme de intrare/ieșire ca openrouterChat/Stream — orchestratorul
-// nu știe diferența. Nemotron :free rămâne SECUNDARUL: chat.ts cade automat pe
-// el la cotă epuizată/eroare Gemini. Vocea (OpenAI Realtime) nu trece pe aici.
+// ── THE MAIN BRAIN: GEMINI DIRECT FROM GOOGLE (Adrian, 27 Jul: "switch to
+// the other free one... gemini... as primary, and what's now primary becomes
+// secondary") ──────────────────────────────────────────────────────────────
+// The REAL top free tier: the free key from AI Studio (the owner's Google
+// account) gives gemini-2.5-flash with vision+tools+thinking, above any :free
+// model on OpenRouter. Here is the direct client on the Google API
+// (generatelanguage), with the SAME input/output shapes as
+// openrouterChat/Stream — the orchestrator can't tell the difference.
+// Nemotron :free stays SECONDARY: chat.ts falls back to it automatically on
+// Gemini quota exhaustion/error. The voice (OpenAI Realtime) doesn't go
+// through here.
 
 const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -17,7 +20,7 @@ export function geminiDirectAvailable(): boolean {
   return Boolean(config.geminiKey)
 }
 
-/** Prefixul intern care rutează orchestratorul spre Google în loc de OpenRouter. */
+/** The internal prefix that routes the orchestrator to Google instead of OpenRouter. */
 export const GEMINI_DIRECT_PREFIX = 'google-direct/'
 
 interface GPart {
@@ -31,8 +34,8 @@ interface GContent {
   parts: GPart[]
 }
 
-// Schema JSON a uneltelor → schema acceptată de Gemini (păstrăm doar cheile
-// suportate; restul se aruncă în tăcere, nu strică apelul).
+// The tools' JSON schema → the schema Gemini accepts (we keep only the
+// supported keys; the rest is silently dropped, it doesn't break the call).
 function cleanSchema(s: unknown): unknown {
   if (Array.isArray(s)) return s.map(cleanSchema)
   if (!s || typeof s !== 'object') return s
@@ -47,7 +50,7 @@ function cleanSchema(s: unknown): unknown {
   return out
 }
 
-/** OrMessage[] (formatul casei) → corpul Gemini. Exportat pentru teste. */
+/** OrMessage[] (the house format) → the Gemini body. Exported for tests. */
 export function toGeminiPayload(
   messages: OrMessage[],
   tools: AnthropicTool[],
@@ -55,8 +58,9 @@ export function toGeminiPayload(
 ): Record<string, unknown> {
   const sys: string[] = []
   const contents: GContent[] = []
-  // functionResponse cere NUMELE funcției; mesajele role:'tool' au doar id-ul —
-  // reconstruim harta id→nume din tool_calls-urile asistentului dinainte.
+  // functionResponse requires the function NAME; role:'tool' messages only
+  // have the id — we rebuild the id→name map from the assistant's earlier
+  // tool_calls.
   const idToName = new Map<string, string>()
   for (const m of messages) {
     for (const c of m.tool_calls ?? []) idToName.set(c.id, c.function.name)
@@ -79,7 +83,7 @@ export function toGeminiPayload(
     if (typeof m.content === 'string') {
       if (m.content) parts.push({ text: m.content })
     } else if (Array.isArray(m.content)) {
-      // Multimodal în format OpenAI (text + image_url cu data-URI) → părți Gemini.
+      // Multimodal in OpenAI format (text + image_url with data-URI) → Gemini parts.
       for (const b of m.content as { type: string; text?: string; image_url?: { url?: string } }[]) {
         if (b.type === 'text' && b.text) parts.push({ text: b.text })
         else if (b.type === 'image_url' && b.image_url?.url) {
@@ -93,7 +97,7 @@ export function toGeminiPayload(
       try {
         args = JSON.parse(c.function.arguments || '{}') as Record<string, unknown>
       } catch {
-        /* argumente corupte — mergem cu {} */
+        /* corrupted arguments — we go with {} */
       }
       parts.push({ functionCall: { name: c.function.name, args } })
     }
@@ -106,8 +110,8 @@ export function toGeminiPayload(
     generationConfig: {
       maxOutputTokens: opts.maxTokens ?? 1024,
       temperature: opts.temperature ?? 0.7,
-      // Gândirea internă a lui gemini-2.5: buget mic implicit ca primul cuvânt
-      // să vină REPEDE (regula de latență); mai mult doar pe turele grele.
+      // gemini-2.5's internal thinking: small budget by default so the
+      // first word comes FAST (the latency rule); more only on heavy turns.
       thinkingConfig: {
         thinkingBudget: opts.reasoning === 'high' ? 4096 : opts.reasoning === 'medium' ? 1024 : opts.reasoning === 'low' ? 512 : 0,
       },
@@ -139,13 +143,14 @@ function partsToResult(parts: GPart[], model: string, stop: string): OrChatResul
       })
     }
   }
-  // Gratuit real: Google nu taxează cheia free-tier → costul e 0, și așa îl raportăm.
+  // Really free: Google doesn't charge the free-tier key → the cost is 0, and that's how we report it.
   return { text, toolCalls, costUsd: 0, model, stop }
 }
 
-// Apelul comun Gemini (non-stream + stream): antete x-goog-api-key + corp
-// toGeminiPayload + timeout. Diferă DOAR prin sufixul metodei (generateContent vs
-// streamGenerateContent?alt=sse). Sursă unică (principiul permanent: unic, fără dup).
+// The shared Gemini call (non-stream + stream): x-goog-api-key headers +
+// toGeminiPayload body + timeout. It differs ONLY by the method suffix
+// (generateContent vs streamGenerateContent?alt=sse). Single source (the
+// permanent principle: unique, no duplicates).
 function geminiFetch(
   model: string,
   method: string,
@@ -175,8 +180,9 @@ export async function geminiDirectChat(
   return partsToResult(cand?.content?.parts ?? [], model, cand?.finishReason ?? 'stop')
 }
 
-// Varianta STREAMING (SSE): textul curge prin onText (primul cuvânt instant),
-// apelurile de unelte se strâng din chunk-uri — aceeași formă ca la OpenRouter.
+// The STREAMING variant (SSE): the text flows through onText (first word
+// instantly), the tool calls are collected from chunks — same shape as at
+// OpenRouter.
 export async function geminiDirectChatStream(
   model: string,
   messages: OrMessage[],
@@ -191,8 +197,8 @@ export async function geminiDirectChatStream(
   let text = ''
   const collected: GPart[] = []
   let stop = 'stop'
-  // Citirea fluxului SSE din sursa comună (services/sse.ts); procesarea
-  // evenimentului (format Gemini: candidates/parts) rămâne aici.
+  // The SSE stream reading comes from the shared source (services/sse.ts);
+  // the event processing (Gemini format: candidates/parts) stays here.
   await readSSE(r.body, (raw) => {
     const ev = raw as GResp
     const cand = ev.candidates?.[0]
@@ -209,8 +215,8 @@ export async function geminiDirectChatStream(
   return { ...res, text }
 }
 
-/** Cota gratuită epuizată / serviciu indisponibil — semnalul pentru căderea pe
- *  SECUNDAR (nemotron :free prin OpenRouter). */
+/** Free quota exhausted / service unavailable — the signal to fall back to
+ *  the SECONDARY (nemotron :free through OpenRouter). */
 export function isGeminiQuotaError(e: unknown): boolean {
   return /gemini (429|500|503)|RESOURCE_EXHAUSTED|quota/i.test(String(e))
 }

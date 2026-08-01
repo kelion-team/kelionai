@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
 import { openrouterImage } from './openrouter.js'
 
-// Imagini generate — persistente în DB, cu un cache de nivel 1 în memorie.
-// Generarea trece prin OpenRouter (aceeași cheie ca creierul), nu prin Gemini
-// direct: „2 chei, punct" (Adrian). Vezi services/openrouter.ts openrouterImage.
+// Generated images — persisted in the DB, with a level-1 cache in memory.
+// Generation goes through OpenRouter (the same key as the brain), not through
+// Gemini direct: "2 keys, period" (Adrian). See services/openrouter.ts
+// openrouterImage.
 interface StoredImage {
   mime: string
   buf: Buffer
@@ -15,12 +16,12 @@ const cache = new Map<string, StoredImage>()
 const MAX_CACHE = 60
 
 async function put(mime: string, buf: Buffer): Promise<string> {
-  // ID IMPOSIBIL DE GHICIT (audit pe toate rutele, 29 iul). `/api/image/:id` e
-  // PUBLICĂ — cine știe id-ul vede imaginea. Vechiul id era ceasul (previzibil)
-  // plus 6 caractere din Math.random, care NU e criptografic: cunoscând
-  // aproximativ momentul generării, spațiul de căutare devenea mic. Screenshot-urile
-  // (browser.ts) foloseau deja randomUUID; acum la fel peste tot — un singur
-  // principiu, nu două standarde pentru același risc.
+  // UNGUESSABLE ID (the all-routes audit, 29 Jul). `/api/image/:id` is
+  // PUBLIC — whoever knows the id sees the image. The old id was the clock
+  // (predictable) plus 6 Math.random characters, which is NOT cryptographic:
+  // knowing roughly when it was generated, the search space became small.
+  // The screenshots (browser.ts) already used randomUUID; now the same
+  // everywhere — one principle, not two standards for the same risk.
   const id = randomUUID()
   await saveGeneratedImage(id, mime, buf)
   cache.set(id, { mime, buf, ts: Date.now() })

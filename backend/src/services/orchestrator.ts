@@ -12,12 +12,13 @@ import {
 } from './geminiDirect.js'
 import { filtruRepetitie } from './fluxUnic.js'
 
-// ── ORCHESTRATORUL — un creier, orice model ─────────────────────────────────
-// Rulează o conversație CU tool-use printr-un model ales (GPT/Gemini/Claude prin
-// OpenRouter), IDENTIC indiferent de model: aceleași unelte, aceeași persona
-// (mesajul system), aceeași memorie (venită în `messages`). Bucla: cheamă modelul
-// → dacă cere unelte, le execută (callback) → adaugă rezultatele → reia, până
-// modelul răspunde final. Costul REAL se acumulează pe toate turele.
+// ── THE ORCHESTRATOR — one brain, any model ─────────────────────────────────
+// Runs a conversation WITH tool-use through a chosen model (GPT/Gemini/Claude
+// via OpenRouter), IDENTICALLY regardless of model: same tools, same persona
+// (the system message), same memory (arriving in `messages`). The loop: call
+// the model → if it asks for tools, run them (callback) → append the results
+// → repeat, until the model gives a final answer. The REAL cost accumulates
+// across all rounds.
 
 export interface OrchestratorResult {
   text: string
@@ -30,42 +31,42 @@ export interface OrchestratorOpts {
   maxRounds?: number
   maxTokens?: number
   temperature?: number
-  /** Raționament intern pentru modelele cu gândire (Fable/Claude/GPT-o). */
+  /** Internal reasoning for the thinking models (Fable/Claude/GPT-o). */
   reasoning?: 'low' | 'medium' | 'high'
   onText?: (text: string) => void
-  /** POARTA FAPTEI (Adrian, 27 iul): dacă modelul AFIRMĂ o acțiune fără să fi
-   *  chemat vreo unealtă, îl obligăm mecanic să execute sau să retragă. */
+  /** THE DEED GATE (Adrian, Jul 27): if the model CLAIMS an action without
+   *  having called any tool, we mechanically force it to execute or retract. */
   deedGate?: boolean
-  /** Pe PRIMA rundă forțează modelul să cheme o unealtă (tool_choice:'required')
-   *  — pentru turele de ACȚIUNE ale ownerului, ca să execute, nu să nareze.
-   *  Rundele următoare revin la 'auto' (altfel ar chema unelte la infinit). */
+  /** On the FIRST round forces the model to call a tool (tool_choice:'required')
+   *  — for the owner's ACTION turns, so it executes instead of narrating.
+   *  Later rounds return to 'auto' (otherwise it would call tools forever). */
   forceToolsFirstRound?: boolean
 }
 
-// Detectează o afirmație de ACȚIUNE („am trimis/salvat/deschis/reparat...") —
-// lucruri care ar trebui făcute prin unealtă, nu doar spuse.
+// Detects an ACTION claim ("am trimis/salvat/deschis/reparat...") — things
+// that should be done through a tool, not just said.
 const DEED_CLAIM_RE =
   /\b(?:am|l-?am|le-?am|ți-?am|ti-?am)\s+(?:trimis|salvat|deschis|reparat|publicat|cre[ia]at|pornit|activat|afi[șs]at|ad[ăa]ugat|[șs]ters|configurat|instalat|rulat|executat|setat|actualizat|modificat|[îi]nchis)\b|\bi['’]?ve\s+(?:sent|saved|opened|created|fixed|published|started|deleted|done|updated|set)\b|\bhave\s+(?:sent|saved|opened|created|fixed|published)\b|(?:\b(?:m[ăa]\s+ocup|m[ăa]\s+apuc|[îi][țt]i\s+(?:deschid|ar[ăa]t|trimit|salvez|caut|pornesc|pun)|o\s+s[ăa]\s+(?:deschid|caut|trimit|salvez|pornesc|rulez|verific)|imediat\s+(?:deschid|caut|pornesc)|deschid\s+acum|pornesc\s+acum|caut\s+acum)\b)/i
 
-// ── „O SĂ ANALIZEZ" (Adrian, 31 iul) ────────────────────────────────────────
-// „când spune că o să analizez, trebuie FAPTIC să deschidă monitorul și să
-// arate ce face!"
+// ── "O SĂ ANALIZEZ" (Adrian, Jul 31) ─────────────────────────────────────────
+// "when he says he's going to analyse, he must ACTUALLY open the monitor and
+// show what he's doing!"
 //
-// DEED_CLAIM_RE de mai sus prinde „AM făcut". Asta prinde promisiunea de a te
-// UITA la ceva — verbele cu care se încheia o tură fără să se întâmple nimic,
-// iar omul rămânea în fața unui ecran gol, așteptând o analiză care nu
-// începuse. „Analizez", „mă uit", „verific", „investighez", „cercetez".
+// DEED_CLAIM_RE above catches "I DID it". This one catches the promise to LOOK
+// at something — the verbs a turn used to end with while nothing happened, and
+// the human was left in front of an empty screen, waiting for an analysis that
+// never started. "Analizez", "mă uit", "verific", "investighez", "cercetez".
 //
-// Timpul viitor ȘI prezentul de intenție („analizez acum") — fiindcă în
-// română amândouă înseamnă același lucru: încă n-am făcut-o.
+// Future tense AND intent present ("analizez acum") — because in Romanian both
+// mean the same thing: I haven't done it yet.
 const ANALIZA_CLAIM_RE =
   /\b(?:o\s+s[ăa]\s+)?(?:analizez|verific|investighez|cercetez|examinez|studiez|inspectez)\b|\b(?:m[ăa]\s+uit|arunc\s+o\s+privire|dau\s+o\s+cautare|caut\s+prin|sap\s+in)\b|\b(?:let\s+me\s+)?(?:analy[sz]e|investigate|examine|inspect|look\s+into|take\s+a\s+look|check\s+the)\b|\bi(?:'|’)?ll\s+(?:analy[sz]e|check|look|investigate|examine)\b/i
 
 /**
- * @param model      id OpenRouter (ex: openai/gpt-4.1-mini, anthropic/claude-sonnet-5)
- * @param messages   conversația (system + istoric + tura curentă)
- * @param tools      uneltele în format Anthropic (cele din chat.ts)
- * @param execTool   execută o unealtă: (name, argsJson) → rezultat text
+ * @param model      OpenRouter id (e.g. openai/gpt-4.1-mini, anthropic/claude-sonnet-5)
+ * @param messages   the conversation (system + history + current turn)
+ * @param tools      the tools in Anthropic format (the ones from chat.ts)
+ * @param execTool   runs a tool: (name, argsJson) → text result
  */
 export async function runOrchestrator(
   model: string,
@@ -78,22 +79,24 @@ export async function runOrchestrator(
   const convo: OrMessage[] = [...messages]
   let totalCost = 0
   let served = model
-  // TOT textul rostit/afișat, pe toate rundele (25 iul): rundele intermediare
-  // („stai să verific...") curgeau prin onText și erau ROSTITE, dar doar runda
-  // finală intra în istoric → la reload lipseau bucăți din ce s-a spus, iar la
-  // epuizarea rundelor tura se încheia complet MUTĂ ('').
+  // ALL spoken/displayed text, across all rounds (Jul 25): the intermediate
+  // rounds ("wait, let me check...") flowed through onText and were SPOKEN,
+  // but only the final round went into history → on reload, pieces of what was
+  // said were missing, and when the rounds ran out the turn ended completely
+  // MUTE ('').
   let allText = ''
   let deedGateUsed = false
   let analizaGateUsed = false
   let anyToolCalled = false
 
-  // ── NU SE SCRIE DE DOUĂ ORI ACELAȘI LUCRU ─────────────────────────────────
-  // Adrian, 31 iul: „scrie aceeași frază nonstop" / „în chat se balează
-  // răspunsul lui scris de mai multe ori".
-  // Cauza era chiar aici: bucla merge până la 8 runde, iar FIECARE rundă își
-  // trimitea textul mai departe prin `onText`, fără ca nimic să compare runda
-  // nouă cu ce ajunsese deja la om. Model împotmolit = aceeași frază, o dată pe
-  // rundă. Filtrul lasă să treacă doar ce e NOU. Vezi services/fluxUnic.ts.
+  // ── THE SAME THING IS NEVER WRITTEN TWICE ──────────────────────────────────
+  // Adrian, Jul 31: "writes the same sentence nonstop" / "in chat his written
+  // reply drools out several times".
+  // The cause was right here: the loop runs up to 8 rounds, and EACH round
+  // forwarded its text through `onText`, with nothing comparing the new round
+  // to what had already reached the human. A stuck model = the same sentence,
+  // once per round. The filter lets through only what's NEW. See
+  // services/fluxUnic.ts.
   const flux = filtruRepetitie()
   const emite = opts.onText
   const onTextFiltrat = emite
@@ -102,15 +105,16 @@ export async function runOrchestrator(
         if (nou) emite(nou)
       }
     : undefined
-  // Semnătura apelurilor de unelte din runda trecută: „aceeași frază + aceleași
-  // unelte" = se învârte în loc, nu lucrează.
+  // The signature of last round's tool calls: "same sentence + same tools" =
+  // spinning in place, not working.
   let semnaturaTrecuta = ''
 
   for (let round = 1; round <= maxRounds; round++) {
-    // Cu onText → streaming (primul cuvânt instant, ca pe vechiul creier). Fără →
-    // apel simplu (ex: agenți în fundal care nu difuzează).
-    // Forțarea uneltei DOAR pe prima rundă (dacă cerută) și doar dacă avem
-    // unelte de oferit; altfel 'required' fără tools ar fi respins de API.
+    // With onText → streaming (first word instantly, like the old brain).
+    // Without → plain call (e.g. background agents that don't broadcast).
+    // Tool forcing ONLY on the first round (if requested) and only if we have
+    // tools to offer; otherwise 'required' without tools would be rejected by
+    // the API.
     const toolChoice: 'required' | undefined =
       opts.forceToolsFirstRound && round === 1 && tools.length ? 'required' : undefined
     const callOpts = {
@@ -119,9 +123,9 @@ export async function runOrchestrator(
       reasoning: opts.reasoning,
       toolChoice,
     }
-    // CREIERUL PRINCIPAL GEMINI (Adrian, 27 iul): modelele cu prefixul
-    // google-direct/ merg pe API-ul Google (cheia gratuită), nu pe OpenRouter —
-    // aceleași forme de intrare/ieșire, bucla de unelte rămâne identică.
+    // THE MAIN GEMINI BRAIN (Adrian, Jul 27): models with the google-direct/
+    // prefix go through Google's API (the free key), not through OpenRouter —
+    // same input/output shapes, the tool loop stays identical.
     const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
     const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
     const res = onTextFiltrat
@@ -133,20 +137,21 @@ export async function runOrchestrator(
         : await openrouterChat(model, convo, tools, callOpts)
     totalCost += res.costUsd
     served = res.model
-    // Fără streaming (agenți în fundal) textul nu trece prin filtru la bucată —
-    // îl trecem întreg aici, ca dedublarea să fie aceeași pe ambele căi.
+    // Without streaming (background agents) the text doesn't go through the
+    // filter piece by piece — we pass it whole here, so deduping is the same
+    // on both paths.
     if (!onTextFiltrat && res.text) flux.bucata(res.text)
-    // Închide runda: ce a rămas în așteptare e o repetare curată și se aruncă.
+    // Close the round: what was left pending is a clean repeat and gets dropped.
     const coada = flux.inchideRunda()
     if (coada && emite) emite(coada)
     const rundaGoala = flux.rundaAFostGoala()
     allText = flux.emis()
 
     if (res.toolCalls.length === 0) {
-      // POARTA FAPTEI (Adrian, 27 iul): dacă modelul spune că A FĂCUT o acțiune
-      // („am trimis/salvat/reparat...") dar n-a chemat NICIODATĂ vreo unealtă în
-      // toată tura, nu e o faptă — e vorbă goală. Îl obligăm o dată să execute
-      // sau să retragă sincer. O singură dată, ca să nu intre în buclă.
+      // THE DEED GATE (Adrian, Jul 27): if the model says it DID an action
+      // ("am trimis/salvat/reparat...") but NEVER called any tool in the whole
+      // turn, it's not a deed — it's empty talk. We force it once to execute or
+      // honestly retract. Only once, so it doesn't loop.
       if (
         opts.deedGate &&
         !deedGateUsed &&
@@ -165,19 +170,19 @@ export async function runOrchestrator(
         })
         continue
       }
-      // ── POARTA ANALIZEI (Adrian, 31 iul) ─────────────────────────────────
+      // ── THE ANALYSIS GATE (Adrian, Jul 31) ─────────────────────────────────
       //
-      // El: „când spune că o să analizez, trebuie FAPTIC să deschidă monitorul
-      // și să arate ce face!"
+      // Him: "when he says he's going to analyse, he must ACTUALLY open the
+      // monitor and show what he's doing!"
       //
-      // Poarta faptei de mai sus prinde „AM făcut". Asta prinde „O SĂ fac" —
-      // „analizez", „mă uit", „verific", „investighez". Erau exact cuvintele
-      // cu care se termina o tură fără să se întâmple nimic: promisiunea suna
-      // a muncă, iar omul rămânea cu ecranul gol, așteptând.
+      // The deed gate above catches "I DID". This one catches "I WILL do" —
+      // "analizez", "mă uit", "verific", "investighez". They were exactly the
+      // words a turn ended with while nothing happened: the promise sounded
+      // like work, and the human was left with an empty screen, waiting.
       //
-      // Nu-i cerem doar să execute. Îi cerem să DESCHIDĂ MONITORUL: munca
-      // trebuie să se VADĂ în timp ce se face, nu să fie povestită după.
-      // O singură dată pe tură, ca să nu intre în buclă.
+      // We don't just ask it to execute. We ask it to OPEN THE MONITOR: the
+      // work must be SEEN while it's being done, not narrated afterwards.
+      // Once per turn, so it doesn't loop.
       if (
         opts.deedGate &&
         !analizaGateUsed &&
@@ -200,18 +205,18 @@ export async function runOrchestrator(
         })
         continue
       }
-      // La streaming textul a curs deja prin onText; nu-l re-emitem.
+      // On streaming the text already flowed through onText; we don't re-emit it.
       return { text: allText, costUsd: totalCost, model: served, rounds: round }
     }
 
-    // ── SE ÎNVÂRTE ÎN LOC? ──────────────────────────────────────────────────
-    // Adrian, 31 iul: „scrie aceeași frază nonstop".
-    // Filtrul de mai sus face ca repetarea să nu se mai VADĂ. Dar dacă ne
-    // oprim acolo, tot plătim opt runde ca să aruncăm șapte — și pe modelele
-    // gratuite, opt apeluri într-o rafală lovesc plafonul pe minut, așa că
-    // următoarea ta întrebare primește 429, adică „problemă tehnică".
-    // Deci: rundă care n-a adus NIMIC nou ȘI cere exact aceleași unelte ca
-    // runda dinainte = model împotmolit. Nu-l mai lăsăm să se rotească.
+    // ── SPINNING IN PLACE? ───────────────────────────────────────────────────
+    // Adrian, Jul 31: "writes the same sentence nonstop".
+    // The filter above makes the repetition no longer VISIBLE. But if we stop
+    // there, we still pay eight rounds to throw away seven — and on the free
+    // models, eight calls in a burst hit the per-minute cap, so your next
+    // question gets a 429, i.e. "technical problem".
+    // So: a round that brought NOTHING new AND asks for exactly the same tools
+    // as the round before = a stuck model. We don't let it keep spinning.
     const semnatura = res.toolCalls
       .map((c) => `${c.function.name}(${(c.function.arguments || '').slice(0, 300)})`)
       .join('|')
@@ -222,9 +227,9 @@ export async function runOrchestrator(
     semnaturaTrecuta = semnatura
 
     anyToolCalled = true
-    // Mesajul asistentului care CERE uneltele (păstrează tool_calls pentru legătură).
+    // The assistant message ASKING for the tools (keeps tool_calls for linkage).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
-    // Execută fiecare unealtă și adaugă rezultatul ca mesaj role:'tool'.
+    // Run each tool and append the result as a role:'tool' message.
     for (const call of res.toolCalls as OrToolCall[]) {
       let out = ''
       try {
@@ -236,6 +241,6 @@ export async function runOrchestrator(
     }
   }
 
-  // Prea multe runde de unelte — întoarce ce avem, fără să blocăm userul.
+  // Too many tool rounds — return what we have, without blocking the user.
   return { text: allText, costUsd: totalCost, model: served, rounds: maxRounds }
 }

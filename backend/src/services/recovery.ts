@@ -1,10 +1,11 @@
-// ── PUNCTE DE RECUPERARE (Adrian, 27 iul: „salvare pe serverul Linux, clar
-// recuperabilă" + „meniu de recovery în admin, unde vezi versiunile salvate cu
-// detalii clare") ────────────────────────────────────────────────────────────
-// Un punct de recuperare = un tag git `backup-<data>-<sha>` pe un commit din
-// master. Tag-ul e sursa de adevăr (e pe GitHub ȘI oglindit pe VPS de cronul
-// backup-versiuni.sh, care materializează .bundle + .tar.gz pentru fiecare tag).
-// Aici: listăm tag-urile (cu data, sha, nota) și creăm unul nou din admin.
+// ── RECOVERY POINTS (Adrian, 27 Jul: "save on the Linux server, clearly
+// recoverable" + "a recovery menu in admin, where you see the saved versions
+// with clear details") ─────────────────────────────────────────────────────
+// A recovery point = a git tag `backup-<date>-<sha>` on a master commit.
+// The tag is the source of truth (it is on GitHub AND mirrored on the VPS by
+// the backup-versiuni.sh cron, which materializes .bundle + .tar.gz for each
+// tag). Here: we list the tags (with date, sha, note) and create a new one
+// from admin.
 const REPO = 'kelion-team/kelionai'
 const API = `https://api.github.com/repos/${REPO}`
 
@@ -19,13 +20,13 @@ function ghHeaders(): Record<string, string> {
 
 export interface RecoveryPoint {
   tag: string
-  sha: string // commitul (scurt)
+  sha: string // the commit (short)
   date: string // ISO
   note: string
 }
 
-// Parsează data din numele tag-ului (backup-2026-07-27-1115-3500603) ca rezervă
-// când tag-ul nu e adnotat (fără dată proprie).
+// Parses the date from the tag name (backup-2026-07-27-1115-3500603) as a
+// fallback when the tag is not annotated (no date of its own).
 function dateFromTagName(tag: string): string {
   const m = tag.match(/backup-(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})/)
   if (!m) return ''
@@ -48,7 +49,7 @@ export async function listRecoveryPoints(): Promise<RecoveryPoint[]> {
         let sha = ref.object.sha
         let date = dateFromTagName(tag)
         let note = ''
-        // Tag adnotat → aducem obiectul pentru mesaj + dată + commitul real.
+        // Annotated tag → we fetch the object for the message + date + real commit.
         if (ref.object.type === 'tag') {
           try {
             const tr = await fetch(`${API}/git/tags/${ref.object.sha}`, {
@@ -62,7 +63,7 @@ export async function listRecoveryPoints(): Promise<RecoveryPoint[]> {
               if (t.object?.sha) sha = t.object.sha
             }
           } catch {
-            /* rămân valorile din nume */
+            /* the values from the name remain */
           }
         }
         return { tag, sha: sha.slice(0, 7), date, note }
@@ -78,7 +79,7 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
   const token = (process.env.GITHUB_TOKEN ?? '').trim()
   if (!token) return { ok: false, error: 'github_token_missing' }
   try {
-    // 1. Vârful lui master.
+    // 1. The tip of master.
     const mr = await fetch(`${API}/git/refs/heads/master`, { headers: ghHeaders(), signal: AbortSignal.timeout(12_000) })
     if (!mr.ok) return { ok: false, error: `master_ref_${mr.status}` }
     const commitSha = String(((await mr.json()) as { object: { sha: string } }).object.sha)
@@ -88,7 +89,7 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
     const stamp = `${now.getUTCFullYear()}-${p(now.getUTCMonth() + 1)}-${p(now.getUTCDate())}-${p(now.getUTCHours())}${p(now.getUTCMinutes())}`
     const tag = `backup-${stamp}-${short}`
     const message = (note.trim() || `Punct de recuperare ${stamp} (creat din admin)`).slice(0, 500)
-    // 2. Obiectul-tag adnotat (păstrează mesajul + data).
+    // 2. The annotated tag object (keeps the message + date).
     const to = await fetch(`${API}/git/tags`, {
       method: 'POST',
       headers: ghHeaders(),
@@ -103,7 +104,7 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
     })
     if (!to.ok) return { ok: false, error: `tag_obj_${to.status}: ${(await to.text()).slice(0, 200)}` }
     const tagObjSha = String(((await to.json()) as { sha: string }).sha)
-    // 3. Ref-ul care face tag-ul vizibil (și pe care VPS-ul îl materializează).
+    // 3. The ref that makes the tag visible (and that the VPS materializes).
     const rr = await fetch(`${API}/git/refs`, {
       method: 'POST',
       headers: ghHeaders(),
@@ -117,12 +118,12 @@ export async function createRecoveryPoint(note: string): Promise<{ ok: boolean; 
   }
 }
 
-// ── RESTAURAREA REALĂ (Adrian, 27 iul: „pune și butoanele de selecție în admin,
-// să se poată selecta") ──────────────────────────────────────────────────────
-// Aduce master EXACT la starea commitului din spatele unui tag de backup, cu un
-// commit NOU (arborele vechi, părinte = vârful curent) — deci ÎNAINTE, nu prin
-// rescrierea istoriei: invariantul „producția = master" rămâne intact, iar
-// publicarea pe VPS pornește singură din push-ul pe master.
+// ── THE REAL RESTORE (Adrian, 27 Jul: "add the selection buttons in admin
+// too, so it can be selected") ──────────────────────────────────────────────
+// Brings master EXACTLY to the state of the commit behind a backup tag, with
+// a NEW commit (the old tree, parent = current tip) — so FORWARD, not by
+// rewriting history: the "production = master" invariant stays intact, and
+// publishing to the VPS starts by itself from the push to master.
 export async function restoreToPoint(
   tag: string,
 ): Promise<{ ok: boolean; sha?: string; via?: 'push' | 'pr'; error?: string }> {
@@ -133,7 +134,7 @@ export async function restoreToPoint(
     (await r.json()) as Record<string, unknown>
   const t = (ms: number): AbortSignal => AbortSignal.timeout(ms)
   try {
-    // 1. Tag-ul → commitul lui (tag adnotat → dereferențiere la commit).
+    // 1. The tag → its commit (annotated tag → dereference to the commit).
     const rr = await fetch(`${API}/git/ref/tags/${tag}`, { headers: ghHeaders(), signal: t(12_000) })
     if (!rr.ok) return { ok: false, error: `tag_negasit_${rr.status}` }
     const refObj = (await j(rr)).object as { sha: string; type: string }
@@ -143,7 +144,7 @@ export async function restoreToPoint(
       if (!tr.ok) return { ok: false, error: `tag_obiect_${tr.status}` }
       commitSha = ((await j(tr)).object as { sha: string }).sha
     }
-    // 2. Arborele commitului salvat + vârful curent al lui master.
+    // 2. The saved commit's tree + the current tip of master.
     const [cr, mr] = await Promise.all([
       fetch(`${API}/git/commits/${commitSha}`, { headers: ghHeaders(), signal: t(12_000) }),
       fetch(`${API}/git/refs/heads/master`, { headers: ghHeaders(), signal: t(12_000) }),
@@ -153,7 +154,7 @@ export async function restoreToPoint(
     const treeSha = ((await j(cr)).tree as { sha: string }).sha
     const headSha = ((await j(mr)).object as { sha: string }).sha
     if (headSha === commitSha) return { ok: true, sha: commitSha.slice(0, 7), via: 'push' }
-    // 3. Commitul de restaurare: arborele salvat, părinte = vârful curent.
+    // 3. The restore commit: the saved tree, parent = current tip.
     const nc = await fetch(`${API}/git/commits`, {
       method: 'POST',
       headers: ghHeaders(),
@@ -166,8 +167,9 @@ export async function restoreToPoint(
     })
     if (!nc.ok) return { ok: false, error: `commit_nou_${nc.status}: ${(await nc.text()).slice(0, 200)}` }
     const newSha = String((await j(nc)).sha)
-    // 4. Împinge master la commitul nou (fast-forward). Dacă ramura e protejată
-    //    la push direct, calea de rezervă: ramură + PR + merge — același rezultat.
+    // 4. Push master to the new commit (fast-forward). If the branch is
+    //    protected against direct pushes, the fallback path: branch + PR +
+    //    merge — same result.
     const up = await fetch(`${API}/git/refs/heads/master`, {
       method: 'PATCH',
       headers: ghHeaders(),

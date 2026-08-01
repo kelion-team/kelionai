@@ -418,7 +418,7 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   if (!res.ok) return JSON.stringify({ error: `calendar_http_${res.status}` })
   const j = (await res.json()) as { items?: CalendarItem[] }
   const events = (j.items ?? []).map((e) => ({
-    id: e.id ?? '', // necesar pentru delete_calendar_event
+    id: e.id ?? '', // needed for delete_calendar_event
     summary: e.summary ?? '(no title)',
     start: e.start?.dateTime ?? e.start?.date ?? '',
     end: e.end?.dateTime ?? e.end?.date ?? '',
@@ -427,22 +427,22 @@ async function calendarEvents(max: number, token: string): Promise<string> {
   return JSON.stringify({ events })
 }
 
-// ȘTERGE UN EVENIMENT (CREIER UNIC §2.2). Scope calendar EXISTENT (același ca
-// create_calendar_event) — fără re-autentificare. ID-ul vine din get_calendar_events.
+// DELETE AN EVENT (SINGLE BRAIN §2.2). EXISTING calendar scope (the same as
+// create_calendar_event) — no re-authentication. The id comes from get_calendar_events.
 async function deleteCalendarEvent(id: string, token: string): Promise<string> {
   if (!id) return JSON.stringify({ error: 'missing_event_id', hint: 'Cheamă întâi get_calendar_events ca să iei id-ul.' })
   const res = await tfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   })
-  // Calendar întoarce 204 la ștergere reușită; 410 = deja șters (tot succes).
+  // Calendar returns 204 on a successful delete; 410 = already deleted (still success).
   if (res.status === 204 || res.status === 410) return JSON.stringify({ deleted: true, id })
   return JSON.stringify({ error: `calendar_delete_http_${res.status}` })
 }
 
-// Listează ID-urile mesajelor Gmail pentru o căutare (comun la get_recent_emails
-// și read_email). Întoarce {ids} sau {err} — un string JSON gata de întors userului.
-// Sursă unică (principiul permanent: unic, fără duplicate).
+// Lists the Gmail message ids for a search (shared by get_recent_emails and
+// read_email). Returns {ids} or {err} — a JSON string ready to hand back.
+// Single source (the permanent principle: one, no duplicates).
 async function gmailListMessageIds(
   query: string,
   max: number,
@@ -475,10 +475,11 @@ async function recentEmails(query: string, max: number, token: string): Promise<
   return JSON.stringify({ emails })
 }
 
-// CORPUL COMPLET AL UNUI EMAIL (CREIER UNIC §2.2): get_recent_emails dă doar
-// antetul; asta citește ce SCRIE mesajul. Folosește ACELAȘI scope Gmail (fără
-// re-autentificare). Alege cel mai bun rezultat pentru căutare, extrage corpul
-// (preferă text/plain, altfel curăță html), plafonat ca să nu umple contextul.
+// THE FULL BODY OF AN EMAIL (SINGLE BRAIN §2.2): get_recent_emails gives only
+// the header; this reads what the message SAYS. Uses the SAME Gmail scope (no
+// re-authentication). Picks the best match for the search, extracts the body
+// (prefers text/plain, otherwise cleans html), capped so it doesn't fill the
+// context.
 function decodeGmailB64(data: string): string {
   try {
     return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
@@ -519,8 +520,9 @@ async function readEmail(query: string, token: string): Promise<string> {
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-  // Căutare web prin OpenRouter (plugin `web`) — aceeași cheie ca creierul, fără
-  // Serper/Gemini. Întoarce răspuns concis + sursele reale (citări).
+  // Web search through OpenRouter (the `web` plugin) — the same key as the
+  // brain, no Serper/Gemini. Returns a concise answer + the real sources
+  // (citations).
   const r = await openrouterWebSearch(query)
   if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
   return JSON.stringify({
@@ -685,10 +687,10 @@ async function driveFiles(query: string, max: number, token: string): Promise<st
   return JSON.stringify({ files: j.files ?? [] })
 }
 
-// CITEȘTE CONȚINUTUL UNUI FIȘIER DRIVE (CREIER UNIC §2.2). Scope Drive EXISTENT
-// (același ca get_drive_files) — fără re-autentificare. Alege cel mai bun
-// rezultat pentru căutare; Google Docs → export text, Sheets → csv, fișiere text
-// → conținut brut; binarele (pdf/imagini) nu se pot citi ca text → link.
+// READ A DRIVE FILE'S CONTENT (SINGLE BRAIN §2.2). EXISTING Drive scope (the
+// same as get_drive_files) — no re-authentication. Picks the best match for
+// the search; Google Docs → text export, Sheets → csv, text files → raw
+// content; binaries (pdf/images) can't be read as text → link.
 async function readDriveFile(query: string, token: string): Promise<string> {
   const listUrl = new URL('https://www.googleapis.com/drive/v3/files')
   listUrl.searchParams.set('pageSize', '1')
@@ -730,8 +732,8 @@ async function getTasks(max: number, token: string): Promise<string> {
   return JSON.stringify({ tasks })
 }
 
-// BIFEAZĂ UN TASK CA TERMINAT (CREIER UNIC §2.2). Scope tasks EXISTENT (același
-// ca add_task) — fără re-autentificare. ID-ul vine din get_tasks.
+// TICK A TASK AS DONE (SINGLE BRAIN §2.2). EXISTING tasks scope (the same as
+// add_task) — no re-authentication. The id comes from get_tasks.
 async function completeTask(id: string, token: string): Promise<string> {
   if (!id) return JSON.stringify({ error: 'missing_task_id', hint: 'Cheamă întâi get_tasks ca să iei id-ul.' })
   const res = await tfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${encodeURIComponent(id)}`, {
@@ -833,9 +835,10 @@ async function mapsSearch(query: string, max: number): Promise<string> {
     lon: p.lon ?? '',
     type: p.type ?? '',
   }))
-  // URL de ecran: harta se AFIȘEAZĂ dintr-un singur apel de unealtă (creierul nu
-  // face mereu al doilea show_on_screen). Embed OpenStreetMap centrat pe primul
-  // rezultat, cu marker. runGoogleTool → default-case scrie {monitor} din el.
+  // Screen URL: the map gets DISPLAYED from a single tool call (the brain
+  // doesn't always make the second show_on_screen). OpenStreetMap embed centred
+  // on the first result, with a marker. runGoogleTool → default-case writes
+  // {monitor} from it.
   const f = places[0]
   const la = Number(f?.lat)
   const lo = Number(f?.lon)
@@ -948,20 +951,20 @@ async function mapsDirections(origin: string, destination: string): Promise<stri
   })
 }
 
-// Link watch/short → URL de embed pentru monitor (redabil în iframe).
-// autoplay=1: clipul PORNEȘTE singur pe monitor (Adrian, 27 iul: „nu merge
-// play" — playerul se deschidea OPRIT). enablejsapi=1: clientul îi poate
-// coborî volumul cât vorbește Kelion (postMessage).
+// Watch/short link → embed URL for the monitor (playable in an iframe).
+// autoplay=1: the clip STARTS on its own on the monitor (Adrian, Jul 27:
+// "play doesn't work" — the player opened STOPPED). enablejsapi=1: the client
+// can lower its volume while Kelion speaks (postMessage).
 function ytEmbed(link: string): string | undefined {
   const m = (link || '').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/)
   return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1&enablejsapi=1` : undefined
 }
 
-// Verificarea REALĂ a redabilității (Adrian, 27 iul: „nu merge play pe
-// youtube"): căutarea web poate întoarce ID-uri inventate/moarte, iar
-// clipurile muzicale oficiale au adesea încorporarea INTERZISĂ — ambele
-// ajungeau pe monitor ca player mort. oEmbed-ul YouTube răspunde 200 DOAR
-// pentru clipuri existente ȘI cu încorporare permisă → filtrăm pe el.
+// The REAL playability check (Adrian, Jul 27: "play doesn't work on
+// youtube"): web search can return invented/dead ids, and official music
+// clips often have embedding FORBIDDEN — both ended up on the monitor as a
+// dead player. YouTube's oEmbed answers 200 ONLY for clips that exist AND
+// allow embedding → we filter on it.
 async function ytPlayable(link: string): Promise<boolean> {
   try {
     const r = await fetch(
@@ -977,21 +980,21 @@ async function ytPlayable(link: string): Promise<boolean> {
 async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
-  // Prin OpenRouter (plugin web) — cerem linkuri REALE de watch. Fără Serper.
+  // Through OpenRouter (web plugin) — we ask for REAL watch links. No Serper.
   const r = await openrouterWebSearch(
     `${query} — best YouTube videos`,
     'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
   )
   const seen = new Set<string>()
   const videos: { title: string; link: string }[] = []
-  // Din sursele reale (citări) — cele mai sigure.
+  // From the real sources (citations) — the safest.
   for (const s of r.sources) {
     if (ytEmbed(s.url) && !seen.has(s.url)) {
       seen.add(s.url)
       videos.push({ title: s.title, link: s.url })
     }
   }
-  // Plus orice link youtube din text (Title — URL / URL simplu).
+  // Plus any youtube link in the text (Title — URL / bare URL).
   const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
   const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
   let m: RegExpExecArray | null
@@ -1004,8 +1007,8 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
     videos.push({ title, link })
   }
   if (videos.length > 0) {
-    // Doar clipuri care CHIAR pot reda pe monitor (verificate în paralel, o
-    // singură rundă de rețea) — un player mort nu mai ajunge niciodată afișat.
+    // Only clips that can ACTUALLY play on the monitor (checked in parallel,
+    // a single network round) — a dead player never gets displayed again.
     const cand = videos.slice(0, 6)
     const flags = await Promise.all(cand.map((v) => ytPlayable(v.link)))
     const playable = cand.filter((_, i) => flags[i])
@@ -1017,9 +1020,9 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
 }
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
-  // Fără cheie Gemini: traducem prin OpenRouter (aceeași cheie ca creierul), ca
-  // butonul „Tradu în română" din admin să meargă mereu. Gemini rămâne calea
-  // întâi dacă are cheie.
+  // Without a Gemini key: we translate through OpenRouter (the same key as
+  // the brain), so the admin "Translate into Romanian" button always works.
+  // Gemini stays the first path when it has a key.
   if (!config.geminiKey) {
     try {
       const r = await openrouterComplete(
@@ -1055,10 +1058,11 @@ async function translateText(text: string, target: string): Promise<string> {
   return JSON.stringify({ translation: out ?? '', target })
 }
 
-// TRADUCERE ÎN BLOC (Adrian, 10 iul: „buton care traduce în română instant din
-// orice limbă" — în vizualizarea conversațiilor din admin). Traduce un ȘIR de
-// mesaje în `target`, în paralel; dacă o traducere eșuează (Gemini neconfigurat
-// sau eroare), întoarce textul ORIGINAL pentru acel mesaj, nu se pierde nimic.
+// BULK TRANSLATION (Adrian, Jul 10: "a button that translates into Romanian
+// instantly from any language" — in the admin conversation viewer). Translates
+// a LIST of messages into `target`, in parallel; if one translation fails
+// (Gemini unconfigured or an error), it returns the ORIGINAL text for that
+// message — nothing is lost.
 export async function translateMany(texts: string[], target: string): Promise<string[]> {
   return Promise.all(
     texts.map(async (t) => {

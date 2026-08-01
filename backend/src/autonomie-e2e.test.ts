@@ -1,15 +1,15 @@
-// ── AUTONOMIA, LANȚUL ÎNTREG: cod → PR → checkpoint → merge → publicare ─────
+// ── AUTONOMY, THE WHOLE CHAIN: code → PR → checkpoint → merge → deploy ─────
 //
-// `autonomie.test.ts` verifică CÂND Kelion refuză să lucreze (pauză, token
-// lipsă, ramură interzisă). Aici verificăm ce face când chiar LUCREAZĂ — adică
-// exact drumul pe care codul ajunge în producție, fără mână de om.
+// `autonomie.test.ts` checks WHEN Kelion refuses to work (pause, missing
+// token, forbidden branch). Here we check what it does when it really WORKS —
+// i.e. exactly the road code takes into production, without a human hand.
 //
-// Nu ne mulțumim cu „a întors ok:true". Verificăm CERERILE REALE pe care le
-// trimite: ramura se face din vârful lui master, conținutul pleacă base64, PR-ul
-// are baza master, ÎNAINTE de merge se salvează un punct de recuperare, merge-ul
-// e squash, iar master ajunge la commitul nou (de unde pornește publicarea).
-// GitHub-ul e cel din `testing/fake-github.ts`: o rută necunoscută întoarce 599,
-// deci nimic nu poate trece nevăzut.
+// We don't settle for "it returned ok:true". We check the REAL requests it
+// sends: the branch is made from master's tip, the content leaves base64, the
+// PR has base master, BEFORE the merge a recovery point is saved, the merge
+// is squash, and master reaches the new commit (which is where the deploy
+// starts from). GitHub is the one from `testing/fake-github.ts`: an unknown
+// route returns 599, so nothing can pass unseen.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { creeazaFakeGitHub } from './testing/fake-github.js'
 
@@ -51,11 +51,11 @@ describe('autonomie E2E — Kelion scrie cod pe o ramură nouă', () => {
     expect(r.ok).toBe(true)
     expect(r.branch).toBe('kelion/fix-microfon')
 
-    // Ramura pornește exact de la commitul pe care e master ACUM.
+    // The branch starts exactly from the commit master is on NOW.
     const creare = gh.cereri.find((c) => c.path === '/git/refs' && c.method === 'POST')!
     expect(creare.body).toEqual({ ref: 'refs/heads/kelion/fix-microfon', sha: 'a'.repeat(40) })
 
-    // Fișierul pleacă codificat, pe ramura lui — nu pe master.
+    // The file leaves encoded, on its branch — not on master.
     const scriere = gh.cereri.find((c) => c.method === 'PUT' && c.path.startsWith('/contents/'))!
     const corp = scriere.body as Record<string, string>
     expect(corp.branch).toBe('kelion/fix-microfon')
@@ -70,8 +70,8 @@ describe('autonomie E2E — Kelion scrie cod pe o ramură nouă', () => {
     expect(r.ok).toBe(true)
     const scrieri = gh.cereri.filter((c) => c.method === 'PUT' && c.path.startsWith('/contents/'))
     expect(scrieri).toHaveLength(2)
-    expect((scrieri[0].body as Record<string, unknown>).sha).toBeUndefined() // fișier nou
-    expect((scrieri[1].body as Record<string, unknown>).sha).toBe('blob1') // suprascriere
+    expect((scrieri[0].body as Record<string, unknown>).sha).toBeUndefined() // new file
+    expect((scrieri[1].body as Record<string, unknown>).sha).toBe('blob1') // overwrite
     expect(Buffer.from(gh.fisiere.get('kelion/fix:a.ts')!.continut, 'base64').toString()).toBe('v2')
   })
 
@@ -79,7 +79,7 @@ describe('autonomie E2E — Kelion scrie cod pe o ramură nouă', () => {
     await repoWrite('kelion/fix', 'a.ts', 'v1', 'm')
     await repoWrite('kelion/fix', 'b.ts', 'v1', 'm')
     const creari = gh.cereri.filter((c) => c.path === '/git/refs' && c.method === 'POST')
-    expect(creari).toHaveLength(1) // o singură creare de ramură
+    expect(creari).toHaveLength(1) // a single branch creation
   })
 
   it('numele cu diacritice se REPARĂ, nu se respinge (incidentul din 25 iul)', async () => {
@@ -102,7 +102,7 @@ describe('autonomie E2E — deschide PR spre master', () => {
     expect(corp.base).toBe('master')
     expect(corp.head).toBe('kelion/fix')
     expect(corp.title).toBe('Repar microfonul')
-    expect(corp.body).toContain('Kelion') // se vede cine l-a deschis
+    expect(corp.body).toContain('Kelion') // you can see who opened it
   })
 
   it('un PR pe o ramură inexistentă raportează eroarea, nu tace', async () => {
@@ -123,7 +123,7 @@ describe('autonomie E2E — merge-ul (pasul care PUBLICĂ)', () => {
     expect(r.ok).toBe(true)
     expect(r.merged).toBe(true)
 
-    // Tag-ul de recuperare există ȘI a fost creat ÎNAINTE de merge.
+    // The recovery tag exists AND was created BEFORE the merge.
     expect(gh.taguri).toHaveLength(1)
     expect(gh.taguri[0]).toMatch(/^backup-\d{4}-\d{2}-\d{2}-\d{4}-[0-9a-f]{7}$/)
     expect(String(r.checkpoint)).toBe(gh.taguri[0])
@@ -132,7 +132,7 @@ describe('autonomie E2E — merge-ul (pasul care PUBLICĂ)', () => {
     expect(iTag).toBeGreaterThanOrEqual(0)
     expect(iTag).toBeLessThan(iMerge)
 
-    // Nota checkpointului spune ce urmează — altfel e o salvare oarbă.
+    // The checkpoint's note says what comes next — otherwise it's a blind save.
     const nota = String((gh.cereri.find((c) => c.path === '/git/tags')!.body as Record<string, string>).message)
     expect(nota).toContain(`PR #${nr}`)
     expect(nota).toContain('Repar microfonul')
@@ -153,7 +153,7 @@ describe('autonomie E2E — merge-ul (pasul care PUBLICĂ)', () => {
     gh.rulari = [{ name: 'pr-verify', status: 'in_progress', conclusion: null }]
     const nr = await pregatestePr()
     const r = j(await repoMergePR(nr))
-    expect(r.merged).toBe(true) // merge-ul S-A FĂCUT deși verificarea rula încă
+    expect(r.merged).toBe(true) // the merge HAPPENED even though the check was still running
     expect(r.verify).toBe('in_progress')
   })
 
@@ -176,7 +176,7 @@ describe('autonomie E2E — merge-ul (pasul care PUBLICĂ)', () => {
   it('dacă merge-ul pică, spune de ce — și NU pretinde că a publicat', async () => {
     const nr = await pregatestePr()
     await repoMergePR(nr)
-    const r = j(await repoMergePR(nr)) // deja făcut merge
+    const r = j(await repoMergePR(nr)) // already merged
     expect(r.ok).toBeUndefined()
     expect(String(r.error)).toMatch(/^merge_failed_/)
   })
@@ -202,7 +202,7 @@ describe('autonomie E2E — operațiuni pe server (runbook)', () => {
 
 describe('autonomie E2E — lanțul COMPLET, dintr-o suflare', () => {
   it('cerere → cod → PR → checkpoint → merge → master mutat', async () => {
-    // Exact ce face Kelion când îi ceri „repară X" și are voie să lucreze.
+    // Exactly what Kelion does when you ask it "fix X" and it's allowed to work.
     const scris = j(await repoWrite('kelion/lant-complet', 'backend/src/nou.ts', 'export const ok = true\n', 'Kelion: adaug modulul'))
     expect(scris.ok).toBe(true)
 
@@ -212,9 +212,9 @@ describe('autonomie E2E — lanțul COMPLET, dintr-o suflare', () => {
     const merge = j(await repoMergePR(Number(pr.pr)))
     expect(merge.merged).toBe(true)
 
-    // Dovada de capăt: master s-a mutat, deci publicarea are de unde porni;
-    // există un punct de recuperare la starea de DINAINTE; și nimic nu s-a
-    // scris vreodată direct pe master.
+    // The final proof: master moved, so the deploy has somewhere to start
+    // from; a recovery point exists at the BEFORE state; and nothing was ever
+    // written directly on master.
     expect(gh.refs.get('heads/master')).not.toBe('a'.repeat(40))
     expect(gh.taguri).toHaveLength(1)
     const scrieriPeMaster = gh.cereri.filter(

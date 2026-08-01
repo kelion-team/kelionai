@@ -1,35 +1,38 @@
-// ── CARDUL LA FURNIZORI, PUS DE EL, LA CEREREA TA, RECUNOSCUT DUPĂ VOCE ──────
+// ── THE CARD AT PROVIDERS, PUT BY HIM, AT YOUR REQUEST, RECOGNIZED BY VOICE ──
 //
-// Adrian, 31 iul: „asta era cerința care dovedea autonomia reală" · „să opereze
-// pentru mine când îi cer doar eu, folosind sistemul de recunoaștere vocală, ca
-// securitate sporită."
+// Adrian, Jul 31: "that was the requirement that proved real autonomy" · "he
+// should operate for me when only I ask, using the voice recognition system,
+// as heightened security."
 //
-// Am ținut pasul ăsta închis o zi întreagă, și aveam un motiv bun — dar numai
-// jumătate din el era valabil. Cele două probleme sunt DIFERITE:
+// I kept this step closed for a whole day, and I had a good reason — but only
+// half of it was valid. The two problems are DIFFERENT:
 //
-//   CINE are voie → rezolvat de amprenta vocală. `hasVoiceUnlock` cere ca
-//   sesiunea să fie deblocată ANUME prin voce, nu printr-un secret tastat: un
-//   cod poate fi furat sau citit peste umăr; vocea cere să fii TU, acolo.
+//   WHO is allowed → solved by the voiceprint. `hasVoiceUnlock` requires the
+//   session to be unlocked SPECIFICALLY by voice, not by a typed secret: a
+//   code can be stolen or read over the shoulder; the voice requires you to be
+//   YOU, there.
 //
-//   CE SE SCURGE → rezolvat aici. Un card scris cu `browser_type` obișnuit ar
-//   ajunge în trei locuri deodată: în conversație (modelul îl primește ca
-//   argument), în capturile de ecran de pe monitor, și în textul paginii
-//   întors după fiecare pas. Trei copii ale unui PAN, în trei jurnale.
+//   WHAT LEAKS → solved here. A card typed with a plain `browser_type` would
+//   land in three places at once: in the conversation (the model gets it as an
+//   argument), in the monitor's screenshots, and in the page text returned
+//   after each step. Three copies of a PAN, in three logs.
 //
-// Soluția: modelul NU primește niciodată valoarea. El spune doar „câmpul 7 e
-// numărul cardului", iar SERVERUL scrie acolo, luând valoarea din env. Plus
-// modul discret pe toată durata: zero capturi, cifrele mascate în text.
+// The solution: the model NEVER gets the value. It only says "field 7 is the
+// card number", and the SERVER types there, taking the value from env. Plus
+// discreet mode for the whole duration: zero screenshots, digits masked in the
+// text.
 //
-// Ce rămâne al tău, o singură dată: valorile cardului se pun ca secrete în
-// GitHub, de mâna ta. NU prin Kelion — `secret_pune` refuză din construcție
-// orice arată a card, și rămâne așa. Pentru cea mai sensibilă valoare din
-// sistem, un pas manual e preferabil unei automatizări care poate greși.
+// What stays yours, once: the card values are put as secrets in GitHub, by
+// your hand. NOT through Kelion — `secret_pune` refuses by construction
+// anything that looks like a card, and stays that way. For the most sensitive
+// value in the system, a manual step is preferable to an automation that can
+// err.
 import { browserType, setModDiscret, browserRead, mascheazaCifre } from './browser.js'
 import type { BrowserResult } from './browser.js'
 import { voceRecenta } from './adminLock.js'
 import { loadKv, saveKv } from '../db.js'
 
-/** Câmpurile pe care le poate completa. Numele lor NU dau valoarea. */
+/** The fields it can fill in. Their names do NOT give away the value. */
 export type CampCard = 'numar' | 'expirare' | 'cvc' | 'nume' | 'cod_postal'
 
 const DIN_ENV: Record<CampCard, string> = {
@@ -40,21 +43,21 @@ const DIN_ENV: Record<CampCard, string> = {
   cod_postal: 'CARD_COD_POSTAL',
 }
 
-/** Ce câmpuri sunt configurate — fără să spună CE conțin. */
+/** Which fields are configured — without saying WHAT they contain. */
 export function cardConfigurat(): { gata: boolean; lipsesc: CampCard[] } {
   const lipsesc = (Object.keys(DIN_ENV) as CampCard[]).filter((c) => !(process.env[DIN_ENV[c]] ?? '').trim())
-  // Codul poștal e opțional — nu toți furnizorii îl cer.
+  // The postal code is optional — not all providers ask for it.
   const esentiale = lipsesc.filter((c) => c !== 'cod_postal')
   return { gata: esentiale.length === 0, lipsesc }
 }
 
 /**
- * Scrie ÎN PAGINĂ valoarea unui câmp de card, fără ca modelul s-o vadă vreodată.
+ * Types a card field's value INTO THE PAGE, without the model ever seeing it.
  *
- * Întoarce doar starea paginii (deja mascată de modul discret) și CE câmp a
- * fost completat — niciodată ce s-a scris. Dacă valoarea nu e configurată, o
- * spune limpede: mai bine „lipsește CARD_NUMAR" decât un câmp completat greșit
- * pe o pagină de plată.
+ * Returns only the page state (already masked by discreet mode) and WHICH
+ * field was filled — never what was typed. If the value isn't configured, it
+ * says so plainly: better "CARD_NUMAR is missing" than a wrongly filled field
+ * on a payment page.
  */
 export async function completeazaCard(
   email: string,
@@ -62,10 +65,10 @@ export async function completeazaCard(
   camp: CampCard,
   index: number,
 ): Promise<{ ok: boolean; camp: CampCard; detaliu: string; pagina?: BrowserResult }> {
-  // POARTA CERUTĂ DE OWNER: „doar când îi cer EU, prin recunoaștere vocală".
-  // Nu „ești admin" — ci „ai vorbit ACUM și te-am recunoscut". Un cookie de
-  // admin poate fi furat; fereastra asta se deschide doar când amprenta ta s-a
-  // potrivit, și se închide singură în 15 minute.
+  // THE GATE REQUESTED BY THE OWNER: "only when I ask, through voice
+  // recognition". Not "you're admin" — but "you spoke NOW and I recognized
+  // you". An admin cookie can be stolen; this window opens only when your
+  // voiceprint matched, and it closes itself in 15 minutes.
   if (!voceRecenta(email)) {
     return {
       ok: false,
@@ -91,8 +94,8 @@ export async function completeazaCard(
   if (!Number.isInteger(index) || index < 0) {
     return { ok: false, camp, detaliu: 'index de câmp invalid — citește întâi pagina' }
   }
-  // Modul discret e pornit AICI, nu lăsat în seama nimănui: din clipa în care
-  // se scrie un card, pagina nu mai are voie să ajungă pe monitor.
+  // Discreet mode is turned on HERE, not left in anyone's care: from the
+  // moment a card is typed, the page is no longer allowed on the monitor.
   setModDiscret(email, true)
   const pagina = await browserType(email, baseUrl, index, valoare, false)
   return {
@@ -103,39 +106,39 @@ export async function completeazaCard(
   }
 }
 
-// ── PLĂȚILE AUTOMATE — SCOPUL, nu cardul ─────────────────────────────────────
+// ── AUTOMATIC PAYMENTS — THE GOAL, not the card ──────────────────────────────
 //
-// Adrian, 31 iul: „plățile automate". Cardul pus într-un formular nu e ținta;
-// ținta e ca furnizorul să se încaseze SINGUR, ca Kelion să nu se oprească
-// niciodată din lipsă de credit, fără ca ownerul să apese ceva.
+// Adrian, Jul 31: "the automatic payments". A card put into a form is not the
+// target; the target is for the provider to charge ITSELF, so Kelion never
+// stops for lack of credit, without the owner pressing anything.
 //
-// Deci pasul nu e „am completat câmpurile", ci „pagina furnizorului arată acum
-// un card la dosar ȘI reîncărcarea automată pornită". Iar asta o MĂSOARĂ codul
-// de aici, pe textul paginii, nu o declară modelul (regula #1 a ownerului: o
-// valoare care n-a venit dintr-o citire reușită nu e o valoare).
+// So the step is not "I filled the fields", but "the provider's page now shows
+// a card on file AND auto-recharge turned on". And that's MEASURED by the code
+// here, on the page text, not declared by the model (the owner's rule #1: a
+// value that didn't come from a successful read is not a value).
 
-/** Card la dosar: „•••• 4242", „ending in 4242", „card on file", „Visa …4242". */
+/** Card on file: "•••• 4242", "ending in 4242", "card on file", "Visa …4242". */
 const MARCA_CARD =
   /(?:[•*·x]{2,}\s?\d{4}|ending\s+in\s+\d{4}|card\s+on\s+file|payment\s+method\s+(?:added|on file)|se\s+termină\s+în\s+\d{4})/i
-/** Plată automată pornită: auto-recharge / auto top-up / automatic payments. */
+/** Automatic payment on: auto-recharge / auto top-up / automatic payments. */
 const MARCA_AUTOMAT =
   /(?:auto[-\s]?(?:recharge|reload|top[-\s]?up|renew(?:al)?|pay(?:ment)?s?)|automatic\s+(?:payments?|billing|recharge)|recurring\s+(?:payment|billing)|reîncărcare\s+automată|plăți\s+automate)/i
 
 export interface StareFurnizor {
-  /** Numele furnizorului, spus de el: „openrouter", „anthropic"… */
+  /** The provider's name, said by it: "openrouter", "anthropic"… */
   furnizor: string
-  /** Textul paginii arăta un card la dosar, la închiderea sesiunii. */
+  /** The page text showed a card on file, at session close. */
   card: boolean
-  /** …și reîncărcarea automată pornită. ĂSTA e scopul. */
+  /** …and auto-recharge turned on. THIS is the goal. */
   automat: boolean
-  /** Fragmentul de pagină pe care s-a făcut potrivirea (mascat). */
+  /** The page fragment the match was made on (masked). */
   dovada: string
   cand: string
 }
 
 const CHEIE = 'card:furnizori'
 
-/** Ce furnizori sunt configurați — CITIT din ce s-a măsurat, nu din promisiuni. */
+/** Which providers are configured — READ from what was measured, not from promises. */
 export async function stareFurnizori(): Promise<StareFurnizor[]> {
   try {
     const raw = await loadKv(CHEIE)
@@ -146,7 +149,7 @@ export async function stareFurnizori(): Promise<StareFurnizor[]> {
   }
 }
 
-/** Dovada pentru misiune: măcar un furnizor cu plata automată PORNITĂ. */
+/** The proof for the mission: at least one provider with automatic payment ON. */
 export async function platiAutomatePornite(): Promise<boolean> {
   return (await stareFurnizori()).some((f) => f.automat)
 }
@@ -158,12 +161,12 @@ async function noteazaFurnizor(s: StareFurnizor): Promise<void> {
 }
 
 /**
- * Închide sesiunea discretă și MĂSOARĂ ce a rămas pe pagină.
+ * Closes the discreet session and MEASURES what remained on the page.
  *
- * Ordinea contează: citim CÂT timp modul discret e încă pornit (deci fără
- * captură de ecran și cu cifrele mascate), și abia apoi îl stingem. Invers —
- * cum era prima variantă — ultima citire ar fi fotografiat exact pagina de
- * plată pe care tocmai scrisesem cardul.
+ * The order matters: we read WHILE discreet mode is still on (so no screenshot
+ * and with the digits masked), and only then turn it off. The other way —
+ * like the first version — the last read would have photographed exactly the
+ * payment page on which we had just typed the card.
  */
 export async function terminaCard(
   email: string,

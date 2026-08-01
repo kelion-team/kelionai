@@ -2,24 +2,24 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── UN FIȘIER NU SE GOLEȘTE DINTR-O SCHIMBARE DE DOUĂ RÂNDURI ───────────────
+// ── A FILE IS NOT EMPTIED BY A TWO-LINE CHANGE ─────────────────────────────
 //
-// 31 iul 2026, 12:36. Kelion a deschis și și-a dat merge singur la PR #613:
-// „exclud un model din scara constructorului". A intrat în master cu 2 inserții
-// și 1036 de ȘTERGERI, iar `deploy/constructor-agent.mjs` a rămas cu 14 rânduri
-// din 1049. Diagnosticul lui era CORECT (modelul chiar întorcea răspunsuri goale
-// la 11 ordine la rând) — execuția a golit fișierul.
+// Jul 31 2026, 12:36. Kelion opened and merged PR #613 by itself: "exclude a
+// model from the constructor's ladder". It entered master with 2 insertions
+// and 1036 DELETIONS, and `deploy/constructor-agent.mjs` was left with 14
+// lines out of 1049. Its diagnosis was CORRECT (the model really returned
+// empty answers on 11 orders in a row) — the execution emptied the file.
 //
-// Cauza: `repo_write` cere conținutul COMPLET, iar ieșirea modelului e plafonată.
-// Pe un fișier mare răspunsul se taie, și se scrie un ciot — cu commit și mesaj
-// care sună corect.
+// The cause: `repo_write` requires the COMPLETE content, and the model's
+// output is capped. On a large file the answer gets cut, and a stump is
+// written — with a commit and a correct-sounding message.
 //
-// LECȚIA CARE CONTEAZĂ, și de ce testul ăsta e scris așa: paznicul EXISTA. De
-// mult. Dar doar în constructorul de pe VPS, pus acolo după un incident
-// anterior de exact același fel. Calea din aplicație n-a primit niciodată
-// aceeași lecție. **Un paznic pus într-un singur loc apără un singur loc.**
-// De asta testul verifică AMBELE căi și că pragul e IDENTIC — două praguri
-// diferite pentru aceeași primejdie ar însemna că unul e greșit.
+// THE LESSON THAT MATTERS, and why this test is written this way: the guard
+// EXISTED. For a long time. But only in the VPS constructor, put there after
+// a previous incident of exactly the same kind. The in-app path never got the
+// same lesson. **A guard placed in a single place protects a single place.**
+// That's why the test checks BOTH paths and that the threshold is IDENTICAL —
+// two different thresholds for the same danger would mean one is wrong.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -33,12 +33,12 @@ describe('calea din aplicație (repo_write) refuză o rescriere ciuntită', () =
   })
 
   it('ia mărimea din cererea pe care o face oricum — fără cerere în plus', () => {
-    // `/contents/` întoarce și `size` lângă `sha`; paznicul nu costă nimic.
+    // `/contents/` returns `size` next to `sha`; the guard costs nothing.
     expect(backend).toMatch(/sha\?: string; size\?: number/)
   })
 
   it('refuzul spune ce să facă, nu doar „nu"', () => {
-    // Un refuz fără ieșire îl lasă pe model să reîncearce la fel, în buclă.
+    // A refusal with no way out lets the model retry the same way, in a loop.
     expect(backend).toMatch(/citește-l cu read_source[\s\S]{0,80}retrimite-l complet/)
   })
 
@@ -49,7 +49,7 @@ describe('calea din aplicație (repo_write) refuză o rescriere ciuntită', () =
 })
 
 describe('AMBELE căi de scriere au paznicul, cu ACELAȘI prag', () => {
-  it('constructorul de pe VPS îl are (îl avea de dinainte)', () => {
+  it('the VPS constructor has it (it had it from before)', () => {
     expect(constructor).toMatch(/content\.length < vechi\.length \* 0\.5/)
     expect(constructor).toMatch(/vechi\.length > 2_000/)
   })
@@ -70,15 +70,15 @@ describe('fișierul distrus e la loc, întreg', () => {
   })
 
   it('scara de modele conține schimbarea pe care PR #613 o voia', () => {
-    // Diagnosticul lui Kelion era bun: modelul chiar e defect. Schimbarea
-    // rămâne — doar aplicată fără să distrugă restul fișierului.
+    // Kelion's diagnosis was good: the model really is broken. The change
+    // stays — just applied without destroying the rest of the file.
     expect(constructor).toMatch(/MODELE_DOVEDIT_PROASTE = new Set\(\[[\s\S]{0,600}nvidia\/nemotron-3-super-120b-a12b:free/)
     expect(constructor).not.toMatch(/MODEL_LADDER = \[\s*\n\s*'nvidia\/nemotron-3-super-120b-a12b:free'/)
   })
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
-    // Verificare grosieră dar reală: dacă fișierul ar fi iar ciuntit, măcar una
-    // dintre astea ar lipsi.
+    // A coarse but real check: if the file were maimed again, at least one of
+    // these would be missing.
     for (const bucata of ['function toolWrite', 'function toolEdit', 'MODEL_LADDER', 'RUN_ALLOWED', 'compactHistory'])
       expect(constructor).toContain(bucata)
   })

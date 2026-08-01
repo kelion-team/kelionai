@@ -1,19 +1,19 @@
-// ── TEXTUL PANOULUI DE ADMIN — ENGLEZA E BAZA, ROMÂNA E O TRADUCERE ─────────
+// ── THE ADMIN PANEL TEXT — ENGLISH IS THE BASE, ROMANIAN IS A TRANSLATION ──
 //
-// Regula lui Adrian (30 iul): „inclusiv aplicația toată default engleză", apoi
-// limba userului, „inclusiv admin". Suprafața publică și cea a userului sunt
-// deja făcute (`publicText.ts`, `i18n.ts`); panoul de admin era ultimul loc din
-// aplicație scris direct în română.
+// Adrian's rule (Jul 30): "including the whole app default English", then
+// the user's language, "including admin". The public and user surfaces are
+// already done (`publicText.ts`, `i18n.ts`); the admin panel was the last place in
+// the app written directly in Romanian.
 //
-// DE CE UN FIȘIER SEPARAT, nu `i18n.ts`: cheile astea se văd DOAR de admin.
-// Puse în dicționarul comun, ar fi umflat tipul `Strings` cu ~60 de rubrici pe
-// care fiecare limbă nouă ar trebui să le treacă — pentru un ecran pe care nu-l
-// deschide niciun user. Aici namespace-ul e limpede și separat.
+// WHY A SEPARATE FILE, not `i18n.ts`: these keys are seen ONLY by the admin.
+// Put in the common dictionary, they would bloat the `Strings` type with ~60
+// labels every new language would have to pass through — for a screen no user
+// ever opens. Here the namespace is clear and separate.
 //
-// Aceeași regulă de completitudine ca la `i18n.ts`: **engleza e obligatorie**
-// (tipul o cere întreagă), restul limbilor sunt parțiale și cad curat pe
-// engleză. Româna e completă fiindcă adminul de azi e român; o limbă care
-// lipsește nu lasă rubrici goale, arată engleza.
+// The same completeness rule as `i18n.ts`: **English is mandatory**
+// (the type requires it whole), the other languages are partial and fall cleanly onto
+// English. Romanian is complete because today's admin is Romanian; a missing
+// language leaves no empty labels, it shows English.
 import { resolveLang, type Lang } from './i18n'
 import { loadLocalLang } from './prefs'
 
@@ -33,9 +33,8 @@ export interface AdminStrings {
   tabTokens: string
   tabBuilder: string
   tabRecovery: string
-  // Stări comune
+  // Common states
   loading: string
-  readingStripe: string
   noSpendYet: string
   noTransactionsYet: string
   noContactsYet: string
@@ -50,9 +49,7 @@ export interface AdminStrings {
   // Bani
   setManual: string
   activate: string
-  seeInStripe: string
   andRunWorkflow: string
-  balanceTransfersBeta: string
   once: string
   transactionsHead: string
   // Magazine
@@ -109,7 +106,6 @@ const en: AdminStrings = {
   tabBuilder: 'Builder',
   tabRecovery: 'Recovery',
   loading: 'Loading…',
-  readingStripe: 'Reading the state from Stripe…',
   noSpendYet: 'No spend yet.',
   noTransactionsYet: 'No transactions yet.',
   noContactsYet: 'No contacts yet.',
@@ -123,11 +119,9 @@ const en: AdminStrings = {
   noLettersYet: 'No letters yet (or MAIL_PASS is not set).',
   setManual: 'Set to Manual',
   activate: 'Activate',
-  seeInStripe: 'See in Stripe',
   andRunWorkflow: ' and run the workflow ',
-  balanceTransfersBeta: ' — the Balance Transfers endpoint is in beta at Stripe: request access from ',
   once: ' (once)',
-  transactionsHead: 'History — top-ups through Stripe (channel CLOSED 30 Jul, nothing new arrives here)',
+  transactionsHead: 'History — top-ups via Revolut transfer (unique code per payment)',
   checkingStores: 'Checking the stores live…',
   notListedYet: '○ not listed yet',
   downloadsHead: 'Who downloaded (last 100)',
@@ -172,7 +166,6 @@ const ro: AdminStrings = {
   tabBuilder: 'Constructor',
   tabRecovery: 'Recuperare',
   loading: 'Se încarcă…',
-  readingStripe: 'Se citește starea din Stripe…',
   noSpendYet: 'Niciun consum încă.',
   noTransactionsYet: 'Nicio tranzacție încă.',
   noContactsYet: 'Niciun contact încă.',
@@ -186,11 +179,9 @@ const ro: AdminStrings = {
   noLettersYet: 'Nicio scrisoare încă (sau MAIL_PASS nesetat).',
   setManual: 'Setează Manual',
   activate: 'Activează',
-  seeInStripe: 'Vezi în Stripe',
   andRunWorkflow: ' și rulează workflow-ul ',
-  balanceTransfersBeta: ' — endpointul Balance Transfers e în beta la Stripe: cere accesul din ',
   once: ' (o dată)',
-  transactionsHead: 'Istoric — alimentări prin Stripe (canal ÎNCHIS pe 30 iul, nu mai intră nimic aici)',
+  transactionsHead: 'Istoric — alimentări prin transfer Revolut (cod unic la fiecare plată)',
   checkingStores: 'Se verifică magazinele live…',
   notListedYet: '○ nelistat încă',
   downloadsHead: 'Cine a descărcat (ultimele 100)',
@@ -223,8 +214,8 @@ const dict: { en: AdminStrings } & Partial<Record<Lang, Partial<AdminStrings>>> 
 
 const cache = new Map<Lang, AdminStrings>()
 
-/** Textul panoului, în limba adminului conectat. Aceeași regulă ca peste tot:
- *  oglinda locală a limbii identificate de server, altfel engleză. */
+/** The panel text, in the connected admin's language. The same rule as everywhere:
+ *  the local mirror of the server-identified language, else English. */
 export function adminStrings(): AdminStrings {
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const gata = cache.get(lang)

@@ -1,10 +1,10 @@
-// ── LIMBILE OFERITE ÎN SELECTOARE — O SINGURĂ LISTĂ ─────────────────────────
-// Era scrisă de două ori (formularul de contact și manualul). O listă de limbi
-// copiată ajunge inevitabil să difere: adaugi o limbă într-un loc și userul o
-// vede acolo, dar nu și dincolo. Aici, o dată.
+// ── THE LANGUAGES OFFERED IN THE SELECTORS — ONE SINGLE LIST ──────────────
+// It was written twice (the contact form and the manual). A copied language
+// list inevitably ends up differing: you add a language in one place and the
+// user sees it there, but not elsewhere. Here, once.
 //
-// Nu e o limită tehnică: serverul traduce ORICE cod valid de limbă. Lista asta e
-// doar ce se vede în meniu.
+// It's not a technical limit: the server translates ANY valid language code.
+// This list is only what shows in the menu.
 export interface LangOption {
   code: string
   label: string

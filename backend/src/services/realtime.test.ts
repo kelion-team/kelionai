@@ -7,10 +7,12 @@ describe('realtimeInstructions', () => {
     expect(ro).toContain('Romanian')
     expect(ro).toContain('consecvent')
 
-    // Tag lung — ruta normalizează la 2 litere înainte; aici primim deja 'en'.
-    // NOTĂ (25 iul): „Romanian" apare LEGITIM și la userii englezi — în LISTA
-    // gărzii de limbi permise („only in: English, Romanian, ..."). Ce contează
-    // e limba STABILITĂ a userului, nu absența cuvântului din gardă.
+    // Long tag — the route normalizes to 2 letters first; here we already
+    // receive 'en'.
+    // NOTE (Jul 25): "Romanian" LEGITIMATELY appears for English users too —
+    // in the language guard's LIST of allowed languages ("only in: English,
+    // Romanian, ..."). What matters is the user's ESTABLISHED language, not
+    // the word's absence from the guard.
     const en = realtimeInstructions('en')
     expect(en).toContain('limba stabilită a utilizatorului este English')
     expect(en).not.toContain('limba stabilită a utilizatorului este Romanian')
@@ -20,7 +22,7 @@ describe('realtimeInstructions', () => {
     const t = realtimeInstructions('')
     expect(t).toContain('ENGLEZĂ')
     expect(t).toContain('Detectează limba')
-    // Nu comută pe cuvinte scurte/ambigue — stabilitate.
+    // It doesn't switch on short/ambiguous words — stability.
     expect(t).toContain('propoziție clară')
   })
 
@@ -39,9 +41,10 @@ describe('realtimeInstructions', () => {
   })
 })
 
-// GPS LA CERERE (pana din 26 iul: fără flux permanent, vocea rămânea fără nicio
-// cale spre poziție și zicea „nu am acces la GPS"). Unealta get_location TREBUIE
-// să existe în sesiunea de voce — regresia ei ar orbi din nou vocea la locație.
+// GPS ON DEMAND (the Jul 26 outage: without a permanent stream, voice was
+// left with no path to the position and said "I don't have GPS access"). The
+// get_location tool MUST exist in the voice session — its regression would
+// blind voice to location again.
 describe('realtimeTools', () => {
   it('include get_location (citirea GPS la cerere, executată în browser)', async () => {
     const { realtimeTools } = await import('./realtime.js')

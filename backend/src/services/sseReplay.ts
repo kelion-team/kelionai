@@ -18,8 +18,9 @@ interface Event {
 interface ConversationBuffer {
   seq: number // last used sequence number
   events: Event[] // ring buffer, oldest at index 0
-  // Turele ÎNCHEIATE (25 iul): fără asta, resume-ul nu putea ști dacă tura mai
-  // produce evenimente — replay-a bufferul și ÎNCHIDEA, trunchiind răspunsul.
+  // The FINISHED turns (25 Jul): without this, resume couldn't know whether
+  // the turn still produces events — it replayed the buffer and CLOSED,
+  // truncating the reply.
   finished: Set<string>
 }
 
@@ -111,10 +112,10 @@ export function finishTurn(email: string, turnId: string): void {
   // Refresh TTL on finish.
   const ev = buf.events[buf.events.length - 1]
   if (ev && ev.turnId === turnId) ev.ts = Date.now()
-  // Marchează tura ÎNCHEIATĂ — resume-ul (readTurnFrom) se poate opri curat.
+  // Marks the turn FINISHED — resume (readTurnFrom) can stop cleanly.
   buf.finished.add(turnId)
   if (buf.finished.size > 32) {
-    // Nu creștem la nesfârșit; turele vechi ies oricum din ring/TTL.
+    // We don't grow without bound; old turns leave the ring/TTL anyway.
     const first = buf.finished.values().next().value
     if (first !== undefined) buf.finished.delete(first)
   }
@@ -142,12 +143,13 @@ export async function* readTurnFrom(
     return
   }
 
-  // LIVE-FOLLOW (25 iul — bug REAL de trunchiere): înainte, bucla replay-a doar
-  // ce era DEJA în buffer și se termina — dacă tura încă rula pe server (ex. o
-  // unealtă de 20s), clientul primea jumătate de răspuns prezentat ca întreg,
-  // fără nicio eroare. Acum: replay ce există, apoi URMĂREȘTE tura vie și cedează
-  // evenimentele noi pe măsură ce sosesc, până când tura e marcată încheiată
-  // (finishTurn) sau expiră TTL-ul — abia atunci stream-ul se închide.
+  // LIVE-FOLLOW (25 Jul — a REAL truncation bug): before, the loop replayed
+  // only what was ALREADY in the buffer and ended — if the turn was still
+  // running on the server (e.g. a 20s tool), the client got half a reply
+  // presented as whole, with no error. Now: replay what exists, then FOLLOW
+  // the live turn and yield new events as they arrive, until the turn is
+  // marked finished (finishTurn) or the TTL expires — only then does the
+  // stream close.
   let cursor = startSeq
   const deadline = Date.now() + TTL_MS
   for (;;) {
@@ -160,9 +162,9 @@ export async function* readTurnFrom(
       emitted = true
       yield formatSSE(ev.seq, ev.payload)
     }
-    if (buf.finished.has(turnId)) return // tura e gata — tot ce era de dat s-a dat
-    if (Date.now() > deadline) return // plasă: nu ținem conexiunea la nesfârșit
-    // Tura încă rulează — așteaptă puțin și verifică iar (fără busy-loop).
+    if (buf.finished.has(turnId)) return // the turn is done — everything has been given
+    if (Date.now() > deadline) return // safety net: we don't hold the connection forever
+    // The turn is still running — wait a bit and check again (no busy-loop).
     if (!emitted) await new Promise((r) => setTimeout(r, 150))
   }
 }

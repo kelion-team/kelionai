@@ -1,10 +1,10 @@
 // ── PICTOGRAMELE MANUALULUI ─────────────────────────────────────────────────
-// Adrian, 30 iul: „manualul e extrem de rudimentar... nivelul e de clasă
-// pregătitoare." Avea dreptate: era text negru pe alb, fără niciun reper vizual.
+// Adrian, Jul 30: "the manual is extremely rudimentary... the level is
+// kindergarten." He was right: it was black text on white, with no visual landmark.
 //
-// Desenate în cod (SVG), nu imagini: se scalează perfect, iau culoarea din jur,
-// nu adaugă nicio cerere de rețea și nu se pot rupe la un deploy. O carte se
-// citește cu ochii — dacă fiecare capitol arată identic, nu ții minte nimic.
+// Drawn in code (SVG), not images: they scale perfectly, take the surrounding
+// color, add no network request and cannot break on a deploy. A book is read
+// with the eyes — if every chapter looks identical, you remember nothing.
 import React from 'react'
 
 const cai: Record<string, React.JSX.Element> = {

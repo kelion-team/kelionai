@@ -4,63 +4,63 @@ import { repoOpenPR } from './github.js'
 import { resurseGazda, PRAG_INCARCARE_PCT } from './resurse.js'
 import { LUCRATORI, ruleazaLucrator, lucratoriInstalati, type Propunere } from './lucratori.js'
 
-// ── PANOUL: TREI PROPUN, CREIERUL ALEGE ─────────────────────────────────────
+// ── THE PANEL: THREE PROPOSE, THE BRAIN CHOOSES ─────────────────────────────
 //
-// Adrian, 31 iul: „trebuie pornite toate 3, fiecare independent, creierul ia
-// care e cel mai bun rezultat propus de ei, după ce analizează propunerile".
+// Adrian, Jul 31: "all 3 must be started, each independent, the brain takes
+// the best result proposed by them, after analysing the proposals".
 //
-// Exact asta face fișierul ăsta:
-//   1. verifică dacă mașina duce (producția are prioritate — mereu)
-//   2. vede CINE e instalat; lipsa unuia nu oprește panoul, se spune și se
-//      merge mai departe cu ceilalți
-//   3. pornește toți lucrătorii instalați ÎN PARALEL, pe aceeași sarcină, cu
-//      MODELE DIFERITE — altfel n-ar fi trei păreri, ar fi aceeași părere de
-//      trei ori
-//   4. adună propunerile: diff măsurat cu git, teste rulate de noi
-//   5. dă creierului propunerile și îl pune să ALEAGĂ, cu motiv
-//   6. deschide UN SINGUR PR, pentru câștigător. Niciodată merge.
+// That's exactly what this file does:
+//   1. checks whether the machine can take it (production has priority — always)
+//   2. sees WHO is installed; one missing doesn't stop the panel, it gets said
+//      and we proceed with the others
+//   3. starts all installed workers IN PARALLEL, on the same task, with
+//      DIFFERENT MODELS — otherwise it wouldn't be three opinions, it would be
+//      the same opinion three times
+//   4. collects the proposals: diff measured with git, tests run by us
+//   5. gives the brain the proposals and has it CHOOSE, with a reason
+//   6. opens ONE SINGLE PR, for the winner. Never a merge.
 //
-// DE CE MODELE DIFERITE: valoarea unui panou stă în diversitate. Trei unelte
-// pe același model dau, de cele mai multe ori, aceeași soluție cu alte cuvinte.
-// Fiecare lucrător primește alt creier gratuit, deci trei drumuri de gândire.
+// WHY DIFFERENT MODELS: a panel's value is in diversity. Three tools on the
+// same model give, most of the time, the same solution in other words. Each
+// worker gets a different free brain, hence three paths of thought.
 //
-// DE CE CREIERUL ALEGE, ȘI NU O FORMULĂ: „cel mai bun" nu e „cel mai puțin
-// cod" și nici „cel mai rapid". O propunere de 5 rânduri care repară cauza bate
-// una de 200 care ascunde simptomul. Asta cere judecată, nu aritmetică. Dar
-// judecata primește FAPTE ca intrare: câte fișiere, câte rânduri, TRECE sau NU
-// testele — măsurate, nu declarate de unelte despre ele însele.
+// WHY THE BRAIN CHOOSES, NOT A FORMULA: "best" is not "least code" and not
+// "fastest". A 5-line proposal that repairs the cause beats a 200-line one
+// that hides the symptom. That takes judgment, not arithmetic. But judgment
+// gets FACTS as input: how many files, how many lines, tests PASS or NOT —
+// measured, not declared by the tools about themselves.
 
-/** Câți lucrători pot rula odată. Trei clone + trei modele + trei rulări de
- *  teste e deja mult pe o mașină care ține și producția. */
+/** How many workers can run at once. Three clones + three models + three test
+ *  runs is already a lot on a machine that also hosts production. */
 const MAX_PARALEL = 3
 
-/** Un singur panou odată. Al doilea primește un „nu" clar, nu o coadă tăcută. */
+/** One panel at a time. The second gets a clear "no", not a silent queue. */
 let ocupat = false
 
 export interface RezultatPanou {
   ok: boolean
   motiv?: string
-  /** Cine a fost pornit, cine lipsea. */
+  /** Who was started, who was missing. */
   pornit: string[]
   lipsa: string[]
   propuneri: Propunere[]
-  /** Numele lucrătorului ales, dacă s-a ales unul. */
+  /** The chosen worker's name, if one was chosen. */
   castigator?: string
-  /** De ce a fost ales — în cuvintele creierului. */
+  /** Why it was chosen — in the brain's words. */
   judecata?: string
   pr?: string
 }
 
-/** Modele DIFERITE pentru lucrători diferiți — de asta e panou, nu ecou.
- *  Toate gratuite; ordinea e cea a capacității măsurate pe 31 iul. */
+/** DIFFERENT models for different workers — that's why it's a panel, not an
+ *  echo. All free; the order is the capability measured on Jul 31. */
 const MODELE = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'cohere/north-mini-code:free',
   'inclusionai/ling-3.0-flash:free',
 ]
 
-/** Rezumatul unei propuneri, pentru creier. Numai fapte, în ordinea în care
- *  contează la judecată. */
+/** A proposal's summary, for the brain. Facts only, in the order they matter
+ *  to the judgment. */
 function rezuma(p: Propunere, i: number): string {
   const cap = `### Propunerea ${i + 1} — ${p.lucrator} (model: ${p.model})`
   if (!p.ok) return `${cap}\nA EȘUAT: ${p.motiv ?? 'motiv necunoscut'}`
@@ -77,8 +77,8 @@ function rezuma(p: Propunere, i: number): string {
 }
 
 /**
- * Pornește panoul pe o sarcină. Întoarce propunerile, judecata și PR-ul.
- * `raporteaza` primește pașii pe măsură ce se întâmplă (pentru monitor).
+ * Starts the panel on a task. Returns the proposals, the judgment and the PR.
+ * `raporteaza` gets the steps as they happen (for the monitor).
  */
 export async function ruleazaPanou(
   sarcina: string,
@@ -94,10 +94,10 @@ export async function ruleazaPanou(
   if (ocupat) return { ...gol, motiv: 'rulează deja un panou — unul singur odată' }
   if (!config.githubToken) return { ...gol, motiv: 'lipsește GITHUB_TOKEN — lucrătorii nu pot clona' }
 
-  // ── PRODUCȚIA ARE PRIORITATE ─────────────────────────────────────────────
-  // Trei lucrători în paralel înseamnă trei clone, trei modele și trei rulări
-  // de teste pe mașina care ține și aplicația. Dacă e deja încărcată, panoul
-  // NU pornește — o reparație nu merită o pagină care se mișcă greu.
+  // ── PRODUCTION HAS PRIORITY ────────────────────────────────────────────────
+  // Three workers in parallel means three clones, three models and three test
+  // runs on the machine that also hosts the app. If it's already loaded, the
+  // panel does NOT start — a repair isn't worth a page that moves slowly.
   const res = await resurseGazda()
   if (res && res.incarcarePct >= PRAG_INCARCARE_PCT) {
     return { ...gol, motiv: `VPS-ul e încărcat ${res.incarcarePct}% — nu pornesc panoul acum, ar călca producția` }
@@ -117,8 +117,8 @@ export async function ruleazaPanou(
     spune(`Pornesc ${echipa.length} lucrători în paralel: ${echipa.map((l) => l.nume).join(', ')}` +
       (lipsa.length ? ` (lipsesc: ${lipsa.join(', ')})` : ''))
 
-    // TOȚI ODATĂ, independent. `allSettled`: unul care crapă nu-i oprește pe
-    // ceilalți — de-asta sunt trei.
+    // ALL AT ONCE, independent. `allSettled`: one that crashes doesn't stop
+    // the others — that's why there are three.
     const rezultate = await Promise.allSettled(
       echipa.map((l, i) => ruleazaLucrator(l, MODELE[i % MODELE.length], text)),
     )
@@ -140,9 +140,9 @@ export async function ruleazaPanou(
       return { ok: true, pornit: echipa.map((l) => l.nume), lipsa, propuneri, motiv: 'niciun lucrător n-a produs o modificare' }
     }
 
-    // ── JUDECATA ───────────────────────────────────────────────────────────
-    // Un singur apel de creier, cu FAPTELE în față. Nu-i cerem să ghicească
-    // dacă merge — îi spunem noi, măsurat, și-l punem să cântărească.
+    // ── THE JUDGMENT ─────────────────────────────────────────────────────────
+    // A single brain call, with the FACTS in front. We don't ask it to guess
+    // whether it works — we tell it ourselves, measured, and have it weigh.
     spune(`Creierul compară ${valide.length} propuneri…`)
     const intrebare =
       `Ai ${valide.length} propuneri INDEPENDENTE pentru aceeași sarcină. Alege UNA.\n\n` +
@@ -163,8 +163,9 @@ export async function ruleazaPanou(
     const numeAles = /ALEG:\s*([a-z0-9_-]+)/i.exec(verdict)?.[1]?.toLowerCase() ?? ''
     const motivAles = /MOTIV:\s*([\s\S]+)/i.exec(verdict)?.[1]?.trim() ?? ''
 
-    // Dacă creierul n-a răspuns în format (sau deloc), NU inventăm un
-    // câștigător tăcut: cădem pe o regulă scrisă, și SPUNEM că am căzut pe ea.
+    // If the brain didn't answer in format (or at all), we do NOT invent a
+    // silent winner: we fall back on a written rule, and we SAY we fell back
+    // on it.
     let castigator = valide.find((p) => p.lucrator.toLowerCase() === numeAles)
     let judecata = motivAles
     if (!castigator) {

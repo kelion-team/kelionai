@@ -3,26 +3,27 @@ import { openrouterChat } from './openrouter.js'
 import type { AnthropicTool, OrMessage } from './openrouter.js'
 import type { Message } from './brain-types.js'
 
-// ── CREIERUL — 100% OpenRouter ──────────────────────────────────────────────
-// Kimi și GLM SCOASE DEFINITIV (Adrian: „0 kimi, 0 glm, niciodată"). Tot creierul
-// trece printr-o singură cheie OpenRouter (GPT/Gemini/Claude). Modelul de chat
-// selectabil e gestionat în chat.ts (orchestrator); aici rămân doar utilitarele
-// non-streaming folosite în afara chatului: memorie (agents), rezumate scurte
-// (mailbox/admin) și verificarea cheii.
+// ── THE BRAIN — 100% OpenRouter ─────────────────────────────────────────────
+// Kimi and GLM REMOVED FOR GOOD (Adrian: "0 kimi, 0 glm, never"). The whole
+// brain goes through a single OpenRouter key (GPT/Gemini/Claude). The
+// selectable chat model is managed in chat.ts (orchestrator); only the
+// non-streaming utilities used outside the chat remain here: memory (agents),
+// short summaries (mailbox/admin) and the key check.
 
 
-// ── EXPERTUL FIABIL (Etapa 1, ordin owner 29 iul) ────────────────────────────
-// CAUZA (confirmată în cod + logurile constructorului): brainComplete/WithTools
-// chemau `workModel()` O SINGURĂ DATĂ; la 429/saturare `:free`, openrouterChat
-// arunca, iar `catch { return '' }` întorcea gol → „expertul nu răspunde"
-// (exact simptomul raportat de Kelion). Acum expertul trece printr-o SCARĂ de
-// modele gratuite (work → top → rezerve), sare peste cele saturate/moarte și
-// răspunde de pe prima treaptă liberă. Doar dacă TOATĂ scara pică, tace — dar
-// abia după ce a încercat tot, nu din prima. Aceeași cură ca la constructor.
+// ── THE RELIABLE EXPERT (Stage 1, owner order Jul 29) ───────────────────────
+// THE CAUSE (confirmed in code + the constructor's logs): brainComplete/
+// WithTools called `workModel()` ONLY ONCE; on 429/`:free` saturation,
+// openrouterChat threw, and `catch { return '' }` returned empty → "the expert
+// doesn't answer" (exactly the symptom Kelion reported). Now the expert walks
+// a LADDER of free models (work → top → reserves), skips the saturated/dead
+// ones and answers from the first free rung. Only if the WHOLE ladder fails
+// does it stay silent — but only after trying everything, not on the first
+// attempt. The same cure as the constructor's.
 
-// Eroare TRECĂTOARE (furnizor saturat/căzut) — merită să treci la alt model.
-// 400/401/404 (cererea/cheia noastră) NU sunt aici: nu-s trecătoare, dar tot
-// trecem la modelul următor (un nume greșit nu are voie să omoare expertul).
+// A TRANSIENT error (provider saturated/down) — worth moving to another model.
+// 400/401/404 (our request/key) are NOT here: they're not transient, but we
+// still move to the next model (a wrong name must not kill the expert).
 export function isTransientBrainError(err: unknown): boolean {
   const s = String((err as { message?: string })?.message ?? err)
   return /\b429\b|rate.?limit|resourceexhausted|degraded|provider returned error|openrouter (5\d\d|408|409)|timed? ?out|econnreset|etimedout|fetch failed/i.test(
@@ -30,8 +31,8 @@ export function isTransientBrainError(err: unknown): boolean {
   )
 }
 
-// Scara de modele a expertului: work → top → rezerve gratuite. Editabilă din env
-// (OPENROUTER_EXPERT_FALLBACKS) fără deploy. Deduplicată, ordinea păstrată.
+// The expert's model ladder: work → top → free reserves. Editable from env
+// (OPENROUTER_EXPERT_FALLBACKS) without a deploy. Deduplicated, order kept.
 export function expertModelLadder(): string[] {
   const extra = (
     process.env.OPENROUTER_EXPERT_FALLBACKS ??
@@ -47,10 +48,10 @@ export function expertModelLadder(): string[] {
   return out
 }
 
-// Rulează un apel pe scara de modele: încearcă fiecare treaptă, sare peste cele
-// saturate/moarte, întoarce PRIMUL rezultat bun; aruncă ultima eroare doar dacă
-// TOATE au picat. `sleep`/`now` injectabile pentru test. Buget total scurt —
-// userul așteaptă expertul, nu-l ținem agățat pe toată scara la nesfârșit.
+// Runs a call across the model ladder: tries each rung, skips the saturated/
+// dead ones, returns the FIRST good result; throws the last error only if ALL
+// failed. `sleep`/`now` injectable for tests. Short total budget — the user is
+// waiting for the expert, we don't keep him hanging on the ladder forever.
 export async function runBrainLadder<T>(
   models: string[],
   call: (model: string) => Promise<T>,
@@ -67,17 +68,17 @@ export async function runBrainLadder<T>(
       return await call(models[i])
     } catch (e) {
       lastErr = e
-      // Pauză mică DOAR pe saturare (429) — dă furnizorului o clipă; pe eroare
-      // definitivă (model greșit) trecem instant la următorul.
+      // Small pause ONLY on saturation (429) — gives the provider a moment; on
+      // a definitive error (wrong model) we move instantly to the next one.
       if (i < models.length - 1 && isTransientBrainError(e)) await sleep(500)
     }
   }
   throw lastErr
 }
 
-// Adaptor minimal compatibil cu vechiul client (folosit de services/agents.ts):
-// `.messages.create({ model, max_tokens, system?, messages })` → Message cu un
-// singur bloc de text. Fără streaming (memorie/rezumate rulează în fundal).
+// Minimal adapter compatible with the old client (used by services/agents.ts):
+// `.messages.create({ model, max_tokens, system?, messages })` → Message with a
+// single text block. No streaming (memory/summaries run in the background).
 export const brain = {
   messages: {
     create: async (params: {
@@ -94,8 +95,9 @@ export const brain = {
           content: typeof m.content === 'string' ? m.content : '',
         })
       }
-      // Scara de modele și aici (memorie/rezumate în fundal): un 429 nu mai lasă
-      // memoria fără să învețe. Dacă s-a cerut un model anume, îl încearcă primul.
+      // The model ladder here too (memory/summaries in the background): a 429
+      // no longer leaves memory without learning. If a specific model was
+      // requested, it is tried first.
       const ladder = params.model
         ? [params.model, ...expertModelLadder().filter((m) => m !== params.model)]
         : expertModelLadder()
@@ -113,10 +115,11 @@ export const brain = {
   },
 }
 
-// VEDEREA ÎN VOCE (Adrian: „de ce nu vede?"). În sesiunea Realtime (doar audio)
-// Kelion n-avea ochi. Clientul capturează un cadru din cameră și-l trimite aici;
-// îl dăm unui model cu vedere (GPT/Gemini prin OpenRouter) și întoarcem o
-// descriere scurtă, naturală, de rostit cu voce. Gol la eșec — nu aruncă.
+// VISION IN VOICE (Adrian: "why can't he see?"). In the Realtime session
+// (audio only) Kelion had no eyes. The client captures a camera frame and
+// sends it here; we give it to a vision model (GPT/Gemini via OpenRouter) and
+// return a short, natural description to speak aloud. Empty on failure —
+// never throws.
 export async function describeScene(
   imageDataUrl: string,
   question?: string,
@@ -149,19 +152,20 @@ export async function describeScene(
   }
 }
 
-// Un răspuns text scurt de la creier (mailbox, admin). Gol la eșec — nu aruncă.
-// onCost (25 iul): vocea trebuie să DEBITEZE costul real al escaladării — fără
-// callback, costul se pierdea și userul consuma creier gratis.
+// A short text answer from the brain (mailbox, admin). Empty on failure —
+// never throws. onCost (Jul 25): voice must DEBIT the real cost of the
+// escalation — without the callback, the cost was lost and the user consumed
+// brain for free.
 export async function brainComplete(
   prompt: string,
   maxTokens = 1024,
   onCost?: (usd: number) => void,
 ): Promise<string> {
   try {
-    // reasoning medium (25 iul): creierul de escaladare GÂNDEȘTE real înainte
-    // de răspuns — cerința lui Adrian „raționament adevărat, complet".
-    // SCARA de modele (29 iul): la 429 pe treapta curentă, trece la următoarea,
-    // nu mai tace din prima.
+    // reasoning medium (Jul 25): the escalation brain THINKS for real before
+    // answering — Adrian's requirement "true, complete reasoning".
+    // The model LADDER (Jul 29): on 429 on the current rung, it moves to the
+    // next one instead of going silent on the first attempt.
     const r = await runBrainLadder(expertModelLadder(), (m) =>
       openrouterChat(m, [{ role: 'user', content: prompt }], [], { maxTokens, reasoning: 'medium' }),
     )
@@ -172,11 +176,11 @@ export async function brainComplete(
   }
 }
 
-// ESCALADAREA CU UNELTE (Adrian, 27 iul: „Kelion nu poate vedea tot codul
-// sursă al lui, de ce?" — vocea escalada spre un creier FĂRĂ unelte, care
-// nega accesul). Buclă mică de tool-calling pe același model de lucru:
-// modelul cheamă uneltele primite (sursă/DB/constructor...), primește
-// rezultatele și abia apoi formulează răspunsul final.
+// ESCALATION WITH TOOLS (Adrian, Jul 27: "Kelion cannot see all of his source
+// code, why?" — voice escalated to a brain WITHOUT tools, which denied the
+// access). A small tool-calling loop on the same work model: the model calls
+// the tools it received (source/DB/constructor...), gets the results and only
+// then formulates the final answer.
 export async function brainCompleteWithTools(
   prompt: string,
   tools: AnthropicTool[],
@@ -185,17 +189,17 @@ export async function brainCompleteWithTools(
     maxTokens?: number
     maxRounds?: number
     onCost?: (usd: number) => void
-    /** SCARA IMPUSĂ — pentru sarcinile grele (Adrian, 31 iul: „pe nivel de
-     *  dificultate setabil automat pe cerință"). Fără ea se merge pe scara
-     *  obișnuită, care începe cu modelul de LUCRU; o sarcină de dificultate 5
-     *  merită mâna cea mai bună din prima, nu după ce a irosit turele. */
+    /** FORCED LADDER — for heavy tasks (Adrian, Jul 31: "difficulty level set
+     *  automatically per requirement"). Without it, the usual ladder is used,
+     *  which starts with the WORK model; a difficulty-5 task deserves the best
+     *  hand from the start, not after it has wasted its turns. */
     models?: string[]
   } = {},
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 6
   const messages: OrMessage[] = [{ role: 'user', content: prompt }]
-  // Aceeași scară de modele ca brainComplete — fiecare RUNDĂ o încearcă, deci un
-  // 429 pe o treaptă nu mai rupe toată bucla de unelte a expertului.
+  // The same model ladder as brainComplete — every ROUND tries it, so a 429
+  // on one rung no longer breaks the expert's whole tool loop.
   const ladder = opts.models?.length ? opts.models : expertModelLadder()
   try {
     for (let round = 0; round < maxRounds; round++) {
@@ -210,13 +214,13 @@ export async function brainCompleteWithTools(
         try {
           args = JSON.parse(c.function.arguments || '{}') as Record<string, unknown>
         } catch {
-          /* argumente stricate → unealta primește obiect gol */
+          /* broken arguments → the tool gets an empty object */
         }
         const out = await execTool(c.function.name, args).catch((e: Error) => JSON.stringify({ error: e.message }))
         messages.push({ role: 'tool', tool_call_id: c.id, content: out.slice(0, 60_000) })
       }
     }
-    // plafonul de runde atins — cerem răspunsul final fără alte unelte
+    // round ceiling reached — we ask for the final answer without more tools
     const last = await runBrainLadder(ladder, (m) =>
       openrouterChat(m, messages, [], { maxTokens: opts.maxTokens ?? 2000 }),
     )
@@ -227,14 +231,15 @@ export async function brainCompleteWithTools(
   }
 }
 
-// Verifică modelele implicite (chat + work) cu un ping real prin OpenRouter.
+// Checks the default models (chat + work) with a real ping through OpenRouter.
 export async function verifyModels(): Promise<Record<string, string>> {
   const ping = async (model: string): Promise<string> => {
     try {
-      // 64, nu 16: modelele cu raționament intern (ex. claude-fable-5) consumă
-      // tokeni din buget PE GÂNDIRE înainte de răspuns — dovadă live, 25 iul:
-      // cu 16 tokeni, 11 s-au dus pe „reasoning_tokens" și conținutul a ieșit gol
-      // (finish_reason:"length"), deci ping-ul raporta fals „fail" pe un model viu.
+      // 64, not 16: models with internal reasoning (e.g. claude-fable-5) spend
+      // budget tokens ON THINKING before the answer — live proof, Jul 25: with
+      // 16 tokens, 11 went to "reasoning_tokens" and the content came out empty
+      // (finish_reason:"length"), so the ping falsely reported "fail" on a live
+      // model.
       const r = await openrouterChat(model, [{ role: 'user', content: 'Reply with the single word: ok' }], [], {
         maxTokens: 64,
       })
@@ -249,7 +254,7 @@ export async function verifyModels(): Promise<Record<string, string>> {
   }
 }
 
-// Verifică cheia OpenRouter (o singură cheie pentru tot creierul).
+// Checks the OpenRouter key (a single key for the whole brain).
 export async function verifyKeys(): Promise<{
   primary: string
   reserve: string

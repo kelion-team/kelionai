@@ -1,32 +1,32 @@
-// ── GITHUB DE HÂRTIE, DOAR PENTRU TESTE ─────────────────────────────────────
+// ── PAPER GITHUB, FOR TESTS ONLY ────────────────────────────────────────────
 //
-// Testele de gardă din `autonomie.test.ts` verifică CÂND Kelion refuză să
-// lucreze (pauză, token lipsă, ramură interzisă). Nu verifică ce se întâmplă
-// când chiar lucrează — adică exact partea care duce cod în producție.
+// The guard tests in `autonomie.test.ts` check WHEN Kelion refuses to work
+// (pause, missing token, forbidden branch). They don't check what happens
+// when it actually works — i.e. exactly the part that ships code to production.
 //
-// Motorul ăsta răspunde ca API-ul GitHub: ține ref-uri, fișiere, PR-uri, tag-uri
-// și dispecerizări de workflow în memorie, și înregistrează FIECARE cerere
-// (metodă, cale, corp). Așa testul poate spune nu doar „a mers", ci „a cerut
-// EXACT asta": ramură din vârful lui master, conținut base64, PR cu baza
-// master, merge prin squash.
+// This engine answers like the GitHub API: it keeps refs, files, PRs, tags
+// and workflow dispatches in memory, and records EVERY request (method, path,
+// body). That way a test can say not just "it worked", but "it asked for
+// EXACTLY this": a branch from master's tip, base64 content, a PR with base
+// master, a squash merge.
 //
-// Ce NU cunoaște ARUNCĂ 599 cu calea în corp — o rută nouă nu poate trece
-// nevăzută printr-un test „verde".
+// What it does NOT know THROWS 599 with the path in the body — a new route
+// can't slip unseen through a "green" test.
 
 export interface CerereGh {
   method: string
-  path: string // fără prefixul /repos/owner/repo
+  path: string // without the /repos/owner/repo prefix
   body: unknown
 }
 
 export interface FakeGitHub {
   cereri: CerereGh[]
   refs: Map<string, string> // 'heads/master' → sha
-  fisiere: Map<string, { sha: string; continut: string }> // 'ramura:cale'
+  fisiere: Map<string, { sha: string; continut: string }> // 'branch:path'
   pruri: Map<number, { head: string; title: string; merged: boolean }>
   taguri: string[]
   dispatches: { workflow: string; ref: string }[]
-  /** Rulările întoarse pentru orice interogare de tip /actions/... */
+  /** The runs returned for any /actions/... query. */
   rulari: { name?: string; status?: string; conclusion?: string | null }[]
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>
   cereriPe(fragment: string): CerereGh[]
@@ -65,7 +65,7 @@ export function creeazaFakeGitHub(shaMaster = 'a'.repeat(40)): FakeGitHub {
     const c = (corp ?? {}) as Record<string, string>
     let m: RegExpMatchArray | null
 
-    // ── Ref-uri (ramuri + tag-uri) ──
+    // ── Refs (branches + tags) ──
     if ((m = cale.match(/^\/git\/refs?\/(.+)$/)) && method === 'GET') {
       const cheie = decodeURIComponent(m[1])
       const sha = g.refs.get(cheie)
@@ -82,7 +82,7 @@ export function creeazaFakeGitHub(shaMaster = 'a'.repeat(40)): FakeGitHub {
       return raspuns(201, { sha: `tagobj${g.taguri.length}`, tag: c.tag, message: c.message })
     }
 
-    // ── Conținut de fișier ──
+    // ── File content ──
     if ((m = cale.match(/^\/contents\/(.+?)(\?ref=(.+))?$/)) && method === 'GET') {
       const cheie = `${decodeURIComponent(m[3] ?? 'master')}:${decodeURIComponent(m[1])}`
       const f = g.fisiere.get(cheie)
@@ -93,14 +93,14 @@ export function creeazaFakeGitHub(shaMaster = 'a'.repeat(40)): FakeGitHub {
       if (!g.refs.has(`heads/${ramura}`)) return raspuns(404, { message: 'Branch not found' })
       const cheie = `${ramura}:${decodeURIComponent(m[1])}`
       const vechi = g.fisiere.get(cheie)
-      // GitHub cere sha-ul curent la SUPRASCRIERE; fără el răspunde 409.
+      // GitHub requires the current sha on OVERWRITE; without it it answers 409.
       if (vechi && c.sha !== vechi.sha) return raspuns(409, { message: 'sha does not match' })
       contorCommit++
       g.fisiere.set(cheie, { sha: `blob${contorCommit}`, continut: String(c.content ?? '') })
       return raspuns(200, { commit: { sha: `commit${contorCommit}`.padEnd(40, '0') } })
     }
 
-    // ── PR-uri ──
+    // ── PRs ──
     if (cale === '/pulls' && method === 'POST') {
       const nr = urmatorulPr++
       if (String(c.base) !== 'master') return raspuns(422, { message: 'base must be master' })
@@ -121,15 +121,15 @@ export function creeazaFakeGitHub(shaMaster = 'a'.repeat(40)): FakeGitHub {
       if (pr.merged) return raspuns(405, { message: 'Pull Request is not mergeable' })
       pr.merged = true
       const sha = `merge${nr}`.padEnd(40, '0')
-      g.refs.set('heads/master', sha) // publicarea pornește din push-ul în master
+      g.refs.set('heads/master', sha) // deploy starts from the push into master
       return raspuns(200, { sha, merged: true, message: 'Pull Request successfully merged' })
     }
 
-    // ── Acțiuni (informativ: verificări + buclă de deploy) ──
+    // ── Actions (informational: checks + deploy loop) ──
     if (cale.startsWith('/actions/') && cale.includes('/dispatches') && method === 'POST') {
       const wf = cale.match(/workflows\/([^/]+)\/dispatches/)?.[1] ?? ''
       g.dispatches.push({ workflow: wf, ref: String(c.ref ?? '') })
-      return raspuns(200, { ok: true }) // dispatch reușit = 200 (docul GitHub)
+      return raspuns(200, { ok: true }) // successful dispatch = 200 (GitHub docs)
     }
     if (cale.startsWith('/actions/') && method === 'GET') {
       return raspuns(200, { workflow_runs: g.rulari })

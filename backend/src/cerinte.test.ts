@@ -1,17 +1,18 @@
-// ── EVALUAREA SOLUȚIILOR: alegerea nu are voie să fie o toană ────────────────
+// ── EVALUATING SOLUTIONS: the choice must not be a whim ───────────────────
 //
-// Adrian, 30 iul: „evaluări avansate pe soluțiile oferite" · „analiza și
-// îmbunătățirea continuă a posibilităților de implementare".
+// Adrian, Jul 30: "advanced evaluations of the offered solutions" · "the
+// analysis and continuous improvement of the implementation possibilities".
 //
-// De ce e nevoie de un scor CALCULAT, nu de „modelul zice că asta e mai bună":
-// azi am ales de trei ori, din burtă, drumul greșit — email, apoi portal cu
-// consimțământ care expiră, apoi un API care nu există pentru contul lui. De
-// fiecare dată exista pe masă o variantă mai bună; nu a pus-o nimeni alături.
+// Why a CALCULATED score is needed, not "the model says this one is better":
+// today I chose the wrong road three times, from the gut — email, then a
+// portal with an expiring consent, then an API that doesn't exist for his
+// account. Every time a better variant was on the table; nobody laid them
+// side by side.
 //
-// Ponderile spun ce contează în proiectul ĂSTA, în ordinea în care le-a spus
-// ownerul: să REZOLVE, să nu-i mai ceară LUI timp, să nu strice ce merge, să
-// fie repede, să nu coste. Testul apără exact ordinea aia — dacă cineva o
-// schimbă pe ascuns, alegerile se mută și nimeni nu vede de ce.
+// The weights say what matters in THIS project, in the order the owner said
+// them: SOLVE it, don't ask HIM for time, don't break what works, be fast,
+// don't cost. The test guards exactly that order — if someone changes it in
+// secret, the choices move and nobody sees why.
 import { describe, it, expect } from 'vitest'
 import { scor, alege, type Varianta } from './services/cerinte.js'
 
@@ -35,7 +36,7 @@ describe('evaluarea soluțiilor', () => {
   })
 
   it('o soluție care cere timpul ownerului pierde în fața uneia care nu-i cere', () => {
-    // Lecția zilei: „nu-l trimite pe el prin portaluri" — a pierdut o zi așa.
+    // The lesson of the day: "don't send him through portals" — he lost a day that way.
     const cereOmului = v('portal manual', { rezolva: 9, independent: 1 })
     const singura = v('o face el', { rezolva: 9, independent: 10 })
     expect(scor(singura)).toBeGreaterThan(scor(cereOmului))
@@ -46,7 +47,7 @@ describe('evaluarea soluțiilor', () => {
     expect(r.castigatoare.nume).toBe('A')
     expect(r.motiv).toContain('bate')
     expect(r.motiv).toContain('B')
-    expect(r.motiv).toContain('Risc') // riscul nu se ascunde
+    expect(r.motiv).toContain('Risc') // the risk is not hidden
   })
 
   it('cu o singură variantă spune limpede că a fost singura — nu se laudă cu o alegere', () => {

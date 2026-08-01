@@ -100,20 +100,21 @@ function parseUa(ua: string): { browser: string; os: string; device: string; isB
   return { browser, os, device, isBot }
 }
 
-// IP-ul REAL al vizitatorului în spatele Cloudflare: cf-connecting-ip (XFF dă IP-ul
-// edge-ului CF, comun multor vizitatori — rău pentru geo ȘI anti-reuse). Preferă
-// antetele real-client, cade pe XFF apoi req.ip. Era copiat în demo (×2) și chat
-// (services→routes) — o singură sursă exportată (principiul permanent: unic, fără dup).
+// The visitor's REAL IP behind Cloudflare: cf-connecting-ip (XFF gives the
+// CF edge's IP, shared by many visitors — bad for geo AND anti-reuse). It
+// prefers the real-client headers, falls back to XFF then req.ip. It used to
+// be copied in demo (×2) and chat (services→routes) — one single exported
+// source (the permanent principle: unique, no duplicates).
 export function clientIp(req: FastifyRequest): string {
   const hdr = (name: string): string =>
     ((req.headers[name] as string | undefined) ?? '').split(',')[0]?.trim()
   return hdr('cf-connecting-ip') || hdr('true-client-ip') || hdr('x-forwarded-for') || req.ip || ''
 }
 
-// Poll-ul conversației vizitator↔admin: aceleași conv/after + validare + răspuns.
-// Folosit de ruta PUBLICĂ (/api/visitor-chat/poll, aici) și de cea de ADMIN
-// (/api/admin/visitor-chat, care adaugă doar poarta de admin înainte). Sursă
-// unică (principiul permanent: unic, fără duplicate).
+// The visitor↔admin conversation poll: the same conv/after + validation +
+// reply. Used by the PUBLIC route (/api/visitor-chat/poll, here) and by the
+// ADMIN one (/api/admin/visitor-chat, which only adds the admin gate in
+// front). Single source (the permanent principle: unique, no duplicates).
 export async function pollVisitorChat(
   req: FastifyRequest<{ Querystring: { conv?: string; after?: string } }>,
   reply: FastifyReply,
@@ -166,9 +167,10 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // FĂRĂ tier gratuit (Adrian: „se scot total minutele de test, userii cumpără
-  // să probeze"). Vizita e în continuare urmărită (analytics de mai sus), dar
-  // NIMENI nu mai primește o sesiune gratuită — accesul cere cont + credite.
+  // NO free tier (Adrian: "the trial minutes are removed completely, users
+  // buy to try"). The visit is still tracked (the analytics above), but
+  // NOBODY gets a free session anymore — access requires an account +
+  // credits.
 
   // A visitor leaves their email (the only real channel to an anonymous visitor):
   // stored as a lead the owner can then email from the admin panel. Public but

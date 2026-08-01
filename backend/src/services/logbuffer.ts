@@ -1,13 +1,14 @@
 import { Writable } from 'node:stream'
 
-// ── F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele astea trebuie obligatoriu să
-// ajungă la Kelion ca și F12") ────────────────────────────────────────────────
-// Erorile de CLIENT ajung deja la Kelion prin /api/client-errors (F12-ul
-// browserului). Jurnalele de SERVER însă trăiau doar în `docker logs`, unde
-// Kelion nu poate ajunge (rulează în container, fără docker.sock — și e corect
-// așa). Soluția: un inel de memorie care reține ultimele intrări chiar din
-// fluxul pino al aplicației; unealta admin `server_logs` (chat.ts) i le dă lui
-// Kelion nativ, exact cum îi dă `db_query` erorile de client.
+// ── THE SERVER'S F12 (Adrian, 27 Jul: "these logs must absolutely reach
+// Kelion like F12") ────────────────────────────────────────────────────────
+// CLIENT errors already reach Kelion through /api/client-errors (the
+// browser's F12). The SERVER logs, however, lived only in `docker logs`,
+// which Kelion cannot reach (he runs in a container, without docker.sock —
+// and that is correct). The solution: a memory ring that keeps the latest
+// entries straight from the app's pino stream; the admin tool `server_logs`
+// (chat.ts) hands them to Kelion natively, exactly as `db_query` hands him
+// the client errors.
 
 export interface LogEntry {
   t: string // ISO time
@@ -23,9 +24,9 @@ function push(e: LogEntry): void {
   if (ring.length > MAX_ENTRIES) ring.splice(0, ring.length - MAX_ENTRIES)
 }
 
-/** Stream pino: scrie ÎN CONTINUARE pe stdout (docker logs rămâne intact) și
- *  reține în inel. Reqid/req/res se comprimă la un rezumat scurt ca inelul să
- *  țină SEMNAL, nu zgomot de acces. */
+/** Pino stream: keeps writing to stdout (docker logs stays intact) AND
+ *  retains entries in the ring. Reqid/req/res are compressed to a short
+ *  summary so the ring holds SIGNAL, not access noise. */
 export function makeLogTee(): Writable {
   return new Writable({
     write(chunk: Buffer, _enc, cb) {
@@ -44,8 +45,8 @@ export function makeLogTee(): Writable {
             reason?: unknown
           }
           const level = j.level ?? 30
-          // Zgomotul de acces (request completed 2xx/3xx) NU intră în inel —
-          // doar erori, avertismente și mesaje aplicative reale.
+          // Access noise (request completed 2xx/3xx) does NOT enter the
+          // ring — only errors, warnings and real applicative messages.
           const code = j.res?.statusCode ?? 0
           const isAccessNoise =
             level <= 30 && (j.msg === 'request completed' || j.msg === 'incoming request') && code < 400
@@ -63,7 +64,7 @@ export function makeLogTee(): Writable {
           })
         }
       } catch {
-        // Linie ne-JSON (ex. output străin) — o reținem brută dacă pare eroare.
+        // Non-JSON line (e.g. foreign output) — we keep it raw if it looks like an error.
         const s = chunk.toString('utf8')
         if (/error|fail|exception/i.test(s)) push({ t: new Date().toISOString(), level: 50, msg: s.slice(0, 400) })
       }
@@ -72,7 +73,7 @@ export function makeLogTee(): Writable {
   })
 }
 
-/** Ultimele intrări, opțional doar de la un nivel în sus (40 = warn+error). */
+/** The latest entries, optionally only from a level up (40 = warn+error). */
 export function recentLogs(minLevel = 0, limit = 80): LogEntry[] {
   const out = ring.filter((e) => e.level >= minLevel)
   return out.slice(-Math.max(1, Math.min(limit, MAX_ENTRIES)))

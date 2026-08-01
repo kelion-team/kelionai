@@ -1,33 +1,34 @@
-// ── MANUALUL DE UTILIZARE — o sursă, engleză, tradus la cerere ──────────────
+// ── THE USER MANUAL — one source, English, translated on demand ────────────
 //
-// Adrian, 29–30 iul: buton pe pagina de start → manualul COMPLET al aplicației,
-// în engleză, cu selector de limbă, DESCĂRCABIL în limba aleasă. Fără admin.
-// Și, imediat după: „nu sunt doar 5 limbi, sunt X limbi".
+// Adrian, Jul 29–30: a button on the start page → the COMPLETE manual of the
+// app, in English, with a language selector, DOWNLOADABLE in the chosen
+// language. No admin. And immediately after: "it's not just 5 languages, it's
+// X languages".
 //
-// Deci NU un manual scris de mână în N limbi — ăla rămâne în urmă la a doua
-// limbă și minte la a treia. Aici:
-//   • textul trăiește O DATĂ, în engleză;
-//   • lista de funcții se DERIVĂ din registrul unic (CAPABILITIES) — un skill
-//     nou apare singur în manual, nu poate fi uitat;
-//   • orice altă limbă se traduce la prima cerere și se ține în bază; a doua
-//     persoană care o cere o primește instantaneu.
+// So NOT a manual hand-written in N languages — that one falls behind at the
+// second language and lies at the third. Here:
+//   • the text lives ONCE, in English;
+//   • the feature list is DERIVED from the single registry (CAPABILITIES) — a
+//     new skill appears in the manual on its own, it can't be forgotten;
+//   • any other language is translated on first request and kept in the
+//     database; the second person asking for it gets it instantly.
 //
-// Uneltele de admin NU intră: manualul e pentru utilizatori.
+// The admin tools do NOT enter: the manual is for users.
 import { CAPABILITIES } from './brainCapabilities.js'
 
-// ── CELE 7 LIMBI ALE MANUALULUI ─────────────────────────────────────────────
-// Adrian, 30 iul: „la manual se vor afișa 7 limbi de circulație, traduci tot în
-// acele 7, nu mai consuma după resurse."
+// ── THE MANUAL'S 7 LANGUAGES ───────────────────────────────────────────────
+// Adrian, Jul 30: "the manual will show 7 major languages, translate
+// everything into those 7, don't spend resources beyond that."
 //
-// Deci o listă ÎNCHISĂ, nu „orice cod de limbă". Fiecare limbă nouă înseamnă o
-// traducere plătită a întregului manual; nelimitat, un singur vizitator care
-// umblă prin selector le-ar porni pe toate. Orice cod în afara listei primește
-// engleza, fără să cheme traducătorul.
+// So a CLOSED list, not "any language code". Every new language means a paid
+// translation of the whole manual; unbounded, a single visitor playing with
+// the selector would start them all. Any code outside the list gets English,
+// without calling the translator.
 //
-// Lista: cele șase limbi de circulație internațională + ROMÂNA. Prima variantă
-// pe care am pus-o (limbile oficiale ONU: + chineză și arabă, fără italiană și
-// fără română) era o alegere academică, nu una potrivită produsului — Adrian a
-// întrebat pe bună dreptate „unde e ro? italiana?".
+// The list: the six international circulation languages + ROMANIAN. The first
+// version I put up (the UN official languages: + Chinese and Arabic, without
+// Italian and without Romanian) was an academic choice, not one fit for the
+// product — Adrian rightly asked "where is ro? Italian?".
 export const MANUAL_LANGS = ['en', 'fr', 'de', 'es', 'it', 'ru', 'ro'] as const
 
 export function isManualLang(v: string): boolean {
@@ -40,22 +41,23 @@ export interface ManualSection {
 }
 export interface ManualGroup {
   title: string
-  /** Cheia grupei (google, vedere, browser…) — frontendul desenează pictograma
-   *  potrivită. Nu trimitem SVG prin API: forma e treaba interfeței, nu a
-   *  textului, iar traducerea n-are ce căuta pe un desen. */
+  /** The group's key (google, vedere, browser…) — the frontend draws the
+   *  matching icon. We don't send SVG through the API: shape is the
+   *  interface's job, not the text's, and translation has no business on a
+   *  drawing. */
   key: string
   items: { what: string; say: string }[]
 }
-/** „Cum funcționează", în patru pași — diagrama de la începutul manualului.
- *  Adrian, 30 iul: „manualul e extrem de rudimentar, mă așteptam să fie cu
- *  imagini, mult mai profesional". Nu punem capturi de ecran (se învechesc la
- *  fiecare schimbare de interfață și cântăresc cât tot manualul); punem un
- *  desen care explică drumul unei cereri — și care se traduce, ca restul. */
+/** "How it works", in four steps — the diagram at the start of the manual.
+ *  Adrian, Jul 30: "the manual is extremely rudimentary, I expected images,
+ *  much more professional". We don't use screenshots (they go stale at every
+ *  interface change and weigh as much as the whole manual); we use a drawing
+ *  that explains a request's journey — and it translates, like the rest. */
 export interface ManualFlow {
   title: string
   steps: {
-    /** Pictograma pasului. Emoji: nu se traduce, nu cere fișiere, se vede la fel
-     *  în pagină, la tipărire și în fișierul descărcat. */
+    /** The step's icon. Emoji: not translated, needs no files, looks the same
+     *  on the page, in print and in the downloaded file. */
     icon: string
     label: string
     note: string
@@ -85,7 +87,7 @@ const FLOW: ManualFlow = {
   ],
 }
 
-/** Pictograma fiecărei grupe de capabilități. Cheia e cea din registru. */
+/** Each capability group's icon. The key is the one from the registry. */
 export const GROUP_ICONS: Record<string, string> = {
   google: '✉️',
   vedere: '👁️',
@@ -165,12 +167,12 @@ const GROUP_TITLES: Record<string, string> = {
 }
 const GROUP_ORDER = ['google', 'vedere', 'afisare', 'memorie', 'browser', 'cod', 'diverse']
 
-/** Ce face fiecare capabilitate + o frază cu care i-o ceri, pe înțelesul unui om.
- *  Registrul spune CE EXISTĂ; aici e doar CUM SE EXPLICĂ. Paznicul din
- *  manual.test.ts pică dacă apare un skill nou fără rând aici — deci nu se poate
- *  livra o funcție nedocumentată. */
+/** What each capability does + a phrase you'd ask for it with, in plain human
+ *  terms. The registry says WHAT EXISTS; here is only HOW IT'S EXPLAINED. The
+ *  guard in manual.test.ts fails if a new skill appears without a row here —
+ *  so an undocumented feature cannot ship. */
 export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
-  // Google + răspunsuri de zi cu zi
+  // Google + everyday answers
   get_recent_emails: { what: 'Reads the headers of your latest emails', say: '"anything new in my inbox?"' },
   read_email: { what: 'Opens one email and reads the whole body', say: '"read me the one from the bank"' },
   send_email: { what: 'Writes and sends an email for you', say: '"email Ana that I\'ll be late"' },
@@ -194,12 +196,12 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   convert_currency: { what: 'Converts between currencies at today\'s rate', say: '"how much is 200 euro in pounds?"' },
   get_time: { what: 'The time and date where you are', say: '"what time is it in Tokyo?"' },
 
-  // Ochi și ancorare
+  // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },
   get_monitor: { what: 'Checks what is actually on your screen right now', say: '"what am I looking at?"' },
   get_location: { what: 'Uses your real position, not a guess', say: '"where am I?"' },
 
-  // Afișare
+  // Display
   show_on_screen: { what: 'Puts a page or a map on your screen', say: '"show me that on the screen"' },
   show_document: { what: 'Puts a text or a result on your screen to read', say: '"write that out for me"' },
   run_web_app: { what: 'Builds a small page and runs it for you', say: '"make me a quick calculator"' },
@@ -207,7 +209,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
   play_avatar_gesture: { what: 'Kelion gestures while it speaks', say: 'happens on its own' },
 
-  // Notițe și memorie
+  // Notes and memory
   save_note: { what: 'Saves a note for later', say: '"note the meter reading is 4471"' },
   list_notes: { what: 'Shows your notes', say: '"what notes do I have?"' },
   delete_note: { what: 'Deletes a note', say: '"delete the meter note"' },
@@ -225,16 +227,16 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   browser_key: { what: 'Presses a key for you', say: '"press Enter"' },
   browser_click_at: { what: 'Clicks a precise spot you point at', say: '"click that button top right"' },
 
-  // Gândire adâncă
+  // Deep thinking
   ask_brain: { what: 'Sends a hard question to its full reasoning brain', say: 'happens on its own when needed' },
   propose_tool: { what: 'Asks for a new ability it does not have yet', say: 'happens on its own' },
 
-  // Altele
+  // Other
   log_unsupported_request: { what: 'Records something it cannot do yet, so it can be built', say: 'happens on its own' },
   set_active_role: { what: 'Switches to a role that fits your work', say: '"be my accountant for this"' },
 }
 
-/** Manualul, în engleză. Traducerea se face deasupra, în serviciul de limbi. */
+/** The manual, in English. Translation happens on top, in the language service. */
 export function buildManual(): ManualDoc {
   const groups: ManualGroup[] = []
   for (const g of GROUP_ORDER) {
@@ -261,10 +263,11 @@ export function buildManual(): ManualDoc {
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-/** Manualul ca pagină de sine stătătoare — se deschide, se tipărește, se salvează. */
+/** The manual as a standalone page — it opens, it prints, it saves. */
 export function manualHtml(d: ManualDoc): string {
-  // Numerotăm secțiunile: un manual fără numere de capitol și fără cuprins nu
-  // se poate răsfoi, oricât de bun ar fi textul (Adrian: „extrem de rudimentar").
+  // We number the sections: a manual without chapter numbers and without a
+  // table of contents can't be browsed, however good the text (Adrian:
+  // "extremely rudimentary").
   const sectiuni = d.sections
     .map(
       (s, i) =>
@@ -307,7 +310,7 @@ export function manualHtml(d: ManualDoc): string {
 <style>
   @page { margin: 18mm 16mm; }
   body { font: 11pt/1.65 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #16181d; background: #fff; max-width: 780px; margin: 0 auto; padding: 28px 22px; }
-  /* COPERTA — pagină proprie la tipărire, ca la o carte adevărată. */
+  /* THE COVER — its own page when printed, like a real book. */
   .coperta { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; border-bottom: 3px solid #16181d; padding-bottom: 26px; margin-bottom: 30px; }
   .marca { font-size: 34pt; line-height: 1; margin-bottom: 14px; }
   h1 { font-size: 30pt; margin: 0 0 6px; letter-spacing: -0.02em; }
@@ -317,14 +320,14 @@ export function manualHtml(d: ManualDoc): string {
   h3 { font-size: 12.5pt; margin: 24px 0 6px; display: flex; align-items: center; gap: 8px; }
   .ic { font-size: 14pt; }
   p { margin: 0 0 10px; }
-  /* CUPRINS */
+  /* TABLE OF CONTENTS */
   .cuprins { margin: 0 0 34px; padding: 16px 18px; background: #f6f7f9; border-radius: 10px; page-break-after: always; }
   .cuprins ol { margin: 0; padding-left: 1.3em; }
   .cuprins ol ol { padding-left: 1.1em; margin: 4px 0 0; }
   .cuprins li { margin: 3px 0; }
   .cuprins a { color: #16181d; text-decoration: none; }
   .cuprins a:hover { text-decoration: underline; }
-  /* DIAGRAMA „cum călătorește o cerere" */
+  /* THE "how a request travels" DIAGRAM */
   .pasi { list-style: none; margin: 10px 0 6px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .pasi li { position: relative; padding: 14px 14px 14px 14px; border: 1px solid #d7dbe2; border-radius: 10px; background: #fbfcfd; display: flex; flex-direction: column; gap: 4px; page-break-inside: avoid; }
   .pas-nr { position: absolute; top: -9px; left: 12px; background: #16181d; color: #fff; font-size: 8pt; width: 18px; height: 18px; border-radius: 999px; display: flex; align-items: center; justify-content: center; }

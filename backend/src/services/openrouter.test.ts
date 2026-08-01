@@ -10,58 +10,58 @@ describe('openrouter catalog', () => {
     expect(
       toModel({ id: 'anthropic/claude-sonnet-5', supported_parameters: ['tools'], architecture: { input_modalities: ['text', 'image'] } }),
     )?.toMatchObject({ provider: 'anthropic', vision: true })
-    // fără tools → respins
+    // no tools → rejected
     expect(toModel({ id: 'openai/gpt-4o', supported_parameters: [] })).toBeNull()
-    // provider necunoscut → respins
+    // unknown provider → rejected
     expect(toModel({ id: 'mistral/large', supported_parameters: ['tools'] })).toBeNull()
-    // variantă veche exclusă
+    // old variant excluded
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
   })
 
   it('uneltele sunt obligatorii peste tot; vederea doar pe lista de chat', async () => {
-    // Ordinul lui Adrian, 29 iul: „se afișează doar AI care respectă toate
-    // funcționalitățile aplicației — văz, auz, voce live". Un model orb ajuns în
-    // meniu e o promisiune ruptă: userul îl alege și pe urmă camera nu merge.
-    // Uneltele sunt la fel de obligatorii — fără ele cad skill-urile Google,
-    // memoria, comenzile și escaladarea vocii pe creier.
+    // Adrian's order, Jul 29: "only AI that respects all the app's features
+    // is shown — sight, hearing, live voice". A blind model that reaches the
+    // menu is a broken promise: the user picks it and then the camera doesn't
+    // work. Tools are just as mandatory — without them the Google skills,
+    // memory, commands and voice escalation onto the brain all fall.
     //
-    // MODIFICAT LA ORDINUL LUI, 31 iul: „scoate filtrul de vedere".
-    // Motivul: Nemotron 3 Ultra 550B — cel mai capabil creier gratuit măsurat
-    // (550B, 1M context, unelte) — e ORB, deci filtrul îl scotea din listă și
-    // nu-l putea alege niciodată. Promisiunea din 29 iul rămâne întreagă, dar
-    // la nivelul la care conta: funcționalitatea e a APLICAȚIEI, nu a unui
-    // model singur. O tură cu poză e servită automat de un model care vede
-    // (`bestVisionModel`, chat.ts) — vezi src/vedereaDelegata.test.ts.
+    // CHANGED AT HIS ORDER, Jul 31: "remove the vision filter".
+    // The reason: Nemotron 3 Ultra 550B — the most capable free brain measured
+    // (550B, 1M context, tools) — is BLIND, so the filter took it out of the
+    // list and he could never choose it. The Jul 29 promise stays whole, but
+    // at the level where it mattered: the feature belongs to the APP, not to
+    // a single model. A turn with a picture is automatically served by a model
+    // that sees (`bestVisionModel`, chat.ts) — see src/vedereaDelegata.test.ts.
     //
-    // Ce NU s-a schimbat: uneltele rămân obligatorii peste tot (fără ele nu
-    // merge nimic, și nu se pot delega), iar lista de CHAT — treapta publică,
-    // unde nu există escaladare — cere în continuare vedere.
+    // What did NOT change: tools stay mandatory everywhere (nothing works
+    // without them, and they can't be delegated), and the CHAT list — the
+    // public tier, where there is no escalation — still requires vision.
     const vede = { input_modalities: ['text', 'image'] }
     const brut = [
       { id: 'openai/gpt-5', supported_parameters: ['tools'], architecture: vede },
       { id: 'google/gemini-3-pro', supported_parameters: ['tools'], architecture: vede },
       { id: 'anthropic/claude-opus-5', supported_parameters: ['tools'], architecture: vede },
-      // ORBUL: are unelte, dar NU vede → nu are ce căuta în nicio listă.
+      // THE BLIND ONE: has tools, but does NOT see → has no business in any list.
       { id: 'openai/gpt-5-text-only', supported_parameters: ['tools'] },
-      // FĂRĂ UNELTE: vede, dar n-ar putea folosi nimic din aplicație.
+      // WITHOUT TOOLS: it sees, but couldn't use anything in the app.
       { id: 'google/gemini-3-vision-mut', supported_parameters: [], architecture: vede },
     ]
     const modele = brut.map(toModel).filter((m) => m != null)
     const cat = groupCatalog(modele)
     const toate = [...cat.chat, ...cat.work]
     expect(toate.length).toBeGreaterThan(0)
-    // UNELTELE: obligatorii peste tot, în ambele liste. Nu se pot delega —
-    // fără ele nu merge nici Google, nici memoria, nici comenzile.
+    // TOOLS: mandatory everywhere, in both lists. They can't be delegated —
+    // without them neither Google, nor memory, nor commands work.
     expect(toate.map((m) => m.id)).not.toContain('google/gemini-3-vision-mut')
-    // VEDEREA: obligatorie pe lista de CHAT (treapta publică, fără escaladare).
+    // VISION: mandatory on the CHAT list (the public tier, no escalation).
     for (const m of cat.chat) expect(m.vision, `${m.id} nu vede, dar e pe lista de chat`).toBe(true)
     expect(cat.chat.map((m) => m.id)).not.toContain('openai/gpt-5-text-only')
-    // …dar NU pe treapta de muncă: acolo un creier orb e permis, fiindcă tura
-    // cu poză e servită de un model care vede. Fără asta, Nemotron Ultra 550B
-    // n-ar putea fi ales niciodată — cel mai capabil creier gratuit, invizibil
-    // în propria aplicație.
+    // …but NOT on the work tier: there a blind brain is allowed, because the
+    // turn with a picture is served by a model that sees. Without this,
+    // Nemotron Ultra 550B could never be chosen — the most capable free brain,
+    // invisible in its own app.
     expect(cat.work.map((m) => m.id)).toContain('openai/gpt-5-text-only')
-    // Și cele complete chiar ajung acolo unde trebuie (nu „liste goale = curat").
+    // And the complete ones really get where they should (not "empty lists = clean").
     expect(cat.chat.map((m) => m.id)).toContain('openai/gpt-5')
     expect(cat.chat.map((m) => m.id)).toContain('google/gemini-3-pro')
     expect(cat.work.map((m) => m.id)).toContain('anthropic/claude-opus-5')
@@ -83,27 +83,28 @@ describe('openrouter catalog', () => {
   })
 
   it('resolveModel cade pe implicit când modelul cerut nu e în tier', async () => {
-    // Fără cheie OpenRouter (mediul de test) catalogul e gol → orice cerere cade
-    // pe implicitul tier-ului, niciodată pe un model neverificat.
-    // Implicitul chat = un model REAL gratuit, testat live (tool-call curat +
-    // vedere reală) — vezi config.ts pentru dovada testului.
+    // Without an OpenRouter key (the test environment) the catalog is empty →
+    // any request falls onto the tier's default, never onto an unverified model.
+    // The chat default = a REAL free model, tested live (clean tool-call +
+    // real vision) — see config.ts for the test's proof.
     expect(await resolveModel('chat', 'ceva/inexistent')).toBe('google/gemma-4-26b-a4b-it:free')
-    // CREIERUL, PUS DE ADRIAN PE 31 IUL: „pune-l creier nemotron-3-ultra".
-    // Era `nano-omni-30b-a3b` — 30B totali, 3B ACTIVI. Munca lui trecea printr-un
-    // model de treapta a treia, în timp ce cel mai capabil creier gratuit din
-    // lume (550B, 1M context) stătea nefolosit pe treapta 'top', la care se
-    // ajunge doar prin escaladare. Acum e pe amândouă.
-    // N-are vedere — nu mai contează: vederea se DELEGĂ (vezi vedereaDelegata).
+    // THE BRAIN, SET BY ADRIAN ON JUL 31: "make nemotron-3-ultra the brain".
+    // It was `nano-omni-30b-a3b` — 30B total, 3B ACTIVE. His work went through
+    // a third-tier model, while the most capable free brain in the world (550B,
+    // 1M context) sat unused on the 'top' tier, reachable only through
+    // escalation. Now it is on both.
+    // It has no vision — no longer matters: vision gets DELEGATED (see
+    // vedereaDelegata).
     expect(await resolveModel('work', null)).toBe('google/gemma-4-26b-a4b-it:free')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
-  // ── ÎNLOCUIREA CREIERULUI NU MAI E TĂCUTĂ ───────────────────────────────────
-  // Adrian, 30 iul: „Kelion nu execută cerințele". Una dintre căile prin care
-  // ajungea acolo: își alesese un model din Admin→Modele, acela dispărea din
-  // catalogul furnizorului, iar `resolveModel` întorcea în TĂCERE implicitul
-  // `:free` — model slab, care narează în loc să cheme unealta. Nimic, nicăieri,
-  // nu spunea că s-a schimbat creierul sub el.
+  // ── REPLACING THE BRAIN IS NO LONGER SILENT ─────────────────────────────
+  // Adrian, Jul 30: "Kelion doesn't execute requests". One of the paths that
+  // got there: he had chosen a model in Admin→Models, that one disappeared
+  // from the provider's catalog, and `resolveModel` SILENTLY returned the
+  // `:free` default — a weak model that narrates instead of calling the tool.
+  // Nothing, anywhere, said the brain had been swapped under him.
   it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
     const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
     expect(cerut.fellBack).toBe(true)
@@ -117,8 +118,8 @@ describe('openrouter catalog', () => {
   })
 
   it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {
-    // Paznic de compatibilitate: zeci de apeluri vechi trec prin `resolveModel`;
-    // dacă cele două ar diverge, ar fi două adevăruri despre același lucru.
+    // Compatibility guard: dozens of old calls go through `resolveModel`;
+    // if the two diverged, there would be two truths about the same thing.
     for (const cerut of [null, 'ceva/inexistent']) {
       expect(await resolveModel('work', cerut)).toBe((await resolveModelChecked('work', cerut)).model)
     }

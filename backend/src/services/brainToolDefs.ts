@@ -1,11 +1,12 @@
-// ── SURSA UNICĂ a definițiilor de unelte partajate (CREIER UNIC §1) ──────────
-// Adrian: „nu înzeci dublările; un singur creier". Definițiile uneltelor trăiau
-// DOAR în chat.ts, deci vocea nu le putea folosi fără să le copieze. Aici e
-// sursa comună: definiția o dată, folosită și de chat, și de voce.
+// ── SINGLE SOURCE of shared tool definitions (SINGLE BRAIN §1) ──────────────
+// Adrian: "don't multiply the duplications; a single brain". The tool
+// definitions lived ONLY in chat.ts, so voice couldn't use them without
+// copying them. This is the common source: defined once, used by both chat
+// and voice.
 //
-// Migrare INCREMENTALĂ (ca să nu risc chat.ts live dintr-o mutare mare): începem
-// cu uneltele de ACCES LA PROPRIUL COD (au executor deja decuplat în
-// sourceCode.ts). Restul se aduc aici, câteva odată, verificate.
+// INCREMENTAL migration (so we don't risk live chat.ts with one big move): we
+// start with the OWN-CODE ACCESS tools (their executor is already decoupled in
+// sourceCode.ts). The rest are brought here a few at a time, verified.
 
 import type { Tool } from './brain-types.js'
 
@@ -29,8 +30,8 @@ export const SEARCH_SOURCE_TOOL: Tool = {
   input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Text or regex to search for.' } }, required: ['query'] },
 }
 
-// „Vede-și starea proprie": baza de date + sănătatea. Executori decupla ți în
-// db.ts (dbTablesOverview/dbQuery) și health.ts (systemHealth).
+// "Sees its own state": the database + health. Executors decoupled in
+// db.ts (dbTablesOverview/dbQuery) and health.ts (systemHealth).
 export const DB_TABLES_TOOL: Tool = {
   name: 'db_tables',
   description:
@@ -52,11 +53,12 @@ export const SYSTEM_HEALTH_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
-// ── SETĂRILE LUI, PUSE DE EL (Adrian, 30 iul: „să creeze secretele și să le
-// pună unde trebuie, e al meu și îi permit full acces") ───────────────────────
-// Regula de fier, scrisă și în descriere ca s-o vadă și creierul: valoarea unui
-// secret nu se repetă, nu se confirmă, nu se scrie nicăieri. Se raportează
-// numele și câte caractere are.
+// ── HIS SETTINGS, SET BY HIMSELF (Adrian, Jul 30: "he should create the
+// secrets and put them where they belong, it's mine and I allow him full
+// access") ───────────────────────────────────────────────────────────────────
+// The iron rule, also written in the description so the brain sees it: a
+// secret's value is never repeated, never confirmed, never written anywhere.
+// Only the name and its character count are reported.
 export const SECRET_PUNE_TOOL: Tool = {
   name: 'secret_pune',
   description:
@@ -83,11 +85,11 @@ export const SECRET_PUBLICA_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
-// ── CERINȚELE OWNERULUI, PRINSE ÎN ZBOR (Adrian, 30 iul: „gestiune a
-// cerințelor" · „ți-am cerut de zeci de ori") ────────────────────────────────
-// Tabela `cerinte` exista, dar NU avea cine s-o umple: cerințele lui rămâneau
-// în chat și se pierdeau. De-aia „ți-am cerut de zeci de ori" era adevărat și
-// nedemonstrabil. Uneltele astea o umplu din conversație, pe loc.
+// ── THE OWNER'S REQUIREMENTS, CAUGHT IN FLIGHT (Adrian, Jul 30: "requirements
+// management" · "I've asked you dozens of times") ────────────────────────────
+// The `cerinte` table existed, but NOTHING filled it: his requirements stayed
+// in chat and got lost. That's why "I've asked you dozens of times" was true
+// yet unprovable. These tools fill it from the conversation, on the spot.
 export const CERINTA_NOUA_TOOL: Tool = {
   name: 'cerinta_noua',
   description:
@@ -125,10 +127,11 @@ export const CERINTA_PRIORITATE_TOOL: Tool = {
   },
 }
 
-// ── CARDUL LA FURNIZORI, FĂRĂ CA MODELUL SĂ-L VADĂ (Adrian, 31 iul) ─────────
-// „Asta era cerința care dovedea autonomia reală" · „să opereze pentru mine
-// când îi cer doar eu, folosind sistemul de recunoaștere vocală."
-// Descrierea îi spune limpede modelului: nu primești valoarea și nu ai ce cere.
+// ── THE CARD AT PROVIDERS, WITHOUT THE MODEL SEEING IT (Adrian, Jul 31) ─────
+// "This was the requirement that proved real autonomy" · "it should operate
+// for me when only I ask it, using the voice recognition system."
+// The description tells the model plainly: you never receive the value and
+// there is nothing to ask for.
 export const CARD_STARE_TOOL: Tool = {
   name: 'card_stare',
   description:
@@ -161,10 +164,10 @@ export const CARD_GATA_TOOL: Tool = {
   },
 }
 
-// Constructorul (autonomie) — definiții mutate din ruta vocii aici, în sursa
-// COMUNĂ (CREIER UNIC §1, „fără duplicare"): aceleași definiții și pentru scris,
-// și pentru escaladarea vocii. Executorii rămân în rutele lor (createBuildJob/
-// listBuildJobs), fiindcă au nevoie de contextul userului.
+// The constructor (autonomy) — definitions moved from the voice route here,
+// into the COMMON source (SINGLE BRAIN §1, "no duplication"): the same
+// definitions for both text and voice escalation. The executors stay in their
+// routes (createBuildJob/listBuildJobs), because they need the user's context.
 export const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
@@ -172,14 +175,14 @@ export const BUILD_SOFTWARE_TOOL: Tool = {
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 
-// ── PANOUL DE LUCRĂTORI (Adrian, 31 iul) ────────────────────────────────────
-// „trebuie pornite toate 3, fiecare independent, creierul ia care e cel mai bun
-// rezultat propus de ei, după ce analizează propunerile".
-// Diferența față de `build_software`: acolo UN constructor lucrează și deschide
-// PR. Aici TREI unelte diferite, pe TREI modele diferite, rezolvă aceeași
-// sarcină fără să știe una de alta — și abia apoi creierul compară diff-urile
-// și alege, cu motiv scris. Costă de trei ori mai mult timp de mașină, deci se
-// cheamă pentru probleme care merită trei păreri, nu pentru o virgulă.
+// ── THE WORKER PANEL (Adrian, Jul 31) ───────────────────────────────────────
+// "all 3 must be started, each independent, the brain takes the best result
+// they propose, after analysing the proposals".
+// The difference from `build_software`: there ONE constructor works and opens
+// a PR. Here THREE different tools, on THREE different models, solve the same
+// task without knowing about each other — and only then does the brain compare
+// the diffs and choose, with a written reason. It costs three times the machine
+// time, so it's called for problems worth three opinions, not for a comma.
 export const PANOU_COD_TOOL: Tool = {
   name: 'panou_cod',
   description:
@@ -198,9 +201,10 @@ export const CONSTRUCTOR_STATUS_TOOL: Tool = {
 }
 
 
-// ── §1: definiții mutate din chat.ts ca să le poată folosi ȘI vocea ──────────
-// Erau locale în chat.ts, deci vocea nu avea cum să le ceară — de aceea apăreau
-// „adormite pe voce". Sursă unică (principiul permanent: unic, fără duplicate).
+// ── §1: definitions moved out of chat.ts so VOICE can use them too ──────────
+// They were local to chat.ts, so voice had no way to request them — that's why
+// they appeared "asleep on voice". Single source (the permanent principle:
+// one, no duplicates).
 export const COST_TOOL: Tool = {
   name: 'get_real_cost',
   description:
@@ -272,8 +276,8 @@ export const FORGET_MEMORY_TOOL: Tool = {
 }
 
 
-// ── §1: BROWSERUL LIVE — definiții comune (erau locale în chat.ts, deci vocea
-// nu avea cum să le ceară → cele 9 unelte apăreau „adormite pe voce"). ───────
+// ── §1: THE LIVE BROWSER — common definitions (they were local to chat.ts, so
+// voice had no way to request them → the 9 tools appeared "asleep on voice"). ─
 export const BROWSER_OPEN_TOOL: Tool = {
   name: 'browser_open',
   description:
@@ -383,12 +387,12 @@ export const BROWSER_TOOLS: Tool[] = [
 ]
 
 
-// ── Lotul C: panoul aplicatiei — o SINGURA declaratie ────────────────────────
-// Unealta asta era scrisa de DOUA ori: aici in format Anthropic (pentru scris)
-// si inca o data, litera cu litera, in services/realtime.ts in formatul OpenAI
-// Realtime (pentru voce) — aceleasi enum-uri, aceeasi descriere. Daca se adauga
-// un panou nou, trebuia editat in ambele, altfel vocea si scrisul stiau lucruri
-// diferite. Acum: o declaratie, iar vocea o CONVERTESTE (realtimeTools).
+// ── Batch C: the app panel — a SINGLE declaration ────────────────────────────
+// This tool was written TWICE: here in Anthropic format (for text) and once
+// more, letter by letter, in services/realtime.ts in OpenAI Realtime format
+// (for voice) — same enums, same description. If a new panel was added, both
+// had to be edited, otherwise voice and text knew different things. Now: one
+// declaration, and voice CONVERTS it (realtimeTools).
 export const OPEN_APP_VIEW_TOOL: Tool = {
   name: 'open_app_view',
   description:
@@ -412,11 +416,11 @@ export const OPEN_APP_VIEW_TOOL: Tool = {
   },
 }
 
-// ── TOT PANOUL DE ADMIN, ÎN MÂNA LUI (Adrian, 31 iul, a treia oară) ──────────
-// „Kelion trebuie să poată vedea tot ce conține adminul, și să poată modifica."
-// Avea codul (read_source), datele brute (db_query) și scrisul (repo_write) —
-// dar nu ce vede ownerul pe ecran: cifrele agregate pe care le calculează
-// rutele. O singură unealtă pentru toate tab-urile, nu treizeci.
+// ── THE WHOLE ADMIN PANEL, IN HIS HAND (Adrian, Jul 31, the third time) ─────
+// "Kelion must be able to see everything the admin contains, and to modify it."
+// He had the code (read_source), the raw data (db_query) and writing
+// (repo_write) — but not what the owner sees on screen: the aggregated figures
+// the routes compute. A single tool for all tabs, not thirty.
 export const ADMIN_VEZI_TOOL: Tool = {
   name: 'admin_vezi',
   description:
@@ -441,33 +445,33 @@ export const ADMIN_SCHIMBA_TOOL: Tool = {
   },
 }
 
-// ── TOT SETUL DE ADMIN, DERIVAT — NU SCRIS CU MÂNA ───────────────────────────
+// ── THE WHOLE ADMIN SET, DERIVED — NOT HAND-WRITTEN ──────────────────────────
 //
-// Adrian, 31 iul: „îți lipsesc câteva elemente esențiale pentru capabilitățile
-// lui Kelion, care sunt acelea?"
+// Adrian, Jul 31: "you're missing a few essential elements for Kelion's
+// capabilities — which are they?"
 //
-// Mâinile lui primeau 15 unelte dintr-o listă scrisă de mine, deși executorul
-// (`uneltele()` → `execSharedAdminTool`) știe să ruteze tot setul. Îi lipseau
-// exact cele de care avea nevoie ca să se depaneze singur: să-și citească
-// codul, să interogheze baza, să-și ia pulsul, să deschidă PR, să citească
-// jurnalul eșecului. Iar inventarul din prompt îi spunea că le are.
+// His hands received 15 tools from a list I wrote by hand, even though the
+// executor (`uneltele()` → `execSharedAdminTool`) knows how to route the whole
+// set. He was missing exactly the ones he needs to debug himself: read his own
+// code, query the database, take his pulse, open a PR, read the failure log.
+// And the prompt inventory told him he had them.
 //
-// Lista asta e ordinea în care le vede modelul; ce e aici TREBUIE să existe și
-// în SHARED_ADMIN_TOOLS (are test). Nu se mai umblă în două locuri.
+// This list is the order the model sees them in; whatever is here MUST also
+// exist in SHARED_ADMIN_TOOLS (there's a test). No more editing in two places.
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
-  // repo_* și runbook_* sunt încă definite în routes/chat.ts (migrarea spre
-  // sursa unică e incrementală). Se adaugă în autonomie.ts, de-acolo.
+  // repo_* and runbook_* are still defined in routes/chat.ts (the migration to
+  // the single source is incremental). They are added in autonomie.ts, from there.
   SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
   CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
-  // Legate de EL: memoria, notițele, jurnalele, costul, cutia poștală, și
-  // dreptul de a-și cere singur o unealtă care-i lipsește. Fără astea nu ține
-  // minte nimic de la o tură la alta — de-aia repeta aceleași greșeli.
+  // About HIMSELF: memory, notes, logs, cost, the mailbox, and the right to
+  // ask for a missing tool on his own. Without these he remembers nothing from
+  // one turn to the next — that's why he repeated the same mistakes.
   LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL,
   COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
-  // Tot panoul de admin — vede ce vezi tu, și poate schimba ce se poate desface.
+  // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
 ]
 

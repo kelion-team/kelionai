@@ -1,14 +1,14 @@
-// ── TESTELE SELECȚIEI DE MODEL ȘI ALE ESCALADĂRII (creierul) ────────────────
+// ── MODEL SELECTION AND ESCALATION TESTS (the brain) ────────────────────────
 //
-// Aici se decide CÂT de deștept răspunde Kelion și CÂND urcă pe modelul greu —
-// exact locul unde s-a ascuns bug-ul „creierul plătit e prost ca cel free"
-// (ruta ownerului cădea pe modele `:free`). Zero teste până acum.
+// This is where it is decided HOW smart Kelion replies and WHEN it climbs to
+// the heavy model — exactly where the "the paid brain is as dumb as the free
+// one" bug hid (the owner route fell onto `:free` models). Zero tests until now.
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
   config: {
     openrouter: {
-      key: '', // NECONFIGURAT: nicio cerere de rețea
+      key: '', // NOT CONFIGURED: no network request
       chatDefault: 'model/chat:free',
       workDefault: 'model/work:free',
       topDefault: 'model/top:free',
@@ -100,8 +100,8 @@ describe('creier — fără cheie NU se cheamă rețeaua', () => {
     expect(await resolveModel('top')).toBe('model/top:free')
   })
   it('bestPaidWorkModel întoarce null (nu rutează pe plătit fără bani)', async () => {
-    // GARDA anti-spargere: fără cheie/sold, ownerul rămâne pe free FUNCȚIONAL,
-    // în loc să pice pe 402 la fiecare tură.
+    // Anti-breakage GUARD: without key/balance, the owner stays on FUNCTIONAL
+    // free, instead of hitting 402 on every turn.
     expect(await bestPaidWorkModel()).toBeNull()
   })
 })

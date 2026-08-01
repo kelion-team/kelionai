@@ -1,12 +1,14 @@
-// COALESCER DE FRAZĂ — leagă bucățile transcrise de VOX într-un singur gând.
-// De ce există: microfonul (audioIO.ts) taie pe tăcere (SILENCE_MS, azi 450ms —
-// prag calibrat de Adrian pentru viteză, NU se atinge aici). O pauză naturală de
-// respirație/gândire în mijlocul unei propoziții e mai lungă decât atât, dar mult
-// mai scurtă decât o pauză reală de final-de-gând — rezultă fraze tăiate în bucăți
-// disparate trimise separat creierului ("Eu sunt în setare." / "un" / ...).
-// Fix strict la nivel de text: fiecare fragment transcris intră aici, nu direct la
-// creier; dacă mai vine un fragment în `windowMs`, se unesc — abia la prima tăcere
-// REALĂ (fără fragment nou o vreme) se trimite o singură frază completă.
+// UTTERANCE COALESCER — joins the pieces transcribed by VOX into a single
+// thought. Why it exists: the microphone (audioIO.ts) cuts on silence
+// (SILENCE_MS, today 450ms — a threshold calibrated by Adrian for speed, NOT
+// touched here). A natural breathing/thinking pause in the middle of a
+// sentence is longer than that, but much shorter than a real end-of-thought
+// pause — resulting in utterances cut into disjointed pieces sent separately
+// to the brain ("I am in setting." / "a" / ...).
+// Fix strictly at text level: every transcribed fragment enters here, not
+// straight to the brain; if another fragment arrives within `windowMs`, they
+// merge — only at the first REAL silence (no new fragment for a while) is a
+// single complete utterance sent.
 
 export interface UtteranceCoalescer {
   push(text: string): void
@@ -41,7 +43,7 @@ export function createUtteranceCoalescer(
       const t = text.trim()
       if (!t) return
       buffer.push(t)
-      // debounce clasic: fiecare fragment nou amână trimiterea, nu o grăbește
+      // classic debounce: each new fragment delays the sending, doesn't rush it
       clearTimer()
       timer = window.setTimeout(flush, windowMs)
     },

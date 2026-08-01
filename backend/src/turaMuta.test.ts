@@ -1,14 +1,16 @@
-// TURA MUTĂ — „răspuns = nimic" (Adrian, 30 iul)
+// THE MUTE TURN — "answer = nothing" (Adrian, Jul 30)
 //
-// Simptomul lui, cuvânt cu cuvânt: scrii în chat și NU vine nimic. Nici răspuns,
-// nici eroare. Cauza nu era la el: creierul poate întoarce 200 cu text GOL (model
-// scos de furnizor, completare vidă) — atunci nu se aruncă nicio excepție, plasa
-// de eroare nu se activează, iar tura se închidea fără să fi scris un cuvânt.
-// Clientul șterge turele goale, deci pe ecran rămânea… nimic.
+// His symptom, word for word: you write in the chat and NOTHING comes. No
+// answer, no error. The cause wasn't on his side: the brain can return 200
+// with EMPTY text (a model pulled by the provider, an empty completion) —
+// then no exception is thrown, the error net doesn't engage, and the turn
+// closed without having written a word. The client deletes empty turns, so on
+// screen there remained… nothing.
 //
-// Testul ăsta apără exact deosebirea care contează: ce e „ceva vizibil" pentru om
-// și ce e doar protocol. Fără ea, plasa fie n-ar porni niciodată (crezând că a
-// vorbit), fie ar vorbi peste o tură reușită.
+// This test guards exactly the distinction that matters: what is "something
+// visible" for the person and what is just protocol. Without it, the net
+// would either never start (believing it had spoken), or speak over a
+// successful turn.
 import { describe, expect, it } from 'vitest'
 import { areCevaDeVazut } from './routes/chat.js'
 

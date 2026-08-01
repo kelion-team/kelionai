@@ -1,32 +1,33 @@
-// ── KELION VEDE TOT CE VEDE PANOUL DE ADMIN ─────────────────────────────────
+// ── KELION SEES EVERYTHING THE ADMIN PANEL SEES ─────────────────────────────
 //
-// Adrian, 31 iul, a treia oară: „Kelion trebuie să poată vedea tot ce conține
-// adminul, și să poată modifica, să aibă full acces la codul sursă. A treia
-// oară nu-ți mai cer, te înjur direct."
+// Adrian, 31 Jul, for the third time: "Kelion must be able to see everything
+// the admin contains, and to modify it, to have full access to the source
+// code. I won't ask you a third time, I'll just curse you."
 //
-// Are dreptate că a cerut-o de trei ori. Avea `read_source` (codul), `db_query`
-// (datele brute) și `repo_write` (scrisul) — dar NU ce vede el pe ecran: cifrele
-// agregate, verdictele, listele pe care le calculează rutele de admin. Când îi
-// spunea „uită-te în tabul Bani", Kelion trebuia să reconstruiască din SQL ce
-// panoul avea deja gata calculat — și de multe ori ieșea altceva.
+// He is right that he asked three times. He had `read_source` (the code),
+// `db_query` (raw data) and `repo_write` (writing) — but NOT what he sees on
+// screen: the aggregated figures, the verdicts, the lists computed by the
+// admin routes. When he told him "look in the Money tab", Kelion had to
+// rebuild from SQL what the panel already had computed — and often came out
+// with something else.
 //
-// Aici e legătura care lipsea: aceleași rute pe care le cheamă panoul, chemate
-// de el. Nu o copie a logicii (ar diverge într-o săptămână) — chiar rutele.
+// Here is the missing link: the very same routes the panel calls, called by
+// him. Not a copy of the logic (it would diverge within a week) — the actual
+// routes.
 //
-// PROIECTARE, și de ce:
-//   • O SINGURĂ unealtă de citire pentru toate cele ~30 de tab-uri. Nu treizeci
-//     de unelte care ar umple fereastra de context și s-ar învechi la fiecare
-//     rută nouă.
-//   • Numele rutelor NU sunt scrise de mână aici: se cer de la aplicație, deci
-//     o rută nouă apare singură în lista lui.
-//   • Citirea e liberă; SCRISUL trece prin listă albă explicită, fiindcă printre
-//     rutele de admin sunt și cele care mișcă bani (`deposit`, `payout`,
-//     `sell-credits`) sau restaurează baza (`backups/restore`). Alea rămân ale
-//     ownerului — nu fiindcă n-am încredere în el, ci fiindcă o greșeală acolo
-//     nu se poate desface.
+// DESIGN, and why:
+//   • ONE SINGLE read tool for all ~30 tabs. Not thirty tools that would fill
+//     the context window and go stale with every new route.
+//   • Route names are NOT hand-written here: they are requested from the app,
+//     so a new route shows up in his list on its own.
+//   • Reading is free; WRITING goes through an explicit allowlist, because
+//     among the admin routes are also the ones that move money (`deposit`,
+//     `payout`, `sell-credits`) or restore the database (`backups/restore`).
+//     Those stay with the owner — not because I don't trust him, but because
+//     a mistake there cannot be undone.
 
-/** Rutele de admin pe care NU le poate chema singur, cu motivul scris.
- *  Regula: dacă greșeala nu se poate desface, o apeși tu. */
+/** The admin routes he may NOT call on his own, with the reason written down.
+ *  The rule: if the mistake cannot be undone, you press it yourself. */
 const DOAR_OWNERUL = new Map<string, string>([
   ['deposit', 'mișcă bani reali în pungă'],
   ['payout', 'scoate bani din cont'],
@@ -38,21 +39,21 @@ const DOAR_OWNERUL = new Map<string, string>([
   ['money-circuit/card-key', 'expune cheia de card'],
 ])
 
-/** Trunchiem ce e prea lung ca să nu mănânce fereastra de context a creierului. */
+/** We truncate what is too long so it doesn't eat the brain's context window. */
 const MAX = 20_000
 
-/** Rutele se cheamă pe LIVE, nu pe localhost: ce vede el trebuie să fie exact
- *  ce vezi tu în panou, din aceeași aplicație. */
+/** Routes are called on LIVE, not localhost: what he sees must be exactly
+ *  what you see in the panel, from the same application. */
 function url(cale: string): string {
   const c = cale.replace(/^\/+/, '').replace(/^api\/admin\//, '')
   return `https://kelionai.app/api/admin/${c}`
 }
 
 /**
- * Citește o secțiune din panoul de admin — exact datele pe care le vede el.
+ * Reads a section of the admin panel — exactly the data he sees.
  *
- * `cookie` e sesiunea admin a celui care cere: fără ea ruta răspunde 403, și e
- * bine așa — unealta nu ocolește poarta de admin, o folosește.
+ * `cookie` is the admin session of the requester: without it the route answers
+ * 403, and that is good — the tool does not bypass the admin gate, it uses it.
  */
 export async function adminVezi(cale: string, cookie: string): Promise<string> {
   if (!cale.trim()) return JSON.stringify({ error: 'spune ce secțiune vrei, ex. „finance" sau „users"' })
@@ -72,10 +73,11 @@ export async function adminVezi(cale: string, cookie: string): Promise<string> {
 }
 
 /**
- * Schimbă ceva în panou (POST), pe rutele care se pot desface.
+ * Changes something in the panel (POST), on the routes that can be undone.
  *
- * Ce mișcă bani sau restaurează baza rămâne al ownerului — răspunsul spune
- * limpede CARE e ruta și DE CE, ca să nu pară un refuz arbitrar.
+ * What moves money or restores the database stays with the owner — the reply
+ * states clearly WHICH route it is and WHY, so it doesn't look like an
+ * arbitrary refusal.
  */
 export async function adminSchimba(cale: string, corp: unknown, cookie: string): Promise<string> {
   const c = cale.replace(/^\/+/, '').replace(/^api\/admin\//, '')

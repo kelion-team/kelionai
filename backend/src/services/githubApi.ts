@@ -1,9 +1,10 @@
-// ── SURSĂ UNICĂ pentru apelul REST GitHub (token din env + fetch cu antete) ───
-// github.ts (bucla de cod: repo_write/open_pr/merge_pr) și runbooks.ts (dispatch
-// de workflow-uri + jurnale) aveau FIECARE o copie identică a perechii
-// ghToken()/gh(). Acum una singură (principiul permanent: unic, fără duplicate).
-// Tokenul vine din env (GITHUB_TOKEN) și nu se întoarce niciodată în răspunsuri.
-// Timeout-ul e parametru: github folosea 20s, runbooks 15s — comportament păstrat.
+// ── SINGLE SOURCE for the GitHub REST call (env token + fetch with headers) ─
+// github.ts (the code loop: repo_write/open_pr/merge_pr) and runbooks.ts
+// (workflow dispatch + journals) EACH had an identical copy of the
+// ghToken()/gh() pair. Now just one (the permanent principle: unique, no
+// duplicates). The token comes from env (GITHUB_TOKEN) and is never returned
+// in responses. The timeout is a parameter: github used 20s, runbooks 15s —
+// behaviour preserved.
 export const REPO = 'kelion-team/kelionai'
 export const GITHUB_API = `https://api.github.com/repos/${REPO}`
 

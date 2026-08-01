@@ -1,22 +1,24 @@
-// ── CODUL UNIC DE PLATĂ (Adrian, 30 iul) ─────────────────────────────────────
+// ── THE UNIQUE PAYMENT CODE (Adrian, Jul 30) ──────────────────────────────
 //
-// „fiecare plată trebuie să fie însoțită de un cod unic" · „userul X cumpără
-// credit de atâția bani, tranzacția are un cod alocat unic generat, la plată se
-// trece automat la ce cod/client".
+// "every payment must be accompanied by a unique code" · "user X buys credit
+// worth this much money, the transaction has a uniquely generated assigned
+// code, at payment it automatically goes to that code/client".
 //
-// Revolut Pro n-are webhook, deci nimeni nu ne anunță că s-a plătit. Codul e
-// puntea: pleacă cu omul la plată, se întoarce în referința tranzacției bancare,
-// iar potrivirea îl leagă înapoi de contul lui. Fără el ar rămâne gestiunea
-// manuală — „în ziua de azi, la mii de potențiali useri", cum a spus.
+// Revolut Pro has no webhook, so nobody tells us a payment happened. The code
+// is the bridge: it leaves with the person at payment, comes back in the bank
+// transaction's reference, and the matching ties it back to their account.
+// Without it, manual bookkeeping would remain — "nowadays, with thousands of
+// potential users", as he said.
 //
-// Testat aici e EXTRAGEREA codului din referință: singura bucată pură din lanț,
-// și cea de care depinde tot restul. Dacă tiparul e prea lax, un text oarecare
-// ar putea trece drept cod; dacă e prea strict, plata omului ajunge „neatribuită"
-// și munca manuală se întoarce pe ușa din dos.
+// Tested here is EXTRACTING the code from the reference: the only pure piece
+// in the chain, and the one everything else depends on. If the pattern is too
+// lax, any text could pass as a code; if it's too strict, the person's
+// payment ends up "unassigned" and the manual work returns through the back
+// door.
 import { describe, it, expect } from 'vitest'
 
-/** Exact tiparul din `crediteazaDupaCod` (db.ts). Ținut identic aici, ca testul
- *  să apere REGULA, nu o copie aproximativă a ei. */
+/** The exact pattern from `crediteazaDupaCod` (db.ts). Kept identical here,
+ *  so the test guards the RULE, not a rough copy of it. */
 function codDinReferinta(referinta: string): string | null {
   const m = referinta.toUpperCase().replace(/\s+/g, '-').match(/KLN-[A-Z2-9]{4}-[A-Z2-9]{4}/)
   return m ? m[0] : null
@@ -46,23 +48,25 @@ describe('codul de plată se recunoaște în referința bancară', () => {
   })
 
   it('NU acceptă caractere confundabile (0/O, 1/I/L) — alfabetul le exclude', () => {
-    // Alfabetul codului nu conține 0, O, 1, I sau L tocmai ca omul să nu se
-    // încurce la citit. Un „cod" care le conține nu e un cod de-al nostru.
+    // The code's alphabet doesn't contain 0, O, 1, I or L precisely so the
+    // person doesn't mix them up when reading. A "code" containing them is
+    // not one of ours.
     expect(codDinReferinta('KLN-AB0O-CD45')).toBeNull()
     expect(codDinReferinta('KLN-AB1I-CD45')).toBeNull()
   })
 
   it('lungime greșită → null, în ambele sensuri (nu ghicim pe un cod stricat)', () => {
-    // Un caracter în minus SAU în plus înseamnă că omul a greșit la copiat.
-    // Alegerea deliberată e să NU potrivim: mai bine plata ajunge la
-    // „neatribuite" și o rezolvă adminul, decât să creditam un cont apropiat.
+    // One character fewer OR more means the person miscopied. The deliberate
+    // choice is NOT to match: better the payment lands in "unassigned" and the
+    // admin resolves it, than crediting a nearby account.
     expect(codDinReferinta('KLN-AB2-CD45')).toBeNull()
     expect(codDinReferinta('KLN-AB234-CD45')).toBeNull()
   })
 
   it('două coduri în aceeași referință → îl ia pe primul, determinist', () => {
-    // Nu ghicim între ele: prima potrivire, mereu aceeași. Dacă e greșit, plata
-    // apare la „neatribuite" pentru celălalt și o rezolvă adminul.
+    // We don't guess between them: the first match, always the same. If it's
+    // wrong, the payment shows in "unassigned" for the other one and the admin
+    // resolves it.
     expect(codDinReferinta('KLN-AB23-CD45 si KLN-XY78-ZW99')).toBe('KLN-AB23-CD45')
   })
 })

@@ -77,9 +77,9 @@ export interface Strings {
   calibrateVoiceFailed: string
   calibrateVoiceReset: string
   voiceNotEnrolledHint: string
-  // ── MONITORUL (Stage.tsx) — erau scrise direct în cod, în română ──────────
-  // 20 de texte pe care un user nelogat-pe-română le vedea în română: titluri
-  // de butoane, stări goale, panoul de deblocare admin.
+  // ── THE MONITOR (Stage.tsx) — they were written directly in code, in Romanian ──
+  // 20 texts that a Romanian logged-out user saw in Romanian: button titles,
+  // empty states, the admin unlock panel.
   wsFileFailed: string
   wsOpenFile: string
   wsPageBlocked: string
@@ -101,22 +101,22 @@ export interface Strings {
   adminLocked: string
   adminLockedHint: string
   adminUnlock: string
-  // ── BENZILE DE LATENȚĂ ȘI DE ASCULTARE (ChatPanel.tsx) ───────────────────
+  // ── THE LATENCY AND LISTENING BANDS (ChatPanel.tsx) ──────────────────────
   latencyChip: string
   heardYouTitle: string
   heardBrainTitle: string
 }
 
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
-// Regula lui Adrian (30 iul): „100% engleză în toată aplicația; după care se
-// aplică regula per user cu limba, inclusiv admin".
+// Adrian's rule (Jul 30): "100% English in the whole app; then the per-user
+// language rule applies, including admin".
 //
-// Tipul cere ENGLEZA completă și lasă restul limbilor PARȚIALE. Înainte,
-// `Record<Lang, Strings>` obliga fiecare limbă să aibă TOATE cheile — adică o
-// traducere se putea adăuga doar în bloc, sau deloc. De-aia au rămas sute de
-// texte scrise direct în cod: era mai ușor decât să traduci tot dintr-o dată.
-// Acum o cheie netradusă cade curat pe engleză, nu pe gol; traducerile se pot
-// adăuga în etape, fără ca interfața să aibă vreodată rubrici goale.
+// The type requires COMPLETE English and leaves the other languages PARTIAL. Before,
+// `Record<Lang, Strings>` forced every language to have ALL keys — meaning a
+// translation could only be added as a block, or not at all. That's why
+// hundreds of texts stayed written directly in code: it was easier than translating everything at once.
+// Now an untranslated key falls cleanly onto English, not onto blank; translations can
+// be added in stages, without the interface ever having empty labels.
 const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   en: {
     tagline: 'Your assistant. Sign in to continue.',
@@ -905,10 +905,10 @@ export function resolveLang(locale: string | undefined | null): Lang {
   return (SUPPORTED as string[]).includes(base) ? (base as Lang) : 'en'
 }
 
-// Cache: obiectul unit se calculează O DATĂ pe limbă. `strings()` e chemată la
-// fiecare randare a fiecărei componente — un spread acolo ar face muncă inutilă
-// de zeci de ori pe secundă și ar rupe memoizarea React (obiect nou de fiecare
-// dată → re-randări în lanț).
+// Cache: the merged object is computed ONCE per language. `strings()` is called on
+// every render of every component — a spread there would do useless work
+// dozens of times per second and would break React memoization (a new object every
+// time → chained re-renders).
 const cache = new Map<Lang, Strings>()
 
 export function strings(lang: Lang): Strings {
@@ -919,11 +919,11 @@ export function strings(lang: Lang): Strings {
   return unit
 }
 
-// LIMBA INTERFEȚEI, ÎNTR-UN SINGUR LOC. `resolveLang(loadLocalLang() ?? 'en')`
-// era copiat în Stage, WalletButton și CustomerSettings — trei locuri de
-// schimbat dacă regula se mută. Aici e regula: oglinda locală a limbii
-// IDENTIFICATE de server; lipsă → ENGLEZĂ (Adrian: „la delogare se afișează
-// engleză; la relogare se revine la limba detectată").
+// THE INTERFACE LANGUAGE, IN ONE PLACE. `resolveLang(loadLocalLang() ?? 'en')`
+// was copied in Stage, WalletButton and CustomerSettings — three places to
+// change if the rule moves. Here is the rule: the local mirror of the language
+// IDENTIFIED by the server; missing → ENGLISH (Adrian: "on logout it shows
+// English; on re-login it returns to the detected language").
 export function uiStrings(): Strings {
   return strings(resolveLang(loadLocalLang() ?? 'en'))
 }

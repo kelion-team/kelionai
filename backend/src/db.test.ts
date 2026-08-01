@@ -1,12 +1,13 @@
-// ── TESTELE PĂRȚILOR DETERMINISTE DIN db.ts (2997 linii, ZERO teste) ────────
+// ── TESTS FOR THE DETERMINISTIC PARTS OF db.ts (2997 lines, ZERO tests) ────
 //
-// Baza de date e cel mai mare fișier din soft. Majoritatea funcțiilor cer
-// Postgres, dar bucățile care decid IDENTITATEA (amprenta vocală și cea de față)
-// sunt matematică pură — și sunt și cele mai periculoase dacă greșesc:
-// o distanță calculată prost înseamnă ori „nu te recunosc pe tine", ori, mult mai
-// rău, „recunosc pe altcineva DREPT tine" (lacătul de admin se deschide pe voce).
+// The database is the biggest file in the software. Most functions require
+// Postgres, but the pieces that decide IDENTITY (the voice and face
+// fingerprints) are pure math — and also the most dangerous if they go wrong:
+// a badly computed distance means either "I don't recognize you", or, much
+// worse, "I recognize someone else AS you" (the admin padlock opens on
+// voice).
 //
-// Verificăm și că fără DATABASE_URL nimic nu pretinde că merge.
+// We also check that without DATABASE_URL nothing pretends to work.
 import { describe, it, expect } from 'vitest'
 import { vectorDistance, faceDistance, dbEnabled } from './db.js'
 
@@ -33,8 +34,8 @@ describe('db — distanța dintre amprente (identitatea userului)', () => {
   })
 
   it('vector gol → Infinity (NU 0): „nu știu cine ești", nu „ești tu"', () => {
-    // Capcana care contează: dacă un vector gol ar da 0, orice prag l-ar accepta
-    // ca potrivire perfectă — adică oricine ar trece drept owner.
+    // The trap that matters: if an empty vector gave 0, any threshold would
+    // accept it as a perfect match — meaning anyone would pass as the owner.
     expect(vectorDistance([], [])).toBe(Infinity)
     expect(vectorDistance([1, 2], [])).toBe(Infinity)
     expect(faceDistance([], [1, 2])).toBe(Infinity)
@@ -52,9 +53,9 @@ describe('db — distanța dintre amprente (identitatea userului)', () => {
   })
 
   it('cele două distanțe au scări DIFERITE, intenționat', () => {
-    // vectorDistance e normalizată pe lungime (voce); faceDistance e brută
-    // (convenția face-api, prag ~0,6). Dacă cineva le-ar unifica din greșeală,
-    // pragurile de recunoaștere ar deveni greșite pe tăcute.
+    // vectorDistance is length-normalized (voice); faceDistance is raw (the
+    // face-api convention, threshold ~0.6). If someone unified them by
+    // mistake, the recognition thresholds would silently become wrong.
     const a = [1, 1, 1, 1]
     const b = [0, 0, 0, 0]
     expect(vectorDistance(a, b)).toBe(1) // sqrt(4/4)
@@ -64,8 +65,9 @@ describe('db — distanța dintre amprente (identitatea userului)', () => {
 
 describe('db — fără DATABASE_URL nu se pretinde nimic', () => {
   it('dbEnabled spune adevărul despre configurare', () => {
-    // În teste nu există DATABASE_URL → trebuie să fie fals, ca apelanții să
-    // cadă pe căile lor de rezervă în loc să aștepte o bază inexistentă.
+    // In tests there is no DATABASE_URL → it must be false, so callers fall
+    // onto their fallback paths instead of waiting for a nonexistent
+    // database.
     expect(typeof dbEnabled()).toBe('boolean')
     expect(dbEnabled()).toBe(Boolean(process.env.DATABASE_URL))
   })

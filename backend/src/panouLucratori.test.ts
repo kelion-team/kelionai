@@ -3,15 +3,15 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { LUCRATORI } from './services/lucratori.js'
 
-// ── PANOUL DE TREI ──────────────────────────────────────────────────────────
+// ── THE PANEL OF THREE ─────────────────────────────────────────────────────
 //
-// Adrian, 31 iul: „trebuie pornite toate 3, fiecare independent, creierul ia
-// care e cel mai bun rezultat propus de ei, după ce analizează propunerile".
+// Adrian, Jul 31: "all 3 must be started, each independent, the brain takes
+// the best result proposed by them, after analyzing the proposals".
 //
-// Și, imediat după, ordinul care schimbă felul în care e servit el:
-//   „ai scris sute de linii ca escaladarea să fie automată, și tu tot manual mă
-//   pui" · „să fie clar, manual eu nu fac, rămâi pe modele performante free" ·
-//   „inclusiv la escaladări".
+// And, immediately after, the order that changes how he is served:
+//   "you wrote hundreds of lines so escalation is automatic, and you still
+//   put me on manual" · "to be clear, manual I don't do, stay on performant
+//   free models" · "including at escalations".
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -44,7 +44,7 @@ describe('sunt trei, și chiar sunt independenți', () => {
     expect(cmd('openhands')).toContain('--headless')
   })
 
-  // Independența e literală: clonă proprie, ramură proprie, proces propriu.
+  // Independence is literal: own clone, own branch, own process.
   it('fiecare lucrează în clona LUI, pe ramura LUI', () => {
     expect(lucratori).toMatch(/mkdtemp\(path\.join\(tmpdir\(\), `\$\{lucrator\.nume\}-`\)\)/)
     expect(lucratori).toMatch(/panou\/\$\{lucrator\.nume\}-/)
@@ -74,8 +74,8 @@ describe('nimic nu se ia pe încredere de la unelte', () => {
   })
 
   it('un rezultat nemăsurat rămâne null, nu devine „trec"', () => {
-    // `testeTrec: null` = n-am ajuns să le rulăm. Nu e „au picat" și nu e
-    // „au trecut" — regula 1, în tip.
+    // `testeTrec: null` = we never got to run them. It's not "they failed" and not
+    // "they passed" — rule 1, in the type.
     expect(lucratori).toMatch(/testeTrec: boolean \| null/)
   })
 })
@@ -90,8 +90,8 @@ describe('judecata e a creierului, dar pe fapte', () => {
     expect(panou).toMatch(/PICĂ testele nu se alege decât dacă toate pică/)
   })
 
-  // Lecția zilei, pusă în instrucțiunea de judecată: pe 31 iul un fișier de
-  // 1049 de rânduri a ajuns la 14 printr-o „reparație" care suna bine.
+  // The lesson of the day, put into the judging instruction: on Jul 31 a
+  // 1049-line file ended up at 14 through a "fix" that sounded good.
   it('e avertizat despre propunerile care taie mult și explică puțin', () => {
     expect(panou).toMatch(/1049 de rânduri a ajuns la 14/)
   })
@@ -120,19 +120,19 @@ describe('producția are prioritate', () => {
 
 describe('ordinul „manual eu nu fac"', () => {
   it('selecția salvată a ownerului se ignoră — aplicația ține implicitul', () => {
-    expect(chat).toMatch(/ignor selecția salvată/)
-    expect(chat).toMatch(/manual eu nu fac/)
+    expect(chat).toMatch(/ignoring the saved selection/)
+    expect(chat).toMatch(/I don't do manual/)
   })
 
   it('escaladarea urcă automat de pe alegerea lui, și e SPUSĂ în jurnal', () => {
-    // Bug-ul reclamat: `return` ieșea din funcție înainte de escaladare, deci
-    // pe drumul ownerului — singurul cu sarcini grele — nu rula niciodată.
+    // The reported bug: `return` exited the function before escalation, so on
+    // the owner's path — the only one with heavy tasks — it never ran.
     expect(chat).toMatch(/const cereSusul = difficulty >= ESCALATE_TOP_AT/)
-    expect(chat).toMatch(/sarcină grea \(\$\{difficulty\}\) → urc de pe/)
+    expect(chat).toMatch(/heavy task \(\$\{difficulty\}\) → climbing from/)
   })
 
   it('regula rămâne pentru owner, nu pentru toți userii', () => {
-    expect(chat).toMatch(/NU se aplică nimănui altcuiva/)
+    expect(chat).toMatch(/does NOT apply to anyone else/)
   })
 })
 
@@ -143,10 +143,10 @@ describe('instalarea e verificată, nu presupusă', () => {
     expect(docker).toContain('npm install -g cline')
   })
 
-  // Regula 1 aplicată la Dockerfile: n-am confirmat comanda care dă CLI-ul
-  // headless de OpenHands, deci NU o pun. Panoul îl detectează lipsă și merge
-  // mai departe cu ceilalți doi — în loc să instaleze „ceva" și să raportez
-  // că merge.
+  // Rule 1 applied to the Dockerfile: I haven't confirmed the command that
+  // provides the headless OpenHands CLI, so I do NOT put it in. The panel
+  // detects it missing and moves on with the other two — instead of
+  // installing "something" and reporting that it works.
   it('OpenHands NU e instalat orbește, iar motivul e scris', () => {
     expect(docker).not.toMatch(/install.*openhands/i)
     expect(docker).toMatch(/OpenHands NU e aici, INTENȚIONAT/)

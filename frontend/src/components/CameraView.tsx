@@ -58,9 +58,9 @@ export default function CameraView({
         // Lift exposure/gain after the stream is alive — the browser may have
         // started conservatively in dim light.
         await boostLowLight(stream).catch(() => undefined)
-        // Eșantionarea feței în FUNDAL (recunoaștere titular vs. altcineva).
-        // Pornește doar acum (camera vie), rulează decuplat de chat, se oprește
-        // la cleanup. Nu blochează nimic din calea de răspuns.
+        // Face sampling in the BACKGROUND (owner vs. someone else recognition).
+        // Starts only now (live camera), runs decoupled from chat, stops at
+        // cleanup. It blocks nothing on the reply path.
         if (videoRef.current && !faceStopRef.current) {
           faceStopRef.current = startFaceSampling(
             videoRef.current,

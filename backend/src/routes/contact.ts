@@ -63,11 +63,12 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'bad_request', message: 'email and message required' })
     }
 
-    // 0) SALVEAZĂ MEREU în DB, ÎNAINTE de orice email (bug 10 iul: „mesajele din
-    // contact nu se trimit"). Cauza: dacă emailul nu era configurat (MAIL_PASS
-    // gol) sau sendMail eșua tăcut (fire-and-forget), mesajul se pierdea complet —
-    // UI-ul zicea „trimis", dar nu ajungea nicăieri. Acum e persistat garantat și
-    // vizibil în Inbox-ul adminului; emailul e doar redirectare best-effort.
+    // 0) ALWAYS SAVE to the DB, BEFORE any email (bug 10 Jul: "contact
+    // messages are not sent"). The cause: if mail wasn't configured (empty
+    // MAIL_PASS) or sendMail failed silently (fire-and-forget), the message
+    // was lost completely — the UI said "sent", but it reached nowhere. Now
+    // it is persisted guaranteed and visible in the admin's Inbox; the email
+    // is just best-effort forwarding.
     const stored = await saveContactMessage({
       name,
       email,
@@ -79,12 +80,13 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     })
 
     if (!mailEnabled()) {
-      // Emailul nu e cablat, dar mesajul E salvat — owner-ul îl vede în Inbox.
+      // Mail isn't wired, but the message IS saved — the owner sees it in the Inbox.
       return reply.send({ ok: true, stored, delivered: false })
     }
 
-    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated field —
-    // name/subject/department vin de la un vizitator anonim (XSS stocat în inbox).
+    // 1) Forward the full enquiry to the owner. Escape EVERY interpolated
+    // field — name/subject/department come from an anonymous visitor (stored
+    // XSS in the inbox).
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const adminHtml = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;">

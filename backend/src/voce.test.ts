@@ -1,15 +1,17 @@
-// ── TESTELE CĂII DE VOCE (§1 „ce poate scrisul, poate și vocea" + §6) ───────
+// ── THE VOICE PATH'S TESTS (§1 "what writing can do, voice can too" + §6) ──
 //
-// Vocea e cea mai fragilă cale: plafonul de 31 de unelte al sesiunii OpenAI
-// Realtime nu dă eroare la depășire — sesiunea pur și simplu NU pornește (504 la
-// FIECARE încercare, cronologia din AI-HANDOFF, valul 28 iul). Un singur rând
-// adăugat în registru poate rupe vocea în producție, fără să pice niciun build.
+// Voice is the most fragile path: the OpenAI Realtime session's 31-tool
+// ceiling doesn't error on overflow — the session simply does NOT start (504
+// on EVERY attempt, the AI-HANDOFF chronology, the Jul 28 wave). A single row
+// added to the registry can break voice in production without any build
+// failing.
 //
-// Apărăm exact garanțiile care s-au dovedit scumpe:
-//   • plafonul de 31 — dovedit prin măsurătoare, nu presupus;
-//   • lista vocii DERIVĂ din registrul unic (nu e o a doua listă, de mână);
-//   • §1: nicio capabilitate a scrisului nu rămâne inaccesibilă vorbind;
-//   • instrucțiunile de voce poartă ancorele (limba + regula faptei).
+// We guard exactly the guarantees that proved expensive:
+//   • the 31 ceiling — proven by measurement, not assumed;
+//   • the voice list DERIVES from the single registry (not a second,
+//     hand-written list);
+//   • §1: no writing capability stays unreachable by speaking;
+//   • the voice instructions carry the anchors (language + the deed rule).
 import { describe, it, expect } from 'vitest'
 import { realtimeTools, VOICE_TOOL_NAMES, realtimeInstructions } from './services/realtime.js'
 import { CAPABILITIES, chatCapabilityNames, dormantOnVoice } from './services/brainCapabilities.js'
@@ -22,7 +24,7 @@ describe('voce — plafonul de 31 de unelte (dacă se depășește, vocea NU por
   })
 
   it('uneltele dinamice NU pot ocoli plafonul', () => {
-    // Chiar dacă owner-ul aprobă 50 de skill-uri noi, lista trimisă rămâne ≤31.
+    // Even if the owner approves 50 new skills, the sent list stays ≤31.
     const multe = Array.from({ length: 50 }, (_, i) => ({
       name: `skill_${i}`,
       description: `unealtă dinamică ${i}`,
@@ -79,7 +81,7 @@ describe('voce — ancorele din instrucțiuni (§3)', () => {
     expect(instr.length).toBeGreaterThan(100)
   })
   it('conține regula FAPTEI (nu declara că ai făcut fără unealtă)', () => {
-    // Regula care oprește „am trimis"/„am salvat" fără apel real de unealtă.
+    // The rule that stops "I sent"/"I saved" without a real tool call.
     expect(instr.toLowerCase()).toMatch(/unealt|tool|nu (spune|declara|pretinde)|never (say|claim)/i)
   })
   it('nu crapă pe intrări lipsă', () => {

@@ -1,5 +1,5 @@
 import Fastify from 'fastify'
-// paritate-verificata-13iul
+// parity-verified-13jul
 import cookie from '@fastify/cookie'
 import websocket from '@fastify/websocket'
 import cors from '@fastify/cors'
@@ -32,10 +32,8 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startAutonomie } from './services/autonomie.js'
 import { triageGaps } from './services/gapsTriage.js'
-import { reconcileStripePayments } from './services/stripeReconcile.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { runSelfHeal } from './services/selfHeal.js'
-import { autoFundIssuing } from './services/stripe.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { manualRoutes } from './routes/manual.js'
@@ -57,8 +55,9 @@ const DL_TYPES: Record<string, string> = {
   zip: 'application/zip',
 }
 
-// Pachetul Linux nu e un binar depozitat, ci un lansator generat pe loc — mereu
-// versiunea live, deci /dl/Kelionai-linux.zip nu poate 404 (Adrian, 9 iul).
+// The Linux package is not a stored binary, but a launcher generated on the
+// spot — always the live version, so /dl/Kelionai-linux.zip can never 404
+// (Adrian, 9 Jul).
 const LINUX_ZIP = 'Kelionai-linux.zip'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -66,24 +65,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // GLOBAL body limit kept MODEST (25MB) so no endpoint can be flooded with huge
 // payloads — covers audio buffers, documents and camera frames. The /api/chat
 // route raises its own limit to 100MB per-route for camera frames (see chat.ts).
-// F12-UL SERVERULUI (Adrian, 27 iul: „jurnalele trebuie să ajungă la Kelion ca
-// și F12"): logger-ul scrie tot pe stdout (docker logs neatins) ȘI reține
-// erorile/avertismentele într-un inel de memorie citit de unealta server_logs.
+// THE SERVER'S F12 (Adrian, 27 Jul: "the logs must reach Kelion like F12"): the
+// logger writes everything to stdout (docker logs untouched) AND keeps the
+// errors/warnings in a memory ring read by the server_logs tool.
 const app = Fastify({ logger: { stream: makeLogTee() }, bodyLimit: 25_000_000 })
 
-// PLASĂ GLOBALĂ (audit 6 iul): pe Node modern, o singură promisiune respinsă
-// fără `.catch` (ex. un `JSON.parse` corupt într-un `.then`) omoară TOT procesul
-// → restart-loop pe gazdă. Le prindem și le logăm, ca aplicația live să NU cadă
-// dintr-o eroare izolată. (Fixul de fond rămâne `.catch` pe fiecare `.then`.)
+// GLOBAL SAFETY NET (audit 6 Jul): on modern Node, a single rejected promise
+// without `.catch` (e.g. a corrupt `JSON.parse` in a `.then`) kills the WHOLE
+// process → restart-loop on the host. We catch and log them, so the live app
+// does NOT fall from an isolated error. (The real fix stays `.catch` on every
+// `.then`.)
 process.on('unhandledRejection', (reason) => {
-  app.log.error({ reason }, 'unhandledRejection — prins global, procesul rămâne viu')
+  app.log.error({ reason }, 'unhandledRejection — caught globally, the process stays alive')
 })
 process.on('uncaughtException', (err) => {
-  app.log.error({ err }, 'uncaughtException — prins global, procesul rămâne viu')
+  app.log.error({ err }, 'uncaughtException — caught globally, the process stays alive')
 })
 
 await app.register(cookie)
-// WebSocket pentru microfonul full-duplex (STT stream) și vocea live.
+// WebSocket for the full-duplex microphone (STT stream) and the live voice.
 await app.register(websocket)
 await app.register(cors, {
   origin: config.frontendOrigin,
@@ -105,16 +105,18 @@ await app.register(rateLimit, {
   allowList: (req) => {
     const u = (req.url || '').split('?')[0]
     return (
-      // FIȘIERE STATICE (avatar .glb, modele face-api, bundle JS/CSS, imagini):
-      // NICIODATĂ rate-limited. Cauza „microfonul pleacă dar nu aude" (14 iul):
-      // o singură încărcare de pagină cere ZECI de /anim/*.glb + /models/* deodată,
-      // depășea 120/min și dădea 429 pe TOT — inclusiv WebSocket-ul microfonului.
-      // Orice cale non-/api/ = fișier static → exceptată; API-ul îți păstrează capul.
+      // STATIC FILES (avatar .glb, face-api models, JS/CSS bundles, images):
+      // NEVER rate-limited. The cause of "the mic starts but doesn't hear"
+      // (14 Jul): a single page load requests DOZENS of /anim/*.glb + /models/*
+      // at once, exceeded 120/min and returned 429 on EVERYTHING — including
+      // the microphone WebSocket. Any non-/api/ path = static file → exempted;
+      // the API keeps its cap.
       !u.startsWith('/api/') ||
-      // MICROFONUL (voce): WebSocket-ul de STT — calea critică, nu poate fi throttled.
+      // THE MICROPHONE (voice): the STT WebSocket — the critical path, it
+      // cannot be throttled.
       u === '/api/asr-stream' ||
       u === '/health' ||
-      u === '/api/version' || // sondat la 45s de fiecare client pentru rutina de update
+      u === '/api/version' || // polled every 45s by every client for the update routine
       u === '/api/visit/ping'
     )
   },
@@ -127,14 +129,12 @@ await app.register(rateLimit, {
   },
 })
 
-// Keep the raw JSON body around (Stripe webhook signature verification needs the
-// exact bytes) while still parsing JSON for every other route.
+// Parse JSON ourselves so a malformed body is a CLIENT error (400), never a
+// 500 server crash.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
-  ;(req as unknown as { rawBody?: string }).rawBody = body as string
   try {
     done(null, body ? JSON.parse(body as string) : {})
   } catch (err) {
-    // Malformed JSON is a CLIENT error → 400, never a 500 server crash.
     ;(err as Error & { statusCode?: number }).statusCode = 400
     done(err as Error, undefined)
   }
@@ -153,19 +153,20 @@ app.addHook('onRequest', async (_req, reply) => {
   reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)')
 })
 
-// LACĂTUL ADMIN — AL DOILEA FACTOR PE TOT /api/admin/* (Adrian, 27 iul: „dacă
-// amprenta nu corespunde, nici butonul admin nu trebuie să se activeze").
-// Un singur punct de strangulare, nu 40 de handler-e: odată ARMAT (secretul
-// setat), sesiunea de admin NU mai e de-ajuns — trebuie și deblocarea (amprenta
-// vocală potrivită sau secretul tastat → cookie semnat 12h). 423 = semnalul
-// distinct pentru client că panoul e încuiat (403 rămâne „nu ești admin").
-// Excepții: rutele de deblocare însele (altfel lacătul nu s-ar putea deschide).
+// THE ADMIN LOCK — A SECOND FACTOR ON ALL /api/admin/* (Adrian, 27 Jul: "if
+// the print doesn't match, even the admin button must not activate"). A single
+// choke point, not 40 handlers: once ARMED (the secret is set), the admin
+// session is NO LONGER enough — the unlock is also needed (matching
+// voiceprint or the typed secret → 12h signed cookie). 423 = the distinct
+// signal to the client that the panel is locked (403 stays "you're not
+// admin"). Exceptions: the unlock routes themselves (otherwise the lock could
+// never open).
 app.addHook('preHandler', async (req, reply) => {
   const u = (req.raw.url ?? '').split('?')[0]
   if (!u.startsWith('/api/admin/')) return
   if (u.startsWith('/api/admin/unlock')) return
   const user = getSessionUser(req)
-  if (!user || user.role !== 'admin') return // 403-ul din rută rămâne autoritatea
+  if (!user || user.role !== 'admin') return // the route's 403 stays the authority
   if (!(await isArmed())) return
   if (hasUnlock(req, user.email)) return
   return reply.code(423).send({ error: 'admin_locked' })
@@ -182,23 +183,25 @@ app.addHook('preHandler', async (req, reply) => {
 // resumes and HEAD probes don't double-count.
 app.addHook('onSend', async (req, reply) => {
   const u = (req.raw.url ?? '').split('?')[0]
-  // Service worker-ul + manifestul PWA: MEREU proaspete. Cloudflare le ținea
-  // 4 ore la edge (max-age=14400 din static) — deci instalările (PWA/TWA/iOS/
-  // desktop, toate încarcă site-ul live) rămâneau lipite de shell-ul vechi până
-  // la 4 ore după deploy. no-store = update-ul ajunge la TOȚI la prima deschidere.
+  // The service worker + the PWA manifest: ALWAYS fresh. Cloudflare kept them
+  // at the edge for 4 hours (max-age=14400 from static) — so installs
+  // (PWA/TWA/iOS/desktop, all loading the live site) stayed glued to the old
+  // shell for up to 4 hours after a deploy. no-store = the update reaches
+  // EVERYONE at the first open.
   if (u === '/sw.js' || u === '/manifest.webmanifest') {
     reply.header('Cache-Control', 'no-store')
     return
   }
-  // HTML-UL PRINCIPAL: MEREU proaspăt (Adrian, 26 iul: „aplicațiile de sub
-  // codul de bare nu preiau automat ultimul update... nu preiau funcțiile de pe
-  // pagina web"). Aceeași boală ca la sw.js, rămasă nerezolvată la index.html:
-  // Cloudflare îl ținea la edge până la 4 ore, deci SHELL-urile instalate
-  // (exe/APK/TWA — toate deschid site-ul live la kelionai.app/) primeau HTML-ul
-  // VECHI cu bundle-urile vechi. Browserele scăpau prin rutina „/?_v=timestamp";
-  // coaja care deschide simplu „/" rămânea lipită de versiunea veche. no-store
-  // pe ORICE răspuns text/html (/, /login, /credite, fallback SPA) = fiecare
-  // deschidere ia pagina nouă; bundle-urile cu hash rămân cache-uite normal.
+  // THE MAIN HTML: ALWAYS fresh (Adrian, 26 Jul: "the apps under the barcode
+  // don't automatically pick up the latest update... they don't pick up the
+  // features from the web page"). The same disease as sw.js, left unsolved at
+  // index.html: Cloudflare kept it at the edge for up to 4 hours, so the
+  // installed SHELLS (exe/APK/TWA — all opening the live site at kelionai.app/)
+  // got the OLD HTML with the old bundles. Browsers escaped through the
+  // "/?_v=timestamp" routine; the shell that simply opens "/" stayed glued to
+  // the old version. no-store on ANY text/html response (/, /login, /credite,
+  // SPA fallback) = every open gets the new page; hashed bundles stay cached
+  // normally.
   const ct = String(reply.getHeader('content-type') ?? '')
   if (ct.includes('text/html')) {
     reply.header('Cache-Control', 'no-store')
@@ -225,18 +228,18 @@ app.addHook('onSend', async (req, reply) => {
   }
 })
 
-// Health — must return exactly 200 (200-only rule + healthcheck-ul gazdei)
+// Health — must return exactly 200 (200-only rule + the host's healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
 
-// VERSIUNEA DEPLOY-ULUI (Adrian, 10 iul: „la orice deploy nou se actualizează
-// filigranul, browserul repornește curat"). Gazda poate injecta sha-ul
-// commitului publicat prin GIT_COMMIT_SHA; frontend-ul îl sondează și, când se
-// schimbă, face resetul curat la ultima versiune. Filigranul îl afișează —
-// deci SE SCHIMBĂ la ORICE publicare, chiar dacă interfața n-a fost atinsă.
+// THE DEPLOY VERSION (Adrian, 10 Jul: "on every new deploy the watermark
+// updates, the browser restarts clean"). The host can inject the published
+// commit sha through GIT_COMMIT_SHA; the frontend polls it and, when it
+// changes, does the clean reset to the latest version. The watermark displays
+// it — so it CHANGES on ANY publish, even if the interface wasn't touched.
 const DEPLOY_SHA = (process.env.GIT_COMMIT_SHA ?? '').slice(0, 7)
 const BOOT_AT = new Date().toISOString()
-// Fără sha injectat, momentul pornirii E versiunea: se schimbă la fiecare
-// publicare reală.
+// Without an injected sha, the boot moment IS the version: it changes on every
+// real publish.
 const DEPLOY_V = DEPLOY_SHA || BOOT_AT
 app.get('/api/version', async (_req, reply) => {
   reply.header('Cache-Control', 'no-store')
@@ -274,26 +277,27 @@ await app.register(manualRoutes)
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)
 
-// Schema DB e VITALĂ când baza e configurată (audit securitate 27 iul):
-// initDb rulează totul într-o singură tranzacție implicită — dacă ORICE
-// statement pică, pică TOT, inclusiv indexul unic anti-dublă-creditare
-// (uniq_billing_ref). Înainte doar logam și mergeam mai departe = plățile
-// puteau fi creditate de două ori în tăcere. Acum: DB configurată dar schema
-// picată → procesul iese (gazda îl repornește; mai bine o repornire vizibilă
-// decât bani dublați invizibil). Fără DATABASE_URL rămâne pornire normală.
+// The DB schema is VITAL when the database is configured (security audit 27
+// Jul): initDb runs everything in a single implicit transaction — if ANY
+// statement fails, EVERYTHING fails, including the unique
+// anti-double-crediting index (uniq_billing_ref). Before, we just logged and
+// moved on = payments could be credited twice in silence. Now: DB configured
+// but schema failed → the process exits (the host restarts it; better a
+// visible restart than invisible doubled money). Without DATABASE_URL, normal
+// startup remains.
 try {
   await initDb()
   await initAppFiles() // load installer masters (uploaded from Linux) into cache
 } catch (err) {
   if (config.databaseUrl) {
-    app.log.error({ err }, 'initDb EȘUAT cu DB configurată — ies (protecția banilor cere schema completă)')
+    app.log.error({ err }, 'initDb FAILED with DB configured — exiting (money protection requires the full schema)')
     process.exit(1)
   }
   app.log.error({ err }, 'initDb failed — chat persistence disabled')
 }
 
-// MEMORIE SEMANTICĂ — backfill lent (12 iul): amintirile vechi primesc vector
-// de înțeles în loturi mici, la 10 minute; fără cheie Gemini e un no-op ieftin.
+// SEMANTIC MEMORY — slow backfill (12 Jul): old memories get a meaning vector
+// in small batches, every 10 minutes; without a Gemini key it's a cheap no-op.
 setTimeout(() => {
   const tick = (): void => {
     void backfillMemoryEmbeddings(40).catch(() => {})
@@ -321,9 +325,9 @@ app.get<{ Params: { file: string } }>('/dl/:file', async (req, reply) => {
     reply.header('Content-Type', type)
     return reply.send(fs.createReadStream(onDisk))
   }
-  // Linux: dacă nu s-a urcat un binar real în DB/pe disc, servește lansatorul
-  // generat pe loc — mereu 200, mereu versiunea live (un binar urcat ulterior în
-  // DB are prioritate, fiindcă e verificat mai sus).
+  // Linux: if no real binary was uploaded to the DB/disk, serve the launcher
+  // generated on the spot — always 200, always the live version (a binary
+  // uploaded later to the DB takes priority, because it's checked above).
   if (file === LINUX_ZIP) {
     reply.header('Content-Type', 'application/zip')
     reply.header('Content-Disposition', `attachment; filename="${LINUX_ZIP}"`)
@@ -352,55 +356,37 @@ try {
   app.log.info(`Kelionai backend on :${config.port}`)
   // ROW 19: start reading the contact@ mailbox (no-op until MAIL_PASS is set).
   startMailbox()
-  // CREDITAREA AUTOMATĂ A PLĂȚILOR PRIN REVOLUT PRO (Adrian, 30 iul): citește
-  // tranzacțiile intrate și potrivește codul unic din referință cu userul care
-  // aștepta să plătească. Revolut Pro n-are webhook, deci întrebăm noi periodic.
-  // Fără chei GoCardless nu face nimic (și o spune o dată, la pornire).
+  // AUTOMATIC CREDITING OF PAYMENTS VIA REVOLUT PRO (Adrian, 30 Jul): reads
+  // the inflow transactions and matches the unique code in the reference with
+  // the user waiting to pay. We read through Enable Banking (PSD2) at fixed
+  // intervals. Without the Enable Banking keys it does nothing (and says so
+  // once, at startup).
   startCitirePlati()
-  // KELION SE APUCA SINGUR: la fiecare ora ia urmatorul rand nefacut din
-  // RAMAS-DE-FACUT.md si il trimite constructorului. Fara sa astepte pe nimeni.
+  // KELION GETS TO WORK BY ITSELF: every hour it takes the next undone row
+  // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
+  // anyone.
   startAutonomie()
-  // PLASA BANILOR (Adrian, 24 iul: „nu e de joacă cu banii userilor"):
-  // reconciliere Stripe la boot + la fiecare oră — orice plată reală rămasă
-  // necreditată (webhook pierdut/respins) se aplică singură, idempotent.
-  setTimeout(() => {
-    const run = (): void => {
-      void reconcileStripePayments()
-        .then((r) => { if (r.credited > 0) app.log.warn(r, 'stripe reconcile: plăți recuperate') })
-        .catch(() => {})
-    }
-    run()
-    setInterval(run, 60 * 60 * 1000)
-  }, 20_000)
-  // ALIMENTAREA AUTOMATĂ A PUNGII CARDULUI (Adrian, 24 iul: „tot prin Stripe,
-  // circuit unificat, nimic extern"): când punga cardului scade sub prag și
-  // punga plăților are bani, transferăm prin Balance Transfer API — banii
-  // userilor curg singuri spre cardul care hrănește AI-ul. La 60s după boot,
-  // apoi orar. (Endpoint beta la Stripe — starea apare în Circuitul banilor.)
-  setTimeout(() => {
-    void autoFundIssuing().catch(() => {})
-    setInterval(() => { void autoFundIssuing().catch(() => {}) }, 60 * 60 * 1000)
-  }, 60_000)
-  // ALERTĂ SOLD OPENROUTER (Adrian, 24 iul: „se anunță admin că e nevoie să
-  // depună bani"): creierul e alimentat CENTRAL din punga lui Kelion; când
-  // soldul real scade sub prag, îl anunțăm pe admin pe email (o dată/zi).
-  // La 40s după boot, apoi la fiecare 30 min. Best-effort.
+  // OPENROUTER BALANCE ALERT (Adrian, 24 Jul: "notify the admin when money
+  // needs to be deposited"): the brain is fed CENTRALLY from Kelion's pocket;
+  // when the real balance drops below the threshold, we email the admin (once
+  // a day). 40s after boot, then every 30 min. Best-effort.
   setTimeout(() => {
     void checkOpenRouterBalance().catch(() => {})
     setInterval(() => { void checkOpenRouterBalance().catch(() => {}) }, 30 * 60 * 1000)
   }, 40_000)
-  // TRIAJ AUTONOM zilnic al cererilor neacoperite (Adrian, 24 iul): Kelion
-  // decide singur ce aduce valoare (rămâne „DE IMPLEMENTAT") și ce se închide
-  // automat. La 1h după boot, apoi la 24h. Best-effort — nu blochează nimic.
+  // Daily AUTONOMOUS TRIAGE of uncovered requests (Adrian, 24 Jul): Kelion
+  // decides by itself what brings value (stays "TO IMPLEMENT") and what gets
+  // closed automatically. 1h after boot, then every 24h. Best-effort — blocks
+  // nothing.
   setTimeout(() => {
-    void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonom)')).catch(() => {})
+    void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
     setInterval(() => {
-      void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonom)')).catch(() => {})
+      void triageGaps().then((r) => app.log.info(r, 'gaps triage (autonomous)')).catch(() => {})
     }, 24 * 60 * 60 * 1000)
   }, 60 * 60 * 1000)
-  // AUTO-VINDECAREA (Adrian, 27 iul): Kelion culege singur erorile RECURENTE ale
-  // userilor și le trimite constructorului spre reparare (PR → merge → toți
-  // userii primesc versiunea reparată). La 3 min după boot, apoi la fiecare 30 min.
+  // SELF-HEALING (Adrian, 27 Jul): Kelion collects the users' RECURRING errors
+  // by itself and sends them to the builder for repair (PR → merge → all users
+  // get the repaired version). 3 min after boot, then every 30 min.
   setTimeout(() => {
     void runSelfHeal().catch(() => {})
     setInterval(() => { void runSelfHeal().catch(() => {}) }, 30 * 60 * 1000)

@@ -1,77 +1,82 @@
-// ── NU SE SCRIE DE DOUĂ ORI ACELAȘI LUCRU ───────────────────────────────────
+// ── THE SAME THING IS NEVER WRITTEN TWICE ───────────────────────────────────
 //
-// Adrian, 31 iul: „în chat se balează răspunsul lui scris de mai multe ori, e
-// greșit, el nu mă aude din prima?" — apoi: „scrie aceeași frază nonstop".
+// Adrian, Jul 31: "in chat his written reply drools out several times, it's
+// wrong, doesn't he hear me the first time?" — then: "writes the same sentence
+// nonstop".
 //
-// NU e că nu aude. Cauza, găsită în cod:
+// It's NOT that he doesn't hear. The cause, found in the code:
 //
-//   orchestrator.ts rulează până la 8 RUNDE (model → unealtă → model → …), iar
-//   chat.ts:1809 trimite la client, prin `onText`, FIECARE bucată din FIECARE
-//   rundă. Nimic nu compara runda nouă cu ce se spusese deja. Când modelul se
-//   împotmolește — repetă aceeași frază și cheamă aceeași unealtă — fraza se
-//   scrie o dată pe rundă. De opt ori. „Nonstop", exact cum arată.
+//   orchestrator.ts runs up to 8 ROUNDS (model → tool → model → …), and
+//   chat.ts:1809 sends to the client, through `onText`, EVERY piece of EVERY
+//   round. Nothing compared the new round to what had already been said. When
+//   the model gets stuck — repeats the same sentence and calls the same tool —
+//   the sentence gets written once per round. Eight times. "Nonstop", exactly
+//   as it looked.
 //
-// Filtrul de aici e partea vizibilă a reparației: ce a ajuns o dată la om nu
-// mai ajunge a doua oară. (Cealaltă parte e în orchestrator: bucla se rupe când
-// o rundă nu aduce nimic nou — altfel tot plătim opt runde ca să tăiem șapte.)
+// The filter here is the visible part of the repair: what reached the human
+// once doesn't reach him a second time. (The other part is in the
+// orchestrator: the loop breaks when a round brings nothing new — otherwise
+// we'd still pay eight rounds to cut seven.)
 //
-// PRINCIPIUL DE PROIECTARE, fiindcă aici se poate greși urât: e mai bine să
-// scape o repetare decât să se înghită text adevărat. Un răspuns tăiat e mult
-// mai rău decât unul spus de două ori. De aceea se compară EXACT (substring,
-// fără normalizări deștepte care ar putea confunda două fraze asemănătoare) și
-// de aceea există pragul de mai jos.
+// THE DESIGN PRINCIPLE, because this is where it can go badly wrong: it's
+// better to let a repetition slip through than to swallow real text. A cut
+// answer is far worse than one said twice. That's why the comparison below
+// exists with an explicit threshold, and why cutting is conservative.
 
-/** Sub atâtea caractere, o repetare se lasă să treacă.
+/** Below this many characters, a repetition is let through.
  *
- *  Un „Da." sau „Gata." poate apărea de zece ori într-o conversație, absolut
- *  legitim, și e mereu substring a ce s-a spus înainte. Dacă am tăia și așa
- *  ceva, un răspuns final scurt ar dispărea complet de pe ecran — adică fix
- *  boala pe care o reparăm, doar pe dos. Duplicarea care deranjează e o FRAZĂ
- *  întreagă, nu un cuvânt. */
+ *  A "Da." or "Gata." can legitimately appear ten times in a conversation, and
+ *  is always a substring of what was said before. If we cut that too, a short
+ *  final answer would vanish completely from the screen — exactly the disease
+ *  we're repairing, only backwards. The annoying duplication is a whole
+ *  SENTENCE, not a word. */
 export const PRAG_REPETITIE = 40
 
 export interface FiltruRepetitie {
-  /** Ce trebuie trimis clientului pentru bucata primită. `''` = nimic. */
+  /** What must be sent to the client for the received piece. `''` = nothing. */
   bucata(txt: string): string
-  /** Închide runda. Întoarce ce a mai rămas de trimis (`''` dacă runda a fost
-   *  o repetare și se aruncă). */
+  /** Closes the round. Returns what's left to send (`''` if the round was a
+   *  repetition and gets dropped). */
   inchideRunda(): string
-  /** Runda tocmai închisă n-a adus NIMIC nou (semnal de împotmolire). */
+  /** The round just closed brought NOTHING new (stuck signal). */
   rundaAFostGoala(): boolean
-  /** Tot ce a ajuns efectiv la client, peste toate rundele. */
+  /** Everything that actually reached the client, across all rounds. */
   emis(): string
 }
 
-// ── DE CE NU MAI COMPARĂM EXACT (Adrian, 31 iul, a doua oară) ───────────────
+// ── WHY WE NO LONGER COMPARE EXACTLY (Adrian, Jul 31, the second time) ───────
 //
-// El, după ce reparația din 12:25 era live: „revin cu întrebarea, de ce baleiezi
-// permanent în chat răspunsul?"
+// Him, after the 12:25 repair was live: "coming back with the question, why do
+// you permanently drool the reply in chat?"
 //
-// Fiindcă am comparat EXACT. Am ales-o intenționat — „mai bine scapă o repetare
-// decât să înghită text adevărat" — dar un model nu repetă identic: schimbă o
-// virgulă, un cuvânt, un spațiu. Iar la cea mai mică diferență, filtrul îl lăsa
-// să treacă întreg. Deci reparația mea prindea exact cazul care nu se întâmplă.
+// Because we compared EXACTLY. We chose it deliberately — "better let a
+// repetition slip than swallow real text" — but a model doesn't repeat
+// identically: it changes a comma, a word, a space. And at the smallest
+// difference, the filter let it all through. So my repair caught exactly the
+// case that never happens.
 //
-// Acum comparăm pe o formă NORMALIZATĂ (litere mici, fără punctuație, spațiile
-// strânse) — dar EMITEM textul original, neatins. Normalizarea e doar ochelarii
-// cu care ne uităm dacă s-a mai spus, nu ce ajunge la om.
+// Now we compare on a NORMALIZED form (lowercase, no punctuation, squeezed
+// spaces) — but we EMIT the original text, untouched. Normalization is just
+// the glasses through which we check whether it was said before, not what
+// reaches the human.
 const norm = (t: string): string =>
   t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
 export function filtruRepetitie(): FiltruRepetitie {
   let emis = ''
-  // Oglinda normalizată a lui `emis`. Ținută în paralel ca să nu renormalizăm
-  // tot istoricul la fiecare bucată care vine din stream.
+  // The normalized mirror of `emis`. Kept in parallel so we don't renormalize
+  // the whole history on every piece coming from the stream.
   let emisNorm = ''
-  // Ce a produs runda curentă și încă nu știm dacă e nou sau repetare.
+  // What the current round produced and we don't yet know if new or repetition.
   let asteptare = ''
-  // Runda a divergat de ce se spusese deja → de-acum curge liber, fără cost.
+  // The round diverged from what was said before → from now on it flows freely,
+  // at no cost.
   let curge = false
-  // A adus runda ÎN CURS ceva nou? Se resetează la fiecare `inchideRunda`.
+  // Did the CURRENT round bring anything new? Reset on every `inchideRunda`.
   let aduseNou = false
-  // Verdictul ultimei runde ÎNCHISE — ăsta e semnalul de împotmolire pe care
-  // îl citește orchestratorul. Separat de `aduseNou`, altfel ar răspunde despre
-  // toată tura, nu despre runda care tocmai s-a terminat.
+  // The verdict of the last CLOSED round — this is the stuck signal the
+  // orchestrator reads. Separate from `aduseNou`, otherwise it would answer
+  // about the whole turn, not about the round that just ended.
   let ultimaRundaGoala = false
 
   return {
@@ -83,26 +88,29 @@ export function filtruRepetitie(): FiltruRepetitie {
         return txt
       }
       asteptare += txt
-      // Încă e cuprins în ce s-a spus deja → ținem, poate e o repetare.
-      // Comparăm NORMALIZAT: o virgulă schimbată nu mai face dintr-o repetare
-      // un text nou. (La prima rundă `emisNorm` e gol, iar ''.includes(ceva) e
-      // false, deci primul cuvânt curge instant — latența nu are de suferit.)
+      // Still contained in what was said before → hold it, it may be a
+      // repetition. We compare NORMALIZED: a changed comma no longer turns a
+      // repetition into new text. (On the first round `emisNorm` is empty, and
+      // ''.includes(something) is false, so the first word flows instantly —
+      // latency doesn't suffer.)
       if (emisNorm.includes(norm(asteptare))) return ''
-      // A divergat. Trimitem DOAR partea nouă: căutăm cel mai lung început
-      // care fusese deja spus și tăiem exact atât. Căutarea e pe forma
-      // normalizată, dar tăietura se face în textul ORIGINAL — omul primește
-      // ce a scris modelul, nu forma noastră de lucru.
+      // It diverged. We send ONLY the new part: we look for the longest
+      // beginning that had already been said and cut exactly that much. The
+      // search is on the normalized form, but the cut happens in the ORIGINAL
+      // text — the human gets what the model wrote, not our working form.
       let k = asteptare.length
       while (k > 0 && !emisNorm.includes(norm(asteptare.slice(0, k)))) k--
-      // GRANIȚA CARE LIPSEA, și fără care reparația devenea mai rea decât boala:
-      // pe forma normalizată, un început SCURT se potrivește aproape mereu
-      // undeva în istoric („A", „Al", un spațiu). Fără pragul ăsta, filtrul a
-      // tăiat „Al" din „Altceva" la prima probă — adică exact ce jurasem să nu
-      // fac: să ciuntesc text adevărat. Tăiem doar dacă bucata deja spusă e o
-      // FRAZĂ, nu o silabă; sub prag nu tăiem nimic.
-      // Spațiul dintre repetare și textul nou aparține textului NOU: dacă îl
-      // tăiem, cuvintele se lipesc („…dimineață.Ai o ședință"). Normalizarea
-      // nu-l vede, fiindcă îl strânge — deci îl recuperăm aici, explicit.
+      // THE BOUNDARY THAT WAS MISSING, and without which the repair became
+      // worse than the disease: on the normalized form, a SHORT beginning
+      // almost always matches somewhere in the history ("A", "Al", a space).
+      // Without this threshold, the filter cut "Al" out of "Altceva" on the
+      // first test — exactly what I had sworn not to do: truncate real text.
+      // We cut only if the already-said piece is a SENTENCE, not a syllable;
+      // below the threshold we cut nothing.
+      // The space between the repetition and the new text belongs to the NEW
+      // text: if we cut it, the words glue together ("…dimineață.Ai o
+      // ședință"). Normalization can't see it, because it squeezes it — so we
+      // recover it here, explicitly.
       while (k > 0 && /\s/.test(asteptare[k - 1] ?? '')) k--
       const nou = k >= PRAG_REPETITIE ? asteptare.slice(k) : asteptare
       asteptare = ''
@@ -116,11 +124,11 @@ export function filtruRepetitie(): FiltruRepetitie {
     inchideRunda(): string {
       let iese = ''
       if (asteptare) {
-        // Runda întreagă a încăput în ce se spusese deja.
+        // The whole round fit into what had already been said.
         if (asteptare.length >= PRAG_REPETITIE) {
-          // Repetare adevărată → se aruncă. ASTA e reparația.
+          // A true repetition → dropped. THIS is the repair.
         } else {
-          // Prea scurtă ca să fim siguri („Da.", „Gata.") → o lăsăm să treacă.
+          // Too short to be sure ("Da.", "Gata.") → we let it through.
           iese = asteptare
           emis += iese
           emisNorm = norm(emis)

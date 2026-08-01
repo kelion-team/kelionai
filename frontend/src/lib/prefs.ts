@@ -15,8 +15,8 @@ export function loadLocalLang(): string | null {
   }
 }
 
-// Aranjarea avatarului în colț (poziție vw/vh + scală) — a lui Adrian, salvată
-// PE SERVER (11 iul: „salvează mărimea actuală a lui Kelion").
+// The avatar's corner arrangement (vw/vh position + scale) — Adrian's,
+// saved ON THE SERVER (Jul 11: "save Kelion's current size").
 export interface AvatarBox {
   x: number
   y: number
@@ -27,10 +27,10 @@ export async function loadServerPrefs(): Promise<{
   speechLang: string | null
   meserieActiva: number | null
   avatarBox?: AvatarBox | null
-  /** Vocea aleasă de user; `null` = cea implicită a aplicației. */
+  /** The voice chosen by the user; `null` = the app's default. */
   voice?: string | null
-  /** Lista din care poate alege. Vine de la server, ca interfața să nu țină o
-   *  listă paralelă care se învechește când se schimbă env-ul. */
+  /** The list they can choose from. Comes from the server, so the interface
+   *  doesn't keep a parallel list that goes stale when the env changes. */
   voices?: string[]
 } | null> {
   try {
@@ -48,7 +48,7 @@ export async function loadServerPrefs(): Promise<{
   }
 }
 
-/** Salvează vocea aleasă. `null` = revino la vocea implicită a aplicației. */
+/** Saves the chosen voice. `null` = return to the app's default voice. */
 export async function saveVoicePref(voice: string | null): Promise<boolean> {
   try {
     const r = await fetch('/api/prefs', {
@@ -63,7 +63,7 @@ export async function saveVoicePref(voice: string | null): Promise<boolean> {
   }
 }
 
-// Persistă aranjarea avatarului per utilizator; best-effort, nu aruncă.
+// Persists the avatar arrangement per user; best-effort, never throws.
 export async function saveAvatarBox(box: AvatarBox): Promise<boolean> {
   try {
     const res = await fetch('/api/prefs', {
@@ -104,7 +104,7 @@ export async function saveSpeechLang(code: string): Promise<boolean> {
   }
 }
 
-// Self-service account deletion (GDPR: dreptul la ștergere). Wipes the user's
+// Self-service account deletion (GDPR: the right to erasure). Wipes the user's
 // data server-side and clears the session cookie. Returns true on success.
 export async function deleteMyAccount(): Promise<boolean> {
   try {
