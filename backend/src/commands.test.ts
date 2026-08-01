@@ -1,14 +1,14 @@
-// ── TESTELE INTERPRETORULUI DE COMENZI (cameră + monitor) ───────────────────
+// ── THE COMMAND INTERPRETER'S TESTS (camera + monitor) ─────────────────────
 //
-// Modulul ăsta decide, ÎNAINTE de creier și fără niciun cost, dacă o replică e o
-// comandă de dispozitiv („închide camera", „treci pe hartă") sau conversație
-// adevărată care trebuie să ajungă la Kelion. Greșelile lui sunt vizibile
-// instant pentru user: ori nu execută, ori execută peste vorbă. Zero teste.
+// This module decides, BEFORE the brain and at no cost, whether a reply is a
+// device command ("close the camera", "switch to the map") or real
+// conversation that must reach Kelion. Its mistakes are instantly visible to
+// the user: either it doesn't execute, or it executes over speech. Zero tests.
 //
-// Regulile documentate pe care le apărăm (AI-HANDOFF, valul 4 / W4 #2):
-//   • operațiile pe monitor pornesc DOAR dacă tab-ul cerut e chiar deschis —
-//     altfel replica merge la creier, ca el să-l DESCHIDĂ;
-//   • „închide harta" când harta NU e deschisă nu are voie să închidă altceva.
+// The documented rules we guard (AI-HANDOFF, wave 4 / W4 #2):
+//   • monitor operations start ONLY if the requested tab is really open —
+//     otherwise the reply goes to the brain, so IT can open it;
+//   • "close the map" when the map is NOT open must not close anything else.
 import { describe, it, expect } from 'vitest'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from './services/commands.js'
 
@@ -39,7 +39,7 @@ describe('commands — monitorul (doar pe tab-uri chiar deschise)', () => {
   })
   it('W4 #2: „închide harta" când harta NU e deschisă nu închide ALTCEVA', () => {
     const video = [{ kind: 'video', title: 'Clip', active: true }]
-    // Regresia pe care o apărăm: să NU întoarcă `close` (ar fi închis clipul).
+    // The regression we guard: it must NOT return `close` (it would have closed the clip).
     expect(interpretDeviceCommand('închide harta', video)).toBeNull()
   })
   it('închide tab-ul numit, dacă e chiar deschis', () => {

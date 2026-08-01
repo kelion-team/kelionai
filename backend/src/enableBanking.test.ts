@@ -1,13 +1,15 @@
-// ── CITITORUL ENABLE BANKING, PROBAT FĂRĂ REȚEA ──────────────────────────────
+// ── THE ENABLE BANKING READER, PROVEN WITHOUT NETWORK ─────────────────────
 //
-// 31 iul 2026: GoCardless a murit pentru conturi noi, cititorul a fost rescris
-// pe Enable Banking. Regulile care decid CE devine plată stau în
-// `mapeazaTranzactii` — funcție pură, de-ia o testăm aici direct:
-//   - DOAR intrări (CRDT): o ieșire nu creditează pe nimeni, niciodată;
-//   - DOAR booked: o plată pending poate dispărea — creditul ei, nu;
-//   - codul se caută în referință + numele plătitorului (unii scriu acolo);
-//   - fără referință de bancă tranzacția nu există pentru noi (idempotența
-//     creditării stă pe ea — fără id, am putea credita de două ori).
+// Jul 31 2026: GoCardless died for new accounts, the reader was rewritten on
+// Enable Banking. The rules that decide WHAT becomes a payment live in
+// `mapeazaTranzactii` — a pure function, which we test here directly:
+//   - INCOMING only (CRDT): an outgoing never credits anyone, ever;
+//   - booked ONLY: a pending payment can disappear — its credit can't;
+//   - the code is searched in the reference + the payer's name (some write it
+//     there);
+//   - without a bank reference the transaction doesn't exist for us (the
+//     crediting's idempotency stands on it — without an id, we could credit
+//     twice).
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({

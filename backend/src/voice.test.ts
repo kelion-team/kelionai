@@ -1,12 +1,14 @@
-// ── VOCEA PER USER: preferința nu are voie să omoare vocea ───────────────────
+// ── THE PER-USER VOICE: the preference must not kill the voice ─────────────
 //
-// Adrian, 30 iul: „își poate seta aplicația cu ce voce dorește… se ține minte
-// per user. A nu se încurca cu alt user sau să afecteze alt cont."
+// Adrian, Jul 30: "they can set the app to whatever voice they want… it's
+// remembered per user. Not to be mixed up with another user or affect another
+// account."
 //
-// Riscul real al funcției ăsteia nu e estetic, e de disponibilitate: dacă un
-// nume de voce necunoscut ajunge în sesiunea OpenAI, aceasta întoarce 400 și
-// omul rămâne FĂRĂ VOCE — fără să aibă de unde bănui că vinovată e o preferință
-// salvată cândva în contul lui. De-aia rezolvarea e o funcție pură, probată.
+// This function's real risk is not aesthetic, it's availability: if an
+// unknown voice name reaches the OpenAI session, it returns 400 and the
+// person is left WITHOUT VOICE — with no way to suspect the culprit is a
+// preference saved once in their account. That's why the resolution is a pure
+// function, proven.
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
