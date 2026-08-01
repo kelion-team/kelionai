@@ -399,7 +399,7 @@ export async function startMic(
   onBargeIn?: () => void,
   // Adrian's order: "only my voice or my writing". true = the admin — if
   // there's no calibrated profile yet, the microphone accepts NO voice (not enrolled,
-  // nu „orice voce"). false = rolul demo (vizitatori publici) — comportamentul
+  // not „any voice”). false = the demo role (public visitors) — the behavior
   // stays exactly as today: without a profile, accepts any voice above threshold.
   restrictToOwnerVoice = false,
   // stream pre-warmed by pressing the "mic on" button for instant activation.

@@ -7,7 +7,7 @@ export interface WalletStatus {
   percent: number
   currency: string
   // True if the user has never topped up: first top-up = £20 minimum
-  // (activarea creierului), apoi orice multiplu de £5.
+  // (brain activation), then any multiple of £5.
   firstTopUp?: boolean
 }
 

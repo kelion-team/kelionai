@@ -131,11 +131,11 @@ export async function* streamChat(
   // the server doesn't synthesize the Chirp voice for this turn (no cost, no frames).
   serverVoiceOff?: boolean,
 ): AsyncGenerator<string> {
-  // BUG FINANCIAR REPARAT (audit 24 iul): aici mai exista un POST /api/chat al
-  // whose response was NEVER read — openStream() below opened A
-  // DOILEA POST identic, singurul consumat. Serverul rula deci FIECARE mesaj de
-  // SECOND one: double brain cost, doubled history, the first turn's frames
-  // lost. One single POST remains: the one in openStream().
+  // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
+  // whose response was NEVER read — openStream() below opened A SECOND identical
+  // POST, the only one consumed. The server therefore ran EVERY message twice:
+  // double brain cost, doubled history, the first turn's frames lost. One single
+  // POST remains: the one in openStream().
 
   // Deduplication set: a reconnect may re-send events we already processed.
   const seenIds = new Set<string>()

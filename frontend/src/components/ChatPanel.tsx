@@ -783,7 +783,7 @@ export default function ChatPanel({
     if (msg && STOP_CMD.test(msg)) {
       stopVoice()
       abortRef.current?.abort()
-      pendingSendsRef.current = [] // stop înseamnă stop — golește coada
+      pendingSendsRef.current = [] // stop means stop — empty the queue
       setQueued([])
       inFlightRef.current = false
       setBusy(false)
@@ -814,8 +814,8 @@ export default function ChatPanel({
       // until the first finished). The backend + worker already accept concurrent
       // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
       if (!msg) return
-      stopVoice() // taie vocea rămasă din tura veche, să nu vorbească peste
-      abortRef.current?.abort() // tura veche devine „superseded"; finally-ul ei nu mai resetează
+      stopVoice() // cut the old turn's remaining voice, so it doesn't talk over it
+      abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
     }
     inFlightRef.current = true
@@ -890,7 +890,7 @@ export default function ChatPanel({
         handleControl,
         screen,
         ac.signal,
-        Boolean(attached), // poză lipită/încărcată explicit — analiză fără condiție
+        Boolean(attached), // explicitly pasted/uploaded picture — unconditional analysis
         // Continuous vision for ALL users (rule no. 9): the last frames.
         camFrames.length > 0 ? camFrames : undefined,
         voiceFeatures,
@@ -900,7 +900,7 @@ export default function ChatPanel({
         // no Chirp voice from the server (the session remains the only voice).
         (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
       )) {
-        if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // primul cuvânt REAL
+        if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
         // FUNCTIONAL updater, not a snapshot (Jul 25): with a fixed [...next, ...], a
         // VOICE transcript arriving during the written turn was overwritten by
@@ -921,7 +921,7 @@ export default function ChatPanel({
       // A monitor-only / tool-only reply streams no visible text. Don't leave an
       // empty assistant turn in the history (it would 400 the next request).
       if (!acc.trim()) setMessages(next)
-      else suggestFacial(acc) // fața însoțește tonul replicii încheiate
+      else suggestFacial(acc) // the face follows the tone of the finished reply
     } catch (err) {
       // A REPLACED TURN MAY NO LONGER WRITE (Adrian, Jul 31: "it hears the second
       // question, briefly shows it, but doesn't pass it on" + "the message that technically
@@ -1092,7 +1092,7 @@ export default function ChatPanel({
               try {
                 args = JSON.parse(argsJson || '{}') as Record<string, unknown>
               } catch {
-                /* argumente stricate → obiect gol */
+                /* broken arguments → empty object */
               }
               // ESCALATION TO THE BRAIN → SEMI-DUPLEX: while the heavy brain
               // thinks and Kelion is about to speak the reply, we put
@@ -1394,7 +1394,7 @@ export default function ChatPanel({
           },
           onError: (reason) => {
             if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
-              // streamingul nu merge → treci pe batch pentru restul sesiunii
+              // streaming doesn't work → switch to batch for the rest of the session
               streamModeRef.current = false
               micRef.current?.stop()
               micRef.current = null
@@ -1802,12 +1802,12 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {/* FĂRĂ BULE ÎN CENTRU (Adrian, 11 iul: „tot ce e chat trebuie să fie în
-          spațiul unde apare semnul de creier... nu se mai afișează în afara
-          spațiului de acolo răspunsurile de chat”). Bulele care pluteau peste
-          monitor au fost SCOASE — schimbul de replici trăiește exclusiv în
-          benzile de lângă composer (👤 tu / K Kelion, teletext). În centru
-          rămân doar îndemnul de start și imaginile generate. */}
+      {/* NO BUBBLES IN THE CENTER (Adrian, Jul 11: „everything chat must be
+      in the space where the brain sign appears... chat replies are no longer
+      shown outside that space”). The bubbles that floated over the monitor
+      were REMOVED — the exchange lives exclusively in the bands next to the
+      composer (👤 you / K Kelion, teletext). The center keeps only the start
+      prompt and the generated images. */}
       {!monitorMode && (
         <div className="chat-log">
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
@@ -1817,9 +1817,10 @@ export default function ChatPanel({
         </div>
       )}
       {scenarioRunning && <p className="scenario-live">● {t.scenarioRecording}</p>}
-      {/* VITEZA REALĂ (auditul 27 iul: latența se măsura la fiecare tură și se
-          ARUNCA — cititorii nu erau chemați de nimeni). Dovada regulii „primul
-          cuvânt sub 1s", discretă, doar proaspătă (sub 2 min de la măsurare). */}
+      {/* REAL SPEED (Jul 27 audit: latency was measured every turn and THROWN
+      AWAY — the readers were never called by anyone). The proof of the „first
+      word under 1s” rule, discreet, shown only while fresh (under 2 min from
+      the measurement). */}
       {realLatency && Date.now() - realLatency.at < 120_000 && (
         <span className="latency-chip" title={uiStrings().latencyChip}>
           ⚡ {(realLatency.firstMs / 1000).toFixed(1)}s · {(realLatency.totalMs / 1000).toFixed(1)}s
@@ -1858,20 +1859,20 @@ export default function ChatPanel({
         </button>
       )}
       <div className={`composer ${busy ? 'working' : ''}`}>
-        {/* DICTARE LIVE cu efect cinematografic (ca în filmele cu AI): pe măsură
-            ce Adrian vorbește, fraza apare cuvânt cu cuvânt, cu cursor care
-            clipește; la pauză > 3s pleacă la creier și banda se golește. */}
-        {/* REGULĂ FIXĂ (Adrian, 10 iul: „nu vreau să văd pe interfață ceva ce
-            acoperă pagina — textul curge ca teletextul, pe o singură linie”):
-            ORICE bandă live e o linie fixă, text pe o singură linie, care
-            derulează (teletext) dacă nu încape — NICIODATĂ nu crește pe
-            verticală, niciodată nu acoperă pagina. */}
+        {/* LIVE DICTATION with a cinematic effect (like AI movies): as Adrian
+        speaks, the sentence appears word by word, with a blinking cursor; on a
+        pause over 3s it leaves for the brain and the band empties. */}
+        {/* FIXED RULE (Adrian, Jul 10: „I don't want to see anything on the
+        interface that covers the page — text flows like teletext, on a single
+        line”): ANY live band is a fixed line, single-line text, scrolling
+        (teletext) when it doesn't fit — it NEVER grows vertically, never
+        covers the page. */}
         {liveVoice && (
           <div className="voice-live" aria-live="polite">
             <span className="voice-live-dot" />
-            {/* COADĂ FIXĂ, nu teletext remontat (fluiditate #9): la dictare,
-                textul crește pe loc arătându-și coada — nu mai sare off-screen
-                la fiecare cuvânt nou. */}
+            {/* FIXED TAIL, not a remounted teletext (fluidity #9): during dictation
+            the text grows in place, showing its tail — it no longer jumps off-screen
+            at every new word. */}
             <span className="speech-tail">
               <span className="speech-tail-text">{liveVoice}</span>
             </span>
@@ -1926,10 +1927,11 @@ export default function ChatPanel({
             )}
           </div>
         ) : null}
-        {/* SCOS (ordin Adrian, 10 iul: „scoate chestia aia microphone is muted,
-            că e greșită” + „microfon cu autovox, instant”): microfonul nu mai
-            stă mut până la calibrare — amprenta se învață AUTOMAT din primele
-            fraze (audioIO.ts, auto-înrolare), deci indiciul era fals. */}
+        {/* REMOVED (Adrian's order, Jul 10: „remove that microphone-is-muted
+        thing, it's wrong” + „microphone with autovox, instantly”): the mic no
+        longer stays mute until calibration — the voiceprint is learned
+        AUTOMATICALLY from the first sentences (audioIO.ts, auto-enrollment),
+        so the hint was false. */}
         {attachments.length > 0 && (
           <div className="composer-atts">
             {attachments.map((a) => (
@@ -1993,16 +1995,16 @@ export default function ChatPanel({
                     {cameraOn && <span className="dot" />}
                   </button>
                 )}
-                {/* Full-duplex mâini-libere: NU mai există buton — microfonul se
-                    deschide SINGUR la montarea chatului (vezi useEffect „Permanent
-                    hearing”), cu VOX + barge-in. Butonul LiveKit a fost scos (ordin
-                    Adrian, 13 iul): era un dublet mort (serverul LiveKit nici nu e
-                    pornit), full-duplexul real merge pe calea vocală automată. */}
-                {/* Butonul „Trezire Kelion” a fost SCOS (Adrian, 13 iul): trezirea e
-                    AUTOMATĂ — microfonul e deja mereu pornit (useEffect „Permanent
-                    hearing”), deci Kelion se trezește la PRIMUL SUNET auzit; iar la
-                    scris se trezește la PRIMA LITERĂ tastată (câmpul e mereu activ).
-                    Nu mai e nimic de apăsat. */}
+                {/* Hands-free full-duplex: there is NO button anymore — the microphone
+                opens BY ITSELF when the chat mounts (see the „Permanent hearing”
+                useEffect), with VOX + barge-in. The LiveKit button was removed (Adrian's
+                order, Jul 13): it was a dead duplicate (the LiveKit server isn't even
+                running); real full-duplex works on the automatic voice path. */}
+                {/* The „Trezire Kelion” button was REMOVED (Adrian, Jul 13): waking is
+                AUTOMATIC — the microphone is already always on (the „Permanent hearing”
+                useEffect), so Kelion wakes at the FIRST SOUND heard; and for typing he
+                wakes at the FIRST LETTER typed (the field is always active). There is
+                nothing left to press. */}
                 {/* No monitor or camera-switch buttons: Kelion opens the monitor on
                     his own (show_on_screen), and the camera is switched by text
                     command ("switch camera", "comută camera", "camera spate"). */}
@@ -2019,10 +2021,9 @@ export default function ChatPanel({
                     {t.scenarioTitle}
                   </button>
                 )}
-                {/* Butoanele „Recunoaște-mi vocea” ȘI „Resetează vocea” au fost
-                    SCOASE (Adrian, 13 iul): calibrarea vocală e complet automată
-                    (vezi useEffect-ul de calibrare de mai sus); nu mai e nimic de
-                    apăsat manual. */}
+                {/* The „Recunoaște-mi vocea” AND „Resetează vocea” buttons were REMOVED
+                (Adrian, Jul 13): voice calibration is fully automatic (see the
+                calibration useEffect above); there is nothing left to press manually. */}
               </div>
             )}
           </div>
@@ -2037,9 +2038,9 @@ export default function ChatPanel({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                // Textul scris are PRIORITATE peste vocea in asteptare (Adrian,
-                // 11 iul: mesaje scrise pierdute — nu lasa un fragment de voce
-                // sa sara inaintea textului). Coalescerul se anuleaza, nu flush.
+                // Typed text has PRIORITY over the pending voice (Adrian, Jul 11: typed
+                // messages lost — don't let a voice fragment jump ahead of the text).
+                // The coalescer is cancelled, not flushed.
                 coalescerRef.current?.cancel()
                 void send(input)
               }
@@ -2055,9 +2056,9 @@ export default function ChatPanel({
           >
             {listening ? '●' : '🎤'}
           </button>
-          {/* VOLUMUL VOCII (25 iul — Adrian: „volumul audio incontrolabil"):
-              o singură comandă pentru TOATĂ vocea lui Kelion (Realtime + TTS),
-              persistată; până azi nu exista niciun control de volum în aplicație. */}
+          {/* THE VOICE VOLUME (Jul 25 — Adrian: „uncontrollable audio volume”):
+          a single control for ALL of Kelion's voice (Realtime + TTS), persisted;
+          until today there was no volume control in the app. */}
           <input
             type="range"
             className="composer-volume"

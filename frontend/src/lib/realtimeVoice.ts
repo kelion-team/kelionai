@@ -166,7 +166,7 @@ let voiceBc: BroadcastChannel | null = null
 try {
   voiceBc = new BroadcastChannel(VOICE_BC)
 } catch {
-  voiceBc = null /* browser vechi — rămâne garda pe tab */
+  voiceBc = null /* old browser — the per-tab guard stays */
 }
 
 /**

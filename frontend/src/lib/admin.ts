@@ -525,7 +525,7 @@ export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
   }
 }
 
-// Mostra audio a unei amprente (data-URL) — pentru butonul „play" din panou.
+// A voiceprint's audio sample (data-URL) — for the „play” button in the panel.
 export async function fetchVoiceprintAudio(email: string): Promise<string | null> {
   try {
     const r = await fetch(`/api/voiceprint/audio?email=${encodeURIComponent(email)}`, {
