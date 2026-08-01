@@ -1,6 +1,6 @@
 // ── PERIODIC POLLING OF AN ENDPOINT — once only ───────────────────────────
 //
-// DE CE (Lotul E din PROCEDURA-REFACERE-CLONE.md; Adrian: „toate trebuie pe 0"):
+// WHY (Batch E of PROCEDURA-REFACERE-CLONE.md; Adrian: "everything must go to 0"):
 // `Stage.tsx` had TWO identical effects — the brain credit (admin) and the
 // client credit. Both: fetch a JSON, apply it only if the component is still
 // alive, repeat every 30s, clean up the interval on exit. They were 11 copied

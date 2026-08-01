@@ -1,7 +1,7 @@
-// CONTRACTUL HTTP cu backend-ul, o SINGURĂ declarație (Lotul A din
+// THE HTTP CONTRACT with the backend, ONE SINGLE declaration (Batch A of
 // PROCEDURA-REFACERE-CLONE.md): tipurile astea erau redeclarate identic aici
-// și în backend (98 de linii duplicate). Acum vin din sursa comună; import de
-// TIP, deci dispare la compilare — nu adaugă nimic în bundle.
+// and in the backend (98 duplicated lines). Now they come from the common source; a TYPE
+// import, so it vanishes at compile time — it adds nothing to the bundle.
 import type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow } from '../../../backend/src/shared/api-types'
 export type { DemoRecent, DemoStats, MoneyCircuit, UserActivityRow }
 export interface UserSummary {
@@ -61,11 +61,11 @@ export async function fetchFinance(): Promise<Finance | null> {
 }
 
 // CIRCUITUL BANILOR (admin): starea verigilor Stripe→AI + crearea cardului.
-/** Maneta ownerului: oprește / repornește autonomia lui Kelion.
+/** The owner's lever: stops / restarts Kelion's autonomy.
  *
- *  Comanda „pauza-autonomie" exista din 27 iul, dar trebuia s-o știi pe de rost
- *  și s-o spui în chat. O frână pe care ownerul o alege singur nu e o barieră —
- *  e control. De-aia e un buton, la vedere, nu un cuvânt magic. */
+ *  The "pauza-autonomie" command existed since Jul 27, but you had to know it
+ *  by heart and say it in chat. A brake the owner chooses himself is not a barrier —
+ *  it's control. That's why it's a button, in plain sight, not a magic word. */
 export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
   try {
     const r = await fetch('/api/admin/autonomie/pauza', {
@@ -80,7 +80,7 @@ export async function pauzaAutonomie(oprit: boolean): Promise<boolean> {
   }
 }
 
-/** O dovadă a autonomiei, așa cum o citește serverul din baza de date. */
+/** A proof of autonomy, as the server reads it from the database. */
 export interface DovadaAutonomie {
   nivel: number
   ce: string
@@ -92,8 +92,8 @@ export interface DovadaAutonomie {
 
 /** Cele opt dovezi (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
  *
- *  Nu e o listă scrisă de mine: fiecare nivel își caută în bază urma concretă —
- *  un ordin, un PR, o măsurătoare — și spune „dovedit" DOAR dacă a găsit-o. */
+ *  Not a list written by me: each level looks in the database for its concrete
+ *  trace — an order, a PR, a measurement — and says "proven" ONLY if it found it. */
 export async function fetchDoveziAutonomie(): Promise<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null> {
   try {
     const r = await fetch('/api/admin/autonomie/dovezi', { credentials: 'include' })
@@ -112,15 +112,15 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
   }
 }
 // AICI A STAT `fetchCardKey` — cheia efemera prin care se afisa numarul cardului
-// virtual Stripe (Issuing Elements). A iesit odata cu cardul: componenta care o
+// virtual Stripe (Issuing Elements). It went away with the card: the component that
 // folosea (CardReveal) a fost stearsa.
 
 // AICI AU STAT `CardAddress`, `createAiCard`, `adminPayout` si `ownerDeposit` —
 // crearea cardului virtual Stripe, retragerea profitului si depunerea in punga.
 // Toate trei mergeau prin Stripe, iar Stripe a iesit pe 30 iul: userii platesc pe
 // linkul Revolut, banii intra direct in contul lui Adrian, iar furnizorii se
-// platesc cu cardul lui. Rutele din spate raman pana cand trecerea e confirmata
-// pe viu, dar interfata nu le mai cheama.
+// pay with his card. The back-end routes stay until the transition is confirmed
+// live, but the interface no longer calls them.
 
 // HERE STOOD `sellCredits` — X credits → a Stripe payment link for the user.
 // Deleted together with Stripe (31 Jul): credit sales go through the unique
@@ -331,8 +331,8 @@ export async function fetchInbound(): Promise<InboundEmail[]> {
   }
 }
 
-// INBOX LIVE — cutia REALĂ contact@kelionai.app citită direct prin IMAP (ultimele
-// mesaje, citite sau nu), ca adminul să vadă tot ce e în cutie, nu doar mailul nou.
+// LIVE INBOX — the REAL contact@kelionai.app mailbox read directly via IMAP (latest
+// messages, read or not), so the admin sees everything in the box, not just new mail.
 export interface MailboxLiveItem {
   uid: number
   from: string
@@ -351,7 +351,7 @@ export async function fetchMailboxLive(): Promise<MailboxLiveItem[]> {
   }
 }
 
-// Mesajele din formularul „Contact" — salvate mereu în DB, vizibile chiar dacă
+// Messages from the "Contact" form — always saved in the DB, visible even if
 // emailul nu e configurat.
 export interface ContactMessage {
   id: number
@@ -401,9 +401,9 @@ export async function fetchHistory(email: string): Promise<HistoryRow[]> {
   return j.history ?? []
 }
 
-// Traduce în bloc mesajele unei conversații în română (butonul „Tradu în română"
-// din vizualizarea chaturilor). Întoarce traducerile aliniate 1:1 cu intrarea;
-// pe eroare, întoarce textele originale ca să nu se golească afișajul.
+// Batch-translates a conversation's messages into Romanian (the "Translate to Romanian"
+// button in the chat viewer). Returns translations aligned 1:1 with the input;
+// on error, returns the original texts so the display doesn't empty.
 export async function translateToRo(texts: string[]): Promise<string[]> {
   if (texts.length === 0) return []
   try {
@@ -430,13 +430,13 @@ export interface CapabilityGap {
   hits: number
   resolved: boolean
   escalated?: boolean
-  // Decizia autonomă a lui Kelion: „DE IMPLEMENTAT: ..." / „ÎNCHIS AUTONOM: ...".
+  // Kelion's autonomous decision: "DE IMPLEMENTAT: ..." / "ÎNCHIS AUTONOM: ...".
   triage?: string | null
   created_at: string
   last_seen: string
 }
 
-// Declanșează triajul autonom al lui Kelion pe toate gap-urile deschise.
+// Triggers Kelion's autonomous triage over all open gaps.
 export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number } | null> {
   try {
     const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
@@ -447,8 +447,8 @@ export async function runGapsTriage(): Promise<{ triaged: number; kept: number; 
   }
 }
 
-// AUDITUL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate auditurile și
-// toate căzutele") — agregatul de pe /api/admin/audit, afișat sub gaps.
+// THE FALLS AUDIT (Adrian, Jul 27: "here you must see all the audits and
+// all the falls") — the aggregate from /api/admin/audit, shown under gaps.
 export interface AuditReport {
   health?: {
     ok?: boolean
@@ -494,7 +494,7 @@ export async function resolveGap(id: number, resolved = true): Promise<void> {
   }
 }
 
-// Amprente vocale înregistrate (admin only).
+// Registered voiceprints (admin only).
 export interface VoiceprintRow {
   email: string
   name: string
@@ -569,12 +569,12 @@ export interface TokenChecksResult {
   checks: TokenCheck[]
 }
 
-/** Ce chei vede serverul CHIAR ACUM. Răspunde la „le-am scris de zeci de ori"
- *  vs. „(neconfigurat)": o cheie scrisă nu ajunge automat în procesul care
- *  rulează. NU conține valori — doar nume, prezență și lungime. */
+/** Which keys the server sees RIGHT NOW. Answers "I've written them dozens of times"
+ *  vs. "(not configured)": a written key doesn't automatically reach the process that
+ *  runs. Contains NO values — only names, presence and length. */
 export interface EnvCheckResult {
   vars: { name: string; what: string; present: boolean; length: number; breaks: string; foundAs?: string; accepts: string[] }[]
-  /** Nume de chei pe care serverul le ARE, dar pe care codul nu le citea. */
+  /** Names of keys the server HAS, but which the code wasn't reading. */
   orphans: string[]
   summary: { total: number; lipsa: number; goale: number; nume: string[] }
   /** Process start time: a key written AFTER this is not loaded yet. */

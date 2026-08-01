@@ -12,18 +12,18 @@ import {
 import { fetchBalance, type WalletStatus } from '../lib/billing'
 import { LANGS } from '../lib/languages'
 
-// SETĂRI CLIENT (plătitor). Un client are mai puțin acces decât adminul — nu
-// vede panoul de admin — dar are propriul buton ⚙ cu trei secțiuni:
-//   1. Preferințe de bază  — limba în care Kelion îl ascultă și îi vorbește.
-//   2. Credit / portofel   — soldul, reîncărcare, ȘI mențiunea 25% către platformă.
-//   3. Cont                — email, delogare, ștergere cont (GDPR).
+// CLIENT SETTINGS (paying). A client has less access than the admin — doesn't
+// see the admin panel — but has their own ⚙ button with three sections:
+//   1. Basic preferences — the language Kelion listens and speaks to them in.
+//   2. Credit / wallet    — balance, top-up, AND the 25% platform share note.
+//   3. Account            — email, logout, account deletion (GDPR).
 // BYOK-provider a fost SCOS complet (Adrian, 12 iul: „scoatem vechiul provider") —
-// creierul e pe Kimi/GLM, toți userii trec prin creditul de mai sus.
-// Backend-ul (prefs + billing + me/delete) e deja verificat live. NU dublează
-// cod: folosește exact aceleași rute pe care le folosește restul aplicației.
+// the brain is on Kimi/GLM, all users go through the credit above.
+// The backend (prefs + billing + me/delete) is already verified live. It does NOT
+// duplicate code: it uses exactly the same routes the rest of the app uses.
 
-// Etichete în limba clientului (ro pentru vorbitorii de română, altfel engleză —
-// clienții pot fi din orice limbă). Doar textele UI; valorile vin de la server.
+// Labels in the client's language (ro for Romanian speakers, otherwise English —
+// clients can be from any language). Only the UI texts; values come from the server.
 interface L {
   title: string
   prefs: string
@@ -87,8 +87,8 @@ const EN: L = {
   close: 'Close',
 }
 
-// Cât primești la o liră. Aceeași valoare ca la cumpărare (WalletButton) —
-// userul nu vede lire nicăieri în ecranul lui, doar creditele rezultate.
+// How much you get per pound. The same value as at purchase (WalletButton) —
+// the user never sees pounds anywhere on their screen, only the resulting credits.
 const CREDITE_PE_LIRA = 7.5
 
 interface CatModel {
@@ -105,21 +105,21 @@ export default function CustomerSettings({
   readonly user: User
   readonly onClose: () => void
 }): React.JSX.Element {
-  // Default ENGLEZĂ până la identificarea limbii (nu limba browserului).
+  // Default ENGLISH until language identification (not the browser language).
   const base = (loadLocalLang() ?? 'en')
     .slice(0, 2)
     .toLowerCase()
   const t = base === 'ro' ? RO : EN
 
   const [lang, setLang] = useState<string>('en-US')
-  // Vocea aleasă de omul ăsta ('' = implicita aplicației) + lista permisă,
-  // amândouă venite de la server.
+  // The voice chosen by this person ('' = the app's default) + the allowed list,
+  // both from the server.
   const [voice, setVoice] = useState<string>('')
   const [voices, setVoices] = useState<string[]>([])
   const [wallet, setWallet] = useState<WalletStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
-  // Modele selectabile (OpenRouter) + reîncărcare automată.
+  // Selectable models (OpenRouter) + automatic reload.
   const [catalog, setCatalog] = useState<{ chat: CatModel[]; work: CatModel[] }>({ chat: [], work: [] })
   const [sel, setSel] = useState<{ chat: string; work: string }>({ chat: '', work: '' })
   const [ar, setAr] = useState<{ enabled: boolean; threshold: number; topupAmount: number }>({
@@ -146,7 +146,7 @@ export default function CustomerSettings({
         if (s) setSel({ chat: s.chat ?? '', work: s.work ?? '' })
         if (a) setAr({ enabled: !!a.enabled, threshold: Number(a.threshold ?? 20), topupAmount: Number(a.topupAmount ?? 10) })
       } catch {
-        /* endpointuri indisponibile → secțiunile rămân goale */
+        /* endpoints unavailable → the sections stay empty */
       }
     })()
   }, [])

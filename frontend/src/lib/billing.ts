@@ -32,7 +32,7 @@ export async function fetchBalance(): Promise<WalletStatus | null> {
 }
 
 // Starts a top-up: asks the server for the payment link and takes the person there.
-// De la 30 iul linkul e cel de Revolut, nu o sesiune Stripe — dar forma
+// Since Jul 30 the link is the Revolut one, not a Stripe session — but the shape
 // of the reply stayed the same (`{ url }`), precisely so that all payment
 // places (the wallet pill, /credite, paywall) change with a single touch.
 // It RETURNS the error instead of swallowing it (Adrian, Jul 24: "I press

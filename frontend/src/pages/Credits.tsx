@@ -9,7 +9,7 @@ import { PUBLIC_TEXT as T } from '../lib/publicText'
 import BackLink from '../components/BackLink'
 
 const CREDITS_PER_POUND = 7.5
-// Prima alimentare are minim £20 pe server — pachetele pornesc de la £20 ca
+// The first top-up has a £20 minimum on the server — the packs start at £20 so
 // no public button should fall on this rule.
 const PACKS = [20, 30, 50]
 

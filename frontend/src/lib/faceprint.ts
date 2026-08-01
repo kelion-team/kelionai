@@ -22,7 +22,7 @@ async function ensureApi(): Promise<FaceApi | null> {
   loading = true
   try {
     const mod = (await import('@vladmandic/face-api')) as FaceApi
-    // Modelele sunt servite din /models (copiate din pachet la build).
+    // The models are served from /models (copied from the package at build).
     await mod.nets.tinyFaceDetector.loadFromUri('/models')
     await mod.nets.faceLandmark68Net.loadFromUri('/models')
     await mod.nets.faceRecognitionNet.loadFromUri('/models')

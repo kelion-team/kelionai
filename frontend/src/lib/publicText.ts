@@ -15,7 +15,7 @@
 // country read "Your brilliant assistant", clicked "Sign in with email" and
 // landed on a Romanian page. 29 texts, none ever passed through i18n.
 export const PUBLIC_TEXT = {
-  // Pagina de start — linkurile de sub butonul Google
+  // The start page — the links under the Google button
   emailSignIn: 'Sign in with email',
   creditsPricing: 'Credits & pricing',
   userManual: 'User manual',

@@ -18,7 +18,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
   // The server's DEPLOY version — on the watermark, so proof of the version
-  // schimbe la ORICE publicare (ordinul lui Adrian, 10 iul), nu doar la build
+  // changes on EVERY publish (Adrian's order, Jul 10), not just on build
   // of interface. The label is composed with versionLabel (same source as under the QR).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
   const [error, setError] = useState<string | null>(null)

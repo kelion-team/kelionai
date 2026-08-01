@@ -14,9 +14,9 @@ import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/upd
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
-  // `href` = ținta de INSTALARE (Adrian, 26 iul: „sub fiecare cod trebuie să fie
-  // install care te duce la pagina de instalare") — același loc în care duce și
-  // scanarea codului, dar pe click, pentru cine e deja pe dispozitivul țintă.
+  // `href` = the INSTALL target (Adrian, Jul 26: "under each code there must be
+  // install that takes you to the install page") — the same place the code
+  // scan leads to, but on click, for someone already on the target device.
   { key: 'win', label: '⊞ Windows', img: '/dl/qr-win.png', href: '/dl/Kelionai-Setup.exe' },
   { key: 'linux', label: '🐧 Linux', img: '/dl/qr-linux.png', href: '/dl/Kelionai-linux.zip' },
   { key: 'ios', label: 'iOS', img: '/dl/qr-ios.png', href: 'https://apps.apple.com/app/id6786766714' },
@@ -43,9 +43,9 @@ export default function Landing({ error }: { error?: string | null }) {
   const t = strings('en')
   const [contactOpen, setContactOpen] = useState(false)
   const [qrZoom, setQrZoom] = useState<QrCode | null>(null)
-  // Versiunea live (aceeași sursă ca filigranul din browser) — o arătăm sub
-  // fiecare cod QR ca dovadă că aplicația instalată e EXACT versiunea din
-  // browser; se împrospătează singură la orice deploy (fetchServerVersion).
+  // The live version (same source as the browser watermark) — we show it under
+  // each QR code as proof that the installed app is EXACTLY the browser
+  // version; it refreshes itself on every deploy (fetchServerVersion).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
   useEffect(() => {
     let alive = true
@@ -61,8 +61,8 @@ export default function Landing({ error }: { error?: string | null }) {
       window.clearInterval(id)
     }
   }, [])
-  // Eroare venită prin URL (ex: ?error=closed). Afișată o dată; nu se schimbă
-  // după montare (nu mai există flux de probă care s-o actualizeze).
+  // Error arriving via URL (e.g. ?error=closed). Shown once; doesn't change
+  // after mount (there's no probe flow left to update it).
   const [notice] = useState<string | null>(
     error ? (t[ERR_KEY[error] ?? 'errGeneric'] as string) : null,
   )

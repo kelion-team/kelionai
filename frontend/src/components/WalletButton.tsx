@@ -3,20 +3,20 @@ import { fetchBalance, startCheckout } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
 
-// Credit vizibil pentru ORICE user logat (Adrian, 24 iul: „când te-ai logat cu
-// Google trebuie să poți cumpăra credit, nu văd cum se alimentează"). Arată O
-// SINGURĂ valoare — creditele disponibile — cu un „＋" evident și meniul de
-// reîncărcare. Din același meniu se ajunge la Setări și la conectarea
-// Gmail/Calendar — bara nu mai are rotița ⚙ separată, nici butonul „Connect
-// Google" care părea o re-logare. Toate textele în limba userului.
+// Credit visible for ANY logged-in user (Adrian, Jul 24: "once logged in with
+// Google you must be able to buy credit, I don't see how to top up"). It shows ONE
+// SINGLE value — the available credits — with an obvious "＋" and the
+// top-up menu. From the same menu you reach Settings and the
+// Gmail/Calendar connection — the bar no longer has a separate ⚙ cog, nor the "Connect
+// Google" button that looked like a re-login. All texts in the user's language.
 //
 // VALORI PRESETATE (Adrian, 24 iul): PRIMA alimentare = £20 minim (activarea
-// creierului), apoi orice MULTIPLU de £5. Regula e validată și pe server.
+// of the brain), then any MULTIPLE of £5. The rule is validated on the server too.
 //
-// SE VÂND CREDITE, NU LIRE (Adrian, 24 iul: „trebuie să se poată vinde X
-// credite pe bani"): produsul afișat e pachetul de CREDITE, cu prețul lângă.
-// Conversia: userul primește 75% din plată drept credit, 1 credit = £0.10 →
-// £ × 7.5 credite. Presetările sunt alese să dea numere ÎNTREGI de credite.
+// WE SELL CREDITS, NOT POUNDS (Adrian, Jul 24: "you must be able to sell X
+// credits for money"): the displayed product is the CREDIT pack, with the price next to it.
+// Conversion: the user gets 75% of the payment as credit, 1 credit = £0.10 →
+// £ × 7.5 credits. The presets are chosen to give WHOLE credit numbers.
 const CREDITS_PER_POUND = 7.5
 const creditsFor = (pounds: number): number => Math.floor(pounds * CREDITS_PER_POUND)
 const AMOUNTS_FIRST = [20, 30, 50] // 150 / 225 / 375 credite
@@ -31,11 +31,11 @@ export function WalletButton({
   readonly onOpenSettings: () => void
   readonly googleConnected?: boolean
   readonly onConnectGoogle?: () => void
-  // Adminul (owner) nu plătește credite — vede portofelul și POATE testa
-  // alimentarea, dar fără sâcâiala „Te rog reîncarcă" (nu e blocat niciodată).
+  // The admin (owner) doesn't pay credits — sees the wallet and CAN test
+  // topping up, but without the "Please top up" nag (never blocked).
   readonly isAdmin?: boolean
 }): React.JSX.Element {
-  // Default ENGLEZĂ până la identificarea limbii (nu limba browserului).
+  // Default ENGLISH until language identification (not the browser language).
   const langKey = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(langKey)
   const ro = langKey.slice(0, 2).toLowerCase() === 'ro'
@@ -46,15 +46,15 @@ export function WalletButton({
   const [paywalled, setPaywalled] = useState(false)
   const [firstTopUp, setFirstTopUp] = useState(false)
   const [custom, setCustom] = useState('')
-  // Eroarea checkout-ului AFIȘATĂ, nu înghițită („apăs și nu se execută").
+  // The checkout error DISPLAYED, not swallowed ("I press and nothing runs").
   const [payErr, setPayErr] = useState('')
-  // OCUPAT VIZIBIL (auditul de fluiditate 27 iul, defectul 10): drumul până la
-  // Stripe durează — fără semnal, butonul părea mort și userul apăsa iar.
+  // VISIBLE BUSY (fluidity audit Jul 27, defect 10): the road to the
+  // payment page takes time — without a signal, the button looked dead and the user pressed again.
   const [payBusy, setPayBusy] = useState(false)
-  // „CREDIT ADĂUGAT" (Adrian, 24 iul: „mesajul «adăugat credit» e suficient
-  // pentru useri, restul în spate la mine automat"): când soldul CREȘTE între
-  // două citiri (adminul a vândut/creditat), userul vede doar mesajul — nicio
-  // mecanică de plată în față.
+  // "CREDIT ADDED" (Adrian, Jul 24: "the 'credit added' message is enough
+  // for users, the rest automatically behind the scenes to me"): when the balance GROWS between
+  // two reads (the admin sold/credited), the user sees only the message — no
+  // payment mechanics up front.
   const [addedCredits, setAddedCredits] = useState<number | null>(null)
   const prevCreditsRef = useRef<number | null>(null)
   const addedTimerRef = useRef<number | null>(null)
@@ -77,15 +77,15 @@ export function WalletButton({
         setPayErr(errText(err))
         console.error('checkout failed:', err) // ajunge și la Kelion (F12 → server)
       }
-      // succes → pagina navighează la Stripe; starea moare odată cu ea.
+      // success → the page navigates to the payment link; the state dies with it.
     })
   }
 
   const refresh = async (): Promise<void> => {
     const b = await fetchBalance()
     if (b) {
-      // Soldul a CRESCUT → mesajul „credit adăugat" (atât vede userul; vânzarea
-      // și plata rămân în spatele adminului). 8s, apoi dispare singur.
+      // The balance GREW → the "credit added" message (that's all the user sees; the sale
+      // and payment stay behind the admin). 8s, then it fades by itself.
       const prev = prevCreditsRef.current
       if (prev !== null && b.credits > prev) {
         setAddedCredits(b.credits - prev)
@@ -96,9 +96,9 @@ export function WalletButton({
       setCredits(b.credits)
       setPercent(b.percent)
       setFirstTopUp(!!b.firstTopUp)
-      // reflectă realitatea: la sold 0 rămâne paywalled, altfel iese — altfel
-      // un refresh cu credits=0 lăsa meniul de top-up blocat deschis pe veci.
-      // Adminul nu e blocat NICIODATĂ → fără pastila de paywall pentru el.
+      // reflects reality: at balance 0 it stays paywalled, otherwise it exits — otherwise
+      // a refresh with credits=0 left the top-up menu stuck open forever.
+      // The admin is NEVER blocked → no paywall pill for him.
       setPaywalled(!isAdmin && b.credits <= 0)
     }
   }
@@ -119,15 +119,15 @@ export function WalletButton({
     }
     window.addEventListener('kelion:paywall', onPaywall)
     // Kelion deschide portofelul prin voce (unealta open_app_view → Stage →
-    // acest eveniment). Îl deschidem și reîmprospătăm soldul.
+    // this event). We open it and refresh the balance.
     const onWalletOpen = (): void => {
       setOpen(true)
       void refresh()
     }
     window.addEventListener('kelion:wallet-open', onWalletOpen)
-    // CREDIT ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
-    // real, valoarea reală"): reîmprospătăm la fiecare 15s, imediat ce fereastra
-    // redevine activă (revii în tab) ȘI la orice semnal că s-a consumat/creditat.
+    // REAL-TIME CREDIT (Adrian, Jul 24: "all credits are displayed in real
+    // time, the real value"): we refresh every 15s, as soon as the window
+    // becomes active again (you return to the tab) AND on any signal that credit was consumed/added.
     const onChanged = (): void => void refresh()
     window.addEventListener('kelion:credits-changed', onChanged)
     const onVisible = (): void => { if (!document.hidden) void refresh() }
@@ -152,8 +152,8 @@ export function WalletButton({
   // more often the lower the credit gets (30% → rare, 10% → frequent). Never a
   // blocking popup.
   useEffect(() => {
-    // Owner-ul nu cumpără credite → nu primește NICIODATĂ „mai ai puțin
-    // credit" (Adrian, 26 iul: „afișează corect creditele la admin").
+    // The owner doesn't buy credits → NEVER gets "you're running low on
+    // credit" (Adrian, Jul 26: "display credits correctly for the admin").
     if (isAdmin || credits === null || percent > 30) {
       setToast(false)
       return

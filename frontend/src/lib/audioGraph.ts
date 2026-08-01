@@ -5,7 +5,7 @@
 // (dictation) both started the microphone EXACTLY the same way — the same
 // echo/noise constraints, the same "permission refusal ≠ transient failure"
 // distinction, the same
-// creare de AudioContext cu prefixul webkit. Erau ~20 de linii copiate, iar
+// webkit-prefixed AudioContext creation. They were ~20 copied lines, and
 // the real risk wasn't aesthetic: if someone changed the constraints in a
 // single place, dictation and voice would start hearing DIFFERENTLY, silently.
 //
@@ -15,7 +15,7 @@
 // THE HOUSE RULE (AI-HANDOFF, the Jul 25 lesson): anything touching the
 // voice path is verified LIVE, with real voice — not just typecheck.
 
-/** De ce n-a pornit microfonul. `not-allowed` = refuz de permisiune (NU se
+/** Why the microphone didn't start. `not-allowed` = permission refusal (does NOT
  *  retries by itself); `failed` = transient failure (device busy, headset
  *  unplugged — worth retrying); `unsupported` = the browser lacks the API. */
 export type MicError = 'not-allowed' | 'failed' | 'unsupported'

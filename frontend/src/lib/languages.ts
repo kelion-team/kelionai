@@ -47,7 +47,7 @@ export const LANGS: readonly SpeechLang[] = [
 // applies"). NO guessing from the browser language: we start from the
 // IDENTIFIED language (uiLang comes from the server mirror), otherwise
 // English. The later switching is done by the frame
-// {lang} de la server (applyLang), nu noi aici.
+// {lang} from the server (applyLang), not us here.
 export function defaultSpeechLang(uiLang: string): string {
   const lc = (uiLang || 'en').toLowerCase()
   const exact = LANGS.find((l) => l.code.toLowerCase() === lc)
