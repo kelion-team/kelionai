@@ -26,13 +26,13 @@ describe('Token checks', () => {
     expect(names).toContain('Google OAuth (login)')
     expect(names).toContain('SESSION_SECRET')
 
-    // Verificările locale (doar prezență/config, fără apel extern) pot fi ok și
-    // fără chei externe — le excludem din testul „nimic extern configurat".
+    // Local checks (presence/config only, no external call) can be ok even
+    // without external keys — we exclude them from the "nothing external configured" test.
     const local = new Set(['SESSION_SECRET', 'Google OAuth (login)', 'PostgreSQL'])
     const configured = checks.filter((c) =>
       c.status !== 'not_configured' && !local.has(c.name),
     )
-    // Fără chei externe configurate, niciun token extern nu ar trebui să fie ok/fail.
+    // With no external keys configured, no external token should be ok/fail.
     expect(configured).toEqual([])
 
     const session = checks.find((c) => c.name === 'SESSION_SECRET')

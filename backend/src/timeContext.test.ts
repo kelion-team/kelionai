@@ -1,9 +1,9 @@
-// ── TESTELE ANCOREI DE TIMP (§3 din KELION-CREIER-UNIC) ─────────────────────
+// ── TIME ANCHOR TESTS (§3 of KELION-CREIER-UNIC) ────────────────────────────
 //
-// Bug-ul reclamat de Adrian: „bună seara" spus dimineața, și „i-am zis de 2 ori
-// că e dimineața și a zis ca mine". Ancora asta e sursa UNICĂ de adevăr despre
-// oră pentru chat ȘI voce — dacă întoarce ceva greșit sau tace, creierul rămâne
-// fără reper și inventează. Avea zero teste.
+// The bug Adrian reported: "good evening" said in the morning, and "I told him
+// twice it's morning and he parroted me". This anchor is the SINGLE source of
+// truth about the time for chat AND voice — if it returns something wrong or
+// stays silent, the brain loses its reference and invents. It had zero tests.
 import { describe, it, expect } from 'vitest'
 import { formatDeviceTime } from './services/timeContext.js'
 
@@ -12,7 +12,7 @@ describe('timeContext — ancora de timp a dispozitivului', () => {
     const r = formatDeviceTime('2026-07-29T06:30:00Z', 'Europe/London')
     expect(r).not.toBeNull()
     expect(r?.tzName).toBe('Europe/London')
-    // 06:30 UTC = 07:30 la Londra vara — ora TREBUIE să apară în text.
+    // 06:30 UTC = 07:30 in London in summer — the time MUST appear in the text.
     expect(r?.human).toMatch(/07:30/)
     expect(r?.human).toMatch(/July|Wednesday/)
   })
@@ -27,12 +27,12 @@ describe('timeContext — ancora de timp a dispozitivului', () => {
   it('fără fus valid cade pe UTC, nu crapă', () => {
     expect(formatDeviceTime('2026-07-29T06:30:00Z', undefined)?.tzName).toBe('UTC')
     expect(formatDeviceTime('2026-07-29T06:30:00Z', '')?.tzName).toBe('UTC')
-    // Fus inexistent: nu aruncă — cade pe reprezentarea UTC.
+    // Nonexistent timezone: does not throw — falls back to the UTC representation.
     expect(formatDeviceTime('2026-07-29T06:30:00Z', 'Nu/Exista')).not.toBeNull()
   })
 
   it('TACE (null) când nu are oră reală — nu inventează una', () => {
-    // Regula: mai bine fără bloc de timp decât cu o oră greșită.
+    // The rule: better no time block than a wrong time.
     expect(formatDeviceTime(undefined, 'Europe/London')).toBeNull()
     expect(formatDeviceTime('', 'Europe/London')).toBeNull()
     expect(formatDeviceTime('nu-i o dată', 'Europe/London')).toBeNull()
@@ -42,6 +42,6 @@ describe('timeContext — ancora de timp a dispozitivului', () => {
 
   it('dimineața rămâne dimineață (bugul „bună seara" la 7 AM)', () => {
     const r = formatDeviceTime('2026-07-29T05:00:00Z', 'Europe/London')
-    expect(r?.human).toMatch(/06:00/) // 6 dimineața, nu seara
+    expect(r?.human).toMatch(/06:00/) // 6 in the morning, not the evening
   })
 })

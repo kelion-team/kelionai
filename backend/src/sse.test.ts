@@ -1,15 +1,15 @@
-// ── TESTELE CITITORULUI DE FLUX SSE (calea vorbirii în timp real) ───────────
+// ── SSE STREAM READER TESTS (the real-time speech path) ─────────────────
 //
-// `readSSE` e sursa unică prin care curge răspunsul creierului, cuvânt cu cuvânt
-// (OpenRouter ȘI Gemini). Dacă greșește parsarea, userul vede text rupt sau
-// nimic — și nu dă eroare de compilare. Avea zero teste.
+// `readSSE` is the single source through which the brain's reply flows, word by
+// word (OpenRouter AND Gemini). If parsing breaks, the user sees torn text or
+// nothing — with no compile error. It had zero tests.
 //
-// Cazurile care CHIAR se întâmplă în rețea: un eveniment tăiat în două pachete,
-// linii goale de heartbeat, `[DONE]`, JSON stricat.
+// The cases that ACTUALLY happen on the network: an event split across two
+// packets, empty heartbeat lines, `[DONE]`, broken JSON.
 import { describe, it, expect } from 'vitest'
 import { readSSE } from './services/sse.js'
 
-/** Un flux ca cel real, livrat în bucățile date (pot tăia un eveniment în două). */
+/** A stream like the real one, delivered in the given chunks (they can split an event in two). */
 function flux(bucati: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
   let i = 0
@@ -29,7 +29,7 @@ describe('sse — citirea fluxului de la creier', () => {
   })
 
   it('reasamblează un eveniment TĂIAT între două pachete de rețea', async () => {
-    // Cazul real care rupe parserele naive: JSON-ul vine în două bucăți.
+    // The real case that breaks naive parsers: the JSON arrives in two pieces.
     const out: unknown[] = []
     await readSSE(flux(['data: {"text":"buc', 'ată"}\n']), (e) => out.push(e))
     expect(out).toEqual([{ text: 'bucată' }])

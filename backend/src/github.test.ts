@@ -2,16 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.stubEnv('GITHUB_TOKEN', 'test-token')
 
-// Mock-uri pentru dependențele lui github.ts, ca să testez DOAR logica
-// checkpoint-ului din repoMergePR, fără să atingem GitHub-ul real.
+// Mocks for github.ts dependencies, so I test ONLY the checkpoint logic in
+// repoMergePR, without touching the real GitHub.
 const { createRecoveryPoint } = vi.hoisted(() => ({ createRecoveryPoint: vi.fn() }))
 vi.mock('./services/recovery.js', () => ({ createRecoveryPoint }))
 vi.mock('./services/runbooks.js', () => ({ isOpsPaused: vi.fn(async () => false), alertAdminLoop: vi.fn() }))
 
 import { repoMergePR } from './services/github.js'
 
-// Jurnal comun: și checkpoint-ul (mock) și merge-ul (fetch) scriu aici, ca să
-// pot dovedi ORDINEA — checkpoint ÎNAINTE de merge.
+// Shared log: both the checkpoint (mock) and the merge (fetch) write here, so
+// I can prove the ORDER — checkpoint BEFORE merge.
 let callLog: string[] = []
 
 function fakeResp(data: unknown, ok = true, status = 200): Response {
@@ -47,12 +47,12 @@ describe('Etapa 3 — checkpoint automat înainte de merge (operație riscantă)
     })
     const out = JSON.parse(await repoMergePR(123))
     expect(createRecoveryPoint).toHaveBeenCalledOnce()
-    // Descrierea checkpoint-ului conține numărul PR-ului (descriere clară).
+    // The checkpoint description contains the PR number (clear description).
     expect(String(createRecoveryPoint.mock.calls[0][0])).toMatch(/PR #123/)
-    // ORDINEA: checkpoint înainte de merge.
+    // ORDER: checkpoint before merge.
     expect(callLog.indexOf('checkpoint')).toBeLessThan(callLog.indexOf('merge'))
     expect(callLog).toEqual(['checkpoint', 'merge'])
-    // Rezultatul poartă tag-ul de revenire.
+    // The result carries the rollback tag.
     expect(out.checkpoint).toBe('backup-2026-07-29-0700-abcdef1')
     expect(out.merged).toBe(true)
   })
@@ -63,7 +63,7 @@ describe('Etapa 3 — checkpoint automat înainte de merge (operație riscantă)
       return { ok: false, error: 'master_ref_500' }
     })
     const out = JSON.parse(await repoMergePR(123))
-    expect(callLog).toContain('merge') // merge-ul s-a făcut oricum
+    expect(callLog).toContain('merge') // the merge happened anyway
     expect(out.merged).toBe(true)
     expect(out.checkpoint).toBeUndefined()
     expect(String(out.checkpointWarning)).toMatch(/NU am putut crea checkpoint/)

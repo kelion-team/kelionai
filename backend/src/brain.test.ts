@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 
-// Mediul minim ca importul config.js (tras de brain.ts) să nu se plângă.
+// Minimal environment so the config.js import (pulled by brain.ts) does not complain.
 vi.stubEnv('GOOGLE_CLIENT_ID', 'test-id')
 vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-secret')
 vi.stubEnv('GOOGLE_REDIRECT_URI', 'test-uri')
@@ -26,7 +26,7 @@ describe('Expertul fiabil — scara de modele', () => {
   it('începe cu work + top și e deduplicată, ordinea păstrată', () => {
     const ladder = expertModelLadder()
     expect(ladder.length).toBeGreaterThanOrEqual(2)
-    expect(new Set(ladder).size).toBe(ladder.length) // fără dubluri
+    expect(new Set(ladder).size).toBe(ladder.length) // no duplicates
   })
 })
 
@@ -45,7 +45,7 @@ describe('Expertul fiabil — runBrainLadder', () => {
       { sleep: noSleep },
     )
     expect(out).toBe('raspuns de la m2')
-    expect(tried).toEqual(['m1', 'm2']) // s-a oprit la primul bun
+    expect(tried).toEqual(['m1', 'm2']) // stopped at the first good one
   })
 
   it('încearcă TOATE treptele înainte să arunce, dacă toate pică', async () => {

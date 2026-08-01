@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 
-// Mock-uim funcțiile reale — testăm DISPATCH-ul + extragerea argumentelor, nu ele.
+// We mock the real functions — we test the DISPATCH + argument extraction, not them.
 const listSource = vi.hoisted(() => vi.fn(async () => 'ARBORE'))
 const readSource = vi.hoisted(() => vi.fn(async () => 'FISIER'))
 const searchSource = vi.hoisted(() => vi.fn(async () => 'POTRIVIRE'))
@@ -66,13 +66,13 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(SHARED_ADMIN_TOOLS.size).toBe(24)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
-      // 30 iul: își face SINGUR setările — aceleași trei pe scris și pe voce.
+      // Jul 30: he does his OWN settings — the same three in writing and in voice.
       'secret_pune', 'secret_lista', 'secret_publica',
-      // 30 iul: cerințele ownerului se prind din conversație, nu se mai pierd.
+      // Jul 30: the owner's requirements are caught from the conversation, no longer lost.
       'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
-      // 31 iul: cardul la furnizori — poarta e fereastra de voce, în executor.
+      // Jul 31: the card at providers — the gate is the voice window, in the executor.
       'card_stare', 'card_completeaza', 'card_gata',
-      // 31 iul, a treia cerere: vede TOT ce conține adminul și poate schimba.
+      // Jul 31, the third request: sees EVERYTHING the admin contains and can change it.
       'admin_vezi', 'admin_schimba',
     ])
       expect(SHARED_ADMIN_TOOLS.has(n)).toBe(true)

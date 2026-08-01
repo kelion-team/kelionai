@@ -26,17 +26,17 @@ describe('gemini direct (creierul principal gratuit)', () => {
       tools: { functionDeclarations: { name: string; parameters: Record<string, unknown> }[] }[]
       toolConfig: { functionCallingConfig: { mode: string } }
     }
-    // System separat, nu în contents.
+    // System separate, not in contents.
     expect(body.systemInstruction?.parts[0].text).toBe('Ești Kelion.')
     expect(body.contents).toHaveLength(3)
-    // Apelul de unealtă al asistentului → functionCall cu argumente PARSATE.
+    // The assistant's tool call → functionCall with PARSED arguments.
     const call = body.contents[1].parts[0] as { functionCall: { name: string; args: { url: string } } }
     expect(call.functionCall.name).toBe('show_on_screen')
     expect(call.functionCall.args.url).toBe('https://google.com')
-    // Rezultatul uneltei → functionResponse cu NUMELE reconstruit din id.
+    // The tool result → functionResponse with the NAME rebuilt from the id.
     const resp = body.contents[2].parts[0] as { functionResponse: { name: string } }
     expect(resp.functionResponse.name).toBe('show_on_screen')
-    // Schema curățată ($schema aruncat), forțarea uneltei → mode ANY.
+    // Cleaned schema ($schema dropped), tool forcing → mode ANY.
     expect(body.tools[0].functionDeclarations[0].parameters).not.toHaveProperty('$schema')
     expect(body.toolConfig.functionCallingConfig.mode).toBe('ANY')
   })

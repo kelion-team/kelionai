@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock-uim orchestratorul: testăm CONTRACTUL turei de voce (ce mesaje îi predă
-// creierului + ce întoarce), nu creierul în sine.
+// We mock the orchestrator: we test the voice turn CONTRACT (which messages
+// it hands to the brain + what it returns), not the brain itself.
 const runOrchestrator = vi.hoisted(() => vi.fn())
 vi.mock('./services/orchestrator.js', () => ({ runOrchestrator }))
 
@@ -31,8 +31,8 @@ describe('voiceBrainTurn — vocea = același creier (§6)', () => {
     expect(runOrchestrator).toHaveBeenCalledTimes(1)
     const [model, messages, tools, passedExec] = runOrchestrator.mock.calls[0]
     expect(model).toBe('test-model')
-    expect(tools).toBe(TOOLS) // TOATE uneltele injectate ajung la creier
-    expect(passedExec).toBe(exec) // executorul e cel injectat (decuplat de HTTP)
+    expect(tools).toBe(TOOLS) // ALL injected tools reach the brain
+    expect(passedExec).toBe(exec) // the executor is the injected one (decoupled from HTTP)
     expect(messages[0]).toEqual({ role: 'system', content: 'Ești Kelion.' })
     expect(messages[1]).toEqual({ role: 'user', content: 'salut' })
     expect(messages[2]).toEqual({ role: 'assistant', content: 'bună' })
