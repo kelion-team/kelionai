@@ -121,6 +121,10 @@ export interface MoneyCircuit {
     estimat: number
     felul: Record<string, 'masurat' | 'estimat'>
   } | null
+  /** The fixed voice rate ($/min) the estimate above is computed with — sent
+   *  by the server so the panel never shows a hand-written figure that has
+   *  drifted from the one actually used (env: VOICE_USD_PER_MINUTE). */
+  voiceUsdPerMin?: number
   /** The owner's lever: is autonomy stopped? A limit HE chooses is not a
    *  barrier; one set by me is. That is why it is visible, and it is his. */
   autonomiaOprita?: boolean

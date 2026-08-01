@@ -41,6 +41,7 @@ import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
+import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
@@ -523,6 +524,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // next to the money: total, today, and what it went on. It cuts nothing;
       // it shows.
       costReal: await getCostSummary().catch(() => null),
+      // The voice rate the estimate is computed with — read by the panel so
+      // the figure next to the explanation is ALWAYS the live one (it can be
+      // changed from env, and a hand-written copy in the frontend would lie).
+      voiceUsdPerMin: VOICE_USD_PER_MINUTE,
       // THE BRAKE IS YOURS, AND IT SHOWS. "pauza-autonomie" existed for a long
       // time, but only as a command you had to know by heart. A limit you
       // choose is not a barrier; one I impose on you is.

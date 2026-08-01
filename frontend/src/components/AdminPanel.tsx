@@ -171,7 +171,7 @@ export default function AdminPanel({
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
   const [vLoading, setVLoading] = useState(false)
   const [vreply, setVreply] = useState('')
-  const vLastId = useState({ id: 0 })[0]
+  const vLastId = useRef(0)
   const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
   const [mailboxLoading, setMailboxLoading] = useState(false)
@@ -408,9 +408,9 @@ export default function AdminPanel({
     if (tab !== 'vchat' || !vsel) return
     let alive = true
     const tick = async (): Promise<void> => {
-      const more = await fetchVisitorChat(vsel, vLastId.id)
+      const more = await fetchVisitorChat(vsel, vLastId.current)
       if (alive && more.length > 0) {
-        vLastId.id = more[more.length - 1].id
+        vLastId.current = more[more.length - 1].id
         setVmsgs((m) => [...m, ...more])
       }
     }
@@ -423,7 +423,7 @@ export default function AdminPanel({
   }, [tab, vsel, vLastId])
 
   async function openConvo(conv: string): Promise<void> {
-    vLastId.id = 0
+    vLastId.current = 0
     setVsel(conv)
     setVmsgs([])
     // VISIBLE BUSY (fluidity audit Jul 27, defect 10): the thread emptied and
@@ -431,7 +431,7 @@ export default function AdminPanel({
     setVLoading(true)
     const rows = await fetchVisitorChat(conv, 0)
     setVLoading(false)
-    vLastId.id = rows.length ? rows[rows.length - 1].id : 0
+    vLastId.current = rows.length ? rows[rows.length - 1].id : 0
     setVmsgs(rows)
   }
 
@@ -441,7 +441,7 @@ export default function AdminPanel({
     const id = await replyVisitorChat(vsel, t)
     if (id > 0) {
       setVmsgs((m) => [...m, { id, role: 'owner', text: t, created_at: '' }])
-      vLastId.id = Math.max(vLastId.id, id)
+      vLastId.current = Math.max(vLastId.current, id)
       setVreply('')
     }
   }
@@ -667,9 +667,10 @@ export default function AdminPanel({
               onClick={() => setTab('visitors')}
             >
               {A.tabVisitors}
-              {demos && demos.visitsToday + demos.today > 0
-                ? ` (${demos.visitsToday + demos.today})`
-                : ''}
+              {/* The demo half of DemoStats is dead (nothing writes demo_uses
+                  anymore) — the badge counts only REAL visits, not the
+                  permanently-zero demo field. */}
+              {demos && demos.visitsToday > 0 ? ` (${demos.visitsToday})` : ''}
             </button>
             <button
               type="button"
@@ -879,7 +880,7 @@ export default function AdminPanel({
                       </span>
                       <span className="or-wallet-sub" style={{ opacity: 0.7 }}>
                         Minutele de voce se socotesc cât a fost microfonul PORNIT × $
-                        {(0.35).toFixed(2)}/min — nu cât ți-a luat OpenAI. Suma exactă e doar în
+                        {(circuit.voiceUsdPerMin ?? 0.35).toFixed(2)}/min — nu cât ți-a luat OpenAI. Suma exactă e doar în
                         contul tău OpenAI.
                       </span>
                       </>
