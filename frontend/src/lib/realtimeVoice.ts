@@ -67,10 +67,8 @@ export interface RealtimeVoiceOpts {
 
 // VOICEPRINT ON THE MAIN VOICE (Adrian, Jul 26): the voiceprint tap of the
 // ACTIVE session (one single session — guaranteed by the singleton). finalize()
-// returns the voiceprint of the just-spoken utterance and empties the buffer. liveInject
-// injects a SYSTEM message into the session (the foreign-voice warning).
+// returns the voiceprint of the just-spoken utterance and empties the buffer.
 let liveVoiceTap: { finalize: () => VoiceFeatures | null } | null = null
-let liveInject: ((text: string) => void) | null = null
 
 // Language anchoring + the voiceprint padlock (Aug 1: this NO LONGER saves
 // messages — the spoken turn reaches history through /api/chat, which owns the
@@ -291,7 +289,6 @@ export async function startRealtimeVoice(
       cleanups.push(() => {
         window.clearInterval(tick)
         liveVoiceTap = null
-        liveInject = null
         void tapCtx.close().catch(() => {})
       })
     } catch {
@@ -497,9 +494,6 @@ export async function startRealtimeVoice(
     const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
     // The last language ANCHORED in the live session — we re-anchor only on change.
     let anchoredLang = ''
-    // The system injection becomes available with the events channel.
-    liveInject = (text: string) =>
-      send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } })
 
     dc.onmessage = (ev) => {
       let m: Record<string, unknown>
