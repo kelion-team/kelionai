@@ -301,9 +301,10 @@ body {
     grid-template-columns: 1fr;
     grid-template-rows: 42svh 1fr;
   }
-  /* FIX TELEFON (Adrian, 24 iul: „pe telefon nu pot gestiona nimic"): hero-ul
-     păstra height:100svh și, fiind poziționat, se revărsa PESTE panoul de jos —
-     acoperea complet logarea și butoanele. Pe mobil hero-ul respectă rândul lui. */
+  /* PHONE FIX (Adrian, Jul 24: „on the phone I can't manage anything”): the hero
+  kept height:100svh and, being positioned, spilled OVER the panel below —
+  completely covering the sign-in and the buttons. On mobile the hero respects
+  its own row. */
   .landing-hero {
     height: 42svh;
   }
@@ -311,7 +312,7 @@ body {
     background: linear-gradient(180deg, transparent 55%, rgba(11, 13, 18, 0.9) 100%);
   }
   .landing-panel {
-    /* Deasupra oricărei revărsări a hero-ului poziționat — mereu vizibil. */
+    /* Above any spill of the positioned hero — always visible. */
     position: relative;
     z-index: 2;
     padding: 4vh 8vw;
@@ -329,10 +330,11 @@ body {
   margin-bottom: 8px;
 }
 .landing-qr-row {
-  /* PATRU PE ACELAȘI RÂND (Adrian, 30 iul). Cu `flex-wrap: wrap` și lățime
-     fixă, Android cădea singur pe rândul doi și lăsa trei sferturi de rând gol.
-     Grilă cu patru coloane egale: fiecare cod se strânge cât trebuie ca să
-     încapă, în loc să sară. Pe telefon (sub 620px) rămâne pe două rânduri. */
+  /* FOUR ON THE SAME ROW (Adrian, Jul 30). With `flex-wrap: wrap` and a fixed
+  width, Android dropped alone onto the second row and left three quarters of
+  the row empty. A grid with four equal columns: each code shrinks as much as
+  it needs to fit, instead of wrapping. On the phone (under 620px) it stays on
+  two rows. */
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -359,8 +361,8 @@ body {
   font-size: 11.5px;
   color: var(--muted);
 }
-/* Numărul de versiune sub fiecare cod QR — mic, încadrat pe lățimea codului,
-   ca să nu spargă rândul; se schimbă singur la orice deploy (versionLabel). */
+/* The version number under each QR code — small, framed to the code's width,
+so it doesn't break the row; it changes by itself on any deploy (versionLabel). */
 .landing-qr .qr-version {
   display: block;
   max-width: 108px;
@@ -416,10 +418,10 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
-/* COADA textului care CURGE: containerul RTL taie overflow-ul din STÂNGA
-   (se vede mereu SFÂRȘITUL replicii), iar textul dinăuntru e IZOLAT LTR.
-   `unicode-bidi: isolate` împiedică motorul bidi să reordoneze caracterele
-   românești (â/ț/ș) sau să spargă cuvintele în litere individuale. */
+/* The TAIL of the FLOWING text: the RTL container clips the overflow on the
+LEFT (you always see the END of the reply), while the text inside is LTR-
+ISOLATED. `unicode-bidi: isolate` stops the bidi engine from reordering
+Romanian characters (â/ț/ș) or splitting words into individual letters. */
 .speech-tail {
   flex: 1;
   min-width: 0;
@@ -535,14 +537,14 @@ body {
 }
 
 /* ---------- contact form (royal theme) ---------- */
-/* Lacătul butonului Admin (27 iul): fereastra de tastare a secretului. Peste
-   admin-overlay (z 90 > 80) ca să nu poată fi acoperită de nimic din scenă. */
-/* ── FUNDALUL COMUN AL FERESTRELOR MODALE (unic, fără duplicate) ─────────────
-   Cele patru suprapuneri (lacăt, contact, admin, conversație) aveau EXACT
-   aceleași reguli copiate: poziționare fixă pe tot ecranul, centrare, blur.
-   Aici o singură dată; fiecare păstrează doar ce o deosebește (z-index,
-   opacitatea fundalului, tranziția). Dacă se schimbă aspectul modalelor, se
-   schimbă într-un singur loc — nu în patru, cu riscul de a diverge. */
+/* The Admin button lock (Jul 27): the secret-typing window. Above the
+admin-overlay (z 90 > 80) so nothing from the stage can cover it. */
+/* ── THE SHARED BACKDROP OF THE MODAL WINDOWS (unique, no duplicates) ──────
+The four overlays (lock, contact, admin, conversation) had EXACTLY the same
+copied rules: fixed full-screen positioning, centering, blur. Here, once;
+each keeps only what sets it apart (z-index, backdrop opacity, transition).
+If the modals' look changes, it changes in one place — not in four, with
+the risk of diverging. */
 .unlock-overlay,
 .contact-overlay,
 .admin-overlay,
@@ -845,16 +847,16 @@ body {
    top-left of the monitor, the status line sits bottom-left, the composer is
    bottom-center — so his corner is BOTTOM-RIGHT, clear of all of them. */
 .stage-canvas.pip {
-  /* Adrian, 11 iul: „mărește avatarul când e în dreapta jos la mărimea
-     inițială și fă-l să se vadă tot" — scala urcă de la 0.26 la 0.42
-     (silueta întreagă, vizibil mai mare), ancorat tot dreapta-jos, cu
-     aceeași gardă de 180px deasupra composer-ului. Poziția/scala REALĂ
-     vine ca stil inline din aranjarea lui Adrian (dublu-click). */
+  /* Adrian, Jul 11: „enlarge the avatar when it's bottom-right, to its initial
+  size, and make it fully visible” — the scale goes from 0.26 to 0.42 (full
+  silhouette, visibly larger), still anchored bottom-right, with the same
+  180px guard above the composer. The REAL position/scale comes as inline
+  style from Adrian's layout (double-click). */
   transform: translate(calc(58vw - 14px), calc(58vh - 180px)) scale(0.42);
 }
-/* MODUL DE ARANJARE (Adrian: „să rescalez eu avatarul și să-l poziționez cum
-   cred eu, dând dublu click pe el"): contur vizibil + fără tranziție (tragerea
-   trebuie să urmeze mâna instant), overlay care prinde gesturile. */
+/* LAYOUT MODE (Adrian: „let me rescale the avatar myself and position it as
+I see fit, by double-clicking it”): visible outline + no transition (the
+drag must follow the hand instantly), an overlay that catches the gestures. */
 .stage-canvas.editing {
   transition: none;
 }
@@ -877,16 +879,16 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* Degajare JOS pentru composer-ul fix (Adrian, 13 iul: „nu pot scrola" —
-     caseta de scris acoperea textul raportului). ~150px = înălțimea composer-
-     ului cu tot; acum documentul se termină DEASUPRA lui și se scrolează
-     complet, nimic nu mai rămâne ascuns în spatele casetei. */
+  /* BOTTOM clearance for the fixed composer (Adrian, Jul 13: „I can't scroll” —
+  the writing box covered the report's text). ~150px = the composer's full
+  height; now the document ends ABOVE it and scrolls completely, nothing stays
+  hidden behind the box anymore. */
   padding: 56px 16px 150px;
 }
-/* PE TELEFON bara de sus (fixă) se împachetează pe 2-3 rânduri (insigne +
-   butoane admin) și ajunge mult sub 56px — titlul panoului și butoanele lui
-   (A−/100%/A+) intrau SUB insigne (captura lui Adrian, 26 iul: „butoanele
-   îngrămădite"). Degajarea de sus crește cât bara împachetată. */
+/* ON THE PHONE the (fixed) top bar wraps onto 2-3 rows (badges + admin
+buttons) and reaches far below 56px — the panel's title and its buttons
+(A−/100%/A+) went UNDER the badges (Adrian's screenshot, Jul 26: „the
+crowded buttons”). The top clearance grows to match the wrapped bar. */
 @media (max-width: 640px) {
   .workspace-inner {
     padding-top: 195px;
@@ -959,10 +961,10 @@ body {
   border-radius: 12px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   overflow: hidden;
-  /* PAGINĂ COMPLETĂ (Adrian, 27 iul: „afișările pe monitor trebuie să fie pe
-     pagina completă"): fără flex aici, iframe-ul playground-ului (copil cu
-     flex:1 într-un părinte ne-flex) cădea pe înălțimea implicită de ~150px —
-     documentul HTML apărea ca o fâșie sus, restul paginii gol. */
+  /* FULL PAGE (Adrian, Jul 27: „the monitor displays must be on the full
+  page”): no flex here — the playground's iframe (a flex:1 child in a non-flex
+  parent) fell to the default ~150px height: the HTML document appeared as a
+  strip on top, the rest of the page empty. */
   display: flex;
   flex-direction: column;
 }
@@ -1004,7 +1006,7 @@ body {
   border-radius: 12px;
   background: #fff;
 }
-/* PANOUL CONSTRUCTORULUI pe monitor (Etapa 4b) — Preluat→pas→Gata/Eșuat. */
+/* THE BUILDER'S PANEL on the monitor (Stage 4b) — Preluat→pas→Gata/Eșuat. */
 .build-surface {
   overflow: auto;
   padding: 18px 20px;
@@ -1289,10 +1291,10 @@ body {
   gap: 8px;
   padding: 4px 2px;
   scrollbar-width: thin;
-  /* Adrian, 11 iul: „săgeata de mișcare sus-jos nu merge". Părintele .chat e
-     pointer-events:none (să nu acopere avatarul), bulele își reactivează
-     clickurile — dar BARA DE DERULARE aparține containerului ăstuia, care
-     ignora mouse-ul: săgețile/cursorul barei erau moarte. Reactivat aici. */
+  /* Adrian, Jul 11: „the up-down scroll arrow doesn't work”. The .chat parent
+  is pointer-events:none (so it doesn't cover the avatar), the bubbles
+  re-enable their clicks — but the SCROLLBAR belongs to this container, which
+  ignored the mouse: the bar's arrows/cursor were dead. Re-enabled here. */
   pointer-events: auto;
 }
 .chat-hint {
@@ -1301,9 +1303,9 @@ body {
   text-align: center;
   opacity: 0.7;
 }
-/* BULELE DE CHAT AU FOST ELIMINATE COMPLET (Adrian, 11 iul: „nimic în afara
-   barei aceleia de la creier") — tot chatul curge teletext în benzile 👤/🧠/K
-   de lângă composer; CSS-ul lor mort a fost șters odată cu JSX-ul. */
+/* THE CHAT BUBBLES WERE REMOVED COMPLETELY (Adrian, Jul 11: „nothing outside
+that band from the brain”) — all chat flows as teletext in the 👤/🧠/K bands
+next to the composer; their dead CSS was deleted together with the JSX. */
 /* ChatGPT-style composer: rounded glass container, + on the side, a round
    send button, and image thumbnails above the row. */
 .composer {
@@ -1325,11 +1327,12 @@ body {
 }
 .composer-input {
   flex: 1;
-  /* PANA „săgeata de trimis nu se vede pe telefon" (Adrian, 26 iul, captură):
-     fără min-width:0, inputul flex NU se strânge sub lățimea placeholder-ului
-     („Scrie-i lui Kelion — începe cu „K") → pe ecran îngust împingea afară
-     ultimul element din rând — chiar butonul de trimis. Regula flexbox: un
-     flex-item are min-width:auto implicit; aici trebuie explicit 0. */
+  /* THE „send arrow isn't visible on the phone” BUG (Adrian, Jul 26,
+  screenshot): without min-width:0, the flex input does NOT shrink below the
+  placeholder's width („Scrie-i lui Kelion — începe cu „K”) → on a narrow
+  screen it pushed the row's last element out — the send button itself. The
+  flexbox rule: a flex-item has min-width:auto by default; here it must be
+  explicitly 0. */
   min-width: 0;
   background: transparent;
   border: none;
@@ -1338,18 +1341,19 @@ body {
   font-size: 15px;
   padding: 6px 4px;
 }
-/* Volumul vocii: lățimea stă AICI (nu inline), ca telefonul să primească o
-   variantă îngustă — altfel slider-ul + micul mâncau tot rândul composer-ului. */
+/* The voice volume: the width lives HERE (not inline), so the phone gets a
+narrow variant — otherwise the slider + the mic ate the whole composer row. */
 .composer-volume {
   width: 64px;
   flex: 0 0 auto;
   align-self: center;
   accent-color: var(--accent, #7aa2ff);
 }
-/* PE TELEFON sliderul de volum DISPARE (Adrian, 26 iul: „ascunde pe telefon
-   buton volum și în loc să fie săgeata trimite" + captura cu butoanele
-   îngrămădite) — rămân doar micul și săgeata, cu loc de atins. Volumul se
-   reglează de pe telefon sau de pe desktop (valoarea e persistată). */
+/* ON THE PHONE the volume slider DISAPPEARS (Adrian, Jul 26: „hide the
+volume button on the phone and let the send arrow be there instead” + the
+screenshot with the crowded buttons) — only the mic and the arrow remain,
+with room to touch. The volume is adjusted from the phone or from the
+desktop (the value is persisted). */
 @media (max-width: 540px) {
   .composer-volume {
     display: none;
@@ -1358,12 +1362,13 @@ body {
 .composer-input::placeholder {
   color: var(--muted);
 }
-/* ── BUTOANELE ROTUNDE ALE COMPOZERULUI (unic, fără duplicate) ───────────────
-   Micul buton de microfon și butonul de trimitere au ACEEAȘI formă: cerc de
-   36px, fără chenar, centrat, care nu se întinde în bandă. Regulile erau
-   copiate; aici o dată. Ce le deosebește (culoare, mărimea semnului, grosimea)
-   rămâne la fiecare. Așa, dacă se schimbă mărimea butoanelor, banda nu mai poate
-   sări (bug-ul „benzile compozerului sar 38-46px" venea din reguli divergente). */
+/* ── THE COMPOSER'S ROUND BUTTONS (unique, no duplicates) ──────────────────
+The little microphone button and the send button share the SAME shape: a
+36px circle, no border, centered, that doesn't stretch into a band. The
+rules were copied; here, once. What sets them apart (color, sign size,
+weight) stays with each. This way, if the buttons' size changes, the band
+can no longer jump (the „composer bands jump 38-46px” bug came from
+divergent rules). */
 .composer-icon,
 .composer-send {
   border: none;
@@ -1665,9 +1670,10 @@ body {
   background: rgba(0, 0, 0, 0.55);
   transition: opacity 0.35s ease;
 }
-/* PREVIEW GEST (Adrian, 13 iul: „cum văd pe Kelion gestul?"): la „▶ Arată"
-   panoul se face aproape transparent + click-through ~3.5s, ca să vezi avatarul
-   din spate făcând gestul, apoi revine singur. */
+/* GESTURE PREVIEW (Adrian, Jul 13: „how do I see Kelion's gesture?”): on
+„▶ Arată” the panel goes almost transparent + click-through for ~3.5s, so
+you see the avatar behind performing the gesture, then it comes back by
+itself. */
 .admin-overlay.peek {
   opacity: 0.06;
   pointer-events: none;
@@ -1685,8 +1691,8 @@ body {
   border-radius: 16px;
   overflow: hidden;
 }
-/* FIX scroll (Adrian, 15 iul): conținutul tab-urilor din admin trebuie să
-   poată scroll; fiecare <section> din admin e scrollabil. */
+/* SCROLL FIX (Adrian, Jul 15): the admin tabs' content must be able to
+scroll; every <section> in admin is scrollable. */
 .admin-panel > section {
   flex: 1;
   overflow-y: auto;
@@ -1704,14 +1710,14 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  /* CHEIA: fără flex:1 + min-width:0, containerul creștea la lățimea tuturor
-     tab-urilor pe UN rând (max-content) și flex-wrap nu se declanșa niciodată —
-     de-aia Close ieșea din pagină. Acum ia DOAR lățimea disponibilă (minus
-     Close) și tab-urile chiar curg pe mai multe rânduri. */
+  /* THE KEY: without flex:1 + min-width:0, the container grew to the width of
+  ALL the tabs on ONE row (max-content) and flex-wrap never triggered — that's
+  why Close went off the page. Now it takes ONLY the available width (minus
+  Close) and the tabs really wrap onto several rows. */
   flex: 1;
   min-width: 0;
 }
-/* Butonul Close rămâne MEREU vizibil, sus-dreapta, nu se micșorează sub tab-uri. */
+/* The Close button stays ALWAYS visible, top-right, never shrinking under the tabs. */
 .admin-head > .ghost {
   flex-shrink: 0;
 }
@@ -1829,10 +1835,10 @@ body {
   padding: 5px 0;
   border-top: 1px solid var(--border);
 }
-/* `.fin-cards-4` a fost ștearsă odată cu cele patru fișe din tabul Bani
-   (30 iul): trei din cifrele lor erau scrise a doua oară mai jos, în pungă și
-   în tabelul de costuri. Regula rămasă (`.fin-cards`, 3 coloane) e folosită de
-   analiza vizitatorilor. */
+/* `.fin-cards-4` was deleted together with the four cards in the Money tab
+(Jul 30): three of their figures were written a second time below, in the
+wallet and in the cost table. The remaining rule (`.fin-cards`, 3 columns)
+is used by the visitor analytics. */
 /* Visitor analytics — professional two-line rows with a real flag image. */
 .flag-img {
   border-radius: 2px;
@@ -2045,8 +2051,9 @@ body {
   border-radius: 50%;
   transition: box-shadow 0.3s ease;
 }
-/* CREDIT USER pe cercul-logo (Adrian, 13 iul): verde = are credit; roșu PULSÂND
-   = credit epuizat, ca clientul să-și dea seama din cerc. Doar clienți. */
+/* USER CREDIT on the logo circle (Adrian, Jul 13): green = has credit;
+PULSING red = credit exhausted, so the client realizes from the circle.
+Clients only. */
 .brand-logo.credit-ok {
   box-shadow: 0 0 0 2px rgba(53, 208, 127, 0.9), 0 0 8px rgba(53, 208, 127, 0.6);
 }
@@ -2067,13 +2074,13 @@ body {
 /* Prepaid credit wallet (customer topbar) */
 .wallet {
   position: relative;
-  /* Topbar-ul e pointer-events:none (să nu acopere scena) și fiecare copil
-     interactiv REACTIVEAZĂ click-urile (.who, .cost-meter...). .wallet nu o
-     făcea → TOATE click-urile pe credit/„reîncarcă" treceau PRIN buton (Adrian,
-     24 iul: „apăs pe reîncarcă și nu se execută procedura"). */
+  /* The topbar is pointer-events:none (so it doesn't cover the stage) and
+  every interactive child RE-ENABLES clicks (.who, .cost-meter...). .wallet
+  didn't → ALL clicks on credit/„reîncarcă” went THROUGH the button (Adrian,
+  Jul 24: „I press top-up and the procedure doesn't run”). */
   pointer-events: auto;
 }
-/* Orice buton direct în topbar (fondul admin £, etc.) — la fel. */
+/* Any direct button in the topbar (the admin £ pool, etc.) — same. */
 .topbar > button {
   pointer-events: auto;
 }
@@ -2135,7 +2142,7 @@ body {
   background: #2a2f3a;
   margin: 4px 0;
 }
-/* „＋" evident pe pastila de credit, ca alimentarea să fie de neratat. */
+/* An obvious „＋” on the credit pill, so the top-up can't be missed. */
 .wallet-plus {
   margin-left: 5px;
   font-weight: 700;
@@ -2173,8 +2180,8 @@ body {
   border-color: #ff5b5b;
   color: #ffd0d0;
 }
-/* Varianta ÎN BARĂ (paywall permanent): în fluxul topbar-ului, nu absolută —
-   ca să nu acopere titlul tabului de pe monitor. */
+/* The IN-BAR variant (permanent paywall): in the topbar's flow, not absolute —
+so it doesn't cover the monitor tab's title. */
 .wallet-toast-inline {
   position: static;
   margin-left: 8px;
@@ -2288,7 +2295,7 @@ a.card-item:hover {
 .inbox-body { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; }
 .inbox-reply { font-size: 12.5px; color: #bfe8cf; margin-top: 6px; white-space: pre-wrap; }
 
-/* Buton microfon în composer (intrare audio → server → creier; zero voce în front) */
+/* Microphone button in the composer (audio in → server → brain; zero voice in the front) */
 .composer-mic {
   flex: 0 0 auto;
   width: 40px;
@@ -2312,7 +2319,7 @@ a.card-item:hover {
   animation: rec 1.2s ease-in-out infinite;
 }
 
-/* Bara „trimite toate cererile la creier" */
+/* The „send all requests to the brain” bar */
 .gaps-bulk {
   display: flex;
   align-items: center;
@@ -2334,9 +2341,9 @@ a.card-item:hover {
 .ws-zoom-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
 .doc-text { transition: font-size 0.12s ease; }
 
-/* Filigran versiune + dată update (Adrian, 7 iul): dovada vizibilă, pe toate
-   shell-urile, că ultima versiune e instalată. Discret, jos-dreapta, nu prinde
-   clicuri; pe monitoare mici rămâne citibil. */
+/* Version + update-date watermark (Adrian, Jul 7): the visible proof, on
+every shell, that the latest version is installed. Discreet, bottom-right,
+catches no clicks; stays readable on small monitors. */
 .app-watermark {
   position: fixed;
   right: 8px;
@@ -2352,8 +2359,8 @@ a.card-item:hover {
   user-select: none;
 }
 
-/* Pool AI — controale de adăugat/scos bani în tab-ul „Bani". */
-/* PUNGA LUI KELION — soldul real OpenRouter (creierul central), doar admin. */
+/* AI pool — add/remove money controls in the „Bani” tab. */
+/* KELION'S WALLET — the real OpenRouter balance (the central brain), admin only. */
 .or-wallet {
   margin-top: 14px;
   padding: 14px 16px;
@@ -2393,33 +2400,6 @@ a.card-item:hover {
 .or-wallet-sub a {
   color: #7db4ff;
 }
-/* NUMĂRUL CARDULUI VIRTUAL în panoul de bani. Câmpurile sunt iframe-uri Stripe:
-   le dăm doar cutia și înălțimea, conținutul îl desenează ei. */
-.card-reveal {
-  margin: 10px 0 4px;
-  padding: 12px 14px;
-  border: 1px solid rgba(125, 180, 255, 0.28);
-  border-radius: 10px;
-  background: rgba(125, 180, 255, 0.06);
-}
-.card-reveal-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.card-reveal-grid {
-  grid-template-columns: auto 1fr auto;
-  gap: 6px 12px;
-  align-items: center;
-  margin: 6px 0 8px;
-}
-.card-reveal-eticheta {
-  font-size: 12px;
-  color: var(--muted);
-}
-.card-reveal-camp {
-  min-height: 24px;
-}
 .pool-manage {
   margin-top: 14px;
   padding: 14px 16px;
@@ -2448,11 +2428,11 @@ a.card-item:hover {
   font-size: 15px;
   outline: none;
 }
-/* ── BUTOANELE DIN ADMIN (unic, fără duplicate) ──────────────────────────────
-   Butonul din panoul de fonduri și butonul de acțiune de pe rândul unui user au
-   ACEEAȘI ținută: chenar subțire, text semi-gros, fundal discret care se aprinde
-   la hover. Regulile erau copiate; aici o dată. Diferă doar mărimea (rotunjire,
-   padding, font) — asta rămâne la fiecare. */
+/* ── THE ADMIN BUTTONS (unique, no duplicates) ──────────────────────────────
+The button in the funds panel and the action button on a user's row share
+the SAME outfit: thin border, semi-bold text, discreet background that
+lights up on hover. The rules were copied; here, once. They differ only in
+size (rounding, padding, font) — that stays with each. */
 .pool-btn,
 .user-act {
   border: 1px solid var(--border);
@@ -2487,7 +2467,7 @@ a.card-item:hover {
   cursor: not-allowed;
 }
 
-/* Gestionare user — badge-uri + butoane pe rândul din tab-ul „Utilizatori". */
+/* User management — badges + buttons on the row in the „Utilizatori” tab. */
 .vis-actions {
   display: flex;
   gap: 8px;
@@ -2522,7 +2502,7 @@ a.card-item:hover {
   background: rgba(240, 90, 90, 0.14);
 }
 
-/* Vizitatori — „ce l-a interesat" (prima întrebare din demo). */
+/* Visitors — „what interested him” (the first question from the demo). */
 .vis-interest {
   margin-top: 6px;
   font-size: 13px;
@@ -2531,7 +2511,7 @@ a.card-item:hover {
   opacity: 0.9;
 }
 
-/* Landing — captură email (lead). */
+/* Landing — email capture (lead). */
 .landing-lead {
   margin: 18px 0 6px;
 }
@@ -2778,11 +2758,11 @@ a.card-item:hover {
   max-height: 52vh;
 }
 
-/* DICTARE LIVE — efect cinematografic „AI din filme": bandă terminal, text
-   monospace cu glow, cursor care clipește, punct roșu care pulsează. */
-/* REGULĂ FIXĂ (Adrian, 10 iul): orice bandă live e o SINGURĂ LINIE, înălțime
-   fixă — nu crește NICIODATĂ pe verticală, nu acoperă niciodată pagina. Text
-   lung derulează ca teletextul (.ticker), nu se rupe pe mai multe linii. */
+/* LIVE DICTATION — cinematic „movie AI” effect: terminal band, monospace
+text with glow, blinking cursor, pulsing red dot. */
+/* FIXED RULE (Adrian, Jul 10): any live band is a SINGLE LINE, fixed height
+— it NEVER grows vertically, never covers the page. Long text scrolls like
+teletext (.ticker), never breaks onto several lines. */
 .voice-live,
 .heard-band {
   display: flex;
@@ -2820,8 +2800,9 @@ a.card-item:hover {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.35; transform: scale(0.7); }
 }
-/* BARGRAF LA INTRAREA ÎN CREIER: confirmarea serverului cu textul EXACT predat
-   creierului la tura curentă — chihlimbar, distinct de banda verde de dictare. */
+/* BAR AT THE BRAIN'S INPUT: the server's confirmation with the EXACT text
+handed to the brain on the current turn — amber, distinct from the green
+dictation band. */
 .heard-band {
   background: linear-gradient(90deg, rgba(24, 16, 0, 0.88), rgba(20, 10, 0, 0.88));
   border: 1px solid rgba(255, 190, 80, 0.35);
@@ -2831,8 +2812,9 @@ a.card-item:hover {
   flex: 0 0 auto;
   font-size: 15px;
 }
-/* BECUL DE RELEASE-URI (Adrian, 11 iul: „un bec care pâlpâie, să știu să
-   verific") — pâlpâit vizibil dar nu enervant; dispare singur după decizie. */
+/* THE RELEASES LIGHTBULB (Adrian, Jul 11: „a blinking light, so I know to
+check”) — visible but not annoying blinking; it disappears by itself after
+the decision. */
 .rel-alert {
   display: inline-flex;
   align-items: center;
@@ -2851,9 +2833,8 @@ a.card-item:hover {
   0%, 54% { opacity: 1; }
   55%, 100% { opacity: 0.3; }
 }
-/* TOT CHATUL PE ROLURI, în spațiul benzilor (Adrian, 11 iul): tu = 👤 pe
-   verde, Kelion = pastila K pe albastru; nimic din chat nu se mai afișează
-   în afara acestui spațiu. */
+/* ALL CHAT BY ROLES, inside the bands' space (Adrian, Jul 11): you = 👤 on
+green, Kelion = the K pill on blue; no chat shows outside this space anymore. */
 .user-band {
   background: linear-gradient(90deg, rgba(0, 20, 12, 0.88), rgba(0, 14, 10, 0.88));
   border: 1px solid rgba(90, 220, 160, 0.3);
@@ -2884,8 +2865,8 @@ a.card-item:hover {
   font-size: 12px;
   line-height: 1;
 }
-/* COADĂ MESAJE SCRISE (Adrian, 11 iul): vizibile în timp ce așteaptă tura activă,
-   ca să nu pară pierdute. Culoare neutră/albastră, distinctă de voci. */
+/* TYPED MESSAGES QUEUE (Adrian, Jul 11): visible while they wait for the
+active turn, so they don't look lost. Neutral/blue color, distinct from the voices. */
 .queued-band {
   display: flex;
   align-items: center;
@@ -2911,8 +2892,8 @@ a.card-item:hover {
 .queued-band .ticker-text {
   color: #a8d8ff;
 }
-/* TICKER / TELETEXT: o singură linie, care derulează în loc să se rupă sau să
-   crească pagina. Text scurt (încape) → static; text lung → derulează stânga. */
+/* TICKER / TELETEXT: a single line, which scrolls instead of breaking or
+growing the page. Short text (fits) → static; long text → scrolls left. */
 .ticker {
   flex: 1;
   min-width: 0;
@@ -2962,8 +2943,8 @@ a.card-item:hover {
 @media (max-width: 640px) {
 }
 
-/* Linkul „Install" de sub fiecare cod QR (Adrian, 26 iul) — click direct la
-   instalare pentru cine e deja pe dispozitivul țintă; scanarea rămâne la fel. */
+/* The „Install” link under each QR code (Adrian, Jul 26) — direct click to
+install for anyone already on the target device; scanning stays the same. */
 .qr-install {
   display: inline-block;
   margin-top: 6px;
@@ -2977,8 +2958,8 @@ a.card-item:hover {
 }
 .qr-install:hover { filter: brightness(1.1); }
 
-/* Lupa de lângă Install — mărește codul pentru scanat de pe alt dispozitiv
-   (codul însuși e acum buton de INSTALARE, per ordinul din 26 iul). */
+/* The magnifier next to Install — enlarges the code for scanning from
+another device (the code itself is now an INSTALL button, per the Jul 26 order). */
 .qr-zoom-btn {
   margin-top: 4px;
   margin-left: 6px;
@@ -2991,7 +2972,7 @@ a.card-item:hover {
   cursor: pointer;
 }
 
-/* ── Pagina dedicată /login (26 iul) ─────────────────────────────────────── */
+/* ── Dedicated /login page (Jul 26) ─────────────────────────────────────── */
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -3014,9 +2995,9 @@ a.card-item:hover {
 }
 .login-brand { font-size: 22px; font-weight: 800; color: var(--accent, #7aa2ff); text-decoration: none; }
 
-/* Butonul de întoarcere la pagina anterioară (Adrian, 30 iul): pe aplicația
-   instalată nu există bara browserului, deci fără el userul rămâne blocat în
-   pagină. Discret, sus-stânga în card, aceeași formă peste tot. */
+/* The back-to-previous-page button (Adrian, Jul 30): the installed app has
+no browser bar, so without it the user stays stuck on the page. Discreet,
+top-left in the card, the same shape everywhere. */
 .back-link {
   display: inline-flex; align-items: center; gap: 6px;
   background: none; border: 0; padding: 4px 0; margin-bottom: 10px;
@@ -3049,7 +3030,7 @@ a.card-item:hover {
 .login-legal { margin-top: 8px; font-size: 12px; color: var(--muted, #9aa3b5); }
 .login-legal a { color: inherit; }
 
-/* Pagina publică /credite (26 iul) — pachetele pe cardul de login. */
+/* The public /credite page (Jul 26) — the packs on the login card. */
 .credits-blurb { font-size: 13.5px; color: var(--muted, #9aa3b5); margin: 0 0 6px; }
 .credits-pack {
   display: flex; justify-content: space-between; align-items: center;
@@ -3061,8 +3042,8 @@ a.card-item:hover {
 .credits-pack-price { color: var(--accent, #7aa2ff); font-weight: 800; }
 
 /* ── FLUIDITATE (audit 27 iul) ─────────────────────────────────────────── */
-/* Bara „Versiune nouă" — anunță fără să taie lucrul; resetul dur se aplică
-   la buton sau automat când tab-ul e ascuns (App.tsx). */
+/* The „Versiune nouă” bar — announces without cutting the work; the hard
+reset applies on the button or automatically when the tab is hidden (App.tsx). */
 .update-banner {
   position: fixed;
   top: 12px;
@@ -3097,8 +3078,8 @@ a.card-item:hover {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* Ferestrele plutitoare intră lin, nu „pocnesc" (defectul 3 din audit):
-   aceeași intrare scurtă pe toate overlay-urile care se montează condiționat. */
+/* The floating windows enter smoothly, they don't „pop” (defect 3 from the
+audit): the same short entry on all conditionally-mounted overlays. */
 .unlock-overlay, .contact-overlay, .convo-overlay, .wallet-menu, .fn-menu {
   animation: overlay-in 0.22s ease-out;
 }
@@ -3112,7 +3093,7 @@ a.card-item:hover {
   }
 }
 
-/* Cipul de viteză reală — dovada „primul cuvânt sub 1s", discret lângă chat. */
+/* The real-speed chip — the proof of „first word under 1s”, discreet next to the chat. */
 .latency-chip {
   position: absolute;
   top: -26px;
@@ -3127,16 +3108,16 @@ a.card-item:hover {
   pointer-events: none;
 }
 
-/* FLUIDITATE #9: teletextul final nu se mai termină pe GOL — bucla continuă
-   (textul reintră prin dreapta, ca un teletext adevărat). */
+/* FLUIDITY #9: the final teletext no longer ends on EMPTY — the loop is
+continuous (the text re-enters from the right, like a real teletext). */
 .ticker-text { animation-iteration-count: infinite; }
-/* Culorile benzilor se aplică și cozii fixe (dictare/👤/🧠 au trecut pe
-   speech-tail — fluiditate #9). */
+/* The bands' colors also apply to the fixed tail (dictation/👤/🧠 moved to
+speech-tail — fluidity #9). */
 .voice-live .speech-tail-text { color: #7dffc0; text-shadow: 0 0 6px rgba(90, 255, 180, 0.5); }
 .heard-band .speech-tail-text { color: #ffd9a0; text-shadow: 0 0 6px rgba(255, 200, 120, 0.35); }
 .user-band .speech-tail-text { color: #d9ffe9; }
-/* FLUIDITATE #8: benzile compozerului INTRĂ crescând (180ms), nu prin salt de
-   38-46px al întregii coloane de chat. */
+/* FLUIDITY #8: the composer bands ENTER by growing (180ms), not through a
+38-46px jump of the whole chat column. */
 .voice-live, .heard-band, .queued-band, .composer-atts {
   animation: band-in 0.18s ease-out;
 }
@@ -3149,7 +3130,7 @@ a.card-item:hover {
   .ticker-text { animation-iteration-count: 1; }
 }
 
-/* Legăturile alternative de sub butonul Google (login email + prețuri publice). */
+/* The alternative links under the Google button (email login + public prices). */
 .landing-alt-links {
   display: flex;
   align-items: center;
@@ -3166,19 +3147,20 @@ a.card-item:hover {
 .landing-alt-links span { color: #5c6478; }
 
 
-/* Defalcarea pungii unice (Admin → Bani): din ce surse reale s-a adunat cifra.
-   Fără ea, un total e doar încă un număr în care trebuie să ai încredere. */
+/* The single wallet's breakdown (Admin → Money): which real sources the
+figure added up from. Without it, a total is just another number you have
+to trust. */
 .pool-parts { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
 
-/* ── MANUALUL (public) ──────────────────────────────────────────────────────
-   Butonul dreapta-sus pe pagina de start + pagina propriu-zisă. Manualul se
-   citește, deci fundal clar și rânduri scurte — nu tema închisă a aplicației.
+/* ── THE MANUAL (public) ────────────────────────────────────────────────────
+Top-right button on the start page + the page itself. The manual is read,
+so a light background and short lines — not the app's dark theme.
 
-   NUMELE CLASEI E `-btn` DINTR-UN MOTIV: `.landing-manual` EXISTA DEJA — e
-   lista de capabilități din pagina de start. Am refolosit numele din greșeală
-   și stilul de mai jos (position: absolute) a smuls lista din pagină și a
-   trântit-o peste titlu: „Your brilliant assistant" a ajuns ilizibil în
-   producție. O clasă nouă nu se botează niciodată fără să cauți numele întâi. */
+THE CLASS NAME IS `-btn` FOR A REASON: `.landing-manual` ALREADY EXISTED —
+it's the capabilities list on the start page. I reused the name by mistake
+and the style below (position: absolute) ripped the list out of the page
+and slammed it over the title: „Your brilliant assistant” became illegible
+in production. A new class is never named without searching the name first. */
 .landing-manual-btn {
   position: absolute; top: 18px; right: 20px; z-index: 6;
   padding: 8px 14px; border-radius: 999px;
@@ -3189,9 +3171,9 @@ a.card-item:hover {
 .landing-manual-btn:hover { background: rgba(24,28,38,.8); border-color: rgba(255,255,255,.34); }
 
 .manual-page {
-  /* SCROLL (Adrian: „la afișare nu ai scroll"). Shell-ul aplicației are
-     `body { overflow: hidden }`, deci o pagină care CREȘTE e pur și simplu
-     tăiată. Înălțime mărginită + derulare proprie: cartea se citește. */
+  /* SCROLL (Adrian: „on display you have no scroll”). The app shell has
+  `body { overflow: hidden }`, so a page that GROWS is simply cut. Bounded
+  height + own scrolling: the book reads. */
   height: 100%;
   overflow-y: auto;
   background: #f6f7f9;
@@ -3201,16 +3183,17 @@ a.card-item:hover {
 .manual-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
 .manual-bar .login-brand { margin-right: auto; }
 
-/* ── CARTEA ────────────────────────────────────────────────────────────────
-   Adrian: „când dai pe manual trebuie să fie ca o carte cu efect de dat pagina."
-   O filă pe ecran, cu cotor și umbră; întoarcerea rotește fila pe axa cotorului,
-   ca hârtia. Perspectiva stă pe container, altfel rotația arată plată. */
+/* ── THE BOOK ──────────────────────────────────────────────────────────────
+Adrian: „when you open the manual it must be like a book with a page-turn
+effect.” One leaf per screen, with a spine and a shadow; turning rotates
+the leaf on the spine's axis, like paper. The perspective sits on the
+container, otherwise the rotation looks flat. */
 .manual-book { perspective: 2000px; margin: 0 auto; }
 
-/* Cartea. Era text negru pe alb, fara coperta si fara repere ("nivel de clasa
-   pregatitoare", Adrian, 30 iul). Acum: cotor cu grosime, pictograma pe fiecare
-   capitol, initiala ca la tipar. Fara imagini externe: nimic nu se rupe la
-   deploy si nu cere nicio cerere de retea. */
+/* The book. It was black text on white, no cover and no landmarks
+("kindergarten level", Adrian, Jul 30). Now: a spine with thickness, an
+icon on each chapter, a drop cap like in print. No external images: nothing
+breaks at deploy and no network request is needed. */
 .manual-leaf {
   position: relative;
   background: #fffdfa;
@@ -3234,8 +3217,9 @@ a.card-item:hover {
 }
 .manual-leaf.turn-inainte { animation: fila-inainte .5s cubic-bezier(.22,.61,.36,1) both; }
 .manual-leaf.turn-inapoi { transform-origin: right center; animation: fila-inapoi .5s cubic-bezier(.22,.61,.36,1) both; }
-/* SENSUL, corectat dupa ce Adrian l-a vazut pe viu: pagina se dadea invers.
-   Cotorul e in STANGA; inainte, fila vine dinspre dreapta si se aseaza pe cotor. */
+/* THE DIRECTION, corrected after Adrian saw it live: the page turned the
+wrong way. The spine is on the LEFT; going forward, the leaf comes from the
+right and settles onto the spine. */
 @keyframes fila-inainte {
   from { transform: rotateY(52deg); opacity: .2; }
   to { transform: rotateY(0deg); opacity: 1; }
@@ -3291,10 +3275,10 @@ a.card-item:hover {
 .manual-table tr:hover td { background: #fbf9f5; }
 .manual-say { color: #2f6df6; font-style: italic; }
 
-/* FILA „cum călătorește o cerere" — singura pagină a cărții care se uită ca o
-   schemă, nu ca text (Adrian: „mă așteptam să fie cu imagini, mult mai
-   profesional"). Fără poze de descărcat: patru cartonașe numerotate, care se
-   rearanjează singure pe telefon. */
+/* THE „how a request travels” LEAF — the only page of the book that looks
+like a diagram, not like text (Adrian: „I expected it with images, much
+more professional”). No pictures to download: four numbered cards, which
+rearrange by themselves on the phone. */
 .manual-pasi {
   list-style: none; margin: 14px 0 0; padding: 0;
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px;
