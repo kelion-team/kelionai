@@ -8,25 +8,27 @@ import {
   type VoiceFeatureMeta,
 } from '../db.js'
 
-// Sistem de identificare a vorbitorului după timbru vocal.
-// Frontul extrage features 100% client-side (zero cost) din fiecare frază
-// înregistrată; backendul le compară cu amprentele salvate în Postgres și
-// adaugă contextul (nume, gen, voce verificată admin) în promptul creierului.
+// Speaker identification system by voice timbre.
+// The frontend extracts features 100% client-side (zero cost) from each
+// recorded phrase; the backend compares them with the voiceprints saved in
+// Postgres and adds the context (name, gender, admin-verified voice) to the
+// brain's prompt.
 
 export interface VoiceFeatures {
-  /** Vectorul normalizat folosit la comparare. */
+  /** The normalized vector used for comparison. */
   vector: number[]
-  /** Metadate interpretabile (Hz, proporții etc.). */
+  /** Interpretable metadata (Hz, ratios etc.). */
   meta: VoiceFeatureMeta
-  /** Mostră audio scurtă (data-URL webm/opus) a frazei — pentru butonul „play" din admin. */
+  /** A short audio sample (webm/opus data-URL) of the phrase — for the "play" button in admin. */
   clip?: string
 }
 
-// Rutele /save și /identify au fost SCOASE (auditul din 27 iul: zero apelanți —
-// înrolarea și potrivirea se fac inline pe server, în chat.ts și realtime.ts).
+// The /save and /identify routes were REMOVED (the 27 Jul audit: zero
+// callers — enrolment and matching happen inline on the server, in chat.ts
+// and realtime.ts).
 
 export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
-  // Întoarce amprenta userului logat (sau null dacă nu s-a înrolat încă).
+  // Returns the logged-in user's voiceprint (or null if not enrolled yet).
   app.get('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
@@ -34,7 +36,7 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ voiceprint: v })
   })
 
-  // Lista tuturor amprentelor — doar admin.
+  // The list of all voiceprints — admin only.
   app.get('/api/voiceprint/list', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -42,8 +44,9 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ rows })
   })
 
-  // Mostra audio a unei amprente — doar admin. Întoarce data-URL-ul salvat ca să
-  // poată fi redat cu butonul „play" din panou (Adrian, 14 iul).
+  // The audio sample of a voiceprint — admin only. Returns the saved
+  // data-URL so it can be played with the panel's "play" button (Adrian,
+  // 14 Jul).
   app.get<{ Querystring: { email?: string } }>('/api/voiceprint/audio', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -54,7 +57,7 @@ export async function voiceprintRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ clip })
   })
 
-  // Șterge amprenta vocală a userului logat (sau a altui user, doar pentru admin).
+  // Deletes the logged-in user's voiceprint (or another user's, admin only).
   app.delete<{ Body: { email?: string } }>('/api/voiceprint/me', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })

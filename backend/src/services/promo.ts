@@ -1,13 +1,13 @@
-// ── CLIPUL PROMO — pregătirea, într-o SINGURĂ sursă (chat + voce) ─────────────
-// §1 „ce poate scrisul, poate și vocea": `prepare_promo_clip` era ULTIMA
-// capabilitate adormită pe voce (din 38). Logica trăia inline în chat.ts, deci
-// vocea n-avea cum s-o folosească. Aici o dată, chemată de ambele rute
-// (principiul permanent: unic, fără duplicate).
+// ── THE PROMO CLIP — the preparation, in ONE SINGLE source (chat + voice) ─
+// §1 "what typing can do, the voice can do too": `prepare_promo_clip` was the
+// LAST capability asleep on the voice (out of 38). The logic lived inline in
+// chat.ts, so the voice had no way to use it. Here once, called by both
+// routes (the permanent principle: unique, no duplicates).
 //
-// Rezultatul e „forma clientului": ChatPanel armează butonul Rec din cadrul
-// {promo} (armPromo), iar scenele trebuie să fie {at,title,url,close} — NU forma
-// brută {at_seconds,kind,query} (QA 24 iul: altfel toate timerele ieșeau NaN și
-// scenele map/weather rămâneau fără URL).
+// The result is "the client's shape": ChatPanel arms the Rec button from the
+// {promo} frame (armPromo), and the scenes must be {at,title,url,close} —
+// NOT the raw {at_seconds,kind,query} shape (QA 24 Jul: otherwise all timers
+// came out NaN and the map/weather scenes were left without a URL).
 import { promoSceneUrl } from './google.js'
 
 export interface PromoScene {
@@ -25,7 +25,7 @@ export interface PromoPayload {
   scenes: PromoScene[]
 }
 
-/** Validează + construiește clipul promo. `error` = motiv de refuz, altfel payload. */
+/** Validates + builds the promo clip. `error` = refusal reason, otherwise payload. */
 export async function buildPromo(
   args: Record<string, unknown>,
 ): Promise<{ error: string } | { promo: PromoPayload; monitorUrl: string | null }> {
@@ -35,7 +35,7 @@ export async function buildPromo(
   const lang = String(args.lang ?? 'ro-RO')
   const scenes = Array.isArray(args.scenes) ? args.scenes : []
   if (!subject || !script) return { error: 'missing_params' }
-  // Scenele-imagine trebuie să vină din generate_image (URL propriu), nu din web.
+  // Image scenes must come from generate_image (own URL), not from the web.
   for (const s of scenes) {
     const scene = s as { kind?: string; url?: string }
     if (scene.kind === 'image' && !scene.url?.startsWith('/api/image/')) {
@@ -51,7 +51,7 @@ export async function buildPromo(
     else if (s.kind === 'map' || s.kind === 'weather') {
       const u = await promoSceneUrl(s.kind, String(s.query ?? subject))
       if (u) clientScenes.push({ at, title, url: u })
-    } else clientScenes.push({ at, title, close: true }) // avatar → ecran liber
+    } else clientScenes.push({ at, title, close: true }) // avatar → clear screen
   }
   return {
     promo: { subject, duration, script, lang, scenes: clientScenes },
