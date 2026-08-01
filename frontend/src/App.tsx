@@ -17,9 +17,9 @@ import {
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<User | null>(null)
-  // Versiunea DEPLOY-ului de pe server — pe filigran, ca dovada versiunii să se
+  // The server's DEPLOY version — on the watermark, so proof of the version
   // schimbe la ORICE publicare (ordinul lui Adrian, 10 iul), nu doar la build
-  // de interfață. Eticheta se compune cu versionLabel (aceeași sursă ca sub QR).
+  // of interface. The label is composed with versionLabel (same source as under the QR).
   const [srv, setSrv] = useState<ServerVersion | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -44,12 +44,13 @@ export default function App() {
     }
   }, [error])
 
-  // RUTINA DE VERSIUNE, ÎMBLÂNZITĂ (auditul de fluiditate, 27 iul — defectul
-  // nr. 1: reset-ul dur AUTOMAT tăia conversația/vocea în viu, fără avertisment
-  // — exact „se rupe pe undeva"). Regula rămâne „mereu ultima versiune", dar
-  // aplicarea nu mai calcă peste lucrul în desfășurare: deploy nou → bară
-  // vizibilă „Versiune nouă" cu buton; resetul dur se aplică AUTOMAT doar când
-  // tab-ul e ascuns (userul e plecat — nu simte nimic) sau la apăsarea lui.
+  // THE VERSION ROUTINE, TAMED (fluidity audit, Jul 27 — defect no. 1: the
+  // AUTOMATIC hard reset cut the conversation/voice live, without warning
+  // — exactly "it breaks somewhere"). The rule stays "always the latest
+  // version", but applying no longer tramples work in progress: new deploy →
+  // visible "New version" bar with a button; the hard reset applies
+  // AUTOMATICALLY only when the tab is hidden (the user is away — feels
+  // nothing) or when they press it.
   const [updateReady, setUpdateReady] = useState(false)
   useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
   useEffect(() => {
@@ -62,12 +63,12 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', applyIfHidden)
   }, [updateReady])
 
-  // FILIGRAN MEREU LA ZI (Adrian, 10 iul: „filigranul nou să apară automat la
-  // orice update, în interiorul aplicațiilor" — e scris dar nu se reflecta:
-  // versiunea se citea o singură dată la pornire). Acum reîmprospătim ștampila
-  // deploy-ului periodic + când tab-ul redevine vizibil, așa filigranul din
-  // ORICE shell (PWA/TWA din magazine, demo, clienți) se schimbă singur la
-  // fiecare publicare, fără reîncărcare. Aceeași sursă ca sub QR (fără dublare).
+  // WATERMARK ALWAYS UP TO DATE (Adrian, Jul 10: "the new watermark should
+  // appear automatically on any update, inside the apps" — it was written but
+  // not reflected: the version was read once at startup). Now we refresh the
+  // deploy stamp periodically + when the tab becomes visible again, so the
+  // watermark in ANY shell (store PWA/TWA, demo, clients) changes by itself on
+  // every publish, without reload. Same source as under the QR (no duplication).
   useEffect(() => {
     let alive = true
     const refresh = (): void => {

@@ -1,11 +1,11 @@
-// Recunoașterea persoanei după față — descriptor 128-d (face-api), 100%
-// client-side. Adrian: „camera pornită → captură automată la voce, fără buton,
-// tot în paralel să NU încetinească chatul." De aceea:
-//  - face-api se încarcă LAZY, doar când pornește camera (nu umflă bundle-ul,
-//    păstrează pornirea chat/voce sub 1s);
-//  - eșantionarea rulează în FUNDAL (timer), decuplată de trimiterea mesajului;
-//  - chatul ia doar ultimul descriptor GATA prin getPendingFaceDescriptor()
-//    (instant, nu așteaptă nicio inferență) — exact ca voiceFeatures.
+// Person recognition by face — 128-d descriptor (face-api), 100%
+// client-side. Adrian: "camera on → automatic capture on voice, no button,
+// all in parallel so it does NOT slow down chat." That's why:
+//  - face-api loads LAZILY, only when the camera starts (doesn't bloat the
+//    bundle, keeps chat/voice startup under 1s);
+//  - sampling runs in the BACKGROUND (timer), decoupled from message sending;
+//  - chat only takes the latest READY descriptor via getPendingFaceDescriptor()
+//    (instant, waits for no inference) — exactly like voiceFeatures.
 
 type FaceApi = typeof import('@vladmandic/face-api')
 
@@ -13,7 +13,7 @@ let api: FaceApi | null = null
 let modelsReady = false
 let loading = false
 
-// Ultimul descriptor calculat în fundal (proaspăt). Chatul îl citește instant.
+// The latest descriptor computed in the background (fresh). Chat reads it instantly.
 let latest: { descriptor: number[]; photo: string; at: number } | null = null
 
 async function ensureApi(): Promise<FaceApi | null> {
@@ -30,7 +30,7 @@ async function ensureApi(): Promise<FaceApi | null> {
     modelsReady = true
     return mod
   } catch {
-    // Fără recunoaștere facială — chatul merge exact ca înainte (fail-open).
+    // Without face recognition — chat works exactly as before (fail-open).
     return null
   } finally {
     loading = false
@@ -41,9 +41,9 @@ const SAMPLE_EVERY_MS = 1500 // o inferență la ~1.5s cât e camera pornită
 const FRESH_MS = 8000 // un descriptor mai vechi de atât e considerat expirat
 
 /**
- * Pornește eșantionarea feței în fundal din elementul <video> al camerei.
- * `capture` întoarce un JPEG mic al cadrului curent (miniatura salvată).
- * Întoarce o funcție de oprire. NIMIC din asta nu blochează chatul.
+ * Starts background face sampling from the camera's <video> element.
+ * `capture` returns a small JPEG of the current frame (the saved thumbnail).
+ * Returns a stop function. NOTHING here blocks chat.
  */
 export function startFaceSampling(
   video: HTMLVideoElement,
@@ -73,7 +73,7 @@ export function startFaceSampling(
           }
         }
       } catch {
-        /* un cadru prost nu oprește bucla */
+        /* a bad frame doesn't stop the loop */
       }
       if (!stopped) timer = setTimeout(() => void tick(), SAMPLE_EVERY_MS)
     }
@@ -91,9 +91,9 @@ export function startFaceSampling(
 }
 
 /**
- * Ultimul descriptor facial gata (proaspăt), pentru atașare la /api/chat.
- * Instant — nu declanșează nicio inferență, nu așteaptă nimic. null dacă nu e
- * cameră pornită, nu s-a prins nicio față, sau descriptorul e prea vechi.
+ * The latest ready (fresh) face descriptor, for attaching to /api/chat.
+ * Instant — triggers no inference, waits for nothing. null if no camera is
+ * on, no face was caught, or the descriptor is too old.
  */
 export function getPendingFaceDescriptor(): { descriptor: number[]; photo: string } | null {
   if (!latest) return null

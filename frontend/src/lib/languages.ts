@@ -8,10 +8,10 @@ export interface SpeechLang {
   readonly label: string
 }
 
-// TOATE limbile rămân (ordinul lui Adrian, 25 iul: „îmi lași toate limbile,
-// nu mai scoți nimic"). Tăierea la 7 făcută mai devreme în aceeași zi a fost
-// GREȘITĂ — micșora produsul în loc să repare problema reală (deriva automată
-// a limbii, care e gardată separat în services/lang.ts pe server).
+// ALL languages stay (Adrian's order, Jul 25: "leave me all the languages,
+// don't remove anything"). The cut to 7 done earlier the same day was WRONG
+// — it shrank the product instead of fixing the real problem (automatic
+// language drift, which is guarded separately in services/lang.ts on the server).
 export const LANGS: readonly SpeechLang[] = [
   { code: 'en-US', label: 'English' },
   { code: 'ro-RO', label: 'Română' },
@@ -42,10 +42,11 @@ export const LANGS: readonly SpeechLang[] = [
   { code: 'vi-VN', label: 'Tiếng Việt' },
 ]
 
-// Limba de pornire a recognizer-ului (regula finală, Adrian 24 iul: „default
-// ENGLEZĂ; după identificarea limbii se aplică procedura existentă"). FĂRĂ
-// ghicit din limba browserului: pornim de la limba IDENTIFICATĂ (uiLang vine
-// din oglinda serverului), altfel engleză. Comutarea ulterioară o face frame-ul
+// The recognizer's starting language (the final rule, Adrian Jul 24:
+// "default ENGLISH; after language identification the existing procedure
+// applies"). NO guessing from the browser language: we start from the
+// IDENTIFIED language (uiLang comes from the server mirror), otherwise
+// English. The later switching is done by the frame
 // {lang} de la server (applyLang), nu noi aici.
 export function defaultSpeechLang(uiLang: string): string {
   const lc = (uiLang || 'en').toLowerCase()

@@ -1,13 +1,13 @@
-// ── ÎNTOARCEREA LA PAGINA ANTERIOARĂ ────────────────────────────────────────
+// ── BACK TO THE PREVIOUS PAGE ─────────────────────────────────────────────
 //
-// Adrian, 30 iul: „panourile trebuie să aibă buton de back în pagina anterioară".
-// Până acum, ajuns pe /login sau /credite, singura ieșire era logo-ul (care duce
-// mereu în pagina de start, nu de unde ai venit) sau butonul browserului — care
-// pe aplicația instalată, în fereastră fără bară, nici nu există.
+// Adrian, Jul 30: "the panels must have a back button to the previous page".
+// Until now, once on /login or /credite, the only way out was the logo (which
+// always goes to the start page, not where you came from) or the browser
+// button — which on the installed app, in a chromeless window, doesn't even exist.
 //
-// O singură componentă pentru toate paginile (principiul permanent: unic, fără
-// duplicate). Se întoarce EXACT de unde ai venit dacă există istoric în acest
-// tab; altfel cade pe pagina de start, ca să nu ducă nicăieri.
+// A single component for all pages (the permanent principle: unique, no
+// duplicates). It goes back EXACTLY where you came from if this tab has
+// history; otherwise it falls back to the start page, so it never leads nowhere.
 import React from 'react'
 
 export default function BackLink({
@@ -15,14 +15,14 @@ export default function BackLink({
   onBack,
 }: {
   label?: string
-  /** Panourile nu sunt pagini: „înapoi" înseamnă închide-mă și lasă-mă unde
-   *  eram. Când e dat, el decide; altfel ne întoarcem în istoricul paginii. */
+  /** Panels are not pages: "back" means close-me and leave-me where I was.
+   *  When given, it decides; otherwise we go back into the page history. */
   onBack?: () => void
 }): React.JSX.Element {
   const inapoi = (): void => {
     if (onBack) return onBack()
-    // history.length > 1 = am ajuns aici dintr-o altă pagină din acest tab.
-    // Deschis direct din link/marcaj → nu există „înapoi", mergem acasă.
+    // history.length > 1 = we got here from another page in this tab.
+    // Opened directly from a link/bookmark → there is no "back", we go home.
     if (window.history.length > 1) window.history.back()
     else window.location.href = '/'
   }

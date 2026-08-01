@@ -1,11 +1,12 @@
-// PAGINA DEDICATĂ DE LOGIN (Adrian, 26 iul: „să avem pagină dedicată de login...
-// da, pornește, inclusiv să poată crea"). Toate căile într-un singur loc:
-//   • email + parolă (login SAU creare cont — comutator)
-//   • link magic pe email (fără parolă; contul se creează din zbor la click)
-//   • resetare parolă (?reset=TOKEN vine din emailul de resetare)
-//   • Google (procedura completă — alegerea contului + reautentificare)
-// Identitatea = emailul, deci contul local are TOATE funcțiile (mai puțin
-// skill-urile pe datele Google personale, imposibile fără cont Google).
+// THE DEDICATED LOGIN PAGE (Adrian, Jul 26: "we should have a dedicated
+// login page... yes, go ahead, including being able to create"). All paths in
+// one place:
+//   • email + password (login OR account creation — switch)
+//   • magic link by email (no password; the account is created on the fly at click)
+//   • password reset (?reset=TOKEN comes from the reset email)
+//   • Google (the full procedure — account chooser + re-authentication)
+// Identity = the email, so the local account has ALL features (except the
+// skills on personal Google data, impossible without a Google account).
 import React, { useState } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
 import BackLink from '../components/BackLink'

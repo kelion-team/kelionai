@@ -1,24 +1,25 @@
-// ── SONDAREA PERIODICĂ A UNUI ENDPOINT — o singură dată ──────────────────────
+// ── PERIODIC POLLING OF AN ENDPOINT — once only ───────────────────────────
 //
 // DE CE (Lotul E din PROCEDURA-REFACERE-CLONE.md; Adrian: „toate trebuie pe 0"):
-// `Stage.tsx` avea DOUĂ efecte identice — creditul creierului (admin) și creditul
-// clientului. Amândouă: cer un JSON, îl aplică doar dacă componenta mai trăiește,
-// repetă la 30s, curăță intervalul la ieșire. Erau 11 linii copiate, iar riscul
-// real e scurgerea: dacă cineva uita `alive` sau `clearInterval` într-una din
-// copii, rămâneau cereri care scriau în componente demontate.
+// `Stage.tsx` had TWO identical effects — the brain credit (admin) and the
+// client credit. Both: fetch a JSON, apply it only if the component is still
+// alive, repeat every 30s, clean up the interval on exit. They were 11 copied
+// lines, and the real risk is leakage: if someone forgot `alive` or
+// `clearInterval` in one of the copies, requests kept writing into unmounted
+// components.
 //
-// Aici o dată, corect: garda `alive` și oprirea intervalului sunt garantate.
+// Here once, correctly: the `alive` guard and the interval stop are guaranteed.
 
 import { useEffect } from 'react'
 
 /**
- * Cere periodic un JSON de la `url` și predă rezultatul lui `apply`.
+ * Periodically fetches a JSON from `url` and hands the result to `apply`.
  *
- * - `enabled=false` → nu pornește deloc (ex. ruta e doar pentru admin);
- * - prima cerere pleacă imediat, apoi se repetă la `everyMs`;
- * - la demontare: intervalul se oprește ȘI un răspuns întârziat e ignorat;
- * - orice eroare (rețea sau status ne-ok) se înghite — o sondare de fundal nu
- *   are voie să spargă ecranul.
+ * - `enabled=false` → doesn't start at all (e.g. the route is admin-only);
+ * - the first request fires immediately, then repeats every `everyMs`;
+ * - on unmount: the interval stops AND a late response is ignored;
+ * - any error (network or non-ok status) is swallowed — a background poll
+ *   must never break the screen.
  */
 export function usePolledJson<T>(
   url: string,
@@ -43,8 +44,8 @@ export function usePolledJson<T>(
       alive = false
       window.clearInterval(id)
     }
-    // `apply` e o funcție definită la fiecare randare; o urmărim prin `enabled`
-    // și `url`, ca sondarea să nu repornească la fiecare randare.
+    // `apply` is a function defined on every render; we track it through
+    // `enabled` and `url`, so polling doesn't restart on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, enabled, everyMs])
 }

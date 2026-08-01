@@ -1,21 +1,21 @@
-// ── LIMITELE CAMEREI DIN JURUL AVATARULUI — o singură dată ───────────────────
+// ── THE CAMERA LIMITS AROUND THE AVATAR — once only ───────────────────────
 //
-// DE CE (Lotul E din PROCEDURA-REFACERE-CLONE.md): `Landing.tsx` (vizitatorul) și
-// `Stage.tsx` (aplicația) aveau EXACT aceleași limite de orbitare, copiate. Dacă
-// se regla încadrarea într-una, Kelion arăta diferit în cele două ecrane — genul
-// de divergență pe care n-o vezi până nu-ți sare în ochi într-o captură.
+// WHY (Batch E of PROCEDURA-REFACERE-CLONE.md): `Landing.tsx` (the visitor)
+// and `Stage.tsx` (the app) had EXACTLY the same orbit limits, copied. If the
+// framing was tuned in one, Kelion looked different on the two screens — the
+// kind of divergence you don't see until it jumps out at you in a screenshot.
 //
-// Regula de încadrare (neschimbată, doar mutată): fără deplasare laterală, fără
-// zoom, privire aproape orizontală, și rotire de cel mult ±3° în jurul axei —
-// Kelion se uită la om, nu se învârte ca un obiect.
+// The framing rule (unchanged, only moved): no lateral panning, no zoom,
+// nearly horizontal gaze, and rotation of at most ±3° around the axis —
+// Kelion looks at the person, it doesn't spin like an object.
 export const AVATAR_ORBIT = {
   enablePan: false,
   enableZoom: false,
   minPolarAngle: Math.PI / 2.3,
   maxPolarAngle: Math.PI / 1.95,
-  /** ±3° stânga/dreapta — atât, ca privirea să rămână spre utilizator. */
+  /** ±3° left/right — that's all, so the gaze stays toward the user. */
   minAzimuthAngle: -Math.PI / 60,
   maxAzimuthAngle: Math.PI / 60,
-  /** Punctul privit: la înălțimea pieptului/feței, nu la picioare. */
+  /** The point looked at: at chest/face height, not at the feet. */
   target: [0, 0.7, 0] as [number, number, number],
 } as const

@@ -1,15 +1,16 @@
-// PAGINA PUBLICĂ DE CREDITE (Adrian, 26 iul: „pagină dedicată de... cumpărare
-// credite... inclusiv să poată crea și cumpăra"). Vizibilă ȘI fără cont —
-// prețuri transparente înainte de înregistrare. „Cumpără" → dacă nu e logat,
-// îl ducem la /login; dacă e logat, pornește plata prin /api/billing/checkout
-// (aceeași cale ca pastila de portofel din aplicație — link Revolut + cod unic).
+// THE PUBLIC CREDITS PAGE (Adrian, Jul 26: "dedicated page for... buying
+// credits... including being able to create and buy"). Visible EVEN without
+// an account — transparent prices before registration. "Buy" → if not logged
+// in, we take them to /login; if logged in, it starts payment through
+// /api/billing/checkout (the same path as the wallet pill in the app —
+// Revolut link + unique code).
 import React, { useEffect, useState } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
 import BackLink from '../components/BackLink'
 
 const CREDITS_PER_POUND = 7.5
 // Prima alimentare are minim £20 pe server — pachetele pornesc de la £20 ca
-// niciun buton public să nu pice pe regula asta.
+// no public button should fall on this rule.
 const PACKS = [20, 30, 50]
 
 export default function Credits(): React.JSX.Element {

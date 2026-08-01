@@ -6,7 +6,7 @@ export interface WalletStatus {
   credits: number
   percent: number
   currency: string
-  // True dacă userul n-a alimentat niciodată: prima alimentare = £20 minim
+  // True if the user has never topped up: first top-up = £20 minimum
   // (activarea creierului), apoi orice multiplu de £5.
   firstTopUp?: boolean
 }
@@ -31,12 +31,13 @@ export async function fetchBalance(): Promise<WalletStatus | null> {
   }
 }
 
-// Pornește o alimentare: cere serverului linkul de plată și duce omul acolo.
+// Starts a top-up: asks the server for the payment link and takes the person there.
 // De la 30 iul linkul e cel de Revolut, nu o sesiune Stripe — dar forma
-// răspunsului a rămas aceeași (`{ url }`), tocmai ca toate locurile de plată
-// (pastila de portofel, /credite, paywall) să se schimbe dintr-o singură atingere.
-// ÎNTOARCE eroarea în loc s-o înghită (Adrian, 24 iul: „apăs pe +credite și nu
-// se execută procedura" — orice eșec era tăcut, butonul părea mort).
+// of the reply stayed the same (`{ url }`), precisely so that all payment
+// places (the wallet pill, /credite, paywall) change with a single touch.
+// It RETURNS the error instead of swallowing it (Adrian, Jul 24: "I press
+// +credits and the procedure doesn't run" — every failure was silent, the
+// button looked dead).
 export async function startCheckout(amount: number): Promise<string | null> {
   try {
     const r = await fetch('/api/billing/checkout', {
@@ -57,8 +58,8 @@ export async function startCheckout(amount: number): Promise<string | null> {
   }
 }
 
-// AICI A STAT `createPaymentIntent` — a doua cale de plată, pe Stripe.js. N-o
-// chema nimeni din interfață, iar ruta din spate a fost scoasă odată cu Stripe.
+// HERE STOOD `createPaymentIntent` — the second payment path, on Stripe.js.
+// Nothing in the interface called it, and the back-end route was removed along with Stripe.
 
 // ORDIN #6G: user purchase history from the transactions table.
 export async function fetchHistory(): Promise<{ history: PurchaseRecord[] } | null> {

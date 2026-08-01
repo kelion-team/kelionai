@@ -1,26 +1,27 @@
-// ── DESCHIDEREA MICROFONULUI + CONTEXTUL AUDIO — o singură sursă ─────────────
+// ── OPENING THE MICROPHONE + THE AUDIO CONTEXT — one single source ────────
 //
-// DE CE (Lotul D din PROCEDURA-REFACERE-CLONE.md; Adrian: „0 clone, ăsta e
-// targetul"): `audioIO.ts` (redarea + captura pentru voce) și `micStream.ts`
-// (dictarea) porneau amândouă microfonul EXACT la fel — aceleași constrângeri de
-// eco/zgomot, aceeași distincție „refuz de permisiune ≠ eșec trecător", aceeași
+// WHY (Batch D of PROCEDURA-REFACERE-CLONE.md; Adrian: "0 clones, that's the
+// target"): `audioIO.ts` (playback + capture for voice) and `micStream.ts`
+// (dictation) both started the microphone EXACTLY the same way — the same
+// echo/noise constraints, the same "permission refusal ≠ transient failure"
+// distinction, the same
 // creare de AudioContext cu prefixul webkit. Erau ~20 de linii copiate, iar
-// riscul real nu era estetic: dacă cineva schimba constrângerile într-un singur
-// loc, dictarea și vocea începeau să audă DIFERIT, tăcut.
+// the real risk wasn't aesthetic: if someone changed the constraints in a
+// single place, dictation and voice would start hearing DIFFERENTLY, silently.
 //
-// Aici e o singură dată. Cele două module păstrează ce au ele specific (nodurile,
+// Here it's once. The two modules keep what is specific to them (the nodes,
 // resample-ul, VAD-ul); comun e DOAR deschiderea aparatului.
 //
-// REGULA CASEI (AI-HANDOFF, lecția din 25 iul): orice atinge calea vocii se
-// verifică LIVE, cu voce reală — nu doar cu typecheck.
+// THE HOUSE RULE (AI-HANDOFF, the Jul 25 lesson): anything touching the
+// voice path is verified LIVE, with real voice — not just typecheck.
 
 /** De ce n-a pornit microfonul. `not-allowed` = refuz de permisiune (NU se
- *  reîncearcă singur); `failed` = eșec trecător (dispozitiv ocupat, căști scoase
- *  — se poate reîncerca); `unsupported` = browserul n-are API-ul. */
+ *  retries by itself); `failed` = transient failure (device busy, headset
+ *  unplugged — worth retrying); `unsupported` = the browser lacks the API. */
 export type MicError = 'not-allowed' | 'failed' | 'unsupported'
 
-/** Constrângerile microfonului — IDENTICE pentru voce și dictare (dacă se
- *  schimbă, se schimbă pentru amândouă, ceea ce e chiar scopul). */
+/** The microphone constraints — IDENTICAL for voice and dictation (if they
+ *  change, they change for both, which is exactly the point). */
 export const MIC_CONSTRAINTS: MediaStreamConstraints = {
   audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 }
@@ -35,11 +36,11 @@ export function getAudioContextCtor(): typeof AudioContext | null {
 }
 
 /**
- * Deschide microfonul și pregătește contextul audio.
+ * Opens the microphone and prepares the audio context.
  *
- * `preWarmed` = un flux deja obținut (îl refolosim, ca să nu cerem permisiunea
- * de două ori). La orice eșec cheamă `onError` cu motivul exact și întoarce
- * `null` — apelantul nu mai trebuie să deosebească singur cazurile.
+ * `preWarmed` = an already-obtained stream (we reuse it, so we don't ask for
+ * permission twice). On any failure it calls `onError` with the exact reason
+ * and returns `null` — the caller no longer has to distinguish the cases itself.
  */
 export async function openMicGraph(
   onError: (e: MicError) => void,
@@ -52,8 +53,8 @@ export async function openMicGraph(
     try {
       stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS)
     } catch (e) {
-      // Refuz de permisiune ≠ eșec trecător: refuzul nu se reîncearcă singur,
-      // eșecul trecător (dispozitiv ocupat, căști scoase) da.
+      // Permission refusal ≠ transient failure: a refusal doesn't retry by
+      // itself, a transient failure (device busy, headset unplugged) does.
       const name = (e as { name?: string })?.name
       onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
       return null
@@ -62,7 +63,7 @@ export async function openMicGraph(
 
   const AC = getAudioContextCtor()
   if (!AC) {
-    // Fără AudioContext nu putem procesa nimic — eliberăm aparatul, altfel rămâne
+    // Without AudioContext we can't process anything — we release the device, otherwise it stays
     // becul microfonului aprins degeaba.
     stream.getTracks().forEach((t) => t.stop())
     onError('unsupported')
