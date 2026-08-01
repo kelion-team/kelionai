@@ -1,33 +1,36 @@
-// ── MÂINILE LUI KELION PE PROPRIILE LUI SETĂRI ───────────────────────────────
+// ── KELION'S HANDS ON HIS OWN SETTINGS ─────────────────────────────────────
 //
-// Adrian, 30 iul: „cerința a fost autonomia lui și să rezolve problema cu
-// setările pentru Revolut… **să creeze secretele și să le pună unde trebuie**,
-// e al meu și îi permit full acces."
+// Adrian, Jul 30: "the requirement was his autonomy and solving the settings
+// problem for Revolut… **he should create the secrets and put them where they
+// belong**, it's mine and I allow him full access."
 //
-// ASTA ERA GAURA, și era a mea. Toată ziua i-am spus: „intră pe portal, fă un
-// cont, copiază cheia, du-te în GitHub → Settings → Secrets, lipește-o acolo,
-// apoi rulează workflow-ul". Ore din viața lui, ca să facă de mână exact ce un
-// program face în două secunde. Iar când m-a întrebat de ce nu le pune Kelion,
-// i-am răspuns că „nu am unealtă care să scrie secrete în GitHub" — adevărat
-// atunci, dar ăsta e un motiv să CONSTRUIESC unealta, nu să-l trimit pe el.
+// THAT WAS THE HOLE, and it was mine. All day I told him: "go to the portal,
+// make an account, copy the key, go to GitHub → Settings → Secrets, paste it
+// there, then run the workflow". Hours of his life, to do by hand exactly
+// what a program does in two seconds. And when he asked me why Kelion doesn't
+// set them, I answered that "I don't have a tool that writes secrets to
+// GitHub" — true at the time, but that's a reason to BUILD the tool, not to
+// send him.
 //
-// De aici încolo Kelion își pune singur cheile: le scrie în GitHub Secrets
-// (criptate cu cheia publică a repo-ului, cum cere GitHub), pornește
-// `vps-set-env` care le duce pe server și repornește aplicația, apoi VERIFICĂ
-// că au ajuns. Fără ca omul să atingă nimic.
+// From here on Kelion sets his own keys: he writes them into GitHub Secrets
+// (encrypted with the repo's public key, as GitHub requires), starts
+// `vps-set-env` which carries them to the server and restarts the app, then
+// VERIFIES they arrived. Without the human touching anything.
 //
-// ── CE NU SE ÎNTÂMPLĂ NICIODATĂ AICI, ORICINE AR CERE ────────────────────────
+// ── WHAT NEVER HAPPENS HERE, WHOEVER ASKS ────────────────────────────────────
 //
-//   • VALOAREA unui secret nu se întoarce în niciun răspuns, nu intră în
-//     niciun jurnal, nu se scrie în niciun fișier din repo. Se raportează
-//     NUMELE și LUNGIMEA. (GitHub, de altfel, nici nu poate da valoarea înapoi
-//     — prin construcție. Regula asta o ține partea noastră.)
-//   • Un număr de card NU trece pe aici. Dacă valoarea arată a card (13-19
-//     cifre care trec testul Luhn), se refuză. „Are voie orice" e despre
-//     autonomie, nu despre a lăsa un PAN să curgă printr-un API.
-//   • Numele care încep cu `GITHUB_` se refuză — GitHub le rezervă, iar un
-//     secret respins tăcut e o cheie scrisă degeaba (capcana din 30 iul, când
-//     `vps-set-env` avea o listă fixă de nume și linkul Revolut cădea în gol).
+//   • A secret's VALUE never goes into any response, never enters any log,
+//     never gets written into any repo file. The NAME and the LENGTH are
+//     reported. (GitHub, for that matter, can't return the value either — by
+//     construction. This rule keeps our side.)
+//   • A card number does NOT pass through here. If the value looks like a
+//     card (13-19 digits passing the Luhn test), it's refused. "He may do
+//     anything" is about autonomy, not about letting a PAN leak through an
+//     API.
+//   • Names starting with `GITHUB_` are refused — GitHub reserves them, and a
+//     silently rejected secret is a key written for nothing (the Jul 30 trap,
+//     when `vps-set-env` had a fixed name list and the Revolut link fell
+//     through).
 import _sodium from 'libsodium-wrappers'
 import { gh, ghToken, REPO } from './githubApi.js'
 
@@ -36,14 +39,14 @@ const FARA_TOKEN = JSON.stringify({
   hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env (fin-granulat pe repo, Secrets: write + Actions: write) și repornește.',
 })
 
-/** Spune EXACT ce lipsește, nu doar un cod de eroare.
+/** Says EXACTLY what is missing, not just an error code.
  *
- *  Un „HTTP 403" îl pune pe om să ghicească — și ghicitul pe permisiuni de
- *  GitHub e exact felul în care s-a pierdut o zi pe 30 iul (l-am trimis să caute
- *  `Account: Read` la Stripe, care nici măcar nu era problema). Scrierea
- *  secretelor cere permisiunea **Secrets: write** pe tokenul fin-granulat —
- *  documentația noastră proprie o pomenește doar pe `Actions: write`. Deci dacă
- *  vine 403, ăsta e primul lucru de verificat, și scrie aici, nu în capul meu. */
+ *  An "HTTP 403" makes the human guess — and guessing on GitHub permissions is
+ *  exactly how a day was lost on Jul 30 (I sent him to look for `Account:
+ *  Read` at Stripe, which wasn't even the problem). Writing secrets requires
+ *  the **Secrets: write** permission on the fine-grained token — our own
+ *  documentation only mentioned `Actions: write`. So if a 403 comes, that's
+ *  the first thing to check, and it's written here, not in my head. */
 function lipsaPermisiune(status: number, ce: string): string {
   if (status === 403 || status === 404) {
     return (
@@ -56,13 +59,13 @@ function lipsaPermisiune(status: number, ce: string): string {
   return `${ce} (HTTP ${status}).`
 }
 
-/** Numele acceptate: MAJUSCULE, cifre și `_`, începând cu o literă. */
+/** Accepted names: UPPERCASE, digits and `_`, starting with a letter. */
 export function numeSecretValid(nume: string): boolean {
   if (!/^[A-Z][A-Z0-9_]{2,99}$/.test(nume)) return false
-  return !nume.startsWith('GITHUB_') // rezervat de GitHub — ar fi respins oricum
+  return !nume.startsWith('GITHUB_') // reserved by GitHub — it would be rejected anyway
 }
 
-/** Arată a număr de card? (13-19 cifre + Luhn). Vezi regula de sus. */
+/** Looks like a card number? (13-19 digits + Luhn). See the rule above. */
 export function pareCard(valoare: string): boolean {
   const cifre = valoare.replace(/[\s-]/g, '')
   if (!/^\d{13,19}$/.test(cifre)) return false
@@ -80,7 +83,7 @@ export function pareCard(valoare: string): boolean {
   return suma % 10 === 0
 }
 
-/** Criptarea cerută de GitHub: sealed box (libsodium) cu cheia publică a repo-ului. */
+/** The encryption GitHub requires: sealed box (libsodium) with the repo's public key. */
 async function cripteaza(valoare: string, cheiePublicaB64: string): Promise<string> {
   await _sodium.ready
   const sodium = _sodium
@@ -89,7 +92,7 @@ async function cripteaza(valoare: string, cheiePublicaB64: string): Promise<stri
   return sodium.to_base64(plic, sodium.base64_variants.ORIGINAL)
 }
 
-/** PUNE un secret în repo. Întoarce JSON — cu numele și lungimea, NU cu valoarea. */
+/** PUTS a secret into the repo. Returns JSON — with the name and the length, NEVER the value. */
 export async function seteazaSecret(nume: string, valoare: string): Promise<string> {
   if (!ghToken()) return FARA_TOKEN
   const n = nume.trim().toUpperCase()
@@ -115,7 +118,7 @@ export async function seteazaSecret(nume: string, valoare: string): Promise<stri
     body: JSON.stringify({ encrypted_value, key_id }),
   })
   if (!r.ok) return JSON.stringify({ error: lipsaPermisiune(r.status, 'GitHub a refuzat scrierea'), nume: n })
-  // 201 = creat acum, 204 = actualizat.
+  // 201 = created now, 204 = updated.
   console.log(`[SECRETE] ${n}: scris (${valoare.length} caractere) — valoarea NU se afișează`)
   return JSON.stringify({
     ok: true,
@@ -126,7 +129,7 @@ export async function seteazaSecret(nume: string, valoare: string): Promise<stri
   })
 }
 
-/** CE secrete există (doar NUMELE și data — GitHub nu dă valorile nimănui). */
+/** WHICH secrets exist (only the NAMES and the date — GitHub gives the values to nobody). */
 export async function listeazaSecrete(): Promise<string> {
   if (!ghToken()) return FARA_TOKEN
   const r = await gh('/actions/secrets?per_page=100')
@@ -139,7 +142,7 @@ export async function listeazaSecrete(): Promise<string> {
   })
 }
 
-/** DUCE cheile pe server: pornește `vps-set-env` (scrie env-ul + repornește app-ul). */
+/** CARRIES the keys to the server: starts `vps-set-env` (writes the env + restarts the app). */
 export async function publicaCheile(): Promise<string> {
   if (!ghToken()) return FARA_TOKEN
   const r = await gh('/actions/workflows/vps-set-env.yml/dispatches', {

@@ -2,15 +2,15 @@ import type { FastifyInstance } from 'fastify'
 import { buildManual, manualHtml, isManualLang, MANUAL_LANGS, type ManualDoc } from '../services/manual.js'
 import { translateStrings, translationReady, normalizeLang } from '../services/manualLang.js'
 
-// ── MANUALUL, PUBLIC ────────────────────────────────────────────────────────
-// GET /api/manual?lang=xx  → manualul ca date (pagina din aplicație)
-// GET /manual.html?lang=xx → aceeași carte ca pagină de sine stătătoare, de
-//                            tipărit sau salvat (butonul de descărcare)
-// Public intenționat: e materialul de prezentare al aplicației, îl citește și
-// cine nu are cont. Nu conține nimic de admin.
+// ── THE MANUAL, PUBLIC ─────────────────────────────────────────────────────
+// GET /api/manual?lang=xx  → the manual as data (the in-app page)
+// GET /manual.html?lang=xx → the same book as a standalone page, to print or
+//                            save (the download button)
+// Public on purpose: it's the app's presentation material, readable even
+// without an account. It contains nothing admin.
 
-/** Aplatizează manualul în perechi cheie→text, ca să poată fi trimis la tradus
- *  dintr-o singură bucată, apoi reasamblat identic. */
+/** Flattens the manual into key→text pairs, so it can be sent to translation
+ *  in one piece, then reassembled identically. */
 function aplatizeaza(d: ManualDoc): Record<string, string> {
   const out: Record<string, string> = {
     title: d.title,
@@ -39,8 +39,8 @@ function aplatizeaza(d: ManualDoc): Record<string, string> {
   return out
 }
 
-/** Pune traducerile înapoi în structură. Ce lipsește rămâne în engleză — o
- *  rubrică goală ar fi mai rea decât un rând netradus. */
+/** Puts the translations back into the structure. What is missing stays in
+ *  English — an empty section would be worse than an untranslated line. */
 function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): ManualDoc {
   const g = (k: string, implicit: string): string => tr[k] ?? implicit
   return {
@@ -52,7 +52,7 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
     columnWhat: g('columnWhat', d.columnWhat),
     columnSay: g('columnSay', d.columnSay),
     footer: d.footer,
-    // Pictogramele NU trec prin traducere: un emoji tradus ar deveni un cuvânt.
+    // The icons do NOT go through translation: a translated emoji would become a word.
     flow: {
       title: g('flow.t', d.flow.title),
       steps: d.flow.steps.map((p, i) => ({
@@ -76,26 +76,27 @@ function reasambleaza(d: ManualDoc, tr: Record<string, string>, lang: string): M
   }
 }
 
-/** Manualul în limba cerută, AȘTEPTÂND traducerea (pentru descărcare: fișierul
- *  trebuie să fie complet în limba aleasă, nu pe jumătate). */
+/** The manual in the requested language, WAITING for the translation (for
+ *  download: the file must be complete in the chosen language, not half). */
 async function manualIn(lang: string): Promise<ManualDoc> {
   const en = buildManual()
   const cod = normalizeLang(lang)
-  // Doar cele 7 limbi ale manualului. O limbă în afara listei nu cheamă
-  // traducătorul deloc — altfel un singur vizitator care umblă prin selector ar
-  // porni zeci de traduceri plătite ale întregului manual.
+  // Only the manual's 7 languages. A language outside the list doesn't call
+  // the translator at all — otherwise a single visitor playing with the
+  // selector would start dozens of paid translations of the whole manual.
   if (!cod || cod === 'en' || !isManualLang(cod)) return en
   const tr = await translateStrings(cod, aplatizeaza(en)).catch(() => ({}))
   return Object.keys(tr).length ? reasambleaza(en, tr, cod) : en
 }
 
-/** Pentru ECRAN: răspunde INSTANT. Dacă limba e deja tradusă, o dă; dacă nu, dă
- *  engleza cu `ready: false` și pornește traducerea în fundal. Pagina reîntreabă
- *  peste câteva secunde și primește limba cerută.
+/** For the SCREEN: answers INSTANTLY. If the language is already translated,
+ *  it serves it; if not, it serves English with `ready: false` and starts the
+ *  translation in the background. The page re-asks a few seconds later and
+ *  gets the requested language.
  *
- *  Fără asta, userul alegea limba și cererea rămânea agățată zeci de secunde —
- *  pe ecran nu se schimba nimic, deci părea că selectorul nu face nimic.
- *  (Măsurat pe live: franceza, în serie, peste 100 de secunde.) */
+ *  Without this, the user picked the language and the request hung for tens of
+ *  seconds — nothing changed on screen, so the selector seemed to do nothing.
+ *  (Measured live: French, in series, over 100 seconds.) */
 async function manualRapid(lang: string): Promise<ManualDoc & { ready: boolean }> {
   const en = buildManual()
   const cod = normalizeLang(lang)
@@ -103,26 +104,28 @@ async function manualRapid(lang: string): Promise<ManualDoc & { ready: boolean }
   const plat = aplatizeaza(en)
   const gata = await translationReady(cod, plat).catch(() => null)
   if (gata && Object.keys(gata).length) return { ...reasambleaza(en, gata, cod), ready: true }
-  // Pornește traducerea și NU o aștepta. `translateStrings` are grijă ca mai
-  // multe cereri pe aceeași limbă să aștepte aceeași lucrare, nu să pornească
-  // fiecare încă una.
+  // Starts the translation and does NOT wait for it. `translateStrings`
+  // makes sure several requests for the same language await the same job
+  // instead of each starting another one.
   void translateStrings(cod, plat).catch(() => ({}))
   return { ...en, lang: cod, ready: false }
 }
 
-/** ── TRADUCE TOT, O DATĂ, LA PORNIRE ────────────────────────────────────────
+/** ── TRANSLATE EVERYTHING, ONCE, AT STARTUP ───────────────────────────────
  *
- *  Măsurat pe live: o limbă netradusă ia ~2 minute (verificat pe germană — la
- *  20/40/60/80/100 secunde încă nu era gata, la 120 a apărut
- *  „Benutzerhandbuch"). Vizitatorul vede „Translating…" și trage concluzia
- *  corectă: că nu merge.
+ *  Measured live: an untranslated language takes ~2 minutes (verified on
+ *  German — at 20/40/60/80/100 seconds it still wasn't ready, at 120
+ *  "Benutzerhandbuch" appeared). The visitor sees "Translating…" and draws
+ *  the correct conclusion: that it doesn't work.
  *
- *  Deci nu-l mai punem pe el să aștepte. La pornirea serverului traducem toate
- *  limbile, una după alta (în serie, ca să nu lovim furnizorul cu 7 deodată), și
- *  le punem în bază. După prima pornire, orice limbă apare INSTANT.
+ *  So we no longer make him wait. At server startup we translate all the
+ *  languages, one after another (in series, so we don't hit the provider with
+ *  7 at once), and put them in the database. After the first startup, any
+ *  language appears INSTANTLY.
  *
- *  Costă o singură dată per versiune de text: cheia include amprenta textelor
- *  engleze, deci se re-traduce automat doar când chiar se schimbă manualul. */
+ *  It costs once per text version: the key includes the fingerprint of the
+ *  English texts, so it re-translates automatically only when the manual
+ *  actually changes. */
 async function incalzesteTraducerile(): Promise<void> {
   const plat = aplatizeaza(buildManual())
   for (const lang of MANUAL_LANGS) {
@@ -134,7 +137,7 @@ async function incalzesteTraducerile(): Promise<void> {
 }
 
 export async function manualRoutes(app: FastifyInstance): Promise<void> {
-  // Pornește încălzirea fără să blocheze pornirea serverului.
+  // Starts the warm-up without blocking the server's startup.
   void incalzesteTraducerile().catch(() => {})
   app.get<{ Querystring: { lang?: string } }>('/api/manual', async (req, reply) => {
     return reply.send(await manualRapid(String(req.query.lang ?? 'en')))
