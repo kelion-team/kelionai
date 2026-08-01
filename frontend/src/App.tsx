@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
-import { PUBLIC_TEXT as PT } from './lib/publicText'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Credits from './pages/Credits'
@@ -13,6 +12,12 @@ import {
   versionLabel,
   type ServerVersion,
 } from './lib/updateCheck'
+import { isCalm } from './lib/activity'
+import { uiStrings } from './lib/i18n'
+
+// How long the new-version bar counts down before it applies by itself
+// (ticking only while the app is calm — see below).
+const UPDATE_AUTO_SEC = 60
 
 export default function App() {
   const [loading, setLoading] = useState(true)
@@ -44,14 +49,16 @@ export default function App() {
     }
   }, [error])
 
-  // THE VERSION ROUTINE, TAMED (fluidity audit, Jul 27 — defect no. 1: the
-  // AUTOMATIC hard reset cut the conversation/voice live, without warning
-  // — exactly "it breaks somewhere"). The rule stays "always the latest
-  // version", but applying no longer tramples work in progress: new deploy →
-  // visible "New version" bar with a button; the hard reset applies
-  // AUTOMATICALLY only when the tab is hidden (the user is away — feels
-  // nothing) or when they press it.
+  // THE VERSION ROUTINE, SELF-APPLYING (Adrian, Aug 1: "the deploy didn't take
+  // everything" — his tab was open and VISIBLE, so the old interface ran for an
+  // hour after the publish while the bar waited for a click). The rule "always
+  // the latest version" now really holds: a new deploy shows the bar with a
+  // COUNTDOWN that applies the hard reset by itself. The countdown ticks only
+  // while the app is calm (no live voice, no request in flight, no draft —
+  // see lib/activity.ts), so it never cuts work; a hidden tab applies
+  // immediately, as before; the button applies on the spot.
   const [updateReady, setUpdateReady] = useState(false)
+  const [updateIn, setUpdateIn] = useState(UPDATE_AUTO_SEC)
   useEffect(() => watchForUpdate(() => setUpdateReady(true)), [])
   useEffect(() => {
     if (!updateReady) return
@@ -60,7 +67,19 @@ export default function App() {
     }
     applyIfHidden()
     document.addEventListener('visibilitychange', applyIfHidden)
-    return () => document.removeEventListener('visibilitychange', applyIfHidden)
+    const id = window.setInterval(() => {
+      if (!isCalm()) return // paused — live voice / request / draft
+      setUpdateIn((n) => {
+        if (n > 1) return n - 1
+        window.clearInterval(id)
+        void hardResetToLatest()
+        return 0
+      })
+    }, 1000)
+    return () => {
+      document.removeEventListener('visibilitychange', applyIfHidden)
+      window.clearInterval(id)
+    }
   }, [updateReady])
 
   // WATERMARK ALWAYS UP TO DATE (Adrian, Jul 10: "the new watermark should
@@ -121,13 +140,16 @@ export default function App() {
       <div className="app-watermark" aria-hidden="true">
         {versionLabel(srv)}
       </div>
-      {/* THE NEW VERSION BAR (Jul 27): visible, not intrusive — the user decides
-      when it applies; if he leaves the tab, it applies itself, unnoticed. */}
+      {/* THE NEW VERSION BAR: visible, with a countdown that applies by itself
+      (paused while the user works); the button applies on the spot. In the
+      USER'S language after login, English before it (uiStrings handles both). */}
       {updateReady && (
         <div className="update-banner" role="status">
-          <span>{PT.updateAvailable}</span>
+          <span>
+            {uiStrings().updateReady} · {uiStrings().updateAuto.replace('{n}', String(updateIn))}
+          </span>
           <button type="button" onClick={() => void hardResetToLatest()}>
-            {PT.updateNow}
+            {uiStrings().updateNow}
           </button>
         </div>
       )}

@@ -62,6 +62,8 @@ export interface Strings {
   scanHint: string
   updateReady: string
   updateNow: string
+  /** The self-applying countdown in the version bar — `{n}` = seconds left. */
+  updateAuto: string
   cookieNote: string
   privacyLabel: string
   termsLabel: string
@@ -175,6 +177,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Or scan to install on your phone or tablet',
     updateReady: 'A new version is available',
     updateNow: 'Update',
+    updateAuto: 'applies automatically in {n} s',
     features: [
       'Natural conversation with a genuinely brilliant mind',
       'Speaks and listens — fully hands-free',
@@ -286,6 +289,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Sau scanează ca să instalezi pe telefon sau tabletă',
     updateReady: 'O versiune nouă este disponibilă',
     updateNow: 'Actualizează',
+    updateAuto: 'se aplică automat în {n} s',
     features: [
       'Conversație naturală cu o minte cu adevărat genială',
       'Vorbește și ascultă — complet hands-free',
@@ -397,6 +401,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'O escanea para instalar en tu teléfono o tableta',
     updateReady: 'Hay una nueva versión disponible',
     updateNow: 'Actualizar',
+    updateAuto: 'se aplicará automáticamente en {n} s',
     features: [
       'Conversación natural con una mente realmente brillante',
       'Habla y escucha — totalmente manos libres',
@@ -508,6 +513,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Ou scannez pour installer sur votre téléphone ou tablette',
     updateReady: 'Une nouvelle version est disponible',
     updateNow: 'Mettre à jour',
+    updateAuto: "s'applique automatiquement dans {n} s",
     features: [
       'Conversation naturelle avec un esprit vraiment brillant',
       'Parle et écoute — entièrement mains libres',
@@ -619,6 +625,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Oder scannen, um auf Handy oder Tablet zu installieren',
     updateReady: 'Eine neue Version ist verfügbar',
     updateNow: 'Aktualisieren',
+    updateAuto: 'wird automatisch in {n} s angewendet',
     features: [
       'Natürliche Gespräche mit einem wirklich brillanten Verstand',
       'Spricht und hört zu — komplett freihändig',
@@ -730,6 +737,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Oppure scansiona per installare su telefono o tablet',
     updateReady: 'È disponibile una nuova versione',
     updateNow: 'Aggiorna',
+    updateAuto: 'si applica automaticamente tra {n} s',
     features: [
       'Conversazione naturale con una mente davvero brillante',
       'Parla e ascolta — completamente a mani libere',
@@ -841,6 +849,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     scanHint: 'Ou escaneie para instalar no seu telefone ou tablet',
     updateReady: 'Uma nova versão está disponível',
     updateNow: 'Atualizar',
+    updateAuto: 'aplica-se automaticamente em {n} s',
     features: [
       'Conversa natural com uma mente realmente brilhante',
       'Fala e ouve — totalmente mãos livres',

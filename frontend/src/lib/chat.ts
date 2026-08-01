@@ -130,6 +130,11 @@ export async function* streamChat(
   // THE SINGLE VOICE RULE (Adrian, Jul 26): the full-duplex voice session is active →
   // the server doesn't synthesize the Chirp voice for this turn (no cost, no frames).
   serverVoiceOff?: boolean,
+  // THE SPOKEN TURN (Aug 1 — one brain): this message came from the live voice
+  // session's ears. The server shapes the reply for speech (clean sentences,
+  // no markdown tables/links) — the client speaks it verbatim through the
+  // voice session's mouth. Typed turns omit the flag.
+  spoken?: boolean,
 ): AsyncGenerator<string> {
   // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
   // whose response was NEVER read — openStream() below opened A SECOND identical
@@ -257,6 +262,7 @@ export async function* streamChat(
             faceDescriptor,
             facePhoto,
             serverVoiceOff,
+            spoken: spoken || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }),

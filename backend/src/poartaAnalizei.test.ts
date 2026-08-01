@@ -37,7 +37,7 @@ describe('poarta analizei există și e separată de poarta faptei', () => {
 
   it('se declanșează DOAR când n-a chemat nicio unealtă', () => {
     // If it called something, it really looked — we stop nagging it.
-    const bloc = /POARTA ANALIZEI[\s\S]*?continue\n/.exec(orch)?.[0] ?? ''
+    const bloc = /POARTA ANALIZEI[\s\S]*?continue\r?\n/.exec(orch)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
   })
 })

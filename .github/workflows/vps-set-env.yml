@@ -98,11 +98,13 @@ jobs:
               name="${line%%=*}"
               val=$(printf "%s" "${line#*=}" | base64 -d)
               # O valoare pe mai multe rânduri ar rupe fișierul env — o sărim și
-              # o SPUNEM, în loc s-o scriem stricat și să pară pusă.
-              case "$val" in
-                *"
-"*) echo "::warning::$name are rânduri multiple — nu se poate pune în env, sărit"; continue ;;
-              esac
+              # o SPUNEM, în loc s-o scriem stricat și să pară pusă. (Testul cu
+              # wc -l, NU un pattern multi-linie în `case`: newline-ul literal
+              # din pattern ieșea la coloana 0, ieșea din blocul `run: |` și
+              # INVALIDA TOT WORKFLOW-UL — de-aia a picat la fiecare push.)
+              if [ "$(printf '%s' "$val" | wc -l)" -gt 0 ]; then
+                echo "::warning::$name are rânduri multiple — nu se poate pune în env, sărit"; continue
+              fi
               grep -v "^${name}=" "$f" > "$f.tmp" 2>/dev/null || true
               printf "%s=%s\n" "$name" "$val" >> "$f.tmp"
               mv "$f.tmp" "$f"; chmod 600 "$f"

@@ -10,7 +10,6 @@ import {
   dormantOnChat,
   inventarulMeu,
 } from './services/brainCapabilities.js'
-import { VOICE_TOOL_NAMES } from './services/realtime.js'
 import { googleTools } from './services/google.js'
 import { RUNBOOKS } from './services/runbooks.js'
 import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './services/adminTools.js'
@@ -28,25 +27,21 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
     for (const c of CAPABILITIES) {
       expect(c.name, 'nume gol').toBeTruthy()
       expect(c.does, `does gol la ${c.name}`).toBeTruthy()
-      expect(c.chat || c.voice, `${c.name} nu e pe nicio cale`).toBe(true)
+      expect(c.chat || c.voice || c.voiceViaBrain, `${c.name} nu e pe nicio cale`).toBe(true)
     }
   })
 
-  // SINGLE SOURCE (§1): voice now DERIVES from the registry (realtime.ts). We
-  // check the registry against the CANONICAL list of the 18 Google voice skills
-  // — and that the derivation produces exactly the canonical set. If someone
-  // changes the registry in secret, the test falls; nothing falls asleep silently.
-  it('skill-urile Google pe voce = cele 18 canonice, dintr-o singură sursă', () => {
-    const canonic = [
-      'add_contact', 'add_task', 'convert_currency', 'create_calendar_event', 'get_calendar_events',
-      'get_drive_files', 'get_recent_emails', 'get_tasks', 'get_time', 'get_weather',
-      'maps_directions', 'maps_search', 'search_contacts', 'send_email', 'translate_text',
-      'web_search', 'wikipedia_lookup', 'youtube_search',
-    ].sort()
-    const dinRegistru = CAPABILITIES.filter((c) => c.category === 'google' && c.voice).map((c) => c.name).sort()
-    expect(dinRegistru).toEqual(canonic)
-    // VOICE_TOOL_NAMES (realtime.ts) derives from the registry → must be identical.
-    expect([...VOICE_TOOL_NAMES].sort()).toEqual(canonic)
+  // ONE BRAIN (Aug 1): the Realtime session holds ZERO tools by design — it is
+  // ears+mouth only, so the old 31-tool ceiling is gone. EVERY capability is
+  // reachable by voice through the ONE brain (/api/chat): voiceViaBrain mirrors
+  // chat. If someone marks a chat capability as unreachable by voice, the test
+  // falls — parity can't silently break.
+  it('vocea ajunge la TOT prin creierul unic; lista directă e goală by design', () => {
+    expect(voiceCapabilityNames()).toEqual([])
+    const faraVoce = chatCapabilityNames().filter(
+      (n) => !CAPABILITIES.find((c) => c.name === n)?.voiceViaBrain,
+    )
+    expect(faraVoce, `capabilități de chat NEaccesibile vorbind: ${faraVoce.join(', ')}`).toEqual([])
   })
 
   // COMPLETENESS AGAINST REALITY (§5): the registry isn't checked only against
@@ -114,22 +109,16 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(75) // + card_stare/card_completeaza/card_gata (31 iul: cardul la furnizori, gardat de voce)
-    expect(voiceCapabilityNames().length).toBe(31) // vocea = plafon OpenAI Realtime (măsurat)
+    expect(chatCapabilityNames().length).toBe(76) // + lookup_address (1 aug: coordonate↔cod poștal)
+    expect(voiceCapabilityNames().length).toBe(0) // 1 aug: sesiunea de voce = urechi+gură, ZERO unelte directe
   })
 
-  // Only the 3 vision tools (camera/monitor/GPS) are native on voice and not on
-  // chat (chat sees inline). The rest of the "sleeping" is on voice — the §1/§6
-  // target = 0.
+  // AUG 1: the 3 vision tools (camera/monitor/GPS) are no longer voice-native
+  // either — voice reaches them through the SAME body context as writing
+  // (camera frames / coords / screen go with the turn). Nothing is dormant
+  // anywhere; both lists stay empty and any regression goes RED.
   it('adormirea e enumerată explicit, niciodată ascunsă', () => {
-    expect(dormantOnChat().map((c) => c.name).sort()).toEqual(['get_location', 'get_monitor', 'look'])
-    // §1 TARGET REACHED (Jul 30): voice reaches ALL chat capabilities —
-    // dormant = 0. The test was "> 0" while the list still had rows; now it is
-    // a REGRESSION GUARD: if someone adds a chat-only tool, or cuts a path from
-    // voice, the list becomes non-empty again and CI goes RED. "Asleep" can no
-    // longer sneak in quietly — exactly the guarantee required in §5.
+    expect(dormantOnChat().map((c) => c.name)).toEqual([])
     expect(dormantOnVoice().map((c) => c.name)).toEqual([])
-    // eslint-disable-next-line no-console
-    console.log(`[completitudine] adormite pe voce (de dus în §1/§6): ${dormantOnVoice().map((c) => c.name).join(', ')}`)
   })
 })
