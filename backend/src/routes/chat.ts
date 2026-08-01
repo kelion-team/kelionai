@@ -1876,10 +1876,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // before saying a word). On the admin's action turn, the acknowledgment
       // leaves INSTANTLY; the tools run immediately after.
       if (isAdmin && heavyTurn) {
-        // The wording requested by Adrian (Jul 30, second time): "am preluat
-        // sarcina", not "mă apuc — verific și execut". The first says the job
-        // is IN his hands; the second described what he was about to do, which
-        // is not what the human cares about.
+        // The wording requested by Adrian (Jul 30, second time): "task taken
+        // on", not "getting on it — checking and executing". The first says the
+        // job is IN his hands; the second described what he was about to do,
+        // which is not what the human cares about.
         const ackText = ro ? 'Am preluat sarcina. ' : 'Task taken on. '
         noteFirstWord()
         reply.raw.write(appendTurn(user.email, turnId, ackText))
@@ -2232,8 +2232,8 @@ async function runTool(
       // panel subscribes to /api/constructor/live). A control frame, like
       // {monitor}/{card}.
       reply.raw.write(`${CTRL}${JSON.stringify({ build: { open: true } })}${CTRL}`)
-      // THE SHORT ACKNOWLEDGMENT PHRASE (Adrian, Jul 28: "remove «mă apuc,
-      // verific și execut» — it needs a short phrase: am preluat cerința").
+      // THE SHORT ACKNOWLEDGMENT PHRASE (Adrian, Jul 28: "remove «getting on
+      // it, checking and executing» — it needs a short phrase: order taken").
       // The instruction to the model is explicit: acknowledge in 3-4 words, no
       // long promises.
       return JSON.stringify({

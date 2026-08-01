@@ -4,7 +4,7 @@ import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } 
 import { brainCost } from './cost.js'
 import { brain } from './brain.js'
 
-// Memoria rulează pe modelul de chat implicit (OpenRouter). Kimi/GLM scoase.
+// Memory runs on the default chat model (OpenRouter). Kimi/GLM removed.
 const MEMORY_MODEL = config.openrouter.chatDefault
 
 export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {

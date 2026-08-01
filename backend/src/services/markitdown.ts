@@ -20,15 +20,15 @@ export async function documentToMarkdown(bytes: Buffer, filename: string): Promi
         'import sys;from markitdown import MarkItDown;sys.stdout.write(MarkItDown().convert(sys.argv[1]).text_content or "")',
         path,
       ], { detached: true })
-      // setEncoding tamponează byte-ii UTF-8 parțiali peste granițele de chunk —
-      // altfel diacriticele (ă ș ț) care cad pe graniță se corup în „�".
+      // setEncoding buffers partial UTF-8 bytes across chunk boundaries —
+      // otherwise diacritics (ă ș ț) that land on a boundary corrupt into "�".
       py.stdout.setEncoding('utf8')
       py.stderr.setEncoding('utf8')
       let out = ''
       let err = ''
-      // TIMEOUT (W10 #3): un PDF malformat putea bloca MarkItDown la infinit —
-      // procesul rămânea agățat, promisiunea nerezolvată, fișierul temp nescurs.
-      // La 30s omorâm tot grupul de procese și respingem curat.
+      // TIMEOUT (W10 #3): a malformed PDF could hang MarkItDown forever — the
+      // process stayed stuck, the promise unresolved, the temp file leaked.
+      // At 30s we kill the whole process group and reject cleanly.
       const killer = setTimeout(() => {
         try {
           if (py.pid) process.kill(-py.pid, 'SIGKILL')

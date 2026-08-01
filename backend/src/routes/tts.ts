@@ -13,14 +13,15 @@ export async function ttsRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // Plafon la 5000 caractere: /api/tts lovește Google TTS (plătit) și n-avea
-    // limită — un client putea trimite ~24MB text la 120 req/min = factură uriașă.
+    // 5000-character cap: /api/tts hits Google TTS (paid) and had no limit —
+    // one client could send ~24MB of text at 120 req/min = a huge bill.
     const text = req.body?.text?.trim()?.slice(0, 5000)
     if (!text) return reply.code(400).send({ error: 'bad_request' })
 
     try {
-      // ACEEAȘI VOCE CA LA VOCEA LIVE (C4). Fără asta, omul își alegea vocea din
-      // Setări, o auzea în full-duplex, iar chatul scris îi răspundea cu altcineva.
+      // THE SAME VOICE AS THE LIVE VOICE (C4). Without this, the user picked a
+      // voice in Settings, heard it in full-duplex, and the written chat replied
+      // with someone else.
       const r = await synthesize(text, req.body?.lang, { voice: await getVoicePref(user.email).catch(() => null) })
       if (!r.ok) {
         if (r.status >= 500) app.log.warn({ status: r.status, error: r.error }, 'google tts failed')

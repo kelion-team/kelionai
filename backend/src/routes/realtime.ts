@@ -427,7 +427,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             const order = String(targs.order ?? '').trim()
             if (order.length < 8) return JSON.stringify({ error: 'ordin_prea_scurt' })
             const jobId = await createBuildJob(user.email, order)
-            // "Am preluat cerința." ONLY when the order really IS in the queue
+            // "Order taken." ONLY when the order really IS in the queue
             // (Jul 28 audit, finding #19): createBuildJob returns 0 on unavailable
             // DB or reached daily ceiling — confirming then would be exactly the
             // lie forbidden by THE DEED RULE. On failure, voice honestly says it
@@ -438,8 +438,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
                 error: 'ordin_nepreluat',
                 speak_rule: 'Spune sincer: ordinul NU a putut fi preluat (baza de date indisponibilă sau plafonul zilnic de construcții atins) — nu confirma preluarea.',
               })
-            // The same short phrase as in chat (Adrian, Jul 28): just "Am preluat
-            // cerința." — voice doesn't hold speeches about the worker/PR/email.
+            // The same short phrase as in chat (Adrian, Jul 28): just "Order
+            // taken." — voice doesn't hold speeches about the worker/PR/email.
             return JSON.stringify({
               ok: true,
               job: jobId,

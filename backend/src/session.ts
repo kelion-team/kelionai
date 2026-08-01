@@ -46,9 +46,9 @@ export function setSession(reply: FastifyReply, user: SessionUser): void {
 }
 
 export function getSessionUser(req: FastifyRequest): SessionUser | null {
-  // req.cookies e populat de @fastify/cookie pe rutele HTTP normale. Pe un
-  // UPGRADE WebSocket poate fi neparsat (undefined) → `?.` evită crash-ul și
-  // cădem pe header-ul brut, ca autentificarea prin sesiune să meargă și pe WS.
+  // req.cookies is populated by @fastify/cookie on normal HTTP routes. On a
+  // WebSocket UPGRADE it may be unparsed (undefined) → `?.` avoids the crash and
+  // we fall back to the raw header, so session auth works over WS too.
   let token = req.cookies?.[SESSION_COOKIE]
   if (!token) {
     const raw = req.headers.cookie
@@ -60,8 +60,8 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
   if (!token) return null
   try {
     const u = jwt.verify(token, config.sessionSecret) as SessionUser
-    // Re-derivă rolul din email (W10 #5): rolul „înghețat" în JWT rămânea admin
-    // 30 de zile dacă ADMIN_EMAIL se schimba — revocarea de admin nu avea efect.
+    // Re-derive the role from the email (W10 #5): the role "frozen" in the JWT
+    // stayed admin for 30 days if ADMIN_EMAIL changed — revoking admin had no effect.
     u.role = roleFor(u.email)
     return u
   } catch {
