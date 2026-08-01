@@ -1,13 +1,15 @@
-// ── AUTENTIFICARE LOCALĂ (Adrian, 26 iul: „alte soluții de logare non-Gmail?
-// ... da, pornește, inclusiv să poată crea și cumpăra credite") ──────────────
-// Trei căi FĂRĂ Google, cu aceleași funcții (identitatea = emailul, ca la
-// Google; portofel/istoric/memorie sunt deja pe email):
-//   1. email + parolă (înregistrare + login)
-//   2. link magic pe email (fără parolă; creează contul din zbor dacă nu există)
-//   3. resetare parolă (link pe email)
-// Parole: scrypt din node:crypto (fără dependențe noi), sare per cont,
-// comparare în timp constant. Tokenurile de link: DOAR hash-ul în DB.
-// Mesaje deliberat GENERICE la magic/reset (nu confirmăm dacă un email există).
+// ── LOCAL AUTHENTICATION (Adrian, 26 Jul: "other non-Gmail login solutions?
+// ... yes, go ahead, including being able to create and buy credits") ──────
+// Three paths WITHOUT Google, with the same functions (identity = the email,
+// like with Google; wallet/history/memory are already keyed by email):
+//   1. email + password (register + login)
+//   2. magic link by email (no password; creates the account on the fly if
+//      it doesn't exist)
+//   3. password reset (link by email)
+// Passwords: scrypt from node:crypto (no new dependencies), per-account salt,
+// constant-time comparison. Link tokens: ONLY the hash in the DB.
+// Deliberately GENERIC messages on magic/reset (we don't confirm whether an
+// email exists).
 import type { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
 import { config, roleFor } from '../config.js'
@@ -35,10 +37,11 @@ function verifyPassword(pass: string, stored: string): boolean {
 }
 const sha256 = (s: string): string => crypto.createHash('sha256').update(s).digest('hex')
 const validEmail = (e: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)
-// GAURĂ CRITICĂ ÎNCHISĂ (auditul de securitate, 27 iul): oricine putea să-și
-// facă un CONT LOCAL cu emailul ownerului — roleFor(email) îi dădea sesiune de
-// ADMIN pe 30 de zile, fără nicio verificare că e chiar el. Ownerul intră DOAR
-// cu Google; contul lui nu are ce căuta pe calea locală, pe niciuna din rute.
+// CRITICAL HOLE CLOSED (the security audit, 27 Jul): anyone could create a
+// LOCAL ACCOUNT with the owner's email — roleFor(email) would give them an
+// ADMIN session for 30 days, with no verification that it's really him. The
+// owner logs in ONLY with Google; his account has no business on the local
+// path, on any of the routes.
 const isOwnerEmail = (e: string): boolean => e.toLowerCase() === config.adminEmail.toLowerCase()
 
 function signIn(reply: Parameters<typeof setSession>[0], email: string, name: string): void {
@@ -70,7 +73,7 @@ async function sendLink(email: string, purpose: 'magic' | 'reset'): Promise<void
 export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
   const rl = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }
 
-  // Înregistrare cont nou (email + parolă) → sesiune direct.
+  // New account registration (email + password) → session right away.
   app.post<{ Body: { email?: string; password?: string; name?: string } }>(
     '/auth/local/register',
     rl,
@@ -101,7 +104,7 @@ export async function authLocalRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // Link magic: răspuns GENERIC mereu; contul se creează din zbor la click.
+  // Magic link: always a GENERIC answer; the account is created on the fly at click.
   app.post<{ Body: { email?: string } }>('/auth/local/magic', rl, async (req, reply) => {
     const email = String(req.body?.email ?? '').toLowerCase().trim()
     if (validEmail(email) && !isOwnerEmail(email)) void sendLink(email, 'magic').catch(() => {})

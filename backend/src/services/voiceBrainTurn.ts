@@ -1,37 +1,40 @@
-// ── §6 CREIER UNIC — VOCEA = URECHILE ȘI GURA ACELUIAȘI CREIER ───────────────
-// Adrian: „vocea să ajungă la TOATE rutele; nimic separat, fără dispecer". Calea
-// curată (spec §6): o tură de voce rulată prin ACELAȘI orchestrator ca scrisul,
-// cu TOATE uneltele din registru — NU prin creierul de voce separat, plafonat la
-// 31. Fluxul: text transcris (STT) → creierul complet → text de rostit (TTS).
+// ── §6 ONE BRAIN — THE VOICE = THE EARS AND MOUTH OF THE SAME BRAIN ──────
+// Adrian: "the voice must reach ALL routes; nothing separate, no dispatcher".
+// The clean path (spec §6): a voice turn run through the SAME orchestrator as
+// typing, with ALL the tools from the registry — NOT through the separate
+// voice brain, capped at 31. The flow: transcribed text (STT) → the full
+// brain → text to speak (TTS).
 //
-// STARE: NECABLAT încă la sesiunea Realtime LIVE (se construiește în paralel,
-// verificat cu test, apoi se comută — ca să NU cadă vocea live, lecția „owner
-// testează live"). Uneltele și executorul se INJECTEAZĂ (dependency injection),
-// deci modulul e decuplat de HTTP și de listele hardcodate: aceleași unelte pe
-// care le folosește scrisul se pot da și aici, dintr-o singură sursă.
+// STATE: NOT WIRED yet to the LIVE Realtime session (built in parallel,
+// verified by test, then switched over — so the live voice does NOT drop,
+// the "owner tests live" lesson). The tools and the executor are INJECTED
+// (dependency injection), so the module is decoupled from HTTP and from the
+// hardcoded lists: the same tools typing uses can be given here too, from a
+// single source.
 
 import { runOrchestrator } from './orchestrator.js'
 import type { AnthropicTool, OrMessage } from './openrouter.js'
 
 export interface VoiceBrainTurnDeps {
-  /** Modelul creierului (același ca scrisul). */
+  /** The brain's model (the same as for typing). */
   model: string
-  /** Uneltele în format Anthropic — venite din registrul unic (brainCapabilities). */
+  /** The tools in Anthropic format — coming from the single registry (brainCapabilities). */
   tools: AnthropicTool[]
-  /** Execută o unealtă: (name, argsJson) → rezultat text. Decuplat de reply.raw. */
+  /** Executes a tool: (name, argsJson) → text result. Decoupled from reply.raw. */
   execTool: (name: string, argsJson: string) => Promise<string>
-  /** Persona/instrucțiunile creierului (aceleași ca scrisul, ancorate în realitate). */
+  /** The brain's persona/instructions (the same as for typing, anchored in reality). */
   systemPrompt: string
-  /** Istoricul conversației (memorie + replici recente). */
+  /** The conversation history (memory + recent replies). */
   history?: OrMessage[]
-  /** Text difuzat pe măsură ce curge (pentru sinteză TTS incrementală). */
+  /** Text broadcast as it flows (for incremental TTS synthesis). */
   onText?: (delta: string) => void
-  /** Costul REAL al turei (facturare pe voce) — orchestratorul îl acumulează pe
-   *  toate rundele; fără callback, costul escaladării s-ar pierde. */
+  /** The REAL cost of the turn (voice billing) — the orchestrator
+   *  accumulates it across all rounds; without the callback, the escalation
+   *  cost would be lost. */
   onCost?: (usd: number) => void
 }
 
-// O TURĂ COMPLETĂ DE VOCE prin creierul unic. Întoarce textul de rostit.
+// ONE COMPLETE VOICE TURN through the single brain. Returns the text to speak.
 export async function voiceBrainTurn(transcript: string, deps: VoiceBrainTurnDeps): Promise<string> {
   const messages: OrMessage[] = [
     { role: 'system', content: deps.systemPrompt },
@@ -41,11 +44,11 @@ export async function voiceBrainTurn(transcript: string, deps: VoiceBrainTurnDep
   const res = await runOrchestrator(deps.model, messages, deps.tools, deps.execTool, {
     maxRounds: 6,
     maxTokens: 1500,
-    // ACEEAȘI REGULĂ A FAPTEI ca scrisul: nu declara o acțiune fără s-o fi făcut.
+    // THE SAME DEED RULE as typing: never declare an action without having done it.
     deedGate: true,
     onText: deps.onText,
   })
-  // Costul real al escaladării (toate rundele) → facturare pe voce.
+  // The real escalation cost (all rounds) → voice billing.
   if (res.costUsd > 0) deps.onCost?.(res.costUsd)
   return res.text
 }
