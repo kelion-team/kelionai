@@ -1871,8 +1871,12 @@ export default function AdminPanel({
           <section className="admin-finance">
             {(() => {
               const url = 'https://kelionai.app'
+              // TRUTHFUL TEXT (Adrian, Aug 1 — button audit): it USED to promise
+              // „3 minute free, no account” — the demo is dead (nothing writes
+              // demo_uses, no trial endpoint exists). The truth: the account is
+              // free, made in half a minute; credits are bought inside.
               const text =
-                'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Îl încerci 3 minute gratuit, fără cont:'
+                'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Contul e gratuit și îl faci în 30 de secunde:'
               const enc = encodeURIComponent
               // Text/link networks accept a prefilled share URL; video platforms
               // require uploading IN their studio — the clips are in Downloads.

@@ -180,6 +180,56 @@ export async function systemHealth(): Promise<string> {
     /* balance unavailable */
   }
 
+  // 7. THE ADMIN'S BUTTONS, WATCHED (Adrian, Aug 1: „Kelion must monitor all
+  // the buttons — resolve their tasks, remove the dead ones"). Every button in
+  // the Admin panel calls a read endpoint; a DEAD button = its endpoint 404s,
+  // 500s or hangs. Probed from inside, without a session: alive endpoints
+  // answer 401 (no auth) — 404/500/timeout means the button lies to the admin.
+  try {
+    const port = Number(process.env.PORT ?? 3000)
+    const BUTOANE: [string, string][] = [
+      ['Finanțe', '/api/admin/finance'],
+      ['Circuitul banilor', '/api/admin/money-circuit'],
+      ['Dovezile autonomiei', '/api/admin/autonomie/dovezi'],
+      ['Magazine', '/api/admin/stores'],
+      ['Vizitatori', '/api/admin/demos'],
+      ['Contacte', '/api/admin/leads'],
+      ['Chaturi vizitatori', '/api/admin/visitor-chats'],
+      ['Inbox secretar', '/api/admin/inbound'],
+      ['Cutia reală', '/api/admin/mailbox-live'],
+      ['Mesaje contact', '/api/admin/contact-messages'],
+      ['Utilizatori', '/api/admin/activity'],
+      ['Istoric', '/api/admin/users'],
+      ['Chei server', '/api/admin/env-check'],
+      ['Tokenuri live', '/api/admin/token-checks'],
+      ['Constructor', '/api/admin/constructor'],
+      ['Recuperare', '/api/admin/backups'],
+      ['Lacăt admin', '/api/admin/unlock/status'],
+      ['Amprente vocale', '/api/voiceprint/list'],
+    ]
+    const moarte: string[] = []
+    await Promise.all(
+      BUTOANE.map(async ([nume, path]) => {
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(8_000) })
+          if (r.status === 404 || r.status >= 500) moarte.push(`${nume} (${r.status})`)
+        } catch {
+          moarte.push(`${nume} (nu răspunde)`)
+        }
+      }),
+    )
+    info.butoane = `${BUTOANE.length - moarte.length}/${BUTOANE.length} vii`
+    if (moarte.length)
+      problems.push({
+        id: 'buton_mort',
+        grav: 'mediu',
+        desc: `${moarte.length} butoane din Admin au endpointul MORT: ${moarte.join(', ')}.`,
+        reparabil: 'verifică ruta în backend (repo_read); repar-o sau șterge butonul din AdminPanel (cere acordul ownerului)',
+      })
+  } catch {
+    /* the probe itself failed — we don't invent problems */
+  }
+
   return JSON.stringify({
     ok: problems.length === 0,
     verificatLa: new Date().toISOString(),
