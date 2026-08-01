@@ -1,11 +1,12 @@
 import { config } from '../config.js'
 import { sendMail } from './mail.js'
 
-// ── ALERTĂ „contul OpenAI fără credit" (incident real, 24 iul) ───────────────
-// Vocea ÎNTREAGĂ (Realtime + STT + TTS) merge pe cheia OpenAI. Când contul
-// rămâne fără cotă, OpenAI răspunde 429 insufficient_quota și vocea moare
-// complet — Adrian a descoperit-o testând („nu aude"). De-acum: la primul
-// refuz de cotă, adminul primește email imediat (cooldown 6h — fără spam).
+// ── ALERT "OpenAI account out of credit" (real incident, 24 Jul) ────────────
+// The ENTIRE voice (Realtime + STT + TTS) runs on the OpenAI key. When the
+// account runs out of quota, OpenAI answers 429 insufficient_quota and the
+// voice dies completely — Adrian discovered it while testing ("he can't
+// hear"). From now on: at the first quota refusal, the admin gets an email
+// immediately (6h cooldown — no spam).
 
 let lastAlertAt = 0
 const COOLDOWN_MS = 6 * 60 * 60 * 1000
