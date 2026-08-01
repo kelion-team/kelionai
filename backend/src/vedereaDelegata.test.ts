@@ -83,7 +83,7 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   // assignment back into this block, image turns start bypassing the chosen
   // brain again — the regression this test repairs.
   it('creierul rămâne același — nicio atribuire de model în blocul de vedere', () => {
-    const bloc = /if \(image \|\| camFrames\.length > 0\) \{[\s\S]*?\n      \}\n/.exec(chat)?.[0] ?? ''
+    const bloc = /if \(image \|\| camFrames\.length > 0\) \{[\s\S]*?\r?\n      \}\r?\n/.exec(chat)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
     expect(bloc).not.toMatch(/orchestratorModel\s*=[^=]/)
   })
@@ -111,43 +111,32 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   })
 })
 
-describe('vocea: aceleași unelte și aceeași personă ca scrisul, dar alt ceas', () => {
-  // Adrian: "and voice... route them through the brain". Voice was calling
-  // `bestPaidWorkModel()` for the owner — so writing ran on the brain he
-  // chose, while voice ran on a paid model. Two brains on the same person,
-  // i.e. exactly what §6 "single brain" had fixed, broken from another side.
+describe('vocea: ACELAȘI creier ca scrisul, prin aceeași poartă (Aug 1)', () => {
+  // Adrian, Aug 1: "rewrite the whole chat procedure... let the BRAIN use the
+  // model's voice and functions; there must not be two separate entities".
+  //
+  // THE OLD BOUNDARY IS GONE: voice no longer picks ANY model (no fast brain,
+  // no heavy brain, no ask_brain). The voice session is ears+mouth; the spoken
+  // turn enters POST /api/chat with `spoken:true` and climbs the SAME ladder
+  // as writing — which STARTS on the fast chat tier, so the sub-second voice
+  // budget is protected by the same economy that protects the wallet.
   const voce = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
 
-  it('vocea nu mai alege singură un model plătit pentru owner', () => {
+  it('vocea NU mai alege niciun model — nici rapid, nici greu, nici plătit', () => {
     expect(voce).not.toContain('bestPaidWorkModel')
+    expect(voce).not.toContain('resolveModel')
+    expect(voce).not.toContain('geminiDirect')
+    expect(voce).not.toContain('runOrchestrator')
   })
 
-  // ── FIXED AT 14:45, after "it can't sustain audio chat" ───────────────────
-  //
-  // At 14:35 I routed voice onto the writing brain (Ultra 550B), at his order
-  // "change everything that needs to be it". Ten minutes later voice couldn't
-  // hold a conversation. I broke it.
-  //
-  // The cause is a physical limit, not a setting: 550B with internal reasoning,
-  // on the free tier with 20 requests per minute. In writing, a few seconds of
-  // thinking are fine. In a spoken conversation, those same seconds are a
-  // pause where the person thinks the line died.
-  //
-  // The test now guards the correct boundary: voice on fast, writing on capable.
-  it('vocea NU folosește creierul greu — are buget de sub o secundă', () => {
-    expect(voce).toMatch(/const primaryModel = geminiDirectAvailable\(\)/)
-    expect(voce).toMatch(/await resolveModel\('chat'\)/)
-    // The 'work' tier (the big brain) is no longer voice's default path.
-    expect(voce).not.toContain("resolveModel('work')")
-  })
-
-  it('motivul e scris în cod, ca să nu fie „reparat" înapoi', () => {
-    expect(voce).toMatch(/VOICE RUNS ON A DIFFERENT CLOCK THAN WRITING/)
-    expect(voce).toMatch(/sub-second budget/)
+  it('turnul vorbit intră pe poarta scrisului: flag `spoken` + aceeași scară', () => {
+    expect(chat).toMatch(/spoken\?: boolean/)
+    expect(chat).toMatch(/req\.body\?\.spoken === true/)
+    // The ladder stays where it always was — the voice inherits it, unchanged.
+    expect(chat).toMatch(/ownerModel = await resolveModel\('work', null\)/)
   })
 
   it('nici scrisul nu mai rutează ownerul pe plătit fără să ceară el', () => {
     expect(chat).not.toContain('bestPaidWorkModel')
-    expect(chat).toMatch(/ownerModel = await resolveModel\('work', null\)/)
   })
 })

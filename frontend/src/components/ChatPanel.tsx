@@ -38,6 +38,7 @@ import {
   calibrateVoiceprint,
   hasVoiceprint,
   getPendingVoiceFeatures,
+  setPendingVoiceFeatures,
   clearPendingVoiceFeatures,
   getVoiceVolume,
   setVoiceVolume,
@@ -172,6 +173,13 @@ export default function ChatPanel({
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
+  // THE VISIBLE CONVERSATION (Aug 1): the chat log stays pinned to the newest
+  // bubble — auto-scroll on every new message and on every streaming update.
+  const chatLogRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = chatLogRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages])
   // THE BAND GOES TO SLEEP WHEN IDLE (Adrian, Aug 1: "the sweeping stays on
   // screen"). The K band (the reply ticker) used to stay on screen FOREVER
   // after the reply. It still shows the flow live, but 12s after the turn ends
@@ -232,13 +240,10 @@ export default function ChatPanel({
   // the failure counter resets — a fixed deploy recovers on its own.
   const realtimeOffAtRef = useRef(0)
   const REALTIME_RECOVER_MS = 90_000
-  // SEMI-DUPLEX ON ESCALATION (Adrian: "when it escalates it uses the same
-  // voice and switches to semi-duplex while it thinks, then returns to normal once
-  // it's resolved"). When the live voice calls the heavy brain (`ask_brain`), thinking +
-  // answering take time; we mute the microphone (semi-duplex) while it thinks, so
-  // it doesn't talk over itself, then we return to full-duplex when it finishes speaking.
-  // The voice stays THE SAME (still Realtime) — only the duplex mode changes.
-  const thinkingRef = useRef(false)
+  // NO SEMI-DUPLEX ANYMORE (Aug 1 — one brain): the old escalation muted the
+  // microphone while the heavy brain thought. The voice session no longer
+  // thinks at all — the spoken turn goes through send() like a typed one, and
+  // full-duplex never breaks: barge-in is handled by the normal send() logic.
   // Joins the VOX pieces cut at a thinking pause (not an end-of-sentence one)
   // into a single thought, before sending it to the brain. Rebuilt on every
   // (re)start of the microphone — see ensureMic below.
@@ -754,7 +759,7 @@ export default function ChatPanel({
     setScenarioRunning(false)
   }
 
-  async function send(text: string): Promise<void> {
+  async function send(text: string, spoken = false): Promise<void> {
     const msg = text.trim()
     const atts = attachments
     if (!msg && atts.length === 0) return
@@ -825,6 +830,7 @@ export default function ChatPanel({
       /^\s*(stop|stai|opre[șs]te(?:-te)?|oprire|gata|las[ăa](?:\s*asta)?|anuleaz[ăa]|renun[țt][ăa])[\s.!]*$/i
     if (msg && STOP_CMD.test(msg)) {
       stopVoice()
+      rvLiveRef.current?.stopSpeaking() // the live mouth shuts up too (Aug 1 — one brain)
       abortRef.current?.abort()
       pendingSendsRef.current = [] // stop means stop — empty the queue
       setQueued([])
@@ -858,6 +864,7 @@ export default function ChatPanel({
       // turns. No text (attachment only) → we leave the current turn alone, we don't cut it.
       if (!msg) return
       stopVoice() // cut the old turn's remaining voice, so it doesn't talk over it
+      rvLiveRef.current?.stopSpeaking() // and the live mouth's queue (spoken turn replaced)
       abortRef.current?.abort() // the old turn becomes "superseded"; its finally no longer resets
       // NO return — we fall through below and start the new turn right now.
     }
@@ -912,6 +919,37 @@ export default function ChatPanel({
     abortRef.current = ac
     setBusy(true)
     let acc = ''
+    // THE MOUTH, FED BY THE BRAIN (Aug 1 — one brain): while the reply streams,
+    // complete sentences go to the live voice session's speak() queue and are
+    // spoken VERBATIM, in order, with the model's one voice. No live session →
+    // nothing is spoken here (the Chirp path stays as it was). The session is
+    // captured ONCE per turn — a mid-turn rotation must not steal the speech.
+    const mouth = rvLiveRef.current
+    let speechBuf = ''
+    // Sentence splitter: a sentence leaves the buffer only when it ENDS with a
+    // terminator followed by whitespace (or the very end of the buffer) — so
+    // "3.14" or "e.g." don't cut early, and the first words reach the mouth
+    // within the first second of the stream.
+    const SENT_RE = /^[\s\S]*?[.!?…]+["'»)\]]*(?=\s|$)/
+    const cleanForSpeech = (s: string): string =>
+      s
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images — nothing to say
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links keep their label
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/[*_`#>~]/g, '') // markdown ornaments are not words
+        .replace(/\s+/g, ' ')
+        .trim()
+    const feedSpeech = (chunk: string): void => {
+      if (!mouth) return
+      speechBuf += chunk
+      for (;;) {
+        const mm = SENT_RE.exec(speechBuf)
+        if (!mm) break
+        speechBuf = speechBuf.slice(mm[0].length)
+        const sent = cleanForSpeech(mm[0])
+        if (sent) mouth.speak(sent)
+      }
+    }
     // REAL RESPONSE TIME (measured here, in the browser — what the user feels): from
     // send → first visible word → complete reply. Shown on the counter.
     const t0 = performance.now()
@@ -942,9 +980,12 @@ export default function ChatPanel({
         // THE SINGLE-VOICE RULE: with the Realtime session active, the written turn gets
         // no Chirp voice from the server (the session remains the only voice).
         (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
+        // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
+        spoken || undefined,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
+        feedSpeech(chunk) // the mouth speaks the reply as it streams
         // FUNCTIONAL updater, not a snapshot (Jul 25): with a fixed [...next, ...], a
         // VOICE transcript arriving during the written turn was overwritten by
         // the next update and disappeared from the chat. We keep any message added
@@ -956,6 +997,13 @@ export default function ChatPanel({
           const rest = base.slice(next.length).filter((m) => !(m.role === 'assistant' && m.ts === turnTs))
           return [...next, ...rest, { role: 'assistant', content: acc, ts: turnTs }]
         })
+      }
+      // The LAST piece of the reply (it may end without a terminator) — the
+      // mouth says it too, then nothing is left unsaid.
+      if (mouth && speechBuf.trim()) {
+        const rest = cleanForSpeech(speechBuf)
+        speechBuf = ''
+        if (rest) mouth.speak(rest)
       }
       // Publishes the REAL time on the counter (only if visible text arrived).
       if (firstAt) {
@@ -988,6 +1036,7 @@ export default function ChatPanel({
         // Don't let the voice say more than was written (Jul 10 bug: the text
         // disappeared on error, but the audio kept going).
         stopVoice()
+        mouth?.stopSpeaking() // the live mouth stops too — a failed turn says no more
         const code = codErr
         const spoken = strings(resolveLang(replyLang))
         const m =
@@ -1090,217 +1139,37 @@ export default function ChatPanel({
             // GPS FROM THE DEVICE (Jul 25): when the session starts we send the current
             // position → the server puts it into the voice context (weather/"where am I").
             coords: coordsRef.current ?? undefined,
-            // VERBAL CAMERA/SCREEN COMMAND (Jul 25): the server interprets
-            // the speech and returns the command; we execute it on the usual SSE path.
-            onDevice: (device) => handleControl({ device }),
-            // TEXT accompanies the speech (Adrian, Jul 24: "it doesn't show what it says,
-            // it just speaks"): the partials flow onto the live ticker, and the FINAL
-            // transcript of every turn enters the CHAT as a visible message.
+            // THE EARS (Aug 1 — one brain): the live transcript only feeds the
+            // dictation band; the FINAL text no longer enters the chat here —
+            // if it passes the name gate, onAddressed sends it through send(),
+            // which adds the user bubble exactly like a typed message (single
+            // display, single save, single brain).
             onUserTranscript: (text, done) => {
-              if (done) {
-                setLiveVoice('')
-                const t = text.trim()
-                if (t) setMessages((ms) => [...ms, { role: 'user', content: t, ts: Date.now() }])
-              } else setLiveVoice(text)
+              if (done) setLiveVoice('')
+              else setLiveVoice(text)
             },
-            onAssistantTranscript: (text, done) => {
-              if (done) {
-                setLiveVoice('')
-                const t = text.trim()
-                if (t) setMessages((ms) => [...ms, { role: 'assistant', content: t, ts: Date.now() }])
-                // The EXIT from semi-duplex, UNCONDITIONAL (bug proven Jul 27,
-                // "it can't hear me anymore"): only the thinking flag was cleared here,
-                // without reopening the microphone — and the 125s net below
-                // checks the flag, which I had just cleared → after
-                // ANY ask_brain the microphone stayed mute forever. The rule:
-                // every entry into mute has a guaranteed exit on ALL
-                // paths — reply arrived (here), reply lost (the net).
-                // Reopening is idempotent and is the normal full-duplex state.
-                thinkingRef.current = false
-                micRef.current?.setMuted?.(false)
-              } else setLiveVoice(text)
+            // THE MOUTH: what the session speaks is the brain's reply, fed by
+            // send() sentence by sentence (rv.speak) — nothing to add to the
+            // chat from here; the bubbles already stream via send().
+            onAssistantTranscript: (_text, done) => {
+              if (done) setLiveVoice('')
             },
-            // REVENIT LA FULL-DUPLEX (Adrian, 25 iul: „revino la chat
-            // full-duplex" — after 2 real regressions on the same day with "voice per
-            // sentence": it cut the sentence after 2 words, then "hears but doesn't speak").
-            // The session stays OPEN continuously, as before the experiment —
-            // no automatic closing (no `onResponseDone` here).
-            // VOICE AUTONOMY (Adrian, Jul 24: "it doesn't call the tools, it's
-            // missing the tools to show things on screen"): the tools requested by
-            // the voice model run HERE — show_on_screen directly in the client
-            // (the monitor belongs to the browser), the rest through the server, which returns
-            // the result + any screen_url to put on the monitor.
-            onToolCall: async (name, argsJson) => {
-              let args: Record<string, unknown> = {}
-              try {
-                args = JSON.parse(argsJson || '{}') as Record<string, unknown>
-              } catch {
-                /* broken arguments → empty object */
-              }
-              // ESCALATION TO THE BRAIN → SEMI-DUPLEX: while the heavy brain
-              // thinks and Kelion is about to speak the reply, we put
-              // the microphone on mute so it doesn't talk over itself. We return to
-              // full-duplex when Kelion's FINAL transcript arrives
-              // (see onAssistantTranscript). The same voice the whole time.
-              if (name === 'ask_brain') {
-                thinkingRef.current = true
-                micRef.current?.setMuted?.(true)
-                // Safety net: if the reply never arrives (error),
-                // we re-enable the microphone so it doesn't stay mute forever. 125s, not
-                // 30s (Jul 25): the brain has a 120s timeout — with 30s, the net
-                // opened DURING the thinking on heavy 40-60s requests and
-                // the user's speech started a parallel reply over the one in progress.
-                window.setTimeout(() => {
-                  if (thinkingRef.current) {
-                    thinkingRef.current = false
-                    micRef.current?.setMuted?.(false)
-                  }
-                }, 125000)
-              }
-              // VISION IN VOICE (Adrian: "why can't it see?"): on "look", we capture
-              // the current frame from the user's camera and inject it into the call, so
-              // the server can give it to the vision model. No camera/frame →
-              // the server returns "no_camera" and Kelion says it naturally.
-              if (name === 'look' || name === 'see') {
-                // ONLY with the camera ON (Jul 25): with the camera off,
-                // latestFrameRef kept the last frame from before the shutdown and
-                // Kelion "saw" with conviction a scene minutes old.
-                const frame = cameraOnRef.current
-                  ? (latestFrameRef.current ?? captureRef.current?.() ?? '')
-                  : ''
-                if (frame) (args as Record<string, unknown>).image = frame
-              }
-              // GPS ON DEMAND, a dedicated tool (the Jul 26 outage: "gps is not
-              // accessible" — after the permanent flow was removed, the voice had
-              // NO way to learn the position on "where am I"/"here"). It runs
-              // HERE, in the browser: it reads the device's real GPS now,
-              // refreshes the session too (updateCoords), returns lat/lon.
-              // THE MONITOR, NOT THE CAMERA (Adrian, Jul 27: "when I ask him what's on
-              // the monitor he looks at the camera and says what the camera gives him"): the tool
-              // reads the ACTUAL monitor state — the open tabs + what's
-              // shown now — directly from the workspace store, in the client.
-              if (name === 'get_monitor') {
-                const w = getWorkspace()
-                if (!w.open)
-                  return JSON.stringify({ monitor: 'gol', hint: 'Nimic afișat acum pe monitor — spune-i userului sincer.' })
-                // THE REAL STATE (Adrian, Jul 27): 'ok' = it really rendered; 'error'
-                // = it failed (inaccessible file, a site that refuses embedding);
-                // 'loading' = still loading (call get_monitor again in 1-2s).
-                const st = w.status ?? 'loading'
-                return JSON.stringify({
-                  activ: {
-                    tip: w.kind,
-                    titlu: w.title,
-                    url: w.url || undefined,
-                    stareReala: st,
-                    text: (w.text ?? '').slice(0, 800) || undefined,
-                    paginaScrisaDeMine: w.html ? true : undefined,
-                  },
-                  taburiDeschise: w.tasks.map((tk) => ({ tip: tk.kind, titlu: tk.title, stare: tk.status ?? 'loading' })),
-                  indicatie:
-                    st === 'error'
-                      ? 'SUPRAFAȚA ACTIVĂ A PICAT — NU spune userului că ai afișat-o. Încearcă altă cale (alt URL, adu datele cu o unealtă și afișează-le ca document, sau spune sincer că nu se poate) până apare cu adevărat.'
-                      : st === 'loading'
-                        ? 'Încă se încarcă — mai verifică peste 1-2 secunde înainte să confirmi.'
-                        : 'Randat cu succes.',
-                })
-              }
-              if (name === 'get_location') {
-                const fresh = await getFreshCoords()
-                if (fresh) {
-                  rvLiveRef.current?.updateCoords(fresh)
-                  // "PUT ME ON THE MAP" (Adrian, live test Jul 29: "I asked him to
-                  // see where I am and he didn't pick up the GPS"): get_location took
-                  // the coordinates but did NOT open any map — that's why "it couldn't
-                  // be seen". Now, when it gets the real position, it opens on the monitor
-                  // the map centered on it, with a pin (OSM → embed with a marker in Stage).
-                  handleControl({
-                    monitor: { url: `https://www.openstreetmap.org/?mlat=${fresh.lat}&mlon=${fresh.lon}`, title: 'Locația ta' },
-                  })
-                  return JSON.stringify({ lat: fresh.lat, lon: fresh.lon, shown_on_map: true })
-                }
-                return JSON.stringify({
-                  error: 'location_unavailable',
-                  hint: 'Permisiunea de locație e refuzată sau nu există semnal — spune-i userului SINCER că nu ai locația și cere-i să activeze permisiunea. NU inventa un loc, NU folosi o locație implicită.',
-                })
-              }
-              // GPS ONLY WHEN NEEDED, BUT REAL (Adrian, Jul 26): exactly at
-              // the moment the voice uses a location tool
-              // (weather/maps/routes) we read the device's REAL position — a
-              // single query, not a permanent flow — and we give it to the session too
-              // (updateCoords), so that "here"/"from here" means the place of NOW.
-              if (name === 'get_weather' || name === 'maps_search' || name === 'maps_directions') {
-                const fresh = await getFreshCoords()
-                if (fresh) rvLiveRef.current?.updateCoords(fresh)
-                if (name === 'get_weather' && fresh) {
-                  const hasLoc = String(args.location ?? '').trim() !== ''
-                  const hasLatLon = Number.isFinite(args.lat as number) && Number.isFinite(args.lon as number)
-                  if (!hasLoc && !hasLatLon) {
-                    args.lat = fresh.lat
-                    args.lon = fresh.lon
-                  }
-                }
-              }
-              if (name === 'show_on_screen') {
-                const url = String(args.url ?? '').trim()
-                const title = String(args.title ?? '') || 'Ecran'
-                if (url) handleControl({ monitor: { url, title } })
-                else closeAllTasks()
-                return JSON.stringify({ shown: true, url })
-              }
-              // PLAYGROUND IN VOICE (parity with typing): the page written by Kelion
-              // runs live on the monitor (sandboxed frame), it can be saved.
-              if (name === 'run_web_app') {
-                const title = String(args.title ?? '') || 'Aplicație'
-                const html = String(args.html ?? '')
-                if (html.trim()) handleControl({ app: { title, html } })
-                return JSON.stringify({ running: Boolean(html.trim()), title, savable: true })
-              }
-              // THE BUILDER'S PANEL IN VOICE (Stage 4b, parity with typing):
-              // when Kelion takes a build order or is asked for status, it opens
-              // the live display on the monitor. We do NOT interrupt the server-side execution —
-              // we just open the panel, then let the tool go to the server.
-              if (name === 'build_software' || name === 'constructor_status') {
-                handleControl({ build: { open: true } })
-              }
-              // REAL ACCESS TO THE APP (Adrian, Jul 24): Kelion opens the app's
-              // own panels by voice. It runs in the client (it's its UI):
-              // dispatch an event that Stage/WalletButton listens to. The admin
-              // gate is in Stage (a regular user cannot open the admin).
-              if (name === 'open_app_view') {
-                const view = String(args.view ?? '').trim()
-                const section = String(args.section ?? '').trim()
-                window.dispatchEvent(new CustomEvent('kelion:navigate', { detail: { view, section } }))
-                return JSON.stringify({ opened: view || 'home', section: section || null })
-              }
-              // GESTURES IN VOICE (Jul 25, parity with the chat): the avatar belongs to
-              // the browser → we run the gesture here, on the {gesture} frame.
-              if (name === 'play_avatar_gesture') {
-                const gesture = String(args.gesture ?? '').trim()
-                if (gesture) handleControl({ gesture })
-                return JSON.stringify({ gesture })
-              }
-              try {
-                const r = await fetch('/api/realtime/tool', {
-                  method: 'POST',
-                  credentials: 'include',
-                  headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ name, args }),
-                })
-                const j = (await r.json()) as {
-                  output?: string
-                  screen?: { url: string; title: string }
-                  promo?: unknown
-                }
-                if (j.screen?.url) handleControl({ monitor: { url: j.screen.url, title: j.screen.title } })
-                // §1 "what typing can do, voice can do too": the promo clip requested by SPEAKING
-                // arms the Rec button exactly as from typing (the {promo} frame → armPromo).
-                if (j.promo) handleControl({ promo: j.promo as never })
-                return String(j.output ?? '{}')
-              } catch (e) {
-                return JSON.stringify({ error: String(e).slice(0, 200) })
-              }
+            // SPOKEN = WRITTEN: the utterance addressed to Kelion takes the
+            // EXACT path of a typed message — the same brain, the same tools,
+            // the same escalation, the same bubbles. The voiceprint rides along
+            // (speaker check, like on the STT dictation path); the second
+            // argument marks the turn as spoken so the server shapes the reply
+            // for speech (clean sentences, no markdown tables).
+            onAddressed: (text, vf) => {
+              setPendingVoiceFeatures(vf)
+              void sendRef.current(text, true)
             },
+            // NO onToolCall (Aug 1 — one brain): the voice session has NO tools
+            // at all. Every action the user asks for by voice goes through
+            // onAddressed → send() → the ONE brain, which drives the monitor,
+            // camera, maps and app panels through the same control frames as a
+            // typed turn. The second entity that thought in parallel with the
+            // brain (the live "two voices at once" bug) is gone by construction.
             onState: (s, note) => {
               // SOLID Realtime connection (WebRTC `connected`) → resets the failure
               // counter: full-duplex works, any earlier mishap is forgiven.
@@ -1845,15 +1714,21 @@ export default function ChatPanel({
         onError={onCameraError}
         captureRef={captureRef}
       />
-      {/* NO BUBBLES IN THE CENTER (Adrian, Jul 11: „everything chat must be
-      in the space where the brain sign appears... chat replies are no longer
-      shown outside that space”). The bubbles that floated over the monitor
-      were REMOVED — the exchange lives exclusively in the bands next to the
-      composer (👤 you / K Kelion, teletext). The center keeps only the start
-      prompt and the generated images. */}
+      {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
+      chat" — the sweeping band alone was not enough; the exchange lives here as
+      bubbles: you on the right, Kelion on the left, streaming live, auto-scroll).
+      In monitor mode the log hides so nothing covers the monitor — the full
+      reply then stays on the band's ticker, as before. */}
       {!monitorMode && (
-        <div className="chat-log">
+        <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
+          {messages.slice(-100).map((m, i) =>
+            m.content.trim() ? (
+              <div key={`${m.ts ?? 0}-${i}`} className={`chat-msg ${m.role === 'user' ? 'me' : 'kelion'}`}>
+                <span className="chat-msg-text">{m.content}</span>
+              </div>
+            ) : null,
+          )}
           {chatImage && (
             <img className="chat-image" src={chatImage} alt="Kelion generated" />
           )}
@@ -1948,7 +1823,7 @@ export default function ChatPanel({
               </span>
             </div>
           )
-        ) : (lastAssistant?.content && !idleBandHidden) || busy ? (
+        ) : (lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
             {busy ? (

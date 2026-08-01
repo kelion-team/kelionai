@@ -1062,6 +1062,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // synthesize Chirp (not only would it not play: we don't pay synthesis
       // for discarded audio either).
       serverVoiceOff?: boolean
+      // SPOKEN TURN (the ONE-brain voice architecture, Aug 1): this turn came
+      // from the microphone and its reply will be SPOKEN ALOUD verbatim by the
+      // Realtime voice. The brain answers the same way (same tools, same
+      // ladder) — only the STYLE changes: short, natural, speakable sentences.
+      spoken?: boolean
     }
   }>(
     '/api/chat',
@@ -1372,6 +1377,19 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     systemPrompt += absoluteLock
       ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
       : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
+    // SPOKEN TURN (Aug 1 — the ONE-brain voice architecture): the reply leaves
+    // through the Realtime voice, spoken VERBATIM. Same brain, same tools — only
+    // the style bends toward the ear: short sentences, no markdown, no bullet
+    // lists, no tables, no emoji, no URLs read aloud (say "I put it on the
+    // monitor" instead). Still complete and honest — never dumbed down.
+    if (req.body?.spoken === true) {
+      systemPrompt +=
+        `\n\nSPOKEN REPLY: this answer will be SPOKEN ALOUD, word for word, by the voice. ` +
+        `Write it for the ear: short natural sentences (1–3 per thought), no markdown, no lists, ` +
+        `no tables, no emoji, no headings. Numbers and dates in spoken form. If you show something ` +
+        `on the monitor, say so in one short sentence — don't read URLs or code aloud. ` +
+        `Be complete but concise: what matters most first.`
+    }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
     // account"). Without this, the audit said "you are not connected" even

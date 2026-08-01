@@ -2,13 +2,19 @@
 // Adrian, Jul 29: "if the brain doesn't REALLY store everything the software
 // has, there's no point". This is the SINGLE source of truth: every function
 // of the software, once, with where it reaches (chat / voice) and whether it's
-// admin-only. From here derive (in the next steps) both the chat's tool list
-// and the voice's — without duplication.
+// admin-only. From here derive both the chat's tool list and the voice's —
+// without duplication.
 //
 // THE GUARD (brainCapabilities.test.ts): if a function exists but the brain
-// can't reach it, the test FAILS. The final target (§1/§6): ALL on BOTH paths.
-// Today voice is capped at 31 (OpenAI Realtime's measured limit) →
-// `dormantOnVoice` lists exactly what's left to bring to voice; never hidden.
+// can't reach it, the test FAILS.
+//
+// AUG 1 — THE ONE-BRAIN ARCHITECTURE (Adrian: "let the brain use the model's
+// voice and functions; no two separate entities"): the voice session is pure
+// ears+mouth and holds NO tools at all — the old 31-tool Realtime ceiling is
+// gone. A spoken turn goes through POST /api/chat exactly like a typed one, so
+// EVERY chat capability is reachable by voice (`voiceViaBrain`) and
+// `dormantOnVoice()` is structurally empty. The §1/§6 target — what typing can
+// do, voice can do too — is no longer a roadmap, it's the architecture.
 
 export interface Capability {
   /** The tool's name, exactly as the model sees it. */
@@ -19,13 +25,14 @@ export interface Capability {
   readonly does: string
   /** Can the CHAT brain reach it? */
   readonly chat: boolean
-  /** Can the DIRECT VOICE brain reach it? (the Realtime session list, capped
-   *  at 31 tools by OpenAI — that's why they don't all fit here). */
+  /** Can the DIRECT VOICE session reach it? ALWAYS false since Aug 1 (the ONE-
+   *  brain architecture): the Realtime session is ears+mouth only and holds NO
+   *  tools — the old 31-tool ceiling is gone for good. */
   readonly voice: boolean
-  /** Can it be reached by speaking, through the ESCALATED BRAIN (the same
-   *  orchestrator as typing, without the 31 cap)? §1 "what typing can do,
-   *  voice can do too": a capability is dormant on voice only if it reaches
-   *  NONE of the paths. */
+  /** Can it be reached by speaking, through the ONE BRAIN (POST /api/chat — the
+   *  same pipeline, tools and ladder as writing)? Aug 1: voice turns ARE chat
+   *  turns, so everything chat can do, voice can do — `voiceViaBrain` mirrors
+   *  `chat`, and `dormantOnVoice()` is structurally empty. */
   readonly voiceViaBrain?: boolean
   /** Owner only (destructive tools / introspection). */
   readonly admin: boolean
@@ -34,36 +41,36 @@ export interface Capability {
 // The single source. Order = the order in the KELION-CREIER-UNIC.md spec.
 export const CAPABILITIES: readonly Capability[] = [
   // 2.1 Communication & display
-  { name: 'show_on_screen', category: 'afisare', does: 'pune un URL/dată pe monitor', chat: true, voice: true, admin: false },
+  { name: 'show_on_screen', category: 'afisare', does: 'pune un URL/dată pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: true, admin: false },
-  { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: true, admin: false },
-  { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: true, admin: false },
-  { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: true, admin: false },
+  { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.2 Google (19)
-  { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: true, admin: false },
+  { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_email', category: 'google', does: 'citește corpul COMPLET al unui email (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: true, admin: false },
-  { name: 'get_calendar_events', category: 'google', does: 'citește calendarul', chat: true, voice: true, admin: false },
-  { name: 'create_calendar_event', category: 'google', does: 'pune un eveniment în calendar', chat: true, voice: true, admin: false },
+  { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'get_calendar_events', category: 'google', does: 'citește calendarul', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'create_calendar_event', category: 'google', does: 'pune un eveniment în calendar', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'delete_calendar_event', category: 'google', does: 'șterge un eveniment din calendar (după id)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'complete_task', category: 'google', does: 'bifează un task ca terminat (după id)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'get_drive_files', category: 'google', does: 'listează fișierele Drive', chat: true, voice: true, admin: false },
+  { name: 'get_drive_files', category: 'google', does: 'listează fișierele Drive', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_drive_file', category: 'google', does: 'citește conținutul unui fișier Drive (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'get_tasks', category: 'google', does: 'citește task-urile', chat: true, voice: true, admin: false },
-  { name: 'add_task', category: 'google', does: 'adaugă un task', chat: true, voice: true, admin: false },
-  { name: 'search_contacts', category: 'google', does: 'caută contacte', chat: true, voice: true, admin: false },
-  { name: 'add_contact', category: 'google', does: 'adaugă un contact', chat: true, voice: true, admin: false },
-  { name: 'web_search', category: 'google', does: 'căutare web', chat: true, voice: true, admin: false },
-  { name: 'youtube_search', category: 'google', does: 'caută + redă YouTube', chat: true, voice: true, admin: false },
-  { name: 'get_weather', category: 'google', does: 'vremea (cu GPS-ul real)', chat: true, voice: true, admin: false },
-  { name: 'maps_search', category: 'google', does: 'caută locuri pe hartă', chat: true, voice: true, admin: false },
-  { name: 'maps_directions', category: 'google', does: 'trasee pe hartă', chat: true, voice: true, admin: false },
-  { name: 'translate_text', category: 'google', does: 'traduce text', chat: true, voice: true, admin: false },
-  { name: 'wikipedia_lookup', category: 'google', does: 'caută pe Wikipedia', chat: true, voice: true, admin: false },
-  { name: 'convert_currency', category: 'google', does: 'schimb valutar', chat: true, voice: true, admin: false },
-  { name: 'get_time', category: 'google', does: 'ora/data', chat: true, voice: true, admin: false },
+  { name: 'get_tasks', category: 'google', does: 'citește task-urile', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'add_task', category: 'google', does: 'adaugă un task', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'search_contacts', category: 'google', does: 'caută contacte', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'add_contact', category: 'google', does: 'adaugă un contact', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'web_search', category: 'google', does: 'căutare web', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'youtube_search', category: 'google', does: 'caută + redă YouTube', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'get_weather', category: 'google', does: 'vremea (cu GPS-ul real)', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'maps_search', category: 'google', does: 'caută locuri pe hartă', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'maps_directions', category: 'google', does: 'trasee pe hartă', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'translate_text', category: 'google', does: 'traduce text', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'wikipedia_lookup', category: 'google', does: 'caută pe Wikipedia', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'convert_currency', category: 'google', does: 'schimb valutar', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'get_time', category: 'google', does: 'ora/data', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'lookup_address', category: 'google', does: 'adresa+codul poștal din coordonate (sau invers)', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.3 Own code & autonomy (constructor + expert) — admin
@@ -103,7 +110,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'db_query', category: 'cod', does: 'interoghează baza de date', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'system_health', category: 'cod', does: 'sănătatea proprie', chat: true, voice: false, voiceViaBrain: true, admin: true },
   { name: 'server_logs', category: 'cod', does: 'jurnalele serverului', chat: true, voice: false, voiceViaBrain: true, admin: true },
-  { name: 'ask_brain', category: 'cod', does: 'raționament profund (cod/analiză)', chat: true, voice: true, admin: false },
+  { name: 'ask_brain', category: 'cod', does: 'raționament profund (cod/analiză)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'propose_tool', category: 'cod', does: 'își cere singur o unealtă nouă', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.4 Live browser (9) — admin
@@ -118,17 +125,17 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'browser_click_at', category: 'browser', does: 'click la coordonate', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.5 Memory & notes
-  { name: 'save_note', category: 'memorie', does: 'salvează o notiță', chat: true, voice: true, admin: false },
-  { name: 'list_notes', category: 'memorie', does: 'listează notițele', chat: true, voice: true, admin: false },
-  { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: true, admin: false },
+  { name: 'save_note', category: 'memorie', does: 'salvează o notiță', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'list_notes', category: 'memorie', does: 'listează notițele', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'delete_note', category: 'memorie', does: 'șterge o notiță', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'list_memories', category: 'memorie', does: 'memoria de lungă durată', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'forget_memory', category: 'memorie', does: 'uită o memorie', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'read_inbox', category: 'memorie', does: 'își citește propria cutie poștală (contact@kelionai.app)', chat: true, voice: false, voiceViaBrain: true, admin: true },
 
   // 2.6 Sight & place
-  { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: true, admin: false },
-  { name: 'get_monitor', category: 'vedere', does: 'ce e FAPTIC pe monitor', chat: false, voice: true, admin: false },
-  { name: 'get_location', category: 'vedere', does: 'GPS-ul real al dispozitivului', chat: false, voice: true, admin: false },
+  { name: 'look', category: 'vedere', does: 'camera (vede utilizatorul / ce i se arată)', chat: false, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'get_monitor', category: 'vedere', does: 'ce e FAPTIC pe monitor', chat: false, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'get_location', category: 'vedere', does: 'GPS-ul real al dispozitivului', chat: false, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.7 Money & state — admin
   { name: 'get_real_cost', category: 'bani', does: 'costul real', chat: true, voice: false, voiceViaBrain: true, admin: true },
@@ -137,7 +144,7 @@ export const CAPABILITIES: readonly Capability[] = [
 
   // Miscellaneous
   { name: 'log_unsupported_request', category: 'diverse', does: 'notează o cerință imposibilă acum', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: true, admin: false },
+  { name: 'set_active_role', category: 'diverse', does: 'schimbă rolul activ', chat: true, voice: false, voiceViaBrain: true, admin: false },
 ] as const
 
 /** The names of all capabilities (the single source). */

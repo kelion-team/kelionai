@@ -1,10 +1,18 @@
-// ── VOCE LIVE — client OpenAI Realtime (WebRTC) ──────────────────────────────
-// The FRONTEND half of voice, faithfully rebuilt from the live app (brought
-// into git as the single source). The flow, verified from the live bundle:
-//   1. RTCPeerConnection + microfon (addTrack)
-//   2. dataChannel "oai-events" → we receive transcripts (user + Kelion) and errors
-//   3. createOffer → POST /api/realtime/session {sdp, language} → answer SDP
-//   4. ontrack → we play Kelion's voice and animate the avatar (audio level)
+// ── LIVE VOICE — OpenAI Realtime client (WebRTC): EARS + MOUTH ───────────────
+// THE NEW ARCHITECTURE (Adrian, Aug 1: "rewrite the whole chat procedure,
+// written and audio full-duplex, with escalation — let the BRAIN use the
+// model's voice and functions; there must not be two separate entities"):
+//
+//   • EARS — the session transcribes what the user says. The final transcript
+//     passes the NAME GATE and, if addressed to Kelion, goes to the ONE brain
+//     through opts.onAddressed → the exact same send() as typed text (the same
+//     pipeline, the same tools, the same escalation ladder, the same billing).
+//   • MOUTH — the brain's reply streams back as text; the client feeds it
+//     sentence by sentence through handle.speak(): a system item starting with
+//     "ROSTEȘTE:" which the model speaks VERBATIM. The session has NO tools
+//     and NEVER answers from its own head — the "two voices / two entities"
+//     bug is impossible by construction.
+//
 // The OpenAI key is NEVER here — the backend holds it. Model + voice + language
 // are injected server-side; the client only sends the current language as a hint.
 
@@ -18,47 +26,43 @@ export interface RealtimeVoiceHandle {
   /** Immediately interrupts Kelion's speech (manual barge-in). */
   interrupt: () => void
   /**
-   * GPS ON DEMAND (Adrian, Jul 26: "only when GPS apps are used or location
-   * detection is needed" — the permanent flow was explicitly rejected).
-   * The position enters the context once, at startup; when a location tool
-   * (weather/maps/routes) reads the REAL position of the moment, the client provides it too
-   * sesiunii prin metoda asta — un item de sistem cu noii lat/lon, ca „aici"
-   * to mean the place now, not the one from startup. Not polled periodically.
+   * THE MOUTH: queues a piece of the BRAIN's reply to be spoken verbatim
+   * (a "ROSTEȘTE:" item + response.create). Pieces are spoken in order,
+   * one response at a time; the queue drains on response.done.
    */
-  updateCoords: (c: { lat: number; lon: number }) => void
+  speak: (text: string) => void
+  /**
+   * Cuts whatever is being spoken right now and empties the speech queue
+   * (barge-in / STOP / a replaced brain turn). The brain's turn itself is
+   * untouched — this only silences the mouth.
+   */
+  stopSpeaking: () => void
 }
 
 export interface RealtimeVoiceOpts {
   /** The current language (hint). The source of truth stays the preference persisted on the server. */
   language?: string
   onState?: (s: RealtimeVoiceState, note?: string) => void
-  /** Transcriptul userului: (text, final). */
+  /** The user's transcript: (text, final). */
   onUserTranscript?: (text: string, final: boolean) => void
-  /** Transcriptul lui Kelion: (text, final). */
+  /** What the mouth is saying: (text, final). For UI state only — the brain's reply already streams into the chat through send(). */
   onAssistantTranscript?: (text: string, final: boolean) => void
   /**
-   * VOICE AUTONOMY: the model requests a tool (maps/weather/web/Gmail/on-screen
-   * display...). The handler executes it (usually via POST /api/realtime/tool)
-   * and returns the result as a string — sent back to the model, which continues
-   * speaking. Without a handler, voice stays tool-less (conversation only).
+   * THE EARS → THE BRAIN: a final transcript passed the name gate (the user
+   * addressed Kelion). The client sends it to the ONE brain via the normal
+   * send() — identical to a typed message. `vf` is the voiceprint of the
+   * utterance (speaker verification, same as on the STT path).
    */
-  onToolCall?: (name: string, argsJson: string) => Promise<string>
+  onAddressed?: (text: string, vf: VoiceFeatures | null) => void
   /**
-   * DEVICE COMMAND FROM VOICE (camera/screen): the server interprets
-   * the user's transcript with the SAME interpreter as in writing and returns the command;
-   * the client executes it (switches camera front/back, closes the monitor etc.).
+   * The VAD heard speech start while Kelion was SILENT (never while he
+   * speaks — echo protection; a real talk-over still cuts his speech the
+   * moment its transcript passes the gate and starts a new brain turn).
    */
-  onDevice?: (device: DeviceCommandFrame) => void
-  /** Live GPS from the device — injected into the session context (weather/"where am I"). */
+  onSpeechStart?: () => void
+  /** Live GPS from the device — kept for the session-start payload (server context). */
   coords?: { lat: number; lon: number }
   signal?: AbortSignal
-}
-
-// The shape of the device command returned by the server (identical to {device} in the written-chat
-// SSE) — the client maps it onto handleControl({ device }).
-export interface DeviceCommandFrame {
-  camera?: 'on' | 'off' | 'front' | 'back' | 'switch'
-  screen?: { op: 'close' | 'closeAll' | 'closeKind' | 'switchKind'; kind?: string }
 }
 
 // VOICEPRINT ON THE MAIN VOICE (Adrian, Jul 26): the voiceprint tap of the
@@ -68,12 +72,20 @@ export interface DeviceCommandFrame {
 let liveVoiceTap: { finalize: () => VoiceFeatures | null } | null = null
 let liveInject: ((text: string) => void) | null = null
 
-// Saves a turn into history (memory + continuity between sessions). Best-effort.
+// Language anchoring + the voiceprint padlock (Aug 1: this NO LONGER saves
+// messages — the spoken turn reaches history through /api/chat, which owns the
+// one single save, exactly like a typed turn). What stays here, for every
+// utterance, addressed or not:
+//   • the server tracks the spoken language and, once committed, we pin the
+//     session's transcription onto it (no more "random language");
+//   • the voiceprint is compared against the owner's reference — a match arms
+//     the admin padlock (kelion:admin-unlock), a mismatch injects the
+//     protection warning into the session.
+// Best-effort, fire-and-forget.
 function persistTranscript(
-  role: 'user' | 'assistant',
   text: string,
+  vf: VoiceFeatures | null,
   onCommittedLang?: (lang: string) => void,
-  onDevice?: (device: DeviceCommandFrame) => void,
 ): void {
   const t = text.trim()
   if (!t) return
@@ -81,18 +93,10 @@ function persistTranscript(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({
-      role,
-      text: t,
-      // Amprenta frazei tocmai rostite (numai pe turele userului) — serverul o
-      // compares with the owner's reference, like in the written chat.
-      voiceFeatures: role === 'user' ? (liveVoiceTap?.finalize() ?? undefined) : undefined,
-    }),
+    body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined }),
   })
     .then(async (r) => {
-      // The server COMMITTED the detected language (2 consecutive messages) → we anchor
-      // the live session onto it (see the caller) — transcription no longer guesses.
-      const j = (await r.json().catch(() => null)) as { lang?: string; device?: DeviceCommandFrame; foreignVoice?: boolean; adminUnlocked?: boolean } | null
+      const j = (await r.json().catch(() => null)) as { lang?: string; foreignVoice?: boolean; adminUnlocked?: boolean } | null
       // FOREIGN VOICE (the voiceprint doesn't match the owner): the session immediately gets
       // the protection rule — nothing administrative until confirmation.
       if (j?.foreignVoice)
@@ -103,8 +107,6 @@ function persistTranscript(
       // cookie; we notify the UI (Stage) to light up the Admin button.
       if (j?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
       if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
-      // The verbal camera/screen command → the client executes it right away.
-      if (j?.device && onDevice) onDevice(j.device)
     })
     .catch(() => {})
 }
@@ -148,7 +150,7 @@ function getSharedAudioEl(): HTMLAudioElement {
 const AUDIO_OUT_RE = /bluetooth|blueto|airpod|headset|headphone|c[ăa][șs]ti|wireless|buds|earbud|hands?-?free/i
 async function routeAudioOutput(el: HTMLAudioElement): Promise<void> {
   const sinkEl = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-  if (typeof sinkEl.setSinkId !== 'function') return // iOS/Safari: rutează sistemul
+  if (typeof sinkEl.setSinkId !== 'function') return // iOS/Safari: the system routes
   try {
     let target = 'default'
     if (navigator.mediaDevices?.enumerateDevices) {
@@ -170,13 +172,13 @@ try {
 }
 
 /**
- * Starts a full-duplex voice session via OpenAI Realtime.
+ * Starts the ears+mouth voice session via OpenAI Realtime.
  * Throws if the microphone is refused or the backend session fails.
  */
 export async function startRealtimeVoice(
   opts: RealtimeVoiceOpts = {},
 ): Promise<RealtimeVoiceHandle> {
-  const { onState, onUserTranscript, onAssistantTranscript, onToolCall, onDevice, signal } = opts
+  const { onState, onUserTranscript, onAssistantTranscript, onAddressed, onSpeechStart, signal } = opts
   onState?.('connecting')
 
   // Any earlier session from THIS tab dies before another starts.
@@ -262,7 +264,7 @@ export async function startRealtimeVoice(
       const tick = window.setInterval(() => {
         tapAn.getFloatTimeDomainData(tBuf)
         const e = estimateEnergy(tBuf)
-        if (e < 0.004) return // liniște/zgomot — nu poluăm amprenta
+        if (e < 0.004) return // silence/noise — don't pollute the voiceprint
         energies.push(e); eSum += e; zSum += estimateZcr(tBuf)
         const f0 = estimateF0(tBuf, tapCtx.sampleRate)
         if (f0 > 0) f0s.push(f0)
@@ -274,7 +276,7 @@ export async function startRealtimeVoice(
       }, 150)
       liveVoiceTap = {
         finalize: () => {
-          if (frames < 8) return null // prea puțin semnal — fără amprentă
+          if (frames < 8) return null // too little signal — no voiceprint
           const out = buildVoiceFeatures(f0s.slice(), energies.slice(), cN ? cSum / cN : 0, rSum / frames, zSum / frames, eSum / frames)
           f0s.length = 0; energies.length = 0; cSum = 0; cN = 0; rSum = 0; zSum = 0; eSum = 0; frames = 0
           return out
@@ -313,7 +315,7 @@ export async function startRealtimeVoice(
               if (!newTrack) throw new Error('no_audio_track')
               await sender.replaceTrack(newTrack)
               cleanups.push(() => fresh.getTracks().forEach((t) => t.stop()))
-              bindMicTrack(newTrack, sender) // și noua pistă se vindecă la fel
+              bindMicTrack(newTrack, sender) // the new track heals the same way
               console.log('[realtime] microfon reînnoit în loc (input-ended vindecat, sesiunea a rămas vie)')
             })
             .catch(() => {
@@ -331,10 +333,10 @@ export async function startRealtimeVoice(
       bindMicTrack(track, sender)
     }
 
-    // 2) Vocea lui Kelion (pista remote) + animarea avatarului din nivelul audio.
+    // 2) Kelion's voice (the remote track) + avatar animation from the audio level.
     // SHARED ELEMENT (not a new one each time) — see the comment at
     // `getSharedAudioEl`: once unlocked by a real gesture, it stays unlocked across
-    // all later automatic reopenings (voice per utterance).
+    // all later automatic reopenings.
     const audioEl = getSharedAudioEl()
     // CONTROLLABLE VOLUME (Jul 25): the Realtime voice follows the app's global
     // volume (the chat slider) — until today it started fixed at 1.0, unadjustable.
@@ -357,10 +359,8 @@ export async function startRealtimeVoice(
     pc.ontrack = (ev) => {
       audioEl.srcObject = ev.streams[0] ?? new MediaStream([ev.track])
       // AUTOPLAY: the browser can refuse audio playback until a user
-      // gesture. The old variant swallowed the refusal (`.catch(()=>{})`) → Kelion
-      // connected but "the voice was completely missing". Now, if playback is
-      // blocked, we RETRY it on the first gesture (click/key/touch) and then
-      // clean up the listeners — the voice starts from the first interaction.
+      // gesture. If playback is blocked, we RETRY it on the first gesture
+      // (click/key/touch) and then clean up the listeners.
       const GESTURES = ['pointerdown', 'keydown', 'touchstart'] as const
       const removeUnlock = (): void => {
         for (const g of GESTURES) window.removeEventListener(g, unlock)
@@ -377,11 +377,7 @@ export async function startRealtimeVoice(
       cleanups.push(() => stopLip?.())
     }
 
-    // FIX "dies silently" (Jul 24 audit, P2): before, we handled ONLY `failed`.
-    // When OpenAI closes the call (session limit, idle, server drop) the state
-    // goes through `disconnected`/`closed` WITHOUT ever reaching `failed` →
-    // micRef stayed installed, the UI showed "listening", but there was neither hearing,
-    // nor voice ("audio doesn't exist"). Now: `closed` = immediately fatal; on
+    // FIX "dies silently" (Jul 24 audit, P2): `closed` = immediately fatal; on
     // `disconnected` we give a 4s respite (ICE can recover) and only then
     // declare the session dead — the ChatPanel handler restarts by itself.
     let discTimer: number | null = null
@@ -413,20 +409,19 @@ export async function startRealtimeVoice(
       }
     }
 
-    // 3) dataChannel — evenimentele OpenAI Realtime (transcript + erori + barge-in).
+    // 3) dataChannel — the OpenAI Realtime events (transcripts + speech state + errors).
     const dc = pc.createDataChannel('oai-events')
-    // The events channel closed gracefully by the server = dead session (without it
-    // there are neither transcripts nor tool-calls) — treated as a fatal error.
+    // The events channel closed gracefully by the server = dead session.
     dc.onclose = () => {
       if (!closed) {
         stop()
         onState?.('error', 'dc-closed')
       }
     }
-    // ONE SINGLE injection (Jul 25 — Adrian: "you inject a thousand times, you duplicate").
-    // The instructions + tools + context come NOW in the initial session from the
-    // server (multipart string, accepted by OpenAI with 201). We do NOT duplicate here
-    // prin session.update — era exact stratul redundant.
+    // ONE SINGLE injection (Jul 25): the instructions + voice + language come in
+    // the initial session from the server. We never duplicate them via
+    // session.update — the only session.update here pins the transcription
+    // LANGUAGE when the server commits a new one.
     const send = (obj: unknown): void => {
       if (dc.readyState === 'open') {
         try {
@@ -436,68 +431,70 @@ export async function startRealtimeVoice(
         }
       }
     }
-    // The partial text by id, so we save complete turns into history.
+    // The partial user text by item id.
     const userText = new Map<string, string>()
     const asstText = new Map<string, string>()
-    // ── THE NAME GATE, MECHANICAL (Adrian, Jul 27: "doesn't enter the chat unless
-    // he hears his name — it's already done but doesn't work") ───────────────────
-    // The server stopped the automatic reply (create_response:false); HERE it is
-    // decided who gets a reply: (1) the utterance contains the name ("Kelion"/"Kei",
-    // tolerant to transcription variations) → he replies and OPENS the conversation
-    // window; (2) the window is open (recent exchange) → the conversation flows
-    // freely, without repeating the name — exactly what the old Jul 24 gate lacked,
-    // which demanded the name on EVERY utterance and seemed deaf; (3) otherwise → silence:
-    // the room discussion isn't addressed to him. "STOP" closes the window.
-    // 45s, not 120s (Adrian, Jul 31: "talks without respecting the user" —
-    // talks without being called). The two-minute window, renewed on
-    // every exchange, meant in practice ALWAYS OPEN: if you exchanged a word
-    // with him, then talked for a minute with someone else in the room, he replied — not
-    // because the gate was broken, but because it was too wide open.
-    // 45s keeps the conversation flowing without repeating the name, but closes fast
-    // enough that a discussion with someone else is no longer addressed to him.
-    // ── REGULA LUI: „KELION" + RESTUL FRAZEI ────────────────────────────────
-    // Adrian, Jul 31: "talks when no one is talking to him; what he hears that has
-    // nothing to do with him, he reacts to. The implemented rule — Kelion and the rest
-    // of the utterance — he doesn't apply it."
-    //
-    // He was right, and in the morning I had cut the window from 120s to 45s without
-    // touching what kept it open: it RENEWED on every utterance that entered it,
-    // AND it renewed when Kelion himself spoke. A window that renews
-    // from its own content never closes while people talk in the
-    // room — 45s or 120s was the same thing.
-    //
-    // Now the gate is per UTTERANCE, not on the clock: the name is in the utterance → the rest of the utterance is
-    // the command. No name → silence. The only exception is the obvious one: if he just
-    // asked you a question, you may reply without calling him again —
-    // but that's ONE SINGLE reply, consumed on first use and not
-    // renewed by anything.
+
+    // ── THE MOUTH: a serial speech queue ─────────────────────────────────────
+    // The brain's reply arrives sentence by sentence (ChatPanel's feeder). Each
+    // piece becomes a system item starting with the speak prefix the persona
+    // was taught, followed by ONE response request. Exactly one response may be
+    // active at a time — the queue drains on response.done (which the API also
+    // sends for a cancelled response, so a stopSpeaking() can never wedge it).
+    const SPEAK_PREFIX = 'ROSTEȘTE: '
+    const speakQueue: string[] = []
+    let speakActive = false
+    const drainSpeak = (): void => {
+      if (closed || speakActive) return
+      const next = speakQueue.shift()
+      if (!next) return
+      speakActive = true
+      send({
+        type: 'conversation.item.create',
+        item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: SPEAK_PREFIX + next }] },
+      })
+      send({ type: 'response.create' })
+    }
+    const speak = (text: string): void => {
+      const t = text.trim()
+      if (!t || closed) return
+      speakQueue.push(t)
+      drainSpeak()
+    }
+    const stopSpeaking = (): void => {
+      speakQueue.length = 0
+      if (speakActive) {
+        send({ type: 'response.cancel' })
+        send({ type: 'output_audio_buffer.clear' })
+        // speakActive stays true until response.done arrives (guaranteed for a
+        // cancelled response) — a new speak() before that lands in the queue
+        // and drains right after, never over the cancelled utterance.
+      }
+    }
+
+    // ── THE NAME GATE, PER UTTERANCE (Adrian, Jul 31 / Aug 1) ────────────────
+    // The name is in the utterance → the utterance goes to the brain. No name →
+    // silence. The only exception: if Kelion just asked you a QUESTION, you may
+    // answer once without calling him — one reply, consumed on use, never
+    // renewed. The gate DOESN'T speak: it hands the transcript to the brain via
+    // onAddressed (the same door typing uses).
     const REPLY_WINDOW_MS = 12_000
-    // THE WINDOW IS OPEN AT SESSION START (bug found live by Adrian,
-    // Jul 27, "he seems not to hear": the user just STARTED the microphone — obviously
-    // they're addressing Kelion; demanding the name on the very first utterance, with a
-    // transcription that mangles it, made him completely mute at opening).
-    // At STARTUP the window is open for a shorter time: the user just pressed the
-    // microphone, so the first seconds are clearly addressed to him — but if they say
-    // nothing in 15s, silence becomes the default again.
+    // THE WINDOW IS OPEN AT SESSION START (bug found live by Adrian, Jul 27):
+    // the user just STARTED the microphone — obviously they're addressing
+    // Kelion; demanding the name on the very first utterance made him
+    // completely mute at opening. If they say nothing in 15s, silence becomes
+    // the default again.
     let replyUntil = Date.now() + 15_000
     // Regex TOLERANT to real transcription (live proof: "Kelion, ce faci" came out
     // as "Elioncevaci"): we also accept the variants without the initial consonant
     // (elion/eleon), glued to the next word.
     const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
-    // The anti-"he doesn't hear me" net: if the VAD closed the utterance but the transcript doesn't
-    // arrive (transcription failed), in an ACTIVE conversation we reply anyway.
-    let speechStopTimer: number | null = null
-    cleanups.push(() => {
-      if (speechStopTimer != null) clearTimeout(speechStopTimer)
-    })
     // The last language ANCHORED in the live session — we re-anchor only on change.
     let anchoredLang = ''
-    // Apelurile de unelte: numele vine pe output_item.added, argumentele pe
-    // function_call_arguments.done — legate prin call_id.
-    const toolNames = new Map<string, string>()
     // The system injection becomes available with the events channel.
     liveInject = (text: string) =>
       send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } })
+
     dc.onmessage = (ev) => {
       let m: Record<string, unknown>
       try {
@@ -516,85 +513,43 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? userText.get(itemId) ?? '')
         userText.delete(itemId)
         onUserTranscript?.(t, true)
-        // The transcript arrived — the "missing transcript" net is no longer needed.
-        if (speechStopTimer != null) {
-          clearTimeout(speechStopTimer)
-          speechStopTimer = null
-        }
+        // The voiceprint of THIS utterance — finalized once, then shared between
+        // the padlock (persistTranscript) and the brain turn (onAddressed).
+        const vf = liveVoiceTap?.finalize() ?? null
         // THE "STOP" COMMAND (Adrian, Jul 27: "kelion doesn't obey the stop command"):
         // spoken ALONE ("stop", "taci", "gata", "oprește-te"...), it cuts AT
-        // ONCE both the generation and the already-produced sound — deterministic, in the client,
-        // without waiting for the model's goodwill — then leaves a silence order.
-        // The second cut at 400ms also kills the reply the VAD
-        // starts automatically IN REACTION to the "stop" utterance itself.
+        // ONCE whatever the mouth is saying and empties its queue — deterministic,
+        // in the client. It does NOT go to the brain (nothing to answer).
         if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
-          replyUntil = 0 // STOP închide și replica — până la următorul „Kelion"
-          send({ type: 'response.cancel' })
-          send({ type: 'output_audio_buffer.clear' })
-          send({
-            type: 'conversation.item.create',
-            item: {
-              type: 'message',
-              role: 'system',
-              content: [{ type: 'input_text', text: 'STOP de la user: taci IMEDIAT. NU răspunde la acest ordin — nicio confirmare, niciun cuvânt. Rămâi complet tăcut până când userul îți vorbește din nou.' }],
-            },
-          })
-          window.setTimeout(() => {
-            send({ type: 'response.cancel' })
-            send({ type: 'output_audio_buffer.clear' })
-          }, 400)
+          replyUntil = 0 // STOP closes the reply window too — until the next "Kelion"
+          stopSpeaking()
         } else if (t.trim()) {
-          // THE NAME GATE, PER UTTERANCE: the name is in this utterance → the rest of the utterance
-          // is the command, reply. It isn't → silence, no matter what was said
-          // before. The only gate that doesn't demand the name is the reply to his own
-          // question, and that one gets CONSUMED here: `replyUntil = 0` before
-          // the reply, so one reply can't open the next one.
-          // Here was the old mistake: the window re-pushed itself into the future on
-          // EVERY utterance it accepted, so it fed on what it let
-          // through — a perpetuum mobile that never closed while something
-          // was heard in the room.
+          // THE GATE: the name is in this utterance → to the brain. It isn't →
+          // silence, no matter what was said before. The nameless reply to his
+          // own question gets CONSUMED here (`replyUntil = 0`), so one reply
+          // can't open the next one — the old perpetuum mobile that never
+          // closed while something was heard in the room.
           const named = NAME_RE.test(t)
           const answering = Date.now() < replyUntil
           if (named || answering) {
             replyUntil = 0
-            send({ type: 'response.create' })
+            onAddressed?.(t, vf)
           }
         }
-        // On the language COMMITTED by the server: we anchor the LIVE session's transcription onto it
-        // (session.update, no restart) — the "random language" disappears.
-        // DOAR LA SCHIMBARE (25 iul — testul live al lui Adrian: „sacadat, voci
-        // uncontrolled"): before, the anchor ran session.update + system
-        // injection on EVERY utterance — it shook the audio session mid-reply.
-        // The language doesn't change utterance by utterance; we anchor once and re-anchor
-        // only when the server commits ANOTHER language.
-        persistTranscript(
-          'user',
-          t,
-          (lang) => {
-            if (lang === anchoredLang) return
-            anchoredLang = lang
-            send({
-              type: 'session.update',
-              session: {
-                type: 'realtime',
-                audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
-              },
-            })
-            const names: Record<string, string> = { ro: 'Romanian', en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese', it: 'Italian', de: 'German' }
-            const nm = names[lang] ?? 'English'
-            send({
-              type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'system',
-                content: [{ type: 'input_text', text: `Reminder: reply ONLY in ${nm}. Never switch language. If you heard only noise or silence, stay silent.` }],
-              },
-            })
-          },
-          // VERBAL CAMERA/SCREEN COMMAND (Jul 25): the server interpreted
-          // the transcript → we execute it in the client (switch camera, close the monitor).
-          onDevice,
-        )
+        // On the language COMMITTED by the server: we anchor the LIVE session's
+        // transcription onto it (session.update, no restart). ONLY ON CHANGE —
+        // re-anchoring on every utterance shook the audio session mid-reply.
+        persistTranscript(t, vf, (lang) => {
+          if (lang === anchoredLang) return
+          anchoredLang = lang
+          send({
+            type: 'session.update',
+            session: {
+              type: 'realtime',
+              audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
+            },
+          })
+        })
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)
@@ -603,76 +558,25 @@ export async function startRealtimeVoice(
         const t = String(m.transcript ?? asstText.get(itemId) ?? '')
         asstText.delete(itemId)
         onAssistantTranscript?.(t, true)
-        persistTranscript('assistant', t)
-        // Kelion finished speaking. HERE it used to be decided, until today, that anything
-        // heard in the next tens of seconds is addressed to him — he kept
-        // his own gate open, by speaking. Now: if he asked a QUESTION, you
-        // have the right to one reply without calling him; if he only answered or
-        // stated something, the gate closes at once and the name is again
-        // mandatory. A statement of his is not an invitation to talk.
+        // Kelion finished speaking. If what he said was a QUESTION, you have the
+        // right to one reply without calling him; if he only answered or stated
+        // something, the gate closes at once and the name is mandatory again.
         replyUntil = /\?/.test(t) ? Date.now() + REPLY_WINDOW_MS : 0
-      } else if (type === 'input_audio_buffer.speech_stopped') {
-        // The anti-"he doesn't hear me" net (the reason the old gate was removed, Jul 24): the VAD
-        // closed the utterance; if the transcript does NOT arrive within 2.8s (transcription
-        // failed) and the conversation is ACTIVE, we reply anyway — a transcription
-        // failure must not make him deaf in the middle of the discussion. Outside
-        // the conversation (gate closed), silence stays silence.
-        // The net applies ONLY to the reply to his own question — the only
-        // case where we know, without a transcript, that the utterance is addressed to him. Without
-        // a transcript we can't search for the name, and replying "so he doesn't seem
-        // deaf" is exactly how he ended up talking over the room's discussion.
-        // It gets consumed, like any reply.
-        if (speechStopTimer != null) clearTimeout(speechStopTimer)
-        speechStopTimer = window.setTimeout(() => {
-          speechStopTimer = null
-          if (Date.now() < replyUntil) {
-            replyUntil = 0
-            send({ type: 'response.create' })
-          }
-        }, 2800)
-      } else if (type === 'response.output_item.added') {
-        // The requested function's name — stored by call_id for the arguments step.
-        const item = (m.item as Record<string, unknown>) ?? {}
-        if (item.type === 'function_call') {
-          toolNames.set(String(item.call_id ?? ''), String(item.name ?? ''))
-        }
-      } else if (type === 'response.function_call_arguments.done') {
-        // VOICE AUTONOMY: executes the tool and sends the result back, then
-        // asks for the reply to continue — Kelion speaks based on the result.
-        const callId = String(m.call_id ?? '')
-        const name = String(m.name ?? toolNames.get(callId) ?? '')
-        toolNames.delete(callId)
-        const argsJson = String(m.arguments ?? '{}')
-        // ANTI-"2 VOICES" ON ESCALATION (Adrian, Jul 25): if the model was already uttering
-        // something when it requested the tool (e.g. "let me check"), the `response.create`
-        // below started a SECOND utterance OVER the first → two overlapping voices.
-        // We cut any ongoing reply BEFORE uttering the tool result.
-        if (name && onToolCall) {
-          void onToolCall(name, argsJson)
-            .catch((e) => JSON.stringify({ error: String(e).slice(0, 200) }))
-            .then((output) => {
-              send({ type: 'response.cancel' })
-              send({
-                type: 'conversation.item.create',
-                item: { type: 'function_call_output', call_id: callId, output: String(output ?? '{}') },
-              })
-              send({ type: 'response.create' })
-            })
-        } else {
-          // Unresolvable name (or no handler): we reply anyway — otherwise
-          // the model hangs waiting for the function result.
-          send({ type: 'response.cancel' })
-          send({
-            type: 'conversation.item.create',
-            item: { type: 'function_call_output', call_id: callId, output: '{"error":"unknown_tool"}' },
-          })
-          send({ type: 'response.create' })
-        }
+      } else if (type === 'response.done') {
+        // A mouth response ended (naturally or cancelled) — drain the queue.
+        speakActive = false
+        drainSpeak()
+      } else if (type === 'input_audio_buffer.speech_started') {
+        // ECHO PROTECTION: while Kelion speaks we ignore VAD starts — on
+        // speakers, residual echo would make him cut himself mid-sentence.
+        // A REAL talk-over isn't lost: its transcript still arrives, passes the
+        // gate and starts a new brain turn, which silences the mouth anyway.
+        if (!speakActive) onSpeechStart?.()
       } else if (type === 'error') {
         const err = (m.error as Record<string, unknown>) ?? {}
         const msg = String(err.message ?? err.code ?? 'realtime-error')
-        // Erori BENIGNE (cancellation_failed / conversation_already_has_active_
-        // response) doesn't tear down the session — we just note them and move on.
+        // BENIGN errors (cancellation_failed / already-active response) don't
+        // tear down the session — we just note them and move on.
         if (/cancel|active_response/i.test(`${String(err.code ?? '')} ${msg}`)) {
           console.warn('realtime eroare benignă:', msg)
         } else {
@@ -741,33 +645,15 @@ export async function startRealtimeVoice(
           if (s.track?.kind === 'audio') s.track.enabled = !muted
         })
       },
-      // Manual barge-in: we ask the model to cut the current reply.
-      interrupt: () => send({ type: 'response.cancel' }),
-      // The position changed → a SYSTEM item with the new lat/lon (we don't duplicate
-      // instructions via session.update — the "one single injection" rule).
-      updateCoords: (c: { lat: number; lon: number }) =>
-        send({
-          type: 'conversation.item.create',
-          item: {
-            type: 'message',
-            role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text:
-                  `ACTUALIZARE GPS LIVE: poziția CURENTĂ a utilizatorului este ACUM latitudine ${c.lat.toFixed(5)}, longitudine ${c.lon.toFixed(5)}. ` +
-                  'De acum, „aici", „lângă mine", „unde sunt" și vremea locală folosesc ACEASTĂ poziție (cea veche nu mai e valabilă); la get_weather pasează exact acești lat/lon.',
-              },
-            ],
-          },
-        }),
+      // Manual barge-in: silence the mouth right now.
+      interrupt: stopSpeaking,
+      speak,
+      stopSpeaking,
     }
   } catch (e) {
     stop()
     // FIX "double counting" (Jul 24 audit, P3): here we NO LONGER call onState('error')
     // — we throw the exception, and the catch in ChatPanel counts the start failure ITSELF.
-    // Before, a single failure incremented the counter twice (onState + catch) →
-    // "3 chances" were in fact 2 and full-duplex died prematurely onto STT.
     throw e
   }
 }
