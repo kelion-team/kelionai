@@ -99,10 +99,10 @@ export default function App() {
 
   return (
     <>
-      {/* Pagina dedicată /login (Adrian, 26 iul) — un user deja logat e trimis
-          înapoi în aplicație. /credite e PUBLICĂ pentru toți (fix 27 iul —
-          înainte, userul LOGAT nu putea ajunge la ea nici tastând adresa:
-          verificarea de user venea prima și-l arunca mereu în scenă). */}
+      {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
+      sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
+      before, a LOGGED-IN user could not reach it even by typing the address:
+      the user check came first and always threw him onto the stage). */}
       {window.location.pathname === '/manual' ? (
         <Manual />
       ) : window.location.pathname === '/credite' || window.location.pathname === '/credits' ? (
@@ -114,15 +114,15 @@ export default function App() {
       ) : (
         <Landing error={error} />
       )}
-      {/* Filigran versiune + dată update — dovada vizibilă că ultima versiune e
-          instalată (Adrian, 7 iul). Acum include și ștampila DEPLOY-ului de pe
-          server (10 iul): se schimbă la ORICE publicare, nu doar la build de
-          interfață. Apare pe toate shell-urile (aceeași web app). */}
+      {/* Version + update-date watermark — the visible proof that the latest
+      version is installed (Adrian, Jul 7). Now also includes the server's
+      DEPLOY stamp (Jul 10): it changes on ANY publish, not just on a frontend
+      build. Appears on every shell (same web app). */}
       <div className="app-watermark" aria-hidden="true">
         {versionLabel(srv)}
       </div>
-      {/* BARA DE VERSIUNE NOUĂ (27 iul): vizibilă, nu intruzivă — userul decide
-          când se aplică; dacă pleacă din tab, se aplică singură, neobservat. */}
+      {/* THE NEW VERSION BAR (Jul 27): visible, not intrusive — the user decides
+      when it applies; if he leaves the tab, it applies itself, unnoticed. */}
       {updateReady && (
         <div className="update-banner" role="status">
           <span>{PT.updateAvailable}</span>

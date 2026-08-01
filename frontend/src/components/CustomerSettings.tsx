@@ -206,7 +206,7 @@ export default function CustomerSettings({
           </button>
         </div>
 
-        {/* 1 — Preferințe de bază */}
+        {/* 1 — Basic preferences */}
         <section className="settings-sec">
           <h4>{t.prefs}</h4>
           <label className="contact-label">{t.langLabel}</label>
@@ -218,10 +218,10 @@ export default function CustomerSettings({
             ))}
           </select>
 
-          {/* VOCEA, PER USER (Adrian, 30 iul: „își poate seta aplicația cu ce
-              voce dorește… se ține minte per user. A nu se încurca cu alt user
-              sau să afecteze alt cont"). Lista vine de la server — o listă
-              paralelă aici s-ar învechi când se schimbă env-ul. */}
+          {/* THE VOICE, PER USER (Adrian, Jul 30: „he can set the app with whatever
+          voice he wants… it's remembered per user. Not to be mixed up with another
+          user or affect another account”). The list comes from the server — a
+          parallel list here would go stale when the env changes. */}
           {voices.length > 0 && (
             <>
               <label className="contact-label" style={{ marginTop: 12 }}>
@@ -247,10 +247,10 @@ export default function CustomerSettings({
           )}
         </section>
 
-        {/* 2 — Credit / portofel (+ mențiunea 25%). Alimentarea MANUALĂ se face
-            dintr-un SINGUR loc — pastila de credit din bară (Adrian, 24 iul:
-            „utilizatorul trebuie să vadă doar acea parte de alimentare"). Aici
-            rămân doar soldul, regula 25% și reîncărcarea automată. */}
+        {/* 2 — Credit / wallet (+ the 25% note). MANUAL top-up happens from ONE
+        single place — the credit pill in the bar (Adrian, Jul 24: „the user must
+        see only that top-up part”). Here remain only the balance, the 25% rule
+        and the automatic top-up. */}
         <section className="settings-sec">
           <h4>{t.wallet}</h4>
           <div className="settings-credits">
@@ -262,7 +262,7 @@ export default function CustomerSettings({
               : 'Top up from the credit pill “＋” in the top bar — pick the credit pack you want.'}
           </p>
 
-          {/* Reîncărcare automată — ca să nu rămâi fără credit în mijlocul unei sesiuni */}
+          {/* Automatic top-up — so you never run out of credit mid-session */}
           <label className="contact-label" style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={ar.enabled} onChange={(e) => void onAr({ enabled: e.target.checked })} />
             {ro ? 'Reîncărcare automată (să nu rămân fără credit)' : 'Auto top-up (never run out of credit)'}
@@ -278,10 +278,10 @@ export default function CustomerSettings({
                 style={{ width: 70 }}
               />
               <span className="settings-note">{ro ? 'credite, adaugă' : 'credits, add'}</span>
-              {/* USERUL VEDE DOAR CREDITE (Adrian, 30 iul). Serverul lucrează în
-                  lire (regula lui: multipli de £5), deci pachetele de mai jos sunt
-                  aceleași sume, arătate în singura unitate care-l privește pe el.
-                  Conversia rămâne aici, într-un singur loc. */}
+              {/* THE USER SEES ONLY CREDITS (Adrian, Jul 30). The server works in
+              pounds (his rule: multiples of £5), so the packs below are the same
+              amounts, shown in the only unit that concerns him. The conversion
+              stays here, in a single place. */}
               <select
                 value={ar.topupAmount}
                 onChange={(e) => void onAr({ topupAmount: Number(e.target.value) })}

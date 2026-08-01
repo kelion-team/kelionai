@@ -176,14 +176,14 @@ export function WalletButton({
   const critical = !isAdmin && percent <= 5 // stays blinking red at the very end
   return (
     <div className="wallet">
-      {/* Pastila = SOLDUL curent (creditele pe care le AI), nu „cumpără X".
-          Adrian, 24 iul: „e greșită comunicarea — am 150 credite sau cumpăr
-          150?". Icon portofel + număr = clar sold; adăugarea e în meniu.
-          ADMIN (Adrian, 26 iul: „afișează corect creditele la admin"): owner-ul
-          nu cumpără credite, deci soldul lui din registru iese NEGATIV pe
-          măsură ce consumă — un „-324 credite" roșu e fals ca mesaj (nu
-          datorează nimic). La admin pastila arată „nelimitat"; consumul REAL,
-          pe componente, rămâne în Admin → Bani. Registrele NU se ating. */}
+      {/* The pill = the CURRENT BALANCE (the credits you HAVE), not „buy X”.
+      Adrian, Jul 24: „the communication is wrong — do I have 150 credits or
+      am I buying 150?”. Wallet icon + number = clear balance; adding is in
+      the menu. ADMIN (Adrian, Jul 26: „show the credits correctly at admin”):
+      the owner doesn't buy credits, so his ledger balance goes NEGATIVE as he
+      consumes — a red „-324 credits” is false as a message (he owes nothing).
+      At admin the pill shows „nelimitat”; the REAL consumption, by component,
+      stays in Admin → Money. The ledgers are NOT touched. */}
       <button
         type="button"
         className={`ghost wallet-badge ${critical ? 'blink-red' : ''}`}
@@ -198,13 +198,13 @@ export function WalletButton({
               : 'Your available credits — click to add more'
         }
       >
-        {/* LA ADMIN NU MAI SCRIE NICIO CIFRĂ (Adrian, 30 iul). „nelimitat" nu
-            spunea nimic, iar soldul lui real — cel din Revolut Pro — NU poate fi
-            citit de aplicație: API-ul de conturi e doar pe Revolut Business. Deci
-            aici ori punem o cifră măsurată, ori niciuna. Butonul rămâne, fiindcă
-            în spatele lui stau Setările și conectarea Gmail — fără el, drumul
-            spre ele dispare. La user rămâne exact ce era: soldul lui, reîmprospătat
-            la interval, la revenirea în tab și la fiecare schimbare de credite. */}
+        {/* AT ADMIN NO FIGURE SHOWS ANYMORE (Adrian, Jul 30). „nelimitat” said
+        nothing, and his real balance — the one in Revolut Pro — CANNOT be read
+        by the app: the accounts API is Revolut-Business-only. So here we show
+        either a measured figure or none. The button stays, because behind it
+        sit the Settings and the Gmail connection — without it, the path to
+        them disappears. At the user's it stays exactly as it was: his balance,
+        refreshed on an interval, on tab return and on every credit change. */}
         <span aria-hidden style={{ marginRight: 5 }}>{isAdmin ? '⚙' : '💳'}</span>
         {isAdmin
           ? ro
@@ -214,10 +214,10 @@ export function WalletButton({
             ? '…'
             : `${credits.toLocaleString()} ${t.credits}`}
       </button>
-      {/* Paywall PERMANENT = pastilă ÎN bară (în flux, nu absolută) — cea
-          absolută acoperea titlul tabului de pe monitor (Adrian, 24 iul:
-          „se suprapun imagini și butoane"). Reamintirea trecătoare (6s) rămâne
-          plutitoare — dispare singură. */}
+      {/* PERMANENT paywall = a pill IN the bar (in flow, not absolute) — the
+      absolute one covered the monitor tab's title (Adrian, Jul 24: „images
+      and buttons overlap”). The passing reminder (6s) stays floating — it
+      disappears by itself. */}
       {paywalled && !open && (
         <button type="button" className="wallet-toast wallet-toast-inline urgent" onClick={() => setOpen(true)}>
           {t.topUp}
@@ -228,7 +228,7 @@ export function WalletButton({
           {t.lowCredit}
         </button>
       )}
-      {/* „CREDIT ADĂUGAT" — singurul mesaj pe care îl vede userul la o vânzare. */}
+      {/* „CREDIT ADĂUGAT” — the only message the user sees on a sale. */}
       {addedCredits !== null && (
         <span className="wallet-toast">
           ✅ {ro ? `${addedCredits.toLocaleString()} credite adăugate` : `${addedCredits.toLocaleString()} credits added`}
@@ -236,18 +236,18 @@ export function WalletButton({
       )}
       {open && (
         <div className="wallet-menu">
-          {/* SOLD curent, clar separat de acțiunea de adăugare. La ADMIN nu se
-              arată: soldul lui din registru iese negativ pe măsură ce consumă
-              (nu cumpără credite), deci cifra ar fi falsă ca mesaj. */}
+          {/* CURRENT balance, clearly separated from the add action. At ADMIN it
+          is not shown: his ledger balance goes negative as he consumes (he
+          doesn't buy credits), so the figure would be false as a message. */}
           {!isAdmin && (
             <span className="wallet-menu-balance">
               {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
             </span>
           )}
-          {/* VÂNZAREA E LA ADMIN (Adrian, 24 iul, confirmat DA: „butonul de
-              credite e doar la admin; ceilalți doar afișare"). Userii obișnuiți
-              văd DOAR soldul; creditele se cumpără prin linkul de plată primit
-              de la administrator. Adminul păstrează meniul (testare). */}
+          {/* THE SALE IS AT ADMIN (Adrian, Jul 24, confirmed YES: „the credits
+          button is only at admin; the others only display”). Regular users see
+          ONLY the balance; credits are bought through the payment link received
+          from the administrator. The admin keeps the menu (testing). */}
           {isAdmin ? (
             <>
               <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>

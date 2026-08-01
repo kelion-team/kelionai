@@ -109,8 +109,9 @@ export default function Landing({ error }: { error?: string | null }) {
 
   return (
     <div className="landing">
-      {/* MANUALUL, dreapta-sus (Adrian): oricine, fără cont, poate citi tot ce
-          face aplicația — își alege limba și îl descarcă în limba aia. */}
+      {/* THE MANUAL, top-right (Adrian): anyone, without an account, can read
+      everything the app does — picks their language and downloads it in that
+      language. */}
       <a className="landing-manual-btn" href="/manual">{PT.userManual}</a>
       <div className="landing-hero">
         {/* Same proven framing as the in-app stage: camera at chest height looking
@@ -125,8 +126,8 @@ export default function Landing({ error }: { error?: string | null }) {
           <Suspense fallback={null}>
             <AvatarModel />
           </Suspense>
-          {/* Limitele camerei vin din sursa comună (lib/avatarCamera) — aceleași
-              pe landing și în aplicație, ca Kelion să fie încadrat identic. */}
+          {/* The camera limits come from the shared source (lib/avatarCamera) —
+          the same on the landing and in the app, so Kelion is framed identically. */}
           <OrbitControls {...AVATAR_ORBIT} />
         </Canvas>
         <AvatarLoading />
@@ -150,9 +151,8 @@ export default function Landing({ error }: { error?: string | null }) {
           {notice && <p className="error">{notice}</p>}
 
           <div className="landing-cta">
-            {/* Fără probă gratuită (Adrian): singura cale de intrare e contul
-                Google, apoi cumpărarea de credite. Nimeni nu mai primește
-                minute gratis. */}
+            {/* No free trial (Adrian): the only way in is the Google account, then
+            buying credits. Nobody gets free minutes anymore. */}
             <button type="button" className="google-btn cta-primary" onClick={startGoogleLogin}>
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -174,9 +174,9 @@ export default function Landing({ error }: { error?: string | null }) {
               </svg>
               {t.signIn}
             </button>
-            {/* PAGINILE ORFANE, LEGATE (27 iul — construite la ordinul din 26
-                iul dar niciodată legate din landing; auditul le-a găsit
-                neatinse de niciun link): intrarea cu email + prețurile publice. */}
+            {/* THE ORPHAN PAGES, LINKED (Jul 27 — built on the Jul 26 order but
+            never linked from the landing; the audit found them untouched by any
+            link): the email sign-in + the public prices. */}
             <div className="landing-alt-links">
               <a href="/login">{PT.emailSignIn}</a>
               <span aria-hidden>·</span>
@@ -238,16 +238,16 @@ export default function Landing({ error }: { error?: string | null }) {
             <div className="landing-qr-row">
               {QR_CODES.map((q) => (
                 <figure key={q.key}>
-                  {/* CODUL E BUTON DE INSTALARE (Adrian, 26 iul: „când apeși pe
-                      codul win se instalează aplicația win... la fiecare după
-                      sistemul lui"). Click/tap pe cod → instalarea platformei
-                      respective; mărirea pentru scanat rămâne pe butonul 🔍. */}
+                  {/* THE CODE IS AN INSTALL BUTTON (Adrian, Jul 26: „when you press the
+                  win code the win app installs... each according to his system”).
+                  Click/tap on the code → installs that platform; the enlarge-for-scanning
+                  stays on the 🔍 button. */}
                   <a className="qr-btn" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer" aria-label={`Install — ${q.label}`}>
                     <img src={q.img} alt={`QR — ${q.label}`} width="96" height="96" />
                   </a>
                   <figcaption>{q.label}</figcaption>
-                  {/* Numărul din filigram, sub FIECARE cod — același ca în browser;
-                      dovedește că aplicația instalată e exact versiunea live. */}
+                  {/* The watermark number, under EVERY code — the same as in the browser;
+                  it proves the installed app is exactly the live version. */}
                   <span className="qr-version">{versionLabel(srv)}</span>
                   <a className="qr-install" href={q.href} target={q.href.startsWith('http') ? '_blank' : undefined} rel="noreferrer">
                     Install

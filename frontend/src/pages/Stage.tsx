@@ -181,16 +181,16 @@ function BuildSurface({ zoom }: { zoom: number }) {
           {jobs.map((j) => (
             <li key={j.id} className={`build-item build-${j.status}`}>
               <div className="build-row">
-                {/* PAUZA DE COTĂ, VIZIBILĂ (D6): un ordin amânat rămâne „running"
-                    în bază — corect, nu e pierdut — dar pe ecran arăta identic cu
-                    unul care lucrează, cu pasul înghețat 40 de minute. Lucrătorul
-                    marchează pauza cu „⏳"; aici devine o insignă proprie. */}
+                {/* THE QUOTA PAUSE, VISIBLE (D6): a postponed order stays „running” in
+                the database — correct, it's not lost — but on screen it looked identical
+                to a working one, with the step frozen for 40 minutes. The worker marks
+                the pause with „⏳”; here it becomes its own badge. */}
                 {j.progress?.startsWith('⏳') ? (
                   <span className="build-badge build-badge-queued">{uiStrings().buildThrottled}</span>
                 ) : (
                   <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
                 )}
-                {/* Verdictul verificării INDEPENDENTE (Etapa 6): „Gata" dovedit de CI. */}
+                {/* The INDEPENDENT verification's verdict (Stage 6): „Gata” proven by CI. */}
                 {j.ci === 'verde' ? (
                   <span className="build-ci build-ci-ok" title={uiStrings().buildCiOk}>CI ✓</span>
                 ) : j.ci === 'roșu' ? (
@@ -699,12 +699,11 @@ export default function Stage({ user }: { user: User }) {
                 </button>
               )}
             </div>
-            {/* TAB-URI VII (fluiditate #6, 27 iul: „tab-urile monitorului
-                reîncarcă pagina de la zero la fiecare comutare"): toate
-                suprafețele rămân MONTATE — comutarea doar le ascunde/arată,
-                fără reîncărcare, fără pierderea derulării/stării. EXCEPȚIE:
-                sursele cu SUNET (youtube/video/audio) se montează DOAR active,
-                altfel un clip ascuns ar cânta peste vocea lui Kelion. */}
+            {/* LIVE TABS (fluidity #6, Jul 27: „the monitor tabs reload the page
+            from scratch on every switch”): all surfaces stay MOUNTED — switching
+            only hides/shows them, no reload, no lost scroll/state. EXCEPTION:
+            SOUND sources (youtube/video/audio) mount ONLY when active, otherwise
+            a hidden clip would play over Kelion's voice. */}
             {wsv.tasks.map((task) => {
               const active = task.id === wsv.activeId
               const sonor = task.kind === 'youtube' || task.kind === 'video' || task.kind === 'audio'
@@ -845,12 +844,12 @@ export default function Stage({ user }: { user: User }) {
           </div>
         )}
       </div>
-      {/* Avatar canvas — shrinks to the corner in monitor mode. ARANJAREA LUI
-          ADRIAN (11 iul: „vreau acces să rescalez eu avatarul și să-l
-          poziționez cum cred eu, dând dublu click pe el"): dublu-click pe
-          avatar = mod de aranjare — tragi ca să-l muți, rotița ca să-l
-          scalezi, dublu-click din nou = gata; se ține minte PE SERVER
-          (/api/prefs, per utilizator) cu oglindă în localStorage. */}
+      {/* Avatar canvas — shrinks to the corner in monitor mode. ADRIAN'S
+      LAYOUT (Jul 11: „I want access to rescale the avatar myself and position
+      it as I see fit, by double-clicking it”): double-click on the avatar =
+      layout mode — drag to move it, the wheel to scale it, double-click again
+      = done; remembered ON THE SERVER (/api/prefs, per user) with a
+      localStorage mirror. */}
       <div
         ref={stageRef}
         className={`stage-canvas ${monitorOn ? 'pip' : ''} ${avatarEdit ? 'editing' : ''}`}
@@ -866,15 +865,15 @@ export default function Stage({ user }: { user: User }) {
             : undefined
         }
       >
-      {/* MODUL DE ARANJARE MANUALĂ DEZACTIVAT (Adrian, 24 iul: „dezactivează
-          fereastra din rotiță pentru mutări și ajustări manuale") — dublu-click
-          nu mai deschide fereastra de tras/scalat cu rotița; aranjarea salvată
-          pe server rămâne exact cum e. */}
-      {/* Adrian, 11 iul: „avatarul trebuie să se vadă complet" + „picioarele nu
-          i se văd complet" — clipurile de mișcare leagănă șoldurile, deci sub
-          tălpi (−1.65) trebuie aer real: camera centrată la y −0.25, distanța
-          4.6 → cadrul acoperă −1.93…+1.43. Mărimea finală o decide Adrian cu
-          dublu-click (modul de aranjare de mai jos). */}
+      {/* MANUAL LAYOUT MODE DISABLED (Adrian, Jul 24: „disable the wheel
+      window for manual moves and adjustments”) — double-click no longer
+      opens the drag/scale-with-wheel window; the layout saved on the server
+      stays exactly as it is. */}
+      {/* Adrian, Jul 11: „the avatar must be fully visible” + „his feet are
+      not fully seen” — the motion clips sway the hips, so below the soles
+      (−1.65) there must be real air: camera centered at y −0.25, distance
+      4.6 → the frame covers −1.93…+1.43. The final size is decided by Adrian
+      with a double-click (the layout mode below). */}
       <Canvas shadows="percentage" camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
@@ -883,8 +882,8 @@ export default function Stage({ user }: { user: User }) {
             `<Environment preset="city">` fetched a ~1MB HDR from an external CDN
             (githack/pmndrs) INSIDE the avatar's Suspense: on a fresh phone with a
             slow or blocked network that fetch could hang, so the Suspense never
-            resolved and the avatar stayed BLACK forever (Adrian, 8 iul: „aplicația
-            publicată și defectă"). The landing already dropped HDR for this exact
+            resolved and the avatar stayed BLACK forever (Adrian, Jul 8: „the app
+            published and broken”). The landing already dropped HDR for this exact
             reason; the in-app stage now matches — same look, zero external deps. */}
         <ambientLight intensity={0.75} />
         <directionalLight position={[2, 3, 2]} intensity={1.6} castShadow />
@@ -892,8 +891,8 @@ export default function Stage({ user }: { user: User }) {
         <Suspense fallback={null}>
           <AvatarModel />
         </Suspense>
-        {/* Limitele camerei vin din sursa comună (lib/avatarCamera) — aceleași
-            pe landing și în aplicație, ca Kelion să fie încadrat identic. */}
+        {/* The camera limits come from the shared source (lib/avatarCamera) —
+        the same on the landing and in the app, so Kelion is framed identically. */}
         <OrbitControls {...AVATAR_ORBIT} />
       </Canvas>
       <AvatarLoading />
@@ -929,9 +928,9 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* PUNGA LUI KELION în bară (Adrian, 24 iul: „arată adminului
-                realitatea"): SOLDUL REAL, exact din contul OpenRouter (USD) —
-                creierul central. Roșu când e sub prag. Click → alimentare. */}
+            {/* KELION'S WALLET in the bar (Adrian, Jul 24: „show the admin the
+            reality”): the REAL BALANCE, exactly from the OpenRouter account (USD) —
+            the central brain. Red when below threshold. Click → top-up. */}
             {brainCredit && (
               <button
                 type="button"
@@ -948,13 +947,13 @@ export default function Stage({ user }: { user: User }) {
                   : '⚠ OpenRouter'}
               </button>
             )}
-            {/* VPS-UL, PERMANENT ÎN BARĂ (Adrian, 31 iul: „afișează permanent
-                VPS pe interfață în bara de sus"). Două cifre, fiindcă răspund
-                la două întrebări diferite: RAM = mai ÎNCAPE ceva pe mașină,
-                CPU = mai DUCE. Roșu când memoria scade sub 10% liber sau
-                încărcarea trece de 200% — aceleași praguri ca alarma pe email
-                din sentinelă, ca bara și mailul să nu se contrazică niciodată.
-                Când nu se poate măsura scrie „⚠ VPS", nu zerouri (vezi tipul). */}
+            {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
+            permanently on the interface in the top bar”). Two figures, because they
+            answer two different questions: RAM = does anything else FIT on the
+            machine, CPU = can it still COPE. Red when memory drops under 10% free
+            or the load passes 200% — the same thresholds as the sentinel's email
+            alarm, so the bar and the mail never contradict. When it can't be
+            measured it writes „⚠ VPS”, not zeros (see the type). */}
             {brainCredit && (
               <button
                 type="button"
@@ -977,18 +976,18 @@ export default function Stage({ user }: { user: User }) {
                   : '⚠ VPS'}
               </button>
             )}
-            {/* AICI A STAT PASTILA „Stripe £0.00" din bara de sus. Scoasă pe
-                30 iul, odată cu Stripe: banii userilor nu mai trec prin el —
-                plătesc pe linkul Revolut, direct în contul lui Adrian. Cifra
-                rămasă acolo n-ar fi arătat niciodată altceva decât zero, adică
-                exact genul de „0" care nu înseamnă nimic și sperie degeaba.
-                Ce a mai rămas în bară e soldul creierului (OpenRouter), singurul
-                pe care aplicația chiar îl poate citi. */}
+            {/* HERE STOOD THE „Stripe £0.00” PILL from the top bar. Removed on
+            Jul 30, together with Stripe: the users' money no longer passes through
+            it — they pay on the Revolut link, straight into Adrian's account. The
+            figure left there would have never shown anything but zero — exactly
+            the kind of „0” that means nothing and scares for no reason. What
+            remains in the bar is the brain's balance (OpenRouter), the only one
+            the app can actually read. */}
           </>
         )}
-        {/* Credit + reîncărcare pentru ORICE user logat (Adrian, 24 iul). Din
-            meniul portofelului se ajunge și la Setări și la conectarea Gmail —
-            bara nu mai are rotița ⚙ separată, nici butonul „Connect Google". */}
+        {/* Credit + top-up for ANY logged-in user (Adrian, Jul 24). From the
+        wallet menu you also reach Settings and the Gmail connection — the bar
+        no longer has the separate ⚙ wheel, nor the „Connect Google” button. */}
         <WalletButton
           onOpenSettings={() => setSettingsOpen(true)}
           googleConnected={user.googleConnected}

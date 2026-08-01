@@ -181,7 +181,7 @@ export default function Manual(): React.JSX.Element {
           </div>
         </div>
 
-        {/* Semn onest cât se traduce: textul de pe ecran e încă în engleză. */}
+        {/* An honest sign while translating: the on-screen text is still in English. */}
         {traduce && (
           <div className="manual-translating" role="status">
             <span className="manual-spin" aria-hidden="true" />
