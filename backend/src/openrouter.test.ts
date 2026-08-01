@@ -71,8 +71,13 @@ describe('creier — catalogul de modele (filtrul de compatibilitate)', () => {
     expect(cuVedere?.vision).toBe(true)
     expect(toModel({ id: 'openai/x', supported_parameters: ['tools'] })?.vision).toBe(false)
   })
-  it('respinge furnizorii necunoscuți și variantele vechi', () => {
-    expect(toModel({ id: 'necunoscut/model', supported_parameters: ['tools'] })).toBeNull()
+  it('acceptă ORICE provider cu tools; respinge doar variantele moarte', () => {
+    // Adrian, Jul 30: "I must be able to decide any model from the list" —
+    // a fixed 5-company filter was never his order. The provider is taken
+    // from the id's first segment, whatever it is.
+    expect(toModel({ id: 'necunoscut/model', supported_parameters: ['tools'] }))
+      ?.toMatchObject({ provider: 'necunoscut' })
+    // Dead variants stay out: they exist in the OpenRouter list but are retired.
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
   })
 })

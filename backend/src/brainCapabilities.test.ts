@@ -114,7 +114,7 @@ describe('brainCapabilities — registrul unic e adevărat', () => {
   // THE STATE MEASURED TODAY — any change to the brain's surface must pass
   // through HERE (otherwise the test falls), so the registry can't fall behind.
   it('numărul de capabilități pe fiecare cale e cel documentat', () => {
-    expect(chatCapabilityNames().length).toBe(75) // + card_stare/card_completeaza/card_gata (31 iul: cardul la furnizori, gardat de voce)
+    expect(chatCapabilityNames().length).toBe(76) // + lookup_address (1 aug: coordonate↔cod poștal; ajunge pe voce prin creierul escaladat)
     expect(voiceCapabilityNames().length).toBe(31) // vocea = plafon OpenAI Realtime (măsurat)
   })
 

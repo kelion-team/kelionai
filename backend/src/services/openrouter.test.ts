@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog } from './openrouter.js'
+import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog, classifyCost } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
-  it('acceptă doar modele GPT/Gemini/Claude cu tools', () => {
+  it('acceptă orice provider cu tools; refuză doar lipsa uneltelor sau variantele moarte', () => {
     expect(
       toModel({ id: 'openai/gpt-4.1-mini', supported_parameters: ['tools'] }),
     )?.toMatchObject({ provider: 'openai' })
@@ -12,10 +12,36 @@ describe('openrouter catalog', () => {
     )?.toMatchObject({ provider: 'anthropic', vision: true })
     // no tools → rejected
     expect(toModel({ id: 'openai/gpt-4o', supported_parameters: [] })).toBeNull()
-    // unknown provider → rejected
-    expect(toModel({ id: 'mistral/large', supported_parameters: ['tools'] })).toBeNull()
+    // ANY provider with tools → accepted (Adrian, Jul 30: "I must be able to
+    // decide any model from the list" — the 5-company filter was not his order).
+    expect(toModel({ id: 'mistral/large', supported_parameters: ['tools'] }))
+      ?.toMatchObject({ provider: 'mistral' })
     // old variant excluded
     expect(toModel({ id: 'openai/gpt-3.5-turbo', supported_parameters: ['tools'] })).toBeNull()
+  })
+
+  it('clasa de cost: verde free → galben ieftin → portocaliu → roșu, din prețuri reale', () => {
+    // THE COLOR THE USER TRUSTS (Adrian, Aug 1). From real OpenRouter pricing
+    // (USD/token strings → per-1M numbers), blended 3:1 input:output.
+    // free: both prices 0 / missing (the :free variants)
+    expect(toModel({ id: 'nvidia/nemotron-ultra:free', supported_parameters: ['tools'], pricing: { prompt: '0', completion: '0' } }))
+      ?.toMatchObject({ costClass: 'free', promptPerM: 0, completionPerM: 0 })
+    // cheap: blended under $0.5/1M (e.g. $0.10 in / $0.40 out)
+    expect(toModel({ id: 'openai/mini', supported_parameters: ['tools'], pricing: { prompt: '0.0000001', completion: '0.0000004' } }))
+      ?.toMatchObject({ costClass: 'cheap' })
+    // mid: blended under $5/1M (e.g. $1 in / $4 out → 1.75 blended)
+    expect(toModel({ id: 'google/mid', supported_parameters: ['tools'], pricing: { prompt: '0.000001', completion: '0.000004' } }))
+      ?.toMatchObject({ costClass: 'mid' })
+    // expensive: blended $5+/1M (e.g. $15 in / $75 out)
+    expect(toModel({ id: 'anthropic/opus', supported_parameters: ['tools'], pricing: { prompt: '0.000015', completion: '0.000075' } }))
+      ?.toMatchObject({ costClass: 'expensive' })
+    // classifyCost edge cases, directly: 0 and garbage are free, boundaries fall down
+    expect(classifyCost(0, 0)).toBe('free')
+    expect(classifyCost(Number.NaN, Number.NaN)).toBe('free')
+    expect(classifyCost(0.49, 0.49)).toBe('cheap')
+    expect(classifyCost(0.5, 0.5)).toBe('mid')
+    expect(classifyCost(4.99, 4.99)).toBe('mid')
+    expect(classifyCost(5, 5)).toBe('expensive')
   })
 
   it('uneltele sunt obligatorii peste tot; vederea doar pe lista de chat', async () => {

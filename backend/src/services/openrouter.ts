@@ -15,12 +15,41 @@ const CATALOG_TTL_MS = 10 * 60 * 1000
 // validated against the SAME vision+tools filtered catalog as 'work', different fallback.
 export type ModelTier = 'chat' | 'work' | 'top'
 
+// THE COST COLOR (Adrian, Aug 1: "green = free, yellow = cheap with money,
+// orange, red — by capabilities and costs"). The class is computed from the
+// REAL OpenRouter prices, never guessed.
+export type CostClass = 'free' | 'cheap' | 'mid' | 'expensive'
+
 export interface CatalogModel {
   id: string
   name: string
-  provider: 'openai' | 'google' | 'anthropic' | 'nvidia' | 'cohere'
+  // ANY provider on OpenRouter (Adrian, Jul 30: "I must be able to decide any
+  // model from the list" — the old 5-company filter was my judgment, not his
+  // order; the capability rules below stay the only gate).
+  provider: string
   vision: boolean
   contextLength: number
+  costClass: CostClass
+  /** USD per 1M input tokens (0 = free). From the live OpenRouter pricing. */
+  promptPerM: number
+  /** USD per 1M output tokens (0 = free). From the live OpenRouter pricing. */
+  completionPerM: number
+}
+
+/** The blend a chat turn actually costs: ~3:1 input:output (you read more than
+ *  you write). Per 1M blended tokens. Pure and tested. */
+export function blendedPerM(promptPerM: number, completionPerM: number): number {
+  return (promptPerM * 3 + completionPerM) / 4
+}
+
+/** green → yellow → orange → red. Pure and tested — this decides the color the
+ *  user trusts, so it must never be "checked by eye". */
+export function classifyCost(promptPerM: number, completionPerM: number): CostClass {
+  const b = blendedPerM(promptPerM, completionPerM)
+  if (!(b > 0)) return 'free'
+  if (b < 0.5) return 'cheap'
+  if (b < 5) return 'mid'
+  return 'expensive'
 }
 
 export interface Catalog {
@@ -35,20 +64,18 @@ export interface RawModel {
   context_length?: number
   architecture?: { input_modalities?: string[] }
   supported_parameters?: string[]
+  /** Live OpenRouter prices, USD per TOKEN as strings — we keep per-1M numbers. */
+  pricing?: { prompt?: string; completion?: string }
 }
 
 let cache: Catalog | null = null
 
-function providerOf(id: string): CatalogModel['provider'] | null {
-  if (id.startsWith('openai/')) return 'openai'
-  if (id.startsWith('google/')) return 'google'
-  if (id.startsWith('anthropic/')) return 'anthropic'
-  // THE FULL FREE BRAIN (Adrian, Jul 27: "yes" on the $0 schema): nvidia (nemotron
-  // omni/ultra) and cohere (north-mini-code) enter the catalog ONLY for their
-  // free variants with tools — see the list filtering below.
-  if (id.startsWith('nvidia/')) return 'nvidia'
-  if (id.startsWith('cohere/')) return 'cohere'
-  return null
+// NO PROVIDER WHITELIST (Adrian, Jul 30: "I must be able to decide any model
+// from the list"). Any company on OpenRouter enters, as long as the capability
+// rules pass below. Before Jul 30 there was a 5-name filter here — his order
+// removed it; the only gates left are tools + the vision rules per tier.
+function providerOf(id: string): string {
+  return id.split('/')[0] || 'unknown'
 }
 
 // Exclude old/cheap irrelevant variants so the list stays clean for the user.
@@ -56,18 +83,29 @@ function isSelectable(id: string): boolean {
   return !/gpt-3\.5|gpt-4-turbo-preview|claude-3-haiku|-0613|-16k|preview-\d|customtools/.test(id)
 }
 
+/** USD/token string → per-1M number; garbage or missing means 0 (free/unknown
+ *  → the honest "free" class only when BOTH are 0, see classifyCost). */
+function perM(v: string | undefined): number {
+  const n = Number(v ?? '0')
+  return Number.isFinite(n) && n > 0 ? n * 1e6 : 0
+}
+
 export function toModel(m: RawModel): CatalogModel | null {
   const provider = providerOf(m.id)
-  if (!provider) return null
   const sp = m.supported_parameters ?? []
   if (!sp.includes('tools')) return null // all capabilities require tool-use
   if (!isSelectable(m.id)) return null
+  const promptPerM = perM(m.pricing?.prompt)
+  const completionPerM = perM(m.pricing?.completion)
   return {
     id: m.id,
     name: m.name ?? m.id,
     provider,
     vision: (m.architecture?.input_modalities ?? []).includes('image'),
     contextLength: m.context_length ?? 0,
+    costClass: classifyCost(promptPerM, completionPerM),
+    promptPerM,
+    completionPerM,
   }
 }
 

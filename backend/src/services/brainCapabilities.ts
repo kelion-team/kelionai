@@ -41,7 +41,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: true, admin: false },
   { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: true, admin: false },
 
-  // 2.2 Google (18)
+  // 2.2 Google (19)
   { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: true, admin: false },
   { name: 'read_email', category: 'google', does: 'citește corpul COMPLET al unui email (după căutare)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'send_email', category: 'google', does: 'trimite email', chat: true, voice: true, admin: false },
@@ -64,6 +64,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'wikipedia_lookup', category: 'google', does: 'caută pe Wikipedia', chat: true, voice: true, admin: false },
   { name: 'convert_currency', category: 'google', does: 'schimb valutar', chat: true, voice: true, admin: false },
   { name: 'get_time', category: 'google', does: 'ora/data', chat: true, voice: true, admin: false },
+  { name: 'lookup_address', category: 'google', does: 'adresa+codul poștal din coordonate (sau invers)', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.3 Own code & autonomy (constructor + expert) — admin
   { name: 'list_source', category: 'cod', does: 'listează directoare din codul lui', chat: true, voice: false, voiceViaBrain: true, admin: true },
