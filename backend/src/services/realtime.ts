@@ -124,6 +124,7 @@ export async function openaiRealtimeAnswer(
   lang: string,
   hardLock = false,
   voicePref?: string | null,
+  urechiChirp = false,
 ): Promise<RealtimeAnswer> {
   if (!config.openai.key)
     return { ok: false, status: 503, code: 'realtime_not_configured', error: 'realtime_not_configured', attempts: 0 }
@@ -149,29 +150,37 @@ export async function openaiRealtimeAnswer(
     type: 'realtime',
     model,
     audio: {
-      input: {
-        // Ambient noise reduction (microphone near the mouth) → VAD and
-        // transcription no longer trip over background, room, echo.
-        noise_reduction: { type: 'near_field' },
-        // Transcription of the user's speech with the BIG model (not "mini") +
-        // the language hint ONLY when known → exact transcript. Without this, GA
-        // NEVER emits the user's transcript.
-        transcription: iso
-          ? { model: config.openai.realtimeTranscribeModel, language: iso }
-          : { model: config.openai.realtimeTranscribeModel },
-        // SEMANTIC VAD: a model decides when the user has truly finished
-        // speaking (not on raw silence). `interrupt_response:true` = real barge-in.
-        // `create_response:false` stays LAW: the model NEVER speaks on its own —
-        // the client creates a response ONLY for a ROSTEȘTE item (the brain's
-        // words). The name gate (who gets a brain turn at all) lives in the
-        // client (realtimeVoice.ts), unchanged.
-        turn_detection: {
-          type: 'semantic_vad',
-          eagerness: config.openai.realtimeVadEagerness,
-          create_response: false,
-          interrupt_response: true,
-        },
-      },
+      // THE BIG STEP (Adrian, Aug 1 — „Chirp 3 hd peste tot" + „faci acum
+      // pasul mare"): with Chirp ears the LIVE hearing is Google Chirp 3
+      // streaming (/api/asr-stream). This session is then PURE MOUTH — no
+      // input transcription, no VAD, no input audio processed or billed.
+      ...(urechiChirp
+        ? {}
+        : {
+            input: {
+              // Ambient noise reduction (microphone near the mouth) → VAD and
+              // transcription no longer trip over background, room, echo.
+              noise_reduction: { type: 'near_field' },
+              // Transcription of the user's speech with the BIG model (not "mini") +
+              // the language hint ONLY when known → exact transcript. Without this, GA
+              // NEVER emits the user's transcript.
+              transcription: iso
+                ? { model: config.openai.realtimeTranscribeModel, language: iso }
+                : { model: config.openai.realtimeTranscribeModel },
+              // SEMANTIC VAD: a model decides when the user has truly finished
+              // speaking (not on raw silence). `interrupt_response:true` = real barge-in.
+              // `create_response:false` stays LAW: the model NEVER speaks on its own —
+              // the client creates a response ONLY for a ROSTEȘTE item (the brain's
+              // words). The name gate (who gets a brain turn at all) lives in the
+              // client (realtimeVoice.ts), unchanged.
+              turn_detection: {
+                type: 'semantic_vad',
+                eagerness: config.openai.realtimeVadEagerness,
+                create_response: false,
+                interrupt_response: true,
+              },
+            },
+          }),
       output: { voice },
     },
     instructions: persona,

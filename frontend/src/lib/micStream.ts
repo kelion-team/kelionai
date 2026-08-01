@@ -79,15 +79,38 @@ export interface MicStreamHandle {
 export interface MicStreamOpts {
   // the current utterance, LIVE (validated finals + the ongoing partial) — for the band
   onLive: (text: string) => void
-  // the whole utterance, on pause > 3s → sent to the brain
-  onPhrase: (text: string) => void
+  // the whole utterance, on pause > 3s → sent to the brain; the utterance's
+  // voice features ride along (the full-duplex timbre gate needs them directly)
+  onPhrase: (text: string, features: VoiceFeatures | null) => void
   onError: (reason: string) => void
   getLang: () => string
   // voice was heard while Kelion spoke → barge-in (cuts Kelion's voice)
   onBargeIn?: () => void
+  // Google heard speech START (any time, muted or not) — the full-duplex
+  // barge-in signal (the echo protection lives with the caller)
+  onSpeechBegin?: () => void
+  // DEFAULT true: the utterance's features also land in the shared pending
+  // store (the dictation path consumes them on /api/chat). The full-duplex
+  // path passes false — it gets the features directly through onPhrase, and
+  // the shared store stays clean for typed turns.
+  storePendingFeatures?: boolean
   // pre-warmed stream: on pressing the "mic on" button we call getUserMedia
   // before startMicStream, so activation is nearly instant.
   preWarmedStream?: MediaStream
+}
+
+// THE CHIRP EARS PROBE (Aug 1 — the big step): the full-duplex voice session
+// asks this BEFORE choosing its ears. true → ears are Chirp 3 streaming (this
+// module); false → the session keeps the OpenAI Realtime transcription.
+export function urechiChirpDisponibile(): Promise<boolean> {
+  return canStreamAsr()
+}
+
+// If a started Chirp ear DIES mid-session (Google outage, WS drop), the
+// caller marks it here and the NEXT voice session starts on the proven
+// OpenAI ears instead of looping into the same failure.
+export function marcheazaUrechiChirpMoarte(): void {
+  streamingAsrAvailable = false
 }
 
 function floatToPcm16(input: Float32Array): ArrayBuffer {
@@ -271,8 +294,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     opts.onLive('') // golește MEREU banda la sfârșit de frază (nu rămâne agățat)
     if (text) {
       const features = finalizeFeatures()
-      if (features) setPendingVoiceFeatures(features)
-      opts.onPhrase(text)
+      if (features && opts.storePendingFeatures !== false) setPendingVoiceFeatures(features)
+      opts.onPhrase(text, features)
     }
     resetFeatures()
   }
@@ -333,6 +356,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
         opts.onLive(phraseFinal)
         armPhraseTimer()
       } else if (m.type === 'speech_begin') {
+        opts.onSpeechBegin?.()
         if (muted) opts.onBargeIn?.()
       } else if (m.type === 'error' && !closed) {
         opts.onError('silent')
