@@ -30,8 +30,8 @@ import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
 
-// SALVAREA CONȚINUTULUI DE PE MONITOR (Adrian, 25 iul: „nu se poate salva ce e pe
-// monitor"). Descarcă un text/HTML ca fișier local — un nume curat din titlu.
+// SAVING THE MONITOR CONTENT (Adrian, Jul 25: "you can't save what's on the
+// monitor"). Downloads a text/HTML as a local file — a clean name from the title.
 function downloadContent(name: string, content: string, mime: string): void {
   try {
     const blob = new Blob([content], { type: mime })
@@ -44,19 +44,19 @@ function downloadContent(name: string, content: string, mime: string): void {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 4000)
   } catch {
-    /* best-effort — descărcarea nu trebuie să spargă monitorul */
+    /* best-effort — the download must not break the monitor */
   }
 }
 
-// Vizor de cod/text pe monitor (Adrian, 27 iul): aduce conținutul fișierului
-// (cod, json, csv, log…) și-l afișează citibil, monospațiat. Fetch simplu; la
-// eșec (cross-origin / fișier privat) oferă linkul de deschidere.
-// ── Un document pe monitor, o singură dată (unic, fără duplicate) ────────────
-// PDF-ul (servit direct) și fișierele Office (prin vizorul online) se afișau prin
-// DOUĂ cadre identice — aceeași clasă, același fundal alb, aceeași raportare de
-// stare (`ok` / `error`, pe care Kelion o citește cu get_monitor). Difereau doar
-// prin `src`. Acum: o componentă, două apeluri — dacă se schimbă modul de
-// raportare a stării, nu mai poate rămâne o jumătate veche.
+// Code/text viewer on the monitor (Adrian, Jul 27): fetches the file's content
+// (code, json, csv, log…) and shows it readable, monospaced. Simple fetch; on
+// failure (cross-origin / private file) it offers the open link.
+// ── One document on the monitor, once only (unique, no duplicates) ─────────
+// The PDF (served directly) and Office files (through the online viewer) were shown through
+// TWO identical frames — same class, same white background, same state
+// reporting (`ok` / `error`, which Kelion reads with get_monitor). They differed only
+// by `src`. Now: one component, two calls — if the state reporting changes,
+// no stale half can remain.
 function DocFrame({ title, src, taskId }: { title: string; src: string; taskId: string }): React.JSX.Element {
   return (
     <iframe
@@ -112,12 +112,12 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
 }
 
 // PANOUL CONSTRUCTORULUI pe monitor (Etapa 4b, Adrian: „sistem performant cu
-// afișare pe monitor a rezolvării cerințelor"). Se abonează la
-// /api/constructor/live (sesiune admin) și arată fiecare ordin de build:
-// starea (În coadă / Lucrează / Gata / Eșuat), PASUL CURENT trimis de lucrătorul
-// de pe VPS (Etapa 4), încercările și PR-ul. Nu mai e o cutie neagră între
-// „Preluat" și „Gata": se vede drumul, pas cu pas. Poll ușor la 2.5s, oprit
-// curat la demontare (fără scurgeri, fără poll când panoul e închis).
+// monitor display of requirement resolution"). It subscribes to
+// /api/constructor/live (admin session) and shows each build order:
+// the state ("În coadă" / "Lucrează" / "Gata" / "Eșuat"), the CURRENT STEP sent by the worker
+// on the VPS (Stage 4), the attempts and the PR. No longer a black box between
+// "Preluat" and "Gata": you see the road, step by step. Light 2.5s poll, stopped
+// cleanly on unmount (no leaks, no polling while the panel is closed).
 interface BuildLiveJob {
   id: number
   status: string
@@ -224,7 +224,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
   )
 }
 
-// Nume de fișier sigur din titlul panoului (diacritice/spații → cratime).
+// Safe file name from the panel title (diacritics/spaces → dashes).
 function safeFileName(title: string, ext: string): string {
   const base = (title || 'kelion')
     .toLowerCase()
@@ -236,8 +236,8 @@ function safeFileName(title: string, ext: string): string {
   return `${base}.${ext}`
 }
 
-// Forma răspunsului de la /api/admin/brain-credit — numită, ca sondarea comună
-// (usePolledJson) s-o poată tipa.
+// The shape of the /api/admin/brain-credit response — named, so the shared polling
+// (usePolledJson) can type it.
 interface BrainCredit {
     active: string | null
     openrouter: {
@@ -248,9 +248,9 @@ interface BrainCredit {
       low?: boolean
       live?: boolean
     }
-    /** Resursele VPS-ului (Adrian, 31 iul: „afișează permanent VPS pe interfață
-     *  în bara de sus"). `null` = nu s-au putut măsura — bara scrie „⚠ VPS",
-     *  NICIODATĂ zerouri: „0.0 GB / 0%" ar arăta identic cu un server mort. */
+    /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
+     *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
+     *  NEVER zeros: "0.0 GB / 0%" would look identical to a dead server. */
     vps?: {
       totalGb: number
       liberGb: number
@@ -263,31 +263,31 @@ interface BrainCredit {
   }
 
 export default function Stage({ user }: { user: User }) {
-  // OWNER-ul primește MEREU română (regula proiectului); restul după locale.
-  // LIMBA UI (regula finală, Adrian 24 iul: „default ENGLEZĂ pentru toți; după
-  // identificarea limbii se aplică procedura existentă"). Fără forțare pe rol,
-  // fără locale de browser/cont: oglinda locală a limbii IDENTIFICATE de server
-  // (scrisă de frame-ul {lang} → mirrorLang), altfel engleză.
+  // The OWNER always gets Romanian (the project rule); the rest by locale.
+  // THE UI LANGUAGE (the final rule, Adrian Jul 24: "default ENGLISH for everyone; after
+  // language identification the existing procedure applies"). No role forcing,
+  // no browser/account locale: the local mirror of the server-IDENTIFIED language
+  // (written by the {lang} frame → mirrorLang), otherwise English.
   const lang = resolveLang(loadLocalLang() ?? 'en')
   const t = strings(lang)
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminTab, setAdminTab] = useState<'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'>('finance')
-  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul: „dacă amprenta nu corespunde, nici
-  // butonul admin nu trebuie să se activeze"). armed = secretul e setat (în
-  // Admin→Amprente vocale); unlocked = amprenta vocală s-a potrivit în sesiunea
-  // asta SAU s-a tastat secretul. Încuiat → butonul deschide fereastra de cod,
-  // nu panoul; serverul blochează oricum tot /api/admin/* (423) — butonul e
-  // doar oglinda, lacătul real e pe server.
+  // THE ADMIN BUTTON PADLOCK (Adrian, Jul 27: "if the voiceprint doesn't match, the
+  // admin button must not activate either"). armed = the secret is set (in
+  // Admin→Voiceprints); unlocked = the voiceprint matched in this session
+  // OR the secret was typed. Locked → the button opens the code window,
+  // not the panel; the server blocks all /api/admin/* anyway (423) — the button is
+  // only the mirror, the real padlock is on the server.
   const [adminLock, setAdminLock] = useState<{ armed: boolean; unlocked: boolean } | null>(null)
   const adminLockRef = useRef(adminLock)
   adminLockRef.current = adminLock
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockCode, setUnlockCode] = useState('')
   const [unlockErr, setUnlockErr] = useState('')
-  // „Salvează" pe documentele de pe monitor (Adrian, 27 iul: „butonul salvează
-  // nu e funcțional" — descărca tăcut un fișier, fără urmă în Kelion). Acum:
-  // documentul intră în STOCAREA PERMANENTĂ (notes, DB — Kelion îl regăsește
-  // cu uneltele lui) + descărcare locală + confirmare vizibilă pe buton.
+  // "Save" on the monitor documents (Adrian, Jul 27: "the save button
+  // isn't functional" — it silently downloaded a file, no trace in Kelion). Now:
+  // the document enters PERMANENT STORAGE (notes, DB — Kelion finds it again
+  // with his tools) + local download + visible confirmation on the button.
   const [docSaved, setDocSaved] = useState(false)
   const saveDocToKelion = (title: string, content: string, fileName: string, mime: string): void => {
     downloadContent(fileName, content, mime)
@@ -308,16 +308,16 @@ export default function Stage({ user }: { user: User }) {
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [recording, setRecording] = useState(false)
-  // Zoom/potrivire pentru textul de pe monitor (cererea #27): A− / A+ scalează
-  // conținutul citibil (doc + consola live) ca să fie încadrat și lizibil.
+  // Zoom/fit for the monitor text (request #27): A− / A+ scales the
+  // readable content (doc + live console) so it's framed and legible.
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
   // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
-  // configurată + fondul REAL al adminului (loaded − cost real), nu nelimitat.
+  // configured + the admin's REAL fund (loaded − real cost), not unlimited.
   const [brainCredit, setBrainCredit] = useState<BrainCredit | null>(null)
-  // Starea lacătului la intrare + deblocarea venită din voce (amprenta
-  // potrivită → realtimeVoice emite `kelion:admin-unlock`).
+  // The padlock state at entry + the unlock coming from voice (the voiceprint
+  // matched → realtimeVoice emits `kelion:admin-unlock`).
   useEffect(() => {
     if (user.role !== 'admin') return
     fetch('/api/admin/unlock/status', { credentials: 'include' })
@@ -331,8 +331,8 @@ export default function Stage({ user }: { user: User }) {
     window.addEventListener('kelion:admin-unlock', onUnlock)
     return () => window.removeEventListener('kelion:admin-unlock', onUnlock)
   }, [user.role])
-  // Poarta UNICĂ spre panoul de admin: toate drumurile (buton, navigare din
-  // voce/chat, punga Stripe) trec pe aici — încuiat → fereastra de cod.
+  // The SINGLE gate to the admin panel: all roads (button, navigation from
+  // voice/chat, the Stripe bag) pass through here — locked → the code window.
   const openAdmin = (tab?: typeof adminTab): void => {
     if (tab) setAdminTab(tab)
     const l = adminLockRef.current
@@ -360,15 +360,15 @@ export default function Stage({ user }: { user: User }) {
       })
       .catch(() => setUnlockErr('Eroare de rețea — reîncearcă.'))
   }
-  // Sondare din sursa comună (lib/usePolledJson) — garda `alive` și oprirea
-  // intervalului sunt garantate acolo, o singură dată.
+  // Polling from the shared source (lib/usePolledJson) — the `alive` guard and the
+  // interval stop are guaranteed there, once only.
   usePolledJson<BrainCredit>('/api/admin/brain-credit', user.role === 'admin', (j) => {
     if (j && j.openrouter && j.pool) setBrainCredit(j)
   })
-  // ACCES REAL LA APLICAȚIE PRIN VOCE/CHAT (Adrian, 24 iul: „Kelion trebuie să
-  // poată intra în orice tab al aplicației, real"). Kelion cheamă unealta
+  // REAL APP ACCESS VIA VOICE/CHAT (Adrian, Jul 24: "Kelion must be able to
+  // enter any app tab, for real"). Kelion calls the tool
   // `open_app_view` → ChatPanel emite `kelion:navigate` → aici deschidem chiar
-  // panoul cerut. Adminul e gate-uit: un user obișnuit NU poate deschide adminul.
+  // the requested panel. Admin is gated: an ordinary user CANNOT open the admin.
   useEffect(() => {
     const onNav = (e: Event): void => {
       const d = (e as CustomEvent).detail as { view?: string; section?: string } | undefined
@@ -385,9 +385,9 @@ export default function Stage({ user }: { user: User }) {
           break
         case 'admin':
           if (user.role === 'admin') {
-            // Secțiune VALIDATĂ (audit 24 iul): un string liber de la model
-            // („bani", „finanțe") seta un tab inexistent → panou gol. Doar
-            // secțiunile reale trec; altfel rămâne tabul curent.
+            // VALIDATED section (Jul 24 audit): a free string from the model
+            // ("bani", "finanțe") set a nonexistent tab → empty panel. Only
+            // real sections pass; otherwise the current tab stays.
             const VALID = ['finance', 'users', 'visitors', 'vchat', 'history', 'gaps', 'share', 'stores', 'inbox', 'voiceprints', 'gesturi', 'tokenuri', 'constructor', 'recuperare'] as const
             const sec = String(d?.section ?? '')
             if ((VALID as readonly string[]).includes(sec)) setAdminTab(sec as typeof adminTab)
@@ -404,19 +404,19 @@ export default function Stage({ user }: { user: User }) {
     window.addEventListener('kelion:navigate', onNav)
     return () => window.removeEventListener('kelion:navigate', onNav)
   }, [user.role])
-  // CREDIT USER pe CERCUL-logo (Adrian, 13 iul): clientul își dă seama din cerc
-  // — verde = are credit, ROȘU PULSÂND = i s-a terminat creditul. Doar clienți.
+  // USER CREDIT on the logo CIRCLE (Adrian, Jul 13): the client tells from the circle
+  // — green = has credit, PULSING RED = out of credit. Clients only.
   const [userCreditOut, setUserCreditOut] = useState<boolean | null>(null)
   usePolledJson<{ credits?: number }>('/api/billing/balance', user.role === 'customer', (j) => {
     if (typeof j.credits === 'number') setUserCreditOut(j.credits <= 0)
   })
-  // ARANJAREA AVATARULUI de către Adrian (11 iul): poziția (vw/vh) și scala
-  // colțului, editate cu dublu-click pe avatar. SALVATĂ PE SERVER per
-  // utilizator (11 iul seara: „salvează mărimea actuală a lui Kelion") —
-  // localStorage rămâne doar oglinda pentru primul paint, sursa de adevăr
-  // e /api/prefs, ca aranjarea să supraviețuiască oricărei curățări de browser.
-  // Aranjarea manuală e DEZACTIVATĂ (Adrian, 24 iul) — rămâne doar starea
-  // vizuală (fals mereu); poziția vine de pe server.
+  // THE AVATAR ARRANGEMENT by Adrian (Jul 11): the corner position (vw/vh) and scale,
+  // edited by double-clicking the avatar. SAVED ON THE SERVER per
+  // user (Jul 11 evening: "save Kelion's current size") —
+  // localStorage stays only the mirror for first paint, the source of truth
+  // is /api/prefs, so the arrangement survives any browser cleanup.
+  // Manual arrangement is DISABLED (Adrian, Jul 24) — only the visual state
+  // remains (always false); the position comes from the server.
   const avatarEdit = false
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
   // Fix hydration: localStorage is client-only; read it after hydration.
@@ -429,11 +429,11 @@ export default function Stage({ user }: { user: User }) {
       }
       if (typeof v?.x === 'number' && typeof v?.y === 'number' && typeof v?.s === 'number') {
         let s = v.s
-        // MIGRARE INVERSĂ (11 iul noaptea): „avatar v2.3" mutase mărimea lui
-        // Adrian din containerul CSS în scala modelului 3D (localStorage
-        // kelion-avatar-scale) și resetase s la 0.42 — dar scalarea 3D taie
-        // capul/tălpile din cadru la mărimi mari. Mărimea aleasă se aduce
-        // ÎNAPOI în container și cheia veche se șterge.
+        // REVERSE MIGRATION (Jul 11, night): "avatar v2.3" had moved Adrian's size
+        // from the CSS container into the 3D model scale (localStorage
+        // kelion-avatar-scale) and had reset s to 0.42 — but 3D scaling cuts
+        // the head/soles out of frame at large sizes. The chosen size is brought
+        // BACK into the container and the old key is deleted.
         try {
           const old = Number(localStorage.getItem('kelion-avatar-scale'))
           if (Number.isFinite(old) && old > 0 && Math.abs(old - 1.65) > 0.01) {
@@ -441,18 +441,18 @@ export default function Stage({ user }: { user: User }) {
             localStorage.removeItem('kelion-avatar-scale')
           }
         } catch {
-          /* fără cheia veche — nimic de migrat */
+          /* no old key — nothing to migrate */
         }
         setAvatarBox({ x: v.x, y: v.y, s })
       }
     } catch {
-      /* fără preferință salvată — folosim așezarea implicită */
+      /* no saved preference — we use the default placement */
     }
   }, [])
   // RING DE DANS (Adrian, 12 iul, prin Kelion: „la dansuri, avatarul se
-  // repoziționează automat mai spre centrul ecranului cât durează clipul"):
-  // pe un gest de dans, colțul se mută lin spre centru și crește; la finalul
-  // clipului (kelion-gesture-done) revine exact în aranjarea lui Adrian.
+  // automatically repositions toward the center of the screen while the clip lasts"):
+  // on a dance gesture, the corner glides toward the center and grows; at the end
+  // of the clip (kelion-gesture-done) it returns exactly to Adrian's arrangement.
   const [dancing, setDancing] = useState(false)
   useEffect(() => {
     const onGest = (e: Event): void => {
@@ -467,8 +467,8 @@ export default function Stage({ user }: { user: User }) {
       window.removeEventListener('kelion-gesture-done', onDone)
     }
   }, [])
-  // Nu scriem la server ÎNAINTE să fi citit de la el — altfel implicitul local
-  // ar călca peste aranjarea salvată. 'ready' abia după primul GET /api/prefs.
+  // We don't write to the server BEFORE reading from it — otherwise the local default
+  // would trample the saved arrangement. 'ready' only after the first GET /api/prefs.
   const avatarSyncRef = useRef<'pending' | 'ready'>('pending')
   const avatarBoxRef = useRef(avatarBox)
   useEffect(() => {
@@ -480,8 +480,8 @@ export default function Stage({ user }: { user: User }) {
       if (b && typeof b.x === 'number' && typeof b.y === 'number' && typeof b.s === 'number') {
         setAvatarBox({ x: b.x, y: b.y, s: b.s })
       } else if (prefs) {
-        // Prima sincronizare: aranjarea CURENTĂ (cea din browserul lui Adrian)
-        // devine cea salvată pe server — exact „salvează mărimea actuală".
+        // First sync: the CURRENT arrangement (the one in Adrian's browser)
+        // becomes the one saved on the server — exactly "save the current size".
         void saveAvatarBox(avatarBoxRef.current)
       }
       avatarSyncRef.current = 'ready'
@@ -495,11 +495,11 @@ export default function Stage({ user }: { user: User }) {
     try {
       localStorage.setItem('avatar-box', JSON.stringify(avatarBox))
     } catch {
-      /* stocarea locală poate lipsi — aranjarea rămâne doar pe sesiunea asta */
+      /* local storage may be missing — the arrangement stays only for this session */
     }
     if (avatarSyncRef.current !== 'ready') return
-    // Debounce: în timpul tragerii/rotiței vin zeci de valori pe secundă —
-    // pe server pleacă doar așezarea finală, la 800ms după ultima mișcare.
+    // Debounce: during drag/wheel dozens of values arrive per second —
+    // only the final placement goes to the server, 800ms after the last movement.
     const t = window.setTimeout(() => void saveAvatarBox(avatarBox), 800)
     return () => window.clearTimeout(t)
   }, [avatarBox])
@@ -591,9 +591,9 @@ export default function Stage({ user }: { user: User }) {
     return () => window.removeEventListener('kelion:rec', onRec)
   }, [recording])
 
-  // VERSIUNE NOUĂ — NEintruziv (Adrian, 10 iul: „chat distrus, audio și scris").
-  // App.tsx afișează bara „Update now" (watchForUpdate) și TU apeși când ești
-  // gata — resetul dur rămâne, dar la comanda ta, nu peste chat.
+  // NEW VERSION — NON-intrusive (Adrian, Jul 10: "chat destroyed, audio and written").
+  // App.tsx shows the "Update now" bar (watchForUpdate) and YOU press when you're
+  // ready — the hard reset stays, but at your command, not over the chat.
 
   // Presence ping (every 60s): feeds the owner's per-USER analytics — who is
   // signed in, from what IP/place/device, and for how long they stayed.
@@ -619,14 +619,14 @@ export default function Stage({ user }: { user: User }) {
       window.clearInterval(id)
     }
   }, [])
-  // Monitorul (suprafața din spatele avatarului) e deschis DOAR de o sarcină reală
-  // (hartă, pagină, doc, imagine) — avatarul se micșorează în colț cât timp e ceva
+  // The monitor (the surface behind the avatar) is opened ONLY by a real task
+  // (map, page, doc, image) — the avatar shrinks into the corner while something's up
   // pe ecran, altfel e prim-plan.
   const monitorOn = ws.open
-  // ÎNCHIDERE SINCRONĂ CU FADE-UL (fluiditate #7, 27 iul: „conținutul dispare
-  // instant, panoul negru mai persistă 500ms"): pe durata stingerii (500ms în
-  // CSS) randăm O POZĂ a ultimei stări — panoul se stinge CU conținutul în el,
-  // nu gol. Sursele cu sunet nu se randează din poză (ar reporni clipul).
+  // CLOSING IN SYNC WITH THE FADE (fluidity #7, Jul 27: "the content disappears
+  // instantly, the black panel persists 500ms more"): during the fade (500ms in
+  // CSS) we render A SNAPSHOT of the last state — the panel fades WITH the content in it,
+  // not empty. Sound sources aren't rendered from the snapshot (would restart the clip).
   const lastWsRef = useRef(ws)
   if (ws.open) lastWsRef.current = ws
   const [wsFading, setWsFading] = useState(false)
@@ -641,7 +641,7 @@ export default function Stage({ user }: { user: User }) {
   }, [ws.open])
   const wsv = ws.open ? ws : lastWsRef.current
   // Tell the chat when the monitor is busy so it collapses to the slim black
-  // speech bar (Adrian's rule) când e o suprafață deschisă.
+  // speech bar (Adrian's rule) when a surface is open.
   useEffect(() => {
     setMonitorWorking(monitorOn)
   }, [monitorOn])
@@ -712,12 +712,12 @@ export default function Stage({ user }: { user: User }) {
               return (
                 <div key={task.id} style={active ? { display: 'contents' } : { display: 'none' }}>
                 {task.kind === 'build' ? (
-                  // PANOUL CONSTRUCTORULUI (Etapa 4b) — poller propriu, fără url/text.
+                  // THE CONSTRUCTOR PANEL (Stage 4b) — own poller, no url/text.
                   <BuildSurface zoom={monZoom} />
                 ) : task.html ? (
-                  // PLAYGROUND: pagina scrisă de Kelion rulează live într-un iframe
-                  // izolat (srcdoc + sandbox, fără same-origin → nu poate atinge
-                  // sesiunea/aplicația). Butonul salvează pagina ca .html pe disc.
+                  // PLAYGROUND: the page written by Kelion runs live in an isolated
+                  // iframe (srcdoc + sandbox, no same-origin → it can't reach
+                  // the session/app). The button saves the page as .html on disc.
                   <div className="workspace-doc">
                     <button
                       type="button"
@@ -759,7 +759,7 @@ export default function Stage({ user }: { user: User }) {
                   <CardView card={task.card} />
                 ) : task.url && task.kind === 'image' ? (
                   // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
-                  // onLoad/onError → starea reală, ca Kelion s-o vadă faptic.
+                  // onLoad/onError → the real state, so Kelion factually sees it.
                   <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
                     <img
                       src={task.url}
@@ -790,22 +790,22 @@ export default function Stage({ user }: { user: User }) {
                     />
                   </div>
                 ) : task.url && task.kind === 'pdf' ? (
-                  // PDF: vizorul nativ al browserului, în cadru.
+                  // PDF: the browser's native viewer, in a frame.
                   <DocFrame title={task.title} src={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'office' ? (
-                  // XLS/DOC/PPT: vizorul Microsoft Office online (fișierul trebuie
-                  // să fie la un URL public — cele servite de kelionai.app sunt).
+                  // XLS/DOC/PPT: the Microsoft Office online viewer (the file must
+                  // be at a public URL — the ones served by kelionai.app are).
                   <DocFrame
                     title={task.title}
                     src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(task.url)}`}
                     taskId={task.id}
                   />
                 ) : task.url && task.kind === 'textfile' ? (
-                  // Cod / text / json / csv: aducem conținutul și-l afișăm citibil.
+                  // Code / text / json / csv: we fetch the content and show it readable.
                   <MonitorTextFile url={task.url} zoom={monZoom} taskId={task.id} />
                 ) : task.url && task.kind === 'archive' ? (
-                  // Arhive: browserul nu le poate deschide în pagină — oferim
-                  // descărcarea, cinstit (conținutul unui zip nu se randează nativ).
+                  // Archives: the browser can't open them in page — we offer
+                  // the download, honestly (a zip's content doesn't render natively).
                   <div className="workspace-blocked">
                     <p>Arhivă ({task.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
                     <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
@@ -857,8 +857,8 @@ export default function Stage({ user }: { user: User }) {
         style={
           monitorOn
             ? {
-                // În timpul unui dans, ringul e centrul ecranului (mai mare,
-                // vizibil); altfel, exact aranjarea salvată a lui Adrian.
+                // During a dance, the ring is the center of the screen (bigger,
+                // visible); otherwise, exactly Adrian's saved arrangement.
                 transform: dancing
                   ? `translate(calc(30vw - 14px), calc(30vh - 180px)) scale(${Math.max(avatarBox.s, 0.62)})`
                   : `translate(calc(${avatarBox.x}vw - 14px), calc(${avatarBox.y}vh - 180px)) scale(${avatarBox.s})`,

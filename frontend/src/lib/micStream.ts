@@ -1,14 +1,14 @@
 import { openMicGraph } from './audioGraph'
-// MICROFON ÎN STREAMING — dictare LIVE (Adrian, 10 iul): pe măsură ce vorbește,
-// fiecare cuvânt apare pe bandă instantaneu (rezultate PARȚIALE), se VALIDEAZĂ
-// când e confirmat (rezultat FINAL), așa pentru toată fraza; la o PAUZĂ > 3s
-// se închide fraza și pleacă la creier. Backend: WS /api/asr-stream → Google
+// STREAMING MICROPHONE — LIVE dictation (Adrian, Jul 10): as he speaks,
+// each word appears on the band instantly (PARTIAL results), gets VALIDATED
+// when confirmed (FINAL result), and so on for the whole utterance; on a PAUSE > 3s
+// the utterance closes and goes to the brain. Backend: WS /api/asr-stream → Google
 // chirp_3 streaming (vezi routes/asr-stream.ts).
 //
-// Audio: capturăm PCM brut cu un ScriptProcessor (fără worklet extern, ca să nu
-// mai apară „mic-ul mut" de la încărcarea modulului), îl reducem la 16kHz mono
-// LINEAR16 și-l trimitem în cadre binare. Trimitem cadre DOAR când e voce (+3s
-// coadă) ca să nu curgă tăcere spre Google (cost degeaba).
+// Audio: we capture raw PCM with a ScriptProcessor (no external worklet, so the
+// "mute mic" from module loading doesn't reappear), downsample it to 16kHz mono
+// LINEAR16 and send it in binary frames. We send frames ONLY when there's voice (+3s
+// tail) so silence doesn't flow to Google (wasted cost).
 
 import {
   estimateF0,
@@ -30,19 +30,19 @@ const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei
 const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre vocale nu mai sunt pierdute
 
 // ── STREAMING STT: DISPONIBIL SAU NU? (28 iul) ──────────────────────────────
-// DE CE există codul ăsta: pe gazdă (VPS) NU e setat GOOGLE_SERVICE_ACCOUNT_JSON
-// — verificat live în fișierul de mediu. Fără el ruta /api/asr-stream refuză
-// upgrade-ul (închide cu 1011 'asr_not_configured'), iar BROWSERUL scria roșu în
+// WHY this code exists: on the host (VPS) GOOGLE_SERVICE_ACCOUNT_JSON is NOT set
+// — verified live in the env file. Without it the /api/asr-stream route refuses
+// the upgrade (closes with 1011 'asr_not_configured'), and the BROWSER wrote red in
 // consola lui Adrian «WebSocket connection to 'wss://kelionai.app/api/asr-stream'
-// failed» la fiecare pornire de microfon. Mesajul ăla îl tipărește browserul,
-// nu noi — niciun try/catch nu-l poate înghiți; singura soluție e să NU mai
-// deschidem WS-ul când serverul oricum nu-l poate servi.
-// Deci întrebăm serverul O SINGURĂ DATĂ pe încărcarea paginii și, dacă
-// streamingul lipsește, predăm pe loc dictarea BATCH (/api/asr → are fallback pe
-// OpenAI în backend/src/services/asr.ts). Regula casei: dictarea degradează
-// TĂCUT (pierde doar parțialele live), nu moare niciodată și nu face buclă de
-// reîncercări. Când Google E configurat, sonda zice `true` și streamingul merge
-// exact ca înainte.
+// failed» on every microphone start. That message is printed by the browser,
+// not us — no try/catch can swallow it; the only fix is to NOT open the WS
+// when the server can't serve it anyway.
+// So we ask the server ONCE on page load and, if
+// streaming is missing, we immediately hand dictation to BATCH (/api/asr → has fallback to
+// OpenAI in backend/src/services/asr.ts). The house rule: dictation degrades
+// SILENTLY (loses only the live partials), never dies and never loops
+// retries. When Google IS configured, the probe says `true` and streaming works
+// exactly as before.
 let streamingAsrAvailable: boolean | null = null
 let capabilityProbe: Promise<boolean> | null = null
 
@@ -55,7 +55,7 @@ function canStreamAsr(): Promise<boolean> {
   capabilityProbe ??= fetch('/api/asr-stream/capability', { cache: 'no-store' })
     .then((r) => (r.ok ? (r.json() as Promise<{ streaming?: boolean }>) : null))
     .then((j) => {
-      // Server mai vechi / răspuns neașteptat → presupunem că streamingul MERGE
+      // Older server / unexpected response → we assume streaming WORKS
       // (comportamentul de dinainte), iar plasa din `onclose` prinde restul.
       const ok = j ? j.streaming !== false : true
       streamingAsrAvailable = ok
@@ -65,9 +65,9 @@ function canStreamAsr(): Promise<boolean> {
   return capabilityProbe
 }
 
-// Sondăm din start (o singură cerere minusculă, la încărcarea modulului), ca
-// apăsarea pe „microfon" să nu mai aștepte NICIUN drum dus-întors — calea vocii
-// rămâne sub 1s, așa cum e regula.
+// We probe from the start (one tiny request, at module load), so
+// pressing "microphone" waits for NO round trip — the voice path
+// stays under 1s, as the rule says.
 void canStreamAsr()
 
 export interface MicStreamHandle {
@@ -77,16 +77,16 @@ export interface MicStreamHandle {
 }
 
 export interface MicStreamOpts {
-  // fraza curentă, LIVE (finaluri validate + parțialul în curs) — pentru bandă
+  // the current utterance, LIVE (validated finals + the ongoing partial) — for the band
   onLive: (text: string) => void
-  // fraza întreagă, la pauză > 3s → se trimite creierului
+  // the whole utterance, on pause > 3s → sent to the brain
   onPhrase: (text: string) => void
   onError: (reason: string) => void
   getLang: () => string
-  // s-a auzit voce cât Kelion vorbea → barge-in (taie vocea lui Kelion)
+  // voice was heard while Kelion spoke → barge-in (cuts Kelion's voice)
   onBargeIn?: () => void
-  // stream pre-încălzit: la apăsarea butonului "mic on" apelăm getUserMedia
-  // înainte de startMicStream, ca activarea să fie aproape instant.
+  // pre-warmed stream: on pressing the "mic on" button we call getUserMedia
+  // before startMicStream, so activation is nearly instant.
   preWarmedStream?: MediaStream
 }
 
@@ -99,7 +99,7 @@ function floatToPcm16(input: Float32Array): ArrayBuffer {
   return out.buffer
 }
 
-// reducere de rată liniară (ctx.sampleRate → 16kHz) — suficient pentru voce
+// linear downsampling (ctx.sampleRate → 16kHz) — enough for voice
 function downsample(input: Float32Array, inRate: number): Float32Array {
   if (inRate === TARGET_RATE) return input
   const ratio = inRate / TARGET_RATE
@@ -114,25 +114,25 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     opts.onError('unsupported')
     return null
   }
-  // Serverul n-are STT în streaming → ieșim ÎNAINTE de orice WebSocket (și
-  // înainte de getUserMedia, dacă nu ne-a fost dat un stream pre-încălzit).
-  // Captura pre-încălzită se OPREȘTE aici, altfel microfonul rămânea aprins
-  // degeaba cât timp calea batch își deschide propria captură.
-  // 'ws' e eticheta pe care ChatPanel o mapează deja pe „treci pe batch pentru
-  // restul sesiunii" — o refolosim ca să nu atingem panoul.
+  // The server has no streaming STT → we exit BEFORE any WebSocket (and
+  // before getUserMedia, unless we were given a pre-warmed stream).
+  // The pre-warmed capture STOPS here, otherwise the mic stayed on
+  // for nothing while the batch path opens its own capture.
+  // 'ws' is the label ChatPanel already maps to "switch to batch for
+  // the rest of the session" — we reuse it so we don't touch the panel.
   if (!(await canStreamAsr())) {
     opts.preWarmedStream?.getTracks().forEach((t) => t.stop())
     opts.onError('ws')
     return null
   }
-  // Aceeași deschidere de microfon ca vocea (lib/audioGraph.ts) — sursă unică.
+  // The same microphone opening as voice (lib/audioGraph.ts) — single source.
   const graph = await openMicGraph(opts.onError, opts.preWarmedStream)
   if (!graph) return null
   const { stream, ctx } = graph
   void ctx.resume().catch(() => {})
   const source = ctx.createMediaStreamSource(stream)
-  // ScriptProcessor e depreciat dar universal și fără fișier separat — cel mai
-  // sigur pentru „doar merge", exact ce trebuie pe calea critică a vocii.
+  // ScriptProcessor is deprecated but universal and needs no separate file — the
+  // safest for "just works", exactly what's needed on the voice critical path.
   const proc = ctx.createScriptProcessor(4096, 1, 1)
 
   // Analizor paralel pentru features vocale (identificare speaker + gen).
@@ -152,16 +152,16 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let phraseFinal = '' // finalurile validate din fraza curentă
   let lastPartial = '' // ultimul parțial (dacă Google nu dă „final" în 3s)
   let phraseTimer: ReturnType<typeof setTimeout> | null = null
-  // PLASĂ contra „mic-ului mut": dacă am trimis voce dar Google NU întoarce NIMIC
-  // în 15s, streamingul e stricat (WS/auth/format) → cădem pe calea batch dovedită.
+  // SAFETY NET against the "mute mic": if we sent voice but Google returns NOTHING
+  // in 15s, streaming is broken (WS/auth/format) → we fall onto the proven batch path.
   let sentAudio = false
   let gotAnyMsg = false
   let silentTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Inel de pre-roll: păstrează ultimele ~400 ms de audio CHIAR ȘI când VAD-ul
-  // încă n-a declarat „voce". Când declanșează, trimitem mai întâi bufferul,
-  // apoi fluxul curent — rezolvă pierderea primelor silabe (până acum primele
-  // 2-3 cadre ajungeau la Google doar după ce VAD-ul acumula cadre consecutive).
+  // Pre-roll ring: keeps the last ~400 ms of audio EVEN WHEN the VAD
+  // hasn't declared "voice" yet. When it fires, we send the buffer first,
+  // then the current stream — fixes the loss of the first syllables (until now the first
+  // 2-3 frames reached Google only after the VAD accumulated consecutive frames).
   const preRoll: { frame: Float32Array }[] = []
   const pushPreRoll = (frame: Float32Array): void => {
     preRoll.push({ frame: frame.slice() })
@@ -181,7 +181,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
           }, 15000)
         }
       } catch {
-        /* o bucată pierdută nu oprește fluxul */
+        /* a lost chunk doesn't stop the stream */
       }
     }
     preRoll.length = 0
@@ -244,8 +244,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     ws = new WebSocket(`${proto}://${location.host}/api/asr-stream`)
     ws.binaryType = 'arraybuffer'
   } catch {
-    // WS n-a pornit → curăță graful audio și cade pe batch (nu lăsa AudioContext
-    // + microfon agățate — scurgere/rasă din audit 10 iul).
+    // WS didn't start → clean up the audio graph and fall to batch (don't leave AudioContext
+    // + microphone hanging — leak/race from the Jul 10 audit).
     try {
       proc.disconnect()
       source.disconnect()
@@ -263,8 +263,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       clearTimeout(phraseTimer)
       phraseTimer = null
     }
-    // Dacă Google n-a dat „final" în 3s, folosește ultimul parțial — altfel o
-    // frază scurtă/de coadă se pierdea complet (bug audit 10 iul).
+    // If Google gave no "final" in 3s, use the last partial — otherwise a
+    // short/tail utterance was lost completely (Jul 10 audit bug).
     const text = (phraseFinal || lastPartial).trim()
     phraseFinal = ''
     lastPartial = ''
@@ -277,15 +277,15 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     resetFeatures()
   }
 
-  // pauză > 3s de la ULTIMA bucată de transcript → fraza s-a terminat.
+  // pause > 3s since the LAST transcript chunk → the utterance is over.
   const armPhraseTimer = (): void => {
     if (phraseTimer) clearTimeout(phraseTimer)
     phraseTimer = setTimeout(closePhrase, PHRASE_PAUSE_MS)
   }
 
-  // O SINGURĂ predare către batch: la un refuz de server se declanșează AMÂNDOUĂ
-  // (`onerror` ȘI `onclose`), iar ChatPanel repornea microfonul de două ori —
-  // exact bucla scurtă de reporniri pe care o vrem eliminată.
+  // ONE SINGLE handover to batch: on a server refusal BOTH fire
+  // (`onerror` AND `onclose`), and ChatPanel restarted the mic twice —
+  // exactly the short restart loop we want eliminated.
   let fellBack = false
   const fallbackToBatch = (): void => {
     if (fellBack || closed) return
@@ -299,7 +299,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       try {
         ws?.send(JSON.stringify({ type: 'start', lang: opts.getLang() }))
       } catch {
-        /* se reia la prima bucată */
+        /* resumes on the first chunk */
       }
     }
     ws.onmessage = (ev) => {
@@ -309,16 +309,16 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       } catch {
         return
       }
-      // Doar transcript real dovedește că STT funcționează. SPEECH_ACTIVITY_BEGIN
-      // confirmă doar că serverul aude voce, NU și că transcrie — dacă l-am lăsa
-      // să dezarmeze plasa, Kelion ar rămâne mut (aude voce, dar nu livrează text).
+      // Only real transcript proves STT works. SPEECH_ACTIVITY_BEGIN
+      // only confirms the server hears voice, NOT that it transcribes — if we let it
+      // disarm the safety net, Kelion would stay mute (hears voice, but delivers no text).
       if (m.type === 'partial' && typeof m.transcript === 'string') {
         gotAnyMsg = true
         if (silentTimer) {
           clearTimeout(silentTimer)
           silentTimer = null
         }
-        // LIVE: finaluri validate + parțialul care crește acum
+        // LIVE: validated finals + the partial growing now
         lastPartial = m.transcript
         const live = `${phraseFinal} ${m.transcript}`.trim()
         opts.onLive(live)
@@ -344,16 +344,16 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     ws.onclose = (ev) => {
       wsReady = false
       // CONTRACT cu backend/src/routes/asr-stream.ts: (1011, 'asr_not_configured')
-      // = „serverul n-are STT în streaming". Îl ținem minte pe TOATĂ sesiunea de
-      // pagină, ca pornirile următoare de microfon să sară peste WS din prima
-      // (vezi garda din capul lui startMicStream) — zero erori în consolă, zero
-      // reîncercări. Reason-ul poate fi înghițit de un proxy, deci acceptăm și
-      // codul singur: 1011 nu e folosit nicăieri altundeva pe ruta asta.
+      // = "the server has no streaming STT". We remember it for the WHOLE page
+      // session, so later mic starts skip the WS right away
+      // (see the guard at the top of startMicStream) — zero console errors, zero
+      // retries. The reason can be swallowed by a proxy, so we also accept
+      // the bare code: 1011 isn't used anywhere else on this route.
       if (ev.code === 1011 || ev.reason === 'asr_not_configured') streamingAsrAvailable = false
       // Refuz CURAT de la server (ex. 1011 asr_not_configured, 1008 auth):
-      // vine DOAR onclose, niciodată onerror — fără plasa asta fallback-ul pe
-      // batch nu se declanșa niciodată (surd permanent). 'ws' e eticheta pe
-      // care ChatPanel o mapează pe căderea în batch.
+      // only onclose arrives, never onerror — without this net the batch
+      // fallback never fired (permanently deaf). 'ws' is the label
+      // ChatPanel maps to falling into batch.
       if (!gotAnyMsg) fallbackToBatch()
     }
   }
@@ -365,32 +365,32 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
     const rms = Math.sqrt(sum / input.length)
     const now = performance.now()
-    // PODEA DE ZGOMOT adaptivă (ca la batch): urcă lent când e liniște. Vocea
-    // reală = peste pragul absolut ȘI dominând podeaua de-atâtea ori. Fără asta
-    // orice zgomot de fond > 0.012 curgea la Google (transcrieri fantomă).
+    // Adaptive NOISE FLOOR (like batch): rises slowly when quiet. Real
+    // voice = above the absolute threshold AND dominating the floor this many times. Without it
+    // any background noise > 0.012 flowed to Google (phantom transcriptions).
     const voiced = rms > VOICE_RMS && rms > noiseFloor * DOMINANCE
     if (!voiced) noiseFloor = noiseFloor * 0.97 + rms * 0.03
 
-    // Pre-roll: păstrăm mereu ultimele cadre audio, chiar și înainte ca VAD-ul
-    // să declare „voce". Când declanșează, le trimitem înaintea fluxului curent.
+    // Pre-roll: we always keep the latest audio frames, even before the VAD
+    // declares "voice". When it fires, we send them ahead of the current stream.
     pushPreRoll(input)
 
-    // Un poc scurt (1 cadru) nu deschide fluxul — cerem câteva cadre consecutive.
+    // A short blip (1 frame) doesn't open the stream — we require a few consecutive frames.
     voicedRun = voiced ? voicedRun + 1 : 0
     const inSpeech = lastVoiceAt > 0 && now - lastVoiceAt <= TAIL_MS
     const becameVoiced = voicedRun >= VOICED_FRAMES_TO_OPEN
     const isOnset = becameVoiced && !inSpeech
 
     if (isOnset) {
-      // Prima voce REALĂ detectată (sau reluare după o pauză mai mare decât coada):
-      // trimitem mai întâi pre-roll-ul, ca primele silabe să nu se piardă.
+      // First REAL voice detected (or resuming after a pause longer than the tail):
+      // we send the pre-roll first, so the first syllables aren't lost.
       lastVoiceAt = now
       flushPreRoll()
-      // Cadrul curent este deja în pre-roll și a fost trimis — nu-l retrimite.
+      // The current frame is already in the pre-roll and was sent — don't resend it.
       return
     }
     if (becameVoiced || inSpeech) lastVoiceAt = now
-    // trimite DOAR cât e voce sau în coada de 3.2s de după — fără tăcere la Google
+    // sends ONLY while there's voice or in the 3.2s tail after — no silence to Google
     if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
     collectFrame()
     const ds = downsample(input, ctx.sampleRate)
@@ -398,20 +398,20 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       ws.send(floatToPcm16(ds))
       if (!sentAudio) {
         sentAudio = true
-        // am trimis prima voce reală → armăm plasa de 15s pentru „mic mut"
+        // first real voice sent → we arm the 15s "mute mic" safety net
         silentTimer = setTimeout(() => {
           if (!gotAnyMsg && !closed) opts.onError('silent')
         }, 15000)
       }
     } catch {
-      /* o bucată pierdută nu oprește fluxul */
+      /* a lost chunk does not stop the stream */
     }
   }
 
   source.connect(proc)
   proc.connect(ctx.destination) // necesar ca onaudioprocess să ruleze în unele browsere
 
-  // pista moare din exterior (apel, căști scoase) → anunțăm, panoul redeschide.
+  // the track dies from outside (call, headset unplugged) → we notify, the panel reopens.
   stream.getAudioTracks().forEach((t) =>
     t.addEventListener('ended', () => {
       if (!closed) opts.onError('track-ended')
@@ -424,23 +424,23 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (phraseTimer) clearTimeout(phraseTimer)
     if (silentTimer) clearTimeout(silentTimer)
     try {
-      // Doar pe socket DESCHIS: send() pe unul închis nu aruncă — scuipă
-      // «WebSocket is already in CLOSING or CLOSED state» în consolă (văzut
-      // live la căderea de rețea din 28 iul), iar try/catch nu-l poate opri.
+      // Only on an OPEN socket: send() on a closed one doesn't throw — it spits
+      // «WebSocket is already in CLOSING or CLOSED state» into the console (seen
+      // live at the Jul 28 network drop), and try/catch can't stop it.
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }))
     } catch {
-      /* ignoră */
+      /* ignore */
     }
     try {
       ws?.close()
     } catch {
-      /* ignoră */
+      /* ignore */
     }
     try {
       proc.disconnect()
       source.disconnect()
     } catch {
-      /* ignoră */
+      /* ignore */
     }
     stream.getTracks().forEach((t) => t.stop())
     void ctx.close().catch(() => {})
