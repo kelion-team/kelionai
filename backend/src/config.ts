@@ -82,7 +82,7 @@ export const config = {
     // primary model's route was down at OpenAI). Retrying the SAME model has
     // no chance when the model itself is the problem: attempts 2-3 move on to
     // the fallback models.
-    realtimeModelFallbacks: (process.env.OPENAI_REALTIME_MODEL_FALLBACKS ?? 'gpt-realtime-mini,gpt-4o-realtime-preview')
+    realtimeModelFallbacks: (process.env.OPENAI_REALTIME_MODEL_FALLBACKS ?? 'gpt-realtime-mini,gpt-realtime-1.5')
       .split(',')
       .map((m) => m.trim())
       .filter(Boolean),
