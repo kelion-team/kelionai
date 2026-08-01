@@ -93,3 +93,26 @@ describe('amprentele supraviețuiesc upgrade-urilor', () => {
     expect(health).toMatch(/FROM voice_guests WHERE approved/)
   })
 })
+
+// Adrian, Aug 1: „am șters amprenta mea că era greșită" + „gresit, timbrul e
+// masculin" — amprenta lui sărea male↔female pentru că FIECARE tură potrivită
+// rescria referința cu citirea curentă (uneori armonica greșită).
+describe('amprenta titularului nu mai oscilează', () => {
+  const db = readFileSync(fileURLToPath(new URL('./db.ts', import.meta.url)), 'utf8')
+  const audio = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/audioIO.ts', import.meta.url)), 'utf8')
+
+  it('genul se deduce din pitch-ul MEDIAN, nu din medie (spike-urile trackeriului nu mai răstoarnă genul)', () => {
+    expect(audio).toMatch(/pitchMedian/)
+    expect(chat).toMatch(/inferGender\(vf\.meta\.pitchMedian \?\? vf\.meta\.pitchMean\)/)
+    expect(realtime).toMatch(/inferGender\(vf\.meta\.pitchMedian \?\? vf\.meta\.pitchMean\)/)
+  })
+
+  it('adaptarea PĂSTREAZĂ genul stocat și amestecă vectorul (70/30) — niciodată rescriere oarbă', () => {
+    expect(db).toMatch(/old\.gender && old\.gender !== 'unknown'\) gender = old\.gender/)
+    expect(db).toMatch(/0\.7 \* old\.features\[i\] \+ 0\.3 \* x/)
+  })
+
+  it('poarta sub-armonică prinde și vocile masculine înalte (165 Hz, cu dovada autocorelației)', () => {
+    expect(audio).toMatch(/sampleRate \/ maxPos > 165/)
+  })
+})

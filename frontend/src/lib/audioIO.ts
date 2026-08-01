@@ -54,6 +54,9 @@ export interface VoicePrint {
 // Features vocale trimise backendului pentru identificare speaker + gen.
 export interface VoiceFeatureMeta {
   pitchMean: number
+  // The MEDIAN pitch — robust to tracker spikes; gender is inferred from THIS,
+  // never from the mean (Aug 1: one bad frame flipped Adrian to "female").
+  pitchMedian?: number
   pitchStd: number
   pitchMin: number
   pitchMax: number
@@ -184,7 +187,10 @@ export function estimateF0(buf: Float32Array, sampleRate: number): number {
   // frequency) keeps ≥85% of the peak's strength, the true period is the
   // doubled lag — walk down, possibly more than once. A genuinely high voice
   // loses far more correlation at double lag, so it stays untouched.
-  while (maxPos * 2 < n - 1 && sampleRate / maxPos > 190) {
+  // The gate starts at 165 Hz (not 190): his real voice sat at ~186 — high
+  // for a man, but still the 2nd harmonic of ~93. Below 165 we enter the
+  // truly ambiguous band, and the 85% evidence test is the only arbiter.
+  while (maxPos * 2 < n - 1 && sampleRate / maxPos > 165) {
     const lo = Math.max(d, Math.floor(maxPos * 2 * 0.94))
     const hi = Math.min(n - 1, Math.ceil(maxPos * 2 * 1.06))
     let subVal = -1
@@ -307,6 +313,15 @@ export function buildVoiceFeatures(
 ): VoiceFeatures {
   const validF0 = f0s.filter((x) => x > 0)
   const pitchMean = validF0.length ? validF0.reduce((a, b) => a + b, 0) / validF0.length : 0
+  // The MEDIAN: the tracker occasionally locks onto a harmonic for a frame or
+  // two; the mean lets those spikes drag the whole reading (Adrian, Aug 1:
+  // his male voice read "female" at 186 Hz). The median shrugs them off.
+  const sorted = [...validF0].sort((a, b) => a - b)
+  const pitchMedian = sorted.length
+    ? sorted.length % 2
+      ? sorted[(sorted.length - 1) / 2]
+      : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+    : 0
   const pitchMin = validF0.length ? Math.min(...validF0) : 0
   const pitchMax = validF0.length ? Math.max(...validF0) : 0
   const pitchStd =
@@ -318,6 +333,7 @@ export function buildVoiceFeatures(
 
   const meta: VoiceFeatureMeta = {
     pitchMean,
+    pitchMedian,
     pitchStd,
     pitchMin,
     pitchMax,
