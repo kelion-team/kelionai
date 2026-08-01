@@ -119,6 +119,30 @@ export async function asteaptaLaCoada(
   }
 }
 
+// ── FAILURE MEMORY (Adrian, Aug 1 — „timpi sunt exceptionali de mari") ─────
+// A model that fails (429, empty, error) goes to the BACK of the line for 5
+// minutes — for EVERY user. A dead model stops eating everyone's seconds, one
+// by one, turn after turn. Never excluded completely: if the whole pool is
+// sick, the sick ones still serve (a slow answer beats none).
+const ESEC_COOLDOWN_MS = 5 * 60_000
+const esecuri = new Map<string, number>()
+
+/** Mark a model as failed NOW (429 / empty answer / provider error). */
+export function noteazaEsuare(modelId: string): void {
+  esecuri.set(modelId, Date.now())
+}
+
+/** True while the model has no recent failure (or the cooldown expired). */
+export function eSanatos(modelId: string): boolean {
+  const t = esecuri.get(modelId)
+  if (t === undefined) return true
+  if (Date.now() - t >= ESEC_COOLDOWN_MS) {
+    esecuri.delete(modelId)
+    return true
+  }
+  return false
+}
+
 // ── THE PURSE THRESHOLD (pragul rezervei) ────────────────────────────────────
 // The paid reserve exists so the app never stops — but a bad traffic day must
 // not empty the purse. The owner sets a DAILY cap; over it, turns stay on the
@@ -135,6 +159,7 @@ export function stareDispecer(): {
   inZbor: number
   peModele: Record<string, number>
   coada: number
+  bolnavi: number
 } {
   const peModele: Record<string, number> = {}
   let inZbor = 0
@@ -142,7 +167,7 @@ export function stareDispecer(): {
     if (l.inFlight > 0) peModele[id] = l.inFlight
     inZbor += l.inFlight
   }
-  return { inZbor, peModele, coada }
+  return { inZbor, peModele, coada, bolnavi: esecuri.size }
 }
 
 // Test hook: reset all state.
@@ -150,4 +175,5 @@ export function _resetDispecer(): void {
   loads.clear()
   coada = 0
   treziri.clear()
+  esecuri.clear()
 }
