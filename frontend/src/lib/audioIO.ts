@@ -178,6 +178,29 @@ export function estimateF0(buf: Float32Array, sampleRate: number): number {
   }
   if (maxPos <= 0 || maxPos >= n - 1) return -1
 
+  // SUBHARMONIC CHECK (Adrian, Aug 1: his male voice read FEMALE — the tracker
+  // locked onto the 2nd harmonic and reported ~250 Hz instead of ~125). When
+  // the found f0 is high but the autocorrelation at DOUBLE the lag (half the
+  // frequency) keeps ≥85% of the peak's strength, the true period is the
+  // doubled lag — walk down, possibly more than once. A genuinely high voice
+  // loses far more correlation at double lag, so it stays untouched.
+  while (maxPos * 2 < n - 1 && sampleRate / maxPos > 190) {
+    const lo = Math.max(d, Math.floor(maxPos * 2 * 0.94))
+    const hi = Math.min(n - 1, Math.ceil(maxPos * 2 * 1.06))
+    let subVal = -1
+    let subPos = -1
+    for (let i = lo; i <= hi; i++) {
+      if (c[i] > subVal) {
+        subVal = c[i]
+        subPos = i
+      }
+    }
+    if (subPos > 0 && subVal >= maxVal * 0.85) {
+      maxVal = subVal
+      maxPos = subPos
+    } else break
+  }
+
   // parabolic interpolation around the peak for a finer lag estimate
   const x1 = c[maxPos - 1]
   const x2 = c[maxPos]

@@ -39,6 +39,7 @@ import {
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
@@ -2011,6 +2012,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       let textFlowed = false
+      // FAKE TOOL-CALL MARKUP, NEVER SHOWN NOR SPOKEN (Adrian, Aug 1 —
+      // screenshot: „<|tool_call|>call:system_health()<|tool_call|>” displayed
+      // raw in the bubble). Small free models sometimes EMIT tool-call syntax
+      // as plain text. Everything between the markers is dropped from the
+      // stream AND from the voice, and logged whole for diagnosis.
+      const markupStrip = makeToolMarkupStripper((swallowed) =>
+        console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+      )
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
         orMsgs,
@@ -2044,10 +2053,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           // having done it.
           forceToolsFirstRound: false,
           onText: (txt) => {
+            const clean = markupStrip.push(txt)
+            if (!clean) return
             textFlowed = true
             noteFirstWord()
-            reply.raw.write(txt)
-            voice.feed(txt)
+            reply.raw.write(clean)
+            voice.feed(clean)
           },
         },
       )
@@ -2070,7 +2081,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         triedModels.add(orchestratorModel)
         try {
           const cand = await runBrainOnce()
-          if (cand.text.trim() || textFlowed || sawVisible) { r = cand; break }
+          // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
+          // the next free model instead of showing/saying garbage or nothing.
+          if (stripToolMarkup(cand.text).trim() || textFlowed || sawVisible) { r = cand; break }
           // A brain that "succeeds" but says nothing must not close the turn
           // mute — rotate silently to the next free model.
           console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
@@ -2091,7 +2104,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         orchestratorModel = next
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_rotation_exhausted'))
-      assistantText += r.text
+      markupStrip.flush() // held marker fragments: logged, never shown
+      assistantText += stripToolMarkup(r.text)
       usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"

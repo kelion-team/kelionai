@@ -1704,6 +1704,15 @@ export default function ChatPanel({
   // live as it streams — not just one sentence.
   const lastUser = messages.filter((m) => m.role === 'user').at(-1)
   const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1)
+  // RENDER-LEVEL CLEANUP (Adrian, Aug 1): old saved messages can still carry
+  // fake tool-call markup from before the backend stripper existed. It is
+  // never shown, no matter how old the bubble.
+  const cleanMsg = (s: string): string =>
+    s
+      .replace(/<\|?tool_call\|?>[\s\S]*?(<\|?\/?tool_call\|?>|$)/g, '')
+      .replace(/<\/?tool_call>[\s\S]*?(<\/tool_call>|$)/g, '')
+      .replace(/<\|im_(?:start|end)\|>[^\n]*\n?/g, '')
+      .trim()
   const hint = t.chatHint
   // The right-hand button concerns ONLY the WRITTEN chat. You have something to send (text or
   // attached file) → it's active. Empty field → the chat is AUDIO (the microphone is always
@@ -1732,9 +1741,9 @@ export default function ChatPanel({
         <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
           {[lastUser, lastAssistant].map((m, i) =>
-            m && m.content.trim() ? (
+            m && cleanMsg(m.content) ? (
               <div key={`${m.ts ?? 0}-${i}`} className={`chat-msg ${m.role === 'user' ? 'me' : 'kelion'}`}>
-                <span className="chat-msg-text">{m.content}</span>
+                <span className="chat-msg-text">{cleanMsg(m.content)}</span>
               </div>
             ) : null,
           )}
@@ -1838,7 +1847,7 @@ export default function ChatPanel({
             {busy ? (
               <span className="speech-tail">
                 <span className="speech-tail-text">
-                  {lastAssistant?.content || (heard ? synthesize(heard) : '…')}
+                  {cleanMsg(lastAssistant?.content ?? '') || (heard ? synthesize(heard) : '…')}
                 </span>
               </span>
             ) : (
@@ -1846,9 +1855,9 @@ export default function ChatPanel({
                 <span
                   className="ticker-text"
                   key={lastAssistant?.ts ?? 'empty'}
-                  style={{ '--ticker-dur': tickerDur(lastAssistant?.content ?? '') } as CSSProperties}
+                  style={{ '--ticker-dur': tickerDur(cleanMsg(lastAssistant?.content ?? '')) } as CSSProperties}
                 >
-                  {lastAssistant?.content}
+                  {cleanMsg(lastAssistant?.content ?? '')}
                 </span>
               </span>
             )}

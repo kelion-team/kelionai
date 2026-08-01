@@ -1176,7 +1176,27 @@ export default function AdminPanel({
               )}
               {voiceprints.map((v) => (
                 <div className="fin-row" key={v.email}>
-                  <span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* THE PAIRED FACE (Adrian, Aug 1: „voiceprint paired with an
+                    image capture — why wasn't it done?”). It WAS — saved in
+                    faceprints since Jul — only INVISIBLE. Now shown, so the pair
+                    voice+face is seen at a glance. */}
+                    {v.hasFace ? (
+                      <img
+                        src={v.facePhoto}
+                        alt={`Fața lui ${v.name || v.email}`}
+                        title="Captura de imagine împerecheată cu amprenta vocală"
+                        style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.15)' }}
+                      />
+                    ) : (
+                      <span
+                        className="muted"
+                        title="Fără captură încă — se face singură la prima tură cu camera pornită"
+                        style={{ width: 44, height: 44, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed rgba(255,255,255,0.2)', fontSize: 18 }}
+                      >
+                        ?
+                      </span>
+                    )}
                     <strong>{v.name || v.email}</strong>
                     {' · '}
                     <span className={`vis-badge ${v.isAdmin ? 'kind-demo' : 'human'}`}>

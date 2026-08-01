@@ -2619,6 +2619,11 @@ export interface VoiceprintRow {
   features: number[]
   featureMeta: VoiceFeatureMeta
   hasAudio: boolean
+  // THE PAIRED FACE (Adrian, Aug 1: „every voiceprint must be paired with an
+  // image capture” — it WAS saved, in `faceprints`, but the panel never
+  // showed it, so it looked unexecuted). The list now joins the photo.
+  hasFace: boolean
+  facePhoto: string
   createdAt: string
   updatedAt: string
 }
@@ -2631,6 +2636,7 @@ interface VoiceprintDbRow {
   features: number[]
   feature_meta: VoiceFeatureMeta
   has_audio?: boolean
+  face_photo?: string | null
   created_at: string
   updated_at: string
 }
@@ -2644,6 +2650,8 @@ function rowToVoiceprint(r: VoiceprintDbRow): VoiceprintRow {
     features: r.features || [],
     featureMeta: r.feature_meta || ({} as VoiceFeatureMeta),
     hasAudio: !!r.has_audio,
+    hasFace: !!r.face_photo,
+    facePhoto: r.face_photo || '',
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -2727,9 +2735,13 @@ export async function listVoiceprints(limit = 200): Promise<VoiceprintRow[]> {
   if (!dbEnabled()) return []
   try {
     const r = await getPool().query<VoiceprintDbRow>(
-      `SELECT user_email, name, gender, is_admin, features, feature_meta,
-              (audio_clip <> '') AS has_audio, created_at, updated_at
-       FROM voiceprints ORDER BY updated_at DESC LIMIT $1`,
+      `SELECT v.user_email, v.name, v.gender, v.is_admin, v.features, v.feature_meta,
+              (v.audio_clip <> '') AS has_audio,
+              NULLIF(f.photo, '') AS face_photo,
+              v.created_at, v.updated_at
+       FROM voiceprints v
+       LEFT JOIN faceprints f ON f.user_email = v.user_email
+       ORDER BY v.updated_at DESC LIMIT $1`,
       [limit],
     )
     return r.rows.map(rowToVoiceprint)
