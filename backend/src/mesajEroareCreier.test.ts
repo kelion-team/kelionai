@@ -19,8 +19,16 @@ const sursa = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta
 
 describe('rotirea silențioasă între modelele free', () => {
   it('parcurge pool-ul free din catalogul live', () => {
-    expect(sursa).toMatch(/nextFreeCandidate[\s\S]{0,400}getCatalog/)
+    expect(sursa).toMatch(/nextCandidate[\s\S]{0,400}getCatalog/)
     expect(sursa).toMatch(/m\.id\.endsWith\(':free'\)/)
+  })
+
+  // Adrian, Aug 1 — punga de rezervă aprobată („da"): când TOT pool-ul free
+  // pică, tura trece pe cele mai ieftine modele plătite din catalog. Userul
+  // NU află nimic — aplicația pur și simplu nu se oprește.
+  it('după pool-ul free cade pe modelele plătite IEFTINE (punga comună)', () => {
+    expect(sursa).toMatch(/classifyCost\(m\.promptPerM, m\.completionPerM\) === 'cheap'/)
+    expect(sursa).toMatch(/blendedPerM\(a\.promptPerM/)
   })
 
   it('un model gol sau picat NU închide turul — se rotește', () => {
