@@ -482,7 +482,14 @@ export default function ChatPanel({
               typeof m.content === 'string' &&
               m.content.trim() !== '',
           )
+          // PROTOCOL GARBAGE (Aug 1: „id: 15\ndata: …" bubbles on screen) — raw
+          // transport fragments saved into history by the old voice path. They
+          // are not conversation; they never reach the screen again.
+          .filter((m) => !/^(id:\s*\d+|data:)\s/m.test(m.content))
           .map((m) => ({ role: m.role, content: m.content }))
+          // Collapse repeated error echoes (the same technical-problem line
+          // stacked 3× while the chat was down) — one is enough.
+          .filter((m, i, a) => i === 0 || m.content !== a[i - 1].content)
         if (h.length > 0) setMessages((cur) => (cur.length === 0 ? h : cur))
       })
       .catch(() => {})

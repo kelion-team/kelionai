@@ -1780,9 +1780,35 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // without redeploy) + `propose_tool` so it can propose new ones.
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
-    const tools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ...dynTools]
+    const rawTools: Tool[] = isAdmin
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+    // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
+    // allowed", every turn died): (1) DEDUPE by name — open_app_view was
+    // registered twice (once alone, once inside BROWSER_TOOLS), and any future
+    // pairing is absorbed here; (2) the self-proposed dynamic tools fill only
+    // the slots left under the ceiling — a burst of approvals can never kill
+    // the whole conversation again; (3) if the BASE alone ever reaches the
+    // ceiling, we trim from the tail (the rarest tools) and log it loudly,
+    // so the chat degrades instead of dying.
+    const MAX_PROVIDER_TOOLS = 64
+    const seenNames = new Set<string>()
+    const baseTools: Tool[] = []
+    for (const t of rawTools) {
+      if (seenNames.has(t.name)) continue
+      seenNames.add(t.name)
+      baseTools.push(t)
+    }
+    const tools: Tool[] = baseTools.slice(0, MAX_PROVIDER_TOOLS)
+    if (baseTools.length > MAX_PROVIDER_TOOLS)
+      console.error(`[chat] lista de unelte (${baseTools.length}) a depășit plafonul furnizorului — trimise primele ${MAX_PROVIDER_TOOLS}`)
+    for (const t of dynTools) {
+      if (tools.length >= MAX_PROVIDER_TOOLS) break
+      if (!seenNames.has(t.name)) {
+        seenNames.add(t.name)
+        tools.push(t)
+      }
+    }
     const baseUrl = `https://${req.headers.host ?? 'kelionai.app'}`
     // Voice from the first sentence on the API path too (clients): every
     // broadcast piece enters the pipe; synthesis runs in parallel with the text
