@@ -51,8 +51,13 @@ describe('Kelion nu-și mai ține singur poarta deschisă', () => {
     expect(voce).toMatch(/REPLY_WINDOW_MS : 0/)
   })
 
-  it('plasa pe transcript lipsă nu mai răspunde din fereastră largă', () => {
-    expect(voce).toMatch(/if \(Date\.now\(\) < replyUntil\) \{\s*\n\s*replyUntil = 0/)
+  it('fără transcript NU există răspuns deloc — sesiunea nu mai răspunde singură', () => {
+    // The old net replied on speech_stopped even WITHOUT any text (so Kelion
+    // "wouldn't seem deaf"). With ONE BRAIN (Aug 1) the session never answers
+    // on its own — a lost transcript means silence and the user just repeats;
+    // only a REAL transcript that passes the name gate reaches the brain.
+    expect(voce).not.toMatch(/speech_stopped/)
+    expect(voce).not.toContain('speechStopTimer')
   })
 
   it('STOP taie și replica rămasă', () => {
