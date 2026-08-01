@@ -1,12 +1,12 @@
-// ── PAZNICUL CARE NU LASĂ O CHEIE SĂ IASĂ DIN CASĂ ──────────────────────────
+// ── THE GUARD THAT DOESN'T LET A KEY LEAVE THE HOUSE ───────────────────────
 //
-// Ruta `/api/admin/env-check` există ca să răspundă la „le-am scris de zeci de
-// ori" cu fapte din procesul care rulează. Riscul ei nu e că raportează greșit,
-// ci că raportează PREA MULT: o singură scăpare și cheile ajung în răspunsul
-// HTTP, în logurile browserului, în capturi de ecran.
+// The `/api/admin/env-check` route exists to answer "I've written them dozens
+// of times" with facts from the running process. Its risk is not that it
+// reports wrongly, but that it reports TOO MUCH: a single leak and the keys
+// end up in the HTTP response, in browser logs, in screenshots.
 //
-// De-aia testul principal de aici nu verifică prezența, ci ABSENȚA: niciun câmp
-// întors nu are voie să conțină vreo bucată din valoarea reală.
+// That's why the main test here checks not presence, but ABSENCE: no returned
+// field may contain any piece of the real value.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
@@ -45,27 +45,27 @@ describe('env-check — nicio valoare nu iese', () => {
   it('raportul întreg NU conține valoarea, nici măcar o bucată din ea', () => {
     const text = JSON.stringify(envCheck())
     expect(text).not.toContain(SECRET)
-    // Nici prefixe: „primele caractere" e tot o scurgere.
+    // No prefixes either: "the first characters" is still a leak.
     expect(text).not.toContain(SECRET.slice(0, 8))
   })
 
   it('deosebește cele trei stări care contează', () => {
     const byName = Object.fromEntries(envCheck().map((v) => [v.name, v]))
-    // Prezentă cu valoare: știm doar CÂT e, nu CE e.
+    // Present with a value: we only know HOW LONG it is, not WHAT it is.
     expect(byName.SERPER_API_KEY.present).toBe(true)
     expect(byName.SERPER_API_KEY.length).toBe(SECRET.length)
-    // Prezentă dar GOALĂ — altceva decât „lipsă", și se repară altfel.
+    // Present but EMPTY — different from "missing", and fixed differently.
     expect(byName.GOOGLE_MAPS_KEY.present).toBe(true)
     expect(byName.GOOGLE_MAPS_KEY.length).toBe(0)
-    // Lipsă de tot.
+    // Missing altogether.
     expect(byName.GOOGLE_TTS_API_KEY.present).toBe(false)
   })
 
   it('rezumatul numără goalele separat de lipsuri și dă numele de pus', () => {
     const s = envSummary()
-    expect(s.nume).toContain('GOOGLE_MAPS_KEY') // goală
-    expect(s.nume).toContain('GOOGLE_TTS_API_KEY') // lipsă
-    expect(s.nume).not.toContain('SERPER_API_KEY') // pusă
+    expect(s.nume).toContain('GOOGLE_MAPS_KEY') // empty
+    expect(s.nume).toContain('GOOGLE_TTS_API_KEY') // missing
+    expect(s.nume).not.toContain('SERPER_API_KEY') // set
     expect(s.total).toBeGreaterThan(s.lipsa + s.goale)
   })
 
@@ -76,16 +76,16 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(byName.ENABLE_BANKING_PRIVATE_KEY_B64).toBeDefined()
   })
 
-  // ── MIEZUL PROBLEMEI LUI ADRIAN, 30 iul ────────────────────────────────────
-  // „toate cheile au fost scrise de zeci de ori" — și erau. Doar că el scrisese
-  // GOOGLE_MAPS_API_KEY (numele normal), iar codul citea DOAR GOOGLE_MAPS_KEY.
-  // Testele astea există ca să nu se mai repete niciodată tăcerea aia.
+  // ── THE CORE OF ADRIAN'S PROBLEM, Jul 30 ───────────────────────────────
+  // "all the keys have been written dozens of times" — and they were. Only he
+  // had written GOOGLE_MAPS_API_KEY (the normal name), while the code read
+  // ONLY GOOGLE_MAPS_KEY. These tests exist so that silence never repeats.
   it('găsește cheia scrisă cu un nume rezonabil, nu doar cu cel canonic', () => {
     process.env.GOOGLE_MAPS_API_KEY = 'cheia-de-harti'
     delete process.env.GOOGLE_MAPS_KEY
     const maps = envCheck().find((v) => v.name === 'GOOGLE_MAPS_KEY')
     expect(maps?.present).toBe(true)
-    // Și spune SUB CE nume a găsit-o — altfel omul tot nu știe de ce merge acum.
+    // And it says UNDER WHICH name it found it — otherwise the person still doesn't know why it works now.
     expect(maps?.foundAs).toBe('GOOGLE_MAPS_API_KEY')
     delete process.env.GOOGLE_MAPS_API_KEY
   })
@@ -93,7 +93,7 @@ describe('env-check — nicio valoare nu iese', () => {
   it('arată cheile pe care le ai sub un nume pe care codul NU-l citește', () => {
     process.env.GOOGLE_SEARCH_API_KEY = 'ceva'
     expect(envOrphans()).toContain('GOOGLE_SEARCH_API_KEY')
-    // Un nume pe care ÎL citim nu e orfan.
+    // A name we DO read is not an orphan.
     process.env.SERPER_KEY = 'x'
     expect(envOrphans()).not.toContain('SERPER_KEY')
     delete process.env.GOOGLE_SEARCH_API_KEY

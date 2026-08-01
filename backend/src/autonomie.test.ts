@@ -1,19 +1,21 @@
-// ── TESTELE CĂII DE AUTONOMIE (cererea ta → cod → PR → merge → deploy) ──────
+// ── TESTS FOR THE AUTONOMY PATH (your request → code → PR → merge → deploy)
 //
-// Aici Kelion are MÂINILE pe repo și pe VPS: scrie cod, deschide PR, dă merge
-// (ceea ce declanșează publicarea) și rulează operațiuni pe server. Zero teste
-// până acum, pe cea mai puternică unealtă din tot softul.
+// Here Kelion has its HANDS on the repo and the VPS: it writes code, opens a
+// PR, merges (which triggers the deploy) and runs operations on the server.
+// Zero tests until now, on the most powerful tool in the whole software.
 //
-// Ce apărăm — exact garanțiile pe care se sprijină ordinul „fără restricții":
-//   1. ÎNTRERUPĂTORUL LUI ADRIAN („pauza-autonomie") oprește TOT. Dacă poarta
-//      asta cedează, „stop" nu mai înseamnă stop.
-//   2. Fără GITHUB_TOKEN nu se pretinde nimic — se spune sincer ce lipsește.
-//   3. Numele de ramură se normalizează și master NU poate fi scris direct.
-//   4. Numai runbook-urile CUNOSCUTE rulează (LLM-ul dă doar numele).
+// What we guard — exactly the guarantees the "no restrictions" order stands
+// on:
+//   1. ADRIAN'S SWITCH ("pauza-autonomie") stops EVERYTHING. If this gate
+//      gives way, "stop" no longer means stop.
+//   2. Without GITHUB_TOKEN nothing is pretended — it honestly says what's
+//      missing.
+//   3. Branch names are normalized and master can NOT be written directly.
+//   4. Only KNOWN runbooks run (the LLM only gives the name).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// KV în memorie: comutatorul de pauză trăiește în baza de date; îl simulăm ca să
-// testăm poarta fără Postgres.
+// In-memory KV: the pause switch lives in the database; we simulate it to
+// test the gate without Postgres.
 const kv = new Map<string, string>()
 vi.mock('./db.js', () => ({
   loadKv: async (k: string) => kv.get(k) ?? null,
@@ -72,14 +74,14 @@ describe('autonomie — fără GITHUB_TOKEN nu se pretinde nimic', () => {
 
 describe('autonomie — ÎNTRERUPĂTORUL lui Adrian („pauza-autonomie")', () => {
   it('pornit din runbook, oprește TOATE acțiunile autonome', async () => {
-    process.env.GITHUB_TOKEN = 'token-de-test' // token prezent: doar pauza mai poate opri
+    process.env.GITHUB_TOKEN = 'token-de-test' // token present: only the pause can still stop it
     expect(await isOpsPaused()).toBe(false)
 
     const pauza = jsonul(await runRunbook('pauza-autonomie'))
     expect(pauza.paused).toBe(true)
     expect(await isOpsPaused()).toBe(true)
 
-    // Cu pauza pornită, NICIUNA din mâinile lui Kelion nu mai mișcă.
+    // With the pause on, NONE of Kelion's hands move anymore.
     expect(jsonul(await repoWrite('kelion/x', 'a.ts', 'cod', 'm')).error).toBe('paused_by_owner')
     expect(jsonul(await repoOpenPR('kelion/x', 't', 'b')).error).toBe('paused_by_owner')
     expect(jsonul(await repoMergePR(1)).error).toBe('paused_by_owner')
@@ -95,7 +97,7 @@ describe('autonomie — ÎNTRERUPĂTORUL lui Adrian („pauza-autonomie")', () =
   })
 
   it('comenzile de pauză merg CHIAR ȘI fără token (nu depind de GitHub)', async () => {
-    // Dacă „stop" ar avea nevoie de token, ar putea eșua exact când e mai nevoie.
+    // If "stop" needed the token, it could fail exactly when it's most needed.
     delete process.env.GITHUB_TOKEN
     expect(jsonul(await runRunbook('pauza-autonomie')).paused).toBe(true)
   })
