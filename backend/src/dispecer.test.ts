@@ -6,6 +6,8 @@ import {
   elibereazaSlot,
   asteaptaLaCoada,
   poateFolosiRezerva,
+  noteazaEsuare,
+  eSanatos,
   stareDispecer,
   _resetDispecer,
   REZERVA_CAP_ZILNIC_DEFAULT_USD,
@@ -89,6 +91,25 @@ describe('the purse threshold', () => {
   })
 })
 
+describe('failure memory (Adrian: timpii sunt exceptionali de mari)', () => {
+  it('a model without failures is healthy', () => {
+    expect(eSanatos('m1')).toBe(true)
+  })
+
+  it('a failed model becomes sick — for EVERY user, not just this turn', () => {
+    noteazaEsuare('m1')
+    expect(eSanatos('m1')).toBe(false)
+    // …while the rest of the pool stays healthy.
+    expect(eSanatos('m2')).toBe(true)
+  })
+
+  it('sick models show up in the telemetry', () => {
+    noteazaEsuare('m1')
+    noteazaEsuare('m2')
+    expect(stareDispecer().bolnavi).toBe(2)
+  })
+})
+
 describe('telemetry', () => {
   it('stareDispecer reports in-flight per model + the queue', () => {
     iaSlotDacaLiber('m1')
@@ -122,5 +143,23 @@ describe('chat.ts chiar folosește dispecerul', () => {
   })
   it('pool-ul plătit e oprit de pragul pungii', () => {
     expect(chat).toMatch(/if \(await rezervaDeschisa\(\)\)/)
+  })
+})
+
+describe('latența (Adrian: timpi exceptionali de mari)', () => {
+  it('tururile ușoare aleargă în PARALEL — primul răspuns bun câștigă', () => {
+    expect(chat).toMatch(/!heavyTurn && !turnHasImage/)
+    expect(chat).toMatch(/slice\(0, 3\)/)
+    expect(chat).toMatch(/Promise\.all\(curse\)/)
+  })
+  it('concurenții NU primesc unelte (fără dublă execuție)', () => {
+    expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)
+  })
+  it('modelele moarte se notează bolnav în bucla secvențială', () => {
+    expect(chat).toMatch(/returned empty — silent rotation`\)\s*\n\s*noteazaEsuare/)
+    expect(chat).toMatch(/silent rotation`\)\s*\n\s*noteazaEsuare/)
+  })
+  it('candidații sănătoși trec în fața bolnavilor', () => {
+    expect(chat).toMatch(/sanatosi[\s\S]{0,120}bolnavi/)
   })
 })

@@ -47,6 +47,8 @@ import {
   elibereazaSlot,
   asteaptaLaCoada,
   poateFolosiRezerva,
+  noteazaEsuare,
+  eSanatos,
   REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
@@ -2161,7 +2163,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             .sort((a, b) => blendedPerM(a.promptPerM, a.completionPerM) - blendedPerM(b.promptPerM, b.completionPerM))
           for (const m of cheapPaid) ids.push(m.id)
         }
-        return ids
+        // FAILURE MEMORY (Adrian, Aug 1 — „timpi sunt exceptionali de mari"):
+        // healthy models first, the recently-failed at the BACK of the line —
+        // a dead model stops eating everyone's seconds, turn after turn.
+        const sanatosi = ids.filter((id) => eSanatos(id))
+        const bolnavi = ids.filter((id) => !eSanatos(id))
+        return [...sanatosi, ...bolnavi]
       }
       const nextCandidate = async (tried: Set<string>): Promise<string | null> =>
         (await listaCandidati(tried))[0] ?? null
@@ -2172,6 +2179,53 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // SERVED by a paid fallback it reached through rotation (not the user's
       // own tier/quality choice).
       const modelInitial = orchestratorModel
+      // THE LIGHT-TURN RACE (Adrian, Aug 1 — „timpi sunt exceptionali de mari
+      // pentru a atrage useri"): chit-chat turns (no image, no action) RACE
+      // the first 3 healthy FREE models in PARALLEL and the first good answer
+      // wins — the 40-second one-by-one walk through dead models dies here.
+      // Racers get NO tools: chit-chat needs none, and parallel tool calls
+      // could double-execute deeds. A racer that fails or answers empty is
+      // marked sick (failure memory) so the NEXT user doesn't pay its seconds
+      // again. If nobody wins, the classic sequential path below takes over
+      // (with tools, the reserve and the queue).
+      if (!heavyTurn && !turnHasImage) {
+        const concurenti = (await listaCandidati(triedModels))
+          .filter((id) => id.endsWith(':free') && eSanatos(id))
+          .slice(0, 3)
+        for (const id of concurenti) triedModels.add(id)
+        interface Castigator { id: string; rez: Awaited<ReturnType<typeof runBrainOnce>>; curat: string }
+        const curse = concurenti.map(async (id): Promise<Castigator | null> => {
+          if (!iaSlotDacaLiber(id)) return null // busy — racing is about speed, no queue here
+          try {
+            const rez = await runOrchestrator(id, orMsgs, [], execTool, { maxTokens: 800 })
+            const curat = stripToolMarkup(rez.text).trim()
+            if (!curat) {
+              noteazaEsuare(id)
+              console.error(`[CURSA] ${id} a răspuns gol — marcat bolnav`)
+              return null
+            }
+            return { id, rez, curat }
+          } catch (e) {
+            noteazaEsuare(id)
+            console.error(`[CURSA] ${id} a picat (${String(e).slice(0, 80)}) — marcat bolnav`)
+            return null
+          } finally {
+            elibereazaSlot(id)
+          }
+        })
+        const castigator = (await Promise.all(curse)).find((c): c is Castigator => c !== null)
+        if (castigator) {
+          orchestratorModel = castigator.id
+          // The winner's text flows whole — chit-chat is short, and the
+          // seconds the race saved beat the word-by-word drip.
+          textFlowed = true
+          noteFirstWord()
+          reply.raw.write(castigator.curat)
+          voice.feed(castigator.curat)
+          r = castigator.rez
+          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți`)
+        }
+      }
       // THE DISPATCHER (Adrian, Aug 1 — „să scaleze pe o pungă comună"): a
       // model never gets more simultaneous calls / starts-per-minute than it
       // can serve. When every candidate is busy, the turn WAITS in line
@@ -2197,6 +2251,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // A brain that "succeeds" but says nothing must not close the turn
             // mute — rotate silently to the next free model.
             console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
+            noteazaEsuare(orchestratorModel)
           } catch (ge) {
             lastBrainErr = ge
             // Gemini direct: ANY failure (not only quota) falls to the free pool
@@ -2208,6 +2263,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             }
             if (textFlowed) throw ge // partial text already at the user — no rotation
             console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
+            noteazaEsuare(orchestratorModel)
           } finally {
             elibereazaSlot(slotTinut)
             slotTinut = null
