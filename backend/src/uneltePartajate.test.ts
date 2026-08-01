@@ -34,6 +34,12 @@ describe('orice creier primește TOT ce știe executorul să ruleze', () => {
     ['propose_tool', 'așteaptă aprobarea ownerului, nu se poate în buclă'],
     // It logs a gap for YOU, in conversation. The loop has `cerinta_noua`.
     ['log_unsupported_request', 'e pentru conversație; bucla scrie în cerinte'],
+    // The guest-voice trio needs the HOLDER PRESENT: he asks for the window,
+    // the guest speaks into the room's microphone, he confirms the print. In
+    // the night loop there is no microphone and no guest.
+    ['allow_guest_voice', 'fereastra se deschide la cererea titularului, cu microfonul în cameră'],
+    ['approve_guest_voice', 'confirmarea aparține titularului, în conversație'],
+    ['forget_guest', 'decizia de uitare aparține titularului, în conversație'],
   ])
 
   it('fiecare unealtă rutată de executor e ȘI în mâna lui — sau are motiv scris', () => {

@@ -35,6 +35,7 @@ import {
   loadKv,
   createBuildJob,
   listBuildJobs,
+  attachGuestPhoto,
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
@@ -74,7 +75,7 @@ import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL } from '../services/brainToolDefs.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -1068,6 +1069,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // Realtime voice. The brain answers the same way (same tools, same
       // ladder) — only the STYLE changes: short, natural, speakable sentences.
       spoken?: boolean
+      // GUEST SPEAKER (Adrian, Aug 1): the voice gate (realtime.ts) recognised
+      // the speaker as a GUEST of this account — "guest:<id>:<name> (<relation>)"
+      // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
+      // admin powers, even inside the holder's logged-in session.
+      speaker?: string
     }
   }>(
     '/api/chat',
@@ -1732,12 +1738,37 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // Persist the user's new message (last turn).
     const lastTurn = messages.at(-1)
     const lastUserText = lastTurn?.role === 'user' ? lastTurn.content : ''
+    // THE GUEST SPEAKER, PARSED ONCE (Adrian, Aug 1): the voice gate's label
+    // travels in the request body — "guest:<id>:<name> (<relation>)" for an
+    // approved guest, "guest-pending:..." for one awaiting the holder's
+    // confirmation. Parsed BEFORE the save, so everything below (the brain
+    // note, the admin strip) uses it.
+    const speakerRaw = typeof req.body?.speaker === 'string' ? req.body.speaker : ''
+    const guestMatch = /^guest(-pending)?:(\d+):(.+)$/.exec(speakerRaw)
+    const guestPending = guestMatch?.[1] === '-pending'
+    const guestId = guestMatch ? Number(guestMatch[2]) : 0
+    const guestLabel = guestMatch?.[3] ?? ''
     // PROGRESS BAR ON BRAIN ENTRY — ONE {heard} for EVERYONE (admin, demo,
     // public, paying): the server confirms exactly the text handed to the brain
     // on this turn, and the UI band displays it. It is not a local echo — if
     // the band does not change when you speak, the voice died BEFORE the brain.
     reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
     if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+
+    // THE GUEST CONTEXT FOR THE BRAIN (only the model sees it — the saved
+    // bubble and the {heard} band stay the guest's clean words).
+    if (guestMatch && messages.at(-1)?.role === 'user') {
+      const last = messages[messages.length - 1]
+      last.content =
+        (guestPending
+          ? `[NOTĂ DE SISTEM — vorbitorul este un OASPETE NOU: ${guestLabel}. Amprenta lui a fost salvată NEAPROBATĂ. Prezintă-te politicos, răspunde-i la întrebare, apoi ROAGĂ-L pe titular (în aceeași cameră) să confirme dacă păstrezi vocea și relația — se confirmă cu unealta approve_guest_voice. INTERZIS: orice acțiune administrativă, financiară sau distructivă în această tură.]\n\n`
+          : `[NOTĂ DE SISTEM — vorbitorul este un OASPETE APROBAT al titularului: ${guestLabel}. Răspunde-i normal, în limba lui, dar cu drepturi de oaspete: INTERZIS orice acțiune administrativă, financiară sau distructivă; pentru așa ceva cere-i să-l cheme pe titular.]\n\n`) +
+        last.content
+      // The guest's photo: if the camera caught a face on this turn, it becomes
+      // the guest's portrait in Admin → Amprente.
+      if (guestId && typeof req.body?.facePhoto === 'string' && req.body.facePhoto)
+        void attachGuestPhoto(guestId, req.body.facePhoto)
+    }
 
     // IN CHAT, THE ADMIN SESSION IS ENOUGH (Adrian, Jul 31: "if I logged in as
     // admin, Kelion must no longer ask for any kind of security confirmation in
@@ -1756,7 +1787,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // What we lose, written down so it is not lost: a stolen session cookie now
     // reaches the destructive chat tools directly, without a second factor.
     // The trade-off is the owner's, explicitly requested, with the risk stated.
-    const isAdmin = user.role === 'admin'
+    //
+    // THE GUEST EXCEPTION (Adrian, Aug 1): a turn the voice gate labelled as
+    // GUEST runs inside the holder's session, but the person at the microphone
+    // is NOT the holder — so this turn gets ZERO admin powers, whoever is
+    // logged in. (guestMatch is parsed above, before the save.)
+    const isAdmin = user.role === 'admin' && !guestMatch
 
     // The turn's model is chosen HERE (before the tool list): on the CHAT step,
     // the model also gets the ask_brain tool so it can escalate whatever it
@@ -1782,8 +1818,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const rawTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future

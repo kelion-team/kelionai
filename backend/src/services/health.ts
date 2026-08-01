@@ -230,6 +230,34 @@ export async function systemHealth(): Promise<string> {
     /* the probe itself failed — we don't invent problems */
   }
 
+  // 8. THE VOICEPRINTS SURVIVE EVERY UPGRADE (Adrian, Aug 1: "la fiecare
+  // upgrade să țină minte timbrul și vocea, să nu se mai piardă"). The prints
+  // live in Postgres, which no deploy touches — so a MISSING admin print here
+  // means it was truly lost (deleted by hand or DB rebuilt), and the voice
+  // will no longer recognise him until he re-enrols.
+  try {
+    if (dbEnabled()) {
+      const r = await getPool().query<{ n: string; admin_n: string }>(
+        `SELECT count(*) AS n,
+                count(*) FILTER (WHERE is_admin) AS admin_n
+         FROM voiceprints`,
+      )
+      const n = Number(r.rows[0]?.n ?? 0)
+      const adminN = Number(r.rows[0]?.admin_n ?? 0)
+      const g = await getPool().query<{ n: string }>('SELECT count(*) AS n FROM voice_guests WHERE approved').catch(() => null)
+      info.amprente = `${n} amprente (${adminN} admin) + ${Number(g?.rows[0]?.n ?? 0)} oaspeți aprobați`
+      if (adminN === 0)
+        problems.push({
+          id: 'amprenta_admin_lipsa',
+          grav: 'mediu',
+          desc: 'Amprenta vocală a adminului LIPSEȘTE din baza de date — vocea nu-l mai recunoaște și lacătul vocal nu se mai deschide.',
+          reparabil: 'ownerul dă Ctrl+F5 (să ia ultimul bundle) și îi vorbește lui Kelion — amprenta se re-înrolează singură la prima frază',
+        })
+    }
+  } catch {
+    /* the prints table answered nothing — the DB check above already reports */
+  }
+
   return JSON.stringify({
     ok: problems.length === 0,
     verificatLa: new Date().toISOString(),

@@ -53,7 +53,7 @@ export interface RealtimeVoiceOpts {
    * send() — identical to a typed message. `vf` is the voiceprint of the
    * utterance (speaker verification, same as on the STT path).
    */
-  onAddressed?: (text: string, vf: VoiceFeatures | null) => void
+  onAddressed?: (text: string, vf: VoiceFeatures | null, speaker?: string) => void
   /**
    * The VAD heard speech start while Kelion was SILENT (never while he
    * speaks — echo protection; a real talk-over still cuts his speech the
@@ -81,34 +81,40 @@ let liveInject: ((text: string) => void) | null = null
 //   • the voiceprint is compared against the owner's reference — a match arms
 //     the admin padlock (kelion:admin-unlock), a mismatch injects the
 //     protection warning into the session.
-// Best-effort, fire-and-forget.
-function persistTranscript(
-  text: string,
-  vf: VoiceFeatures | null,
-  onCommittedLang?: (lang: string) => void,
-): void {
+// ── THE VOICE VERDICT (one POST per utterance) ──────────────────────────────
+// The server compares the utterance's voiceprint with the holder's reference
+// and answers with WHO is speaking:
+//   • holder          → the turn goes to the brain (and the admin padlock may
+//                       unlock — kelion:admin-unlock);
+//   • foreign + guest → an APPROVED guest (recognised by timbre): allowed,
+//                       with guest rights — `speaker` rides to /api/chat;
+//   • foreign + guestPending → the holder just opened a window: allowed, the
+//                       brain asks the holder to confirm keeping the print;
+//   • foreign alone   → IGNORED COMPLETELY (women, men, TV, radio — Adrian,
+//                       Aug 1): the turn NEVER reaches the brain, nothing is
+//                       said, nothing is shown.
+// The turn AWAITS this verdict — before it, nothing goes to the brain.
+export interface TranscriptVerdict {
+  lang?: string
+  foreignVoice?: boolean
+  adminUnlocked?: boolean
+  guest?: { id: number; name: string; relation: string }
+  guestPending?: { id: number; name: string; relation: string }
+}
+async function transcriptVerdict(text: string, vf: VoiceFeatures | null): Promise<TranscriptVerdict | null> {
   const t = text.trim()
-  if (!t) return
-  void fetch('/api/realtime/transcript', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined }),
-  })
-    .then(async (r) => {
-      const j = (await r.json().catch(() => null)) as { lang?: string; foreignVoice?: boolean; adminUnlocked?: boolean } | null
-      // FOREIGN VOICE (the voiceprint doesn't match the owner): the session immediately gets
-      // the protection rule — nothing administrative until confirmation.
-      if (j?.foreignVoice)
-        liveInject?.(
-          'ATENȚIE (verificare de timbru): vocea curentă NU se potrivește cu amprenta titularului contului. Poartă conversația normal, dar NU executa comenzi de administrare, financiare sau distructive până când titularul nu confirmă ÎN SCRIS în chat.',
-        )
-      // THE ADMIN PADLOCK: the voiceprint matched → the server set the unlock
-      // cookie; we notify the UI (Stage) to light up the Admin button.
-      if (j?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
-      if (j?.lang && onCommittedLang) onCommittedLang(j.lang)
+  if (!t) return null
+  try {
+    const r = await fetch('/api/realtime/transcript', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ role: 'user', text: t, voiceFeatures: vf ?? undefined }),
     })
-    .catch(() => {})
+    return (await r.json().catch(() => null)) as TranscriptVerdict | null
+  } catch {
+    return null
+  }
 }
 
 // ── ONE SINGLE VOICE SESSION, ACROSS ALL TABS (Jul 25 — Adrian: "the Russian comes
@@ -514,16 +520,50 @@ export async function startRealtimeVoice(
         userText.delete(itemId)
         onUserTranscript?.(t, true)
         // The voiceprint of THIS utterance — finalized once, then shared between
-        // the padlock (persistTranscript) and the brain turn (onAddressed).
+        // the padlock (transcriptVerdict) and the brain turn (onAddressed).
         const vf = liveVoiceTap?.finalize() ?? null
-        // THE "STOP" COMMAND (Adrian, Jul 27: "kelion doesn't obey the stop command"):
-        // spoken ALONE ("stop", "taci", "gata", "oprește-te"...), it cuts AT
-        // ONCE whatever the mouth is saying and empties its queue — deterministic,
-        // in the client. It does NOT go to the brain (nothing to answer).
-        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
-          replyUntil = 0 // STOP closes the reply window too — until the next "Kelion"
-          stopSpeaking()
-        } else if (t.trim()) {
+        // THE TIMBRE GATE IS AWAITED (Adrian, Aug 1: "dacă nu-mi identifică
+        // vocea, trebuie să ignore ce aude — femei, bărbați, tv, radio").
+        // NOTHING leaves for the brain before the server says WHO is speaking.
+        void (async () => {
+          const verdict = await transcriptVerdict(t, vf)
+          // The language COMMITTED by the server anchors the LIVE session's
+          // transcription (session.update, no restart) — ONLY ON CHANGE.
+          if (verdict?.lang && verdict.lang !== anchoredLang) {
+            anchoredLang = verdict.lang
+            send({
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: verdict.lang } } },
+              },
+            })
+          }
+          // THE ADMIN PADLOCK: the voiceprint matched → the server set the
+          // unlock cookie; we notify the UI to light up the Admin button.
+          if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
+          // THE STRICT GATE: a voice that is neither the holder NOR an allowed
+          // guest is ignored COMPLETELY — no brain turn, no reply, no warning,
+          // no trace in the chat. This is what stops him from answering the TV.
+          const guest = verdict?.guest ?? verdict?.guestPending
+          if (verdict?.foreignVoice && !guest) {
+            console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
+            return
+          }
+          const speaker = verdict?.guest
+            ? `guest:${verdict.guest.id}:${verdict.guest.name}${verdict.guest.relation ? ` (${verdict.guest.relation})` : ''}`
+            : verdict?.guestPending
+              ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
+              : undefined
+          // THE "STOP" COMMAND (Adrian, Jul 27): spoken ALONE, it cuts AT ONCE
+          // whatever the mouth is saying and empties its queue. Holder/guest
+          // only — a stranger's "stop" is ignored with everything else above.
+          if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+            replyUntil = 0 // STOP closes the reply window too — until the next "Kelion"
+            stopSpeaking()
+            return
+          }
+          if (!t.trim()) return
           // THE GATE: the name is in this utterance → to the brain. It isn't →
           // silence, no matter what was said before. The nameless reply to his
           // own question gets CONSUMED here (`replyUntil = 0`), so one reply
@@ -533,23 +573,9 @@ export async function startRealtimeVoice(
           const answering = Date.now() < replyUntil
           if (named || answering) {
             replyUntil = 0
-            onAddressed?.(t, vf)
+            onAddressed?.(t, vf, speaker)
           }
-        }
-        // On the language COMMITTED by the server: we anchor the LIVE session's
-        // transcription onto it (session.update, no restart). ONLY ON CHANGE —
-        // re-anchoring on every utterance shook the audio session mid-reply.
-        persistTranscript(t, vf, (lang) => {
-          if (lang === anchoredLang) return
-          anchoredLang = lang
-          send({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
-            },
-          })
-        })
+        })()
       } else if (type === 'response.output_audio_transcript.delta') {
         const t = (asstText.get(itemId) ?? '') + String(m.delta ?? '')
         asstText.set(itemId, t)

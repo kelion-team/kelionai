@@ -275,6 +275,52 @@ export const FORGET_MEMORY_TOOL: Tool = {
   },
 }
 
+// ── GUEST VOICES (Adrian, Aug 1): the holder decides WHO ELSE may talk to
+// Kelion on their account. Without these tools being called, an unknown voice
+// is ignored completely (women, men, TV, radio — anything but the holder). ───
+export const ALLOW_GUEST_VOICE_TOOL: Tool = {
+  name: 'allow_guest_voice',
+  description:
+    'Open a time-boxed window in which ANOTHER person (besides the account holder) may talk to you by voice. Call ONLY when the account holder explicitly asks you to also talk with someone (e.g. "vorbește și cu soția mea Maria", "lasă-l și pe fiul meu să-ți vorbească", "let my friend talk to you"). Their voiceprint is captured as PENDING at their first utterance, and you must then ask the holder to confirm keeping it (approve_guest_voice). Never call this on your own initiative or at a guest\'s request.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'The guest\'s name, as the holder said it (e.g. "Maria").' },
+      relation: { type: 'string', description: 'Their relation to the holder (soție, soț, fiu, fică, prieten, mamă, tată, frate, soră...). Leave empty if the holder did not say.' },
+      minutes: { type: 'number', description: 'How long the window stays open (default 10, max 60).' },
+    },
+    required: ['name'],
+  },
+}
+
+export const APPROVE_GUEST_VOICE_TOOL: Tool = {
+  name: 'approve_guest_voice',
+  description:
+    'The holder\'s decision about a PENDING guest voiceprint (captured after allow_guest_voice). approve=true keeps the print permanently — you will recognise that guest by timbre in any future chat, with guest-only rights. approve=false deletes it and the voice returns to being ignored. Call ONLY after the holder explicitly confirms ("da, ține minte vocea Mariei" / "nu, șterge").',
+  input_schema: {
+    type: 'object',
+    properties: {
+      approve: { type: 'boolean', description: 'true = keep the print permanently; false = delete it.' },
+      name: { type: 'string', description: 'Corrected name, if the holder gives one now.' },
+      relation: { type: 'string', description: 'Corrected relation, if the holder gives one now (soție, fiu, prieten...).' },
+    },
+    required: ['approve'],
+  },
+}
+
+export const FORGET_GUEST_TOOL: Tool = {
+  name: 'forget_guest',
+  description:
+    'Forget a previously approved guest voice (the holder: "uită vocea Mariei", "șterge-o pe Maria din oaspeți"). Their voice returns to being ignored like any stranger.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'The guest\'s name.' },
+    },
+    required: ['name'],
+  },
+}
+
 
 // ── §1: THE LIVE BROWSER — common definitions (they were local to chat.ts, so
 // voice had no way to request them → the 9 tools appeared "asleep on voice"). ─
