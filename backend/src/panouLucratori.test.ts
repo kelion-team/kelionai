@@ -75,7 +75,7 @@ describe('nimic nu se ia pe încredere de la unelte', () => {
 
   it('un rezultat nemăsurat rămâne null, nu devine „trec"', () => {
     // `testeTrec: null` = we never got to run them. It's not "they failed" and not
-    // „au trecut" — regula 1, în tip.
+    // "they passed" — rule 1, in the type.
     expect(lucratori).toMatch(/testeTrec: boolean \| null/)
   })
 })
