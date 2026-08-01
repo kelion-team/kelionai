@@ -2,34 +2,37 @@ import { describe, it, expect } from 'vitest'
 import { UNELTELE_MAINILOR } from './services/autonomie.js'
 import { SHARED_ADMIN_TOOLS, USER_SCOPED_TOOLS } from './services/adminTools.js'
 
-// ── PAZNICUL: ORICE CREIER SE SCHIMBĂ, PRIMEȘTE ÎNTOTDEAUNA TOT ──────────────
+// ── THE GUARD: WHATEVER BRAIN GETS SWAPPED IN, IT ALWAYS GETS EVERYTHING ───
 //
-// Adrian, 31 iul: „deci trebuie să te asiguri că orice creier se schimbă
-// primește întotdeauna tot" · „cele 75 conștiente pentru creierul lui, oricare
-// se pune".
+// Adrian, Jul 31: "so you must make sure that whatever brain gets swapped in
+// always receives everything" · "the 75 aware ones for its brain, whichever
+// is put in".
 //
-// Cerința nu e despre un model anume — e despre INDEPENDENȚA de model. Astăzi
-// creierul e OpenRouter, mâine Claude direct, poimâine altul. Capabilitățile
-// nu au voie să depindă de care e pus: se derivă din registru și din executor,
-// nu din lista pe care am scris-o eu de mână pentru un model anume.
+// The requirement is not about a specific model — it's about MODEL
+// INDEPENDENCE. Today the brain is OpenRouter, tomorrow Claude directly, the
+// day after another. The capabilities must not depend on which one is in:
+// they derive from the registry and the executor, not from a list I wrote by
+// hand for a specific model.
 //
-// Bugul care a impus paznicul ăsta: executorul (`execSharedAdminTool` +
-// `execUserScopedTool`) știa să ruteze un set întreg, dar lista dată MODELULUI
-// era scrisă separat și rămăsese în urmă cu 7 unelte. Iar inventarul din prompt
-// îi spunea că le are — deci creierul cerea o unealtă care nu exista în listă
-// și primea un „nu pot" pentru ceva ce codul de dedesubt chiar putea face.
+// The bug that imposed this guard: the executor (`execSharedAdminTool` +
+// `execUserScopedTool`) knew how to route a whole set, but the list given to
+// the MODEL was written separately and had fallen 7 tools behind. And the
+// inventory in the prompt told it it had them — so the brain asked for a tool
+// that didn't exist in the list and got a "can't" for something the code
+// underneath really could do.
 //
-// Testul ăsta cade în clipa în care cele două diverg din nou.
+// This test falls the moment the two diverge again.
 describe('orice creier primește TOT ce știe executorul să ruleze', () => {
   const numeInMana = new Set(UNELTELE_MAINILOR.map((t) => t.name))
 
-  // Unelte pe care executorul le rutează, dar care NU au ce căuta în mâna lui
-  // autonomă — fiecare cu motivul scris. O excepție fără motiv e o scăpare.
+  // Tools the executor routes, but which have NO business in its autonomous
+  // hand — each with the reason written. An exception without a reason is a
+  // leak.
   const DOAR_CU_OM_DE_FAȚĂ = new Map<string, string>([
-    // Cere aprobarea ta cu un click în Admin → Unelte Kelion; în bucla de
-    // noapte n-are cine aproba, deci ordinul ar aștepta la infinit.
+    // It asks for your approval with a click in Admin → Kelion Tools; in the
+    // night loop there is nobody to approve, so the order would wait forever.
     ['propose_tool', 'așteaptă aprobarea ownerului, nu se poate în buclă'],
-    // Notează un gol pentru TINE, în conversație. Bucla are `cerinta_noua`.
+    // It logs a gap for YOU, in conversation. The loop has `cerinta_noua`.
     ['log_unsupported_request', 'e pentru conversație; bucla scrie în cerinte'],
   ])
 
@@ -44,8 +47,9 @@ describe('orice creier primește TOT ce știe executorul să ruleze', () => {
   })
 
   it('nicio unealtă în mână fără executor — altfel ar cere ceva ce nimeni nu execută', () => {
-    // Browserul are executorul lui direct în `uneltele()` (switch pe
-    // browser_*), fiindcă e per-user și nu trece prin dispatch-ul partajat.
+    // The browser has its executor directly in `uneltele()` (a switch on
+    // browser_*), because it's per-user and doesn't go through the shared
+    // dispatch.
     const orfane = [...numeInMana].filter(
       (n) => !n.startsWith('browser_') && !SHARED_ADMIN_TOOLS.has(n) && !USER_SCOPED_TOOLS.has(n),
     )
