@@ -2,24 +2,26 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── „$0.00" NU ARE VOIE SĂ ÎNSEMNE „N-AM PUTUT CITI" ────────────────────────
+// ── "$0.00" IS NOT ALLOWED TO MEAN "I COULDN'T READ IT" ────────────────────
 //
-// Adrian, 31 iul: pagina lui OpenRouter arăta $10,00. Bara aplicației arăta
-// „OpenRouter $0.00", roșu intermitent, adică „depune bani!".
+// Adrian, Jul 31: his OpenRouter page showed $10.00. The app's bar showed
+// "OpenRouter $0.00", blinking red, i.e. "deposit money!".
 //
-// Partea proastă nu e cifra. E că, cu câteva ore înainte, mă uitasem la
-// FRONTEND (care chiar e corect: afișează „⚠ OpenRouter" când citirea pică) și
-// îi spusesem că pilula NU minte, deci zeroul e o măsurătoare reușită. Nu m-am
-// uitat și la cine produce `live`. Am certificat ca sănătos exact tiparul pe
-// care-l reparam în altă parte în aceeași zi.
+// The bad part is not the figure. It's that, a few hours earlier, I had
+// looked at the FRONTEND (which really is correct: it shows "⚠ OpenRouter"
+// when the reading fails) and told him the pill does NOT lie, so the zero is
+// a successful measurement. I didn't also look at who produces `live`. I
+// certified as healthy exactly the pattern I was fixing elsewhere on the same
+// day.
 //
-// Cauza, în getOpenRouterBalance: `ok: true` se punea imediat ce HTTP-ul era
-// 200. Dar corpul trece prin `.catch(() => ({}))`, iar câmpurile prin `?? 0`.
-// Corp neparsabil, `data` lipsă sau câmpuri redenumite la furnizor → 0 − 0 = 0,
-// cu `ok: true`. O citire eșuată devenea „ai zero dolari", cu tot cu alarmă.
+// The cause, in getOpenRouterBalance: `ok: true` was set as soon as the HTTP
+// was 200. But the body goes through `.catch(() => ({}))`, and the fields
+// through `?? 0`. Unparsable body, missing `data` or fields renamed at the
+// provider → 0 − 0 = 0, with `ok: true`. A failed reading became "you have
+// zero dollars", alarm included.
 //
-// Testul păzește regula, nu implementarea: dacă cifrele nu-s acolo unde le
-// aștept, răspunsul e „nu pot citi", nu un zero credibil.
+// The test guards the rule, not the implementation: if the figures aren't
+// where I expect them, the answer is "can't read", not a credible zero.
 const sursa = readFileSync(
   fileURLToPath(new URL('./services/openrouter.ts', import.meta.url)),
   'utf8',
@@ -37,14 +39,15 @@ describe('soldul: lipsa se declară, nu se inventează', () => {
   })
 
   it('HTTP nereușit rămâne raportat separat de forma greșită', () => {
-    // Două cauze diferite, două erori diferite: „n-a răspuns serverul" nu e
-    // același lucru cu „a răspuns, dar altfel decât mă așteptam".
+    // Two different causes, two different errors: "the server didn't answer"
+    // is not the same as "it answered, but not how I expected".
     expect(sursa).toMatch(/if \(!r\.ok\) return \{ \.\.\.base, error: `http_\$\{r\.status\}` \}/)
   })
 
   it('eroarea spune CE a venit — numele câmpurilor, nicio valoare', () => {
-    // Ca următorul care se uită să vadă din prima forma reală, nu să caute o zi.
-    // Doar chei, niciodată valori: un sold e al ownerului, nu al jurnalului.
+    // So the next person looking sees the real shape at first glance, instead
+    // of searching for a day. Keys only, never values: a balance belongs to
+    // the owner, not to the log.
     expect(sursa).toMatch(/Object\.keys\(d \?\? j \?\? \{\}\)/)
     expect(sursa).not.toMatch(/JSON\.stringify\(j\)/)
   })
