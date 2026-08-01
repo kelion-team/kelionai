@@ -62,7 +62,7 @@ describe('lipsa se arată ca lipsă, nu ca zero', () => {
   })
 
   it('sursa măsurătorii întoarce null la eșec, nu un obiect cu zerouri', () => {
-    expect(resurse).toMatch(/return null \/\/ fără \/proc/)
+    expect(resurse).toMatch(/return null \/\/ no \/proc/)
     expect(resurse).toMatch(/if \(!mem \|\| !load\) return null/)
   })
 })
