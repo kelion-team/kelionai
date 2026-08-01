@@ -2135,9 +2135,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     // void. A silent error remains an error (rule no. 1); silence is the worst
     // reply, because it cannot be told apart from "the app is dead".
     if (!sawVisible) {
+      // NEUTRAL HERE TOO (Adrian, Aug 1): no "brain", no "model", no Settings
+      // instructions for paying users — the human hears only "try again".
+      // The technical detail stays in the server log below.
       const mut = ro
-        ? 'Nu am putut produce un răspuns la tura asta (creierul a răspuns gol). Încearcă din nou — dacă se repetă, schimbă modelul din Setări.'
-        : "I couldn't produce a reply this turn (the brain returned empty). Try again — if it repeats, switch the model in Settings."
+        ? 'Încearcă din nou în câteva secunde.'
+        : 'Try again in a few seconds.'
       reply.raw.write(mut)
       void saveMessage(user.email, 'assistant', mut)
       console.error('[CHAT MUTE] the turn ended with nothing visible', {

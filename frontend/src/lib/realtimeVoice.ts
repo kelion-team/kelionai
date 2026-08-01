@@ -615,13 +615,15 @@ export async function startRealtimeVoice(
       const corp = (await res.json().catch(() => null)) as
         | { code?: string; retryable?: boolean }
         | null
+      // NEUTRAL FOR PAYING USERS (Adrian, Aug 1): no "provider", no internals —
+      // the human hears only what to DO ("try again"). Codes stay in the log.
       const dupaCod: Record<string, string> = {
-        realtime_not_configured: 'vocea nu e configurată pe server',
-        upstream_timeout: 'furnizorul vocii n-a răspuns la timp — încearcă din nou',
-        upstream_unreachable: 'nu am putut ajunge la furnizorul vocii — verifică rețeaua',
-        upstream_5xx: 'furnizorul vocii are o pană — încearcă din nou peste puțin',
-        upstream_empty: 'furnizorul vocii a răspuns gol — încearcă din nou',
-        upstream_refuz: 'cererea de pornire a vocii a fost refuzată',
+        realtime_not_configured: 'vocea nu e disponibilă momentan — încearcă din nou',
+        upstream_timeout: 'vocea n-a răspuns la timp — încearcă din nou',
+        upstream_unreachable: 'vocea nu s-a putut conecta — verifică rețeaua',
+        upstream_5xx: 'vocea are o pană temporară — încearcă din nou peste puțin',
+        upstream_empty: 'vocea n-a răspuns — încearcă din nou',
+        upstream_refuz: 'vocea nu a putut porni — încearcă din nou',
       }
       const note =
         res.status === 401
