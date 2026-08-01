@@ -19,7 +19,7 @@ const sursa = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta
 
 describe('rotirea silențioasă între modelele free', () => {
   it('parcurge pool-ul free din catalogul live', () => {
-    expect(sursa).toMatch(/nextCandidate[\s\S]{0,400}getCatalog/)
+    expect(sursa).toMatch(/listaCandidati[\s\S]{0,400}getCatalog/)
     expect(sursa).toMatch(/m\.id\.endsWith\(':free'\)/)
   })
 

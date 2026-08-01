@@ -37,10 +37,18 @@ import {
   listBuildJobs,
   attachGuestPhoto,
   userKey,
+  saveKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
 import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, blendedPerM, classifyCost, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
+import {
+  iaSlotDacaLiber,
+  elibereazaSlot,
+  asteaptaLaCoada,
+  poateFolosiRezerva,
+  REZERVA_CAP_ZILNIC_DEFAULT_USD,
+} from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
@@ -989,8 +997,34 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   return out
 }
 
-export async function chatRoutes(app: FastifyInstance): Promise<void> {
-  // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
+// ── THE RESERVE PURSE (accounting) ──────────────────────────────────────────
+// Daily spend on PAID FALLBACK models (the reserve — the pool that keeps the
+// app alive when every free model is down) lives in kv_state, one counter per
+// UTC day; the owner's daily cap in rezerva:cap_zilnic (default $3). Over the
+// cap the reserve closes: turns stay on the free pool + the dispatcher's
+// queue, and systemHealth flags rezerva_plina to the owner.
+async function rezervaCheltuitaAzi(): Promise<number> {
+  const zi = new Date().toISOString().slice(0, 10)
+  const raw = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
+  const n = raw ? Number(raw) : 0
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+async function rezervaDeschisa(): Promise<boolean> {
+  const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
+  const n = rawCap ? Number(rawCap) : NaN
+  const cap = Number.isFinite(n) && n > 0 ? n : REZERVA_CAP_ZILNIC_DEFAULT_USD
+  return poateFolosiRezerva(await rezervaCheltuitaAzi(), cap)
+}
+
+async function adaugaLaRezerva(usd: number): Promise<void> {
+  if (!(usd > 0)) return
+  const zi = new Date().toISOString().slice(0, 10)
+  const cheltuit = await rezervaCheltuitaAzi()
+  await saveKv(`rezerva:zi:${zi}`, String(cheltuit + usd)).catch(() => {})
+}
+
+export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
   // client reconnects with the Last-Event-ID it last saw and we replay the
   // missing SSE events for the SAME turn from the in-memory ring buffer.
   // Unknown / expired turn / buffer overflow → empty or DESYNC response, and
@@ -2112,48 +2146,88 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // minute, the turn falls through to the CHEAPEST paid models in the
       // catalog (class „cheap" — pennies per turn, paid from the common
       // purse). The user never sees a model name; the app simply never stops.
-      const nextCandidate = async (tried: Set<string>): Promise<string | null> => {
+      // THE ORDERED CANDIDATE LIST — one single ordering used by the rotation
+      // AND by the dispatcher's queue: the free pool in catalog order, then
+      // the cheapest paid (the reserve), gated by the purse threshold: over
+      // the daily cap the reserve closes and turns stay on the free pool.
+      const listaCandidati = async (tried: Set<string>): Promise<string[]> => {
         const cat = await getCatalog().catch(() => null)
         const chat = cat?.chat ?? []
-        for (const m of chat) if (m.id.endsWith(':free') && !tried.has(m.id)) return m.id
-        const cheapPaid = chat
-          .filter((m) => !m.id.endsWith(':free') && !tried.has(m.id) && classifyCost(m.promptPerM, m.completionPerM) === 'cheap')
-          .sort((a, b) => blendedPerM(a.promptPerM, a.completionPerM) - blendedPerM(b.promptPerM, b.completionPerM))
-        return cheapPaid[0]?.id ?? null
+        const ids: string[] = []
+        for (const m of chat) if (m.id.endsWith(':free') && !tried.has(m.id)) ids.push(m.id)
+        if (await rezervaDeschisa()) {
+          const cheapPaid = chat
+            .filter((m) => !m.id.endsWith(':free') && !tried.has(m.id) && classifyCost(m.promptPerM, m.completionPerM) === 'cheap')
+            .sort((a, b) => blendedPerM(a.promptPerM, a.completionPerM) - blendedPerM(b.promptPerM, b.completionPerM))
+          for (const m of cheapPaid) ids.push(m.id)
+        }
+        return ids
       }
+      const nextCandidate = async (tried: Set<string>): Promise<string | null> =>
+        (await listaCandidati(tried))[0] ?? null
       const triedModels = new Set<string>()
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
-      for (let attempt = 0; attempt < 6 && !r; attempt++) {
-        triedModels.add(orchestratorModel)
-        try {
-          const cand = await runBrainOnce()
-          // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
-          // the next free model instead of showing/saying garbage or nothing.
-          if (stripToolMarkup(cand.text).trim() || textFlowed || sawVisible) { r = cand; break }
-          // A brain that "succeeds" but says nothing must not close the turn
-          // mute — rotate silently to the next free model.
-          console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
-        } catch (ge) {
-          lastBrainErr = ge
-          // Gemini direct: ANY failure (not only quota) falls to the free pool
-          // if no text has flowed yet (widened safety net, Jul 28 audit #1).
-          if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
-            orchestratorModel = await resolveModel('work', null)
-            console.log(`[brain] gemini unavailable (${String(ge).slice(0, 80)}) → fallback ${orchestratorModel}`)
-            continue
+      // THE INITIAL MODEL — the reserve is counted only when the turn was
+      // SERVED by a paid fallback it reached through rotation (not the user's
+      // own tier/quality choice).
+      const modelInitial = orchestratorModel
+      // THE DISPATCHER (Adrian, Aug 1 — „să scaleze pe o pungă comună"): a
+      // model never gets more simultaneous calls / starts-per-minute than it
+      // can serve. When every candidate is busy, the turn WAITS in line
+      // instead of dying — the user only sees „composing" a few seconds
+      // longer. Slot release is guaranteed on every path.
+      let slotTinut: string | null = null
+      try {
+        for (let attempt = 0; attempt < 6 && !r; attempt++) {
+          // Take a slot on the chosen model; if it's busy, queue for ANY
+          // untried candidate and switch to whichever frees up first.
+          if (!iaSlotDacaLiber(orchestratorModel)) {
+            const tinut = await asteaptaLaCoada(() => listaCandidati(triedModels), triedModels)
+            if (!tinut) break // queue full or waited too long — the honest error below
+            orchestratorModel = tinut
           }
-          if (textFlowed) throw ge // partial text already at the user — no rotation
-          console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
+          slotTinut = orchestratorModel
+          triedModels.add(orchestratorModel)
+          try {
+            const cand = await runBrainOnce()
+            // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
+            // the next free model instead of showing/saying garbage or nothing.
+            if (stripToolMarkup(cand.text).trim() || textFlowed || sawVisible) { r = cand; break }
+            // A brain that "succeeds" but says nothing must not close the turn
+            // mute — rotate silently to the next free model.
+            console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
+          } catch (ge) {
+            lastBrainErr = ge
+            // Gemini direct: ANY failure (not only quota) falls to the free pool
+            // if no text has flowed yet (widened safety net, Jul 28 audit #1).
+            if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
+              orchestratorModel = await resolveModel('work', null)
+              console.log(`[brain] gemini unavailable (${String(ge).slice(0, 80)}) → fallback ${orchestratorModel}`)
+              continue
+            }
+            if (textFlowed) throw ge // partial text already at the user — no rotation
+            console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
+          } finally {
+            elibereazaSlot(slotTinut)
+            slotTinut = null
+          }
+          const next = await nextCandidate(triedModels)
+          if (!next) break
+          orchestratorModel = next
         }
-        const next = await nextCandidate(triedModels)
-        if (!next) break
-        orchestratorModel = next
+      } finally {
+        if (slotTinut) elibereazaSlot(slotTinut)
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_rotation_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
       assistantText += stripToolMarkup(r.text)
       usage.usd += r.costUsd
+      // THE PURSE LEDGER: a turn served by a PAID FALLBACK (reached through
+      // rotation, not by choice) spends from the reserve — count it against
+      // the daily cap.
+      if (orchestratorModel !== modelInitial && !orchestratorModel.endsWith(':free'))
+        void adaugaLaRezerva(r.costUsd)
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.

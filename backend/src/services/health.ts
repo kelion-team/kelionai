@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
-import { getPool, dbEnabled, listBuildJobs } from '../db.js'
+import { getPool, dbEnabled, listBuildJobs, loadKv } from '../db.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
 import { getOpenRouterBalance } from './openrouter.js'
+import { stareDispecer, poateFolosiRezerva, REZERVA_CAP_ZILNIC_DEFAULT_USD } from './dispecer.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -256,6 +257,30 @@ export async function systemHealth(): Promise<string> {
     }
   } catch {
     /* the prints table answered nothing — the DB check above already reports */
+  }
+
+  // 9. THE DISPATCHER + THE RESERVE PURSE (Adrian, Aug 1: one purse, many
+  // users). Telemetry always visible; a PROBLEM only when the day's reserve
+  // spend passed the owner's cap — the app keeps running on the free pool,
+  // but the owner must know the safety net is closed until tomorrow.
+  try {
+    info.dispecer = stareDispecer()
+    const zi = new Date().toISOString().slice(0, 10)
+    const rawSpent = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
+    const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
+    const spent = rawSpent ? Number(rawSpent) : 0
+    const capN = rawCap ? Number(rawCap) : NaN
+    const cap = Number.isFinite(capN) && capN > 0 ? capN : REZERVA_CAP_ZILNIC_DEFAULT_USD
+    info.rezerva = `$${(Number.isFinite(spent) ? spent : 0).toFixed(4)} cheltuiți azi din rezervă (cap $${cap})`
+    if (!poateFolosiRezerva(Number.isFinite(spent) ? spent : 0, cap))
+      problems.push({
+        id: 'rezerva_plina',
+        grav: 'mediu',
+        desc: `Rezerva de plată a atins capul zilnic ($${Number(spent).toFixed(2)} ≥ $${cap}) — până mâine tururile stau DOAR pe pool-ul gratuit (cu coada dispecerului).`,
+        reparabil: 'dacă traficul o cere, ownerul ridică capul: saveKv rezerva:cap_zilnic (prin db_query) — e o decizie de bani, NU o lua singur',
+      })
+  } catch {
+    /* kv unreachable — the DB check above already reports */
   }
 
   return JSON.stringify({
