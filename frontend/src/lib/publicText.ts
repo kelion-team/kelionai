@@ -58,6 +58,12 @@ export const PUBLIC_TEXT = {
   creditsRate: (perPound: number): string => `£1 = ${perPound} credits. Secure payment via Revolut.`,
   creditsUnit: (n: number): string => `${n} credits`,
   creditsSignInFirst: 'You need to be signed in to buy — the buttons take you to sign-in.',
+  // The auto top-up checkbox, shown at payment time (Adrian, Aug 1: "auto-pay
+  // selectable with a checkbox when the user pays"). Honest wording: we
+  // PREPARE the payment, the user always confirms the money move.
+  autoTopUpLabel: 'Auto top-up: when my credit runs low, prepare my refill automatically (I confirm with one tap)',
+  autoTopUpAmount: 'Refill amount',
+  autoTopUpSaved: 'Saved ✓',
   errPaymentStart: "The payment didn't start — please try again.",
   accountLink: 'Sign in',
   privacyLink: 'Privacy',

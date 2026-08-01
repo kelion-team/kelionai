@@ -3040,6 +3040,12 @@ top-left in the card, the same shape everywhere. */
 .credits-pack:hover { border-color: var(--accent, #7aa2ff); }
 .credits-pack-n { font-weight: 700; }
 .credits-pack-price { color: var(--accent, #7aa2ff); font-weight: 800; }
+/* The auto top-up checkbox + refill value, chosen at payment time (Aug 1). */
+.credits-autopay {
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--border, rgba(255,255,255,0.15)); background: rgba(255,255,255,0.03);
+  color: var(--text, #e8ecf4);
+}
 
 /* ── FLUIDITATE (audit 27 iul) ─────────────────────────────────────────── */
 /* The „Versiune nouă” bar — announces without cutting the work; the hard

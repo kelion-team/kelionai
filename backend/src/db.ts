@@ -48,6 +48,14 @@ export async function initDb(): Promise<void> {
     -- user"). Until now the voice came from the environment, so it was ONE for
     -- everyone.
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS voice TEXT;
+    -- AUTO TOP-UP, per user (Adrian, Aug 1: "auto-pay selectable with a
+    -- checkbox when the user pays"). The rails (Revolut pay-link) cannot pull
+    -- money by themselves, so "enabled" means: when the balance drops below
+    -- the threshold, the app PREPARES the payment (unique code + link) and
+    -- the user confirms with one tap. Stored here so it survives sessions.
+    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_enabled BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_threshold INTEGER NOT NULL DEFAULT 20;
+    ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_amount INTEGER NOT NULL DEFAULT 10;
     -- Voiceprints: timbre + gender + admin flag per account.
     -- The vector is normalized client-side; meta keeps the raw values for debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
@@ -1891,6 +1899,56 @@ export async function setMeserieActivaPref(email: string, id: number | null): Pr
     )
   } catch {
     // Never break the chat because persistence failed.
+  }
+}
+
+// ── AUTO TOP-UP (the checkbox in Settings / on the credits page) ────────────
+// Same single-key persistence pattern as the other preferences. The shape is
+// always returned complete (defaults included), so the UI never guesses.
+export interface AutoRechargePrefs {
+  enabled: boolean
+  /** credits — below this, the app prepares the payment automatically */
+  threshold: number
+  /** pounds — the pack prepared each time (multiple of 5, like any top-up) */
+  topupAmount: number
+}
+
+export async function getAutoRecharge(email: string): Promise<AutoRechargePrefs> {
+  const def: AutoRechargePrefs = { enabled: false, threshold: 20, topupAmount: 10 }
+  if (!dbEnabled()) return def
+  try {
+    const r = await getPool().query<{
+      autorecharge_enabled: boolean
+      autorecharge_threshold: number
+      autorecharge_amount: number
+    }>(
+      'SELECT autorecharge_enabled, autorecharge_threshold, autorecharge_amount FROM user_prefs WHERE user_email = $1',
+      [userKey(email)],
+    )
+    const row = r.rows[0]
+    if (!row) return def
+    return {
+      enabled: !!row.autorecharge_enabled,
+      threshold: Number(row.autorecharge_threshold ?? def.threshold),
+      topupAmount: Number(row.autorecharge_amount ?? def.topupAmount),
+    }
+  } catch {
+    return def
+  }
+}
+
+export async function setAutoRecharge(email: string, p: AutoRechargePrefs): Promise<void> {
+  if (!dbEnabled()) return
+  try {
+    await getPool().query(
+      `INSERT INTO user_prefs (user_email, autorecharge_enabled, autorecharge_threshold, autorecharge_amount, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_email) DO UPDATE
+         SET autorecharge_enabled = $2, autorecharge_threshold = $3, autorecharge_amount = $4, updated_at = now()`,
+      [userKey(email), p.enabled, p.threshold, p.topupAmount],
+    )
+  } catch {
+    // Never break the app because a preference failed to save.
   }
 }
 

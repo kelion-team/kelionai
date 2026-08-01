@@ -44,6 +44,10 @@ export function WalletButton({
   const [open, setOpen] = useState(false)
   const [toast, setToast] = useState(false)
   const [paywalled, setPaywalled] = useState(false)
+  // AUTO TOP-UP, prepared by the server (the checkbox in Settings): when the
+  // credit drops under the user's threshold, the payment is already prepared
+  // (unique code + link) and this button completes it with ONE tap.
+  const [autoPay, setAutoPay] = useState<{ amount: number; url: string } | null>(null)
   const [firstTopUp, setFirstTopUp] = useState(false)
   const [custom, setCustom] = useState('')
   // The checkout error DISPLAYED, not swallowed ("I press and nothing runs").
@@ -96,6 +100,7 @@ export function WalletButton({
       setCredits(b.credits)
       setPercent(b.percent)
       setFirstTopUp(!!b.firstTopUp)
+      setAutoPay(!isAdmin && b.autoTopUp ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url } : null)
       // reflects reality: at balance 0 it stays paywalled, otherwise it exits — otherwise
       // a refresh with credits=0 left the top-up menu stuck open forever.
       // The admin is NEVER blocked → no paywall pill for him.
@@ -223,7 +228,22 @@ export function WalletButton({
           {t.topUp}
         </button>
       )}
-      {toast && !paywalled && !open && (
+      {/* AUTO TOP-UP, ONE TAP (Adrian, Aug 1): the server prepared the payment
+      (the user's checkbox is on and his credit dropped under his threshold) —
+      this button completes it instantly. It replaces the generic "running low"
+      nudge: an action beats a warning. */}
+      {autoPay && !paywalled && !open && (
+        <button
+          type="button"
+          className="wallet-toast urgent"
+          onClick={() => {
+            window.location.href = autoPay.url
+          }}
+        >
+          ⚡ {ro ? `Reîncarcă £${autoPay.amount} — o apăsare` : `Top up £${autoPay.amount} — one tap`}
+        </button>
+      )}
+      {toast && !autoPay && !paywalled && !open && (
         <button type="button" className={`wallet-toast ${critical ? 'urgent' : ''}`} onClick={() => setOpen(true)}>
           {t.lowCredit}
         </button>

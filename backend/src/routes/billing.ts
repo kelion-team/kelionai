@@ -1,7 +1,22 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getWalletStatus, listTransactionsForUser, creeazaCodPlata, codPlataInAsteptare } from '../db.js'
+import { getWalletStatus, listTransactionsForUser, creeazaCodPlata, codPlataInAsteptare, getAutoRecharge, setAutoRecharge, type AutoRechargePrefs } from '../db.js'
+
+// AUTO TOP-UP validation — pure, so the rule is testable without a database.
+// The checkbox means: "when my credit drops below the threshold, PREPARE my
+// top-up automatically" (the Revolut link cannot pull money by itself — the
+// user always confirms the actual payment with one tap). The amount obeys the
+// same rule as any top-up: a multiple of £5, minimum £5.
+export function validateAutoRecharge(input: unknown): AutoRechargePrefs | null {
+  const b = input as { enabled?: unknown; threshold?: unknown; topupAmount?: unknown } | null
+  if (!b || typeof b !== 'object') return null
+  const threshold = Math.floor(Number(b.threshold))
+  const topupAmount = Math.floor(Number(b.topupAmount))
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100_000) return null
+  if (!Number.isFinite(topupAmount) || topupAmount < 5 || topupAmount > 500 || topupAmount % 5 !== 0) return null
+  return { enabled: !!b.enabled, threshold, topupAmount }
+}
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // The customer sees CREDITS (1 credit = config.billing.creditValue) and the %
@@ -15,8 +30,46 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     // firstTopUp = the user has never topped up (topup_ref is 0). The first
     // top-up is bigger (brain activation = £20 minimum); then any multiple of
     // £5.
-    return reply.send({ credits, percent, currency: config.billing.currency, firstTopUp: topupRef <= 0 })
+    const firstTopUp = topupRef <= 0
+    // AUTO TOP-UP, DUE (Adrian, Aug 1). When the checkbox is on and the credit
+    // dropped under the user's threshold, we PREPARE the payment right here:
+    // the unique code exists (reused while pending, exactly like at checkout)
+    // and the reply carries the link — the client shows a one-tap button. The
+    // money itself moves only with the user's tap: the Revolut link cannot
+    // pull from his account by itself, and we never pretend it can. The first
+    // top-up stays manual (£20 minimum — it activates the brain).
+    let autoTopUp: { code: string; amount: number; currency: string; url: string } | null = null
+    if (!firstTopUp && config.revolut.payLink && user.role !== 'admin') {
+      const ar = await getAutoRecharge(user.email)
+      if (ar.enabled && credits < ar.threshold) {
+        const existent = await codPlataInAsteptare(user.email)
+        const cod = existent?.amount === ar.topupAmount ? existent : await creeazaCodPlata(user.email, ar.topupAmount, config.billing.currency)
+        if (cod) autoTopUp = { code: cod.code, amount: cod.amount, currency: cod.currency, url: config.revolut.payLink }
+      }
+    }
+    return reply.send({ credits, percent, currency: config.billing.currency, firstTopUp, autoTopUp })
   })
+
+  // THE AUTO TOP-UP CHECKBOX (Adrian, Aug 1: "auto-pay selectable with a
+  // checkbox when the user pays"). The route the Settings page had been
+  // calling without it existing — the checkbox used to save into the void.
+  app.get('/api/billing/autorecharge', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    return reply.send(await getAutoRecharge(user.email))
+  })
+
+  app.put<{ Body: { enabled?: boolean; threshold?: number; topupAmount?: number } }>(
+    '/api/billing/autorecharge',
+    async (req, reply) => {
+      const user = getSessionUser(req)
+      if (!user) return reply.code(401).send({ error: 'unauthorized' })
+      const prefs = validateAutoRecharge(req.body)
+      if (!prefs) return reply.code(400).send({ error: 'bad_autorecharge' })
+      await setAutoRecharge(user.email, prefs)
+      return reply.send(prefs)
+    },
+  )
 
   // The top-up rule (Adrian, 24 Jul): first top-up = £20 minimum (brain
   // activation), then any multiple of £5. Validated on the server, not just

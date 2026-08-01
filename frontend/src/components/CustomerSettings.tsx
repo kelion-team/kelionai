@@ -294,6 +294,13 @@ export default function CustomerSettings({
               </select>
             </div>
           )}
+          {ar.enabled && (
+            <p className="settings-note">
+              {ro
+                ? 'Când ajungi sub prag, îți pregătim plata automat (cod unic + link) — confirmi cu o singură apăsare. Banii se mișcă doar la confirmarea ta: linkul Revolut nu poate trage singur din cont.'
+                : 'When you drop below the threshold, we prepare your payment automatically (unique code + link) — you confirm with a single tap. Money moves only on your confirmation: the Revolut link cannot pull from your account by itself.'}
+            </p>
+          )}
         </section>
 
         {/* 3 — Model AI (chat + creier), selectabil prin OpenRouter */}
