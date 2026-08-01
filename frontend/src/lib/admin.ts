@@ -501,6 +501,8 @@ export interface VoiceprintRow {
   gender: 'male' | 'female' | 'unknown'
   isAdmin: boolean
   hasAudio: boolean
+  hasFace: boolean
+  facePhoto: string
   updatedAt: string
 }
 
@@ -517,6 +519,8 @@ export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
         gender: String(r.gender ?? 'unknown') as VoiceprintRow['gender'],
         isAdmin: Boolean(r.isAdmin ?? r.is_admin),
         hasAudio: Boolean(r.hasAudio ?? r.has_audio),
+        hasFace: Boolean(r.hasFace ?? r.has_face),
+        facePhoto: String(r.facePhoto ?? r.face_photo ?? ''),
         updatedAt: String(r.updatedAt ?? r.updated_at ?? ''),
       }
     })
