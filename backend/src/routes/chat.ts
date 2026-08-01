@@ -38,7 +38,7 @@ import {
   userKey,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, blendedPerM, classifyCost, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
 import { runOrchestrator } from '../services/orchestrator.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
@@ -2067,17 +2067,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // EMPTY free model must NEVER surface as a user message. The turn
       // silently walks the LIVE catalog's free pool until one answers; only if
       // the whole pool fails does the human hear a neutral "try again".
-      const nextFreeCandidate = async (tried: Set<string>): Promise<string | null> => {
+      // THE RESERVE PURSE (Adrian, Aug 1 — „ce se întâmplă când vor fi zeci
+      // sau sute?": approved „da"): when EVERY free model is down in the same
+      // minute, the turn falls through to the CHEAPEST paid models in the
+      // catalog (class „cheap" — pennies per turn, paid from the common
+      // purse). The user never sees a model name; the app simply never stops.
+      const nextCandidate = async (tried: Set<string>): Promise<string | null> => {
         const cat = await getCatalog().catch(() => null)
-        for (const m of cat?.chat ?? []) {
-          if (m.id.endsWith(':free') && !tried.has(m.id)) return m.id
-        }
-        return null
+        const chat = cat?.chat ?? []
+        for (const m of chat) if (m.id.endsWith(':free') && !tried.has(m.id)) return m.id
+        const cheapPaid = chat
+          .filter((m) => !m.id.endsWith(':free') && !tried.has(m.id) && classifyCost(m.promptPerM, m.completionPerM) === 'cheap')
+          .sort((a, b) => blendedPerM(a.promptPerM, a.completionPerM) - blendedPerM(b.promptPerM, b.completionPerM))
+        return cheapPaid[0]?.id ?? null
       }
       const triedModels = new Set<string>()
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
-      for (let attempt = 0; attempt < 4 && !r; attempt++) {
+      for (let attempt = 0; attempt < 6 && !r; attempt++) {
         triedModels.add(orchestratorModel)
         try {
           const cand = await runBrainOnce()
@@ -2099,7 +2106,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           if (textFlowed) throw ge // partial text already at the user — no rotation
           console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
         }
-        const next = await nextFreeCandidate(triedModels)
+        const next = await nextCandidate(triedModels)
         if (!next) break
         orchestratorModel = next
       }
