@@ -2,26 +2,27 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── A DOUA ÎNTREBARE NU SE MAI PIERDE ───────────────────────────────────────
+// ── THE SECOND QUESTION IS NO LONGER LOST ──────────────────────────────────
 //
-// Adrian, 31 iul: „aude a doua întrebare, scurt o arată, dar nu o dă mai
-// departe către creier, repară" — și, imediat: „mesajul că tehnic a apărut din
-// nou". Cele două propoziții descriau ACELAȘI lanț:
+// Adrian, Jul 31: "it hears the second question, shows it briefly, but doesn't
+// pass it on to the brain, fix it" — and immediately: "the message that
+// technically appeared again". The two sentences described the SAME chain:
 //
-//   1. Scrii ceva nou cât Kelion încă răspunde → tura veche e abortată
-//      intenționat (barge-in, ChatPanel:823). Corect, așa e proiectat.
-//   2. `lib/chat.ts` prindea abortul într-un `catch {}` fără discernământ și-l
-//      scotea ca `Error('offline')` — o anulare cerută de om, raportată ca pană
-//      de rețea.
-//   3. `offline` pornește mecanismul de reluare: marchează sesiunea căzută și
-//      reține textul. La următorul semnal `online`, ChatPanel:1588 face
-//      `cur.slice(0, -2)` — ȘTERGE ULTIMELE DOUĂ MESAJE. După barge-in, alea
-//      sunt fix întrebarea nouă și răspunsul ei în curs.
-//   4. În paralel, `catch`-ul din ChatPanel scria `setMessages([...next, ...])`
-//      cu instantaneul turei VECHI, fără garda `stillCurrent` — pe care
-//      `finally`-ul de dedesubt o avea de mult. Asimetria aia era bug-ul.
+//   1. You type something new while Kelion is still answering → the old turn
+//      is aborted on purpose (barge-in, ChatPanel:823). Correct, that's the
+//      design.
+//   2. `lib/chat.ts` caught the abort in an indiscriminate `catch {}` and
+//      emitted it as `Error('offline')` — a human-requested cancellation,
+//      reported as a network outage.
+//   3. `offline` starts the resume mechanism: it marks the session as dropped
+//      and keeps the text. On the next `online` signal, ChatPanel:1588 does
+//      `cur.slice(0, -2)` — DELETES THE LAST TWO MESSAGES. After a barge-in,
+//      those are exactly the new question and its in-flight answer.
+//   4. In parallel, the ChatPanel `catch` wrote `setMessages([...next, ...])`
+//      with the OLD turn's snapshot, without the `stillCurrent` guard — which
+//      the `finally` below had had for a long time. That asymmetry was the bug.
 //
-// Frontendul n-are runner de teste; îl citim de aici, ca la poartaNumelui.
+// The frontend has no test runner; we read it from here, like poartaNumelui.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -34,15 +35,15 @@ describe('abortul nu mai e confundat cu o pană de rețea', () => {
   })
 
   it('ambele locuri care aruncau „offline" verifică întâi abortul', () => {
-    // Erau DOUĂ: la deschiderea cererii și la citirea din flux. Una singură
-    // reparată ar fi lăsat jumătate din bug în picioare.
+    // There were TWO: at the request's opening and at reading from the
+    // stream. Fixing only one would have left half the bug standing.
     const gardieni = flux.match(/signal\?\.aborted \|\| \(e instanceof Error && e\.name === 'AbortError'\)/g) ?? []
     expect(gardieni.length).toBe(2)
   })
 
   it('mecanismul de reluare rămâne — dar numai pentru offline ADEVĂRAT', () => {
-    // Ștergerea celor două mesaje e corectă când chiar ai pierdut semnalul.
-    // Greșit era s-o declanșeze o anulare voită.
+    // Deleting the two messages is correct when you really lost the signal.
+    // What was wrong was a deliberate cancellation triggering it.
     expect(panou).toContain('cur.slice(0, -2)')
     expect(panou).toMatch(/if \(code === 'offline'\)/)
   })
@@ -55,20 +56,20 @@ describe('o tură înlocuită nu mai scrie peste tura nouă', () => {
   })
 
   it('mesajul de eroare se scrie funcțional, nu cu instantaneu', () => {
-    // O scriere cu instantaneu (`setMessages([...next, …])`) rescrie lista cu
-    // starea turei vechi și șterge orice a apărut între timp — exact ce făcea
-    // dispărută întrebarea a doua.
+    // A snapshot write (`setMessages([...next, …])`) rewrites the list with
+    // the old turn's state and erases anything that appeared in the meantime —
+    // exactly what made the second question disappear.
     //
-    // ATENȚIE la granița pe care o păzim: UNA singură e legitimă — cea de la
-    // ÎNCEPUTUL turei (`content: ''`), care tocmai stabilește starea nouă și
-    // n-are ce clobber-a. Toate celelalte, și în primul rând cea cu ⚠️ din
-    // catch, trebuie să fie funcționale. De asta testul nu interzice tiparul
-    // în bloc, ci exact scrierea de eroare.
+    // ATTENTION to the boundary we guard: only ONE is legitimate — the one at
+    // the START of the turn (`content: ''`), which establishes the new state
+    // and has nothing to clobber. All the others, first of all the ⚠️ one in
+    // the catch, must be functional. That's why the test doesn't forbid the
+    // pattern wholesale, but exactly the error write.
     const instantanee = panou.match(/setMessages\(\[\.\.\.next,[\s\S]{0,120}?\]\)/g) ?? []
     expect(instantanee.length).toBe(1)
     expect(instantanee[0]).toContain("content: ''")
     expect(instantanee[0]).not.toContain('⚠️')
-    // Iar eroarea chiar folosește updater-ul funcțional.
+    // And the error really uses the functional updater.
     expect(panou).toMatch(/setMessages\(\(cur\) => \{[\s\S]{0,500}⚠️/)
   })
 
@@ -79,9 +80,10 @@ describe('o tură înlocuită nu mai scrie peste tura nouă', () => {
 })
 
 describe('barge-in-ul rămâne întreg', () => {
-  // Regula lui Adrian din 13 iul: „când lucrează nu aude microfonul / nu-i
-  // ajunge textul". Coada fusese scoasă anume ca a doua întrebare să plece
-  // IMEDIAT. Reparația de azi nu are voie s-o readucă.
+  // Adrian's rule from Jul 13: "while it works it doesn't hear the
+  // microphone / the text doesn't reach it". The queue had been removed
+  // precisely so the second question leaves IMMEDIATELY. Today's fix is not
+  // allowed to bring it back.
   it('input nou cât lucrează = tura veche tăiată, tura nouă pornită pe loc', () => {
     expect(panou).toMatch(/abortRef\.current\?\.abort\(\)[^\n]*superseded/)
     expect(panou).toMatch(/NU return — cădem mai jos și pornim tura nouă chiar acum/)
