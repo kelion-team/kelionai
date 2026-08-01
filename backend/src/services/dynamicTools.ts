@@ -1,14 +1,15 @@
-// ── AUTO-EXTINDEREA LUI KELION — unelte dinamice, propuse de el, aprobate de owner ──
-// Kelion își poate propune unelte NOI (definiții de apel HTTP, nu cod), pe care
-// owner-ul le aprobă cu un click. O unealtă aprobată devine ACTIVĂ instant (fără
-// redeploy): apare în lista de unelte a creierului, iar execuția o face runnerul
-// generic de mai jos. Siguranță: DOAR HTTPS, fără gazde interne/IP-uri private,
-// timeout scurt, corp mărginit — Kelion nu poate rula decât ce a aprobat adminul.
+// ── KELION'S SELF-EXPANSION — dynamic tools, proposed by him, owner-approved ─
+// Kelion can propose NEW tools for himself (HTTP call definitions, not code),
+// which the owner approves with one click. An approved tool becomes ACTIVE
+// instantly (no redeploy): it appears in the brain's tool list, and the
+// generic runner below executes it. Safety: HTTPS ONLY, no internal
+// hosts/private IPs, short timeout, bounded body — Kelion can only run what
+// the admin approved.
 
 import { listKelionTools, type KelionTool } from '../db.js'
 import type { AnthropicTool } from './openrouter.js'
 
-// Cache scurt (10s) ca să nu lovim DB-ul la fiecare tură.
+// A short cache (10s) so we don't hit the DB on every turn.
 let cache: { at: number; tools: KelionTool[] } = { at: 0, tools: [] }
 async function approved(): Promise<KelionTool[]> {
   if (Date.now() - cache.at < 10_000) return cache.tools
@@ -17,7 +18,7 @@ async function approved(): Promise<KelionTool[]> {
   return tools
 }
 
-/** Uneltele dinamice aprobate, în formatul creierului (ca uneltele fixe). */
+/** The approved dynamic tools, in the brain's format (like the fixed tools). */
 export async function dynamicToolDefs(): Promise<AnthropicTool[]> {
   const tools = await approved()
   return tools.map((t) => {
@@ -26,19 +27,19 @@ export async function dynamicToolDefs(): Promise<AnthropicTool[]> {
       const p = JSON.parse(t.paramsJson) as Record<string, unknown>
       if (p && typeof p === 'object') schema = p
     } catch {
-      /* params invalizi → obiect gol */
+      /* invalid params → empty object */
     }
     return { name: t.name, description: t.description, input_schema: schema }
   })
 }
 
-/** Numele uneltelor dinamice aprobate (ca să știm în runTool ce e dinamic). */
+/** The names of the approved dynamic tools (so runTool knows what is dynamic). */
 export async function dynamicToolNames(): Promise<Set<string>> {
   return new Set((await approved()).map((t) => t.name))
 }
 
-// Blochează gazdele interne / IP-uri private (SSRF): Kelion nu poate lovi rețeaua
-// internă a serverului, doar internetul public prin HTTPS.
+// Blocks internal hosts / private IPs (SSRF): Kelion cannot hit the
+// server's internal network, only the public internet over HTTPS.
 function isSafeUrl(url: string): boolean {
   try {
     const u = new URL(url)
@@ -54,11 +55,11 @@ function isSafeUrl(url: string): boolean {
   }
 }
 
-/** Execută o unealtă dinamică aprobată: apel HTTP cu parametrii substituiți. */
+/** Executes an approved dynamic tool: an HTTP call with the parameters substituted. */
 export async function runDynamicTool(name: string, args: Record<string, unknown>): Promise<string> {
   const t = (await approved()).find((x) => x.name === name)
   if (!t) return JSON.stringify({ error: 'unknown_dynamic_tool' })
-  // Substituie {param} în URL și headere din argumente.
+  // Substitutes {param} in the URL and headers from the arguments.
   const subst = (s: string): string =>
     s.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, k) => encodeURIComponent(String(args[k] ?? '')))
   const url = subst(t.httpUrl)

@@ -1,16 +1,16 @@
 import { getCapabilityGaps, setGapTriage } from '../db.js'
 import { brainComplete } from './brain.js'
 
-// ── TRIAJUL AUTONOM AL CERERILOR NEACOPERITE ─────────────────────────────────
-// Adrian (24 iul): „Kelion trebuie să analizeze cererile neacoperite și să
-// poată decide SINGUR dacă sunt bune și aduc valoare aplicației să le
-// implementeze, dacă nu să le închidă automat."
-// Kelion (modelul work, prin OpenRouter) citește gap-urile deschise și decide:
-//   VALOROS → rămâne deschis, marcat „DE IMPLEMENTAT: <motiv>" (owner-ul vede
-//             lista scurtă, curată, doar cu ce merită construit);
-//   ÎNCHIDE → închis automat cu „ÎNCHIS AUTONOM: <motiv>" (duplicat / deja
-//             posibil / fără valoare / în afara scopului).
-// Rulează la cerere (buton admin) și AUTONOM o dată pe zi (index.ts).
+// ── THE AUTONOMOUS TRIAGE OF UNCOVERED REQUESTS ─────────────────────────────
+// Adrian (24 Jul): "Kelion must analyse the uncovered requests and be able to
+// decide BY HIMSELF whether they are good and bring value to the app, to
+// implement them, and if not, to close them automatically."
+// Kelion (the work model, through OpenRouter) reads the open gaps and decides:
+//   VALUABLE → stays open, marked "DE IMPLEMENTAT: <reason>" (the owner sees
+//              a short, clean list, only with what is worth building);
+//   CLOSE    → closed automatically with "ÎNCHIS AUTONOM: <reason>"
+//              (duplicate / already possible / no value / out of scope).
+// Runs on demand (admin button) and AUTONOMOUSLY once a day (index.ts).
 
 const APP_CAPABILITIES = `Aplicația Kelionai POATE deja: conversație (chat+voce full-duplex) cu escaladare
 automată chat→creier; hărți + traseu rutier pe monitor; vreme; căutare web live;
