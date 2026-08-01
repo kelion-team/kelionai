@@ -1,22 +1,23 @@
-// ── POSTGRES DE HÂRTIE, DOAR PENTRU TESTE ───────────────────────────────────
+// ── PAPER POSTGRES, FOR TESTS ONLY ──────────────────────────────────────────
 //
-// Căile cu BANI din db.ts (creditare, taxare, refund) nu se pot testa fără o
-// bază de date — și tocmai ele n-aveau niciun test. În loc să ceară Postgres în
-// CI, testul rulează pe motorul ăsta minuscul: ține `wallets`, `billing_events`
-// și `transactions` în memorie și înțelege EXACT interogările pe care le scrie
-// db.ts, cu semanticile care contează pentru bani:
+// The MONEY paths in db.ts (crediting, charging, refunds) can't be tested
+// without a database — and they were exactly the ones with no tests. Instead
+// of requiring Postgres in CI, the test runs on this tiny engine: it keeps
+// `wallets`, `billing_events` and `transactions` in memory and understands
+// EXACTLY the queries db.ts writes, with the semantics that matter for money:
 //
-//   • BEGIN/COMMIT/ROLLBACK reale — un ROLLBACK chiar anulează tot ce s-a scris
-//     de la BEGIN (altfel „s-a creditat pe jumătate" ar trece drept corect);
-//   • indexul UNIC pe `ref` — a doua creditare pe aceeași plată ARUNCĂ,
-//     exact ca Postgres (a doua linie de apărare a idempotenței);
-//   • `ON CONFLICT ... DO UPDATE SET` evaluează partea dreaptă pe rândul VECHI,
-//     ca Postgres — de asta `topup_ref = wallets.balance + $2` iese NOUL sold;
-//   • coloanele NUMERIC se întorc ca ȘIRURI, ca driverul `pg` — dacă apelantul
-//     uită un Number(), testul o vede.
+//   • real BEGIN/COMMIT/ROLLBACK — a ROLLBACK really undoes everything written
+//     since BEGIN (otherwise "half-credited" would pass as correct);
+//   • the UNIQUE index on `ref` — a second credit on the same payment THROWS,
+//     exactly like Postgres (the second line of idempotency defense);
+//   • `ON CONFLICT ... DO UPDATE SET` evaluates the right side on the OLD row,
+//     like Postgres — that's why `topup_ref = wallets.balance + $2` yields the
+//     NEW balance;
+//   • NUMERIC columns come back as STRINGS, like the `pg` driver — if the
+//     caller forgets a Number(), the test sees it.
 //
-// Ce NU știe: orice altă interogare. Intenționat — o interogare nerecunoscută
-// ARUNCĂ, ca testul să nu treacă „verde" pe cod pe care nu l-a executat.
+// What it does NOT know: any other query. On purpose — an unrecognized query
+// THROWS, so a test can't pass "green" on code it never executed.
 
 export interface WalletRow {
   user_email: string
@@ -47,13 +48,13 @@ export interface Baza {
 
 export interface FakePg {
   baza: Baza
-  /** Toate interogările executate (pentru verificări pe forma SQL-ului). */
+  /** All executed queries (for assertions on the SQL shape). */
   sqluri: string[]
   reset(): void
   query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
 }
 
-/** Conținutul dintre paranteza deschisă de la `start` și perechea ei. */
+/** The content between the paren opened at `start` and its match. */
 function balansat(s: string, start: number): { corp: string; end: number } {
   let adancime = 0
   for (let i = start; i < s.length; i++) {
@@ -66,7 +67,7 @@ function balansat(s: string, start: number): { corp: string; end: number } {
   throw new Error(`fake-pg: paranteză nebalansată în „${s}"`)
 }
 
-/** Împarte pe virgulele de la nivelul 0 (nu cele din paranteze sau ghilimele). */
+/** Splits on the commas at level 0 (not those inside parens or quotes). */
 function bucati(s: string): string[] {
   const out: string[] = []
   let adancime = 0
@@ -89,7 +90,7 @@ function bucati(s: string): string[] {
   return out
 }
 
-/** Evaluează o expresie din VALUES: `$2`, `lower($1)`, `-($2::numeric)`, `'text'`. */
+/** Evaluates a VALUES expression: `$2`, `lower($1)`, `-($2::numeric)`, `'text'`. */
 function valoare(expr: string, p: unknown[]): unknown {
   const e = expr.trim()
   let m: RegExpMatchArray | null
@@ -103,7 +104,7 @@ function valoare(expr: string, p: unknown[]): unknown {
   throw new Error(`fake-pg: expresie necunoscută „${e}"`)
 }
 
-/** Evaluează partea dreaptă a unui SET, pe rândul VECHI (semantica Postgres). */
+/** Evaluates the right side of a SET, on the OLD row (Postgres semantics). */
 function valoareSet(expr: string, vechi: Record<string, unknown>, p: unknown[]): unknown {
   const m = expr.match(/^(\w+)\.(\w+)\s*([+-])\s*(.+)$/)
   if (m) {
@@ -159,7 +160,7 @@ export function creeazaFakePg(): FakePg {
     if (tabela === 'billing_events') {
       const ref = (rand.ref as string | undefined) ?? null
       if (ref !== null && baza.billing.some((r) => r.ref === ref)) {
-        // uniq_billing_ref — a doua creditare pe aceeași plată.
+        // uniq_billing_ref — a second credit on the same payment.
         if (/ON CONFLICT DO NOTHING/i.test(coada)) return gol
         throw new Error('duplicate key value violates unique constraint "uniq_billing_ref"')
       }
