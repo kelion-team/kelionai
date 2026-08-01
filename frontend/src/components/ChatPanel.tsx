@@ -301,6 +301,10 @@ export default function ChatPanel({
   busyRef.current = busy
   // The abort controller of the current turn — "stop" aborts it on the spot.
   const abortRef = useRef<AbortController | null>(null)
+  // GUEST SPEAKER (Adrian, Aug 1): set by the voice gate right before a spoken
+  // turn — "guest:<id>:<name> (<relation>)" / "guest-pending:...". It rides
+  // with exactly ONE send() (the turn it belongs to), then clears.
+  const pendingSpeakerRef = useRef<string | null>(null)
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
@@ -910,6 +914,9 @@ export default function ChatPanel({
     // Voice features collected from the last spoken sentence (live dictation or batch).
     const voiceFeatures = getPendingVoiceFeatures() ?? undefined
     clearPendingVoiceFeatures()
+    // The guest label set by the voice gate (null for the holder / typed turns).
+    const speaker = pendingSpeakerRef.current ?? undefined
+    pendingSpeakerRef.current = null
     // The facial descriptor READY in the background (if the camera is on and it caught a
     // face). Instant — it waits for no inference, it doesn't slow down the send.
     const face = getPendingFaceDescriptor()
@@ -989,6 +996,9 @@ export default function ChatPanel({
         (micRef.current as unknown as { isRealtime?: boolean } | null)?.isRealtime === true,
         // SPOKEN TURN (the ears brought it): the server shapes the reply for speech.
         spoken || undefined,
+        // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
+        // powers from this turn, whoever is logged in.
+        speaker,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
@@ -1167,8 +1177,9 @@ export default function ChatPanel({
             // (speaker check, like on the STT dictation path); the second
             // argument marks the turn as spoken so the server shapes the reply
             // for speech (clean sentences, no markdown tables).
-            onAddressed: (text, vf) => {
+            onAddressed: (text, vf, speaker) => {
               setPendingVoiceFeatures(vf)
+              pendingSpeakerRef.current = speaker ?? null
               void sendRef.current(text, true)
             },
             // NO onToolCall (Aug 1 — one brain): the voice session has NO tools

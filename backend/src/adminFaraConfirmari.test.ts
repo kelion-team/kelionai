@@ -20,8 +20,8 @@ const voce = sursa('./routes/realtime.ts')
 const panou = sursa('./index.ts')
 
 describe('în chat, sesiunea de admin e de-ajuns', () => {
-  it('chatul decide adminul DOAR din rolul sesiunii', () => {
-    expect(chat).toMatch(/const isAdmin = user\.role === 'admin'\s*$/m)
+  it('chatul decide adminul din rolul sesiunii (singura excepție: tura de OASPETE vocal, Aug 1)', () => {
+    expect(chat).toMatch(/const isAdmin = user\.role === 'admin' && !guestMatch\s*$/m)
   })
 
   it('chatul nu mai cheamă lacătul deloc — nici măcar importat', () => {

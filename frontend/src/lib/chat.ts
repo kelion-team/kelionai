@@ -135,6 +135,10 @@ export async function* streamChat(
   // no markdown tables/links) — the client speaks it verbatim through the
   // voice session's mouth. Typed turns omit the flag.
   spoken?: boolean,
+  // THE GUEST SPEAKER (Aug 1 — the timbre gate): the voice session recognised
+  // the speaker as an approved/pending GUEST of the account — the server
+  // strips every admin power from this turn and tells the brain who's talking.
+  speaker?: string,
 ): AsyncGenerator<string> {
   // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
   // whose response was NEVER read — openStream() below opened A SECOND identical
@@ -263,6 +267,7 @@ export async function* streamChat(
             facePhoto,
             serverVoiceOff,
             spoken: spoken || undefined,
+            speaker,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }),

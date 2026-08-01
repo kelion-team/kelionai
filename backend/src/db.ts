@@ -85,6 +85,24 @@ export async function initDb(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_faceprints_admin ON faceprints (is_admin, updated_at DESC);
+    -- GUEST VOICES (Adrian, Aug 1): the holder may explicitly ask Kelion to
+    -- also talk with another person (wife, son, friend...). That person's
+    -- voiceprint + photo + RELATION to the holder are stored here — but only
+    -- after the holder's explicit approval (approved=true). Unknown voices
+    -- without the holder's request are ignored entirely.
+    CREATE TABLE IF NOT EXISTS voice_guests (
+      id BIGSERIAL PRIMARY KEY,
+      account_email TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      relation TEXT NOT NULL DEFAULT '',
+      features DOUBLE PRECISION[] NOT NULL DEFAULT '{}',
+      feature_meta JSONB NOT NULL DEFAULT '{}',
+      photo TEXT NOT NULL DEFAULT '',
+      approved BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_voice_guests_account ON voice_guests (account_email, approved, updated_at DESC);
     CREATE TABLE IF NOT EXISTS cost_events (
       id BIGSERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -2728,6 +2746,153 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+// ── GUEST VOICES (Adrian, Aug 1) ─────────────────────────────────────────────
+// The people the HOLDER explicitly allows to talk to Kelion on his account
+// (wife, son, daughter, friend...). The print + relation are remembered for
+// future chats — but ONLY after the holder approves (approve_guest_voice).
+export interface GuestVoiceRow {
+  id: number
+  accountEmail: string
+  name: string
+  relation: string
+  features: number[]
+  approved: boolean
+  hasPhoto: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+interface GuestVoiceDbRow {
+  id: string
+  account_email: string
+  name: string
+  relation: string
+  features: number[]
+  approved: boolean
+  has_photo: boolean
+  created_at: Date
+  updated_at: Date
+}
+
+function rowToGuestVoice(r: GuestVoiceDbRow): GuestVoiceRow {
+  return {
+    id: Number(r.id),
+    accountEmail: r.account_email,
+    name: r.name,
+    relation: r.relation,
+    features: Array.isArray(r.features) ? r.features : [],
+    approved: r.approved,
+    hasPhoto: r.has_photo,
+    createdAt: r.created_at?.toISOString?.() ?? '',
+    updatedAt: r.updated_at?.toISOString?.() ?? '',
+  }
+}
+
+export async function saveGuestVoice(g: {
+  accountEmail: string
+  name: string
+  relation: string
+  features: number[]
+  featureMeta: unknown
+}): Promise<number | null> {
+  if (!dbEnabled() || !g.accountEmail) return null
+  try {
+    const vec = g.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    const r = await getPool().query<{ id: string }>(
+      `INSERT INTO voice_guests (account_email, name, relation, features, feature_meta, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now()) RETURNING id`,
+      [g.accountEmail.toLowerCase(), g.name, g.relation, vec, JSON.stringify(g.featureMeta ?? {})],
+    )
+    return r.rows[0] ? Number(r.rows[0].id) : null
+  } catch {
+    return null
+  }
+}
+
+export async function listGuestVoices(accountEmail: string, onlyApproved = false): Promise<GuestVoiceRow[]> {
+  if (!dbEnabled() || !accountEmail) return []
+  try {
+    const r = await getPool().query<GuestVoiceDbRow>(
+      `SELECT id, account_email, name, relation, features, approved,
+              (photo <> '') AS has_photo, created_at, updated_at
+       FROM voice_guests
+       WHERE account_email = $1 ${onlyApproved ? 'AND approved' : ''}
+       ORDER BY updated_at DESC LIMIT 50`,
+      [accountEmail.toLowerCase()],
+    )
+    return r.rows.map(rowToGuestVoice)
+  } catch {
+    return []
+  }
+}
+
+// The newest guest print still awaiting the holder's approval.
+export async function latestPendingGuest(accountEmail: string): Promise<GuestVoiceRow | null> {
+  if (!dbEnabled() || !accountEmail) return null
+  try {
+    const r = await getPool().query<GuestVoiceDbRow>(
+      `SELECT id, account_email, name, relation, features, approved,
+              (photo <> '') AS has_photo, created_at, updated_at
+       FROM voice_guests
+       WHERE account_email = $1 AND NOT approved
+       ORDER BY updated_at DESC LIMIT 1`,
+      [accountEmail.toLowerCase()],
+    )
+    return r.rows[0] ? rowToGuestVoice(r.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
+// The holder's decision on a guest print: approve (optionally correcting the
+// name/relation) or reject (the row is deleted — the voice returns to being
+// ignored).
+export async function decideGuestVoice(id: number, approve: boolean, name?: string, relation?: string): Promise<boolean> {
+  if (!dbEnabled() || !id) return false
+  try {
+    if (approve) {
+      await getPool().query(
+        `UPDATE voice_guests SET approved = true,
+           name = CASE WHEN $2 <> '' THEN $2 ELSE name END,
+           relation = CASE WHEN $3 <> '' THEN $3 ELSE relation END,
+           updated_at = now()
+         WHERE id = $1`,
+        [id, name ?? '', relation ?? ''],
+      )
+    } else {
+      await getPool().query('DELETE FROM voice_guests WHERE id = $1 AND NOT approved', [id])
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The guest's photo (the camera frame that rode along on their turn).
+export async function attachGuestPhoto(id: number, photo: string): Promise<void> {
+  if (!dbEnabled() || !id || !photo) return
+  try {
+    if (photo.length > 900_000) return // same sanity cap as the voice clip
+    await getPool().query('UPDATE voice_guests SET photo = $2, updated_at = now() WHERE id = $1', [id, photo])
+  } catch {
+    /* never break the chat for a photo */
+  }
+}
+
+// Forget guest(s) by name (the holder's "uită-o pe X"). Returns how many.
+export async function forgetGuestVoices(accountEmail: string, name: string): Promise<number> {
+  if (!dbEnabled() || !accountEmail || !name) return 0
+  try {
+    const r = await getPool().query(
+      'DELETE FROM voice_guests WHERE account_email = $1 AND lower(name) = lower($2)',
+      [accountEmail.toLowerCase(), name.trim()],
+    )
+    return r.rowCount ?? 0
+  } catch {
+    return 0
   }
 }
 
