@@ -95,15 +95,20 @@ export async function hardResetToLatest(): Promise<void> {
   }
   // "All default": local state is emptied COMPLETELY (no chat restoration on
   // the page — history comes back from the server on load, like at first login).
-  // EXCEPTION: the voiceprint (kelion.voiceprint). BUG found Jul 10 (Adrian:
+  // EXCEPTIONS: the voiceprint (kelion.voiceprint). BUG found Jul 10 (Adrian:
   // "the microphone doesn't open automatically to say yes" — in fact its calibration
   // was erased on EVERY publish by this reset, so it kept asking for re-enrollment).
   // It's not "session state" — it's a hardware/voice calibration that must
   // survive every publish, just like the memories on the server.
+  // And the COMPOSER DRAFT (kelion.draft, Aug 1): the reset now applies by
+  // itself (the auto-update countdown), so what you were typing is kept too —
+  // the composer restores it on boot.
   try {
     const voiceprint = localStorage.getItem('kelion.voiceprint')
+    const draft = localStorage.getItem('kelion.draft')
     localStorage.clear()
     if (voiceprint) localStorage.setItem('kelion.voiceprint', voiceprint)
+    if (draft) localStorage.setItem('kelion.draft', draft)
   } catch {
     /* indisponibil */
   }

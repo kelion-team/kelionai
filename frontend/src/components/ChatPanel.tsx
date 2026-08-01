@@ -50,6 +50,7 @@ import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
+import { reportActivity } from '../lib/activity'
 
 // Gesturile-tool ale serverului (play_avatar_gesture, release-ul „v2.3” al
 // builder) translated into the REAL clips from the RPM library — the skeleton
@@ -140,7 +141,26 @@ export default function ChatPanel({
   // (the brain gets the history every turn, the voice too), only the screen
   // starts clean. The full history stays in Admin → Istoric chat.
   const [chatImage, setChatImage] = useState<string | null>(null)
-  const [input, setInput] = useState('')
+  // THE DRAFT SURVIVES THE AUTO-UPDATE (Adrian, Aug 1): the new-version
+  // countdown applies a hard reset by itself — what you were typing must NOT
+  // die with it. The draft lives in localStorage (kept by the reset, like the
+  // voiceprint) and comes back into the composer on boot; an emptied composer
+  // clears it.
+  const [input, setInput] = useState(() => {
+    try {
+      return localStorage.getItem('kelion.draft') ?? ''
+    } catch {
+      return ''
+    }
+  })
+  useEffect(() => {
+    try {
+      if (input) localStorage.setItem('kelion.draft', input)
+      else localStorage.removeItem('kelion.draft')
+    } catch {
+      /* storage unavailable — the draft just doesn't survive */
+    }
+  }, [input])
   const [busy, setBusy] = useState(false)
   // Microphone (input) — capture → server (STT) → brain. It is NOT "voice in front".
   const [listening, setListening] = useState(false)
@@ -152,6 +172,29 @@ export default function ChatPanel({
   // BRAIN-INPUT TICKER (Adrian, Jul 10): the EXACT text handed
   // to the brain on the current turn — it comes from the SERVER ({heard}), not a local echo.
   const [heard, setHeard] = useState('')
+  // THE BAND GOES TO SLEEP WHEN IDLE (Adrian, Aug 1: "the sweeping stays on
+  // screen"). The K band (the reply ticker) used to stay on screen FOREVER
+  // after the reply. It still shows the flow live, but 12s after the turn ends
+  // it lies down — the page breathes. Any new activity wakes it.
+  const [idleBandHidden, setIdleBandHidden] = useState(false)
+  // THE CALM SIGNAL for the auto-update countdown (lib/activity.ts): voice
+  // session open / request in flight / draft in the composer — while any of
+  // these is true, the countdown stands still so the reset never cuts work.
+  useEffect(() => {
+    reportActivity({ voice: listening, busy, draft: input.trim().length > 0 })
+  }, [listening, busy, input])
+  useEffect(() => () => reportActivity({ voice: false, busy: false, draft: false }), [])
+  // The sleep timer for the K band: runs only when a turn just ENDED (not busy,
+  // last word is the assistant's). New work resets it and wakes the band.
+  useEffect(() => {
+    const last = messages.at(-1)
+    if (busy || !last || last.role !== 'assistant') {
+      setIdleBandHidden(false)
+      return
+    }
+    const id = window.setTimeout(() => setIdleBandHidden(true), 12_000)
+    return () => window.clearTimeout(id)
+  }, [busy, messages])
   // TICKER (fixed rule, Jul 10): the scroll duration scales with the text
   // length, so it stays readable — neither too fast, nor forever.
   const tickerDur = (s: string): string => `${Math.min(22, Math.max(3.5, s.length / 14))}s`
@@ -1905,7 +1948,7 @@ export default function ChatPanel({
               </span>
             </div>
           )
-        ) : lastAssistant?.content || busy ? (
+        ) : (lastAssistant?.content && !idleBandHidden) || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
             {busy ? (
