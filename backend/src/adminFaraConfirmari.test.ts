@@ -2,16 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── SESIUNEA DE ADMIN E DE-AJUNS ÎN CHAT ────────────────────────────────────
+// ── THE ADMIN SESSION IS ENOUGH IN CHAT ────────────────────────────────────
 //
-// Adrian, 31 iul: „dacă m-am logat cu admin, Kelion nu mai trebuie să ceară
-// niciun fel de confirmare de securitate în chat".
+// Adrian, Jul 31: "if I'm logged in as admin, Kelion must not ask for any
+// kind of security confirmation in chat".
 //
-// Lacătul din 27 iul cerea al doilea factor (amprentă vocală sau secret tastat)
-// ca uneltele de admin să existe în chat. Ordinul de azi îl scoate DE ACOLO —
-// și numai de acolo. Testul păzește exact granița: chatul se încrede în sesiune,
-// vocea și panoul NU. Dacă cineva mută lacătul înapoi pe chat, sau îl scoate
-// din voce/panou „ca să fie la fel", pică aici.
+// The Jul 27 padlock required a second factor (voiceprint or typed secret)
+// for the admin tools to exist in chat. Today's order removes it FROM THERE —
+// and only from there. The test guards exactly the boundary: chat trusts the
+// session, voice and the panel do NOT. If someone moves the padlock back onto
+// chat, or removes it from voice/panel "to be consistent", it falls here.
 const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
@@ -31,10 +31,11 @@ describe('în chat, sesiunea de admin e de-ajuns', () => {
 })
 
 describe('lacătul e dezarmat de owner, dintr-un singur loc', () => {
-  // Adrian, 31 iul, a doua oară: „scoți total te rog aprobarea, lângă mine nu
-  // e nimeni să dea comenzi". Prima dată ceruse doar chatul, și lăsasem vocea
-  // păzită fiindcă oricine e lângă microfon poate vorbi. El spune că nu e
-  // nimeni. Amenințarea de care apăra lacătul nu există la el.
+  // Adrian, Jul 31, the second time: "remove the approval completely please,
+  // there is nobody next to me to give commands". The first time he had only
+  // asked for chat, and I had left voice guarded because anyone next to the
+  // microphone can speak. He says there is nobody. The threat the padlock
+  // guarded against doesn't exist for him.
   const lacat = sursa('./services/adminLock.ts')
 
   it('isArmed() răspunde NU, deci toate porțile se deschid deodată', () => {
@@ -48,7 +49,7 @@ describe('lacătul e dezarmat de owner, dintr-un singur loc', () => {
     expect(lacat).toMatch(/TO RE-ARM/)
   })
 
-  it('porțile îl întreabă mai departe pe isArmed — nu le-am rupt, doar răspunde altfel', () => {
+  it('the gates keep asking isArmed — we did not break them, it just answers differently', () => {
     expect(voce).toMatch(/isArmed\(\)/)
     expect(panou).toMatch(/isArmed\(\)[\s\S]{0,200}423/)
   })
@@ -72,12 +73,13 @@ describe('Kelion nu-i mai cere ownerului voie pentru ce tocmai i-a cerut', () =>
     expect(chat).toMatch(/action he did NOT ask for[\s\S]{0,400}never about the request itself/)
   })
 
-  // Adrian, 31 iul: „nu ai scos cerința cu autorizarea, de ce?" — pusesem blocul
-  // de owner, dar lăsasem trei cereri de voie mai vechi, împrăștiate. Una era
-  // chiar în promptul de owner, în contradicție cu ce tocmai scrisesem, și încă
-  // două în fluxul de clip (prompt + descrierea uneltei, care e semnalul cel mai
-  // puternic — modelul o vede la fiecare apel). Testul le caută pe toate ca text,
-  // ca să nu se mai poată strecura una uitată prin altă parte a fișierului.
+  // Adrian, Jul 31: "you didn't remove the authorization requirement,
+  // why?" — I had put in the owner block, but left three older requests for
+  // permission, scattered. One was right in the owner prompt, contradicting
+  // what I had just written, and two more in the clip flow (prompt + the
+  // tool's description, which is the strongest signal — the model sees it at
+  // every call). The test searches for all of them as text, so a forgotten
+  // one can no longer sneak through another part of the file.
   it('nicio cerere de autorizare nu a mai rămas nicăieri în fișier', () => {
     expect(chat).not.toMatch(/ask for authorization/i)
     expect(chat).not.toMatch(/explicitly authorizes/i)
@@ -87,8 +89,8 @@ describe('Kelion nu-i mai cere ownerului voie pentru ce tocmai i-a cerut', () =>
   })
 
   it('clipul promo se scrie ȘI se armează în aceeași tură', () => {
-    // Textul e tăiat de concatenarea din sursă („...do ' + 'not stop..."), deci
-    // căutăm peste ruptură, nu litera contiguă.
+    // The text is cut by the source's concatenation ("...do ' + 'not
+    // stop..."), so we search across the break, not the contiguous literal.
     expect(chat).toMatch(/his request is the authorisation, do[\s\S]{0,20}not stop to ask for a yes/)
     expect(chat).toMatch(/IN THE SAME TURN — his request for a clip IS the authorisation/)
   })

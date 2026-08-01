@@ -1,19 +1,21 @@
-// ── PLATA A TRECUT DE LA STRIPE LA REVOLUT (Adrian, 30 iul) ──────────────────
+// ── PAYMENT MOVED FROM STRIPE TO REVOLUT (Adrian, Jul 30) ─────────────────
 //
-// „Stripe se scoate total și intră Pro" + „link să înlocuim peste tot".
+// "Stripe is removed completely and Pro comes in" + "a link to replace
+// everywhere".
 //
-// „Peste tot" e partea care contează. Userul poate ajunge la plată din TREI
-// locuri — pastila de portofel, pagina /credite și paywall-ul din chat — iar
-// toate trei cheamă aceeași rută, `/api/billing/checkout`, și folosesc câmpul
-// `url` din răspuns. De-aia schimbarea s-a făcut ACOLO, într-un singur loc:
-// altfel ar fi rămas un al patrulea drum uitat pe Stripe, descoperit peste o
-// săptămână de omul care plătește.
+// "Everywhere" is the part that matters. The user can reach payment from
+// THREE places — the wallet pill, the /credite page and the chat paywall —
+// and all three call the same route, `/api/billing/checkout`, and use the
+// `url` field from the response. That's why the change was made THERE, in a
+// single place: otherwise a fourth forgotten road would have stayed on
+// Stripe, discovered a week later by the person paying.
 //
-// Testul ăsta ține două lucruri:
-//   1. forma răspunsului rămâne `{ url }` — contractul pe care se bazează toate
-//      cele trei locuri; dacă se strică, se strică tăcut, în interfață;
-//   2. fără link configurat NU se tace și NU se trimite omul nicăieri — se
-//      spune ce lipsește (regula nr. 1: un eșec nu se afișează ca reușită).
+// This test holds two things:
+//   1. the response shape stays `{ url }` — the contract all three places
+//      rely on; if it breaks, it breaks silently, in the interface;
+//   2. without a configured link it does NOT stay silent and does NOT send
+//      the person anywhere — it says what's missing (rule no. 1: a failure is
+//      not displayed as success).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const LINK = 'https://revolut.me/exemplu'
@@ -34,9 +36,10 @@ vi.mock('./config.js', () => ({
 
 const { config } = await import('./config.js')
 
-/** Exact logica rutei `/api/billing/checkout`, izolată: sesiunea o dă Fastify,
- *  iar aici ne interesează DECIZIA — ce URL pleacă spre om, sau ce lipsă i se
- *  spune. Fără asta ar trebui pornit un server întreg ca să testăm un `if`. */
+/** The exact logic of the `/api/billing/checkout` route, isolated: Fastify
+ *  provides the session, and here we care about the DECISION — which URL
+ *  leaves for the person, or which absence is told to them. Without this we'd
+ *  have to boot a whole server to test an `if`. */
 function checkout(): { code: number; body: { url?: string; error?: string } } {
   const link = config.revolut.payLink
   if (!link) return { code: 503, body: { error: 'revolut_link_lipsa' } }
@@ -52,7 +55,7 @@ describe('plata userului trece pe linkul Revolut', () => {
     config.revolut.payLink = LINK
     const r = checkout()
     expect(r.code).toBe(200)
-    // Câmpul `url` e contractul comun al celor trei locuri de plată din interfață.
+    // The `url` field is the shared contract of the three payment places in the interface.
     expect(r.body.url).toBe(LINK)
   })
 
@@ -60,8 +63,9 @@ describe('plata userului trece pe linkul Revolut', () => {
     const r = checkout()
     expect(r.code).toBe(503)
     expect(r.body.error).toBe('revolut_link_lipsa')
-    // Cel mai important: NU întoarce un `url` gol, care în interfață ar duce
-    // butonul într-o pagină albă — exact „a mers, dar n-a mers".
+    // Most important: it does NOT return an empty `url`, which in the
+    // interface would lead the button into a blank page — exactly "it worked,
+    // but it didn't".
     expect(r.body.url).toBeUndefined()
   })
 
