@@ -2051,42 +2051,46 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           },
         },
       )
-      let r
-      try {
-        r = await runBrainOnce()
-      } catch (ge) {
-        // THE WIDENED SAFETY NET (Jul 28 audit, finding #1 — HIGH): before, the
-        // secondary took over ONLY on quota errors (`isGeminiQuotaError`:
-        // 429/500/503/quota). A `gemini 400` (tool schema), 401/403 (key), 404
-        // (model) or a network TimeoutError went straight through → the user got
-        // "technical problem" AFTER Kelion had promised the action — exactly
-        // "says it does it, but doesn't". The correct rule: ANY failure of
-        // direct Gemini (if no text has flowed yet) falls ONCE to the free
-        // secondary; only if that fails too do we escalate.
-        if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
-          orchestratorModel = await resolveModel('work', null)
-          console.log(`[brain] gemini unavailable (${String(ge).slice(0, 80)}) → fallback ${orchestratorModel}`)
-          r = await runBrainOnce()
-        } else {
-          throw ge
+      // THE SILENT FREE ROTATION (Adrian, Aug 1): every user pays credits; the
+      // app serves turns on free models for margin — but a rate-limited or
+      // EMPTY free model must NEVER surface as a user message. The turn
+      // silently walks the LIVE catalog's free pool until one answers; only if
+      // the whole pool fails does the human hear a neutral "try again".
+      const nextFreeCandidate = async (tried: Set<string>): Promise<string | null> => {
+        const cat = await getCatalog().catch(() => null)
+        for (const m of cat?.chat ?? []) {
+          if (m.id.endsWith(':free') && !tried.has(m.id)) return m.id
         }
+        return null
       }
-      // A BRAIN THAT "SUCCEEDS" BUT SAYS NOTHING (Adrian, Jul 30: "reply =
-      // nothing"). A model that no longer exists at the provider, an empty
-      // completion or a turn that ends without text does NOT throw — so the
-      // safety net below (catch) never activates, and the turn closed MUTE. On
-      // the client, empty turns are deleted → the human saw NOTHING: no reply,
-      // no error. The same safety-net shape as gemini→secondary: if no text
-      // flowed and nothing visible came out, we try ONCE more on the backup
-      // model.
-      if (!r.text.trim() && !textFlowed && !sawVisible) {
-        const rezerva = await resolveModel('work', null)
-        if (rezerva && rezerva !== orchestratorModel) {
-          console.error(`[CHAT MUTE] ${orchestratorModel} returned empty → retrying on ${rezerva}`)
-          orchestratorModel = rezerva
-          r = await runBrainOnce()
+      const triedModels = new Set<string>()
+      let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
+      let lastBrainErr: unknown = null
+      for (let attempt = 0; attempt < 4 && !r; attempt++) {
+        triedModels.add(orchestratorModel)
+        try {
+          const cand = await runBrainOnce()
+          if (cand.text.trim() || textFlowed || sawVisible) { r = cand; break }
+          // A brain that "succeeds" but says nothing must not close the turn
+          // mute — rotate silently to the next free model.
+          console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
+        } catch (ge) {
+          lastBrainErr = ge
+          // Gemini direct: ANY failure (not only quota) falls to the free pool
+          // if no text has flowed yet (widened safety net, Jul 28 audit #1).
+          if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
+            orchestratorModel = await resolveModel('work', null)
+            console.log(`[brain] gemini unavailable (${String(ge).slice(0, 80)}) → fallback ${orchestratorModel}`)
+            continue
+          }
+          if (textFlowed) throw ge // partial text already at the user — no rotation
+          console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
         }
+        const next = await nextFreeCandidate(triedModels)
+        if (!next) break
+        orchestratorModel = next
       }
+      if (!r) throw (lastBrainErr ?? new Error('brain_rotation_exhausted'))
       assistantText += r.text
       usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
@@ -2098,35 +2102,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // (removed).
       const errMsg = e instanceof Error ? e.message : String(e)
       const low = errMsg.toLowerCase()
-      // 402 ≠ 429. Adrian, Jul 31: "why did you lie?" — he was right. I had
-      // thrown them into the same pile, so a FREE model hitting its per-minute
-      // request limit wrote "top up your credit" to him. I was asking for money
-      // for something that costs zero, without having measured any balance. A
-      // request limit is passed by waiting; insufficient funds are passed by
-      // depositing. It is not the same message.
+      // Diagnostic classification — LOG ONLY (429 vs 402 vs refusal matters to
+      // us in the server log, never to the user; Adrian, Aug 1).
       const isRateLimit =
         low.includes('429') || /rate.?limit|resourceexhausted|too many requests/.test(low) || low.includes('quota')
       const isQuota = !isRateLimit && (low.includes('402') || low.includes('insufficient'))
       const isRefusal = low.includes('refusal')
+      // USER-FACING MESSAGES STAY NEUTRAL (Adrian, Aug 1): paying users must
+      // NEVER read about models, rate limits, quotas or money. The rotation
+      // above absorbs single-model failures; if we land here the whole pool
+      // failed — the human hears only a neutral "try again". Details stay in
+      // the server log (console.error below).
       const spoken = ro
-        ? isRateLimit
-          ? 'Modelul gratuit a atins plafonul de cereri pe minut — nu e o problemă de bani. Reîncearcă în câteva secunde.'
-          : isQuota
-            ? 'Am epuizat momentan creditul creierului. Te rog reîncarcă creditul ca să continuăm.'
-            : isRefusal
-              ? 'Am întâmpinat o restricție de siguranță. Încearcă altfel sau spune-mi ce vrei.'
-              : 'Am întâmpinat o problemă tehnică. Încearcă din nou într-o secundă.'
-        : isRateLimit
-          ? "The free model hit its per-minute request limit — this is not a money problem. Try again in a few seconds."
-          : isQuota
-            ? "I've temporarily run out of brain credit. Please top up so we can continue."
-            : isRefusal
-              ? 'I hit a safety restriction. Try rephrasing or tell me what you need.'
-              : 'I ran into a technical issue. Please try again in a moment.'
+        ? 'Încearcă din nou în câteva secunde.'
+        : 'Try again in a few seconds.'
       reply.raw.write(spoken)
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
-      console.error('[CHAT ERROR]', errMsg)
+      console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
       // MONEY IS NOT LOST ON ERROR (Jul 27 audit): the tools already run in this
       // turn (searches, images, ask_brain) COST money — the return from here
       // used to skip the debit and the user consumed for free, repeatably.

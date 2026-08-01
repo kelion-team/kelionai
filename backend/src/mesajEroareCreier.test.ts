@@ -2,35 +2,56 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── 402 IS NOT 429 ──────────────────────────────────────────────────────────
+// ── USERUL PLĂTITOR NU VEDE NICIODATĂ MODELE / PLAFOANE / BANI ─────────────
 //
-// Adrian, Jul 31: "brain credit exhausted […] why did you lie?"
+// Adrian, Aug 1: "mesajul asta nu trebuie sa apara nici o data la useri
+// platitori" + "userul free plateste la aplicatie, prin credite […] lui
+// trebuie sa functioneze permanent fara mesaje de genul acela".
 //
-// He was right. A free model that hits the per-minute request limit returns
-// 429. The code lumped 429 into the same condition as 402 and wrote "top up
-// your credit" on screen — money demanded for a model that costs ZERO, without
-// the app ever having read a balance. Exactly his rule #1: an asserted,
-// unmeasured state.
+// REGULA: erorile creierului (429 rate-limit, 402 fonduri, model mort,
+// răspuns gol) se absorb prin ROTIRE SILENȚIOASĂ în pool-ul de modele free
+// din catalogul live. Userul aude un mesaj NEUTRU ("încearcă din nou") ABIA
+// dacă tot pool-ul pică. Detaliile tehnice rămân doar în logul serverului.
 //
-// The test reads the REAL code. If someone puts 429 back next to 402, it fails here.
+// Testul citește codul REAL. Dacă cineva repune un mesaj despre modele /
+// plafon / bani în calea vizibilă userului, cade aici.
 const sursa = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
-describe('mesajul de eroare al creierului nu mai cere bani pentru un plafon de cereri', () => {
-  it('429 e tratat ca plafon de cereri, separat de fonduri', () => {
-    expect(sursa).toMatch(/const isRateLimit\s*=[\s\S]{0,200}429/)
+describe('rotirea silențioasă între modelele free', () => {
+  it('parcurge pool-ul free din catalogul live', () => {
+    expect(sursa).toMatch(/nextFreeCandidate[\s\S]{0,400}getCatalog/)
+    expect(sursa).toMatch(/m\.id\.endsWith\(':free'\)/)
   })
 
-  it('condiția de bani NU mai conține 429', () => {
-    const bani = /const isQuota\s*=([\s\S]{0,200}?)\n/.exec(sursa)?.[1] ?? ''
-    expect(bani).not.toContain('429')
-    expect(bani).toContain('402')
+  it('un model gol sau picat NU închide turul — se rotește', () => {
+    expect(sursa).toMatch(/silent rotation/)
+    expect(sursa).toMatch(/brain_rotation_exhausted/)
   })
 
-  it('banii se cer doar când NU e plafon de cereri', () => {
-    expect(sursa).toMatch(/const isQuota\s*=\s*!isRateLimit/)
+  it('textul parțial ajuns la user oprește rotirea (nu dublăm răspunsul)', () => {
+    expect(sursa).toMatch(/if \(textFlowed\) throw ge/)
+  })
+})
+
+describe('mesajele vizibile userului sunt neutre', () => {
+  it('NU există mesaje user-facing despre modele gratuite sau plafoane', () => {
+    expect(sursa).not.toContain('Modelul gratuit a atins plafonul')
+    expect(sursa).not.toContain('free model hit its per-minute')
   })
 
-  it('userul primește un mesaj care spune explicit că nu e vorba de bani', () => {
-    expect(sursa).toMatch(/plafonul de cereri[\s\S]{0,80}nu e o problemă de bani/)
+  it('NU există mesaje user-facing care cer bani sau menționează creditul creierului', () => {
+    expect(sursa).not.toContain('Am epuizat momentan creditul creierului')
+    expect(sursa).not.toContain('run out of brain credit')
+    expect(sursa).not.toContain('nu e o problemă de bani')
+    expect(sursa).not.toContain('not a money problem')
+  })
+
+  it('mesajul neutru există în ambele limbi', () => {
+    expect(sursa).toContain('Încearcă din nou în câteva secunde.')
+    expect(sursa).toContain('Try again in a few seconds.')
+  })
+
+  it('clasificarea 429/402/refusal rămâne DOAR pentru log', () => {
+    expect(sursa).toMatch(/console\.error\('\[CHAT ERROR\]'[\s\S]{0,120}isRateLimit/)
   })
 })
