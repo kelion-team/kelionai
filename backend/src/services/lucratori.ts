@@ -5,62 +5,63 @@ import path from 'node:path'
 import { config } from '../config.js'
 import { normalizeBranch } from './github.js'
 
-// ── TREI LUCRĂTORI CARE PROPUN, UN CREIER CARE ALEGE ────────────────────────
+// ── THREE WORKERS WHO PROPOSE, ONE BRAIN WHO CHOOSES ───────────────────────
 //
-// Adrian, 31 iul: „trebuie pornite toate 3, fiecare independent, creierul ia
-// care e cel mai bun rezultat propus de ei, după ce analizează propunerile".
+// Adrian, Jul 31: "all 3 must be started, each independent, the brain takes
+// the best result they propose, after analysing the proposals".
 //
-// Aici sunt cei trei. Fiecare primește ACEEAȘI sarcină, lucrează în clona LUI,
-// pe ramura LUI, în procesul LUI — și întoarce o propunere. Nu deschid PR, nu
-// fac merge, nu vorbesc între ei. Judecata e a creierului (`panouLucratori.ts`).
+// Here are the three. Each gets the SAME task, works in HIS clone, on HIS
+// branch, in HIS process — and returns a proposal. They don't open PRs, don't
+// merge, don't talk to each other. The judgement belongs to the brain
+// (`panouLucratori.ts`).
 //
-// ── O CORECTURĂ DE-A MEA, scrisă aici ca să nu se piardă ──────────────────
-// I-am spus lui Adrian că „Cline nu poate rula pe server, e extensie de VS Code,
-// merge doar cu tine la tastatură". GREȘIT. Cline are CLI complet headless
-// (`cline --auto-approve true --json`), iar informația era chiar în rezultatele
-// pe care le citisem eu cu două ore înainte — și am trecut peste ea. El a
-// insistat („nu se poate pune vscode pe linux? sau care e problema") și avea
-// dreptate. La fel OpenHands: `openhands --headless -t`.
-// Nu era o limitare a uneltelor. Era a mea.
+// ── A CORRECTION OF MINE, written here so it isn't lost ────────────────────
+// I told Adrian that "Cline can't run on a server, it's a VS Code extension,
+// it only works with you at the keyboard". WRONG. Cline has a fully headless
+// CLI (`cline --auto-approve true --json`), and the information was right
+// there in the results I had read two hours earlier — and I skipped over it.
+// He insisted ("can't you put vscode on linux? or what's the problem") and he
+// was right. Same for OpenHands: `openhands --headless -t`.
+// It wasn't a limitation of the tools. It was mine.
 //
-// ── DE CE FIECARE CU CLONA LUI ─────────────────────────────────────────────
-// `.dockerignore` exclude `.git`, deci containerul are fișierele proiectului
-// dar NU are repo — iar toți trei sunt git-nativi. Și doi lucrători în același
-// director s-ar călca în picioare. Independența e literală: alt director, altă
-// ramură, alt proces.
+// ── WHY EACH ONE WITH HIS OWN CLONE ─────────────────────────────────────────
+// `.dockerignore` excludes `.git`, so the container has the project files but
+// NOT the repo — and all three are git-native. And two workers in the same
+// directory would step on each other. Independence is literal: another
+// directory, another branch, another process.
 //
-// ── DE CE MĂSURĂM CU GIT, NU CU CE SPUN EI ────────────────────────────────
-// Fiecare unealtă își povestește altfel munca. Un raport în cuvintele ei e o
-// afirmație; `git diff --shortstat` e o măsurătoare. Tot ce intră în judecată
-// vine din git și din testele rulate de NOI — nimic pe încredere.
+// ── WHY WE MEASURE WITH GIT, NOT WITH WHAT THEY SAY ─────────────────────────
+// Each tool narrates its work differently. A report in its own words is a
+// claim; `git diff --shortstat` is a measurement. Everything that enters the
+// judgement comes from git and from tests run by US — nothing on trust.
 
-/** Timp maxim de perete pentru un lucrător. După el, procesul e UCIS. */
+/** Maximum wall time for one worker. After it, the process is KILLED. */
 export const LIMITA_LUCRATOR_MS = 12 * 60_000
-/** Cât din jurnal se ține. Un log de 40MB întors în chat nu e raport, e potop. */
+/** How much of the log is kept. A 40MB log returned in chat isn't a report, it's a flood. */
 const LOG_MAX = 5_000
-/** Cât din diff ajunge la creier ca să judece. */
+/** How much of the diff reaches the brain for judgement. */
 const DIFF_MAX = 20_000
 
 export interface Lucrator {
-  /** Numele scurt, folosit în ramuri și în raport. */
+  /** The short name, used in branches and in the report. */
   nume: string
-  /** Comanda prin care aflăm dacă e instalat. */
+  /** The command that tells us whether it's installed. */
   verificare: [string, string[]]
-  /** Comanda de lucru: primește sarcina și modelul, întoarce [cmd, args]. */
+  /** The work command: takes the task and the model, returns [cmd, args]. */
   comanda: (sarcina: string, model: string) => [string, string[]]
-  /** La ce e bun — intră în raportul pentru creier, ca să judece în cunoștință. */
+  /** What it's good at — goes into the report for the brain, so it judges knowingly. */
   descriere: string
 }
 
-// Cei trei. Ordinea nu contează — rulează în paralel.
+// The three. Order doesn't matter — they run in parallel.
 export const LUCRATORI: Lucrator[] = [
   {
     nume: 'aider',
     verificare: ['aider', ['--version']],
-    // `--auto-commits`: DA aici (spre deosebire de folosirea manuală din
-    // `.aider.conf.yml`), fiindcă altfel n-am avea ce compara: propunerea E
-    // commit-ul. `--model` e IMPUS, nu moștenit din fișier — modelul trebuie
-    // să fie explicit, nu ceva ce se schimbă pe sub noi dintr-un fișier.
+    // `--auto-commits`: YES here (unlike the manual use in `.aider.conf.yml`),
+    // because otherwise we'd have nothing to compare: the proposal IS the
+    // commit. `--model` is FORCED, not inherited from a file — the model must
+    // be explicit, not something that changes under us from a file.
     comanda: (s, m) => [
       'aider',
       ['--message', s, '--model', m, '--yes-always', '--no-analytics', '--no-check-update', '--auto-commits'],
@@ -70,16 +71,17 @@ export const LUCRATORI: Lucrator[] = [
   {
     nume: 'cline',
     verificare: ['cline', ['--version']],
-    // `--auto-approve true`: nimeni nu stă lângă terminal. `--json`: ieșire
-    // structurată, și tot ea declanșează modul headless.
+    // `--auto-approve true`: nobody sits by the terminal. `--json`: structured
+    // output, and it also triggers headless mode.
     comanda: (s, m) => ['cline', ['--auto-approve', 'true', '--json', '-m', m, s]],
     descriere: 'agent de cod care face întâi un plan explicit, apoi execută; alt stil de lucru decât Aider',
   },
   {
     nume: 'openhands',
     verificare: ['openhands', ['--version']],
-    // Singurul cu BROWSER: poate deschide pagina și verifica pe viu, nu doar
-    // să ruleze teste. Modelul îl ia din mediu (LLM_MODEL), nu ca argument.
+    // The only one with a BROWSER: it can open the page and verify live, not
+    // just run tests. It takes the model from the environment (LLM_MODEL), not
+    // as an argument.
     comanda: (s) => ['openhands', ['--headless', '-t', s]],
     descriere: 'are BROWSER — poate deschide pagina live și verifica vizual, nu doar rula teste',
   },
@@ -89,24 +91,24 @@ export interface Propunere {
   lucrator: string
   model: string
   ok: boolean
-  /** De ce n-a mers, când n-a mers. Gol la reușită. */
+  /** Why it didn't work, when it didn't. Empty on success. */
   motiv?: string
   branch?: string
   aSchimbat: boolean
-  /** Cifrele din `git diff --shortstat` — măsurate, nu povestite. */
+  /** The figures from `git diff --shortstat` — measured, not narrated. */
   fisiere: number
   adaugate: number
   sterse: number
-  /** Diff-ul propunerii, plafonat. Ăsta e ce judecă creierul. */
+  /** The proposal's diff, capped. This is what the brain judges. */
   diff: string
-  /** Au trecut testele DUPĂ modificare? Rulate de NOI. `null` = n-am ajuns acolo. */
+  /** Did the tests pass AFTER the change? Run by US. `null` = we never got there. */
   testeTrec: boolean | null
   secunde: number
   log: string
 }
 
-/** Rulează o comandă cu timp maxim și ieșire plafonată. Nu aruncă: un eșec de
- *  aici e o informație, nu o excepție. */
+/** Runs a command with a time cap and capped output. Never throws: a failure
+ *  from here is information, not an exception. */
 function ruleaza(
   cmd: string,
   args: string[],
@@ -138,8 +140,8 @@ function ruleaza(
 
 const coada = (t: string, max = LOG_MAX): string => (t.length > max ? `…\n${t.slice(-max)}` : t)
 
-/** Care dintre cei trei sunt instalați ACUM. Verificat, nu presupus — dacă
- *  lipsește unul, panoul spune care și merge mai departe cu ceilalți. */
+/** Which of the three are installed NOW. Checked, not assumed — if one is
+ *  missing, the panel says which and carries on with the others. */
 export async function lucratoriInstalati(): Promise<string[]> {
   const gasiti: string[] = []
   await Promise.all(
@@ -152,8 +154,8 @@ export async function lucratoriInstalati(): Promise<string[]> {
 }
 
 /**
- * Pune UN lucrător să rezolve sarcina. Întoarce propunerea lui.
- * Nu deschide PR și nu face merge — doar propune.
+ * Sets ONE worker on the task. Returns its proposal.
+ * It doesn't open a PR and doesn't merge — it only proposes.
  */
 export async function ruleazaLucrator(
   lucrator: Lucrator,
@@ -183,12 +185,12 @@ export async function ruleazaLucrator(
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       GIT_TERMINAL_PROMPT: '0',
-      // Numele cu care semnează — ca să se vadă în istorie CINE a propus.
+      // The name it signs with — so history shows WHO proposed.
       GIT_AUTHOR_NAME: `Kelion (${lucrator.nume})`,
       GIT_AUTHOR_EMAIL: 'kelion@kelionai.app',
       GIT_COMMITTER_NAME: `Kelion (${lucrator.nume})`,
       GIT_COMMITTER_EMAIL: 'kelion@kelionai.app',
-      // OpenHands ia modelul din mediu, nu ca argument de linie de comandă.
+      // OpenHands takes the model from the environment, not as a CLI argument.
       LLM_MODEL: `openrouter/${model}`,
       LLM_API_KEY: config.openrouter.key,
       OPENROUTER_API_KEY: config.openrouter.key,
@@ -203,17 +205,17 @@ export async function ruleazaLucrator(
       return { ...gol, motiv: `oprit la limita de ${LIMITA_LUCRATOR_MS / 60_000} minute`, log, secunde: sec() }
     }
 
-    // Unii comit singuri, alții lasă modificările necomise. Le luăm pe amândouă:
-    // dacă a rămas ceva în arbore, comităm noi — propunerea trebuie să fie un
-    // commit, ca să poată fi comparată și împinsă.
+    // Some commit on their own, others leave the changes uncommitted. We take
+    // both: if anything is left in the tree, we commit it ourselves — the
+    // proposal must be a commit, so it can be compared and pushed.
     const murdar = await ruleaza('git', ['status', '--porcelain'], { cwd: lucru, env, limitaMs: 20_000 })
     if (murdar.text.trim()) {
       await ruleaza('git', ['add', '-A'], { cwd: lucru, env, limitaMs: 60_000 })
       await ruleaza('git', ['commit', '-m', `${lucrator.nume}: ${sarcina.slice(0, 60)}`], { cwd: lucru, env, limitaMs: 60_000 })
     }
 
-    // A schimbat ceva? Întrebăm GIT-ul, față de unde a pornit — nu ghicim din
-    // ce a povestit unealta despre sine.
+    // Did it change anything? We ask GIT, against where it started — we don't
+    // guess from what the tool narrated about itself.
     const baza = inainte.text.trim()
     const stat = await ruleaza('git', ['diff', '--shortstat', baza, 'HEAD'], { cwd: lucru, env, limitaMs: 30_000 })
     const m = /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/.exec(stat.text)
@@ -222,9 +224,9 @@ export async function ruleazaLucrator(
 
     const d = await ruleaza('git', ['diff', baza, 'HEAD'], { cwd: lucru, env, limitaMs: 30_000 })
 
-    // TESTELE — rulate de NOI, după modificare. O propunere care pică testele
-    // nu e o propunere, e o problemă; iar creierul trebuie să afle asta ca
-    // fapt măsurat, nu din ce a scris unealta în jurnalul ei despre sine.
+    // THE TESTS — run by US, after the change. A proposal that fails the tests
+    // isn't a proposal, it's a problem; and the brain must learn that as a
+    // measured fact, not from what the tool wrote in its log about itself.
     const t = await ruleaza('npx', ['vitest', 'run'], {
       cwd: path.join(lucru, 'backend'), env, limitaMs: 6 * 60_000,
     })
