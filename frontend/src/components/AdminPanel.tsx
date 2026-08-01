@@ -124,10 +124,10 @@ function groupByDay(rows: HistoryRow[]): { header: string; rows: HistoryRow[] }[
   return groups
 }
 
-// ── O GRILĂ DE LINKURI, o singură dată (unic, fără duplicate) ────────────────
-// „Trimite linkul pe rețele" și „Platforme video" erau DOUĂ blocuri JSX identice,
-// diferite doar prin titlu și listă. Dacă se schimba aspectul unui buton, trebuia
-// schimbat în ambele. Acum: o componentă mică, două apeluri.
+// ── ONE GRID OF LINKS, built once (unique, no duplicates) ───────────────────
+// „Trimite linkul pe rețele” and „Platforme video” were TWO identical JSX
+// blocks, differing only in title and list. If a button's look changed, it
+// had to be changed in both. Now: one small component, two calls.
 function ShareGrid({ title, items }: { title: string; items: { name: string; href: string }[] }): React.JSX.Element {
   return (
     <div className="fin-breakdown">
@@ -153,19 +153,19 @@ export default function AdminPanel({
   const [tab, setTab] = useState<
     'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
   >(initialTab ?? 'finance')
-  // GESTURI (Adrian, 13 iul): lista dezactivată; ce NU e bifat NU se folosește.
+  // GESTURES (Adrian, Jul 13): the disabled list — what is NOT checked is NOT used.
   const [gestOff, setGestOff] = useState<string[]>([])
   const [gestSaved, setGestSaved] = useState(false)
-  // La preview, panoul devine transparent ~3.5s ca să vezi avatarul din spate.
+  // On preview the panel goes transparent for ~3.5s, so you see the avatar behind.
   const [peek, setPeek] = useState(false)
-  // Butonul „Pune pe 0” din tabul Bani: cât timp rulează, nu se apasă de două ori.
+  // The „Pune pe 0” button in the Money tab: while it runs, it can't be pressed twice.
   const [resetBusy, setResetBusy] = useState(false)
   const previewAndPeek = (clip: string): void => {
     previewGesture(clip)
     setPeek(true)
     window.setTimeout(() => setPeek(false), 3500)
   }
-  // Chat live cu vizitatorii (inbox owner): conversații, cea selectată, răspuns.
+  // Live chat with visitors (owner inbox): conversations, the selected one, the reply.
   const [vconvos, setVconvos] = useState<VisitorConvo[]>([])
   const [vsel, setVsel] = useState<string | null>(null)
   const [vmsgs, setVmsgs] = useState<VisitorMsg[]>([])
@@ -183,28 +183,28 @@ export default function AdminPanel({
   const [loading, setLoading] = useState(false)
   const [gaps, setGaps] = useState<CapabilityGap[]>([])
   const [triaging, setTriaging] = useState(false)
-  // AUDITUL CĂZUTELOR (Adrian, 27 iul): tot ce a căzut, în același tab cu gaps.
+  // THE OUTAGES AUDIT (Adrian, Jul 27): everything that went down, in the same tab as gaps.
   const [audit, setAudit] = useState<AuditReport | null>(null)
   const [finance, setFinance] = useState<Finance | null>(null)
-  // Circuitul banilor Stripe→AI, gestionat DIN admin (Adrian, 24 iul).
+  // The money circuit, managed FROM admin (Adrian, Jul 24).
   const [circuit, setCircuit] = useState<MoneyCircuit | null>(null)
-  // AICI AU STAT `cardBusy` și `cardDeschis` — starea butonului „Creează cardul"
-  // și a ferestrei care arăta numărul cardului virtual Stripe. Cardul Issuing a
-  // ieșit odată cu Stripe (30 iul): furnizorii se plătesc cu cardul lui Adrian.
-  // Tranzacțiile Stripe au fost SCOASE din panou pe 31 iul odată cu canalul —
-  // nu se mai citesc, deci nu se mai ține starea lor (nici nu se mai cer de la
-  // server la fiecare încărcare de tab).
-  // Pool AI — cât încarci/scoți (valoare tastată) + starea butoanelor.
-  // Lead-uri — vizitatori care și-au lăsat emailul.
+  // HERE STOOD `cardBusy` and `cardDeschis` — the state of the „Creează cardul”
+  // button and of the window that showed the Stripe virtual card number. The
+  // Issuing card left with Stripe (Jul 30): providers are paid with Adrian's card.
+  // Stripe transactions were REMOVED from the panel on Jul 31 with the channel —
+  // they are no longer read, so their state is no longer kept (nor requested
+  // from the server on every tab load).
+  // AI pool — how much you add/remove (typed value) + the buttons' state.
+  // Leads — visitors who left their email.
   const [leads, setLeads] = useState<Lead[]>([])
   const [demos, setDemos] = useState<DemoStats | null>(null)
   const [activity, setActivity] = useState<UserActivity | null>(null)
   const [stores, setStores] = useState<StoresData | null>(null)
   const [voiceprints, setVoiceprints] = useState<VoiceprintRow[]>([])
   const [voiceprintsLoading, setVoiceprintsLoading] = useState(false)
-  // CONSTRUCTORUL (Adrian, 27 iul: „Kelion trebuie să poată crea orice soft îi
-  // cere admin"): ordine noi + coada cu starea lor (lucrătorul de pe VPS le
-  // execută și deschide PR-uri; merge-ul e al lui Adrian).
+  // THE BUILDER (Adrian, Jul 27: „Kelion must be able to create any software the
+  // admin asks him to”): new orders + the queue with their state (the worker on
+  // the VPS executes them and opens PRs; the merge is Adrian's).
   interface BuildJobRow {
     id: number
     status: 'queued' | 'running' | 'done' | 'failed'
@@ -217,7 +217,7 @@ export default function AdminPanel({
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
-  // RECUPERARE (Adrian, 27 iul): versiunile salvate + salvarea versiunii curente.
+  // RECOVERY (Adrian, Jul 27): saved versions + saving the current version.
   interface RecoveryRow {
     tag: string
     sha: string
@@ -228,21 +228,21 @@ export default function AdminPanel({
   const [recoveryLoading, setRecoveryLoading] = useState(false)
   const [recoveryNote, setRecoveryNote] = useState('')
   const [recoveryMsg, setRecoveryMsg] = useState('')
-  // Restaurarea CU BUTON (Adrian, 27 iul: „să se poată selecta de admin").
-  // Cât timp o restaurare rulează, toate butoanele de restaurare sunt blocate.
+  // Restore BY BUTTON (Adrian, Jul 27: „the admin must be able to select it”).
+  // While a restore runs, every restore button is locked.
   const [restoringTag, setRestoringTag] = useState<string | null>(null)
-  // LACĂTUL BUTONULUI ADMIN (Adrian, 27 iul): secretul de activare se setează
-  // AICI (lângă amprente — ambii factori ai lacătului stau împreună). Odată
-  // armat, butonul Admin cere amprenta vocală sau secretul; nu se dezarmează.
+  // THE ADMIN BUTTON LOCK (Adrian, Jul 27): the activation secret is set HERE
+  // (next to the voiceprints — both lock factors stay together). Once armed,
+  // the Admin button asks for the voiceprint or the secret; it never disarms.
   const [lockArmed, setLockArmed] = useState<boolean | null>(null)
   const [lockSecret, setLockSecret] = useState('')
   const [lockMsg, setLockMsg] = useState('')
-  // Redarea mostrei audio a unei amprente (butonul „play"): reținem cine cântă
-  // acum ca să arătăm ⏸ și să nu pornim două deodată.
+  // Playing a voiceprint's audio sample (the „play” button): we remember who is
+  // playing now, to show ⏸ and never start two at once.
   const [playingVp, setPlayingVp] = useState<string | null>(null)
   const vpAudioRef = useRef<HTMLAudioElement | null>(null)
   const playVoiceprint = async (email: string): Promise<void> => {
-    // Al doilea click pe același rând oprește redarea.
+    // A second click on the same row stops playback.
     if (vpAudioRef.current) {
       vpAudioRef.current.pause()
       vpAudioRef.current = null
@@ -269,16 +269,16 @@ export default function AdminPanel({
   }
   const [tokenChecks, setTokenChecks] = useState<TokenChecksResult | null>(null)
   const [tokenChecksLoading, setTokenChecksLoading] = useState(false)
-  // CE CHEI VEDE SERVERUL CHIAR ACUM — răspunsul la „le-am scris de zeci de ori".
+  // WHICH KEYS THE SERVER SEES RIGHT NOW — the answer to „I've typed them dozens of times”.
   const [envCheck, setEnvCheck] = useState<EnvCheckResult | null>(null)
 
   // The conversation + testing profile of a clicked user (tab "Utilizatori") —
-  // ce a scris (chatul) și cum a testat (browser/device/IP/sesiuni/timp), într-un
-  // singur click, fără să mai treacă prin tabul separat "Istoric chat".
+  // what he wrote (the chat) and how he tested (browser/device/IP/sessions/time),
+  // in one click, without going through the separate "Istoric chat" tab.
   const [userConvo, setUserConvo] = useState<{ u: UserActivityRow; rows: HistoryRow[] } | null>(null)
   const [userConvoLoading, setUserConvoLoading] = useState(false)
-  // „Tradu în română" în vizualizarea conversațiilor: roOn = afișăm traducerea;
-  // roMap = cache text-original → traducere (o singură cerere per mesaj nou).
+  // „Tradu în română” in the conversation view: roOn = show the translation;
+  // roMap = original-text → translation cache (one request per new message).
   const [roOn, setRoOn] = useState(false)
   const [roMap, setRoMap] = useState<Record<string, string>>({})
   const [roBusy, setRoBusy] = useState(false)
@@ -301,7 +301,7 @@ export default function AdminPanel({
     }
     setRoOn(true)
   }
-  // La deschiderea unei conversații noi, pornim mereu pe limba originală.
+  // Opening a new conversation always starts on the original language.
   const showMsg = (content: string): string => (roOn ? (roMap[content] ?? content) : content)
 
   async function openUserConvo(u: UserActivityRow): Promise<void> {
@@ -313,10 +313,10 @@ export default function AdminPanel({
     setUserConvoLoading(false)
   }
 
-  // MANETA OWNERULUI: oprește / repornește autonomia, dintr-un click. După
-  // apăsare recitim starea de la server — nu presupunem că a mers.
+  // THE OWNER'S LEVER: stops / restarts autonomy in one click. After the press
+  // we re-read the state from the server — we don't assume it worked.
   const [pauzaBusy, setPauzaBusy] = useState(false)
-  // CELE OPT DOVEZI (Adrian, 31 iul: „trebuie 8 din 8 dovezi").
+  // THE EIGHT PROOFS (Adrian, Jul 31: „there must be 8 out of 8 proofs”).
   const [dovezi, setDovezi] = useState<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null>(null)
   async function onPauzaAutonomie(oprit: boolean): Promise<void> {
     setPauzaBusy(true)
@@ -338,11 +338,11 @@ export default function AdminPanel({
   }, [])
 
   // While the "Cereri neacoperite" tab is open, refresh every 15s so a request
-  // that reached a successful deploy DISPARE singură din listă (auto-rezolvat).
+  // that reached a successful deploy DISAPPEARS from the list (auto-resolved).
   useEffect(() => {
     if (tab !== 'gaps') return
-    // Auditul căzutelor se încarcă la deschiderea tabului și se reîmprospătează
-    // împreună cu gaps — un singur loc unde vezi TOT ce a picat.
+    // The outages audit loads when the tab opens and refreshes together with the
+    // gaps — a single place where you see EVERYTHING that went down.
     void fetchAudit().then(setAudit)
     const id = window.setInterval(() => {
       void fetchGaps().then(setGaps)
@@ -351,16 +351,16 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
-  // SINCRONIZARE CU NAVIGAREA DIN VOCE (auditul de fluiditate 27 iul, defectul
-  // 7): initialTab era doar valoarea de pornire — dacă panoul era DEJA deschis
-  // și Kelion primea „deschide admin → vizitatori", tab-ul nu se schimba deloc.
+  // SYNC WITH VOICE NAVIGATION (fluidity audit Jul 27, defect 7): initialTab was
+  // only the starting value — if the panel was ALREADY open and Kelion got
+  // „deschide admin → vizitatori”, the tab didn't change at all.
   useEffect(() => {
     if (initialTab) setTab(initialTab)
   }, [initialTab])
 
-  // ÎNCĂRCARE PE TAB, NU PE CLICK (defectul 6): stores/inbox/tokenuri își
-  // încărcau datele DOAR din onClick-ul butonului — deschise prin voce sau
-  // initialTab rămâneau permanent goale („Se verifică magazinele live…" etern).
+  // LOAD ON TAB, NOT ON CLICK (defect 6): stores/inbox/tokens loaded their data
+  // ONLY from the button's onClick — opened by voice or initialTab they stayed
+  // forever empty („Se verifică magazinele live…” forever).
   useEffect(() => {
     if (tab === 'stores') {
       void fetchStores().then(setStores)
@@ -373,9 +373,9 @@ export default function AdminPanel({
         setMailboxLoading(false)
       })
     } else if (tab === 'tokenuri') {
-      // Tabelul „Ce chei vede serverul CHIAR ACUM" se încarcă odată cu tabul.
-      // Apelul ăsta ajunsese din greșeală la coada ramurii `inbox`, deci tabelul
-      // nu apărea NICIODATĂ în Tokenuri — prins de Adrian dintr-o captură.
+      // The „Ce chei vede serverul CHIAR ACUM” table loads together with the tab.
+      // This call had ended up by mistake at the tail of the `inbox` branch, so the
+      // table NEVER appeared in Tokens — caught by Adrian from a screenshot.
       void fetchEnvCheck().then(setEnvCheck)
       setTokenChecksLoading(true)
       void fetchTokenChecks().then((r) => {
@@ -385,9 +385,9 @@ export default function AdminPanel({
     }
   }, [tab])
 
-  // BANI ÎN TIMP REAL (Adrian, 24 iul: „toate creditele se afișează în timp
-  // real, valoarea reală"): cât timp tabul Bani e deschis, reîmprospătăm soldul
-  // OpenRouter, Stripe, profit și tranzacțiile la fiecare 15s — valori LIVE.
+  // MONEY IN REAL TIME (Adrian, Jul 24: „all credits show in real time, the real
+  // value”): while the Money tab is open we refresh the balances and the profit
+  // every 15s — LIVE values.
   useEffect(() => {
     if (tab !== 'finance') return
     const id = window.setInterval(() => {
@@ -426,8 +426,8 @@ export default function AdminPanel({
     vLastId.id = 0
     setVsel(conv)
     setVmsgs([])
-    // OCUPAT VIZIBIL (auditul de fluiditate 27 iul, defectul 10): firul se
-    // golea și rămânea ALB cât se aducea conversația — părea stricat.
+    // VISIBLE BUSY (fluidity audit Jul 27, defect 10): the thread emptied and
+    // stayed WHITE while the conversation loaded — it looked broken.
     setVLoading(true)
     const rows = await fetchVisitorChat(conv, 0)
     setVLoading(false)
@@ -446,7 +446,7 @@ export default function AdminPanel({
     }
   }
 
-  // Tab „Amprente vocale" deschis → încarcă lista și reîmprospătează la 10s.
+  // Tab „Amprente vocale” open → loads the list and refreshes every 10s.
   useEffect(() => {
     if (tab !== 'voiceprints') return
     const load = async (): Promise<void> => {
@@ -460,7 +460,7 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
-  // Tab „Constructor" deschis → coada ordinelor, reîmprospătată la 10s.
+  // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
     if (tab !== 'constructor') return
     const load = (): void => {
@@ -498,7 +498,7 @@ export default function AdminPanel({
       .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
   }
 
-  // Tab „Recuperare" deschis → încarcă punctele de recuperare salvate.
+  // Tab „Recuperare” open → loads the saved recovery points.
   const loadRecovery = (): void => {
     setRecoveryLoading(true)
     fetch('/api/admin/backups', { credentials: 'include' })
@@ -532,9 +532,9 @@ export default function AdminPanel({
       .catch(() => setRecoveryMsg('Nu s-a putut salva — reîncearcă.'))
   }
 
-  // Restaurează aplicația la un punct salvat: confirmare dublă (acțiune grea —
-  // producția se schimbă), apoi serverul aduce master la starea tag-ului și
-  // publicarea pornește singură. Butonul arată mersul și rezultatul cu dovadă.
+  // Restores the app to a saved point: double confirmation (heavy action —
+  // production changes), then the server brings master to the tag's state and
+  // the publish starts by itself. The button shows progress and result, with proof.
   const restoreFromPoint = (p: RecoveryRow): void => {
     const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
     if (!window.confirm(`Restaurezi aplicația la versiunea din ${when} (${p.sha})?`)) return
@@ -567,7 +567,7 @@ export default function AdminPanel({
       })
   }
 
-  // Tab „Amprente vocale" deschis → și starea lacătului (armat sau nu).
+  // Tab „Amprente vocale” open → also the lock's state (armed or not).
   useEffect(() => {
     if (tab !== 'voiceprints') return
     fetch('/api/admin/unlock/status', { credentials: 'include' })
@@ -600,14 +600,14 @@ export default function AdminPanel({
       .catch(() => setLockMsg('Nu s-a putut salva — reîncearcă.'))
   }
 
-  // Tab „Gesturi" deschis → încarcă lista dezactivată.
+  // Tab „Gesturi” open → loads the disabled list.
   useEffect(() => {
     if (tab !== 'gesturi') return
     void fetchDisabledGestures().then(setGestOff)
   }, [tab])
 
-  // Bifează/debifează un gest → salvează pe server. Bifat = activ (NU în lista
-  // dezactivată). Ce nu e bifat NU se folosește deloc în aplicație.
+  // Check/uncheck a gesture → saves to the server. Checked = active (NOT on the
+  // disabled list). What is not checked is NOT used anywhere in the app.
   const toggleGesture = (clip: string): void => {
     const next = gestOff.includes(clip) ? gestOff.filter((c) => c !== clip) : [...gestOff, clip]
     setGestOff(next)
@@ -756,15 +756,15 @@ export default function AdminPanel({
             {!finance && <p className="chat-hint">{A.loading}</p>}
             {finance && (
               <>
-                {/* ── PANOUL BANI, CURĂȚAT (Adrian, 30 iul: „simplifică pagina, să
-                    rămână doar ce folosim") ──────────────────────────────────
-                    Ce era: aceleași cifre scrise de două-trei ori. „Stripe —
-                    disponibil" apărea și ca fișă mare sus, și ca rând în pungă.
-                    Soldul creierului apărea de două ori — în dolari sus, în lire
-                    jos („Credit la creier"). Punga cardului, la fel, în două
-                    locuri. Iar „Consumat la AI (real)" era exact suma tabelului
-                    „Cost per AI" de dedesubt. Din 4 fișe + 2 blocuri rămâne UN
-                    singur loc unde scrie cât ai, cu fiecare cifră o dată. */}
+                {/* ── THE MONEY PANEL, CLEANED (Adrian, Jul 30: „simplify the page,
+                keep only what we use”) ─────────────────────────────────────────
+                What it was: the same figures written two-three times. „Stripe —
+                available” appeared both as a big card on top and as a row in the
+                wallet. The brain's balance appeared twice — in dollars on top, in
+                pounds below („Credit la creier”). The card wallet, likewise, in two
+                places. And „Consumat la AI (real)” was exactly the sum of the
+                „Cost per AI” table below. From 4 cards + 2 blocks, ONE single place
+                remains, saying how much you have, each figure exactly once. */}
                 <div className="pool-manage">
                   <div className="pool-manage-head">
                     Punga: {sym}
@@ -772,14 +772,14 @@ export default function AdminPanel({
                     {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
                   </div>
                   <div className="pool-parts">
-                    {/* PUNGA = DOAR CE POATE FI CITIT (Adrian, 30 iul: „Stripe se
-                        scoate total și intră Pro"). Cele trei rânduri Stripe —
-                        disponibil, în tranzit, cardul virtual — descriau bani care
-                        nu mai trec pe aici: userii plătesc pe linkul Revolut, direct
-                        în contul lui, iar furnizorii se plătesc cu cardul lui.
-                        Soldul din Revolut Pro NU poate fi citit (API-ul de conturi
-                        e doar pe Business), deci nu-l punem: ori cifră măsurată,
-                        ori niciuna. Rămâne singurul sold pe care chiar îl citim. */}
+                    {/* THE WALLET = ONLY WHAT CAN BE READ (Adrian, Jul 30: „Stripe goes
+                    out completely and Pro comes in”). The three Stripe rows — available,
+                    in transit, the virtual card — described money that no longer passes
+                    through here: users pay on the Revolut link, straight into his
+                    account, and the providers are paid with his card. The Revolut Pro
+                    balance CANNOT be read (the accounts API is Business-only), so we
+                    don't show it: either a measured figure or none. What remains is the
+                    only balance we actually read. */}
                     {([
                       ['Credit la creier (OpenRouter)', finance.punga.parti.openrouter],
                     ] as [string, number | null][]).map(([eticheta, val]) => (
@@ -789,16 +789,16 @@ export default function AdminPanel({
                       </div>
                     ))}
                   </div>
-                  {/* AICI AU STAT „Depune în pungă" și „Trage profitul". Amândouă
-                      mergeau prin Stripe — Checkout pentru depunere, `/v1/payouts`
-                      pentru retragere. Cu Stripe scos n-au ce mișca: banii userilor
-                      vin pe linkul Revolut, direct în contul lui, iar profitul nu
-                      mai trece prin noi. Un buton care nu mai face nimic e mai rău
-                      decât lipsa lui — pare că merge. */}
+                  {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
+                  through Stripe — Checkout for the deposit, `/v1/payouts` for the
+                  withdrawal. With Stripe out they have nothing to move: the users'
+                  money comes on the Revolut link, straight into his account, and the
+                  profit no longer passes through us. A button that does nothing
+                  anymore is worse than its absence — it looks like it works. */}
                 </div>
-                {/* SOLDUL CREIERULUI se vede în pungă („Credit la creier"), deci
-                    aici nu-l mai repetăm în dolari. Rămâne DOAR când e ceva de
-                    făcut: sub prag sau necitibil. */}
+                {/* THE BRAIN'S BALANCE shows in the wallet („Credit la creier”), so
+                we don't repeat it here in dollars. It stays ONLY when there is
+                something to do: below threshold or unreadable. */}
                 {finance.openrouter && (!finance.openrouter.live || finance.openrouter.low) && (
                   <div className="or-wallet low">
                     {!finance.openrouter.live ? (
@@ -816,48 +816,48 @@ export default function AdminPanel({
                     )}
                   </div>
                 )}
-                {/* AICI A STAT „Circuitul banilor: useri → Stripe → AI" — cele
-                    patru verigi, blocul „Ce pot citi din Stripe", starea Issuing,
-                    crearea cardului virtual și dezvăluirea numărului lui.
-                    Scos pe 30 iul: „Stripe se scoate total și intră Pro".
-                    Circuitul nu mai trece prin aplicație — userul plătește pe
-                    linkul Revolut, banii intră direct la owner, iar furnizorii se
-                    plătesc cu cardul lui. Ce a rămas util aici e drumul cel mai
-                    scurt până unde se schimbă cardul, la fiecare furnizor. */}
+                {/* HERE STOOD „The money circuit: users → Stripe → AI” — the four
+                links, the „What I can read from Stripe” block, the Issuing state,
+                the virtual card creation and its number reveal. Removed on Jul 30:
+                „Stripe goes out completely and Pro comes in”. The circuit no longer
+                passes through the app — the user pays on the Revolut link, the money
+                goes straight to the owner, and the providers are paid with his card.
+                What remains useful here is the shortest path to where the card gets
+                changed, at each provider. */}
                 {(circuit?.expenses?.length ?? 0) > 0 && (
                   <div className="or-wallet">
                     <div className="or-wallet-main">
                       <span className="or-wallet-label">Furnizorii plătiți cu cardul tău</span>
                     </div>
-                    {/* CREDITAREA AUTOMATĂ A PLĂȚILOR (Adrian, 30 iul). Revolut Pro
-                        n-are webhook, deci aplicația citește singură tranzacțiile
-                        și potrivește codul unic. Starea se AFIȘEAZĂ, fiindcă „nu
-                        pot citi contul" și „n-a plătit nimeni" arată identic dacă
-                        taci — exact confuzia care a costat o zi. */}
+                    {/* AUTOMATIC PAYMENT CREDITING (Adrian, Jul 30). Revolut Pro has no
+                    webhook, so the app reads the transactions itself and matches the
+                    unique code. The state is SHOWN, because „I can't read the account”
+                    and „nobody paid” look identical if you stay silent — exactly the
+                    confusion that cost a day. */}
                     {circuit?.citirePlati && (
                       <span className="or-wallet-sub" style={{ color: circuit.citirePlati.ok ? undefined : '#e6a23c' }}>
                         {circuit.citirePlati.ok ? '✅' : '⚠'} Citirea plăților Revolut:{' '}
                         {circuit.citirePlati.detaliu}
                       </span>
                     )}
-                    {/* KELION SE APUCĂ SINGUR (Adrian, 30 iul: „fă-l autonom" ·
-                        „tema autonomiei lui va fi să facă partea totală cu
-                        Revolut"). Aici se vede ULTIMA trecere a buclei: ori a
-                        pornit ceva singur, ori de ce nu. Fără rândul ăsta,
-                        „e autonom" ar fi iar o vorbă de-a mea. */}
-                    {/* COSTUL LA VEDERE (Adrian, 30 iul). Exista ca unealtă —
-                        trebuia să întrebi ca să afli cât te costă. Acum e aici,
-                        lângă bani. Nu taie nimic: arată. */}
+                    {/* KELION STARTS BY HIMSELF (Adrian, Jul 30: „make him autonomous” ·
+                    „his autonomy theme will be doing the whole part with Revolut”).
+                    Here you see the loop's LAST pass: either it started something on
+                    its own, or why not. Without this row, „he is autonomous” would be
+                    just another claim of mine. */}
+                    {/* THE COST IN PLAIN SIGHT (Adrian, Jul 30). It existed as a tool —
+                    you had to ask to learn what it costs you. Now it's here, next to
+                    the money. It cuts nothing: it shows. */}
                     {circuit?.costReal && (
                       <>
                       <span className="or-wallet-sub">
-                        {/* SCRIA „Cât a costat, REAL". Era fals pentru ~90% din
-                            sumă: doar apelurile de creier vin cu banii spuși de
-                            furnizor (OpenRouter usage.cost). Restul — minutele
-                            de voce mai ales — sunt tariful MEU fix înmulțit cu
-                            cât a fost pornit microfonul. Adrian, 31 iul: „de
-                            unde a reieșit valoarea $504?" Exact de-acolo, și
-                            trebuia scris pe cifră, nu explicat după. */}
+                        {/* IT SAID „How much it cost, REAL”. That was false for ~90% of the
+                        sum: only the brain calls come with the money spelled out by the
+                        provider (OpenRouter usage.cost). The rest — the voice minutes
+                        especially — is MY fixed rate multiplied by how long the microphone
+                        was on. Adrian, Jul 31: „where did the $504 figure come from?”
+                        Exactly from there, and it had to be written on the figure, not
+                        explained afterwards. */}
                         💷 Măsurat de furnizor: <b>${circuit.costReal.masurat.toFixed(2)}</b>
                         {' · '}estimat de mine (tarife fixe, NU facturi):{' '}
                         <b>${circuit.costReal.estimat.toFixed(2)}</b>
@@ -884,10 +884,10 @@ export default function AdminPanel({
                       </span>
                       </>
                     )}
-                    {/* MANETA TA (Adrian: „cele 6 trebuiesc, dar nu frâne").
-                        Comanda „pauza-autonomie" exista din 27 iul, dar trebuia
-                        s-o știi pe de rost. O limită pe care o alegi TU nu e o
-                        barieră; una pe care ți-o pun eu, da. */}
+                    {/* YOUR LEVER (Adrian: „the 6 are needed, but not brakes”). The
+                    „pauza-autonomie” command existed since Jul 27, but you had to know
+                    it by heart. A limit YOU choose is not a barrier; one I impose on
+                    you, is. */}
                     <span className="or-wallet-sub">
                       {circuit?.autonomiaOprita ? '⏸ Autonomia e OPRITĂ de tine' : '▶ Autonomia merge'}{' '}
                       <button
@@ -899,10 +899,10 @@ export default function AdminPanel({
                         {circuit?.autonomiaOprita ? 'Repornește' : 'Oprește'}
                       </button>
                     </span>
-                    {/* CELE OPT DOVEZI. Nu o listă scrisă de mine: fiecare
-                        nivel își caută în bază urma lui — un ordin, un PR, o
-                        măsurătoare — și spune „dovedit" DOAR dacă a găsit-o.
-                        Ce n-are dovadă spune ce anume ar fi dovada. */}
+                    {/* THE EIGHT PROOFS. Not a list written by me: each level looks for
+                    its own trace in the database — an order, a PR, a measurement — and
+                    says „proven” ONLY if it found it. What has no proof says what
+                    exactly the proof would be. */}
                     {dovezi && (
                       <span className="or-wallet-sub">
                         🎯 Autonomia: <b>{dovezi.dovedite}/{dovezi.din} dovedite</b>
@@ -926,11 +926,10 @@ export default function AdminPanel({
                         .map((e, i) => (
                           <span key={e.name}>
                             {i > 0 && ' · '}
-                            {/* CE S-A MĂSURAT pe pagina furnizorului, nu ce a
-                                spus cineva: 🔁 = reîncărcare automată pornită,
-                                💳 = doar cardul la dosar (deci NEterminat).
-                                Furnizorul pe care nu l-a atins nimeni n-are
-                                niciun semn — „nu știu" nu se scrie ca „nu". */}
+                            {/* WHAT WAS MEASURED on the provider's page, not what someone said:
+                            🔁 = automatic top-up is on, 💳 = only a card on file (so NOT done).
+                            A provider nobody touched has no sign at all — „I don't know” is
+                            never written as „no”. */}
                             {e.platiAutomate ? '🔁 ' : e.cardPus ? '💳 ' : ''}
                             {e.billingUrl ? (
                               <a href={e.billingUrl} target="_blank" rel="noreferrer">
@@ -946,15 +945,15 @@ export default function AdminPanel({
                 )}
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
-                    {/* Totalul stătea sus, ca fișă separată („Consumat la AI
-                        (real)"), deși e exact suma rândurilor de mai jos. Acum e
-                        capul tabelului pe care-l însumează. */}
+                    {/* The total used to sit on top, as a separate card („Consumat la AI
+                        (real)”), although it is exactly the sum of the rows below. Now it
+                        is the head of the table it sums up. */}
                     Cost per AI — total {sym}
                     {finance.spent.toFixed(2)}, azi ${finance.today.toFixed(2)}
-                    {/* RESETAREA CONTOARELOR (Adrian, 30 iul). Șterge DOAR
-                        jurnalul costurilor noastre la furnizori. Portofelele
-                        userilor NU se ating: creditele consumate nu se dau
-                        înapoi. Punga nu are ce reseta — se citește live. */}
+                    {/* RESETTING THE COUNTERS (Adrian, Jul 30). Deletes ONLY our
+                        provider-cost journal. The users' wallets are NOT touched: spent
+                        credits are never given back. The wallet has nothing to reset — it
+                        is read live. */}
                     <button
                       type="button"
                       className="pool-btn withdraw"
@@ -984,13 +983,13 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
-                {/* BLOCUL STRIPE — SCOS (Adrian, 31 iul: „astea nu mai există" ·
-                    „Stripe nu mai există" · „avem doar Revolut"). Singurul canal
-                    de plată e Revolut, prin card. Rândurile vechi din 24 iul erau
-                    probele lui, de pe conturile lui, plătite cu cardul lui — nu
-                    venit de la clienți. Rămân în baza de date (`transactions`),
-                    dar nu mai au ce căuta în panou: afișau un canal mort ca și
-                    cum ar fi viu. */}
+                {/* THE STRIPE BLOCK — REMOVED (Adrian, Jul 31: „these don't exist
+                    anymore” · „Stripe doesn't exist anymore” · „we only have Revolut”).
+                    The only payment channel is Revolut, by card. The old Jul 24 rows
+                    were his own tests, from his own accounts, paid with his own card —
+                    not revenue from clients. They stay in the database (`transactions`),
+                    but no longer belong in the panel: they showed a dead channel as if
+                    it were alive. */}
               </>
             )}
           </section>
@@ -1418,12 +1417,13 @@ export default function AdminPanel({
         )}
         {tab === 'tokenuri' && (
           <section className="admin-finance">
-            {/* CE VEDE SERVERUL, ÎNAINTE DE ORICE TEST DE REȚEA (Adrian, 30 iul:
-                „toate cheile au fost scrise de zeci de ori"). O cheie SCRISĂ nu
-                ajunge automat în procesul care rulează: poate fi în alt fișier
-                decât cel dat lui docker, scrisă DUPĂ pornirea containerului, sau
-                pusă ca secret în GitHub fără să fi rulat `vps-set-env`. Tabelul
-                ăsta separă „nu e scrisă" de „e scrisă dar n-a ajuns aici". */}
+            {/* WHAT THE SERVER SEES, BEFORE ANY NETWORK TEST (Adrian, Jul 30:
+                „all the keys have been typed dozens of times”). A WRITTEN key does
+                not automatically reach the running process: it can be in a
+                different file than the one given to docker, written AFTER the
+                container started, or set as a GitHub secret without running
+                `vps-set-env`. This table separates „not written” from „written but
+                never got here”. */}
             {envCheck && (
               <div className="fin-breakdown" style={{ marginBottom: 14 }}>
                 <div className="fin-breakdown-head">
@@ -1741,8 +1741,8 @@ export default function AdminPanel({
                     </div>
                   ))}
                 </div>
-                {/* Probele demo sunt MOARTE (nimic nu mai scrie demo_uses) — lista
-                    arată doar VIZITELE, fără badge/flux DEMO. */}
+                {/* The demo probes are DEAD (nothing writes demo_uses anymore) — the
+                list shows only the VISITS, no DEMO badge/flow. */}
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">Vizite recente — profil complet</div>
                   {demos.recent.length === 0 && <div className="chat-hint">—</div>}
@@ -1777,8 +1777,8 @@ export default function AdminPanel({
                           {r.device ? ` · ${r.device === 'mobile' ? 'mobil' : 'desktop'}` : ''}
                         </span>
                         {r.lang && <span>limbă {r.lang}</span>}
-                        {/* Fusul LUI + a câta oară vine (Adrian, 31 iul: „acest
-                            câmp trebuie să ofere full informații despre vizită"). */}
+                        {/* HIS timezone + how many times he has come (Adrian, Jul 31: „this
+                        field must offer full information about the visit”). */}
                         {r.tz && (
                           <span>
                             {r.tz} · la el era{' '}
@@ -1930,8 +1930,8 @@ export default function AdminPanel({
         )}
         {tab === 'gaps' && (
           <section className="admin-gaps">
-            {/* TRIAJ AUTONOM (Adrian, 24 iul): Kelion decide singur — valoros
-                rămâne „DE IMPLEMENTAT", restul se închide automat cu motiv. */}
+            {/* AUTONOMOUS TRIAGE (Adrian, Jul 24): Kelion decides by himself —
+            the valuable one stays „DE IMPLEMENTAT”, the rest auto-close with a reason. */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               <button
                 type="button"
@@ -1978,9 +1978,9 @@ export default function AdminPanel({
               </div>
             ))}
 
-            {/* AUDITUL CĂZUTELOR (Adrian, 27 iul: „aici trebuie să vezi toate
-                auditurile și toate căzutele"): sănătate + erori server + erori
-                client + ordine eșuate — TOT ce a picat, în acest tab. */}
+            {/* THE OUTAGES AUDIT (Adrian, Jul 27: „here you must see all the
+            audits and all the failures”): health + server errors + client
+            errors + failed orders — EVERYTHING that went down, in this tab. */}
             <h3 style={{ marginTop: 22, marginBottom: 6 }}>
               Audit — toate căzutele{' '}
               <span style={{ fontWeight: 400, fontSize: 12, opacity: 0.7 }}>
