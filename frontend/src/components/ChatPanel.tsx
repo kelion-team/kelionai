@@ -1722,15 +1722,17 @@ export default function ChatPanel({
         captureRef={captureRef}
       />
       {/* THE CONVERSATION, VISIBLE (Adrian, Aug 1: „the reply must reach the
-      chat" — the sweeping band alone was not enough; the exchange lives here as
-      bubbles: you on the right, Kelion on the left, streaming live, auto-scroll).
+      chat" — bubbles: you on the right, Kelion on the left, streaming live,
+      auto-scroll). ONLY THE LAST EXCHANGE SHOWS (Adrian, Aug 1: „trebuie doar
+      ultimul mesaj din chat afișat") — the log is not a history; history lives
+      in the saved conversation, the screen shows the CURRENT exchange.
       In monitor mode the log hides so nothing covers the monitor — the full
       reply then stays on the band's ticker, as before. */}
       {!monitorMode && (
         <div className="chat-log" ref={chatLogRef}>
           {messages.length === 0 && <p className="chat-hint">{hint}</p>}
-          {messages.slice(-100).map((m, i) =>
-            m.content.trim() ? (
+          {[lastUser, lastAssistant].map((m, i) =>
+            m && m.content.trim() ? (
               <div key={`${m.ts ?? 0}-${i}`} className={`chat-msg ${m.role === 'user' ? 'me' : 'kelion'}`}>
                 <span className="chat-msg-text">{m.content}</span>
               </div>
