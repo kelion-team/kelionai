@@ -26,7 +26,7 @@ import { vectorDistance } from '../db.js'
 //                              (voice unlock for admin). It does NOT save
 //                              messages — /api/chat owns the history now.
 export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { sdp?: string; language?: string } }>(
+  app.post<{ Body: { sdp?: string; language?: string; ears?: string } }>(
     '/api/realtime/session',
     async (req, reply) => {
       const user = getSessionUser(req)
@@ -64,7 +64,10 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
 
       // THE VOICE CHOSEN BY THIS PERSON, not one for everyone (Adrian, Jul 30).
       const vocePref = await getVoicePref(user.email).catch(() => null)
-      const res = await openaiRealtimeAnswer(offer, lang, isAdmin, vocePref)
+      // THE BIG STEP (Aug 1): 'chirp' = the live ears are Google Chirp 3 —
+      // this session is PURE MOUTH (no input transcription, no VAD).
+      const urechiChirp = String(req.body?.ears ?? '') === 'chirp'
+      const res = await openaiRealtimeAnswer(offer, lang, isAdmin, vocePref, urechiChirp)
       if (!res.ok) {
         // The REAL reason for the refusal goes into the log — otherwise F12
         // shows only "502" and the diagnosis is blind (Adrian, Jul 24).
