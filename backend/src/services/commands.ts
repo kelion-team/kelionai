@@ -33,16 +33,17 @@ const SWITCH_VERB =
 const CLOSE_ALL = /(?<![\p{L}\p{N}])(tot|totul|toate|everything|all)(?![\p{L}\p{N}])/iu
 
 // Map words the user says to a monitor task kind (the tab to switch/close).
-// BUG REAL PRINS DE TESTE (30 iul): aici era `\b...\b`, iar în JavaScript `\b`
-// e ASCII-only — după „ă"/„î"/„ș" NU se potrivește. Efectul, dovedit:
-//   „treci pe hartă"  → NU făcea nimic (fără diacritic mergea);
-//   „închide hartă"   → închidea TAB-UL ACTIV în loc de hartă (chiar regresia
-//                        W4 #2 pe care comentariul de mai jos o crede reparată).
-// Aceeași capcană ca la „Dansează!" (20 iul, AI-HANDOFF). Soluția casei, deja
-// folosită de CLOSE_VERB/SWITCH_VERB din acest fișier: graniță Unicode explicită
-// prin lookaround + flag `u`.
-const G0 = '(?<![\\p{L}\\p{N}])' // început de cuvânt, sigur pe diacritice
-const G1 = '(?![\\p{L}\\p{N}])' // sfârșit de cuvânt, sigur pe diacritice
+// REAL BUG CAUGHT BY TESTS (30 Jul): this used to be `\b...\b`, and in
+// JavaScript `\b` is ASCII-only — after "ă"/"î"/"ș" it does NOT match. The
+// proven effect:
+//   "treci pe hartă"  → did NOTHING (without the diacritic it worked);
+//   "închide hartă"   → closed the ACTIVE TAB instead of the map (the very
+//                        W4 #2 regression the comment below believed fixed).
+// The same trap as "Dansează!" (20 Jul, AI-HANDOFF). The house solution,
+// already used by CLOSE_VERB/SWITCH_VERB in this file: an explicit Unicode
+// boundary via lookaround + the `u` flag.
+const G0 = '(?<![\\p{L}\\p{N}])' // word start, safe on diacritics
+const G1 = '(?![\\p{L}\\p{N}])' // word end, safe on diacritics
 const cuvinte = (corp: string): RegExp => new RegExp(`${G0}(?:${corp})${G1}`, 'iu')
 
 const RE_MAP = cuvinte('hart[ăa]|harta|map|rut[ăa]|ruta|traseu\\p{L}*|route|directions|navigat\\p{L}*')
@@ -103,9 +104,10 @@ export function interpretDeviceCommand(
   if (CLOSE_VERB.test(msg)) {
     if (CLOSE_ALL.test(msg)) return { screen: { op: 'closeAll' } }
     const kind = taskKindFromText(msg)
-    // W4 #2: dacă Adrian numește o suprafață anume (ex. „închide harta"), o închidem
-    // DOAR dacă e chiar deschisă; altfel lăsăm creierul să răspundă — NU închidem
-    // tab-ul activ (alt lucru) doar fiindcă cel numit nu e deschis.
+    // W4 #2: if Adrian names a specific surface (e.g. "închide harta"), we
+    // close it ONLY if it is actually open; otherwise we let the brain answer
+    // — we do NOT close the active tab (a different thing) just because the
+    // named one isn't open.
     if (kind) {
       if (open.some((t) => t.kind === kind)) return { screen: { op: 'closeKind', kind } }
       return null
@@ -143,14 +145,16 @@ export type GestureLabel = 'raiseRightHand' | 'salute' | 'pointMonitor' | 'dans'
 
 const GESTURE_KEYWORDS: { label: GestureLabel; patterns: RegExp[] }[] = [
   {
-    // „Dansează!" e comandă DIRECTĂ (Adrian, 24 iul: în test Kelion a refuzat să
-    // danseze — modelul de chat nu chema unealta). Determinist, fără creier:
-    // doar forme imperative clare, ca o discuție DESPRE dans să nu-l pornească.
+    // "Dansează!" is a DIRECT command (Adrian, 24 Jul: in the test Kelion
+    // refused to dance — the chat model wasn't calling the tool).
+    // Deterministic, no brain: only clear imperative forms, so a conversation
+    // ABOUT dancing doesn't trigger it.
     label: 'dans',
     patterns: [
-      // FĂRĂ \b după diacritice: în JS \b se bazează pe \w (ASCII), deci după
-      // „ă" nu există graniță de cuvânt → /danseaz[ăa]\b/ NU prindea „Dansează!"
-      // (bug dovedit în testul live din 24 iul). Prefixul e suficient de precis.
+      // NO \b after diacritics: in JS \b relies on \w (ASCII), so after
+      // "ă" there is no word boundary → /danseaz[ăa]\b/ did NOT catch
+      // "Dansează!" (bug proven in the 24 Jul live test). The prefix is
+      // precise enough.
       /\bdanseaz/i,
       /\bf[ăa]\s+un\s+dans\b/i,
       /\b(do\s+a\s+dance|dance\s+for\s+me)\b/i,
