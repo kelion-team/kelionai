@@ -166,15 +166,22 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           // already unlocked session (typed secret) or with the padlock unarmed.
           const enrolAllowed = !isAdmin || !(await isArmed()) || hasUnlock(req, user.email)
           if ((!hasRef && enrolAllowed) || (hasRef && isHolder)) {
-            void saveVoiceprint({
-              email: user.email,
-              name: user.name || stored?.name || user.email.split('@')[0],
-              gender: inferGender(vf.meta.pitchMean),
-              isAdmin,
-              features: vf.vector,
-              featureMeta: vf.meta,
-              audioClip: '',
-            })
+            void saveVoiceprint(
+              {
+                email: user.email,
+                name: user.name || stored?.name || user.email.split('@')[0],
+                // Gender from the MEDIAN pitch (spike-proof); on adaptation the
+                // stored gender wins inside saveVoiceprint.
+                gender: inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean),
+                isAdmin,
+                features: vf.vector,
+                featureMeta: vf.meta,
+                audioClip: '',
+              },
+              // First enrolment = fresh reference; a matching voice = gentle
+              // adaptation (blend, stable gender).
+              { adapt: hasRef && isHolder },
+            )
           }
           foreignVoice = hasRef && !isHolder ? true : undefined
           // GUEST RECOGNITION — only when it is NOT the holder.

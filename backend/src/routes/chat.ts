@@ -1532,20 +1532,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // corrupted. Now we save ONLY on the first voice (enrollment) or when the
       // current voice matches (fine adaptation).
       if (hasVoice && vf) {
-        const gender = inferGender(vf.meta.pitchMean)
+        const gender = inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean)
         const hasRef = !!storedVoice?.features?.length
         const refDist = hasRef ? vectorDistance(vf.vector, storedVoice!.features) : Infinity
         const isAccountHolder = refDist < 0.38
         if (!hasRef || isAccountHolder) {
-          void saveVoiceprint({
-            email: user.email,
-            name: user.name || storedVoice?.name || user.email.split('@')[0],
-            gender,
-            isAdmin: isOwnerByEmail,
-            features: vf.vector,
-            featureMeta: vf.meta,
-            audioClip: typeof vf.clip === 'string' ? vf.clip : '',
-          })
+          void saveVoiceprint(
+            {
+              email: user.email,
+              name: user.name || storedVoice?.name || user.email.split('@')[0],
+              gender,
+              isAdmin: isOwnerByEmail,
+              features: vf.vector,
+              featureMeta: vf.meta,
+              audioClip: typeof vf.clip === 'string' ? vf.clip : '',
+            },
+            // Adaptation (blend + stable gender) — never a blind overwrite.
+            { adapt: hasRef && isAccountHolder },
+          )
         }
         const genderLabel =
           gender === 'male' ? 'bărbat' : gender === 'female' ? 'femeie' : 'necunoscut'

@@ -2618,6 +2618,9 @@ export async function listInboundEmails(limit = 50): Promise<InboundEmail[]> {
 
 export interface VoiceFeatureMeta {
   pitchMean: number
+  // The median pitch — the gender is inferred from THIS (robust to tracker
+  // spikes). Optional: old clients don't send it.
+  pitchMedian?: number
   pitchStd: number
   pitchMin: number
   pitchMax: number
@@ -2675,18 +2678,52 @@ function rowToVoiceprint(r: VoiceprintDbRow): VoiceprintRow {
   }
 }
 
-export async function saveVoiceprint(v: {
-  email: string
-  name: string
-  gender: VoiceprintRow['gender']
-  isAdmin: boolean
-  features: number[]
-  featureMeta: VoiceFeatureMeta
-  audioClip?: string
-}): Promise<void> {
+export async function saveVoiceprint(
+  v: {
+    email: string
+    name: string
+    gender: VoiceprintRow['gender']
+    isAdmin: boolean
+    features: number[]
+    featureMeta: VoiceFeatureMeta
+    audioClip?: string
+  },
+  opts: { adapt?: boolean } = {},
+): Promise<void> {
   if (!dbEnabled() || !v.email) return
   try {
-    const vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    let vec = v.features.filter((x) => Number.isFinite(x)).slice(0, 64)
+    let gender = v.gender
+    let featureMeta: VoiceFeatureMeta = v.featureMeta
+    // ADAPTATION, NOT OVERWRITE (Adrian, Aug 1: his print flip-flopped
+    // male↔female as single bad pitch readings rewrote it on every matching
+    // turn). On an adaptation save: (1) the stored GENDER wins — it was set at
+    // enrolment from a full phrase and never flips on one utterance; (2) the
+    // vector BLENDS (70% old + 30% new) so one bad read can't drag the
+    // reference away from the holder's real timbre; (3) the meta blends the
+    // same way, keeping the stored gender's pitch evidence.
+    if (opts.adapt) {
+      const cur = await getPool().query<{
+        features: number[]
+        gender: VoiceprintRow['gender']
+        feature_meta: VoiceFeatureMeta
+      }>('SELECT features, gender, feature_meta FROM voiceprints WHERE user_email = $1', [v.email.toLowerCase()])
+      const old = cur.rows[0]
+      if (old?.features?.length) {
+        if (old.gender && old.gender !== 'unknown') gender = old.gender
+        const len = Math.min(old.features.length, vec.length)
+        vec = vec.map((x, i) => (i < len ? 0.7 * old.features[i] + 0.3 * x : x))
+        const om = old.feature_meta ?? ({} as VoiceFeatureMeta)
+        featureMeta = {
+          ...v.featureMeta,
+          pitchMean: om.pitchMean ? 0.7 * om.pitchMean + 0.3 * v.featureMeta.pitchMean : v.featureMeta.pitchMean,
+          pitchMedian:
+            om.pitchMedian && v.featureMeta.pitchMedian
+              ? 0.7 * om.pitchMedian + 0.3 * v.featureMeta.pitchMedian
+              : (v.featureMeta.pitchMedian ?? om.pitchMedian),
+        }
+      }
+    }
     // The audio sample: we only keep it if it's reasonable in size (≤ ~600KB
     // base64, a few seconds of webm/opus). Too big → we don't store it, but
     // identification still works.
@@ -2701,7 +2738,7 @@ export async function saveVoiceprint(v: {
              -- new clip only if one arrived; otherwise keep the old sample.
              audio_clip = CASE WHEN $7 <> '' THEN $7 ELSE voiceprints.audio_clip END,
              updated_at = now()`,
-      [v.email.toLowerCase(), v.name, v.gender, v.isAdmin, vec, JSON.stringify(v.featureMeta), clip],
+      [v.email.toLowerCase(), v.name, gender, v.isAdmin, vec, JSON.stringify(featureMeta), clip],
     )
   } catch {
     // Never break the chat because voiceprint persistence failed.
