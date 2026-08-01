@@ -39,6 +39,13 @@ describe('mesajele vizibile userului sunt neutre', () => {
     expect(sursa).not.toContain('free model hit its per-minute')
   })
 
+  it('NU există mesaje user-facing despre „creier gol" sau instrucțiuni de model/Setări', () => {
+    expect(sursa).not.toContain('creierul a răspuns gol')
+    expect(sursa).not.toContain('the brain returned empty')
+    expect(sursa).not.toContain('schimbă modelul din Setări')
+    expect(sursa).not.toContain('switch the model in Settings')
+  })
+
   it('NU există mesaje user-facing care cer bani sau menționează creditul creierului', () => {
     expect(sursa).not.toContain('Am epuizat momentan creditul creierului')
     expect(sursa).not.toContain('run out of brain credit')
