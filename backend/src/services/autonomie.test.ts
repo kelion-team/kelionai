@@ -1,22 +1,25 @@
-// ── BUCLA CARE ÎL PUNE PE KELION SĂ SE APUCE SINGUR ──────────────────────────
+// ── THE LOOP THAT MAKES KELION GET TO WORK BY ITSELF ─────────────────────────
 //
-// Adrian, 30 iul: „fă-l autonom" · „dă-i liber să se repare singur" · „tema
-// autonomiei lui va fi să facă partea totală cu Revolut" · „are liber 1000000%
-// să folosească tot ca să obțină scopul meu".
+// Adrian, Jul 30: "make it autonomous" · "let it repair itself" · "its
+// autonomy theme will be to do the whole Revolut part" · "it has 1000000%
+// freedom to use everything to reach my goal".
 //
-// CE APĂRĂ TESTUL ĂSTA, și de ce fiecare rând e aici:
+// WHAT THIS TEST GUARDS, and why every row is here:
 //
-//   1. **Sarcina ajunge unde EXISTĂ uneltele.** Ăsta e bugul pe care era să-l
-//      trimit în producție: pașii de portal plecau la CONSTRUCTOR, care are
-//      exact 7 unelte (ls/grep/read/write/edit/run/finish) și NICIUN browser.
-//      I-aș fi cerut unui agent fără browser să intre pe un site — ar fi picat
-//      de trei ori, pe banii ownerului, și s-ar fi oprit cu „blocat".
-//   2. **„Gata" se MĂSOARĂ, nu se declară.** Un pas de mâini e terminat doar
-//      dacă cheile CHIAR există. Cuvântul creierului nu e dovadă — regula #1.
-//   3. **Aprobarea ownerului nu e eșecul lui.** Când legea cere apăsarea
-//      titularului de cont, pasul NU consumă o încercare: n-a greșit nimeni.
-//   4. Restul gărzilor: un lucru odată, plafonul zilnic care chiar oprește,
-//      trei încercări pe același zid și apoi mai departe, cu motivul la vedere.
+//   1. **The task lands where the tools EXIST.** This is the bug I almost
+//      shipped to production: portal steps were leaving for the CONSTRUCTOR,
+//      which has exactly 7 tools (ls/grep/read/write/edit/run/finish) and NO
+//      browser. I would have asked an agent without a browser to enter a site
+//      — it would have failed three times, on the owner's money, and stopped
+//      with "blocked".
+//   2. **"Done" is MEASURED, not declared.** A hands step is finished only if
+//      the keys REALLY exist. The brain's word is no proof — rule #1.
+//   3. **The owner's approval is not its failure.** When the law requires the
+//      account holder's tap, the step does NOT consume an attempt: nobody
+//      made a mistake.
+//   4. The rest of the guards: one thing at a time, the daily ceiling that
+//      really stops, three attempts on the same wall and then moving on, with
+//      the reason in plain sight.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 interface JobFals {
@@ -24,8 +27,9 @@ interface JobFals {
   orderText: string
   status: 'queued' | 'running' | 'done' | 'failed'
   log: string | null
-  /** CINE l-a pornit — „kelion-autonom" = bucla, un email = un om. Zidul se
-   *  uită numai la ordinele PORNITE DE EL: eșecurile date de om nu-l opresc. */
+  /** WHO started it — "kelion-autonom" = the loop, an email = a human. The
+   *  wall only looks at orders STARTED BY IT: human-given failures don't stop
+   *  it. */
   orderedBy?: string
 }
 
@@ -34,11 +38,11 @@ let jobs: JobFals[] = []
 let urmatorulId = 1
 let plafon = 20
 
-// Ce „vede" bucla când întreabă ce secrete există — dovada pașilor de mâini.
+// What the loop "sees" when it asks which secrets exist — the proof of the hands steps.
 let secreteExistente: string[] = []
-// Ce spune creierul după ce a lucrat cu mâinile.
+// What the brain says after it worked with its hands.
 let spuseCreierul = 'am pus cheile'
-// Câte ture de mâini s-au pornit, și cu ce unelte.
+// How many hands turns were started, and with which tools.
 let turiDeMaini = 0
 let uneltePrimite: string[] = []
 
@@ -52,11 +56,11 @@ vi.mock('../config.js', () => ({
   },
 }))
 
-// Golurile pe care Kelion le-a triat singur ca „de implementat".
+// The gaps Kelion triaged by itself as "to be implemented".
 let goluri: { id: number; request: string; hits: number; reason: string | null; triage: string | null }[] = []
 const goluriInchise: number[] = []
 
-// Cerințele ownerului, cu drumul lor (noua → analizata → in_lucru → livrata).
+// The owner's requirements, with their path (noua → analizata → in_lucru → livrata).
 let cerinte: { id: number; text: string; stare: string; criteriu: string | null; aleasa: string | null; optiuni: string | null; dificultate?: number }[] = []
 const cerinteAtinse: { id: number; stare?: string }[] = []
 let evaluari = 0
@@ -91,8 +95,8 @@ vi.mock('../db.js', () => ({
 }))
 
 let ultimulPrompt = ''
-// Scara de modele: o dăm ca listă fixă, ca testul să poată verifica DACĂ o
-// sarcină grea pleacă pe mâna cea mai bună — fără să atingem rețeaua.
+// The model ladder: we give it as a fixed list, so the test can check WHETHER
+// a heavy task leaves on the best hand — without touching the network.
 let scaraCeruta: string[] | undefined
 vi.mock('./brain.js', () => ({
   expertModelLadder: () => ['model-lucru', 'model-top', 'gratuit:free'],
@@ -110,7 +114,7 @@ vi.mock('./brain.js', () => ({
   },
 }))
 
-// Întrerupătorul ownerului. Îl mocuim ca să putem proba AMBELE stări.
+// The owner's switch. We mock it so we can prove BOTH states.
 let opritDeOwner = false
 vi.mock('./runbooks.js', () => ({ isOpsPaused: async () => opritDeOwner }))
 
@@ -118,7 +122,7 @@ vi.mock('./secrete.js', () => ({
   listeazaSecrete: async () => JSON.stringify({ secrete: secreteExistente.map((n) => ({ nume: n })) }),
 }))
 
-// Unde a ajuns fiecare unealtă cerută — asta apără „full echipat".
+// Where every requested tool landed — this guards "fully equipped".
 const cerute: string[] = []
 vi.mock('./adminTools.js', () => ({
   SHARED_ADMIN_TOOLS: new Set([
@@ -130,8 +134,8 @@ vi.mock('./adminTools.js', () => ({
     cerute.push(`admin:${n}`)
     return '{}'
   },
-  // Uneltele legate de EL — memoria, notițele, jurnalele, costul, poșta.
-  // Adrian, 31 iul: „toate trebuie real să le primească."
+  // The tools tied to ITSELF — memory, notes, logs, cost, mail.
+  // Adrian, Jul 31: "it must really receive them all."
   USER_SCOPED_TOOLS: new Set([
     'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
     'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
@@ -148,15 +152,15 @@ vi.mock('./browser.js', () => ({
   browserKey: async () => ({}), browserClickAt: async () => ({}), browserClose: async () => {},
 }))
 
-// Lista ownerului nu se citește de pe disc: aici ne interesează MISIUNEA.
+// The owner's list is not read from disk: here we care about the MISSION.
 vi.mock('node:fs/promises', () => ({ readFile: async () => '' }))
 
 const { poateSaLucreze, uneltele } = await import('./autonomie.js')
-// Fereastra de voce e REALĂ aici (adminLock nu e mocuit): așa se probează chiar
-// poarta cerută de owner, nu o imitație a ei.
+// The voice window is REAL here (adminLock is not mocked): that way the very
+// gate the owner asked for is proven, not an imitation of it.
 const { marcheazaVoce, uitaVocea } = await import('./adminLock.js')
 
-/** Închide un pas, ca să ajungem la următorul fără să-l jucăm de la capăt. */
+/** Closes a step, so we reach the next one without playing it from scratch. */
 function pasInchis(cod: string): void {
   kv.set(`autonomie:pas:${cod}`, JSON.stringify({ job: 0, incercari: 1, gata: true }))
 }
@@ -177,17 +181,19 @@ beforeEach(() => {
   cerinteAtinse.length = 0
   evaluari = 0
   scaraCeruta = undefined
-  // Fereastra de voce e globală pe proces: dacă rămâne deschisă de la un test
-  // la altul, pasul cardului s-ar strecura în teste care n-au treabă cu el.
+  // The voice window is global per process: if it stays open from one test to
+  // another, the card step would leak into tests that have nothing to do with
+  // it.
   uitaVocea('adrianenc11@gmail.com')
   opritDeOwner = false
 })
 
-// ÎNTRERUPĂTORUL (Adrian, 31 iul, după ce a văzut 27,84$ arși în 3½ ore și a
-// cerut „înainte trebuie verificat că autonomia e pe stop"). Nu era: butonul
-// scria în bază, panoul afișa „OPRITĂ", și bucla lucra mai departe. Un
-// întrerupător care nu întrerupe e mai rău decât niciunul — crezi că ai oprit,
-// deci nu te mai uiți. Testul ăsta nu-l lasă să se mai strice tăcut.
+// THE SWITCH (Adrian, Jul 31, after seeing $27.84 burned in 3½ hours and
+// asking "first it must be verified that autonomy is on stop"). It wasn't:
+// the button wrote to the database, the panel showed "STOPPED", and the loop
+// kept working. A switch that doesn't switch is worse than none — you think
+// you stopped it, so you stop watching. This test doesn't let it break
+// silently again.
 describe('întrerupătorul ownerului chiar întrerupe', () => {
   it('pe STOP: nicio tură de creier, niciun ordin, zero cheltuit', async () => {
     opritDeOwner = true
@@ -195,7 +201,7 @@ describe('întrerupătorul ownerului chiar întrerupe', () => {
     const r = await poateSaLucreze()
     expect(r.pornit).toBe(false)
     expect(r.motiv).toContain('oprit de tine')
-    // Dovada că n-a costat nimic: creierul nu a fost chemat deloc.
+    // The proof it cost nothing: the brain was not called at all.
     expect(turiDeMaini).toBe(0)
     expect(jobs.length).toBe(0)
   })
@@ -207,9 +213,10 @@ describe('întrerupătorul ownerului chiar întrerupe', () => {
   })
 })
 
-// „Pe nivel de dificultate setabil automat pe cerință" — și pentru MÂINILE lui,
-// nu doar pentru constructor. M1 (portalul) e dificultate 5: dacă pleacă pe
-// modelul obișnuit, află că nu poate abia după ce a irosit turele.
+// "By difficulty level set automatically per requirement" — and for its HANDS
+// too, not just for the constructor. M1 (the portal) is difficulty 5: if it
+// leaves on the usual model, it finds out it can't only after wasting the
+// turns.
 describe('mâinile lui pornesc pe mâna potrivită dificultății', () => {
   it('o sarcină grea (M1) cere TOP-ul în capul scării', async () => {
     kv.set('autonomie:pas:M0', JSON.stringify({ job: 0, incercari: 1, gata: true }))
@@ -218,10 +225,11 @@ describe('mâinile lui pornesc pe mâna potrivită dificultății', () => {
   })
 })
 
-// „Sisteme avansate de gestiune a cerințelor, evaluări avansate pe soluțiile
-// oferite" (Adrian, 30 iul). Poarta care contează: o cerință NOUĂ nu pleacă la
-// construit — întâi i se pun variantele pe masă. Eu am sărit peste pasul ăsta de
-// trei ori azi (email → GoCardless → API Revolut) și de fiecare dată s-a dărâmat.
+// "Advanced requirement-management systems, advanced evaluations of the
+// offered solutions" (Adrian, Jul 30). The gate that matters: a NEW
+// requirement doesn't leave for building — first its variants are laid on the
+// table. I skipped this step three times today (email → GoCardless → Revolut
+// API) and every time it collapsed.
 describe('cerințele: analiză înainte de cod', () => {
   function misiuneaInchisa(): void {
     for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5']) pasInchis(c)
@@ -233,14 +241,14 @@ describe('cerințele: analiză înainte de cod', () => {
 
     const r = await poateSaLucreze()
     expect(evaluari).toBe(1)
-    expect(jobs).toHaveLength(0) // NICIUN ordin înainte de analiză
+    expect(jobs).toHaveLength(0) // NO order before the analysis
     expect(r.motiv).toContain('cerința #9')
   })
 
-  // „Pe nivel de dificultate setabil automat pe cerință" (Adrian, 30 iul).
-  // Marcajul din ordin e SINGURUL lucru după care constructorul își alege mâna:
-  // dacă dispare, o sarcină grea pornește pe un model mic, arde turele povestind
-  // și pică — exact ce s-a întâmplat până acum.
+  // "By difficulty level set automatically per requirement" (Adrian, Jul 30).
+  // The mark in the order is the ONLY thing the constructor picks its hand by:
+  // if it disappears, a heavy task starts on a small model, burns the turns
+  // narrating and fails — exactly what happened until now.
   it('ordinul poartă NIVELUL DE DIFICULTATE, ca mâna să fie aleasă din start', async () => {
     misiuneaInchisa()
     cerinte = [{
@@ -263,7 +271,7 @@ describe('cerințele: analiză înainte de cod', () => {
     jobs[0].log = 'a picat'
 
     await poateSaLucreze()
-    // +1 pe încercare: ce a picat o dată e mai greu decât părea.
+    // +1 per attempt: what failed once is harder than it looked.
     expect(jobs[0].orderText).toContain('NIVEL DE DIFICULTATE: 4/5')
   })
 
@@ -291,7 +299,7 @@ describe('cerințele: analiză înainte de cod', () => {
     const r = await poateSaLucreze()
     expect(r.motiv).toContain('VERIFICATĂ pe live')
     expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'verificata' })
-    expect(jobs).toHaveLength(0) // proba trece înaintea muncii noi
+    expect(jobs).toHaveLength(0) // the proof passes before any new work
   })
 
   it('dacă proba pică, cerința se ÎNTOARCE la lucru — nu se declară gata', async () => {
@@ -307,7 +315,7 @@ describe('cerințele: analiză înainte de cod', () => {
   it('nu poate scrie „verificat" fără măsurătoare — orice altceva înseamnă că n-a trecut', async () => {
     misiuneaInchisa()
     cerinte = [{ id: 9, text: 'x', stare: 'livrata', criteriu: null, aleasa: null, optiuni: null }]
-    spuseCreierul = 'cred că merge, arată bine' // fără probă → NU trece
+    spuseCreierul = 'cred că merge, arată bine' // no proof → does NOT pass
     await poateSaLucreze()
     expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'analizata' })
   })
@@ -318,17 +326,17 @@ describe('cerințele: analiză înainte de cod', () => {
     await poateSaLucreze()
     jobs[0].status = 'done'
     await poateSaLucreze()
-    // „Verificat" cere o măsurătoare pe live, nu terminarea unui ordin.
+    // "Verified" requires a live measurement, not an order's completion.
     expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'livrata' })
     expect(cerinteAtinse.some((c) => c.stare === 'verificata')).toBe(false)
   })
 })
 
-// „Autonomia mai înseamnă și capacitatea de a vedea ce îi lipsește și
-// capabilități extinse autonome de învățare și dezvoltare" (Adrian, 30 iul).
-// Vederea exista: `log_gap` + `triageGaps()` îl pun să-și trieze singur lista.
-// Ce lipsea era exact pasul următor — nimeni nu construia ce marcase el
-// „DE IMPLEMENTAT". Deci vedea, dar nu se dezvolta.
+// "Autonomy also means the capacity to see what it's missing and extended
+// autonomous capabilities of learning and development" (Adrian, Jul 30).
+// The seeing existed: `log_gap` + `triageGaps()` make it triage its own list.
+// What was missing was exactly the next step — nobody built what it marked
+// "DE IMPLEMENTAT". So it saw, but didn't develop.
 describe('ce îi lipsește, luat de el și construit', () => {
   it('un gol triat „de implementat" devine muncă pe care o ia singur', async () => {
     pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
@@ -339,7 +347,7 @@ describe('ce îi lipsește, luat de el și construit', () => {
     expect(r.pornit).toBe(true)
     expect(r.motiv).toContain('G41')
     expect(jobs[0].orderText).toContain('cod QR din poză')
-    // Ordinul îi cere să CONSTRUIASCĂ, nu să descrie.
+    // The order asks it to BUILD, not to describe.
     expect(jobs[0].orderText).toContain('CONSTRUIEȘTE-O')
   })
 
@@ -365,10 +373,11 @@ describe('ce îi lipsește, luat de el și construit', () => {
   })
 })
 
-// „Am cerut agenți full echipați și tu i-ai dat doar ciurucuri" (Adrian, 30 iul).
-// Dispatch-ul ăsta e SINGURUL — îl folosesc și bucla, și constructorul de pe VPS
-// prin `/api/constructor/tool`. Dacă cineva îl subțiază, agenții rămân ciungi și
-// se vede abia când un ordin real pică. De-aia are paznic.
+// "I asked for fully equipped agents and you gave them only crumbs" (Adrian,
+// Jul 30). This dispatch is the ONLY one — both the loop and the constructor
+// on the VPS use it through `/api/constructor/tool`. If someone thins it, the
+// agents stay crippled and it only shows when a real order fails. That's why
+// it has a guard.
 describe('uneltele: agentul e echipat la full, nu pe jumătate', () => {
   it('orice unealtă de admin ajunge la dispatch-ul comun', async () => {
     await uneltele('db_query', { sql: 'select 1' })
@@ -389,14 +398,14 @@ describe('uneltele: agentul e echipat la full, nu pe jumătate', () => {
 
 describe('Kelion se apucă singur de treabă', () => {
   it('pasul de setări îl face CU MÂINILE lui, nu prin constructorul fără browser', async () => {
-    secreteExistente = ['REVOLUT_PAY_LINK'] // dovada că a reușit
+    secreteExistente = ['REVOLUT_PAY_LINK'] // the proof it succeeded
     const r = await poateSaLucreze()
 
     expect(r.pornit).toBe(true)
     expect(r.motiv).toContain('M0')
-    // NIMIC în coada constructorului — el n-are cu ce face pasul ăsta.
+    // NOTHING in the constructor's queue — it has nothing to do this step with.
     expect(jobs).toHaveLength(0)
-    // A pornit o tură de lucru cu uneltele REALE.
+    // It started a work turn with the REAL tools.
     expect(turiDeMaini).toBe(1)
     expect(uneltePrimite).toContain('browser_open')
     expect(uneltePrimite).toContain('secret_pune')
@@ -404,8 +413,8 @@ describe('Kelion se apucă singur de treabă', () => {
   })
 
   it('„gata" se MĂSOARĂ: fără cheia în secrete, pasul nu e terminat oricât ar spune el', async () => {
-    secreteExistente = [] // cheia NU e acolo
-    spuseCreierul = 'gata, am configurat tot' // …dar el zice că da
+    secreteExistente = [] // the key is NOT there
+    spuseCreierul = 'gata, am configurat tot' // …but it says yes
     await poateSaLucreze()
 
     const st = JSON.parse(kv.get('autonomie:pas:M0')!) as { gata?: boolean; incercari: number }
@@ -432,19 +441,19 @@ describe('Kelion se apucă singur de treabă', () => {
   })
 
   it('NU renunță niciodată la un pas — dar nici nu blochează restul', async () => {
-    // Cinci treceri pe un pas care nu iese. Înainte, după a treia era marcat
-    // „blocat" și se renunța — o barieră pe care n-a cerut-o nimeni.
+    // Five passes over a step that won't come out. Before, after the third it
+    // was marked "blocked" and given up on — a barrier nobody asked for.
     await poateSaLucreze()
     const dupaPrima = JSON.parse(kv.get('autonomie:pas:M0')!) as { blocat?: string; incercari: number }
-    expect(dupaPrima.blocat).toBeUndefined() // nu există abandon, deloc
+    expect(dupaPrima.blocat).toBeUndefined() // there is no abandonment, at all
     expect(dupaPrima.incercari).toBe(1)
 
-    // Trecerea următoare NU se blochează pe pasul care n-a ieșit: îl lasă în
-    // urmă pe cel încercat deja și ia unul neîncercat. Deci și insistă, și
-    // avansează — fără să renunțe la nimic.
+    // The next pass does NOT block on the step that didn't come out: it leaves
+    // the already-tried one behind and takes an untried one. So it both
+    // insists and advances — without giving up anything.
     const doi = await poateSaLucreze()
     expect(doi.motiv).toContain('M1')
-    // Iar M0 rămâne în listă, neterminat, ca să fie reluat.
+    // And M0 stays in the list, unfinished, so it can be retried.
     expect(JSON.parse(kv.get('autonomie:pas:M0')!).gata).toBeUndefined()
   })
 
@@ -457,7 +466,7 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(r.motiv).toContain('M2')
     expect(jobs).toHaveLength(1)
     expect(jobs[0].orderText).toContain('cd frontend && npm run build')
-    expect(turiDeMaini).toBe(0) // n-a folosit mâinile pentru muncă de cod
+    expect(turiDeMaini).toBe(0) // it didn't use its hands for code work
   })
 
   it('cât timp constructorul are un ordin în lucru, nu mai ia altul', async () => {
@@ -485,33 +494,34 @@ describe('Kelion se apucă singur de treabă', () => {
   })
 
   it('după 3 încercări IESE ȘI CAUTĂ — nu abandonează, nu se învârte', async () => {
-    // Adrian, 30 iul: „după 3 trebuie să caute soluții, să iasă, să identifice
-    // soluții, să studieze problema, să-și instaleze unelte diverse — în niciun
-    // caz să abandoneze sau să stea în buclă."
-    // M0 e singurul rămas, și a picat de 3 ori.
+    // Adrian, Jul 30: "after 3 it must look for solutions, get out, identify
+    // solutions, study the problem, install various tools for itself — under no
+    // circumstances abandon or stay in a loop."
+    // M0 is the only one left, and it failed 3 times.
     pasInchis('M1'); pasInchis('M2'); pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
     kv.set('autonomie:pas:M0', JSON.stringify({ job: 0, incercari: 3 }))
 
     await poateSaLucreze()
     expect(ultimulPrompt).toContain('AI ÎNCERCAT DEJA DE 3 ORI')
-    expect(ultimulPrompt).toContain('IEȘI ȘI CAUTĂ') // browser pe eroarea exactă
-    expect(ultimulPrompt).toContain('INSTALEAZĂ-ȚI UNELTE') // își pune ce-i lipsește
+    expect(ultimulPrompt).toContain('IEȘI ȘI CAUTĂ') // browser on the exact error
+    expect(ultimulPrompt).toContain('INSTALEAZĂ-ȚI UNELTE') // it installs what it's missing
     expect(ultimulPrompt).toContain('Nu ai voie să abandonezi')
 
   })
 
-  // PASUL CARDULUI (M6) — „plățile automate", cu poarta pe voce.
+  // THE CARD STEP (M6) — "automatic payments", with the voice gate.
   //
-  // Aici era o capcană pe care era să o public: M6 e cel mai puțin încercat
-  // pas, deci bucla l-ar fi ales PRIMUL la fiecare trecere, ar fi picat pe
-  // „nu ți-am recunoscut vocea", și ar fi înfometat tot restul — misiunea,
-  // cerințele, golurile. Un pas imposibil ACUM nu e o sarcină, e o buclă.
+  // Here was a trap I almost published: M6 is the least tried step, so the
+  // loop would have picked it FIRST at every pass, it would have failed on
+  // "I didn't recognize your voice", and it would have starved all the rest —
+  // the mission, the requirements, the gaps. A step impossible NOW is not a
+  // task, it's a loop.
   it('fără vocea ownerului, pasul cardului NU se ia și NU blochează restul', async () => {
     pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
     pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
     const r = await poateSaLucreze()
-    // Misiunea e considerată trecută (M6 nu se POATE acum) → merge mai departe
-    // la cerințe/goluri/listă. Nu se învârte pe un pas imposibil.
+    // The mission is considered passed (M6 CANNOT be done now) → it moves on
+    // to requirements/gaps/list. It doesn't spin on an impossible step.
     expect(r.motiv).not.toContain('M6')
     expect(turiDeMaini).toBe(0)
     expect(JSON.parse(kv.get('autonomie:pas:M6') ?? '{"incercari":0}').incercari).toBe(0)
@@ -525,17 +535,17 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(r.motiv).toContain('M6')
     expect(uneltePrimite).toContain('card_completeaza')
     expect(uneltePrimite).toContain('card_gata')
-    // Scopul scris în ordin e plata automată, nu formularul completat.
+    // The goal written in the order is the automated payment, not the filled form.
     expect(ultimulPrompt).toContain('PLĂȚILE AUTOMATE')
-    // Dificultate 5 → pornește direct pe TOP, nu află după ce irosește turele.
+    // Difficulty 5 → starts straight on TOP, doesn't find out after wasting turns.
     expect(scaraCeruta?.[0]).toBe('model-top')
   })
 
-  // ZIDUL (Adrian, 31 iul: „cum se reia sau ce se întâmplă cu cele eșuate? care
-  // e logica????" · „nu se oprește, asta e logica?"). Da, asta era — și era
-  // jumătate de regulă. „Nu abandonează" nu înseamnă „repetă la nesfârșit exact
-  // același lucru". Zece ordine picate la rând, zero terminate, și al
-  // unsprezecelea pleca liniștit, pe banii lui.
+  // THE WALL (Adrian, Jul 31: "how does it resume or what happens with the
+  // failed ones? what's the logic????" · "it doesn't stop, that's the
+  // logic?"). Yes, that was it — and it was half a rule. "It doesn't abandon"
+  // doesn't mean "repeat exactly the same thing forever". Ten failed orders
+  // in a row, zero finished, and the eleventh left calmly, on his money.
   const zidDe = (n: number, log: string): void => {
     for (let i = 0; i < n; i++) {
       jobs.push({ id: 100 + i, orderText: 'x', status: 'failed', log, orderedBy: 'kelion-autonom' })
@@ -547,18 +557,18 @@ describe('Kelion se apucă singur de treabă', () => {
     const r = await poateSaLucreze()
     expect(r.motiv).toContain('ZID')
     expect(r.motiv).toContain('5 ordine picate la rând')
-    // Ordinul de diagnostic pleacă la MÂINILE lui — constructorul e cel stricat.
+    // The diagnostic order leaves for its HANDS — the constructor is the broken one.
     expect(ultimulPrompt).toContain('AFLĂ DE CE PICĂ TOATE')
     expect(ultimulPrompt).toContain('server_logs')
-    // Și îi pune sub nas cauza care se repetă, măsurată din jurnale.
+    // And it puts the repeating cause under its nose, measured from the logs.
     expect(ultimulPrompt).toContain('CE SE REPETĂ ÎN JURNALE')
-    // NU a mai pus un ordin nou în coadă — asta era risipa.
+    // It did NOT put a new order in the queue — that was the waste.
     expect(jobs.some((j) => j.status === 'queued')).toBe(false)
   })
 
   it('un singur succes rupe zidul — seria se numără de la ultimul „gata"', async () => {
-    // Ordinele vin cele mai NOI primele (ORDER BY created_at DESC), deci un
-    // succes recent trebuie să stea aproape de începutul listei ca să rupă seria.
+    // Orders come newest FIRST (ORDER BY created_at DESC), so a recent success
+    // must sit near the top of the list to break the streak.
     zidDe(1, 'Eroare X')
     jobs.push({ id: 90, orderText: 'x', status: 'done', log: null, orderedBy: 'kelion-autonom' })
     zidDe(4, 'Eroare X')
@@ -574,35 +584,35 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(r.motiv).not.toContain('ZID')
   })
 
-  // DOVADA CERUTĂ (Adrian, 31 iul: „75 de capabilități pe chat, toate trebuie
-  // real să le primească, aștept dovezi"). Nu o afirmație de-a mea — o
-  // NUMĂRĂTOARE, care cade dacă cineva îi ia ceva din mână.
+  // THE REQUESTED PROOF (Adrian, Jul 31: "75 capabilities on chat, it must
+  // really receive them all, I expect proof"). Not a claim of mine — a COUNT,
+  // which falls if someone takes something out of its hand.
   it('mâinile lui primesc TOT ce știe executorul să ruleze — numărat, nu spus', async () => {
     secreteExistente = ['REVOLUT_PAY_LINK']
     await poateSaLucreze()
-    // Browserul: toate cele 9, nu un subset.
+    // The browser: all 9, not a subset.
     for (const b of ['browser_open', 'browser_click', 'browser_type', 'browser_read',
       'browser_back', 'browser_scroll', 'browser_key', 'browser_click_at', 'browser_close'])
       expect(uneltePrimite, `îi lipsește ${b}`).toContain(b)
-    // Codul lui: să se poată citi și interoga singur când se blochează.
+    // Its code: so it can read and query itself when it gets stuck.
     for (const c of ['read_source', 'search_source', 'db_query', 'system_health'])
       expect(uneltePrimite, `îi lipsește ${c}`).toContain(c)
-    // Memoria lui: fără ea repetă la nesfârșit aceleași greșeli.
+    // Its memory: without it it repeats the same mistakes forever.
     for (const m of ['list_memories', 'server_logs', 'get_real_cost'])
       expect(uneltePrimite, `îi lipsește ${m}`).toContain(m)
-    // Și cardul, gardat de voce în executor.
+    // And the card, guarded by voice in the executor.
     expect(uneltePrimite).toContain('card_completeaza')
-    // Pragul măsurat azi: dacă scade, cineva i-a luat ceva din mână.
+    // The threshold measured today: if it drops, someone took something out of its hand.
     expect(uneltePrimite.length).toBeGreaterThanOrEqual(31)
   })
 
   it('NU există plafon zilnic — bariera aia a fost scoasă', async () => {
-    // Adrian, 30 iul: „eu plătesc, eu cer, tu execuți fără să comentezi".
-    // Plafonul îl pusesem eu, nu mi-l ceruse nimeni.
+    // Adrian, Jul 30: "I pay, I ask, you execute without commenting".
+    // I had put the ceiling in myself, nobody had asked me for it.
     plafon = 1
     secreteExistente = ['REVOLUT_PAY_LINK']
     expect((await poateSaLucreze()).pornit).toBe(true)
-    // A doua trecere, peste „plafon": lucrează mai departe.
+    // The second pass, over the "ceiling": it keeps working.
     const doi = await poateSaLucreze()
     expect(doi.pornit).toBe(true)
     expect(doi.motiv).not.toContain('plafon')
