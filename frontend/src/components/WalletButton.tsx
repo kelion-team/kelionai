@@ -295,7 +295,17 @@ export function WalletButton({
               </div>
               {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
             </>
-          ) : null}
+          ) : (
+            /* THE PATH TO PURCHASE, for the regular user (Adrian, Aug 1: "the
+            whole chain, from login to buying credits"). The pill's menu does
+            not sell (the Jul 24 rule: the sale is the admin's) — but at 0
+            credits the user must not hit a dead end: the dedicated /credite
+            page sells to any signed-in user. Without this link the paywall
+            said "top up" and showed no way to do it. */
+            <a className="ghost wallet-pack" href="/credite" style={{ textAlign: 'center', textDecoration: 'none' }}>
+              {ro ? 'Cumpără credite →' : 'Buy credits →'}
+            </a>
+          )}
           <div className="wallet-menu-sep" />
           <button
             type="button"

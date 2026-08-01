@@ -1263,6 +1263,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const paywallText = ro
         ? 'Ai rămas fără credit. Te rog reîncarcă creditul ca să continuăm.'
         : "You've run out of credit. Please top up to keep talking with me."
+      // NOTHING IS LOST AT 0 CREDITS (Adrian, Aug 1: "make sure he doesn't lose
+      // what he worked on, so he can resume after topping up"). The user's words
+      // are saved BEFORE the stop — after the top-up the conversation resumes
+      // from exactly where it paused, not from a hole. The paywall notice is
+      // saved too, so the history shows honestly why the reply stopped there.
+      if (lastIncomingText) void saveMessage(user.email, 'user', lastIncomingText)
+      void saveMessage(user.email, 'assistant', paywallText)
       reply.raw.write(appendTurn(user.email, paywallTurnId, paywallText))
       reply.raw.write(appendTurn(user.email, paywallTurnId, `${CTRL}${JSON.stringify({ paywall: true })}${CTRL}`))
       finishTurn(user.email, paywallTurnId)
