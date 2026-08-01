@@ -1,14 +1,15 @@
-// ── TESTELE PAZNICULUI DE LIMBĂ (audit 30 iul: „bagă-le în teste pe toate") ──
+// ── THE LANGUAGE GUARD'S TESTS (Jul 30 audit: "put them all into tests") ──
 //
-// `lang.ts` decide ÎN CE LIMBĂ vorbește Kelion. Avea zero teste, deși a produs
-// bug-uri reale, documentate în AI-HANDOFF:
-//   • româna FĂRĂ diacritice („Buna ziua… multumesc") ieșea `null` → răspuns în
-//     engleză, contra regulii „răspunde în limba primită";
-//   • vorbirea românească auzită ca RUSĂ ar fi fixat „ru" pentru user și ar fi
-//     otrăvit toate sesiunile — de aceea există setul de limbi suportate;
-//   • comutarea limbii cere DOUĂ mesaje la rând în limba nouă, ca o
-//     mis-detectare izolată să nu schimbe preferința.
-// Testele astea le prind dacă revin.
+// `lang.ts` decides WHICH LANGUAGE Kelion speaks. It had zero tests, although
+// it produced real bugs, documented in AI-HANDOFF:
+//   • Romanian WITHOUT diacritics ("Buna ziua… multumesc") came out `null` →
+//     an English answer, against the "reply in the received language" rule;
+//   • Romanian speech heard as RUSSIAN would have pinned "ru" for the user
+//     and poisoned all sessions — that's why the supported-languages set
+//     exists;
+//   • switching languages requires TWO messages in a row in the new language,
+//     so an isolated mis-detection doesn't change the preference.
+// These tests catch them if they come back.
 import { describe, it, expect } from 'vitest'
 import {
   primaryLang,
@@ -34,7 +35,7 @@ describe('lang — normalizarea codului de limbă', () => {
     expect(langLabel('ro-RO')).toBe('Romanian')
     expect(langLabel('de')).toBe('German')
     expect(langLabel(null)).toBe('English')
-    expect(langLabel('xx')).toBe('English') // limbă necunoscută → nu crapă
+    expect(langLabel('xx')).toBe('English') // unknown language → doesn't crash
   })
 })
 
@@ -43,7 +44,7 @@ describe('lang — detectarea limbii', () => {
     expect(detectLang('Bună ziua, îți mulțumesc pentru ajutor')).toBe('ro')
   })
   it('prinde româna FĂRĂ diacritice (bugul din 26 iul)', () => {
-    // Exact textul care ieșea `null` și primea răspuns în engleză.
+    // The exact text that came out `null` and got an English answer.
     expect(detectLang('Buna ziua, multumesc frumos')).toBe('ro')
   })
   it('nu confundă limbile latine între ele', () => {
@@ -76,7 +77,7 @@ describe('lang — limba VORBIRII (BCP-47)', () => {
 describe('lang — comutarea limbii cere CONFIRMARE (două mesaje la rând)', () => {
   it('un singur mesaj în altă limbă NU schimbă preferința', () => {
     const email = `t1-${Date.now()}@x.y`
-    // Prima apariție a francezei: se reține ca „în așteptare", nu se comite.
+    // French's first appearance: it's kept as "pending", not committed.
     expect(trackSpeechLang(email, 'Bonjour, merci pour votre aide', 'ro-RO')).toBeNull()
   })
   it('aceeași limbă nouă de DOUĂ ori la rând → se comite', () => {

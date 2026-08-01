@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// PAZNICUL CARDULUI (Adrian, 31 iul: „să opereze pentru mine când îi cer doar
-// eu, folosind sistemul de recunoaștere vocală" · „plățile automate").
+// THE CARD GUARD (Adrian, Jul 31: "let it operate for me only when I ask,
+// using the voice recognition system" · "the automatic payments").
 //
-// Testul ăsta apără trei lucruri pe care nu am voie să le stric niciodată:
-//   1. fără voce recunoscută, cardul NU se atinge — nici măcar dacă cel care
-//      cere e admin, cu sesiune validă;
-//   2. valoarea cardului nu apare în NICIUN rezultat întors — nici în text,
-//      nici în pagină, nici în detaliu;
-//   3. „gata" înseamnă ce a MĂSURAT codul pe pagină, nu ce a spus modelul.
+// This test guards three things I am never allowed to break:
+//   1. without a recognized voice, the card is NOT touched — not even if the
+//      one asking is admin, with a valid session;
+//   2. the card's value appears in NO returned result — not in text, not in
+//      the page, not in the detail;
+//   3. "done" means what the code MEASURED on the page, not what the model
+//      said.
 
 const browserType = vi.hoisted(() => vi.fn(async () => ({ url: 'u', title: 't', text: 'PAGINA', elements: [], shotUrl: '' })))
 const browserRead = vi.hoisted(() => vi.fn(async () => ({ url: 'u', title: 't', text: 'PAGINA', elements: [], shotUrl: '' })))
@@ -53,11 +54,11 @@ describe('cardFurnizor — poarta e vocea, nu sesiunea', () => {
     marcheazaVoce(EU)
     const r = await completeazaCard(EU, 'https://kelionai.app', 'numar', 3)
     expect(r.ok).toBe(true)
-    // Serverul a scris valoarea…
+    // The server wrote the value…
     expect(browserType).toHaveBeenCalledWith(EU, 'https://kelionai.app', 3, CARD, false)
-    // …dar ea NU apare în nimic din ce pleacă spre model/jurnal.
+    // …but it does NOT appear in anything leaving for the model/log.
     expect(JSON.stringify(r)).not.toContain(CARD)
-    // Și modul discret e pornit ÎNAINTE de scriere, nu lăsat în seama nimănui.
+    // And discreet mode is turned on BEFORE writing, not left to anyone's care.
     expect(setModDiscret).toHaveBeenCalledWith(EU, true)
   })
 
