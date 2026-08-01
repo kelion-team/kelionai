@@ -232,6 +232,19 @@ export const googleTools: Tool[] = [
     },
   },
   {
+    name: 'lookup_address',
+    description:
+      'Resolve EXACT coordinates (latitude/longitude) to the real address and POSTCODE at that point (reverse geocoding). Use whenever the user gives coordinates and wants the address or postcode, or asks "what is the postcode here / of this place". For the user\'s CURRENT location, pass the GPS coordinates injected in the context (or from get_location).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lat: { type: 'number', description: 'Latitude, e.g. 51.7859.' },
+        lon: { type: 'number', description: 'Longitude, e.g. -1.4851.' },
+      },
+      required: ['lat', 'lon'],
+    },
+  },
+  {
     name: 'youtube_search',
     description: 'Search YouTube for videos. Returns titles and links.',
     input_schema: {
@@ -323,39 +336,89 @@ export async function refreshGoogleAccessToken(
   }
 }
 
-// Best-effort reverse geocode (device GPS → human place name) so the brain knows
-// where "here" is. Keyless OpenStreetMap Nominatim; short timeout, never throws.
-// Cached by ~100 m (3 decimals); failures are negative-cached briefly so an
-// outage can't cause a lookup storm.
-const geoCache = new Map<string, string>()
+// Best-effort reverse geocode (device GPS → human place name + POSTCODE) so the
+// brain knows where "here" is. Keyless OpenStreetMap Nominatim; short timeout,
+// never throws. Cached by ~100 m (3 decimals); failures are negative-cached
+// briefly so an outage can't cause a lookup storm.
+
+/** The address fields Nominatim returns with addressdetails=1 (only what we use). */
+export interface NominatimAddress {
+  road?: string
+  neighbourhood?: string
+  suburb?: string
+  village?: string
+  town?: string
+  city?: string
+  county?: string
+  postcode?: string
+  country?: string
+}
+
+/** The pair Kelion needs: a SHORT human place + the postcode of the exact point. */
+export interface GeoPlace {
+  place: string
+  postcode: string
+}
+
+/** THE COORDINATES ↔ POSTCODE PAIRING (Adrian, Aug 1: "it can't see the link
+ *  from the exact coordinates and pair them with the postcode"). Pure and
+ *  exported, so the rules are tested without network: the place is the short
+ *  "street, settlement, county, country" form (the raw display_name is a
+ *  mouthful), the postcode comes from the address parts — never guessed. */
+export function composePlace(addr: NominatimAddress | undefined, displayName: string): GeoPlace {
+  const postcode = (addr?.postcode ?? '').trim()
+  if (!addr) return { place: displayName, postcode }
+  const settlement = addr.city ?? addr.town ?? addr.village ?? addr.suburb ?? addr.neighbourhood ?? ''
+  const county = addr.county && addr.county !== settlement ? addr.county : ''
+  const short = [addr.road, settlement, county, addr.country].filter(Boolean).join(', ')
+  return { place: short || displayName, postcode }
+}
+
+const geoCache = new Map<string, GeoPlace>()
 const geoRetryAt = new Map<string, number>()
-export async function reverseGeocode(lat: number, lon: number): Promise<string> {
+
+/** Structured variant (the address tool uses it): null = couldn't resolve. */
+export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoPlace | null> {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
   const hit = geoCache.get(key)
   if (hit !== undefined) return hit
-  if ((geoRetryAt.get(key) ?? 0) > Date.now()) return ''
+  if ((geoRetryAt.get(key) ?? 0) > Date.now()) return null
   try {
     const u = new URL('https://nominatim.openstreetmap.org/reverse')
     u.searchParams.set('lat', String(lat))
     u.searchParams.set('lon', String(lon))
     u.searchParams.set('format', 'json')
-    u.searchParams.set('zoom', '14')
+    // Building-level zoom + the address breakdown: below this the postcode
+    // often doesn't come at all — exactly the "coordinates have no postcode"
+    // gap Adrian hit.
+    u.searchParams.set('zoom', '18')
+    u.searchParams.set('addressdetails', '1')
     const res = await tfetch(u, {
       headers: { 'User-Agent': 'KelionAI/1.0 (kelionai.app)' },
       signal: AbortSignal.timeout(4000),
     })
     if (!res.ok) {
       geoRetryAt.set(key, Date.now() + 60_000)
-      return ''
+      return null
     }
-    const j = (await res.json()) as { display_name?: string }
-    const name = j.display_name ?? ''
-    geoCache.set(key, name)
-    return name
+    const j = (await res.json()) as { display_name?: string; address?: NominatimAddress }
+    const info = composePlace(j.address, j.display_name ?? '')
+    if (!info.place) {
+      geoRetryAt.set(key, Date.now() + 60_000)
+      return null
+    }
+    geoCache.set(key, info)
+    return info
   } catch {
     geoRetryAt.set(key, Date.now() + 60_000)
-    return ''
+    return null
   }
+}
+
+export async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  const info = await reverseGeocodeInfo(lat, lon)
+  if (!info) return ''
+  return info.postcode ? `${info.place} — postcode ${info.postcode}` : info.place
 }
 
 // Non-blocking variant for the chat hot path: returns the cached place name
@@ -363,13 +426,19 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string> 
 // The GPS place name must NEVER delay a reply — the raw lat/lon (which the
 // skills use directly) is always injected regardless.
 const geoInFlight = new Set<string>()
+
+/** One place, one text: the cached info → the string the context injects. */
+function placeText(info: GeoPlace): string {
+  return info.postcode ? `${info.place} — postcode ${info.postcode}` : info.place
+}
+
 export function reverseGeocodeCached(lat: number, lon: number): string {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`
   const hit = geoCache.get(key)
-  if (hit !== undefined) return hit
+  if (hit !== undefined) return placeText(hit)
   if (!geoInFlight.has(key)) {
     geoInFlight.add(key)
-    void reverseGeocode(lat, lon).finally(() => geoInFlight.delete(key))
+    void reverseGeocodeInfo(lat, lon).finally(() => geoInFlight.delete(key))
   }
   return ''
 }
@@ -849,6 +918,33 @@ async function mapsSearch(query: string, max: number): Promise<string> {
   return JSON.stringify({ places, screen_url })
 }
 
+// EXACT COORDINATES → ADDRESS + POSTCODE (Adrian, Aug 1: "it can't pair the
+// exact coordinates with the postcode"). The same Nominatim reverse geocode as
+// the GPS context, but callable BY THE BRAIN for any point — the user's or an
+// arbitrary one. Never guesses: no postcode in the address → postcode: null.
+async function lookupAddress(lat: number, lon: number): Promise<string> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon))
+    return JSON.stringify({
+      error: 'missing_coordinates',
+      hint: 'Ask the user for the coordinates, or use the device GPS (get_location / the injected GPS) for their current spot.',
+    })
+  const info = await reverseGeocodeInfo(lat, lon)
+  if (!info)
+    return JSON.stringify({
+      error: 'geocode_unavailable',
+      hint: 'The address service did not answer right now — try again shortly.',
+    })
+  return JSON.stringify({
+    lat,
+    lon,
+    address: info.place,
+    postcode: info.postcode || null,
+    note: info.postcode
+      ? undefined
+      : 'No postcode is mapped for this exact point (open field, road between addresses, or incomplete map data) — the address above is still real.',
+  })
+}
+
 // Build a ready-to-embed monitor URL for a promo-clip scene (map or weather) —
 // the exact same surfaces the live skills use, resolved server-side so a clip
 // scene can never 404 from a guessed URL.
@@ -1184,6 +1280,7 @@ export async function runGoogleTool(
     if (name === 'maps_search') return await mapsSearch(str(args.query), num(args.max_results, 5))
     if (name === 'maps_directions')
       return await mapsDirections(str(args.origin), str(args.destination))
+    if (name === 'lookup_address') return await lookupAddress(num(args.lat, Number.NaN), num(args.lon, Number.NaN))
     if (name === 'youtube_search') return await youtubeSearch(str(args.query), num(args.max_results, 5))
     if (name === 'translate_text') return await translateText(str(args.text), str(args.target))
     if (name === 'wikipedia_lookup') return await wikipediaLookup(str(args.query))
