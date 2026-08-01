@@ -1,15 +1,17 @@
-// ── SURSA UNICĂ a EXECUȚIEI uneltelor admin PARTAJATE (audit 29 iul, risc #4) ──
-// Dispatch-ul acestor unelte era copiat identic în chat.ts (runTool) și în
-// realtime.ts (execIntrospection) → cele două puteau diverge tăcut. Aici e o
-// SINGURĂ implementare, chemată de ambele rute.
+// ── SINGLE SOURCE of the EXECUTION of the SHARED admin tools (audit Jul 29,
+// risk #4) ───────────────────────────────────────────────────────────────────
+// These tools' dispatch was copied identically in chat.ts (runTool) and in
+// realtime.ts (execIntrospection) → the two could silently diverge. Here is a
+// SINGLE implementation, called by both routes.
 //
-// Doar uneltele cu comportament IDENTIC pe ambele căi. Cele cu efecte specifice
-// rutei rămân în ruta lor: build_software (chat deschide panoul de control pe
-// monitor; voce răspunde cu speak_rule), constructor_status (formatare diferită),
-// server_logs / read_inbox / list_updates (doar pe chat).
+// Only tools with IDENTICAL behavior on both paths. Those with route-specific
+// effects stay in their route: build_software (chat opens the control panel on
+// the monitor; voice answers with speak_rule), constructor_status (different
+// formatting), server_logs / read_inbox / list_updates (chat only).
 //
-// POARTA de admin o face APELANTUL înainte (isAdmin în chat; adminUnlocked prin
-// amprentă în voce) — funcția asta NU gate-uiește, doar execută.
+// The admin GATE is done by the CALLER beforehand (isAdmin in chat;
+// adminUnlocked via voiceprint in voice) — this function does NOT gate, it
+// only executes.
 
 import { listSource, readSource, searchSource } from './sourceCode.js'
 import { dbTablesOverview, dbQuery } from '../db.js'
@@ -22,8 +24,9 @@ import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type Camp
 import { voceRecenta, minuteRamaseVoce } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
 
-// Numele uneltelor admin partajate (chat ∩ voce). Apelantul verifică apartenența
-// ca să știe dacă delegă aici sau tratează el (build_software, google, browser...).
+// The names of the shared admin tools (chat ∩ voice). The caller checks
+// membership to know whether to delegate here or handle it itself
+// (build_software, google, browser...).
 export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'list_source', 'read_source', 'search_source',
   'db_tables', 'db_query', 'system_health',
@@ -31,21 +34,22 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   'run_runbook', 'runbook_status', 'runbook_log', 'request_repair',
   'secret_pune', 'secret_lista', 'secret_publica',
   'cerinta_noua', 'cerinte_lista', 'cerinta_prioritate',
-  // Cardul: poarta e ÎN executor (fereastra de voce), nu aici.
+  // The card: the gate is IN the executor (the voice window), not here.
   'card_stare', 'card_completeaza', 'card_gata',
-  // Tot panoul de admin (31 iul, a treia cerere): vede ce vede ownerul pe ecran
-  // și poate schimba ce se poate desface.
+  // The whole admin panel (Jul 31, the third request): he sees what the owner
+  // sees on screen and can change what can be undone.
   'admin_vezi', 'admin_schimba',
 ])
 
-// Execută o unealtă admin PARTAJATĂ. Întoarce rezultatul (string) sau `null` dacă
-// numele NU e o unealtă partajată — atunci apelantul o tratează el. Extragerea
-// argumentelor e IDENTICĂ cu cea care trăia dublat în cele două rute.
+// Executes a SHARED admin tool. Returns the result (string) or `null` if the
+// name is NOT a shared tool — then the caller handles it itself. The argument
+// extraction is IDENTICAL to the one that lived duplicated in the two routes.
 export async function execSharedAdminTool(
   name: string,
   args: Record<string, unknown>,
-  // Cine cere și de unde — necesare DOAR uneltelor de card (browserul e per
-  // user, iar poarta e „ți-am recunoscut vocea acum"). Restul le ignoră.
+  // Who asks and from where — needed ONLY by the card tools (the browser is
+  // per user, and the gate is "I recognised your voice just now"). The rest
+  // ignore them.
   ctx: { email?: string; baseUrl?: string; cookie?: string } = {},
 ): Promise<string | null> {
   switch (name) {
@@ -62,13 +66,14 @@ export async function execSharedAdminTool(
     case 'runbook_status': return runbookStatus(args.name ? String(args.name) : undefined)
     case 'runbook_log': return runbookLog(Number(args.run_id ?? 0))
     case 'request_repair': return requestRepair(String(args.title ?? ''), String(args.details ?? ''))
-    // SETĂRILE LUI. `valoare` NU se pune în niciun jurnal de aici — funcția
-    // din secrete.ts raportează doar numele și lungimea.
+    // HIS SETTINGS. `valoare` never goes into any log from here — the
+    // function in secrete.ts reports only the name and the length.
     case 'secret_pune': return seteazaSecret(String(args.nume ?? ''), String(args.valoare ?? ''))
     case 'secret_lista': return listeazaSecrete()
     case 'secret_publica': return publicaCheile()
-    // CERINȚELE OWNERULUI, prinse din conversație. Fără astea, tabela `cerinte`
-    // rămânea goală și tot sistemul de gestiune era decor.
+    // THE OWNER'S REQUIREMENTS, caught from the conversation. Without these,
+    // the `cerinte` table stayed empty and the whole management system was
+    // decoration.
     case 'cerinta_noua': {
       const id = await adaugaCerinta(
         String(args.text ?? ''),
@@ -89,12 +94,13 @@ export async function execSharedAdminTool(
         })),
       })
     }
-    // ── CARDUL LA FURNIZORI ────────────────────────────────────────────────
-    // Valoarea NU trece niciodată prin model: el spune doar ce câmp și unde.
+    // ── THE CARD AT PROVIDERS ──────────────────────────────────────────────
+    // The value NEVER passes through the model: it only says which field and
+    // where.
     case 'card_stare': {
       const c = cardConfigurat()
-      // Furnizorii vin din ce s-a MĂSURAT pe paginile lor la închiderea
-      // sesiunii, nu din ce a spus cineva că a făcut.
+      // The providers come from what was MEASURED on their pages at the
+      // session's close, not from what someone said they did.
       const furnizori = await stareFurnizori()
       return JSON.stringify({
         configurat: c.gata,
@@ -113,12 +119,13 @@ export async function execSharedAdminTool(
         String(args.camp ?? '') as CampCard,
         Number(args.index ?? -1),
       )
-      // Pagina se întoarce deja mascată de modul discret; nu adăugăm nimic.
+      // The page comes back already masked by the discreet module; we add nothing.
       return JSON.stringify({ ok: r.ok, camp: r.camp, detaliu: r.detaliu, pagina: r.pagina })
     }
-    // ── TOT CE CONȚINE ADMINUL ─────────────────────────────────────────────
-    // Cookie-ul e al celui care cere: unealta NU ocolește poarta de admin, o
-    // folosește. Fără sesiune de admin, ruta răspunde 403 și el o spune.
+    // ── EVERYTHING THE ADMIN CONTAINS ──────────────────────────────────────
+    // The cookie belongs to the caller: the tool does NOT bypass the admin
+    // gate, it uses it. Without an admin session, the route answers 403 and it
+    // says so.
     case 'admin_vezi':
       return adminVezi(String(args.sectiune ?? ''), ctx.cookie ?? '')
     case 'admin_schimba':
@@ -135,8 +142,9 @@ export async function execSharedAdminTool(
       return JSON.stringify({ ok: true, id, prioritate: p })
     }
     case 'propose_tool': {
-      // AUTO-EXTINDEREA: Kelion își cere singur o unealtă nouă (owner o aprobă
-      // cu un click în Admin → Unelte Kelion). Identic pe scris și pe voce.
+      // SELF-EXTENSION: Kelion asks for a new tool on its own (the owner
+      // approves it with one click in Admin → Kelion Tools). Identical in text
+      // and in voice.
       const p = args as Record<string, unknown>
       const id = await proposeKelionTool({
         name: String(p.name ?? ''),
@@ -155,13 +163,14 @@ export async function execSharedAdminTool(
   }
 }
 
-// ── §1 „CE POATE SCRISUL, POATE ȘI VOCEA" — unelte legate de UN USER ──────────
-// Golul măsurat 29 iul: registrul avea 66 capabilități pe scris și doar 31 pe
-// voce. Astea 8 nu depindeau de monitor sau de browser — doar de cine e userul —
-// deci nu aveau niciun motiv real să lipsească vorbind. Sursă UNICĂ, chemată de
-// chat.ts (runTool) ȘI de realtime.ts (creierul escaladat), ca să nu diveargă.
-// Poarta de admin o face TOT AICI (are nevoie de isAdmin), spre deosebire de
-// execSharedAdminTool unde o face apelantul.
+// ── §1 "WHAT TEXT CAN DO, VOICE CAN DO TOO" — tools bound to ONE USER ──────
+// The gap measured on Jul 29: the registry had 66 capabilities in text and
+// only 31 in voice. These 8 didn't depend on the monitor or the browser — only
+// on who the user is — so they had no real reason to be missing when speaking.
+// SINGLE source, called by chat.ts (runTool) AND realtime.ts (the escalated
+// brain), so they don't diverge.
+// The admin gate is done HERE TOO (it needs isAdmin), unlike
+// execSharedAdminTool where the caller does it.
 import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
