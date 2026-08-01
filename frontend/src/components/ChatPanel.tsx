@@ -209,9 +209,6 @@ export default function ChatPanel({
   useEffect(() => {
     setHasVoicePrint(hasVoiceprint())
   }, [])
-  // Delivery receipt for the CURRENT turn: the server's first stream frame
-  // ({turn}) sets it, so a small ✓ shows the message actually arrived.
-  const [delivered, setDelivered] = useState(false)
   // Messages typed during an active turn — visible, not lost in a queue.
   const [queued, setQueued] = useState<string[]>([])
   // Adrian, Jul 11: "the camera didn't start [after restart] — that's wrong" → the camera
@@ -292,10 +289,8 @@ export default function ChatPanel({
   // the stream opens/clears the workspace surface behind the avatar.
   function handleControl(c: ChatControl): void {
     // Delivery receipt: the server's first frame arrived — the message got there.
-    if (c.receipt) {
-      setDelivered(true)
-      return
-    }
+    // (No separate UI: the user text already shows ONCE in the single band below.)
+    if (c.receipt) return
     // GESTURE ON COMMAND (Adrian, Jul 11: "commanded movements for everything I want him
     // to do"): the brain put [GEST name] in the reply → the server turned it
     // into the {gest} frame → the movement direction (AvatarModel) plays the clip once.
@@ -825,7 +820,9 @@ export default function ChatPanel({
     }
     inFlightRef.current = true
     setInput('')
-    setDelivered(false) // new turn — the ✓ lights only once the server answers
+    // New turn: the server-confirmed text of the FINISHED turn is cleared —
+    // the band never shows a stale "what the brain got" from the previous one.
+    setHeard('')
     setAttachments([])
     // Multi-tasking: whatever is on the monitor (a map, a route, a video) STAYS
     // open while you keep chatting — it's only replaced when Kelion shows
@@ -1881,29 +1878,32 @@ export default function ChatPanel({
             <span className="voice-live-caret" />
           </div>
         )}
-        {/* O SINGURĂ BANDĂ, AMBELE SENSURI (Adrian, 11 iul seara: „aici
-            trebuiesc baleiate dinspre creier și înspre creier — în afară de
-            asta nu se mai afișează chat scris”). Aceeași bandă de la creier
-            își schimbă semnul după faza turei: 👤 = mesajul tău pleacă
-            ÎNSPRE creier (dispare la preluare — „după ce ai baleiat ce am
-            scris, nu se mai afișează”); 🧠 = creierul l-a primit și gândește
-            (arată ce a auzit efectiv — confirmat de server, nu ecou local);
-            K = răspunsul curge DINSPRE creier (coada textului cât streamează,
-            teletext când e terminat). Un rând, mereu, nimic în afara ei. */}
-        {busy && !delivered && lastUser?.content ? (
-          <div className="heard-band user-band" aria-live="polite">
-            <span className="heard-band-label" title={uiStrings().heardYouTitle}>👤</span>
-            <span className="speech-tail">
-              <span className="speech-tail-text">{lastUser.content.slice(0, 400)}</span>
-            </span>
-          </div>
-        ) : busy && !lastAssistant?.content ? (
-          <div className="heard-band" aria-live="polite">
-            <span className="heard-band-label" title={uiStrings().heardBrainTitle}>🧠</span>
-            <span className="speech-tail">
-              <span className="speech-tail-text">{heard ? `„${heard}”` : '…'}</span>
-            </span>
-          </div>
+        {/* ONE BAND, BOTH DIRECTIONS (Adrian, Jul 11 evening: "things must be
+            swept here, from the brain and towards the brain — no other written
+            chat shows"). The band changes its sign with the turn's phase:
+            👤 = YOUR TEXT, SHOWN ONCE (Adrian, Aug 1: "the text must not show
+            towards the model and then the same text again towards the brain —
+            only what enters the brain, a single time") — first what was sent,
+            swapped IN PLACE for the server-confirmed {heard} when it arrives,
+            never a second display; 🧠 = the brain is thinking (only when there
+            is no user text to show); K = the reply flows FROM the brain (text
+            tail while streaming, ticker when done). One row, always. */}
+        {busy && !lastAssistant?.content ? (
+          heard || lastUser?.content ? (
+            <div className="heard-band user-band" aria-live="polite">
+              <span className="heard-band-label" title={uiStrings().heardYouTitle}>👤</span>
+              <span className="speech-tail">
+                <span className="speech-tail-text">{(heard || lastUser?.content || '').slice(0, 400)}</span>
+              </span>
+            </div>
+          ) : (
+            <div className="heard-band" aria-live="polite">
+              <span className="heard-band-label" title={uiStrings().heardBrainTitle}>🧠</span>
+              <span className="speech-tail">
+                <span className="speech-tail-text">…</span>
+              </span>
+            </div>
+          )
         ) : lastAssistant?.content || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
