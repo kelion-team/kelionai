@@ -45,9 +45,9 @@ function isPrivateIPv4(ip: string): boolean {
 }
 function isPrivateIPv6(ip: string): boolean {
   const low = ip.toLowerCase()
-  // IPv4 MAPAT ÎN IPv6 (audit securitate 27 iul): `::ffff:169.254.169.254`
-  // trecea de filtre — net.isIP îl vede ca IPv6, dar e o adresă IPv4 privată
-  // deghizată. O despachetăm și o judecăm cu regulile IPv4.
+  // IPv4 MAPPED INTO IPv6 (security audit 27 Jul): `::ffff:169.254.169.254`
+  // passed the filters — net.isIP sees it as IPv6, but it is a private IPv4
+  // address in disguise. We unwrap it and judge it by the IPv4 rules.
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(low)
   if (mapped) return isPrivateIPv4(mapped[1])
   return low === '::1' || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('fe80')
@@ -193,25 +193,25 @@ function isNavigationRace(e: unknown): boolean {
   )
 }
 
-// ── MODUL DISCRET: pagina în care se scrie un card nu ajunge NICĂIERI ────────
+// ── DISCREET MODE: the page where a card is typed goes NOWHERE ─────────────
 //
-// Adrian, 31 iul: „să opereze pentru mine când îi cer doar eu, folosind
-// sistemul de recunoaștere vocală, ca securitate sporită."
+// Adrian, 31 Jul: "it should operate for me only when I ask, using the voice
+// recognition system, as heightened security."
 //
-// Amprenta vocală rezolvă CINE are voie. Rămâne însă scurgerea: browserul face
-// o captură la fiecare pas (care ajunge pe monitor) și întoarce textul paginii
-// către model. Pe o pagină de plată, amândouă ar căra numărul cardului — în
-// imagini, în jurnalul turei, în istoricul conversației.
+// The voiceprint solves WHO is allowed. The leak remains though: the browser
+// takes a screenshot at every step (which reaches the monitor) and returns the
+// page text to the model. On a payment page, both would carry the card number
+// — into images, into the turn journal, into the conversation history.
 //
-// Cât timp sesiunea e „discretă": ZERO capturi, iar din textul paginii se
-// maschează orice șir de 12-19 cifre. Nu e o politețe — e diferența dintre „a
-// pus cardul" și „a lăsat cardul prin trei locuri".
+// While a session is "discreet": ZERO screenshots, and any 12-19 digit run is
+// masked out of the page text. This is not politeness — it is the difference
+// between "entered the card" and "left the card in three places".
 const discret = new Set<string>()
 export function setModDiscret(email: string, pornit: boolean): void {
   if (pornit) discret.add(email)
   else discret.delete(email)
 }
-/** Maschează șirurile lungi de cifre (card, IBAN) dintr-un text. */
+/** Masks long runs of digits (card, IBAN) in a text. */
 export function mascheazaCifre(text: string): string {
   return text.replace(/\b(?:\d[ -]?){12,19}\b/g, (m) => `«${m.replace(/\D/g, '').length} cifre ascunse»`)
 }
@@ -222,7 +222,7 @@ async function takeSnapshot(page: Page, baseUrl: string, email = ''): Promise<Br
   const elements = ((await page.evaluate(COLLECT_SCRIPT)) as BrowserElement[]) ?? []
   let text = String((await page.evaluate(TEXT_SCRIPT)) ?? '').trim().slice(0, 3000)
   if (email && discret.has(email)) {
-    // Fără captură (n-ar avea ce ajunge pe monitor) și fără cifre în text.
+    // No screenshot (nothing would reach the monitor) and no digits in the text.
     return { url, title, text: mascheazaCifre(text), elements, shotUrl: '' }
   }
   const buf = await page.screenshot({ type: 'jpeg', quality: 60 })
@@ -283,9 +283,9 @@ export async function browserOpen(
   }
 }
 
-// Rutinele care ACȚIONEAZĂ pe pagină (click/type) au același schelet: sesiune
-// validă → acțiunea în try/catch (element_not_found) → așteaptă încărcarea +
-// 300ms → snapshot. Doar `act` diferă. Sursă unică (unic, fără duplicate).
+// The routines that ACT on the page (click/type) share the same skeleton:
+// valid session → the action in try/catch (element_not_found) → wait for load
+// + 300ms → snapshot. Only `act` differs. Single source (no duplicates).
 async function withPageAction(
   email: string,
   baseUrl: string,
@@ -359,20 +359,20 @@ export async function browserScroll(
   return snapshot(session.page, baseUrl, email)
 }
 
-// COMPUTER-USE COMPLET (Adrian, 13 iul): pe lângă click/type/scroll pe elemente
-// indexate, Kelion poate apăsa TASTE (Tab/Escape/săgeți/Enter/combinații) și
-// poate da click pe COORDONATE (x,y) — pentru widget-uri care nu sunt în DOM-ul
-// indexabil (canvas, hărți, meniuri custom). Astea închid golul față de
-// „computer use" real, păstrând aceeași sesiune/screenshot.
+// FULL COMPUTER USE (Adrian, 13 Jul): besides click/type/scroll on indexed
+// elements, Kelion can press KEYS (Tab/Escape/arrows/Enter/combinations) and
+// can click on COORDINATES (x,y) — for widgets that are not in the indexable
+// DOM (canvas, maps, custom menus). These close the gap to real "computer
+// use", keeping the same session/screenshot.
 
-// Apasă o tastă sau o combinație pe pagina curentă. Formatul Playwright:
+// Presses a key or a combination on the current page. Playwright format:
 // 'Enter', 'Tab', 'Escape', 'ArrowDown', 'Control+A', 'Shift+Tab' etc.
 export async function browserKey(email: string, baseUrl: string, key: string): Promise<BrowserResult> {
   const session = sessions.get(email)
   if (!session) return { error: 'no_session' }
   session.lastUsed = Date.now()
-  // Bariera de siguranță: doar taste/combinații cu forma așteptată (nume de
-  // taste + modificatori), nu text arbitrar injectat.
+  // Safety barrier: only keys/combinations of the expected shape (key names
+  // + modifiers), not arbitrary injected text.
   if (!/^([A-Za-z0-9]+|(Control|Shift|Alt|Meta)(\+(Control|Shift|Alt|Meta))*\+[A-Za-z0-9]+|Enter|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Arrow(Up|Down|Left|Right)|Space)$/.test(key)) {
     return { error: 'bad_key' }
   }
@@ -386,11 +386,12 @@ export async function browserKey(email: string, baseUrl: string, key: string): P
   return snapshot(session.page, baseUrl, email)
 }
 
-// Click pe coordonate (x,y) în viewport (1280×800). Pentru elemente pe care
-// selectorul indexat nu le prinde (canvas, hărți, UI custom).
+// Click on coordinates (x,y) in the viewport (1280×800). For elements the
+// indexed selector cannot catch (canvas, maps, custom UI).
 export async function browserClickAt(email: string, baseUrl: string, x: number, y: number): Promise<BrowserResult> {
-  // Avea scheletul copiat de mână (sesiune → acțiune → așteptare → snapshot),
-  // deși `withPageAction` există exact pentru asta. Aici e o singură sursă.
+  // It used to have a hand-copied skeleton (session → action → wait →
+  // snapshot), even though `withPageAction` exists exactly for that. Here
+  // there is a single source.
   const cx = Math.max(0, Math.min(1280, Math.round(x)))
   const cy = Math.max(0, Math.min(800, Math.round(y)))
   return withPageAction(email, baseUrl, (page) => page.mouse.click(cx, cy))
