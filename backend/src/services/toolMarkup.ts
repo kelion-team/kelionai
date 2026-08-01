@@ -21,7 +21,16 @@ const PAIR_RES = [
   /<\|?tool_call\|?>[\s\S]*?<\|?\/?tool_call\|?>/g,
   /<tool_call>[\s\S]*?<\/tool_call>/g,
   /<\|im_(?:start|end)\|>[^\n]*\n?/g,
+  // JSON-STYLE FAKE CALLS (Adrian, Aug 1 — live screenshot: the bubble showed
+  // RAW „{"tool": "maps_search", "arguments": {"lat": 51.79, ...}}"). Models
+  // with no tool access TYPE the call as JSON instead of invoking it. One
+  // line, flat arguments — the shape every faker produces.
+  /\{\s*"(?:tool|tool_call|name|function)"\s*:\s*"[^"\n]+"\s*,\s*"(?:arguments|args|parameters|input)"\s*:\s*\{[^{}\n]*\}\s*\}/g,
 ]
+// The WHOLE bubble is one typed JSON call (multiline, possibly nested) —
+// caught as a whole in stripToolMarkup (streaming chunks can't hold it).
+const JSON_TOOL_WHOLE_RE = /"(?:tool|tool_call|name|function)"\s*:\s*"[^"\n]+"/
+const JSON_TOOL_ARGS_RE = /"(?:arguments|args|parameters|input)"\s*:/
 const FRAGMENTS = [
   '<|tool_call|>',
   '<|/tool_call|>',
@@ -44,6 +53,21 @@ export function stripToolMarkup(text: string, onLog?: (swallowed: string) => voi
   if (openIdx >= 0) {
     onLog?.(out.slice(openIdx))
     out = out.slice(0, openIdx)
+  }
+  // The WHOLE remaining text is one typed JSON call (multiline / nested args
+  // the one-line regex above cannot hold): it is never a human answer. Drop
+  // it ALL → stripToolMarkup returns empty → the racer with no real tools
+  // LOSES the race and the turn falls to the sequential tool path, where the
+  // map actually opens instead of the model narrating fake coordinates.
+  const trimmed = out.trim()
+  if (
+    trimmed.startsWith('{') &&
+    trimmed.endsWith('}') &&
+    JSON_TOOL_WHOLE_RE.test(trimmed) &&
+    JSON_TOOL_ARGS_RE.test(trimmed)
+  ) {
+    onLog?.(trimmed)
+    out = ''
   }
   return out
 }

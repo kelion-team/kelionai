@@ -152,6 +152,9 @@ describe('latența (Adrian: timpi exceptionali de mari)', () => {
     expect(chat).toMatch(/slice\(0, 3\)/)
     expect(chat).toMatch(/Promise\.all\(curse\)/)
   })
+  it('Gemini direct e PRIMUL concurent (calitatea românei, 1-3s)', () => {
+    expect(chat).toMatch(/geminiDirectAvailable\(\) && eSanatos\(`\$\{GEMINI_DIRECT_PREFIX\}\$\{config\.geminiModel\}`\)/)
+  })
   it('concurenții NU primesc unelte (fără dublă execuție)', () => {
     expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)
   })

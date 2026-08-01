@@ -2189,9 +2189,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // again. If nobody wins, the classic sequential path below takes over
       // (with tools, the reserve and the queue).
       if (!heavyTurn && !turnHasImage) {
-        const concurenti = (await listaCandidati(triedModels))
-          .filter((id) => id.endsWith(':free') && eSanatos(id))
-          .slice(0, 3)
+        const concurenti = [
+          // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step, after the race cut
+          // latency 40s → 4.7s but the free pool kept answering broken
+          // Romanian, „îmi radegând protocolul"): Google's own API on the free
+          // key — real Romanian, 1-3s. The OpenRouter free pool races behind.
+          ...(geminiDirectAvailable() && eSanatos(`${GEMINI_DIRECT_PREFIX}${config.geminiModel}`)
+            ? [`${GEMINI_DIRECT_PREFIX}${config.geminiModel}`]
+            : []),
+          ...(await listaCandidati(triedModels)).filter((id) => id.endsWith(':free') && eSanatos(id)),
+        ].slice(0, 3)
         for (const id of concurenti) triedModels.add(id)
         interface Castigator { id: string; rez: Awaited<ReturnType<typeof runBrainOnce>>; curat: string }
         const curse = concurenti.map(async (id): Promise<Castigator | null> => {
