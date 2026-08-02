@@ -1,5 +1,6 @@
 import { getCapabilityGaps, setGapTriage } from '../db.js'
 import { brainComplete } from './brain.js'
+import { CAPABILITIES } from './brainCapabilities.js'
 
 // ── THE AUTONOMOUS TRIAGE OF UNCOVERED REQUESTS ─────────────────────────────
 // Adrian (24 Jul): "Kelion must analyse the uncovered requests and be able to
@@ -12,13 +13,16 @@ import { brainComplete } from './brain.js'
 //              (duplicate / already possible / no value / out of scope).
 // Runs on demand (admin button) and AUTONOMOUSLY once a day (index.ts).
 
-const APP_CAPABILITIES = `Aplicația Kelionai POATE deja: conversație (chat+voce full-duplex) cu escaladare
-automată chat→creier; hărți + traseu rutier pe monitor; vreme; căutare web live;
-YouTube; generare imagini; traduceri; Wikipedia; valute; ceas mondial; Gmail
-(citire+trimitere), Calendar, Drive, Tasks, Contacts (după Connect Google);
-memorie persistentă + note explicite; voiceprint; vedere prin cameră + analiză
-poze; afișare orice pagină pe monitor + browser live cu click/scris; gesturi
-avatar (inclusiv dans); credite cumpărate prin link Revolut cu cod unic.`
+// WHAT THE APP CAN ALREADY DO — DERIVED from the single registry
+// (services/brainCapabilities.ts), never a hand-written copy. The old constant
+// below was written by hand and had already rotted: it listed nothing about
+// run_web_app, open_app_view, get_monitor, get_location, lookup_address or
+// ask_brain — so the triage could mark "valuable" a request the app already
+// covers, and "already possible" would never be provable. Derived, it cannot
+// fall behind: a new capability appears here on its own.
+const APP_CAPABILITIES =
+  `Aplicația Kelionai POATE deja (${CAPABILITIES.length} capabilități, din registrul unic):\n` +
+  CAPABILITIES.map((c) => `- ${c.name}: ${c.does}`).join('\n')
 
 export interface TriageOutcome {
   triaged: number

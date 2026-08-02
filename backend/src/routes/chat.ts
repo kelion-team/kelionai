@@ -934,9 +934,7 @@ weather, maps, YouTube, translation, Wikipedia knowledge lookup, currency
 conversion, current time by timezone; show_on_screen to put a web page on the
 user's monitor on your own initiative; and generate_image to draw/create a
 picture and show it on the monitor. Call them whenever they help. If a Google
-tool returns an auth error, tell the user to sign in again to grant access. If
-generate_image returns "needs_billing", tell the user image generation needs
-Google AI billing enabled on the Gemini project. When you call get_weather a live
+tool returns an auth error, tell the user to sign in again to grant access. When you call get_weather a live
 weather map for the real location is shown on the monitor automatically — never
 call show_on_screen with a weather website (those guessed URLs often 404). For
 live traffic, open a Waze live map on the monitor: call show_on_screen with url
@@ -1220,8 +1218,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // "instant live chat"): the independent reads leave TOGETHER — every
     // separate await added another DB round trip before the first word.
     // BYOK-PROVIDER REMOVED COMPLETELY (Adrian, Jul 12: "remove the old provider
-    // completely, no patches"): the brain is Kimi→GLM; there is no client key
-    // anymore. All users go through the normal paywall (wallet credit).
+    // completely, no patches"): the brain is 100% OpenRouter (a single key) and
+    // there is no client key anymore. All users go through the normal paywall
+    // (wallet credit).
     const lastForRecall = messages.at(-1)
     // FLUENCY (Jul 24 audit, A1): semantic recall could wait up to 8s for the
     // Google embedding — on the FIRST word's path. A hard 400ms deadline:
@@ -1487,7 +1486,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // I'm connected to Gmail but it can't fetch data").
       (user.googleRefreshToken
         ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked, without saying "you are connected".'
-        : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Conectează Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
+        : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Connect Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
       ' NEVER proactively state whether the user is logged in or connected — the interface already shows it. Just answer what they asked.'
     // EYES ON F12 (Adrian, Jul 24: "it must have access to the logs"). RECENT
     // errors from the user's browser, sent by the client — Kelion diagnoses
