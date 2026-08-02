@@ -31,10 +31,11 @@ import {
   vectorDistance,
   type GuestVoiceRow,
 } from '../db.js'
+import { VOICE_MATCH_THRESHOLD } from './voiceMatch.js'
 
 // Same threshold as the holder check (realtime.ts / chat.ts): under this
-// distance, two prints are the same person.
-const MATCH_THRESHOLD = 0.38
+// distance, two prints are the same person. Single source: voiceMatch.ts.
+const MATCH_THRESHOLD = VOICE_MATCH_THRESHOLD
 
 interface GuestWindow {
   name: string
