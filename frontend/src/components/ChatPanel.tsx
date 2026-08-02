@@ -340,6 +340,12 @@ export default function ChatPanel({
   // the browser regains connectivity. retryTextRef holds the message to re-send.
   const offlineRef = useRef(false)
   const retryTextRef = useRef<string | null>(null)
+  // THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
+  // conexiunea la net"). 'server_down' resumes on a health poll (the browser's
+  // 'online' event never fires — the net was never down); 'transient' gets ONE
+  // silent retry (nothing broke from the human's point of view).
+  const healthPollRef = useRef<number | null>(null)
+  const transientRetryRef = useRef(false)
   const cameraOnRef = useRef(cameraOn)
   cameraOnRef.current = cameraOn
   const speechLangRef = useRef(speechLang)
@@ -1084,12 +1090,28 @@ export default function ChatPanel({
         mouth?.stopSpeaking() // the live mouth stops too — a failed turn says no more
         const code = codErr
         const spoken = strings(resolveLang(replyLang))
+        // TRANSIENT + nothing streamed yet → ONE silent retry: the network and
+        // the server are MEASURED fine (diagnozaConexiune), only this request
+        // broke on the road. From the human's view nothing broke — so nothing
+        // is said. The guard ref stops a retry loop (one per 30s).
+        if (code === 'transient' && !acc.trim() && !transientRetryRef.current) {
+          transientRetryRef.current = true
+          window.setTimeout(() => {
+            transientRetryRef.current = false
+          }, 30_000)
+          console.error('[CONEXIUNE] cerere ruptă cu net+server OK — reîncerc tăcut o dată')
+          window.setTimeout(() => void sendRef.current(msg), 400)
+        } else {
         const m =
           code === 'brain_not_configured'
             ? t.brainNotActive
             : code === 'offline'
               ? spoken.offline
-              : t.brainError
+              : code === 'server_down'
+                ? spoken.serverDown
+                : code === 'transient'
+                  ? spoken.requestLost
+                  : t.brainError
         // KEEP the text already received (don't drop it) — just add a discreet note,
         // so the text stays complete versus what was heard.
         // FUNCTIONAL updater, not a snapshot — the same lesson as in the streaming
@@ -1103,6 +1125,34 @@ export default function ChatPanel({
         if (code === 'offline') {
           offlineRef.current = true
           retryTextRef.current = msg // resume THIS message when the signal returns
+        }
+        if (code === 'server_down') {
+          // The 'online' browser event will never fire — the net was never
+          // down. We poll OUR server's health (5s, max 2 min — a deploy takes
+          // ~30-60s) and resume the SAME message the moment it answers.
+          retryTextRef.current = msg
+          if (healthPollRef.current) window.clearInterval(healthPollRef.current)
+          let incercari = 0
+          healthPollRef.current = window.setInterval(() => {
+            incercari++
+            if (incercari > 24) {
+              window.clearInterval(healthPollRef.current!)
+              healthPollRef.current = null
+              return
+            }
+            void fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(3000) })
+              .then((r) => {
+                if (!r.ok) return
+                window.clearInterval(healthPollRef.current!)
+                healthPollRef.current = null
+                const retry = retryTextRef.current
+                retryTextRef.current = null
+                console.error('[CONEXIUNE] serverul a revenit — reiau mesajul singur')
+                if (retry) void sendRef.current(retry)
+              })
+              .catch(() => {})
+          }, 5000)
+        }
         }
       }
     } finally {

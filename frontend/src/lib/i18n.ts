@@ -159,6 +159,11 @@ export interface Strings {
   payCodeCopied: string
   payCodeOpen: string
   payCodeWaiting: string
+  // ── THE HONEST CONNECTION VERDICT (Adrian, 2 aug: the app claimed „lost
+  // internet" with zero measurement; now the claim is measured — see
+  // diagnozaConexiune in lib/chat.ts) ──────────────────────────────────────
+  serverDown: string
+  requestLost: string
 }
 
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
@@ -319,6 +324,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     payCodeCopied: 'Copied ✓',
     payCodeOpen: 'Open Revolut and pay ↗',
     payCodeWaiting: 'Waiting for the payment — the credits arrive by themselves a few minutes after it lands.',
+    serverDown:
+      'The server isn’t answering right now — it is NOT your internet. I keep checking and will pick this up by myself the moment it returns.',
+    requestLost: 'The request broke on the way (your internet and the server are fine) — please send it again.',
   },
   ro: {
     signIn: 'Conectează-te cu Google',
@@ -464,6 +472,9 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     payCodeCopied: 'Copiat ✓',
     payCodeOpen: 'Deschide Revolut și plătește ↗',
     payCodeWaiting: 'Aștept plata — creditele intră singure la câteva minute după ce ajunge.',
+    serverDown:
+      'Serverul nu răspunde momentan — NU e internetul tău. Verific întruna și reiau singur în clipa în care revine.',
+    requestLost: 'Cererea s-a rupt pe drum (netul tău și serverul sunt bune) — mai trimite o dată.',
   },
   es: {
     signIn: 'Iniciar sesión con Google',

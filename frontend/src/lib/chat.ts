@@ -106,6 +106,35 @@ export interface ScreenTask {
   active: boolean
 }
 
+// ── THE HONEST CONNECTION VERDICT (Adrian, 2 aug: „raportează fals că pierde
+// conexiunea la net — trebuie monitorizat real dacă e așa") ─────────────────
+// Before, ANY failed fetch/stream became 'offline' → the chat told the human
+// „I've lost the internet connection" with ZERO measurement — including when
+// OUR server was restarting (a deploy!) while his internet was perfectly
+// fine. A failed read presented as an established fact, rule no. 1 broken.
+// Now the claim is MEASURED, and the verdict is logged (console.error reaches
+// the server through the F12 pipe — the real monitoring he asked for):
+//   'offline'     → the BROWSER itself says the machine has no network;
+//   'server_down' → the network is up but /api/health doesn't answer
+//                   (deploy/restart/crash — NOT the user's internet);
+//   'transient'   → network up AND the server answers: only this one request
+//                   broke on the road (proxy hiccup, dropped socket).
+async function diagnozaConexiune(): Promise<'offline' | 'server_down' | 'transient'> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    console.error('[CONEXIUNE] verdict măsurat: offline (navigator.onLine=false)')
+    return 'offline'
+  }
+  try {
+    const r = await fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
+    const verdict = r.ok ? 'transient' : 'server_down'
+    console.error(`[CONEXIUNE] verdict măsurat: ${verdict} (net OK, /api/health → ${r.status})`)
+    return verdict
+  } catch {
+    console.error('[CONEXIUNE] verdict măsurat: server_down (net OK, /api/health nu răspunde)')
+    return 'server_down'
+  }
+}
+
 export async function* streamChat(
   messages: ChatMessage[],
   image?: string,
@@ -287,7 +316,7 @@ export async function* streamChat(
       // moment and it disappeared, with ⚠️ on top.
       // A human-requested cancellation is not a network failure and doesn't get repaired.
       if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
-      throw new Error('offline')
+      throw new Error(await diagnozaConexiune())
     }
 
     if (!res.ok || !res.body) {
@@ -346,7 +375,7 @@ export async function* streamChat(
       // reconnect and isn't declared offline — its stop was requested.
       if (signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw new Error('aborted')
       if (await resume()) continue
-      throw new Error('offline')
+      throw new Error(await diagnozaConexiune())
     } finally {
       window.clearTimeout(watchdog)
     }

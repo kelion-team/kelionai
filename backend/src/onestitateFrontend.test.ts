@@ -109,6 +109,27 @@ describe('gestul necunoscut lasă urmă', () => {
   })
 })
 
+describe('„am pierdut netul" e o MĂSURĂTOARE, nu o presupunere (Adrian, 2 aug: „raportează fals")', () => {
+  const chatLib = readFileSync(cale('../../frontend/src/lib/chat.ts'), 'utf8')
+  it('niciun throw orb pe offline — ambele locuri trec prin diagnoză', () => {
+    expect(chatLib).not.toMatch(/throw new Error\('offline'\)/)
+    const diagnoze = chatLib.match(/throw new Error\(await diagnozaConexiune\(\)\)/g) ?? []
+    expect(diagnoze.length).toBe(2)
+  })
+  it('diagnoza deosebește cele 3 adevăruri și le scrie în jurnal (monitorizare reală)', () => {
+    expect(chatLib).toMatch(/navigator\.onLine === false/)
+    expect(chatLib).toMatch(/'offline' \| 'server_down' \| 'transient'/)
+    expect(chatLib).toMatch(/\[CONEXIUNE\] verdict măsurat/)
+  })
+  it('serverul căzut se reia pe pulsul de sănătate, nu pe evenimentul online care nu vine', () => {
+    expect(panou).toMatch(/code === 'server_down'/)
+    expect(panou).toMatch(/healthPollRef/)
+  })
+  it('accidentul pasager fără text scurs se reîncearcă TĂCUT o dată', () => {
+    expect(panou).toMatch(/code === 'transient' && !acc\.trim\(\) && !transientRetryRef\.current/)
+  })
+})
+
 describe('panoul banilor nu mai moare cu un câmp dispărut (Adrian, 2 aug: „mai jos nu mai e nimic")', () => {
   const adminPanel = readFileSync(cale('../../frontend/src/components/AdminPanel.tsx'), 'utf8')
   const rutaAdmin = readFileSync(cale('./routes/admin.ts'), 'utf8')
