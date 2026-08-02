@@ -207,6 +207,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   show_document: { what: 'Puts a text or a result on your screen to read', say: '"write that out for me"' },
   run_web_app: { what: 'Builds a small page and runs it for you', say: '"make me a quick calculator"' },
   generate_image: { what: 'Draws an image from your description', say: '"draw me a red kitchen"' },
+  generate_video: { what: 'Makes a short video clip from your description (paid, only if enabled)', say: '"make me a video of waves at sunset"' },
   open_app_view: { what: 'Opens a panel of the app for you', say: '"open my settings"' },
   play_avatar_gesture: { what: 'Kelion gestures while it speaks', say: 'happens on its own' },
 

@@ -45,6 +45,7 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'show_document', category: 'afisare', does: 'pune un text/rezultat pe monitor', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'run_web_app', category: 'afisare', does: 'rulează o pagină scrisă de el (izolat)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
+  { name: 'generate_video', category: 'afisare', does: 'generează un clip video (Veo; plătit, doar cu aprobarea conștientă din env)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: false, voiceViaBrain: true, admin: false },
 

@@ -62,6 +62,7 @@ import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
 import { generateImage } from '../services/image.js'
+import { genereazaVideo } from '../services/video.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
@@ -380,6 +381,25 @@ const IMAGE_TOOL: Tool = {
     type: 'object',
     properties: {
       prompt: { type: 'string', description: 'Detailed English description of the image to generate.' },
+    },
+    required: ['prompt'],
+  },
+}
+
+// Video generation — Veo through the Gemini key. Veo has NO free tier
+// (measured on Google's pricing page, Aug 2 2026), so services/video.ts
+// refuses structurally unless the owner consciously set VIDEO_ALLOW_PAID=1 —
+// the constructor's own paid-guard pattern. The refusal message carries the
+// measured price, so Kelion can tell the person exactly why and how much.
+const VIDEO_TOOL: Tool = {
+  name: 'generate_video',
+  description:
+    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. This COSTS real money per second (Veo has no free tier) — if the tool refuses because payment is not enabled, tell the user honestly, including the price from the refusal.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', description: 'Detailed English description of the video to generate.' },
+      seconds: { type: 'number', description: 'Clip length in seconds: 4, 6 or 8 (default 8).' },
     },
     required: ['prompt'],
   },
@@ -1987,8 +2007,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const rawTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2812,6 +2832,24 @@ async function runTool(
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: imageUrl })
+    }
+
+    case 'generate_video': {
+      const prompt = String(args.prompt ?? '')
+      if (!prompt) return JSON.stringify({ error: 'no_prompt' })
+      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8))
+      // The refusal (no key / payment not consciously enabled) travels to the
+      // brain VERBATIM — it contains the measured price, so the person hears
+      // the real reason, not a generic "failed".
+      if ('error' in result) return JSON.stringify({ error: result.error })
+      // The cost is the official list price × the real seconds generated —
+      // Google does not itemize per call, so this is the exact bill by their
+      // published rate, booked as its own kind to stay distinguishable.
+      usage.usd += result.costUsd
+      void recordCost(email, 'video', result.costUsd)
+      const videoUrl = `${baseUrl}/api/video/${result.id}`
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: 'Generated video' } })}${CTRL}`)
+      return JSON.stringify({ shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd })
     }
 
     // The 8 browser actions: the call differs, the queue is shared
