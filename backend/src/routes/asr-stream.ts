@@ -5,6 +5,20 @@ import { getSessionUser } from '../session.js'
 import { recordCost } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
 import { normalizeLang } from '../services/tts.js'
+import {
+  CADRU_LINISTE,
+  KEEPALIVE_CHECK_MS,
+  RECONECTARI_MAX,
+  RECONNECT_WINDOW_MS,
+  alertaAdminUrechiChirp,
+  clasificaEroareGoogle,
+  noteazaEroareChirp,
+  noteazaFallbackChirp,
+  noteazaReconectareChirp,
+  noteazaStreamChirp,
+  trebuieCadruDeLiniste,
+  trebuieFallbackDupaEroare,
+} from '../services/urechiChirp.js'
 
 // STREAMING ASR — Google Speech-to-Text v2 `_streamingRecognize`, with:
 //   • advanced detection (chirp model — endpointing on the SERVER, not a local
@@ -15,6 +29,22 @@ import { normalizeLang } from '../services/tts.js'
 // 16kHz, mono) in binary frames; we relay it to Google and push back
 // {partial|final|speech_begin|speech_end}. The batch route /api/asr stays
 // UNTOUCHED until cutover (zero duplication AFTER cutover, not during it).
+//
+// THE EARS NO LONGER DIE OF SILENCE (Adrian, Aug 2 — the live failure: Google
+// «10 ABORTED: Stream timed out after receiving no more client requests» while
+// nobody spoke, then the session rebuilt on the PAID OpenAI ears). The client
+// only streams when the local VAD hears voice (deliberate: silence isn't
+// billed) — so an unfed Google stream used to idle out and die. Now:
+//   1. KEEPALIVE — while the stream is open and no audio has flowed for
+//      KEEPALIVE_IDLE_MS, we write a 100 ms frame of digital silence. Google
+//      never idles out; the ear stays warm at ~1.2 billed seconds/minute.
+//   2. TRANSPARENT RECONNECT — transient drops (idle timeout, UNAVAILABLE,
+//      RST_STREAM, max stream lifetime) reopen the stream WITHOUT a word to
+//      the client: the browser never declares the ear dead for those.
+//   3. The client sees {type:'error'} — and falls back to the paid OpenAI
+//      ears — ONLY on real persistent failure (auth/config, or the reconnect
+//      budget exhausted) — and THAT is when the admin gets paged instantly
+//      (see services/urechiChirp.ts).
 
 // THE PROVEN REGION (live matrix, Jul 10): chirp_3 does NOT exist in
 // us-central1 — Google: 'The model "chirp_3" does not exist in the location
@@ -115,6 +145,12 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     let started = false
     let closed = false
     let langHint = ''
+    // Keepalive + transparent reconnect state (Aug 2 — see the header block).
+    let keepalive: ReturnType<typeof setInterval> | null = null
+    let ultimulAudioLa = 0 // last time ANY frame (voice or silence) went to Google
+    let reconectari = 0 // transparent reconnects inside the current window
+    let fereastraStart = Date.now()
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     const send = (obj: unknown): void => {
       try {
@@ -124,7 +160,34 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    const stopKeepalive = (): void => {
+      if (keepalive) {
+        clearInterval(keepalive)
+        keepalive = null
+      }
+    }
+
+    // The stream dies at ~10s unfed; while the speaker is silent the client
+    // sends NOTHING (deliberate — silence isn't billed), so WE feed Google a
+    // 100 ms silence frame instead. The ear stays warm; nobody pays for an
+    // OpenAI-ear fallback over a mere pause.
+    const armKeepalive = (): void => {
+      stopKeepalive()
+      keepalive = setInterval(() => {
+        if (closed || !gStream) return
+        const acum = Date.now()
+        if (!trebuieCadruDeLiniste(ultimulAudioLa, acum)) return
+        try {
+          gStream.write({ audio: CADRU_LINISTE } as protos.google.cloud.speech.v2.IStreamingRecognizeRequest)
+          ultimulAudioLa = acum
+        } catch {
+          /* the stream's own error handler classifies and reconnects */
+        }
+      }, KEEPALIVE_CHECK_MS)
+    }
+
     const stopGoogle = (): void => {
+      stopKeepalive()
       if (gStream) {
         try {
           gStream.end()
@@ -165,19 +228,47 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         }
       })
       stream.on('error', (e: unknown) => {
-        // DIAGNOSTIC (Adrian, Jul 14): we surface the REAL Google message —
-        // the previous code only sent a generic "asr_failed", and the {err}
-        // logger didn't show in the server journal. Now the message goes BOTH
-        // into the log (string) AND into the WS answer (`detail`), so we see
-        // EXACTLY why Google rejects.
+        // DIAGNOSTIC (Adrian, Jul 14): we surface the REAL Google message in
+        // the server journal, so we see EXACTLY why Google rejects.
+        // Aug 2: the message no longer goes blindly to the client. Classified
+        // first — an idle timeout or a transient drop reopens the stream
+        // TRANSPARENTLY (the ear does NOT die, no paid OpenAI-ear fallback);
+        // only a real persistent failure (auth/config, or the reconnect
+        // budget exhausted) reaches the client AND pages the admin instantly.
         const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
-        app.log.error('asr-stream: eroare Google streamingRecognize: ' + detail)
-        send({ type: 'error', error: 'asr_failed', detail })
-        gStream = null
-        started = false // allows a restart on the next frame — otherwise ASR stays mute
+        if (gStream !== stream && gStream !== null) return // late error from an already-replaced stream
+        const cauza = clasificaEroareGoogle(e)
+        noteazaEroareChirp(cauza, detail)
+        if (gStream === stream) {
+          gStream = null
+          stopKeepalive()
+        }
+        started = false
+        if (Date.now() - fereastraStart > RECONNECT_WINDOW_MS) {
+          fereastraStart = Date.now()
+          reconectari = 0
+        }
+        if (closed) return
+        if (trebuieFallbackDupaEroare(cauza, reconectari, RECONECTARI_MAX)) {
+          app.log.error(`asr-stream: eroare PERSISTENTĂ (${cauza}) — clientul cade pe urechile OpenAI: ` + detail)
+          noteazaFallbackChirp(detail)
+          send({ type: 'error', error: 'asr_failed', detail })
+          void alertaAdminUrechiChirp(cauza, detail)
+          return
+        }
+        reconectari++
+        noteazaReconectareChirp()
+        app.log.warn(`asr-stream: eroare tranzitorie (${cauza}) — reconectare transparentă #${reconectari}: ` + detail)
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null
+          startGoogle()
+        }, 300)
       })
       stream.on('end', () => {
-        gStream = null
+        if (gStream === stream) {
+          gStream = null
+          stopKeepalive()
+        }
         started = false // allows a restart on the same socket if Google closes the stream
       })
 
@@ -204,6 +295,9 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
             },
           },
         } as protos.google.cloud.speech.v2.IStreamingRecognizeRequest)
+        noteazaStreamChirp()
+        ultimulAudioLa = Date.now()
+        armKeepalive() // Google never idles out from now on — see the header block
       } catch {
         send({ type: 'error', error: 'asr_failed' })
         stopGoogle()
@@ -234,6 +328,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       if (gStream) {
         try {
           gStream.write({ audio: data } as protos.google.cloud.speech.v2.IStreamingRecognizeRequest)
+          ultimulAudioLa = Date.now() // real voice also feeds the keepalive clock
         } catch {
           /* one lost chunk doesn't stop the stream */
         }
@@ -243,6 +338,10 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     const cleanup = (): void => {
       if (closed) return
       closed = true
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
       stopGoogle()
     }
     socket.on('close', cleanup)
