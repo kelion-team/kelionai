@@ -47,7 +47,9 @@ describe('modul gură-Chirp: ZERO OpenAI', () => {
     expect(idxPrefix).toBeGreaterThan(idxBranch)
   })
   it('barge-in: speech_begin taie redarea Chirp pe loc și anunță UI-ul', () => {
-    expect(voce).toMatch(/onSpeechBegin: \(\) => \{[\s\S]{0,200}?stopVoice\(\)\s*\n\s*onSpeechStart/)
+    // The barge-in callback is the chirp-mouth mode's piece of the ONE ear
+    // starter: your voice cuts the server playback, then wakes the UI.
+    expect(voce).toMatch(/pornesteUrecheaChirp\('rezerva OpenAI', \(\) => \{[\s\S]{0,200}?stopVoice\(\)\s*\n\s*onSpeechStart/)
   })
   it('STOP-ul vorbit taie gura serverului (taieGura = stopVoice)', () => {
     const idxBranch = voce.indexOf('if (guraChirp) {')
@@ -60,18 +62,31 @@ describe('modul gură-Chirp: ZERO OpenAI', () => {
     expect(hits.length).toBeGreaterThanOrEqual(2)
   })
   it('urechia moartă marchează și cade pe rezervă, fără bucle', () => {
+    // The death wiring lives ONCE, in the shared ear starter defined before
+    // both mode branches — and the chirp-mouth branch starts its ear through
+    // it, so the marking cannot diverge between modes.
+    const idxStarter = voce.indexOf('const pornesteUrecheaChirp')
     const idxBranch = voce.indexOf('if (guraChirp) {')
-    const idxMark = voce.indexOf('marcheazaUrechiChirpMoarte()', idxBranch)
-    expect(idxMark).toBeGreaterThan(idxBranch)
-    expect(idxMark).toBeLessThan(voce.indexOf('new RTCPeerConnection()'))
+    expect(idxStarter).toBeGreaterThanOrEqual(0)
+    expect(idxStarter).toBeLessThan(idxBranch)
+    const starter = voce.slice(idxStarter, idxBranch)
+    expect(starter).toContain('marcheazaUrechiChirpMoarte()')
+    expect(starter).toMatch(/onError:[\s\S]{0,200}?stop\(\)/)
+    expect(voce.indexOf("await pornesteUrecheaChirp('rezerva OpenAI'", idxBranch)).toBeGreaterThan(idxBranch)
   })
   it('log-ul live anunță exact modul cerut de Adrian', () => {
     expect(voce).toContain('urechi + gură pe Google Chirp 3 HD — OpenAI doar rezervă')
   })
   it('finalurile Chirp trec prin ACEEAȘI poartă și în acest mod', () => {
+    // One starter, one gate: the onPhrase → poartaDupaTranscript wiring sits
+    // in the shared starter, and the chirp-mouth branch uses that starter —
+    // the finals CANNOT reach the brain around the gate in this mode.
+    const idxStarter = voce.indexOf('const pornesteUrecheaChirp')
     const idxBranch = voce.indexOf('if (guraChirp) {')
+    const starter = voce.slice(idxStarter, idxBranch)
+    expect(starter).toMatch(/onPhrase: \(t, vf\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf\)/)
     const branch = voce.slice(idxBranch, voce.indexOf('new RTCPeerConnection()'))
-    expect(branch).toMatch(/onPhrase: \(t, vf\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf\)/)
+    expect(branch).toContain("pornesteUrecheaChirp('rezerva OpenAI'")
   })
 })
 

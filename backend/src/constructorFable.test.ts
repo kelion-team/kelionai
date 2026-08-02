@@ -65,9 +65,17 @@ function ruleazaProbele(): Proba {
     };
     console.log(JSON.stringify(out));
   `
+  // The subprocess must NOT inherit the machine's conscious choice: on the
+  // VPS (and its PR gate) CONSTRUCTOR_MODEL + CONSTRUCTOR_ALLOW_PAID are REAL
+  // — inherited, they turn the module's defaults paid and make (b)/(c) assert
+  // a world the test never set up. Both sides of the rule stay covered: the
+  // env-pair behavior runs through modelePentruOrdin's explicit args (d/d2/d3).
+  const envCurat = { ...process.env }
+  for (const k of Object.keys(envCurat)) if (k.startsWith('CONSTRUCTOR_')) delete envCurat[k]
   const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
     timeout: 30000,
+    env: envCurat,
   })
   return JSON.parse(stdout.trim().split('\n').pop()!) as Proba
 }

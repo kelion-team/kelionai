@@ -398,6 +398,32 @@ export async function startRealtimeVoice(
       })()
     }
 
+    // ── THE ONE CHIRP EAR (both modes) ──────────────────────────────────────
+    // Chirp-mouth mode and the OpenAI-mouth mode start the SAME ear with the
+    // SAME wiring; only the two mode-dependent pieces differ — what happens
+    // when speech begins (whose mouth gets cut) and where the session falls
+    // when the ear dies (named in the log line). One starter keeps the wiring
+    // identical by construction — the two copies cannot silently diverge.
+    const pornesteUrecheaChirp = (rezerva: string, onSpeechBegin: () => void) =>
+      startMicStream({
+        preWarmedStream: mic,
+        onLive: (t) => onUserTranscript?.(t, false),
+        onPhrase: (t, vf) => {
+          onUserTranscript?.(t, true)
+          poartaDupaTranscript(t, vf)
+        },
+        onError: (reason) => {
+          if (closed) return
+          console.error(`[voce] urechea Chirp a murit (${reason}) — sesiunea se reface pe ${rezerva}`)
+          marcheazaUrechiChirpMoarte()
+          stop()
+          onState?.('error', `urechi-chirp-${reason}`)
+        },
+        getLang: () => anchoredLang || opts.language || '',
+        onSpeechBegin,
+        storePendingFeatures: false,
+      })
+
     // ── CHIRP-MOUTH MODE (Adrian, Aug 2 — the direct order) ──────────────────
     // google:true at the probe → NO RTCPeerConnection, NO /api/realtime/session,
     // ZERO OpenAI cost: the ears are Chirp 3 streaming (as since Aug 1) and
@@ -409,28 +435,11 @@ export async function startRealtimeVoice(
     if (guraChirp) {
       // The mouth-cutter of this mode: the server's Chirp playback stops here.
       taieGura = stopVoice
-      const ear = await startMicStream({
-        preWarmedStream: mic,
-        onLive: (t) => onUserTranscript?.(t, false),
-        onPhrase: (t, vf) => {
-          onUserTranscript?.(t, true)
-          poartaDupaTranscript(t, vf)
-        },
-        onError: (reason) => {
-          if (closed) return
-          console.error(`[voce] urechea Chirp a murit (${reason}) — sesiunea se reface pe rezerva OpenAI`)
-          marcheazaUrechiChirpMoarte()
-          stop()
-          onState?.('error', `urechi-chirp-${reason}`)
-        },
-        getLang: () => anchoredLang || opts.language || '',
-        onSpeechBegin: () => {
-          // BARGE-IN (Aug 2): your voice cuts Kelion's Chirp playback on the
-          // spot — the aborted turn drains the rest of the server synthesis.
-          stopVoice()
-          onSpeechStart?.()
-        },
-        storePendingFeatures: false,
+      const ear = await pornesteUrecheaChirp('rezerva OpenAI', () => {
+        // BARGE-IN (Aug 2): your voice cuts Kelion's Chirp playback on the
+        // spot — the aborted turn drains the rest of the server synthesis.
+        stopVoice()
+        onSpeechStart?.()
       })
       if (!ear) {
         // The probe lied (race with a config change) — the onError above
@@ -786,25 +795,8 @@ export async function startRealtimeVoice(
     // mouth speaks). If the ear DIES mid-session we mark it and close — the
     // next start falls onto the proven OpenAI ears, never into a retry loop.
     if (urechiChirp) {
-      const ear = await startMicStream({
-        preWarmedStream: mic,
-        onLive: (t) => onUserTranscript?.(t, false),
-        onPhrase: (t, vf) => {
-          onUserTranscript?.(t, true)
-          poartaDupaTranscript(t, vf)
-        },
-        onError: (reason) => {
-          if (closed) return
-          console.error(`[voce] urechea Chirp a murit (${reason}) — sesiunea se reface pe urechile OpenAI`)
-          marcheazaUrechiChirpMoarte()
-          stop()
-          onState?.('error', `urechi-chirp-${reason}`)
-        },
-        getLang: () => anchoredLang || opts.language || '',
-        onSpeechBegin: () => {
-          if (!speakActive) onSpeechStart?.()
-        },
-        storePendingFeatures: false,
+      const ear = await pornesteUrecheaChirp('urechile OpenAI', () => {
+        if (!speakActive) onSpeechStart?.()
       })
       if (!ear) {
         // The probe lied (race with a config change) — the onError above
