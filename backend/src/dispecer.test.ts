@@ -150,7 +150,10 @@ describe('latența (Adrian: timpi exceptionali de mari)', () => {
   it('tururile ușoare aleargă în PARALEL — primul răspuns bun câștigă', () => {
     expect(chat).toMatch(/!heavyTurn && !turnHasImage/)
     expect(chat).toMatch(/slice\(0, 3\)/)
-    expect(chat).toMatch(/Promise\.all\(curse\)/)
+    // Aug 2, măsurat live: Promise.all aștepta și concurentul MORT (18,6s la
+    // chit-chat). Cursa se închide la primul răspuns bun — vezi services/cursa.ts.
+    expect(chat).toMatch(/primulCastigator\(curse\)/)
+    expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
   it('Gemini direct e PRIMUL concurent (calitatea românei, 1-3s)', () => {
     expect(chat).toMatch(/geminiDirectAvailable\(\) && eSanatos\(`\$\{GEMINI_DIRECT_PREFIX\}\$\{config\.geminiModel\}`\)/)

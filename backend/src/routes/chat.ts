@@ -52,6 +52,7 @@ import {
   REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { primulCastigator } from '../services/cursa.js'
 import { needsToolForAnswer, autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
@@ -82,6 +83,7 @@ import {
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
+import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
@@ -471,7 +473,7 @@ export const REPO_MERGE_PR_TOOL: Tool = {
 const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook.",
+    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook. ROUTING RULE: the constructor receives ONLY an explicit build/repair order for the app — NEVER an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation, with your own tools.",
   input_schema: {
     type: 'object',
     properties: {
@@ -774,6 +776,33 @@ export function areCevaDeVazut(chunk: string): boolean {
   if (chunk.replace(cadru, '').trim() !== '') return true
   for (const f of chunk.match(cadru) ?? []) if (!CADRE_PROTOCOL.test(f)) return true
   return false
+}
+
+// THE INSTANT ACK IS NOT THE ANSWER (Adrian, Aug 2 — written localization
+// request → „Am preluat sarcina" → then NOTHING).
+//
+// The admin's heavy-turn ack (below, "Am preluat sarcina. ") leaves BEFORE the
+// brain runs — by design, so the first word is instant. But the write
+// interceptor counted it as "something visible", and that single count killed
+// TWO safety nets in the same turn:
+//
+//   1. THE SILENT ROTATION accepted an EMPTY brain answer as a successful turn
+//      (`... || sawVisible` below — the ack had already "shown" something, so
+//      an empty completion broke out of the rotation loop instead of moving
+//      to the next model). Live proof in the server journal: `[tool]
+//      lookup_address (admin)` fired for his request, the final text came
+//      back empty, and the turn closed on the spot — while non-heavy turns
+//      (where no ack had flowed) rotated correctly: `[CHAT MUTE] ... returned
+//      empty — silent rotation`.
+//   2. THE NEVER-SILENCE NET at the end of the turn stayed off (same poisoned
+//      flag), so not even the honest "try again" reached him.
+//
+// The result looked EXACTLY like the message had been swallowed by a task
+// queue: the pickup phrase, then the void. The ack is a receipt, not a reply
+// — it never counts as visible content. Every taken-on turn must produce a
+// real answer or an honest message; never silence after „am preluat".
+export function conteazaCaVizibil(chunk: string, esteAckInstant: boolean): boolean {
+  return !esteAckInstant && areCevaDeVazut(chunk)
 }
 
 // A SURFACE FRAME (Adrian, Aug 2 — "TOT pe monitor"): {monitor} with a real
@@ -1583,7 +1612,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         const gender = inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean)
         const hasRef = !!storedVoice?.features?.length
         const refDist = hasRef ? vectorDistance(vf.vector, storedVoice!.features) : Infinity
-        const isAccountHolder = refDist < 0.38
+        // ONE threshold for holder and guests alike (services/voiceMatch.ts).
+        const isAccountHolder = refDist < VOICE_MATCH_THRESHOLD
         if (!hasRef || isAccountHolder) {
           void saveVoiceprint(
             {
@@ -1758,6 +1788,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // sees ALL writes (text, tools, agents, voice) without touching every call
     // site.
     let sawVisible = false
+    // While the INSTANT ack is being written (heavy admin turn), the chunk is
+    // a receipt, not the reply — it must NOT flip `sawVisible` (see
+    // conteazaCaVizibil above). Plain flag around a synchronous write.
+    let ackInstantZbor = false
     // A SURFACE ON THE MONITOR this turn (Adrian, Aug 2 — "TOT pe monitor"): the
     // auto-preview post-step at the end of the turn must never duplicate what a
     // tool already pushed. The interceptor sees every write, so it is the one
@@ -1767,7 +1801,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
       if (typeof chunk === 'string' && chunk.length > 0) {
-        if (!sawVisible) sawVisible = areCevaDeVazut(chunk)
+        if (!sawVisible) sawVisible = conteazaCaVizibil(chunk, ackInstantZbor)
         if (!surfaceShown) surfaceShown = eCadruDeSuprafata(chunk)
         const sse = appendTurn(user.email, turnId, chunk)
         return (rawWrite as (...a: unknown[]) => boolean)(sse, ...rest)
@@ -1935,6 +1969,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // default GPT. All tools + persona + memory identical regardless of model;
     // streaming → instant first word. No OpenRouter key = no brain (no Kimi/GLM
     // safety net, removed permanently) → honest message in catch.
+    // THE TURN CLOCK (Aug 2 — the latency mission): one line at the end of the
+    // turn says how long the WHOLE brain section took, on which model, in how
+    // many rounds. Together with the per-round [TIMP] lines in the
+    // orchestrator, a slow turn is decomposed, not guessed.
+    const tCreier = Date.now()
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -2033,7 +2072,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // SSE (appendTurn). Passing appendTurn() output here DOUBLE-framed it:
         // the human saw „id: 5 data: Am preluat sarcina." (Adrian, Aug 1,
         // live screenshot) instead of the sentence.
+        // A RECEIPT, NOT THE REPLY (Aug 2): the ack must not count as
+        // "something visible" for this turn — otherwise an empty brain answer
+        // behind it is accepted as success and the human gets the pickup
+        // phrase, then the void (see conteazaCaVizibil above).
+        ackInstantZbor = true
         reply.raw.write(ackText)
+        ackInstantZbor = false
         voice.feed(ackText)
         assistantText += ackText
       }
@@ -2043,6 +2088,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // safe only if no text has flowed to the user yet (otherwise it would
       // duplicate).
       let orchestratorModel = orChatModel
+      // GEMINI PRIMARY ON THE LIGHT PATH — MEASURED, NOT GUESSED (Aug 2 probe,
+      // the REAL weather-turn payload: 16.7k-char system + 63 tools):
+      //   google-direct/gemini-2.5-flash   1.2s round 1 (correct tool call) + 1.0s round 2
+      //   nvidia/nemotron-3-ultra :free    6.0s + 3.2s (correct tool call)
+      //   google/gemma-4-26b-a4b :free    22.2s (NO tool call) + 36.9s — and
+      //   live, the same day: 70s then EMPTY → [CHAT MUTE] → silent rotation.
+      // The light-turn race below has elected gemini-direct EVERY single time
+      // for chit-chat; but turns that need a tool (weather, maps, search —
+      // needsToolForAnswer) SKIP the race and were starting on the free
+      // OpenRouter pool: that is where the 38 seconds went. Now the sequential
+      // path starts where the race already finishes. The safety chain is
+      // unchanged: gemini failure → the free-pool rotation below (with the
+      // dispatcher, the failure memory and the paid reserve).
+      // NOT a demotion (iron rule §14): gemini-2.5-flash is the owner's own
+      // "primary" (Jul 27) and strictly stronger than the :free pool; heavy
+      // turns keep escalating to the work/top brain as before.
+      if (!heavyTurn && geminiDirectAvailable()) {
+        const geminiLight = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+        if (eSanatos(geminiLight)) orchestratorModel = geminiLight
+      }
       // ── WHEN THE BRAIN IS BLIND, SIGHT IS DELEGATED (Adrian, Jul 31) ───────
       //
       // Him: "Nemotron 3 Ultra 550B remains, who does the seeing?"
@@ -2257,7 +2322,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             elibereazaSlot(id)
           }
         })
-        const castigator = (await Promise.all(curse)).find((c): c is Castigator => c !== null)
+        const tCursa = Date.now()
+        // FIRST WINNER WINS (Aug 2 — measured live: Promise.all made the user
+        // wait for the SLOWEST racer, 18.6s for a chit-chat turn, even though
+        // gemini-direct had answered in 2-4s). primulCastigator resolves on
+        // the first GOOD answer; the losers keep running in the background
+        // (their slots release in `finally`, their failures still get marked).
+        const castigator = await primulCastigator(curse)
         if (castigator) {
           orchestratorModel = castigator.id
           // The winner's text flows whole — chit-chat is short, and the
@@ -2267,7 +2338,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           reply.raw.write(castigator.curat)
           voice.feed(castigator.curat)
           r = castigator.rez
-          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți`)
+          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți, ${Date.now() - tCursa}ms`)
         }
       }
       // THE DISPATCHER (Adrian, Aug 1 — „să scaleze pe o pungă comună"): a
@@ -2291,6 +2362,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             const cand = await runBrainOnce()
             // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
             // the next free model instead of showing/saying garbage or nothing.
+            // `sawVisible` here = a SURFACE a tool already pushed this turn
+            // (map/doc/build frame) — the instant ack no longer flips it
+            // (conteazaCaVizibil), so "Am preluat sarcina" + an EMPTY brain
+            // answer can never again close the turn on the spot.
             if (stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim() || textFlowed || sawVisible) { r = cand; break }
             // A brain that "succeeds" but says nothing must not close the turn
             // mute — rotate silently to the next free model.
@@ -2332,6 +2407,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
       void recordCost(user.email, 'chat', r.costUsd)
+      console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${Date.now() - tCreier}ms`)
     } catch (e) {
       // The brain failed — honest, never silent. No Kimi/GLM safety net
       // (removed).
