@@ -568,3 +568,96 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL,
 ]
 
+
+// ── OPERATIONS + THE CODE LOOP (moved here from routes/chat.ts, 2 aug) ──────
+// Load-bearing move: autonomie.ts needs these at module-evaluation time for
+// UNELTELE_MAINILOR, and importing them from routes/chat.js put them inside an
+// import cycle — on plain Node the consts were not yet initialized when the
+// array evaluated (ReferenceError at boot; production down on the first boot
+// of 93be3a6). Here they sit in the shared source, outside any cycle — which
+// is where SINGLE BRAIN §1 wanted them anyway.
+export const RUN_RUNBOOK_TOOL: Tool = {
+  name: 'run_runbook',
+  description:
+    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. You are fully autonomous — run these freely whenever the owner's request calls for them. If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: "Runbook name, exactly one of: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi." },
+    },
+    required: ['name'],
+  },
+}
+// The complete code loop — Kelion writes, opens a PR and merges it HIMSELF;
+// the deploy starts automatically on the push to master (the anti-phantom proof remains).
+// His eyes on processes: the state of runs + their full log, on demand.
+export const RUNBOOK_STATUS_TOOL: Tool = {
+  name: 'runbook_status',
+  description:
+    "ADMIN ONLY. See YOUR OWN internal processes: the latest runs of your workflows (deploy, vps-run, vps-diag, sentinel, pr-verify) with status/conclusion/run id/url. Call it after starting anything (run_runbook, repo_merge_pr) to WATCH your work progress, and whenever the owner asks what's happening. Then SHOW it to the owner on the monitor with show_document.",
+  input_schema: {
+    type: 'object',
+    properties: { name: { type: 'string', description: 'Optional runbook name to filter (e.g. diagnostic); omit for all workflows.' } },
+  },
+}
+export const RUNBOOK_LOG_TOOL: Tool = {
+  name: 'runbook_log',
+  description:
+    "ADMIN ONLY. Read the REAL log of one of your runs (by run id from runbook_status). This is how you see results — the diagnostic output, the deploy proof, the failure reason. Read it, reason on it, and show the relevant part to the owner (show_document). Never guess an outcome you can read.",
+  input_schema: {
+    type: 'object',
+    properties: { run_id: { type: 'number', description: 'The run id from runbook_status.' } },
+    required: ['run_id'],
+  },
+}
+export const REPO_WRITE_TOOL: Tool = {
+  name: 'repo_write',
+  description:
+    "ADMIN ONLY. Write ONE file on a branch of your own repo (creates the branch from master if missing). Content is the COMPLETE new file text, not a diff. Read the current file first (read_source) so you rewrite it correctly. Use the same branch for related files of one change, then repo_open_pr + repo_merge_pr.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string', description: "Branch name, e.g. 'kelion/fix-microfon'. Never 'master'." },
+      path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." },
+      content: { type: 'string', description: 'The complete new content of the file.' },
+      message: { type: 'string', description: 'Short commit message (English, what & why).' },
+    },
+    required: ['branch', 'path', 'content', 'message'],
+  },
+}
+export const REPO_OPEN_PR_TOOL: Tool = {
+  name: 'repo_open_pr',
+  description: 'ADMIN ONLY. Open a pull request from your branch into master. Title + body in English: what you changed and why.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string', description: 'The branch you wrote with repo_write.' },
+      title: { type: 'string' },
+      body: { type: 'string' },
+    },
+    required: ['branch', 'title', 'body'],
+  },
+}
+export const REPO_MERGE_PR_TOOL: Tool = {
+  name: 'repo_merge_pr',
+  description:
+    'ADMIN ONLY. Merge your pull request into master IMMEDIATELY (squash) — you are fully autonomous, nothing gates you. The result reports (informationally) the pr-verify build/test status. Master push auto-deploys to production with the anti-phantom proof.',
+  input_schema: {
+    type: 'object',
+    properties: { pr: { type: 'number', description: 'Pull request number.' } },
+    required: ['pr'],
+  },
+}
+export const REQUEST_REPAIR_TOOL: Tool = {
+  name: 'request_repair',
+  description:
+    "ADMIN ONLY. File a CODE-repair order (a bug or change that needs code written — NOT an ops task; ops go through run_runbook). Writes the order durably and emails the owner. A Claude coding session executes it later, on the owner's go. Include what's broken, where you saw it (file:line if you looked with read_source), and how to reproduce.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Short title of the repair (one line).' },
+      details: { type: 'string', description: 'Everything a coder needs: symptom, evidence, suspected file:line, reproduction.' },
+    },
+    required: ['title', 'details'],
+  },
+}

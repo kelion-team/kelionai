@@ -55,13 +55,14 @@ import {
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
 } from './brainToolDefs.js'
 import { TOATE_UNELTELE_ADMIN } from './brainToolDefs.js'
-// repo_* / runbook_* / request_repair are still defined in routes/chat.ts (the
-// migration toward the single source is incremental, so the live route is not
-// destabilized). Imported DIRECTLY so there cannot be two lists that diverge.
+// repo_* / runbook_* / request_repair live in the SHARED source — importing
+// them from routes/chat.js put this module in an import cycle, and on plain
+// Node the consts were not yet initialized when UNELTELE_MAINILOR evaluated
+// (ReferenceError at boot, production down — 2 aug, 93be3a6).
 import {
   REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
-} from '../routes/chat.js'
+} from './brainToolDefs.js'
 import { platiAutomatePornite } from './cardFurnizor.js'
 import { voceRecenta } from './adminLock.js'
 import {
