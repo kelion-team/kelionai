@@ -22,16 +22,21 @@ export function brainCost(model: string, inputTokens: number, outputTokens: numb
   return inputTokens * p.input + outputTokens * p.output
 }
 
-export const TTS_USD_PER_CHAR = 30 / 1e6
+// ESTIMATE RATES — labeled 'estimat' in the Money tab, never presented as
+// measured cost. They are OUR assumptions (a fixed rate × a quantity), so
+// they're env-editable like VOICE_USD_PER_MINUTE below: a rate you can't
+// correct without a deploy becomes a fabricated figure the day the provider
+// changes its pricing.
+export const TTS_USD_PER_CHAR = Number(process.env.TTS_USD_PER_CHAR ?? 30 / 1e6)
 export function ttsCost(chars: number): number {
   return chars * TTS_USD_PER_CHAR
 }
 
-export const ASR_USD_PER_CALL = 0.0015
+export const ASR_USD_PER_CALL = Number(process.env.ASR_USD_PER_CALL ?? 0.0015)
 
-export const SERPER_USD_PER_CALL = 0.001
+export const SERPER_USD_PER_CALL = Number(process.env.SERPER_USD_PER_CALL ?? 0.001)
 
-export const IMAGE_USD_PER_CALL = 0.04
+export const IMAGE_USD_PER_CALL = Number(process.env.IMAGE_USD_PER_CALL ?? 0.04)
 
 // VOICE BILLING PER MINUTE (Adrian, 25 Jul: "when users use voice/extra
 // payments, take the costs out of their credits"). The OpenAI Realtime live

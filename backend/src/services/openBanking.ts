@@ -124,7 +124,7 @@ export function mapeazaTranzactii(raw: EbTransaction[]): TranzactieIntrata[] {
     const referinta = [...(t.remittance_information ?? []), t.debtor?.name ?? '']
       .filter(Boolean)
       .join(' ')
-    out.push({ id, amount: suma, currency: (t.transaction_amount?.currency ?? 'gbp').toLowerCase(), referinta })
+    out.push({ id, amount: suma, currency: (t.transaction_amount?.currency ?? config.billing.currency).toLowerCase(), referinta })
   }
   return out
 }
