@@ -86,7 +86,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
-import { formatDeviceTime } from '../services/timeContext.js'
+import { formatDeviceTime, utcDay } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL } from '../services/brainToolDefs.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
@@ -1047,7 +1047,7 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
 // cap the reserve closes: turns stay on the free pool + the dispatcher's
 // queue, and systemHealth flags rezerva_plina to the owner.
 async function rezervaCheltuitaAzi(): Promise<number> {
-  const zi = new Date().toISOString().slice(0, 10)
+  const zi = utcDay()
   const raw = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
   const n = raw ? Number(raw) : 0
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -1062,7 +1062,7 @@ async function rezervaDeschisa(): Promise<boolean> {
 
 async function adaugaLaRezerva(usd: number): Promise<void> {
   if (!(usd > 0)) return
-  const zi = new Date().toISOString().slice(0, 10)
+  const zi = utcDay()
   const cheltuit = await rezervaCheltuitaAzi()
   await saveKv(`rezerva:zi:${zi}`, String(cheltuit + usd)).catch(() => {})
 }

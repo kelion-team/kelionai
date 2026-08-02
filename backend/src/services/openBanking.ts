@@ -41,6 +41,7 @@
 import jwt from 'jsonwebtoken'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
+import { utcDay } from './timeContext.js'
 
 const API = 'https://api.enablebanking.com'
 
@@ -141,7 +142,7 @@ export async function tranzactiiIntrate(): Promise<TranzactieIntrata[] | null> {
   // The last 14 days are enough: pending codes expire after 2 hours, and
   // crediting is idempotent on the bank reference, so re-reading doesn't
   // double.
-  const deLa = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+  const deLa = utcDay(-14)
   const r = await fetch(
     `${API}/accounts/${encodeURIComponent(uid)}/transactions?transaction_status=BOOK&date_from=${deLa}`,
     { headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }, signal: AbortSignal.timeout(20_000) },

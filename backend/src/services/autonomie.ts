@@ -72,6 +72,7 @@ import { evalueazaCerinta, imbunatatireContinua } from './cerinte.js'
 import { listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { listeazaSecrete } from './secrete.js'
 import { isOpsPaused } from './runbooks.js'
+import { utcDay } from './timeContext.js'
 import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
@@ -541,7 +542,7 @@ function cuRegulile(ordin: string, dificultate = 3): string {
 
 /** How many autonomous orders were given TODAY (the daily count). */
 async function dateAzi(): Promise<number> {
-  const azi = new Date().toISOString().slice(0, 10)
+  const azi = utcDay()
   const raw = await loadKv(`autonomie:zi:${azi}`).catch(() => null)
   return Number(raw ?? 0) || 0
 }
@@ -1066,7 +1067,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     // measured.
     if (s.executant === 'maini') {
       mainileOcupate = true
-      const ziua = new Date().toISOString().slice(0, 10)
+      const ziua = utcDay()
       await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
       try {
         // Hands steps leave no job log, so the escalation gets glued here, by
@@ -1102,7 +1103,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       await actualizeazaCerinta(Number(s.cod.slice(1)), { stare: 'in_lucru', job_id: id }).catch(() => {})
     }
     await scrieStare(s.cod, { job: id, incercari: st.incercari + 1 })
-    const ziua = new Date().toISOString().slice(0, 10)
+    const ziua = utcDay()
     await saveKv(`autonomie:zi:${ziua}`, String(azi + 1)).catch(() => {})
     const eticheta = jurnal ? 'reparație' : 'sarcină nouă'
     console.log(`[AUTONOM] ${eticheta}: ${s.cod} („${s.titlu}") → ordinul #${id}`)
