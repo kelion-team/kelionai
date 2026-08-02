@@ -43,6 +43,7 @@ export interface EnvVarState {
  *  that have nothing to do with us. */
 const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] }[] = [
   { alias: ENV_ALIASES.openaiKey, name: 'OPENAI_API_KEY', what: 'vocea live + TTS + STT de rezervă', breaks: 'vocea nu pornește deloc' },
+  { name: 'OPENAI_USAGE_KEY', what: 'citirea cheltuielii reale OpenAI (pastila din bară + Bani)', breaks: 'pastila OpenAI arată „⚠" în loc de cifra reală' },
   { alias: ENV_ALIASES.openrouterKey, name: 'OPENROUTER_API_KEY', what: 'creierul (chat, gândire, traduceri)', breaks: 'nu răspunde nimic' },
   { alias: ENV_ALIASES.databaseUrl, name: 'DATABASE_URL', what: 'baza de date', breaks: 'conturi, credite, istoric — toate' },
   { alias: ENV_ALIASES.sessionSecret, name: 'SESSION_SECRET', what: 'sesiunile de login', breaks: 'nimeni nu poate rămâne logat' },
@@ -91,7 +92,13 @@ export function envCheck(): EnvVarState[] {
 //
 // Only the NAMES, never the values. And only names related to us (by
 // keywords), so we don't spill the whole machine env on screen.
-const CUVINTE = /(OPENAI|OPENROUTER|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|SERPER|MAPS?|STRIPE|MAIL|SMTP|IMAP|TTS|STT|VOICE|DATABASE|POSTGRES|SESSION|BRIDGE|GITHUB|KELION)/i
+//
+// STRIPE IS DELIBERATELY OUT (Adrian: "Stripe is removed completely from the
+// app"): the provider is gone, so a leftover STRIPE_* key in the env is not
+// "something you have under another name" — it's a corpse. Listing it as an
+// orphan made the Tokens tab show three dead rows (STRIPE_CURRENCY,
+// STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET) that looked like something to fix.
+const CUVINTE = /(OPENAI|OPENROUTER|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|SERPER|MAPS?|MAIL|SMTP|IMAP|TTS|STT|VOICE|DATABASE|POSTGRES|SESSION|BRIDGE|GITHUB|KELION)/i
 
 export function envOrphans(): string[] {
   const stiute = new Set<string>()

@@ -41,6 +41,8 @@ import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
+import { getOpenAiMonthCost } from '../services/openaiCosts.js'
+import { calcPunga } from '../services/punga.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
@@ -292,10 +294,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps] = await Promise.all([
+    const [pool, orBalance, vps, openaiCost] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       resurseGazda(),
+      // THE OPENAI PILL (Adrian: "REAL everywhere, zero fabrications"): the
+      // voice spend read from the provider's own costs API, next to the
+      // OpenRouter balance. Cached 5 min in the service, so this 15s poll
+      // costs one upstream call per 5 minutes at most.
+      getOpenAiMonthCost(),
     ])
     return reply.send({
       active: 'openrouter',
@@ -322,8 +329,24 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         live: orBalance.ok,
         error: orBalance.error,
       },
+      // The REAL OpenAI month-to-date spend (USD). `live: false` means
+      // UNREADABLE (key missing or read failed) — the bar writes "⚠ OpenAI",
+      // NEVER "$0.00" (the getOpenRouterBalance honesty rule, applied here).
+      openai: {
+        live: openaiCost.ok,
+        monthUsd: openaiCost.ok ? openaiCost.monthUsd : undefined,
+        error: openaiCost.error,
+      },
       pool,
     })
+  })
+
+  // The REAL OpenAI spend, month-to-date (admin only) — the provider's own
+  // costs API, the same reading the "OpenAI $x.xx" pill in the bar shows.
+  app.get('/api/admin/openai-costs', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send(await getOpenAiMonthCost())
   })
 
   // The REAL picture of the owner's money (admin only): the real balance from
@@ -332,35 +355,44 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [account, costs, orBalance] = await Promise.all([
+    const [account, costs, orBalance, openaiCost] = await Promise.all([
       getAdminAccount(),
       getCostSummary(),
       getOpenRouterBalance(),
+      getOpenAiMonthCost(),
     ])
-    // ── THE SINGLE POCKET (Adrian, 30 Jul: "one single pocket... only REAL
-    // remains, no hardcode") ───────────────────────────────────────────────
-    // A single value, ADDED UP from the external sources verifiable at their
-    // source. If a source doesn't answer, we say it's missing
-    // (`complete: false`) — we don't count it as zero, because "£0 because I
-    // couldn't read" looks exactly like "£0 because you have no money", and
-    // those two are not the same thing.
-    const usdInMoneda = config.billing.usdToCurrency
-    const parti = {
-      openrouter: orBalance.ok ? orBalance.balance * usdInMoneda : null,
-    }
-    const complete = Object.values(parti).every((v) => v !== null)
-    const total = Object.values(parti).reduce<number>((s, v) => s + (v ?? 0), 0)
+    // ── THE SINGLE POCKET, IN ONE CURRENCY (USD) ────────────────────────────
+    // Adrian, with live evidence: the header said "OpenRouter $9.99" while the
+    // Money tab said "Punga: £7.99" — the SAME wallet converted with the
+    // hand-written USD_TO_CURRENCY rate. A converted figure is not a measured
+    // one. The pocket is now USD only (see services/punga.ts), identical to
+    // what the header pill shows.
+    const punga = calcPunga(orBalance.ok ? orBalance.balance : null)
     return reply.send({
       // The pocket: how much you have, with the breakdown it was added from
       // and where it's missing.
-      punga: { total: Math.round(total * 100) / 100, complete, parti },
+      punga,
       spent: account.spent,
+      // The cost journal is kept in USD end to end (cost_events.cost_usd):
+      // spentUsd/today/byKind are the SAME currency, so the Money tab no
+      // longer mixes "total £" with "azi $". `account.spent` stays for older
+      // callers; the tab reads spentUsd.
+      spentUsd: costs.total,
       profit: account.profit,
       currency: config.billing.currency,
       byKind: costs.byKind,
       // Consumed TODAY (USD, real) — for the "Consumed today" card in the
       // Money tab.
       today: costs.today,
+      // ── REAL vs ESTIMATE, WRITTEN ON EVERY ROW ────────────────────────────
+      // Only brain calls carry the provider's own figure (OpenRouter
+      // usage.cost). Everything else — the voice minutes especially — is a
+      // fixed rate × a quantity, OUR estimate. The tab labels each row from
+      // `felul`; an unlabeled estimate presented as cost is exactly the
+      // "voice_minutes $204.52" fabrication this change removes.
+      masurat: costs.masurat,
+      estimat: costs.estimat,
+      felul: costs.felul,
       // "Kelion's pocket" = the REAL, EXACT balance from the OpenRouter
       // account (USD) that feeds the CENTRAL brain (Adrian: "the exact value
       // from OpenRouter"). Only the admin sees this tab; users never get here.
@@ -370,6 +402,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         threshold: orBalance.threshold,
         live: orBalance.ok,
         topup: orBalance.topup,
+      },
+      // The REAL OpenAI month-to-date spend (USD, the provider's costs API) —
+      // the anchor against which the internal voice estimate can be checked.
+      openai: {
+        live: openaiCost.ok,
+        monthUsd: openaiCost.ok ? openaiCost.monthUsd : undefined,
       },
     })
   })
@@ -416,8 +454,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // VERIFY ALL PRIVILEGED TOKENS (Adrian, 14 Jul): verifies LIVE all the
   // keys/tokens with access to external services and reports status without
-  // exposing secret values. Includes OpenRouter, OpenAI, Stripe, Google
-  // (service account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), LiveKit, PostgreSQL
+  // exposing secret values. Includes OpenRouter, OpenAI, Google
+  // (service account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), PostgreSQL
   // and SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)

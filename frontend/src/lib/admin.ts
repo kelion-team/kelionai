@@ -20,24 +20,35 @@ export interface HistoryRow {
 // cost consumed, real profit, and per-AI cost. No hand-typed figures.
 // (Stripe is fully out — 31 Jul.)
 export interface Finance {
-  // SINGLE POUCH: what you have, summed from EXTERNAL sources that can each be
-  // verified at the source. `complete: false` means a source did not answer —
-  // then the total is incomplete, not "zero". The hand-typed figure
-  // (`loaded`/`remaining`) was deleted: nothing ever verified it, so it could
-  // show money that did not exist.
+  // SINGLE POUCH, USD ONLY: the OpenRouter balance is MEASURED in USD, and a
+  // £ conversion (hand-written rate) produced the "header $9.99 vs Punga
+  // £7.99" contradiction — the same wallet, two figures. The pocket is now
+  // exactly what the provider says, identical to the header pill.
+  // `complete: false` means a source did not answer — then the total is
+  // incomplete, not "zero".
   punga: {
     total: number
     complete: boolean
+    currency: 'usd'
     parti: {
       openrouter: number | null
     }
   }
   spent: number
+  /** The SAME cost journal as `spent`, but unconverted (USD end to end) —
+   *  the Money tab shows ONLY this, so "total" and "azi" can't be in two
+   *  currencies anymore. */
+  spentUsd: number
   profit: number
   currency: string
   byKind: Record<string, number>
   // Consumed TODAY at the AI providers (USD, real) — the "Spent today" card.
   today: number
+  /** REAL vs ESTIMATE per row: only 'masurat' rows carry the provider's own
+   *  figure; the rest are internal estimates and MUST be labeled as such. */
+  masurat: number
+  estimat: number
+  felul: Record<string, 'masurat' | 'estimat'>
   // "Kelion's pouch" — the REAL balance, straight from the OpenRouter account (USD).
   openrouter?: {
     balance: number
@@ -45,6 +56,12 @@ export interface Finance {
     threshold: number
     live: boolean
     topup: string
+  }
+  /** The REAL OpenAI month-to-date spend (the provider's costs API).
+   *  `live: false` = unreadable — the tab says so, never shows a zero. */
+  openai?: {
+    live: boolean
+    monthUsd?: number
   }
 }
 

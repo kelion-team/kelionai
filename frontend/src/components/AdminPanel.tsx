@@ -95,6 +95,9 @@ const AI_LABELS: Record<string, string> = {
   asr: 'Hearing (STT)',
   search: 'Căutare (OpenRouter web)',
   memory: 'Memorie',
+  // The live-voice minutes — an INTERNAL ESTIMATE (mic-on seconds × a fixed
+  // rate), never the OpenAI invoice. Labeled as such wherever it shows.
+  voice_minutes: 'Minute voce (OpenAI Realtime)',
 }
 
 // Group the history newest-first, with a date header per day (Today / Yesterday /
@@ -146,9 +149,13 @@ function ShareGrid({ title, items }: { title: string; items: { name: string; hre
 export default function AdminPanel({
   onClose,
   initialTab,
+  onOpenSettings,
 }: {
   readonly onClose: () => void
   readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
+  // „⚙ Setări" moved OUT of the top bar into the panel (Adrian's order): the
+  // bar keeps only measurements; the owner's settings open from here.
+  readonly onOpenSettings?: () => void
 }) {
   const [tab, setTab] = useState<
     'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
@@ -750,6 +757,14 @@ export default function AdminPanel({
               {A.tabRecovery}
             </button>
           </div>
+          {/* „⚙ Setări" — moved here from the top bar (Adrian's order): for
+          the owner, the bar shows only measurements; his settings live in the
+          panel. */}
+          {onOpenSettings && (
+            <button type="button" className="ghost" onClick={onOpenSettings} title="Setările tale (voce, limbă, auto-alimentare)">
+              ⚙ Setări
+            </button>
+          )}
           <BackLink onBack={onClose} />
         </header>
         {tab === 'finance' && (
@@ -768,8 +783,11 @@ export default function AdminPanel({
                 remains, saying how much you have, each figure exactly once. */}
                 <div className="pool-manage">
                   <div className="pool-manage-head">
-                    Punga: {sym}
-                    {finance.punga.total.toFixed(2)}
+                    {/* USD ONLY (Adrian: „Punga £7.99 vs header $9.99" — the
+                    SAME wallet converted with a hand-written rate). The pocket
+                    is now exactly what the provider measures, identical to the
+                    pill in the bar. */}
+                    Punga: ${finance.punga.total.toFixed(2)}
                     {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
                   </div>
                   <div className="pool-parts">
@@ -786,9 +804,20 @@ export default function AdminPanel({
                     ] as [string, number | null][]).map(([eticheta, val]) => (
                       <div className="fin-row" key={eticheta}>
                         <span>{eticheta}</span>
-                        <span>{val === null ? 'nu răspunde' : `${sym}${val.toFixed(2)}`}</span>
+                        <span>{val === null ? 'nu răspunde' : `$${val.toFixed(2)}`}</span>
                       </div>
                     ))}
+                    {/* THE REAL OPENAI MONTH (the provider's costs API) — the
+                    anchor against which the internal voice estimate below can
+                    be checked. Unreadable → we say so, never a zero. */}
+                    <div className="fin-row">
+                      <span>OpenAI, luna asta (măsurat la furnizor)</span>
+                      <span>
+                        {finance.openai?.live
+                          ? `$${(finance.openai.monthUsd ?? 0).toFixed(2)}`
+                          : 'nu pot citi (cheie OPENAI_USAGE_KEY lipsă sau citire picată)'}
+                      </span>
+                    </div>
                   </div>
                   {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
                   through Stripe — Checkout for the deposit, `/v1/payouts` for the
@@ -946,11 +975,15 @@ export default function AdminPanel({
                 )}
                 <div className="fin-breakdown">
                   <div className="fin-breakdown-head">
-                    {/* The total used to sit on top, as a separate card („Consumat la AI
-                        (real)”), although it is exactly the sum of the rows below. Now it
-                        is the head of the table it sums up. */}
-                    Cost per AI — total {sym}
-                    {finance.spent.toFixed(2)}, azi ${finance.today.toFixed(2)}
+                    {/* ONE CURRENCY (USD) END TO END: the journal is kept in USD
+                    (cost_events.cost_usd), and the tab no longer converts the
+                    total to £ while "azi" stayed in $ — the mixed "total £163.66,
+                    azi $0.02" Adrian flagged. The split "măsurat / estimare
+                    internă" is written on the head too, so a number without its
+                    kind is never read as an invoice. */}
+                    Cost per AI — total ${finance.spentUsd.toFixed(2)}
+                    {` (măsurat $${finance.masurat.toFixed(2)} · estimare internă $${finance.estimat.toFixed(2)})`}
+                    , azi ${finance.today.toFixed(2)}
                     {/* RESETTING THE COUNTERS (Adrian, Jul 30). Deletes ONLY our
                         provider-cost journal. The users' wallets are NOT touched: spent
                         credits are never given back. The wallet has nothing to reset — it
@@ -979,7 +1012,20 @@ export default function AdminPanel({
                   {aiParts.length === 0 && <div className="chat-hint">{A.noSpendYet}</div>}
                   {aiParts.map(([k, v]) => (
                     <div className="fin-row" key={k}>
-                      <span>{AI_LABELS[k] ?? k}</span>
+                      <span>
+                        {AI_LABELS[k] ?? k}
+                        {/* THE GOLDEN RULE (Adrian: „REAL, stop fabricating"):
+                        a shown figure is either MEASURED (the provider's own
+                        number / DB recordCost from its response) or it says
+                        „estimare internă" right next to it. The voice minutes
+                        are the big one: mic-on seconds × a fixed rate — never
+                        the OpenAI invoice. */}
+                        {finance.felul[k] === 'estimat' && (
+                          <span className="fin-sub" style={{ color: '#e6a23c' }}>
+                            {' '}— estimare internă
+                          </span>
+                        )}
+                      </span>
                       <span>${v.toFixed(4)}</span>
                     </div>
                   ))}

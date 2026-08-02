@@ -264,68 +264,58 @@ export function WalletButton({
               {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
             </span>
           )}
-          {/* THE SALE IS AT ADMIN (Adrian, Jul 24, confirmed YES: „the credits
-          button is only at admin; the others only display”). Regular users see
-          ONLY the balance; credits are bought through the payment link received
-          from the administrator. The admin keeps the menu (testing). */}
-          {isAdmin ? (
-            <>
-              <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
-              {firstTopUp && (
-                <span className="wallet-menu-note">
-                  {ro
-                    ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
-                    : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
-                </span>
-              )}
-              <div className="wallet-amounts">
-                {presets.map((a) => (
-                  <button key={a} type="button" className="ghost wallet-pack" disabled={payBusy} onClick={() => pay(a)}>
-                    <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
-                  </button>
-                ))}
-              </div>
-              {payBusy && (
-                <span className="wallet-menu-note">{ro ? 'Se deschide plata…' : 'Opening payment…'}</span>
-              )}
-              <div className="wallet-custom">
-                <span aria-hidden>£</span>
-                <input
-                  type="number"
-                  min={minAmount}
-                  step={5}
-                  inputMode="numeric"
-                  placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
-                  value={custom}
-                  onChange={(e) => setCustom(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={customValid() === null || payBusy}
-                  onClick={() => {
-                    const n = customValid()
-                    if (n !== null) pay(n)
-                  }}
-                >
-                  {customValid() !== null
-                    ? `${creditsFor(customValid() as number)} ${t.credits}`
-                    : ro ? 'Alimentează' : 'Top up'}
+          {/* THE CREDITS PANEL, FOR EVERYONE (Adrian's order: the header
+          „Add credits" button opens the EXISTING credits panel for regular
+          users too — the 75/150/375 packs + a custom multiple of £5). Before,
+          this menu sold only at admin and sent users to the /credite page;
+          the panel was already here, tested, and wired to the same checkout,
+          so the dead end is gone. */}
+          <>
+            <span className="wallet-menu-title">{ro ? 'Adaugă credite' : 'Add credits'}</span>
+            {firstTopUp && (
+              <span className="wallet-menu-note">
+                {ro
+                  ? 'Prima alimentare: £20 minim (pornește creierul), apoi multipli de £5.'
+                  : 'First top-up: £20 minimum (starts the brain), then multiples of £5.'}
+              </span>
+            )}
+            <div className="wallet-amounts">
+              {presets.map((a) => (
+                <button key={a} type="button" className="ghost wallet-pack" disabled={payBusy} onClick={() => pay(a)}>
+                  <strong>{creditsFor(a)}</strong> {t.credits} — £{a}
                 </button>
-              </div>
-              {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
-            </>
-          ) : (
-            /* THE PATH TO PURCHASE, for the regular user (Adrian, Aug 1: "the
-            whole chain, from login to buying credits"). The pill's menu does
-            not sell (the Jul 24 rule: the sale is the admin's) — but at 0
-            credits the user must not hit a dead end: the dedicated /credite
-            page sells to any signed-in user. Without this link the paywall
-            said "top up" and showed no way to do it. */
-            <a className="ghost wallet-pack" href="/credite" style={{ textAlign: 'center', textDecoration: 'none' }}>
-              {ro ? 'Cumpără credite →' : 'Buy credits →'}
-            </a>
-          )}
+              ))}
+            </div>
+            {payBusy && (
+              <span className="wallet-menu-note">{ro ? 'Se deschide plata…' : 'Opening payment…'}</span>
+            )}
+            <div className="wallet-custom">
+              <span aria-hidden>£</span>
+              <input
+                type="number"
+                min={minAmount}
+                step={5}
+                inputMode="numeric"
+                placeholder={ro ? `altă sumă (×5, min ${minAmount})` : `other (×5, min ${minAmount})`}
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={customValid() === null || payBusy}
+                onClick={() => {
+                  const n = customValid()
+                  if (n !== null) pay(n)
+                }}
+              >
+                {customValid() !== null
+                  ? `${creditsFor(customValid() as number)} ${t.credits}`
+                  : ro ? 'Alimentează' : 'Top up'}
+              </button>
+            </div>
+            {payErr && <span className="wallet-menu-note" style={{ color: '#ff8d8d' }}>{payErr}</span>}
+          </>
           <div className="wallet-menu-sep" />
           <button
             type="button"
