@@ -171,7 +171,7 @@ export const CARD_GATA_TOOL: Tool = {
 export const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a build order for the autonomous constructor: the VPS worker builds it (with build+tests) and opens a PR; the owner merges. Use when the owner orders new software, or a change/repair to yourself. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
+    "ADMIN ONLY. Queue a build order for the autonomous constructor: the VPS worker builds it (with build+tests) and opens a PR; the owner merges. Use when the owner orders new software, or a change/repair to yourself. ROUTING RULE: the constructor receives ONLY an explicit build/repair order for the app — NEVER for an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation. Confirm 'Am preluat cerința.' ONLY when the job is truly queued — never on a failed/rejected queue.",
   input_schema: { type: 'object', properties: { order: { type: 'string', description: "The build order, in the owner's own words." } }, required: ['order'] },
 }
 

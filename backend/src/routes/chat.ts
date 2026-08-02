@@ -471,7 +471,7 @@ export const REPO_MERGE_PR_TOOL: Tool = {
 const BUILD_SOFTWARE_TOOL: Tool = {
   name: 'build_software',
   description:
-    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook.",
+    "ADMIN ONLY. Queue a BUILD ORDER for your own constructor: any software, feature, change or improvement the owner asks for that is too big to ship in this conversation with repo_write (multi-file work, needs build+tests). A worker on your server clones the repo, writes the code, runs the build and tests, then opens a PR — the owner merges it. Pass the order COMPLETE and self-contained (what to build, where, acceptance criteria) — the worker only sees this text. For small single-file fixes prefer repo_write; for ops use run_runbook. ROUTING RULE: the constructor receives ONLY an explicit build/repair order for the app — NEVER an ordinary question or chat request (a place, the weather, a fact, a conversation): those you ANSWER yourself, in this conversation, with your own tools.",
   input_schema: {
     type: 'object',
     properties: {
@@ -774,6 +774,33 @@ export function areCevaDeVazut(chunk: string): boolean {
   if (chunk.replace(cadru, '').trim() !== '') return true
   for (const f of chunk.match(cadru) ?? []) if (!CADRE_PROTOCOL.test(f)) return true
   return false
+}
+
+// THE INSTANT ACK IS NOT THE ANSWER (Adrian, Aug 2 — written localization
+// request → „Am preluat sarcina" → then NOTHING).
+//
+// The admin's heavy-turn ack (below, "Am preluat sarcina. ") leaves BEFORE the
+// brain runs — by design, so the first word is instant. But the write
+// interceptor counted it as "something visible", and that single count killed
+// TWO safety nets in the same turn:
+//
+//   1. THE SILENT ROTATION accepted an EMPTY brain answer as a successful turn
+//      (`... || sawVisible` below — the ack had already "shown" something, so
+//      an empty completion broke out of the rotation loop instead of moving
+//      to the next model). Live proof in the server journal: `[tool]
+//      lookup_address (admin)` fired for his request, the final text came
+//      back empty, and the turn closed on the spot — while non-heavy turns
+//      (where no ack had flowed) rotated correctly: `[CHAT MUTE] ... returned
+//      empty — silent rotation`.
+//   2. THE NEVER-SILENCE NET at the end of the turn stayed off (same poisoned
+//      flag), so not even the honest "try again" reached him.
+//
+// The result looked EXACTLY like the message had been swallowed by a task
+// queue: the pickup phrase, then the void. The ack is a receipt, not a reply
+// — it never counts as visible content. Every taken-on turn must produce a
+// real answer or an honest message; never silence after „am preluat".
+export function conteazaCaVizibil(chunk: string, esteAckInstant: boolean): boolean {
+  return !esteAckInstant && areCevaDeVazut(chunk)
 }
 
 // A SURFACE FRAME (Adrian, Aug 2 — "TOT pe monitor"): {monitor} with a real
@@ -1758,6 +1785,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // sees ALL writes (text, tools, agents, voice) without touching every call
     // site.
     let sawVisible = false
+    // While the INSTANT ack is being written (heavy admin turn), the chunk is
+    // a receipt, not the reply — it must NOT flip `sawVisible` (see
+    // conteazaCaVizibil above). Plain flag around a synchronous write.
+    let ackInstantZbor = false
     // A SURFACE ON THE MONITOR this turn (Adrian, Aug 2 — "TOT pe monitor"): the
     // auto-preview post-step at the end of the turn must never duplicate what a
     // tool already pushed. The interceptor sees every write, so it is the one
@@ -1767,7 +1798,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
       if (typeof chunk === 'string' && chunk.length > 0) {
-        if (!sawVisible) sawVisible = areCevaDeVazut(chunk)
+        if (!sawVisible) sawVisible = conteazaCaVizibil(chunk, ackInstantZbor)
         if (!surfaceShown) surfaceShown = eCadruDeSuprafata(chunk)
         const sse = appendTurn(user.email, turnId, chunk)
         return (rawWrite as (...a: unknown[]) => boolean)(sse, ...rest)
@@ -2033,7 +2064,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         // SSE (appendTurn). Passing appendTurn() output here DOUBLE-framed it:
         // the human saw „id: 5 data: Am preluat sarcina." (Adrian, Aug 1,
         // live screenshot) instead of the sentence.
+        // A RECEIPT, NOT THE REPLY (Aug 2): the ack must not count as
+        // "something visible" for this turn — otherwise an empty brain answer
+        // behind it is accepted as success and the human gets the pickup
+        // phrase, then the void (see conteazaCaVizibil above).
+        ackInstantZbor = true
         reply.raw.write(ackText)
+        ackInstantZbor = false
         voice.feed(ackText)
         assistantText += ackText
       }
@@ -2291,6 +2328,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             const cand = await runBrainOnce()
             // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
             // the next free model instead of showing/saying garbage or nothing.
+            // `sawVisible` here = a SURFACE a tool already pushed this turn
+            // (map/doc/build frame) — the instant ack no longer flips it
+            // (conteazaCaVizibil), so "Am preluat sarcina" + an EMPTY brain
+            // answer can never again close the turn on the spot.
             if (stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim() || textFlowed || sawVisible) { r = cand; break }
             // A brain that "succeeds" but says nothing must not close the turn
             // mute — rotate silently to the next free model.
