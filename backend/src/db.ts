@@ -1780,7 +1780,7 @@ export interface CostSummary {
 // The only kind of cost that comes MEASURED from the provider: brain calls,
 // where OpenRouter returns `usage.cost` with its real money. Everything else
 // is fixed rates I wrote — useful as an order of magnitude, false as "real".
-const COSTURI_MASURATE = new Set(['chat'])
+const COSTURI_MASURATE = new Set(['chat', 'memory', 'image'])
 
 /** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
  *
