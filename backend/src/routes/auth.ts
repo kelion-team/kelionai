@@ -51,9 +51,15 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/contacts',
-  // New skills (Adrian, Jul 25): Sheets/Docs already work through the Drive
-  // scope; Photos + YouTube need their own scope → they come in at re-connect.
-  'https://www.googleapis.com/auth/photoslibrary.readonly',
+  // Sheets/Docs already work through the Drive scope.
+  // REMOVED (Aug 2, live probe): 'photoslibrary.readonly' — Google DELETED this
+  // scope on 2025-03-31 for every client; the Photos Library API now answers
+  // 403 PERMISSION_DENIED even when the scope appears as granted in tokeninfo
+  // (verified live). Re-authorization can NOT bring it back. Reading the user's
+  // photo library requires migrating to the Google Photos Picker API (a
+  // session-based picker flow — a NEW feature, not a scope fix). Keeping the
+  // dead scope here would only promise Photos on the consent screen and never
+  // deliver it.
   'https://www.googleapis.com/auth/youtube.readonly',
 ].join(' ')
 
