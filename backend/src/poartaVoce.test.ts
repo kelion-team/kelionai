@@ -74,8 +74,8 @@ describe('aprobarea și memoria oaspeților', () => {
     expect(oaspeti).toMatch(/no_name/)
   })
 
-  it('pragul oaspetelui = pragul titularului (0.38)', () => {
-    expect(oaspeti).toMatch(/MATCH_THRESHOLD = 0\.38/)
+  it('pragul oaspetelui = pragul titularului (0.38), dintr-o SINGURĂ sursă', () => {
+    expect(oaspeti).toMatch(/MATCH_THRESHOLD = VOICE_MATCH_THRESHOLD/)
   })
 
   it('respingerea șterge amprenta neaprobată', () => {

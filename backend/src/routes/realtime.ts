@@ -8,6 +8,7 @@ import { trackSpeechLang } from '../services/lang.js'
 import { openaiRealtimeAnswer } from '../services/realtime.js'
 import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { matchApprovedGuest, activeGuestWindow } from '../services/guestVoices.js'
+import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { vectorDistance } from '../db.js'
 
@@ -171,7 +172,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
           const stored = await getVoiceprint(user.email)
           const hasRef = !!stored?.features?.length
           const dist = hasRef ? vectorDistance(vf.vector, stored!.features) : Infinity
-          const isHolder = dist < 0.38
+          // ONE threshold for holder and guests alike (services/voiceMatch.ts).
+          const isHolder = dist < VOICE_MATCH_THRESHOLD
           // HOLE CLOSED (the security audit, Jul 27): with the padlock ARMED, the
           // first enrolment of the admin REFERENCE is accepted ONLY from an
           // already unlocked session (typed secret) or with the padlock unarmed.

@@ -82,6 +82,7 @@ import {
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
+import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
@@ -1610,7 +1611,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         const gender = inferGender(vf.meta.pitchMedian ?? vf.meta.pitchMean)
         const hasRef = !!storedVoice?.features?.length
         const refDist = hasRef ? vectorDistance(vf.vector, storedVoice!.features) : Infinity
-        const isAccountHolder = refDist < 0.38
+        // ONE threshold for holder and guests alike (services/voiceMatch.ts).
+        const isAccountHolder = refDist < VOICE_MATCH_THRESHOLD
         if (!hasRef || isAccountHolder) {
           void saveVoiceprint(
             {
