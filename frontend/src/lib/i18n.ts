@@ -6,23 +6,12 @@ import { loadLocalLang } from './prefs'
 export type Lang = 'en' | 'ro' | 'es' | 'fr' | 'de' | 'it' | 'pt'
 
 export interface Strings {
-  tagline: string
   signIn: string
   restricted: string
   signOut: string
   chatHint: string
   chatPlaceholder: string
   send: string
-  micTitle: string
-  listenTitle: string
-  voiceTitle: string
-  cameraTitle: string
-  switchCamTitle: string
-  camOnMsg: string
-  camOffMsg: string
-  camFrontMsg: string
-  camBackMsg: string
-  camSwitchMsg: string
   functionsTitle: string
   attachTitle: string
   imagePrompt: string
@@ -34,32 +23,20 @@ export interface Strings {
   monitorTitle: string
   disconnectCamTitle: string
   connectCamTitle: string
-  wakeHint: string
   micBlocked: string
   micNoDevice: string
   micUnsupported: string
-  hearingLabel: string
-  chatError: string
   brainNotActive: string
   brainError: string
   offline: string
-  backOnline: string
   credits: string
-  buyCredit: string
   topUp: string
   lowCredit: string
   landingHeadline: string
   landingSub: string
-  buyCreditCta: string
   manualTitle: string
   multilingual: string
   features: readonly string[]
-  downloadWin: string
-  downloadAndroid: string
-  installApp: string
-  iosInstall: string
-  iosSteps: string
-  scanHint: string
   updateReady: string
   updateNow: string
   /** The self-applying countdown in the version bar — `{n}` = seconds left. */
@@ -73,12 +50,6 @@ export interface Strings {
   errNoIdToken: string
   errNoEmail: string
   errGeneric: string
-  calibrateVoiceTitle: string
-  calibrateVoiceListening: string
-  calibrateVoiceDone: string
-  calibrateVoiceFailed: string
-  calibrateVoiceReset: string
-  voiceNotEnrolledHint: string
   // ── THE MONITOR (Stage.tsx) — they were written directly in code, in Romanian ──
   // 20 texts that a Romanian logged-out user saw in Romanian: button titles,
   // empty states, the admin unlock panel.
@@ -117,6 +88,68 @@ export interface Strings {
   latencyChip: string
   heardYouTitle: string
   heardBrainTitle: string
+  /** Title of the K band — the reply flowing FROM the brain. */
+  heardKelionTitle: string
+  // ── THE COMPOSER (ChatPanel.tsx) — frontend audit, Aug 2 ─────────────────
+  micTalk: string
+  micStop: string
+  voiceVolume: string
+  /** The send button while a turn is running — sending INTERRUPTS (Jul 13 barge-in). */
+  sendInterrupts: string
+  attRemove: string
+  // ── ATTACHMENTS, HONEST (audit Aug 2: a failed conversion vanished without
+  // a trace; the admin "raw" chip was never actually transmitted) ───────────
+  /** `{name}` = file name. */
+  docAttachFailed: string
+  /** `{name}` = file name. */
+  docTooLarge: string
+  docPrompt: string
+  // ── THE VOICE, HONEST (audit Aug 2: the real reason was thrown away) ─────
+  voiceDownTemp: string
+  voiceNeedLogin: string
+  voiceNeedCredit: string
+  asrLost: string
+  stopAck: string
+  // ── PROMO RECORDING (they were RO/EN inline ternaries — 5 languages got
+  // whichever branch the SPEECH language picked, not the UI language) ───────
+  promoTakeSaved: string
+  /** `{subject}` = the clip's subject. */
+  promoWrongLang: string
+  promoRetake: string
+  promoRecStopped: string
+  promoRecReady: string
+  promoVoiceLost: string
+  recStartTitle: string
+  recStopTitle: string
+  // ── STAGE (audit Aug 2: Romanian literals next to the very keys that
+  // should have carried them) ───────────────────────────────────────────────
+  back: string
+  wsSave: string
+  wsSaved: string
+  wsOpenTab: string
+  wsArchiveNote: string
+  creditOut: string
+  creditOk: string
+  contactLabel: string
+  connectGoogle: string
+  connectGoogleTitle: string
+  buildQueued: string
+  buildRunning: string
+  buildDone: string
+  buildFailed: string
+  buildOnlyAdmin: string
+  buildUnavailable: string
+  buildNoServer: string
+  buildHead: string
+  /** `{n}` = attempt number. */
+  buildAttempt: string
+  buildSeePr: string
+  buildCiFailed: string
+  unlockWrongCode: string
+  unlockRetryError: string
+  unlockNetError: string
+  unlockPlaceholder: string
+  lockedTitle: string
 }
 
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
@@ -131,23 +164,12 @@ export interface Strings {
 // be added in stages, without the interface ever having empty labels.
 const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
   en: {
-    tagline: 'Your assistant. Sign in to continue.',
     signIn: 'Sign in with Google',
     restricted: 'Access is restricted. Only authorized accounts may enter.',
     signOut: 'Sign out',
     chatHint: 'Say something to Kelion…',
     chatPlaceholder: 'Message Kelion',
     send: 'Send',
-    micTitle: 'Hold to talk',
-    listenTitle: 'Continuous listening',
-    voiceTitle: 'Kelion’s voice',
-    cameraTitle: 'Camera',
-    switchCamTitle: 'Switch camera',
-    camOnMsg: 'Camera on.',
-    camOffMsg: 'Camera off.',
-    camFrontMsg: 'Front camera.',
-    camBackMsg: 'Rear camera.',
-    camSwitchMsg: 'Camera switched.',
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
     imagePrompt: 'What do you see in this image?',
@@ -159,32 +181,23 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Monitor mode',
     disconnectCamTitle: 'Disconnect camera',
     connectCamTitle: 'Connect camera',
-    wakeHint: 'Say “Hey Kelion” to start — or just type.',
     micBlocked: 'Microphone blocked. Allow mic access in the browser, then tap the mic again.',
     micNoDevice: 'No microphone found.',
     micUnsupported: 'Speech recognition is not supported in this browser. Use Chrome.',
-    hearingLabel: 'Kelion is hearing',
-    chatError: 'Error.',
     brainNotActive: 'The brain is not active yet (OpenRouter key missing).',
     brainError: 'Brain error. Please try again.',
     offline: "I've lost the internet connection — I'll be right back when the signal returns.",
-    backOnline: "We're back online.",
     credits: 'credits',
-    buyCredit: 'Buy credit',
     topUp: 'Please top up your credit',
     lowCredit: 'Your credit is running low — please top up.',
     landingHeadline: 'Your brilliant assistant. It sees, hears and speaks.',
+    // NO FREE TRIAL (Adrian — see Landing.tsx: "Nobody gets free minutes
+    // anymore"): this line used to promise "Try it free for 10 minutes" in all
+    // 7 languages while the product had no free trial. The promise is gone.
     landingSub:
-      'Talk to Kelion in your own language — ask, show, navigate, create. Try it free for 10 minutes, no sign-up.',
-    buyCreditCta: 'Sign in & get credit',
+      'Talk to Kelion in your own language — ask, show, navigate, create. Sign in with Google and add credit to start.',
     manualTitle: 'Everything Kelion can do',
     multilingual: 'Multinational support — understands and replies in dozens of languages, written and spoken.',
-    downloadWin: 'Download for Windows',
-    downloadAndroid: 'Download for Android',
-    installApp: 'Install the app',
-    iosInstall: 'Install on iPhone',
-    iosSteps: 'In Safari: tap Share (the square with ↑), then “Add to Home Screen”.',
-    scanHint: 'Or scan to install on your phone or tablet',
     updateReady: 'A new version is available',
     updateNow: 'Update',
     updateAuto: 'applies automatically in {n} s',
@@ -211,12 +224,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google did not return an identity. Please try again.',
     errNoEmail: 'Could not read a verified email from Google.',
     errGeneric: 'Sign-in error. Please try again.',
-    calibrateVoiceTitle: 'Recognize my voice',
-    calibrateVoiceListening: 'Listening… speak normally',
-    calibrateVoiceDone: 'Voice recognized',
-    calibrateVoiceFailed: "Couldn't calibrate — try again",
-    calibrateVoiceReset: 'Reset voice',
-    voiceNotEnrolledHint: 'Mic is muted until you set up your voice (+ → Recognize my voice).',
     wsFileFailed: "Couldn't load the contents of this file here.",
     wsOpenFile: 'Open the file ↗',
     wsPageBlocked: 'This page cannot be displayed here.',
@@ -246,25 +253,65 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     latencyChip: 'sent → first word / full answer',
     heardYouTitle: 'You — on the way to the brain',
     heardBrainTitle: 'The brain got it and is thinking',
+    heardKelionTitle: 'Kelion — from the brain',
+    micTalk: 'Talk (microphone)',
+    micStop: 'Stop the microphone',
+    voiceVolume: 'Kelion’s voice volume',
+    sendInterrupts: 'Kelion is answering — send now and your message replaces the current answer',
+    attRemove: 'Remove attachment',
+    docAttachFailed: 'I couldn’t read “{name}” — it was NOT attached.',
+    docTooLarge: '“{name}” is too large to attach (the limit is about 18 MB).',
+    docPrompt: 'I attached a document — read it and tell me what it contains.',
+    voiceDownTemp:
+      'My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.',
+    voiceNeedLogin: 'The live voice needs you signed in — sign in and I can speak again.',
+    voiceNeedCredit:
+      'Your credit has run out, so the live voice is paused — typing still works. Top up and the voice comes back.',
+    asrLost: 'I couldn’t transcribe that — please say it again.',
+    stopAck: 'Stopped.',
+    promoTakeSaved: 'Take stopped and the clip was saved. Say “retake” to do the same take again.',
+    promoWrongLang:
+      'The saved script was in another language. Say “make a clip about {subject}” again and I’ll redo it in your language.',
+    promoRetake: 'Same take again — press the pulsing red button and pick the screen.',
+    promoRecStopped: 'Recording stopped — the clip is saving to Downloads.',
+    promoRecReady: 'Ready to record. Press the pulsing red button at the top and pick the screen.',
+    promoVoiceLost: 'Part of the narration failed to synthesize — the clip may have silent gaps.',
+    recStartTitle: 'Record a promo clip',
+    recStopTitle: 'Stop recording',
+    back: 'Back',
+    wsSave: 'Save',
+    wsSaved: 'Saved ✓',
+    wsOpenTab: 'Open in a new tab ↗',
+    wsArchiveNote: 'Archive ({name}) — its contents can’t be previewed in the page. You can download it:',
+    creditOut: 'Credit used up — top up to continue',
+    creditOk: 'You have credit',
+    contactLabel: 'Contact',
+    connectGoogle: 'Connect Google',
+    connectGoogleTitle: 'Grant Gmail, Calendar & Drive access so Kelion can act on them',
+    buildQueued: 'Queued',
+    buildRunning: 'Working',
+    buildDone: 'Done',
+    buildFailed: 'Failed',
+    buildOnlyAdmin: 'Only the admin can see the builder.',
+    buildUnavailable: 'The builder is unavailable right now.',
+    buildNoServer: 'No connection to the server.',
+    buildHead: 'Kelion’s builder',
+    buildAttempt: 'attempt {n}',
+    buildSeePr: 'See the PR ↗',
+    buildCiFailed: 'CI failed on the PR',
+    unlockWrongCode: 'Wrong code — try again.',
+    unlockRetryError: 'Error — try again.',
+    unlockNetError: 'Network error — try again.',
+    unlockPlaceholder: 'Activation secret',
+    lockedTitle: 'Locked — talk to Kelion (your voiceprint opens it) or type the secret',
   },
   ro: {
-    tagline: 'Asistentul tău. Conectează-te pentru a continua.',
     signIn: 'Conectează-te cu Google',
     restricted: 'Acces restricționat. Doar conturile autorizate pot intra.',
     signOut: 'Deconectare',
     chatHint: 'Spune-i ceva lui Kelion…',
     chatPlaceholder: 'Scrie-i lui Kelion',
     send: 'Trimite',
-    micTitle: 'Ține apăsat ca să vorbești',
-    listenTitle: 'Ascultare continuă',
-    voiceTitle: 'Vocea lui Kelion',
-    cameraTitle: 'Cameră',
-    switchCamTitle: 'Schimbă camera',
-    camOnMsg: 'Cameră pornită.',
-    camOffMsg: 'Cameră oprită.',
-    camFrontMsg: 'Camera din față.',
-    camBackMsg: 'Camera din spate.',
-    camSwitchMsg: 'Am schimbat camera.',
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     imagePrompt: 'Ce vezi în această imagine?',
@@ -276,32 +323,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Mod monitor',
     disconnectCamTitle: 'Deconectează camera',
     connectCamTitle: 'Conectează camera',
-    wakeHint: 'Spune „Hey Kelion” ca să începi — sau scrie.',
     micBlocked: 'Microfonul e blocat. Permite accesul la microfon în browser, apoi apasă din nou pe microfon.',
     micNoDevice: 'Niciun microfon găsit.',
     micUnsupported: 'Recunoașterea vocală nu e suportată în acest browser. Folosește Chrome.',
-    hearingLabel: 'Kelion aude',
-    chatError: 'Eroare.',
     brainNotActive: 'Creierul nu e încă activat (lipsește cheia OpenRouter).',
     brainError: 'Eroare la creier. Încearcă din nou.',
     offline: 'Am pierdut conexiunea la internet — revin de îndată ce revine semnalul.',
-    backOnline: 'Am revenit online.',
     credits: 'credite',
-    buyCredit: 'Cumpără credit',
     topUp: 'Te rog reîncarcă creditul',
     lowCredit: 'Mai ai puțin credit — te rog reîncarcă.',
     landingHeadline: 'Asistentul tău genial. Vede, aude și vorbește.',
     landingSub:
-      'Vorbește cu Kelion în limba ta — întreabă, arată, navighează, creează. Încearcă gratis 10 minute, fără cont.',
-    buyCreditCta: 'Conectează-te și ia credit',
+      'Vorbește cu Kelion în limba ta — întreabă, arată, navighează, creează. Conectează-te cu Google și pune credit ca să începi.',
     manualTitle: 'Tot ce știe Kelion să facă',
     multilingual: 'Suport multinațional — înțelege și răspunde în zeci de limbi, scris și vorbit.',
-    downloadWin: 'Descarcă pentru Windows',
-    downloadAndroid: 'Descarcă pentru Android',
-    installApp: 'Instalează aplicația',
-    iosInstall: 'Instalează pe iPhone',
-    iosSteps: 'În Safari: apasă Share (pătratul cu ↑), apoi „Adaugă pe ecranul principal”.',
-    scanHint: 'Sau scanează ca să instalezi pe telefon sau tabletă',
     updateReady: 'O versiune nouă este disponibilă',
     updateNow: 'Actualizează',
     updateAuto: 'se aplică automat în {n} s',
@@ -328,12 +363,6 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google nu a returnat o identitate. Încearcă din nou.',
     errNoEmail: 'Nu am putut citi un email verificat de la Google.',
     errGeneric: 'Eroare la conectare. Încearcă din nou.',
-    calibrateVoiceTitle: 'Recunoaște-mi vocea',
-    calibrateVoiceListening: 'Ascult… vorbește normal',
-    calibrateVoiceDone: 'Vocea a fost recunoscută',
-    calibrateVoiceFailed: 'Nu am reușit — încearcă din nou',
-    calibrateVoiceReset: 'Resetează vocea',
-    voiceNotEnrolledHint: 'Microfonul e mut până îți configurezi vocea (+ → Recunoaște-mi vocea).',
     wsFileFailed: 'Nu am putut aduce conținutul fișierului aici.',
     wsOpenFile: 'Deschide fișierul ↗',
     wsPageBlocked: 'Această pagină nu poate fi afișată aici.',
@@ -363,25 +392,65 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     latencyChip: 'trimis → primul cuvânt / răspuns complet',
     heardYouTitle: 'Tu — înspre creier',
     heardBrainTitle: 'Creierul a primit și gândește',
+    heardKelionTitle: 'Kelion — dinspre creier',
+    micTalk: 'Vorbește (microfon)',
+    micStop: 'Oprește microfonul',
+    voiceVolume: 'Volumul vocii lui Kelion',
+    sendInterrupts: 'Kelion răspunde — trimite acum și mesajul tău înlocuiește răspunsul curent',
+    attRemove: 'Scoate atașamentul',
+    docAttachFailed: 'Nu am putut citi „{name}” — NU a fost atașat.',
+    docTooLarge: '„{name}” e prea mare pentru atașare (limita e cam 18 MB).',
+    docPrompt: 'Am atașat un document — citește-l și spune-mi ce conține.',
+    voiceDownTemp:
+      'Vocea mea live e momentan indisponibilă — dictarea și scrisul merg, iar eu reîncerc singur vocea completă în curând.',
+    voiceNeedLogin: 'Vocea live cere să fii logat — conectează-te și pot vorbi din nou.',
+    voiceNeedCredit:
+      'Creditul s-a terminat, așa că vocea live e pe pauză — scrisul merge în continuare. Reîncarcă și vocea revine.',
+    asrLost: 'Nu am reușit să transcriu — te rog spune din nou.',
+    stopAck: 'Am oprit.',
+    promoTakeSaved: 'Dubla s-a oprit și clipul s-a salvat. Spune „reluăm” pentru încă o dublă cu același scenariu.',
+    promoWrongLang:
+      'Scenariul salvat era în altă limbă. Spune-mi din nou „fă un clip despre {subject}” și îl refac în limba curentă.',
+    promoRetake: 'Reluăm aceeași dublă — apasă butonul roșu care pulsează și alege ecranul.',
+    promoRecStopped: 'Am oprit înregistrarea — clipul se salvează în Descărcări.',
+    promoRecReady: 'Pregătit de înregistrare. Apasă butonul roșu care pulsează, sus, și alege ecranul.',
+    promoVoiceLost: 'O parte din narațiune nu s-a putut sintetiza — clipul poate avea goluri de sunet.',
+    recStartTitle: 'Înregistrează un clip promo',
+    recStopTitle: 'Oprește înregistrarea',
+    back: 'Înapoi',
+    wsSave: 'Salvează',
+    wsSaved: 'Salvat ✓',
+    wsOpenTab: 'Deschide într-un tab nou ↗',
+    wsArchiveNote: 'Arhivă ({name}) — conținutul nu se poate previzualiza în pagină. O poți descărca:',
+    creditOut: 'Credit epuizat — reîncarcă pentru a continua',
+    creditOk: 'Ai credit',
+    contactLabel: 'Contact',
+    connectGoogle: 'Conectează Google',
+    connectGoogleTitle: 'Dă acces la Gmail, Calendar și Drive ca Kelion să poată lucra cu ele',
+    buildQueued: 'În coadă',
+    buildRunning: 'Lucrează',
+    buildDone: 'Gata',
+    buildFailed: 'Eșuat',
+    buildOnlyAdmin: 'Doar adminul vede constructorul.',
+    buildUnavailable: 'Constructor indisponibil momentan.',
+    buildNoServer: 'Fără legătură cu serverul.',
+    buildHead: 'Constructorul lui Kelion',
+    buildAttempt: 'încercarea {n}',
+    buildSeePr: 'Vezi PR ↗',
+    buildCiFailed: 'CI a picat pe PR',
+    unlockWrongCode: 'Cod greșit — mai încearcă.',
+    unlockRetryError: 'Eroare — reîncearcă.',
+    unlockNetError: 'Eroare de rețea — reîncearcă.',
+    unlockPlaceholder: 'Secretul de activare',
+    lockedTitle: 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul',
   },
   es: {
-    tagline: 'Tu asistente. Inicia sesión para continuar.',
     signIn: 'Iniciar sesión con Google',
     restricted: 'Acceso restringido. Solo pueden entrar cuentas autorizadas.',
     signOut: 'Cerrar sesión',
     chatHint: 'Dile algo a Kelion…',
     chatPlaceholder: 'Escríbele a Kelion',
     send: 'Enviar',
-    micTitle: 'Mantén pulsado para hablar',
-    listenTitle: 'Escucha continua',
-    voiceTitle: 'La voz de Kelion',
-    cameraTitle: 'Cámara',
-    switchCamTitle: 'Cambiar cámara',
-    camOnMsg: 'Cámara encendida.',
-    camOffMsg: 'Cámara apagada.',
-    camFrontMsg: 'Cámara frontal.',
-    camBackMsg: 'Cámara trasera.',
-    camSwitchMsg: 'Cámara cambiada.',
     functionsTitle: 'Funciones',
     attachTitle: 'Adjuntar archivo',
     imagePrompt: '¿Qué ves en esta imagen?',
@@ -393,32 +462,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Modo monitor',
     disconnectCamTitle: 'Desconectar cámara',
     connectCamTitle: 'Conectar cámara',
-    wakeHint: 'Di «Hey Kelion» para empezar — o simplemente escribe.',
     micBlocked: 'Micrófono bloqueado. Permite el acceso al micrófono en el navegador y vuelve a pulsar.',
     micNoDevice: 'No se encontró ningún micrófono.',
     micUnsupported: 'El reconocimiento de voz no es compatible con este navegador. Usa Chrome.',
-    hearingLabel: 'Kelion está escuchando',
-    chatError: 'Error.',
     brainNotActive: 'El cerebro aún no está activo (falta la clave de OpenRouter).',
     brainError: 'Error del cerebro. Inténtalo de nuevo.',
     offline: 'He perdido la conexión a internet — vuelvo en cuanto regrese la señal.',
-    backOnline: 'Volvimos a estar en línea.',
     credits: 'créditos',
-    buyCredit: 'Comprar crédito',
     topUp: 'Por favor recarga tu crédito',
     lowCredit: 'Te queda poco crédito — recarga, por favor.',
     landingHeadline: 'Tu asistente brillante. Ve, oye y habla.',
     landingSub:
-      'Habla con Kelion en tu idioma — pregunta, muestra, navega, crea. Pruébalo gratis 10 minutos, sin registro.',
-    buyCreditCta: 'Inicia sesión y obtén crédito',
+      'Habla con Kelion en tu idioma — pregunta, muestra, navega, crea. Inicia sesión con Google y añade crédito para empezar.',
     manualTitle: 'Todo lo que Kelion sabe hacer',
     multilingual: 'Soporte multinacional — entiende y responde en decenas de idiomas, escrito y hablado.',
-    downloadWin: 'Descargar para Windows',
-    downloadAndroid: 'Descargar para Android',
-    installApp: 'Instalar la aplicación',
-    iosInstall: 'Instalar en iPhone',
-    iosSteps: 'En Safari: toca Compartir (el cuadrado con ↑) y luego «Añadir a pantalla de inicio».',
-    scanHint: 'O escanea para instalar en tu teléfono o tableta',
     updateReady: 'Hay una nueva versión disponible',
     updateNow: 'Actualizar',
     updateAuto: 'se aplicará automáticamente en {n} s',
@@ -445,16 +502,15 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google no devolvió una identidad. Inténtalo de nuevo.',
     errNoEmail: 'No se pudo leer un email verificado de Google.',
     errGeneric: 'Error al iniciar sesión. Inténtalo de nuevo.',
-    calibrateVoiceTitle: 'Reconoce mi voz',
-    calibrateVoiceListening: 'Escuchando… habla con normalidad',
-    calibrateVoiceDone: 'Voz reconocida',
-    calibrateVoiceFailed: 'No se pudo calibrar — inténtalo de nuevo',
-    calibrateVoiceReset: 'Restablecer voz',
-    voiceNotEnrolledHint: 'El micrófono está silenciado hasta que configures tu voz (+ → Reconoce mi voz).',
     wsFileFailed: 'No se pudo cargar aquí el contenido del archivo.',
     wsOpenFile: 'Abrir el archivo ↗',
     wsPageBlocked: 'Esta página no se puede mostrar aquí.',
     wsDownloadArchive: 'Descargar el archivo ↓',
+    wsMediaFailed: 'Este archivo multimedia no se puede reproducir en el navegador (formato o códec no compatible).',
+    wsFileNoPreview: 'Este tipo de archivo no se puede previsualizar en la página — puedes descargarlo.',
+    wsDownloadFile: 'Descargar el archivo ↓',
+    themeToDark: 'Cambiar al tema oscuro',
+    themeToLight: 'Cambiar al tema claro',
     wsClose: 'Cerrar',
     wsCloseAll: 'Cerrar todo',
     wsCopy: 'Copiar',
@@ -477,23 +533,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardBrainTitle: 'El cerebro lo recibió y está pensando',
   },
   fr: {
-    tagline: 'Votre assistant. Connectez-vous pour continuer.',
     signIn: 'Se connecter avec Google',
     restricted: 'Accès restreint. Seuls les comptes autorisés peuvent entrer.',
     signOut: 'Se déconnecter',
     chatHint: 'Dites quelque chose à Kelion…',
     chatPlaceholder: 'Écrivez à Kelion',
     send: 'Envoyer',
-    micTitle: 'Maintenez pour parler',
-    listenTitle: 'Écoute continue',
-    voiceTitle: 'La voix de Kelion',
-    cameraTitle: 'Caméra',
-    switchCamTitle: 'Changer de caméra',
-    camOnMsg: 'Caméra allumée.',
-    camOffMsg: 'Caméra éteinte.',
-    camFrontMsg: 'Caméra avant.',
-    camBackMsg: 'Caméra arrière.',
-    camSwitchMsg: 'Caméra changée.',
     functionsTitle: 'Fonctions',
     attachTitle: 'Joindre un fichier',
     imagePrompt: 'Que voyez-vous sur cette image ?',
@@ -505,32 +550,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Mode moniteur',
     disconnectCamTitle: 'Déconnecter la caméra',
     connectCamTitle: 'Connecter la caméra',
-    wakeHint: 'Dites « Hey Kelion » pour commencer — ou écrivez simplement.',
     micBlocked: 'Micro bloqué. Autorisez l’accès au micro dans le navigateur, puis réessayez.',
     micNoDevice: 'Aucun microphone trouvé.',
     micUnsupported: 'La reconnaissance vocale n’est pas prise en charge par ce navigateur. Utilisez Chrome.',
-    hearingLabel: 'Kelion écoute',
-    chatError: 'Erreur.',
     brainNotActive: 'Le cerveau n’est pas encore actif (clé OpenRouter manquante).',
     brainError: 'Erreur du cerveau. Veuillez réessayer.',
     offline: 'J’ai perdu la connexion internet — je reviens dès que le signal revient.',
-    backOnline: 'Nous sommes de retour en ligne.',
     credits: 'crédits',
-    buyCredit: 'Acheter du crédit',
     topUp: 'Veuillez recharger votre crédit',
     lowCredit: 'Votre crédit est presque épuisé — veuillez recharger.',
     landingHeadline: 'Votre assistant brillant. Il voit, entend et parle.',
     landingSub:
-      'Parlez à Kelion dans votre langue — demandez, montrez, naviguez, créez. Essayez gratuitement 10 minutes, sans inscription.',
-    buyCreditCta: 'Connectez-vous et obtenez du crédit',
+      'Parlez à Kelion dans votre langue — demandez, montrez, naviguez, créez. Connectez-vous avec Google et ajoutez du crédit pour commencer.',
     manualTitle: 'Tout ce que Kelion sait faire',
     multilingual: 'Support multinational — comprend et répond dans des dizaines de langues, à l’écrit comme à l’oral.',
-    downloadWin: 'Télécharger pour Windows',
-    downloadAndroid: 'Télécharger pour Android',
-    installApp: 'Installer l’application',
-    iosInstall: 'Installer sur iPhone',
-    iosSteps: 'Dans Safari : touchez Partager (le carré avec ↑), puis « Sur l’écran d’accueil ».',
-    scanHint: 'Ou scannez pour installer sur votre téléphone ou tablette',
     updateReady: 'Une nouvelle version est disponible',
     updateNow: 'Mettre à jour',
     updateAuto: "s'applique automatiquement dans {n} s",
@@ -557,16 +590,15 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google n’a pas renvoyé d’identité. Veuillez réessayer.',
     errNoEmail: 'Impossible de lire un email vérifié depuis Google.',
     errGeneric: 'Erreur de connexion. Veuillez réessayer.',
-    calibrateVoiceTitle: 'Reconnaître ma voix',
-    calibrateVoiceListening: 'Écoute… parlez normalement',
-    calibrateVoiceDone: 'Voix reconnue',
-    calibrateVoiceFailed: 'Échec de la calibration — réessayez',
-    calibrateVoiceReset: 'Réinitialiser la voix',
-    voiceNotEnrolledHint: 'Micro coupé jusqu’à ce que vous configuriez votre voix (+ → Reconnaître ma voix).',
     wsFileFailed: 'Impossible de charger le contenu du fichier ici.',
     wsOpenFile: 'Ouvrir le fichier ↗',
     wsPageBlocked: 'Cette page ne peut pas être affichée ici.',
     wsDownloadArchive: 'Télécharger l’archive ↓',
+    wsMediaFailed: 'Ce fichier multimédia ne peut pas être lu dans le navigateur (format ou codec non pris en charge).',
+    wsFileNoPreview: 'Ce type de fichier ne peut pas être prévisualisé dans la page — vous pouvez le télécharger.',
+    wsDownloadFile: 'Télécharger le fichier ↓',
+    themeToDark: 'Passer au thème sombre',
+    themeToLight: 'Passer au thème clair',
     wsClose: 'Fermer',
     wsCloseAll: 'Tout fermer',
     wsCopy: 'Copier',
@@ -589,23 +621,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardBrainTitle: 'Le cerveau a reçu et réfléchit',
   },
   de: {
-    tagline: 'Dein Assistent. Melde dich an, um fortzufahren.',
     signIn: 'Mit Google anmelden',
     restricted: 'Zugang beschränkt. Nur autorisierte Konten haben Zutritt.',
     signOut: 'Abmelden',
     chatHint: 'Sag Kelion etwas…',
     chatPlaceholder: 'Schreib an Kelion',
     send: 'Senden',
-    micTitle: 'Zum Sprechen gedrückt halten',
-    listenTitle: 'Dauerhaftes Zuhören',
-    voiceTitle: 'Kelions Stimme',
-    cameraTitle: 'Kamera',
-    switchCamTitle: 'Kamera wechseln',
-    camOnMsg: 'Kamera an.',
-    camOffMsg: 'Kamera aus.',
-    camFrontMsg: 'Frontkamera.',
-    camBackMsg: 'Rückkamera.',
-    camSwitchMsg: 'Kamera gewechselt.',
     functionsTitle: 'Funktionen',
     attachTitle: 'Datei anhängen',
     imagePrompt: 'Was siehst du auf diesem Bild?',
@@ -617,32 +638,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Monitor-Modus',
     disconnectCamTitle: 'Kamera trennen',
     connectCamTitle: 'Kamera verbinden',
-    wakeHint: 'Sag „Hey Kelion“, um zu starten — oder tippe einfach.',
     micBlocked: 'Mikrofon blockiert. Erlaube den Mikrofonzugriff im Browser und tippe erneut.',
     micNoDevice: 'Kein Mikrofon gefunden.',
     micUnsupported: 'Spracherkennung wird in diesem Browser nicht unterstützt. Nutze Chrome.',
-    hearingLabel: 'Kelion hört zu',
-    chatError: 'Fehler.',
     brainNotActive: 'Das Gehirn ist noch nicht aktiv (OpenRouter-Schlüssel fehlt).',
     brainError: 'Gehirn-Fehler. Bitte versuche es erneut.',
     offline: 'Ich habe die Internetverbindung verloren — ich bin zurück, sobald das Signal wieder da ist.',
-    backOnline: 'Wir sind wieder online.',
     credits: 'Guthaben',
-    buyCredit: 'Guthaben kaufen',
     topUp: 'Bitte lade dein Guthaben auf',
     lowCredit: 'Dein Guthaben wird knapp — bitte aufladen.',
     landingHeadline: 'Dein brillanter Assistent. Er sieht, hört und spricht.',
     landingSub:
-      'Sprich mit Kelion in deiner Sprache — frag, zeig, navigiere, erschaffe. Teste ihn 10 Minuten gratis, ohne Konto.',
-    buyCreditCta: 'Anmelden & Guthaben holen',
+      'Sprich mit Kelion in deiner Sprache — frag, zeig, navigiere, erschaffe. Melde dich mit Google an und lade Guthaben auf, um zu starten.',
     manualTitle: 'Alles, was Kelion kann',
     multilingual: 'Multinationale Unterstützung — versteht und antwortet in Dutzenden Sprachen, schriftlich und gesprochen.',
-    downloadWin: 'Für Windows herunterladen',
-    downloadAndroid: 'Für Android herunterladen',
-    installApp: 'App installieren',
-    iosInstall: 'Auf dem iPhone installieren',
-    iosSteps: 'In Safari: Teilen antippen (Quadrat mit ↑), dann „Zum Home-Bildschirm“.',
-    scanHint: 'Oder scannen, um auf Handy oder Tablet zu installieren',
     updateReady: 'Eine neue Version ist verfügbar',
     updateNow: 'Aktualisieren',
     updateAuto: 'wird automatisch in {n} s angewendet',
@@ -669,16 +678,15 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google hat keine Identität zurückgegeben. Bitte erneut versuchen.',
     errNoEmail: 'Es konnte keine verifizierte E-Mail von Google gelesen werden.',
     errGeneric: 'Anmeldefehler. Bitte erneut versuchen.',
-    calibrateVoiceTitle: 'Meine Stimme erkennen',
-    calibrateVoiceListening: 'Höre zu… sprich normal',
-    calibrateVoiceDone: 'Stimme erkannt',
-    calibrateVoiceFailed: 'Kalibrierung fehlgeschlagen — erneut versuchen',
-    calibrateVoiceReset: 'Stimme zurücksetzen',
-    voiceNotEnrolledHint: 'Mikrofon stumm, bis du deine Stimme einrichtest (+ → Meine Stimme erkennen).',
     wsFileFailed: 'Der Inhalt der Datei konnte hier nicht geladen werden.',
     wsOpenFile: 'Datei öffnen ↗',
     wsPageBlocked: 'Diese Seite kann hier nicht angezeigt werden.',
     wsDownloadArchive: 'Archiv herunterladen ↓',
+    wsMediaFailed: 'Diese Mediendatei kann im Browser nicht abgespielt werden (Format oder Codec nicht unterstützt).',
+    wsFileNoPreview: 'Dieser Dateityp lässt sich auf der Seite nicht anzeigen — du kannst ihn herunterladen.',
+    wsDownloadFile: 'Datei herunterladen ↓',
+    themeToDark: 'Zum dunklen Design wechseln',
+    themeToLight: 'Zum hellen Design wechseln',
     wsClose: 'Schließen',
     wsCloseAll: 'Alles schließen',
     wsCopy: 'Kopieren',
@@ -701,23 +709,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardBrainTitle: 'Das Gehirn hat es und denkt nach',
   },
   it: {
-    tagline: 'Il tuo assistente. Accedi per continuare.',
     signIn: 'Accedi con Google',
     restricted: 'Accesso limitato. Solo gli account autorizzati possono entrare.',
     signOut: 'Esci',
     chatHint: 'Di’ qualcosa a Kelion…',
     chatPlaceholder: 'Scrivi a Kelion',
     send: 'Invia',
-    micTitle: 'Tieni premuto per parlare',
-    listenTitle: 'Ascolto continuo',
-    voiceTitle: 'La voce di Kelion',
-    cameraTitle: 'Fotocamera',
-    switchCamTitle: 'Cambia fotocamera',
-    camOnMsg: 'Fotocamera accesa.',
-    camOffMsg: 'Fotocamera spenta.',
-    camFrontMsg: 'Fotocamera anteriore.',
-    camBackMsg: 'Fotocamera posteriore.',
-    camSwitchMsg: 'Fotocamera cambiata.',
     functionsTitle: 'Funzioni',
     attachTitle: 'Allega file',
     imagePrompt: 'Cosa vedi in questa immagine?',
@@ -729,32 +726,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Modalità monitor',
     disconnectCamTitle: 'Scollega fotocamera',
     connectCamTitle: 'Collega fotocamera',
-    wakeHint: 'Di’ «Hey Kelion» per iniziare — o scrivi e basta.',
     micBlocked: 'Microfono bloccato. Consenti l’accesso al microfono nel browser e riprova.',
     micNoDevice: 'Nessun microfono trovato.',
     micUnsupported: 'Il riconoscimento vocale non è supportato in questo browser. Usa Chrome.',
-    hearingLabel: 'Kelion sta ascoltando',
-    chatError: 'Errore.',
     brainNotActive: 'Il cervello non è ancora attivo (manca la chiave OpenRouter).',
     brainError: 'Errore del cervello. Riprova.',
     offline: 'Ho perso la connessione a internet — torno appena il segnale ritorna.',
-    backOnline: 'Siamo di nuovo online.',
     credits: 'crediti',
-    buyCredit: 'Compra credito',
     topUp: 'Ricarica il tuo credito, per favore',
     lowCredit: 'Il tuo credito sta per finire — ricarica, per favore.',
     landingHeadline: 'Il tuo assistente brillante. Vede, sente e parla.',
     landingSub:
-      'Parla con Kelion nella tua lingua — chiedi, mostra, naviga, crea. Provalo gratis per 10 minuti, senza registrazione.',
-    buyCreditCta: 'Accedi e ottieni credito',
+      'Parla con Kelion nella tua lingua — chiedi, mostra, naviga, crea. Accedi con Google e aggiungi credito per iniziare.',
     manualTitle: 'Tutto ciò che Kelion sa fare',
     multilingual: 'Supporto multinazionale — capisce e risponde in decine di lingue, scritte e parlate.',
-    downloadWin: 'Scarica per Windows',
-    downloadAndroid: 'Scarica per Android',
-    installApp: 'Installa l’app',
-    iosInstall: 'Installa su iPhone',
-    iosSteps: 'In Safari: tocca Condividi (il quadrato con ↑), poi «Aggiungi alla schermata Home».',
-    scanHint: 'Oppure scansiona per installare su telefono o tablet',
     updateReady: 'È disponibile una nuova versione',
     updateNow: 'Aggiorna',
     updateAuto: 'si applica automaticamente tra {n} s',
@@ -781,16 +766,15 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'Google non ha restituito un’identità. Riprova.',
     errNoEmail: 'Impossibile leggere un’email verificata da Google.',
     errGeneric: 'Errore di accesso. Riprova.',
-    calibrateVoiceTitle: 'Riconosci la mia voce',
-    calibrateVoiceListening: 'Ascolto… parla normalmente',
-    calibrateVoiceDone: 'Voce riconosciuta',
-    calibrateVoiceFailed: 'Calibrazione non riuscita — riprova',
-    calibrateVoiceReset: 'Reimposta voce',
-    voiceNotEnrolledHint: 'Microfono muto finché non configuri la tua voce (+ → Riconosci la mia voce).',
     wsFileFailed: 'Non è stato possibile caricare qui il contenuto del file.',
     wsOpenFile: 'Apri il file ↗',
     wsPageBlocked: 'Questa pagina non può essere mostrata qui.',
     wsDownloadArchive: 'Scarica l’archivio ↓',
+    wsMediaFailed: 'Questo file multimediale non può essere riprodotto nel browser (formato o codec non supportato).',
+    wsFileNoPreview: 'Questo tipo di file non si può visualizzare nella pagina — puoi scaricarlo.',
+    wsDownloadFile: 'Scarica il file ↓',
+    themeToDark: 'Passa al tema scuro',
+    themeToLight: 'Passa al tema chiaro',
     wsClose: 'Chiudi',
     wsCloseAll: 'Chiudi tutto',
     wsCopy: 'Copia',
@@ -813,23 +797,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     heardBrainTitle: 'Il cervello l’ha ricevuto e sta pensando',
   },
   pt: {
-    tagline: 'O seu assistente. Inicie sessão para continuar.',
     signIn: 'Entrar com Google',
     restricted: 'Acesso restrito. Apenas contas autorizadas podem entrar.',
     signOut: 'Sair',
     chatHint: 'Diga algo ao Kelion…',
     chatPlaceholder: 'Escreva ao Kelion',
     send: 'Enviar',
-    micTitle: 'Mantenha pressionado para falar',
-    listenTitle: 'Escuta contínua',
-    voiceTitle: 'A voz do Kelion',
-    cameraTitle: 'Câmera',
-    switchCamTitle: 'Trocar câmera',
-    camOnMsg: 'Câmera ligada.',
-    camOffMsg: 'Câmera desligada.',
-    camFrontMsg: 'Câmera frontal.',
-    camBackMsg: 'Câmera traseira.',
-    camSwitchMsg: 'Câmera trocada.',
     functionsTitle: 'Funções',
     attachTitle: 'Anexar arquivo',
     imagePrompt: 'O que você vê nesta imagem?',
@@ -841,32 +814,20 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     monitorTitle: 'Modo monitor',
     disconnectCamTitle: 'Desconectar câmera',
     connectCamTitle: 'Conectar câmera',
-    wakeHint: 'Diga «Hey Kelion» para começar — ou apenas escreva.',
     micBlocked: 'Microfone bloqueado. Permita o acesso ao microfone no navegador e toque novamente.',
     micNoDevice: 'Nenhum microfone encontrado.',
     micUnsupported: 'O reconhecimento de voz não é suportado neste navegador. Use o Chrome.',
-    hearingLabel: 'Kelion está ouvindo',
-    chatError: 'Erro.',
     brainNotActive: 'O cérebro ainda não está ativo (falta a chave da OpenRouter).',
     brainError: 'Erro do cérebro. Tente novamente.',
     offline: 'Perdi a conexão com a internet — volto assim que o sinal retornar.',
-    backOnline: 'Estamos online novamente.',
     credits: 'créditos',
-    buyCredit: 'Comprar crédito',
     topUp: 'Por favor, recarregue o seu crédito',
     lowCredit: 'O seu crédito está acabando — recarregue, por favor.',
     landingHeadline: 'O seu assistente brilhante. Ele vê, ouve e fala.',
     landingSub:
-      'Fale com o Kelion no seu idioma — pergunte, mostre, navegue, crie. Experimente grátis por 10 minutos, sem cadastro.',
-    buyCreditCta: 'Entre e obtenha crédito',
+      'Fale com o Kelion no seu idioma — pergunte, mostre, navegue, crie. Entre com o Google e adicione crédito para começar.',
     manualTitle: 'Tudo o que o Kelion sabe fazer',
     multilingual: 'Suporte multinacional — entende e responde em dezenas de idiomas, escrito e falado.',
-    downloadWin: 'Baixar para Windows',
-    downloadAndroid: 'Baixar para Android',
-    installApp: 'Instalar o aplicativo',
-    iosInstall: 'Instalar no iPhone',
-    iosSteps: 'No Safari: toque em Compartilhar (o quadrado com ↑) e depois em “Adicionar à Tela de Início”.',
-    scanHint: 'Ou escaneie para instalar no seu telefone ou tablet',
     updateReady: 'Uma nova versão está disponível',
     updateNow: 'Atualizar',
     updateAuto: 'aplica-se automaticamente em {n} s',
@@ -893,16 +854,15 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     errNoIdToken: 'O Google não retornou uma identidade. Tente novamente.',
     errNoEmail: 'Não foi possível ler um email verificado do Google.',
     errGeneric: 'Erro ao entrar. Tente novamente.',
-    calibrateVoiceTitle: 'Reconhecer minha voz',
-    calibrateVoiceListening: 'Ouvindo… fale normalmente',
-    calibrateVoiceDone: 'Voz reconhecida',
-    calibrateVoiceFailed: 'Não foi possível calibrar — tente novamente',
-    calibrateVoiceReset: 'Redefinir voz',
-    voiceNotEnrolledHint: 'Microfone mudo até configurar sua voz (+ → Reconhecer minha voz).',
     wsFileFailed: 'Não foi possível carregar aqui o conteúdo do arquivo.',
     wsOpenFile: 'Abrir o arquivo ↗',
     wsPageBlocked: 'Esta página não pode ser exibida aqui.',
     wsDownloadArchive: 'Baixar o arquivo ↓',
+    wsMediaFailed: 'Este arquivo de mídia não pode ser reproduzido no navegador (formato ou codec não suportado).',
+    wsFileNoPreview: 'Este tipo de arquivo não pode ser visualizado na página — você pode baixá-lo.',
+    wsDownloadFile: 'Baixar o arquivo ↓',
+    themeToDark: 'Mudar para o tema escuro',
+    themeToLight: 'Mudar para o tema claro',
     wsClose: 'Fechar',
     wsCloseAll: 'Fechar tudo',
     wsCopy: 'Copiar',

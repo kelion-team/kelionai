@@ -106,9 +106,11 @@ const RETAKE =
   /(relu[ăa]m\b|retake|reia (dubla|clipul|[îi]nregistrarea)|înc[ăa] o dubl[ăa]|inca o dubla|din nou (dubla|clipul))/i
 // LOCATION intent in the typed message — only then is the real GPS read
 // (Adrian, Jul 26: "only when GPS apps are used or location detection
-// is needed"). Covers Romanian + English: weather, maps, position, routes.
+// is needed"). Covers all 7 UI languages (audit Aug 2: it was RO+EN only, so
+// a French/German/Spanish user asking for weather or a route NEVER got a
+// position read): weather, maps, position, routes.
 const LOC_INTENT =
-  /\b(vreme(a|me)?|meteo|prognoz\w*|weather|forecast|unde (sunt|m[ăa] aflu)|where am i|l[âa]ng[ăa] mine|near me|aproape de mine|[îi]n zon[ăa]|hart[ăa]|h[ăa]r[țt]i|maps?|traseu|rut[ăa]|drum(ul)? (spre|p[âa]n[ăa])|direc[țt]ii|directions|navig\w*|loca[țt]ia (mea|curent[ăa])|locul meu|pozi[țt]ia mea|coordonate(le)? mele|gps)\b/i
+  /\b(vreme(a|me)?|meteo|prognoz\w*|weather|forecast|tiempo|clima|pron[óo]stico|m[ée]t[ée]o|pr[ée]visions|wetter(bericht)?|vorhersage|previsioni|tempo|previs[ãa]o|unde (sunt|m[ăa] aflu)|where am i|d[óo]nde estoy|o[ùu] suis[- ]je|wo bin ich|dove (sono|mi trovo)|onde estou|l[âa]ng[ăa] mine|near me|cerca de m[íi]|pr[èe]s de moi|in meiner n[äa]he|vicino a me|perto de mim|aproape de mine|[îi]n zon[ăa]|hart[ăa]|h[ăa]r[țt]i|maps?|mapas?|carte|plan\b|karte|mappa|traseu|rut[ăa]|ruta|rotas?|route|itin[ée]raire|percorso|drum(ul)? (spre|p[âa]n[ăa])|direc[țt]ii|directions|direcciones|wegbeschreibung|indicazioni|dire[çc][õo]es|navig\w*|loca[țt]ia (mea|curent[ăa])|locul meu|pozi[țt]ia mea|coordonate(le)? mele|mi ubicaci[óo]n|ma position|mein standort|la mia posizione|minha localiza[çc][ãa]o|gps)\b/i
 
 function metersBetween(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const R = 6371000
@@ -357,8 +359,16 @@ export default function ChatPanel({
       return
     }
     // The server-side tool's {gesture} frame — translated into the equivalent clip.
-    if (c.gesture && GESTURE_TO_CLIP[c.gesture]) {
-      window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: GESTURE_TO_CLIP[c.gesture] }))
+    if (c.gesture) {
+      if (GESTURE_TO_CLIP[c.gesture]) {
+        window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: GESTURE_TO_CLIP[c.gesture] }))
+      } else {
+        // UNKNOWN NAME ≠ SILENCE (audit Aug 2): the brain called a gesture the
+        // map doesn't know and the avatar just stood still, no trace anywhere.
+        // console.error reaches the server through F12 reporting — the gap
+        // becomes visible instead of looking like a dead gesture engine.
+        console.error('gest necunoscut de la server (lipsește din GESTURE_TO_CLIP):', c.gesture)
+      }
       return
     }
     // Kelion opens the app's tabs from the WRITTEN chat (open_app_view →
@@ -539,16 +549,29 @@ export default function ChatPanel({
       closeAllTasks() // the script panel is done — clean frame for the clip
       // THE CLIP'S VOICE (QA Jul 24: the approved script was NEVER spoken during
       // recording — the clip came out mute). We synthesize the script with the single voice
-      // (ash, via /api/tts) and play it over the rolling scenes.
-      // IN CHUNKS (Jul 25): /api/tts silently cuts at 5000 characters — a 5-10 minute
-      // clip lost its voice halfway through. We split the script into
-      // ≤3500-char sentence chunks, synthesize them IN ORDER and playVoice queues
-      // them (same reply, no cuts).
+      // (via /api/tts) and play it over the rolling scenes.
+      // IN CHUNKS (Jul 25): /api/tts cuts at its character cap — a 5-10 minute
+      // clip lost its voice halfway through. THE CAP IS THE SERVER'S (audit
+      // Aug 2): /api/tts/status publishes `maxChars`; before, a second 3500
+      // lived here and the two could drift apart silently. Fallback 3500 only
+      // if the probe fails. A failed chunk is retried ONCE, and if it still
+      // fails the owner hears it DURING the take (audit Aug 2: the rec kept
+      // rolling and the silent hole was only discovered at playback).
       void (async () => {
+        let cap = 3500
+        try {
+          const s = await fetch('/api/tts/status', { credentials: 'include', cache: 'no-store' })
+          if (s.ok) {
+            const j = (await s.json()) as { maxChars?: number }
+            if (typeof j.maxChars === 'number' && j.maxChars >= 500) cap = j.maxChars
+          }
+        } catch {
+          /* probe down — the conservative fallback stands */
+        }
         const chunks: string[] = []
         let cur = ''
         for (const sentence of p.script.split(/(?<=[.!?…])\s+/)) {
-          if (cur && cur.length + sentence.length + 1 > 3500) {
+          if (cur && cur.length + sentence.length + 1 > cap) {
             chunks.push(cur)
             cur = sentence
           } else {
@@ -556,25 +579,44 @@ export default function ChatPanel({
           }
         }
         if (cur) chunks.push(cur)
-        for (const chunk of chunks) {
-          try {
-            const r = await fetch('/api/tts', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ text: chunk, lang: p.lang ?? 'ro-RO' }),
-            })
-            if (!r.ok) continue
-            const buf = await r.arrayBuffer()
-            let bin = ''
-            const bytes = new Uint8Array(buf)
-            for (let i = 0; i < bytes.length; i += 0x8000)
-              bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-            playVoice(btoa(bin))
-          } catch {
-            /* a dropped chunk doesn't stop the rest of the narration */
+        // A single monster sentence longer than the cap would have been sent
+        // whole and truncated server-side mid-word — hard-split it instead.
+        const bounded = chunks.flatMap((c) => {
+          const parts: string[] = []
+          for (let i = 0; i < c.length; i += cap) parts.push(c.slice(i, i + cap))
+          return parts
+        })
+        let lost = 0
+        for (const chunk of bounded) {
+          let spoken = false
+          for (let attempt = 0; attempt < 2 && !spoken; attempt++) {
+            try {
+              const r = await fetch('/api/tts', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                // The language is the SCRIPT's; without one, the CURRENT speech
+                // language — never a hardcoded locale (the old 'ro-RO' fallback
+                // narrated an English script with the Romanian voice).
+                body: JSON.stringify({ text: chunk, lang: p.lang ?? speechLangRef.current }),
+              })
+              if (!r.ok) continue
+              const buf = await r.arrayBuffer()
+              let bin = ''
+              const bytes = new Uint8Array(buf)
+              for (let i = 0; i < bytes.length; i += 0x8000)
+                bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+              playVoice(btoa(bin))
+              spoken = true
+            } catch {
+              /* retried once above; counted honestly below */
+            }
           }
+          if (!spoken) lost++
         }
+        // The take is live and unrepeatable — if pieces of the narration died,
+        // the owner finds out NOW and can cut the take, not at playback.
+        if (lost > 0) ack(t.promoVoiceLost)
       })()
       for (const s of p.scenes ?? []) {
         promoTimersRef.current.push(
@@ -594,16 +636,7 @@ export default function ChatPanel({
       promoTimersRef.current = []
       if (wasTake) {
         closeAllTasks()
-        const ro = speechLangRef.current.toLowerCase().startsWith('ro')
-        window.setTimeout(
-          () =>
-            ack(
-              ro
-                ? 'Dubla s-a oprit și clipul s-a salvat. Spune „reluăm” pentru încă o dublă cu același scenariu.'
-                : 'Take stopped and the clip was saved. Say "retake" to do the same take again.',
-            ),
-          600,
-        )
+        window.setTimeout(() => ack(t.promoTakeSaved), 600)
       }
     }
     window.addEventListener('kelion:rec-started', onStarted)
@@ -637,15 +670,24 @@ export default function ChatPanel({
     }
   }
   // Documents (PDF / Word / Excel / PowerPoint / …) are converted to Markdown by
-  // the backend (MarkItDown) and attached as text so Kelion can read them. For
-  // the ADMIN, a file that can't be converted (archive, video, audio, anything)
-  // is kept RAW — it rides the bridge to the developer as-is.
-  // The REAL pipe maximum: Cloudflare hard-caps a request at 100MB — one file
-  // may fill nearly the whole pipe (~70MB real content as base64).
-  const MAX_RAW_FILE = 90_000_000
+  // the backend (MarkItDown) and attached as text so Kelion can read them.
+  // HONESTY REWRITE (frontend audit, Aug 2). Two lies lived here:
+  //  1. a failed conversion added NOTHING and said NOTHING — the user believed
+  //     the PDF was attached and Kelion answered as if it never existed;
+  //  2. for the admin, an unconvertible file got a chip and a promise ("rides
+  //     the bridge as-is") — but send() only ever transmits data:image URLs
+  //     and converted text, so the raw file went NOWHERE and was silently
+  //     cleared. A chip for a file that never leaves the browser is a lie.
+  // Now: converted → attached; not converted → an honest chat line says so.
+  // The size gate mirrors the server's REAL limit (Fastify bodyLimit 25MB in
+  // index.ts; base64 inflates 4/3 → ~18MB of file fills the pipe) — the old
+  // 90MB constant was justified by Cloudflare's 100MB cap, which was never
+  // the binding one.
+  const MAX_INGEST_B64 = 24_000_000
   async function addDocFiles(files: File[]): Promise<void> {
     for (const file of files) {
       if (file.type.startsWith('image/')) continue
+      const name = file.name || 'document'
       try {
         const data = await new Promise<string>((res, rej) => {
           const r = new FileReader()
@@ -653,6 +695,10 @@ export default function ChatPanel({
           r.onerror = () => rej(new Error('read'))
           r.readAsDataURL(file)
         })
+        if (data.length > MAX_INGEST_B64) {
+          ack(t.docTooLarge.replace('{name}', name))
+          continue
+        }
         let markdown = ''
         try {
           const resp = await fetch('/api/ingest', {
@@ -663,26 +709,19 @@ export default function ChatPanel({
           })
           if (resp.ok) markdown = ((await resp.json()) as { markdown?: string }).markdown ?? ''
         } catch {
-          /* conversion unavailable — fall through to raw for admin */
+          /* conversion unreachable — reported honestly below */
         }
         if (markdown.trim()) {
           setAttachments((cur) => [
             ...cur,
-            { id: `${Date.now()}-${file.name}-doc`, url: '', name: file.name || 'document', text: markdown },
+            { id: `${Date.now()}-${file.name}-doc`, url: '', name, text: markdown },
           ])
-        } else if (isAdmin && data.length <= MAX_RAW_FILE) {
-          setAttachments((cur) => [
-            ...cur,
-            {
-              id: `${Date.now()}-${file.name}-raw`,
-              url: data,
-              name: file.name || 'fisier',
-              type: file.type || 'application/octet-stream',
-            },
-          ])
+        } else {
+          ack(t.docAttachFailed.replace('{name}', name))
         }
       } catch {
-        /* skip a file that couldn't be read */
+        // The file couldn't even be read from disk — same honest line.
+        ack(t.docAttachFailed.replace('{name}', name))
       }
     }
   }
@@ -782,7 +821,6 @@ export default function ChatPanel({
     if (!msg && atts.length === 0) return
     // Admin recorder commands — handled locally, never sent to the brain.
     if (msg && isAdmin) {
-      const ro = speechLangRef.current.toLowerCase().startsWith('ro')
       // Mid-take cut: something changed — stop everything; the rec-stopped
       // handler cleans up and offers the retake.
       if (takeActiveRef.current && TAKE_STOP.test(msg)) {
@@ -800,40 +838,24 @@ export default function ChatPanel({
         // ask for a fresh take so Kelion regenerates it in the current language.
         if (savedLang && setLang && savedLang !== setLang) {
           lastPromoRef.current = null
-          ack(
-            ro
-              ? `Scenariul salvat era în altă limbă. Spune-mi din nou „fă un clip despre ${saved.subject}” și îl refac în limba curentă.`
-              : `The saved script was in another language. Say "make a clip about ${saved.subject}" again and I'll redo it in your language.`,
-          )
+          ack(t.promoWrongLang.replace('{subject}', saved.subject))
           setInput('')
           return
         }
         armPromo(saved)
-        ack(
-          ro
-            ? 'Reluăm aceeași dublă — apasă butonul roșu care pulsează și alege ecranul.'
-            : 'Same take again — press the pulsing red button and pick the screen.',
-        )
+        ack(t.promoRetake)
         setInput('')
         return
       }
       if (REC_STOP.test(msg)) {
         window.dispatchEvent(new CustomEvent('kelion:rec', { detail: 'stop' }))
-        ack(
-          ro
-            ? 'Am oprit înregistrarea — clipul se salvează în Descărcări.'
-            : 'Recording stopped — the clip is saving to Downloads.',
-        )
+        ack(t.promoRecStopped)
         setInput('')
         return
       }
       if (REC_START.test(msg)) {
         window.dispatchEvent(new CustomEvent('kelion:rec', { detail: 'arm' }))
-        ack(
-          ro
-            ? 'Pregătit de înregistrare. Apasă butonul roșu care pulsează, sus, și alege ecranul.'
-            : 'Ready to record. Press the pulsing red button at the top and pick the screen.',
-        )
+        ack(t.promoRecReady)
         setInput('')
         return
       }
@@ -866,7 +888,7 @@ export default function ChatPanel({
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       }).catch(() => {})
-      ack(speechLangRef.current.toLowerCase().startsWith('ro') ? 'Am oprit.' : 'Stopped.')
+      ack(t.stopAck)
       return
     }
     // Camera + monitor commands are interpreted by the SERVER (it sees the open
@@ -909,7 +931,7 @@ export default function ChatPanel({
     // reads them as part of this turn.
     const docs = atts.filter((a) => a.text)
     const docBlock = docs.map((d) => `[Document: ${d.name}]\n${d.text}`).join('\n\n')
-    const base = msg || (docBlock ? 'Am atașat un document — citește-l și spune-mi ce conține.' : t.imagePrompt)
+    const base = msg || (docBlock ? t.docPrompt : t.imagePrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
     // CONTINUOUS VISION (Adrian, Jul 11): with the camera on, the LAST 8 FRAMES leave
     // (≈2s of motion at 4 fps), not a single one — the brain sees MOTION, not a
@@ -1121,12 +1143,43 @@ export default function ChatPanel({
   // words; then "hears but doesn't speak") → Adrian: "go back to the full-duplex
   // chat". The session stays open continuously, as before the experiment.
 
+  // HONEST MIC FAILURES (audit Aug 2). Two silences lived here:
+  //  1. a failed /api/asr transcription tore NOTHING down but said nothing —
+  //     the red dot stayed on while the spoken sentence vanished;
+  //  2. 'not-allowed'/'unsupported' returned WITHOUT A WORD — a blocked mic
+  //     looked exactly like a working one that ignores you.
+  const lastAsrLostAckRef = useRef(0)
+  const micTerminalAckedRef = useRef(false)
   const onMicErr = (reason: string): void => {
+    // A lost TRANSCRIPTION is not a dead microphone: the mic keeps listening,
+    // the human hears the truth and repeats the sentence — not into a void.
+    if (reason === 'asr-failed') {
+      const now = Date.now()
+      if (now - lastAsrLostAckRef.current > 30_000) {
+        lastAsrLostAckRef.current = now
+        ack(t.asrLost)
+      }
+      return
+    }
     micRef.current = null
     coalescerRef.current?.cancel()
     setListening(false)
     setLiveVoice('')
-    if (reason === 'not-allowed' || reason === 'unsupported') return
+    if (reason === 'not-allowed' || reason === 'unsupported') {
+      // Terminal: retrying can't grant a permission or add browser support —
+      // but the human is TOLD, once, instead of silence.
+      if (!micTerminalAckedRef.current) {
+        micTerminalAckedRef.current = true
+        ack(reason === 'unsupported' ? t.micUnsupported : t.micBlocked)
+      }
+      return
+    }
+    if (reason === 'no-device' && !micTerminalAckedRef.current) {
+      // Said once; the retry loop below stays armed — plugging a headset in
+      // later brings the ear back by itself.
+      micTerminalAckedRef.current = true
+      ack(t.micNoDevice)
+    }
     micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
     micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
   }
@@ -1200,6 +1253,13 @@ export default function ChatPanel({
               if (s === 'live') {
                 realtimeFailCountRef.current = 0
                 voiceDownAckedRef.current = false // the voice is back — a future outage is announced again
+                // THE RED DOT ON PROOF, NOT ON HOPE (audit Aug 2): `listening`
+                // used to light up right after the SDP answer, before ICE ever
+                // connected — the UI asserted "I hear you" without a successful
+                // measurement. 'live' is the measurement (pc connected / Chirp
+                // ear started), so the dot and the backoff reset move HERE.
+                micBackoffRef.current = 1000
+                setListening(true)
                 return
               }
               if (s === 'error') {
@@ -1233,7 +1293,7 @@ export default function ChatPanel({
                   // down — the human hears it ONCE, in chat, instead of silence.
                   if (gaveUp && !voiceDownAckedRef.current) {
                     voiceDownAckedRef.current = true
-                    ack('My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.')
+                    ack(t.voiceDownTemp)
                   }
                   // BACKOFF, not a tight loop (Aug 2 — 57 restarts in 24h came
                   // from this instant re-entry): the restart waits on the same
@@ -1247,6 +1307,9 @@ export default function ChatPanel({
           })
           if (micManualOffRef.current || micRef.current) {
             rv.stop()
+            // The Chirp mouth emits 'live' DURING start — if this stale session
+            // is rejected here, the dot it lit must not survive it.
+            if (!micRef.current) setListening(false)
             return
           }
           // THE SINGLE-VOICE RULE (Adrian, Jul 26: "there must never be
@@ -1331,22 +1394,39 @@ export default function ChatPanel({
             if (rvLiveRef.current === rv) rvLiveRef.current = null
             origStop()
           }
-          micBackoffRef.current = 1000
-          setListening(true)
+          // `listening` is NOT asserted here (audit Aug 2): the dot lights up
+          // on the proven 'live' state — see onState above.
           return
-        } catch {
-          // The Realtime start threw (no key / WebRTC blocked). We count the
-          // same way: 3 chances before latching onto STT — a transient start failure
-          // no longer extinguishes full-duplex for the whole session.
-          realtimeFailCountRef.current += 1
-          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) {
+        } catch (e) {
+          const err = e as Error & { code?: string; retryable?: boolean }
+          if (err?.code === 'need_login' || err?.code === 'need_credit') {
+            // NOT transient (audit Aug 2): retrying can't sign a session in or
+            // refill a wallet — before, a user out of credit burned the 3
+            // chances and then heard "temporarily unavailable… I will retry",
+            // a promise that could never come true. Latch STT now and tell the
+            // REAL reason. The 90s recovery stays armed on purpose: once he
+            // tops up (or signs in), the voice comes back by itself — exactly
+            // what the message promises.
             realtimeOffRef.current = true
             realtimeOffAtRef.current = Date.now()
-            // ONE honest status (Aug 2): both mouths failed — say it once,
-            // then dictation carries the conversation.
             if (!voiceDownAckedRef.current) {
               voiceDownAckedRef.current = true
-              ack('My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.')
+              ack(err.code === 'need_credit' ? t.voiceNeedCredit : t.voiceNeedLogin)
+            }
+          } else {
+            // The Realtime start threw (no key / WebRTC blocked). We count the
+            // same way: 3 chances before latching onto STT — a transient start failure
+            // no longer extinguishes full-duplex for the whole session.
+            realtimeFailCountRef.current += 1
+            if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) {
+              realtimeOffRef.current = true
+              realtimeOffAtRef.current = Date.now()
+              // ONE honest status (Aug 2): both mouths failed — say it once,
+              // then dictation carries the conversation.
+              if (!voiceDownAckedRef.current) {
+                voiceDownAckedRef.current = true
+                ack(t.voiceDownTemp)
+              }
             }
           }
         }
@@ -1896,7 +1976,7 @@ export default function ChatPanel({
           )
         ) : (lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
-            <span className="heard-band-label kelion-k" title="Kelion — dinspre creier">K</span>
+            <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>
             {busy ? (
               <span className="speech-tail">
                 <span className="speech-tail-text">
@@ -1925,12 +2005,14 @@ export default function ChatPanel({
           <div className="composer-atts">
             {attachments.map((a) => (
               <div className="att-chip" key={a.id}>
-                <img src={a.url} alt={a.name} />
+                {/* A converted document has url:'' — an <img src=""> rendered a
+                    BROKEN image icon for every attached PDF (audit Aug 2). */}
+                {a.url ? <img src={a.url} alt={a.name} /> : <span className="att-doc-name">📄 {a.name}</span>}
                 <button
                   type="button"
                   className="att-remove"
                   onClick={() => removeAttachment(a.id)}
-                  aria-label="Remove"
+                  aria-label={t.attRemove}
                 >
                   ×
                 </button>
@@ -2040,8 +2122,8 @@ export default function ChatPanel({
             type="button"
             className={`composer-mic ${listening ? 'live' : ''}`}
             onClick={toggleMic}
-            aria-label="Microfon"
-            title={listening ? 'Oprește microfonul' : 'Vorbește (microfon)'}
+            aria-label={listening ? t.micStop : t.micTalk}
+            title={listening ? t.micStop : t.micTalk}
           >
             {listening ? '●' : '🎤'}
           </button>
@@ -2059,8 +2141,8 @@ export default function ChatPanel({
               setVoiceVolState(v)
               setVoiceVolume(v)
             }}
-            aria-label="Volumul vocii lui Kelion"
-            title={`Volum voce: ${Math.round(voiceVol * 100)}%`}
+            aria-label={t.voiceVolume}
+            title={`${t.voiceVolume}: ${Math.round(voiceVol * 100)}%`}
           />
           <button
             type="button"
@@ -2072,16 +2154,14 @@ export default function ChatPanel({
               void send(input)
             }}
             // Active while you have something TYPED to send. Empty field (audio chat) → it stays
-            // a neutral arrow, disabled — not a dead stop-square. A text sent
-            // while Kelion is answering does NOT interrupt the turn: it gets queued
-            // (send() stacks it) and leaves as soon as the turn ends.
+            // a neutral arrow, disabled — not a dead stop-square.
+            // TRUTHFUL TOOLTIP (audit Aug 2): since the Jul 13 barge-in rewrite
+            // a text sent mid-turn INTERRUPTS (send() cancels the running turn
+            // and starts the new one) — the old "queued, doesn't interrupt"
+            // tooltip described a design that no longer exists.
             disabled={!hasDraft}
-            aria-label={queueing ? 'Pune în coadă' : t.send}
-            title={
-              queueing
-                ? 'Se procesează — mesajul tău se pune în coadă, nu întrerupe'
-                : t.send
-            }
+            aria-label={queueing ? t.sendInterrupts : t.send}
+            title={queueing ? t.sendInterrupts : t.send}
           >
             {queueing ? '■' : '↑'}
           </button>

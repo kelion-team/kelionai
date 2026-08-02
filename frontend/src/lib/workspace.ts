@@ -135,7 +135,7 @@ const EXT_KIND: Record<string, string> = {
   epub: 'file', exe: 'file', msi: 'file', apk: 'file', ipa: 'file', dmg: 'file', iso: 'file', bin: 'file', woff: 'file', woff2: 'file', ttf: 'file', otf: 'file',
 }
 
-export function kindForUrl(raw: string): string {
+function kindForUrl(raw: string): string {
   const s = String(raw ?? '').trim()
   // data: URI → we classify by the MIME in the header itself.
   if (s.startsWith('data:')) {

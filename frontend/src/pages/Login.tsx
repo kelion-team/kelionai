@@ -95,7 +95,7 @@ export default function Login(): React.JSX.Element {
           <input className="login-input" placeholder={T.yourName} value={name} onChange={(e) => setName(e.target.value)} />
         )}
         {mode !== 'reset' && (
-          <input className="login-input" type="email" placeholder="email@exemplu.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          <input className="login-input" type="email" placeholder={T.emailPlaceholder} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
         )}
         {(mode === 'login' || mode === 'register' || mode === 'reset') && (
           <input

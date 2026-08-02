@@ -8,17 +8,19 @@
 // A single component for all pages (the permanent principle: unique, no
 // duplicates). It goes back EXACTLY where you came from if this tab has
 // history; otherwise it falls back to the start page, so it never leads nowhere.
+// The label follows the UI language (audit Aug 2: it was a hardcoded English
+// 'Back' on every screen; the dead `label` prop that nobody ever passed is gone).
 import React from 'react'
+import { uiStrings } from '../lib/i18n'
 
 export default function BackLink({
-  label = 'Back',
   onBack,
 }: {
-  label?: string
   /** Panels are not pages: "back" means close-me and leave-me where I was.
    *  When given, it decides; otherwise we go back into the page history. */
   onBack?: () => void
 }): React.JSX.Element {
+  const label = uiStrings().back
   const inapoi = (): void => {
     if (onBack) return onBack()
     // history.length > 1 = we got here from another page in this tab.

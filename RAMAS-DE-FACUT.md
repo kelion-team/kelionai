@@ -111,6 +111,25 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 
 ---
 
+## I. GĂSITE DE AUDITUL FRONTEND DIN 2 AUG (cele „roșii" din Kimi) — ce s-a reparat și ce a rămas
+
+> Cele două audituri picate în Kimi (HC-front 1: chat/voce UI; HC-front 6: cod
+> mort + i18n) au fost rulate cap-coadă și reparate în **PR #653** (828 teste,
+> tsc + build verzi; **nu pot verifica live** până la merge + publicare).
+> Rândurile de mai jos sunt CE A RĂMAS, cu dovada din audit lângă fiecare.
+
+| # | Ce | Dovada | Stare |
+|---|---|---|---|
+| I1 | **AdminPanel: ~120 de linii cu literale românești în afara `adminText.ts`** (`setBuildMsg('Scrie ordinul complet…')`, `window.confirm('Restaurezi aplicația…')`, `window.alert('Email trimis.')` etc.) + 5 literale engleze pe lângă chei existente (`Loading…` dublează `A.loading`) | auditul din 2 aug, lista de linii în istoricul sesiunii; C1 din 30 iul numărase 54 de texte, dar panoul a crescut mult între timp | **deschis** — C1 rămâne închis pe suprafața USER (regresiunile din Stage/ChatPanel s-au reparat în #653), dar pe admin e parțial redeschis |
+| I2 | **Dicționare paralele în afara `i18n.ts`**: WalletButton (~16 ternare `ro ? … : …` — es/fr/de/it/pt primesc tăcut engleză), CustomerSettings (`const RO/EN` propriu, 18 chei × 2 limbi), ContactModal (`const T` propriu, 22 chei × 7 limbi) | audit 2 aug; verificat în cod | **deschis** — funcțional (engleza e fallback-ul legal al regulii C1), dar 3 sisteme de traducere paralele = 3 locuri de întreținut |
+| I3 | **Traducerile es/fr/de/it/pt pentru cheile noi din #653** (~60 chei: promo, voce onestă, constructor, unlock, monitor) | `i18n.ts` — cheile au EN+RO complete; restul limbilor cad curat pe engleză (mecanismul din 30 iul) | **deschis**, cosmetic |
+| I4 | **Dubluri de politică client-server, documentate, nereparate**: pragurile VPS din bară (`liberPct <= 10 || incarcarePct >= 200`) dublate față de sentinelă; vocabularul gesturilor (`GESTURE_TO_CLIP`, 18 intrări) și lista de limbi (`languages.ts`, 27 coduri) dublate în browser; rotirea la 55 min vs limita 60 a OpenAI; watchdog-ul de stream 50s vs heartbeat 15s | audit 2 aug, TIER B | **deschis** — toate au rațiuni comentate în cod; reparația reală = server ca sursă unică, de făcut punctual |
+| I5 | **Landing.tsx: engleza hardcodată în componentă, nu în `publicText.ts`** (lead-form, QR, Install, Contact) | audit 2 aug | **deschis**, cosmetic — engleza pe suprafața publică e regula; lipsește doar sursa unică |
+| I6 | ~~Promisiunea falsă „încearcă gratis” pe landing (7 limbi) + „3 minute gratuit” în meta/JSON-LD~~ | proba gratuită nu există (decizia lui Adrian, comentată în Landing.tsx) | ✅ **tăiat cu PR #653** (2 aug) — text onest în toate limbile |
+| I7 | ~~Fișierul „raw” al adminului: cip afișat, transmisie zero~~ + ~~conversia picată = atașament dispărut mut~~ + ~~402 la voce = „temporar” cu promisiune falsă~~ + ~~fraza pierdută la ASR = tăcere cu punct roșu aprins~~ | audit 2 aug TIER A, verificate pe cod | ✅ **tăiate cu PR #653**; dovada live rămâne a lui Adrian după publicare |
+
+---
+
 ## Reguli pentru lista asta
 
 - Un rând se taie **doar cu dovadă**: PR + verificare pe live.

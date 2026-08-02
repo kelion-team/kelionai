@@ -17,6 +17,9 @@ const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
 const bara = sursa('../../frontend/src/pages/Stage.tsx')
+// The honest wording moved into adminText.ts (i18n audit, Aug 2): the bar
+// reads adminStrings() so the admin surface follows the UI language.
+const texte = sursa('../../frontend/src/lib/adminText.ts')
 const ruta = sursa('./routes/admin.ts')
 
 describe('pilula de Serper există și e alimentată', () => {
@@ -45,11 +48,13 @@ describe('pilula de Serper există și e alimentată', () => {
 describe('lipsa se arată ca lipsă, nu ca zero', () => {
   it('citirea eșuată dă „Serper ⚠", nu cifre', () => {
     expect(bara).toContain("'Serper ⚠'")
-    expect(bara).toMatch(/Nu pot citi creditul Serper/)
+    // Textul onest vine acum din adminText (EN bază + RO), nu dintr-un literal.
+    expect(bara).toContain('adminStrings().serperPillDead')
+    expect(texte).toMatch(/Nu pot citi creditul Serper/)
   })
 
   it('tooltip-ul poartă cifra EXACTĂ, cu separator de mii', () => {
-    expect(bara).toMatch(/credite reale · click pentru dashboard/)
-    expect(bara).toContain("toLocaleString('ro-RO')")
+    expect(texte).toMatch(/credite reale · click pentru dashboard/)
+    expect(bara).toMatch(/serperPillLive\.replace\('\{n\}', \(brainCredit\.serper\.balance \?\? 0\)\.toLocaleString\(\)\)/)
   })
 })

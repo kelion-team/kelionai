@@ -17,16 +17,6 @@ export interface WalletStatus {
   autoTopUp?: { code: string; amount: number; currency: string; url: string } | null
 }
 
-export interface PurchaseRecord {
-  id: number
-  user_id: string
-  amount: number
-  credits: number
-  status: string
-  payment_ref: string | null
-  created_at: string
-}
-
 export async function fetchBalance(): Promise<WalletStatus | null> {
   try {
     const r = await fetch('/api/billing/balance', { credentials: 'include' })
@@ -66,14 +56,6 @@ export async function startCheckout(amount: number): Promise<string | null> {
 
 // HERE STOOD `createPaymentIntent` — the second payment path, on Stripe.js.
 // Nothing in the interface called it, and the back-end route was removed along with Stripe.
-
-// ORDIN #6G: user purchase history from the transactions table.
-export async function fetchHistory(): Promise<{ history: PurchaseRecord[] } | null> {
-  try {
-    const r = await fetch('/api/billing/history', { credentials: 'include' })
-    if (!r.ok) return null
-    return (await r.json()) as { history: PurchaseRecord[] }
-  } catch {
-    return null
-  }
-}
+// HERE STOOD `fetchHistory` + `PurchaseRecord` too (dead-code audit, Aug 2):
+// zero callers anywhere — AdminPanel uses the DIFFERENT fetchHistory from
+// lib/admin.ts. This was the sole caller of /api/billing/history.

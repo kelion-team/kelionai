@@ -14,6 +14,7 @@ import type { User } from '../lib/api'
 import { usePolledJson } from '../lib/usePolledJson'
 import { logout, startGoogleConnect } from '../lib/api'
 import { resolveLang, strings, uiStrings } from '../lib/i18n'
+import { adminStrings } from '../lib/adminText'
 import {
   getWorkspace,
   subscribeWorkspace,
@@ -107,7 +108,7 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
   return (
     <div className="workspace-doc">
       <pre className="doc-text" style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: `${0.92 * zoom}em` }}>
-        {text ?? 'Se încarcă…'}
+        {text ?? uiStrings().buildLoading}
       </pre>
     </div>
   )
@@ -151,7 +152,7 @@ function MonitorMarkdown({ url, zoom, taskId }: { url: string; zoom: number; tas
   return (
     <div className="workspace-doc">
       {html === null ? (
-        <pre className="doc-text">Se încarcă…</pre>
+        <pre className="doc-text">{uiStrings().buildLoading}</pre>
       ) : (
         // eslint-disable-next-line react/no-danger -- renderMarkdown escapes the source first
         <div className="doc-text md-view" style={{ fontSize: `${zoom}em` }} dangerouslySetInnerHTML={{ __html: html }} />
@@ -198,7 +199,7 @@ function MonitorHtmlFile({ url, taskId }: { url: string; taskId: string }) {
   if (doc === null)
     return (
       <div className="workspace-doc">
-        <pre className="doc-text">Se încarcă…</pre>
+        <pre className="doc-text">{uiStrings().buildLoading}</pre>
       </div>
     )
   return (
@@ -299,7 +300,18 @@ interface BuildLiveJob {
   attempts: number
   updatedAt?: string
 }
-const BUILD_LABEL: Record<string, string> = { queued: 'În coadă', running: 'Lucrează', done: 'Gata', failed: 'Eșuat' }
+// The status labels come from i18n (audit Aug 2 — they were Romanian for
+// every user); built as a function so the CURRENT language is read per render.
+const buildLabel = (status: string): string => {
+  const t = uiStrings()
+  const map: Record<string, string> = {
+    queued: t.buildQueued,
+    running: t.buildRunning,
+    done: t.buildDone,
+    failed: t.buildFailed,
+  }
+  return map[status] ?? status
+}
 function BuildSurface({ zoom }: { zoom: number }) {
   const [jobs, setJobs] = useState<BuildLiveJob[]>([])
   const [note, setNote] = useState('')
@@ -312,10 +324,10 @@ function BuildSurface({ zoom }: { zoom: number }) {
         const r = await fetch('/api/constructor/live', { credentials: 'include' })
         if (!alive) return
         if (r.status === 403) {
-          setNote('Doar adminul vede constructorul.')
+          setNote(uiStrings().buildOnlyAdmin)
           setJobs([])
         } else if (!r.ok) {
-          setNote('Constructor indisponibil momentan.')
+          setNote(uiStrings().buildUnavailable)
         } else {
           const j = (await r.json()) as { jobs?: BuildLiveJob[] }
           if (!alive) return
@@ -325,7 +337,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
         setLoaded(true)
       } catch {
         if (alive) {
-          setNote('Fără legătură cu serverul.')
+          setNote(uiStrings().buildNoServer)
           setLoaded(true)
         }
       } finally {
@@ -340,7 +352,7 @@ function BuildSurface({ zoom }: { zoom: number }) {
   }, [])
   return (
     <div className="workspace-doc build-surface" style={{ fontSize: `${zoom}em` }}>
-      <div className="build-head">Constructorul lui Kelion</div>
+      <div className="build-head">{uiStrings().buildHead}</div>
       {!loaded ? (
         <p className="build-empty">{uiStrings().buildLoading}</p>
       ) : note ? (
@@ -359,13 +371,13 @@ function BuildSurface({ zoom }: { zoom: number }) {
                 {j.progress?.startsWith('⏳') ? (
                   <span className="build-badge build-badge-queued">{uiStrings().buildThrottled}</span>
                 ) : (
-                  <span className={`build-badge build-badge-${j.status}`}>{BUILD_LABEL[j.status] ?? j.status}</span>
+                  <span className={`build-badge build-badge-${j.status}`}>{buildLabel(j.status)}</span>
                 )}
                 {/* The INDEPENDENT verification's verdict (Stage 6): „Gata” proven by CI. */}
                 {j.ci === 'verde' ? (
                   <span className="build-ci build-ci-ok" title={uiStrings().buildCiOk}>CI ✓</span>
                 ) : j.ci === 'roșu' ? (
-                  <span className="build-ci build-ci-bad" title="CI a picat pe PR">CI ✗</span>
+                  <span className="build-ci build-ci-bad" title={uiStrings().buildCiFailed}>CI ✗</span>
                 ) : j.ci === 'în curs' ? (
                   <span className="build-ci build-ci-wait" title={uiStrings().buildCiRunning}>CI…</span>
                 ) : null}
@@ -381,9 +393,9 @@ function BuildSurface({ zoom }: { zoom: number }) {
               ) : null}
               {(j.attempts > 1 || j.prUrl) && (
                 <div className="build-meta">
-                  {j.attempts > 1 && <span>încercarea {j.attempts}</span>}
+                  {j.attempts > 1 && <span>{uiStrings().buildAttempt.replace('{n}', String(j.attempts))}</span>}
                   {j.prUrl && (
-                    <a href={j.prUrl} target="_blank" rel="noreferrer" className="build-pr">Vezi PR ↗</a>
+                    <a href={j.prUrl} target="_blank" rel="noreferrer" className="build-pr">{uiStrings().buildSeePr}</a>
                   )}
                 </div>
               )}
@@ -559,9 +571,9 @@ export default function Stage({ user }: { user: User }) {
           setAdminLock((s) => (s ? { ...s, unlocked: true } : { armed: true, unlocked: true }))
           setUnlockOpen(false)
           setAdminOpen(true)
-        } else setUnlockErr(r.status === 401 ? 'Cod greșit — mai încearcă.' : 'Eroare — reîncearcă.')
+        } else setUnlockErr(r.status === 401 ? uiStrings().unlockWrongCode : uiStrings().unlockRetryError)
       })
-      .catch(() => setUnlockErr('Eroare de rețea — reîncearcă.'))
+      .catch(() => setUnlockErr(uiStrings().unlockNetError))
   }
   // Polling from the shared source (lib/usePolledJson) — the `alive` guard and the
   // interval stop are guaranteed there, once only.
@@ -618,9 +630,9 @@ export default function Stage({ user }: { user: User }) {
   // user (Jul 11 evening: "save Kelion's current size") —
   // localStorage stays only the mirror for first paint, the source of truth
   // is /api/prefs, so the arrangement survives any browser cleanup.
-  // Manual arrangement is DISABLED (Adrian, Jul 24) — only the visual state
-  // remains (always false); the position comes from the server.
-  const avatarEdit = false
+  // Manual arrangement is DISABLED (Adrian, Jul 24); the position comes from
+  // the server. (The `avatarEdit=false` flag + its 'editing' CSS class were
+  // dead weight since then — removed in the Aug 2 dead-code audit.)
   const [avatarBox, setAvatarBox] = useState<{ x: number; y: number; s: number }>({ x: 58, y: 58, s: 0.42 })
   // Fix hydration: localStorage is client-only; read it after hydration.
   useEffect(() => {
@@ -898,7 +910,7 @@ export default function Stage({ user }: { user: User }) {
                   onClick={closeAllTasks}
                   title={t.wsCloseAll}
                 >
-                  Închide tot
+                  {t.wsCloseAll}
                 </button>
               )}
             </div>
@@ -927,7 +939,7 @@ export default function Stage({ user }: { user: User }) {
                       onClick={() => saveDocToKelion(task.title, task.html ?? '', safeFileName(task.title, 'html'), 'text/html')}
                       title={t.wsSaveHtml}
                     >
-                      {docSaved ? 'Salvat ✓' : 'Salvează'}
+                      {docSaved ? t.wsSaved : t.wsSave}
                     </button>
                     <iframe
                       title={task.title}
@@ -944,7 +956,7 @@ export default function Stage({ user }: { user: User }) {
                       onClick={() => void navigator.clipboard?.writeText(task.text ?? '')}
                       title={t.wsCopy}
                     >
-                      Copiază
+                      {t.wsCopy}
                     </button>
                     <button
                       type="button"
@@ -953,7 +965,7 @@ export default function Stage({ user }: { user: User }) {
                       onClick={() => saveDocToKelion(task.title, task.text ?? '', safeFileName(task.title, 'txt'), 'text/plain')}
                       title={t.wsSaveTxt}
                     >
-                      {docSaved ? 'Salvat ✓' : 'Salvează'}
+                      {docSaved ? t.wsSaved : t.wsSave}
                     </button>
                     <pre className="doc-text" style={{ fontSize: `${monZoom}em` }}>{task.text}</pre>
                   </div>
@@ -991,7 +1003,7 @@ export default function Stage({ user }: { user: User }) {
                   // Archives: the browser can't open them in page — we offer
                   // the download, honestly (a zip's content doesn't render natively).
                   <div className="workspace-blocked">
-                    <p>Arhivă ({task.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
+                    <p>{t.wsArchiveNote.replace('{name}', task.title)}</p>
                     <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
                   </div>
                 ) : task.url && task.kind === 'file' ? (
@@ -1025,7 +1037,7 @@ export default function Stage({ user }: { user: User }) {
                     <p>{t.wsPageBlocked}</p>
                     {/^https?:\/\//i.test(task.url) && (
                       <a href={task.url} target="_blank" rel="noreferrer" className="composer-send">
-                        Deschide într-un tab nou ↗
+                        {t.wsOpenTab}
                       </a>
                     )}
                   </div>
@@ -1044,7 +1056,7 @@ export default function Stage({ user }: { user: User }) {
       localStorage mirror. */}
       <div
         ref={stageRef}
-        className={`stage-canvas ${monitorOn ? 'pip' : ''} ${avatarEdit ? 'editing' : ''}`}
+        className={`stage-canvas ${monitorOn ? 'pip' : ''}`}
         style={
           monitorOn
             ? {
@@ -1104,9 +1116,9 @@ export default function Stage({ user }: { user: User }) {
             title={
               user.role === 'customer'
                 ? userCreditOut
-                  ? 'Credit epuizat — reîncarcă pentru a continua'
+                  ? uiStrings().creditOut
                   : userCreditOut === false
-                    ? 'Ai credit'
+                    ? uiStrings().creditOk
                     : ''
                 : ''
             }
@@ -1130,8 +1142,10 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
                 title={
                   brainCredit.openrouter.live
-                    ? `OpenRouter (creierul central): $${(brainCredit.openrouter.balance ?? 0).toFixed(2)} real${brainCredit.openrouter.low ? ' — depune bani!' : ''} · click pentru alimentare`
-                    : 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)'
+                    ? adminStrings()
+                        .orPillLive.replace('{n}', (brainCredit.openrouter.balance ?? 0).toFixed(2))
+                        .replace('{low}', brainCredit.openrouter.low ? adminStrings().orPillLow : '')
+                    : adminStrings().orPillDead
                 }
               >
                 {brainCredit.openrouter.live
@@ -1151,8 +1165,8 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => window.open('https://platform.openai.com/usage', '_blank', 'noopener')}
                 title={
                   brainCredit.openai?.live
-                    ? `OpenAI (vocea): $${(brainCredit.openai.monthUsd ?? 0).toFixed(2)} cheltuiți luna asta — măsurat din API-ul OpenAI · click pentru detalii`
-                    : 'Nu pot citi cheltuiala OpenAI (OPENAI_USAGE_KEY lipsește sau citirea a picat)'
+                    ? adminStrings().oaPillLive.replace('{n}', (brainCredit.openai.monthUsd ?? 0).toFixed(2))
+                    : adminStrings().oaPillDead
                 }
               >
                 {brainCredit.openai?.live
@@ -1173,8 +1187,8 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => window.open('https://serper.dev/dashboard', '_blank', 'noopener')}
                 title={
                   brainCredit.serper?.live
-                    ? `Serper (căutarea web): ${(brainCredit.serper.balance ?? 0).toLocaleString('ro-RO')} credite reale · click pentru dashboard`
-                    : 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)'
+                    ? adminStrings().serperPillLive.replace('{n}', (brainCredit.serper.balance ?? 0).toLocaleString())
+                    : adminStrings().serperPillDead
                 }
               >
                 {brainCredit.serper?.live
@@ -1200,10 +1214,13 @@ export default function Stage({ user }: { user: User }) {
                 onClick={() => openAdmin()}
                 title={
                   brainCredit.vps
-                    ? `VPS: ${brainCredit.vps.liberGb.toFixed(1)} GB liberi din ${brainCredit.vps.totalGb.toFixed(1)} GB` +
-                      ` · încărcare ${brainCredit.vps.incarcarePct}% din ${brainCredit.vps.procesoare} procesoare` +
-                      ` (${brainCredit.vps.incarcare.map((n) => n.toFixed(2)).join(' / ')} la 1/5/15 min)`
-                    : 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)'
+                    ? adminStrings()
+                        .vpsPillLive.replace('{free}', brainCredit.vps.liberGb.toFixed(1))
+                        .replace('{total}', brainCredit.vps.totalGb.toFixed(1))
+                        .replace('{load}', String(brainCredit.vps.incarcarePct))
+                        .replace('{cpus}', String(brainCredit.vps.procesoare))
+                        .replace('{avg}', brainCredit.vps.incarcare.map((n) => n.toFixed(2)).join(' / '))
+                    : adminStrings().vpsPillDead
                 }
               >
                 {brainCredit.vps
@@ -1231,7 +1248,6 @@ export default function Stage({ user }: { user: User }) {
             onOpenSettings={() => setSettingsOpen(true)}
             googleConnected={user.googleConnected}
             onConnectGoogle={startGoogleConnect}
-            isAdmin={false}
           />
         )}
         {/* „Add credits" for regular users (Adrian's order — the exact label,
@@ -1261,7 +1277,7 @@ export default function Stage({ user }: { user: User }) {
                 setRecArmed(false)
                 void toggleRecording()
               }}
-              title={recording ? 'Stop recording' : 'Record a promo clip'}
+              title={recording ? t.recStopTitle : t.recStartTitle}
             >
               {recording ? '■ Rec' : '● Rec'}
             </button>
@@ -1271,11 +1287,7 @@ export default function Stage({ user }: { user: User }) {
               type="button"
               className="ghost"
               onClick={() => openAdmin()}
-              title={
-                adminLock?.armed && !adminLock.unlocked
-                  ? 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul'
-                  : undefined
-              }
+              title={adminLock?.armed && !adminLock.unlocked ? t.lockedTitle : undefined}
             >
               {adminLock?.armed && !adminLock.unlocked ? '🔒 Admin' : 'Admin'}
             </button>
@@ -1285,9 +1297,9 @@ export default function Stage({ user }: { user: User }) {
               type="button"
               className="ghost"
               onClick={startGoogleConnect}
-              title="Grant Gmail, Calendar & Drive access so Kelion can act on them"
+              title={t.connectGoogleTitle}
             >
-              Connect Google
+              {t.connectGoogle}
             </button>
           )}
           <button
@@ -1300,7 +1312,7 @@ export default function Stage({ user }: { user: User }) {
             {theme === 'light' ? '☾' : '☀'}
           </button>
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
-            Contact
+            {t.contactLabel}
           </button>
           <button type="button" className="ghost" onClick={() => void logout()}>
             {t.signOut}
@@ -1326,7 +1338,7 @@ export default function Stage({ user }: { user: User }) {
                 autoFocus
                 value={unlockCode}
                 onChange={(e) => setUnlockCode(e.target.value)}
-                placeholder="Secretul de activare"
+                placeholder={t.unlockPlaceholder}
                 autoComplete="current-password"
               />
               <button type="submit">{t.adminUnlock}</button>

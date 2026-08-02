@@ -36,7 +36,6 @@ export interface AdminStrings {
   // Common states
   loading: string
   noSpendYet: string
-  noTransactionsYet: string
   noContactsYet: string
   noVisitorsYet: string
   noConversationsYet: string
@@ -46,12 +45,17 @@ export interface AdminStrings {
   noMessagesYet: string
   noContactMessagesYet: string
   noLettersYet: string
-  // Bani
-  setManual: string
-  activate: string
-  andRunWorkflow: string
-  once: string
-  transactionsHead: string
+  // Pastilele din bara de sus (Stage.tsx, doar admin) — audit Aug 2: titlurile
+  // erau scrise direct în cod, în română. `{n}` etc. = valorile măsurate.
+  orPillLive: string
+  orPillLow: string
+  orPillDead: string
+  oaPillLive: string
+  oaPillDead: string
+  serperPillLive: string
+  serperPillDead: string
+  vpsPillLive: string
+  vpsPillDead: string
   // Magazine
   checkingStores: string
   notListedYet: string
@@ -107,7 +111,6 @@ const en: AdminStrings = {
   tabRecovery: 'Recovery',
   loading: 'Loading…',
   noSpendYet: 'No spend yet.',
-  noTransactionsYet: 'No transactions yet.',
   noContactsYet: 'No contacts yet.',
   noVisitorsYet: 'No visitors yet.',
   noConversationsYet: 'No conversations yet.',
@@ -117,11 +120,15 @@ const en: AdminStrings = {
   noMessagesYet: 'They have not written a message yet.',
   noContactMessagesYet: 'No contact message yet.',
   noLettersYet: 'No letters yet (or MAIL_PASS is not set).',
-  setManual: 'Set to Manual',
-  activate: 'Activate',
-  andRunWorkflow: ' and run the workflow ',
-  once: ' (once)',
-  transactionsHead: 'History — top-ups via Revolut transfer (unique code per payment)',
+  orPillLive: 'OpenRouter (the central brain): ${n} real{low} · click to top up',
+  orPillLow: ' — deposit money!',
+  orPillDead: 'Cannot read the OpenRouter balance (key missing or account unreachable)',
+  oaPillLive: 'OpenAI (the voice): ${n} spent this month — measured from OpenAI’s API · click for details',
+  oaPillDead: 'Cannot read the OpenAI spend (OPENAI_USAGE_KEY missing or the read failed)',
+  serperPillLive: 'Serper (web search): {n} real credits · click for the dashboard',
+  serperPillDead: 'Cannot read the Serper credit (SERPER_API_KEY missing or the read failed)',
+  vpsPillLive: 'VPS: {free} GB free of {total} GB · load {load}% of {cpus} processors ({avg} at 1/5/15 min)',
+  vpsPillDead: 'Cannot measure the VPS resources (/proc is not answering)',
   checkingStores: 'Checking the stores live…',
   notListedYet: '○ not listed yet',
   downloadsHead: 'Who downloaded (last 100)',
@@ -167,7 +174,6 @@ const ro: AdminStrings = {
   tabRecovery: 'Recuperare',
   loading: 'Se încarcă…',
   noSpendYet: 'Niciun consum încă.',
-  noTransactionsYet: 'Nicio tranzacție încă.',
   noContactsYet: 'Niciun contact încă.',
   noVisitorsYet: 'Niciun vizitator încă.',
   noConversationsYet: 'Nicio conversație încă.',
@@ -177,11 +183,15 @@ const ro: AdminStrings = {
   noMessagesYet: 'Nu a scris niciun mesaj încă.',
   noContactMessagesYet: 'Niciun mesaj de contact încă.',
   noLettersYet: 'Nicio scrisoare încă (sau MAIL_PASS nesetat).',
-  setManual: 'Setează Manual',
-  activate: 'Activează',
-  andRunWorkflow: ' și rulează workflow-ul ',
-  once: ' (o dată)',
-  transactionsHead: 'Istoric — alimentări prin transfer Revolut (cod unic la fiecare plată)',
+  orPillLive: 'OpenRouter (creierul central): ${n} real{low} · click pentru alimentare',
+  orPillLow: ' — depune bani!',
+  orPillDead: 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)',
+  oaPillLive: 'OpenAI (vocea): ${n} cheltuiți luna asta — măsurat din API-ul OpenAI · click pentru detalii',
+  oaPillDead: 'Nu pot citi cheltuiala OpenAI (OPENAI_USAGE_KEY lipsește sau citirea a picat)',
+  serperPillLive: 'Serper (căutarea web): {n} credite reale · click pentru dashboard',
+  serperPillDead: 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)',
+  vpsPillLive: 'VPS: {free} GB liberi din {total} GB · încărcare {load}% din {cpus} procesoare ({avg} la 1/5/15 min)',
+  vpsPillDead: 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)',
   checkingStores: 'Se verifică magazinele live…',
   notListedYet: '○ nelistat încă',
   downloadsHead: 'Cine a descărcat (ultimele 100)',

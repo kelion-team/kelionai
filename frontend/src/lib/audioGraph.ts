@@ -16,18 +16,20 @@
 // voice path is verified LIVE, with real voice — not just typecheck.
 
 /** Why the microphone didn't start. `not-allowed` = permission refusal (does NOT
- *  retries by itself); `failed` = transient failure (device busy, headset
- *  unplugged — worth retrying); `unsupported` = the browser lacks the API. */
-export type MicError = 'not-allowed' | 'failed' | 'unsupported'
+ *  retry by itself); `no-device` = no microphone exists on the machine (audit
+ *  Aug 2 — a different truth than a failure); `failed` = transient failure
+ *  (device busy, headset unplugged — worth retrying); `unsupported` = the
+ *  browser lacks the API. */
+export type MicError = 'not-allowed' | 'no-device' | 'failed' | 'unsupported'
 
 /** The microphone constraints — IDENTICAL for voice and dictation (if they
  *  change, they change for both, which is exactly the point). */
-export const MIC_CONSTRAINTS: MediaStreamConstraints = {
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
   audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 }
 
 /** Constructorul de AudioContext, cu prefixul vechi webkit (Safari). */
-export function getAudioContextCtor(): typeof AudioContext | null {
+function getAudioContextCtor(): typeof AudioContext | null {
   return (
     globalThis.AudioContext ??
     (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
@@ -55,8 +57,16 @@ export async function openMicGraph(
     } catch (e) {
       // Permission refusal ≠ transient failure: a refusal doesn't retry by
       // itself, a transient failure (device busy, headset unplugged) does.
+      // NO MICROPHONE AT ALL is a third truth (audit Aug 2): the panel can
+      // now say "no microphone found" instead of a generic failure.
       const name = (e as { name?: string })?.name
-      onError(name === 'NotAllowedError' || name === 'SecurityError' ? 'not-allowed' : 'failed')
+      onError(
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'not-allowed'
+          : name === 'NotFoundError' || name === 'DevicesNotFoundError'
+            ? 'no-device'
+            : 'failed',
+      )
       return null
     }
   }

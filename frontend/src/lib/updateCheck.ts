@@ -20,7 +20,7 @@ declare const __BUILD_DATE__: string
 // Landing.tsx. The `deploy … UTC` part comes from /api/version, so it changes
 // AUTOMATICALLY on every publish — just like the installed apps (the same web
 // noile date singure.
-export function deployStamp(srv: ServerVersion | null): string {
+function deployStamp(srv: ServerVersion | null): string {
   if (!srv?.at) return ''
   // LONDON TIME EVERYWHERE IN PRODUCTION (Adrian, Jul 11): every system stamp
   // (the version under the QR, the watermark) shows London time, with automatic
