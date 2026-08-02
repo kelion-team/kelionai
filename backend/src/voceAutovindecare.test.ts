@@ -91,10 +91,18 @@ describe('proba gurii: 401 NU e un verdict — se re-sondează la următorul sta
   })
 })
 
-describe('modul gură-Chirp: /api/realtime/tick NU mai pulsează', () => {
-  it('pulsul de facturare pe minut există DOAR pentru rezerva OpenAI', () => {
-    expect(panou).toMatch(/rv\.guraChirp === true \? null : window\.setInterval/)
-    expect(panou).toMatch(/if \(voiceTick !== null\) clearInterval\(voiceTick\)/)
+describe('contorul de voce pulsează în ORICE mod (prețul produsului, nu al furnizorului)', () => {
+  it('pulsul pe minut nu mai e oprit de modul gură-Chirp', () => {
+    // Aug 2: oprit în mod Chirp, pulsul făcea vocea GRATIS pentru toți userii —
+    // modelul ownerului e invers: userii plătesc credite, furnizorii sunt free.
+    expect(panou).not.toMatch(/rv\.guraChirp === true \? null : window\.setInterval/)
+    expect(panou).toMatch(/const voiceTick = window\.setInterval/)
+  })
+  it('OWNERUL nu se debitaeză singur (realtime.ts: isOwner → fără debit, charged 0)', () => {
+    const rt = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
+    expect(rt).toMatch(/const isOwner = user\.email\.toLowerCase\(\) === config\.adminEmail/)
+    expect(rt).toMatch(/if \(!isOwner\) void debitWallet/)
+    expect(rt).toMatch(/charged: isOwner \? 0 : cost/)
   })
 })
 
