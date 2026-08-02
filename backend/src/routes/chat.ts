@@ -52,6 +52,7 @@ import {
   REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { needsToolForAnswer, autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
@@ -772,6 +773,17 @@ export function areCevaDeVazut(chunk: string): boolean {
   const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
   if (chunk.replace(cadru, '').trim() !== '') return true
   for (const f of chunk.match(cadru) ?? []) if (!CADRE_PROTOCOL.test(f)) return true
+  return false
+}
+
+// A SURFACE FRAME (Adrian, Aug 2 — "TOT pe monitor"): {monitor} with a real
+// url, {doc}, {app}, {card} or {build} — what the end-of-turn auto-preview
+// checks so it never duplicates a visual the tools already pushed. The empty
+// {monitor:{url:''}} frame is a screen CLEAR, not a surface.
+const CADRU_SUPRAFATA = /"(doc|app|card|build)"\s*:|"monitor"\s*:\s*\{[^{]*"url"\s*:\s*"[^"]/
+export function eCadruDeSuprafata(chunk: string): boolean {
+  const cadru = new RegExp(`${CTRL}[^${CTRL}]*${CTRL}`, 'g')
+  for (const f of chunk.match(cadru) ?? []) if (CADRU_SUPRAFATA.test(f)) return true
   return false
 }
 
@@ -1746,10 +1758,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // sees ALL writes (text, tools, agents, voice) without touching every call
     // site.
     let sawVisible = false
+    // A SURFACE ON THE MONITOR this turn (Adrian, Aug 2 — "TOT pe monitor"): the
+    // auto-preview post-step at the end of the turn must never duplicate what a
+    // tool already pushed. The interceptor sees every write, so it is the one
+    // place that knows for sure. Surface frames: {monitor} (with a NON-empty
+    // url — the empty one is a screen CLEAR), {doc}, {app}, {card}, {build}.
+    let surfaceShown = false
     reply.raw.write = ((chunk: unknown, ...rest: unknown[]) => {
       lastByteAt = Date.now()
       if (typeof chunk === 'string' && chunk.length > 0) {
         if (!sawVisible) sawVisible = areCevaDeVazut(chunk)
+        if (!surfaceShown) surfaceShown = eCadruDeSuprafata(chunk)
         const sse = appendTurn(user.email, turnId, chunk)
         return (rawWrite as (...a: unknown[]) => boolean)(sse, ...rest)
       }
@@ -2192,7 +2211,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // marked sick (failure memory) so the NEXT user doesn't pay its seconds
       // again. If nobody wins, the classic sequential path below takes over
       // (with tools, the reserve and the queue).
-      if (!heavyTurn && !turnHasImage) {
+      // TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — his weather question at 10:04
+      // showed ONLY the avatar): the race offers NO tools, so a turn that
+      // needs live data (weather/map/video/search/a pasted URL) answered from
+      // stale model memory AND the monitor could never light up — get_weather
+      // was never callable, no screen_url, no {monitor} frame. Those turns now
+      // SKIP the race and take the sequential path WITH tools below. Chit-chat
+      // keeps the race's speed; questions keep the truth and the visual.
+      if (!heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
         const concurenti = [
           // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step, after the race cut
           // latency 40s → 4.7s but the free pool kept answering broken
@@ -2331,6 +2357,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
 
 
     // ── FINAL TURN ──
+    // TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — the monitor is the PRIMARY
+    // display surface): when the brain did NOT push any surface this turn but
+    // its final answer still carries an obviously displayable payload (a URL,
+    // an image link, map coordinates, a markdown table, a code block), the
+    // monitor gets ONE sensible visual of it — deterministic, no extra model
+    // call. Never duplicates what show_document/show_on_screen/a screen_url
+    // tool already pushed (surfaceShown), never fires on plain prose
+    // (autoPreviewFrame returns null). See services/monitorAutoPreview.ts.
+    if (!surfaceShown && assistantText.trim()) {
+      const preview = autoPreviewFrame(assistantText)
+      if (preview) {
+        reply.raw.write(`${CTRL}${JSON.stringify(preview)}${CTRL}`)
+        console.log('[monitor] auto-preview: the answer carried a displayable payload the brain did not show')
+      }
+    }
     // NEVER SILENCE (Adrian, Jul 30: "reply = nothing", "it does nothing").
     // The last safety net, after ALL paths: if the turn produced nothing
     // visible — no text, no surface — the human gets an honest message, not a
