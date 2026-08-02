@@ -87,7 +87,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         })
       }
       // The client reads the response as text (SDP answer) → setRemoteDescription.
-      return reply.header('content-type', 'application/sdp').send(res.sdp)
+      // THE TRANSCRIBE MODEL RIDES ALONG (frontend audit, Aug 2): the client's
+      // language anchor re-sends `session.update` with a transcription model,
+      // and it used to hardcode its own copy — silently overriding
+      // OPENAI_REALTIME_TRANSCRIBE_MODEL from the env on the first language
+      // commit. The header makes the server's config the single source.
+      return reply
+        .header('content-type', 'application/sdp')
+        .header('x-transcribe-model', config.openai.realtimeTranscribeModel)
+        .send(res.sdp)
     },
   )
 

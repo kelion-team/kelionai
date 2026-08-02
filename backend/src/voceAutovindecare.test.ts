@@ -109,9 +109,12 @@ describe('contorul de voce pulsează în ORICE mod (prețul produsului, nu al fu
 describe('când AMBELE guri pică, omul aude O DATĂ, onest — nu 57 de bucle mute', () => {
   it('statusul onest apare o singură dată pe cădere (latch), în chat', () => {
     expect(panou).toMatch(/voiceDownAckedRef/)
-    expect(panou).toContain('My live voice is temporarily unavailable')
+    // Auditul din 2 aug: literalul englez a devenit cheia i18n voiceDownTemp,
+    // iar 401/402 au mesajele lor specifice (voiceNeedLogin/voiceNeedCredit) —
+    // un om fără credit nu mai aude „temporar" cu promisiune falsă de retry.
+    expect(panou).toMatch(/ack\(t\.voiceDownTemp\)/)
     const hits = panou.match(/voiceDownAckedRef\.current = true/g) ?? []
-    expect(hits.length).toBe(2) // cele două puncte de latch: onState('error') + catch la start
+    expect(hits.length).toBe(3) // punctele de latch: onState('error') + catch (401/402 specific + generic)
   })
   it('restartul după eroarea realtime are BACKOFF (nu bucla strânsă de 57 de ori)', () => {
     const hits =

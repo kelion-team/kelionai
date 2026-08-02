@@ -22,18 +22,18 @@ const creditsFor = (pounds: number): number => Math.floor(pounds * CREDITS_PER_P
 const AMOUNTS_FIRST = [20, 30, 50] // 150 / 225 / 375 credite
 const AMOUNTS_NEXT = [10, 20, 50] // 75 / 150 / 375 credite
 
+// NOTE (dead-code audit, Aug 2): the old `isAdmin` prop and its branches are
+// gone — the only render site (Stage.tsx) is guarded by `user.role !== 'admin'`
+// and always passed `isAdmin={false}`, so every admin branch in here was
+// unreachable by construction. The admin's settings live in the Admin panel.
 export function WalletButton({
   onOpenSettings,
   googleConnected,
   onConnectGoogle,
-  isAdmin,
 }: {
   readonly onOpenSettings: () => void
   readonly googleConnected?: boolean
   readonly onConnectGoogle?: () => void
-  // The admin (owner) doesn't pay credits — sees the wallet and CAN test
-  // topping up, but without the "Please top up" nag (never blocked).
-  readonly isAdmin?: boolean
 }): React.JSX.Element {
   // Default ENGLISH until language identification (not the browser language).
   const langKey = resolveLang(loadLocalLang() ?? 'en')
@@ -100,11 +100,10 @@ export function WalletButton({
       setCredits(b.credits)
       setPercent(b.percent)
       setFirstTopUp(!!b.firstTopUp)
-      setAutoPay(!isAdmin && b.autoTopUp ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url } : null)
+      setAutoPay(b.autoTopUp ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url } : null)
       // reflects reality: at balance 0 it stays paywalled, otherwise it exits — otherwise
       // a refresh with credits=0 left the top-up menu stuck open forever.
-      // The admin is NEVER blocked → no paywall pill for him.
-      setPaywalled(!isAdmin && b.credits <= 0)
+      setPaywalled(b.credits <= 0)
     }
   }
 
@@ -157,9 +156,7 @@ export function WalletButton({
   // more often the lower the credit gets (30% → rare, 10% → frequent). Never a
   // blocking popup.
   useEffect(() => {
-    // The owner doesn't buy credits → NEVER gets "you're running low on
-    // credit" (Adrian, Jul 26: "display credits correctly for the admin").
-    if (isAdmin || credits === null || percent > 30) {
+    if (credits === null || percent > 30) {
       setToast(false)
       return
     }
@@ -178,46 +175,21 @@ export function WalletButton({
     }
   }, [percent, credits])
 
-  const critical = !isAdmin && percent <= 5 // stays blinking red at the very end
+  const critical = percent <= 5 // stays blinking red at the very end
   return (
     <div className="wallet">
       {/* The pill = the CURRENT BALANCE (the credits you HAVE), not „buy X”.
       Adrian, Jul 24: „the communication is wrong — do I have 150 credits or
       am I buying 150?”. Wallet icon + number = clear balance; adding is in
-      the menu. ADMIN (Adrian, Jul 26: „show the credits correctly at admin”):
-      the owner doesn't buy credits, so his ledger balance goes NEGATIVE as he
-      consumes — a red „-324 credits” is false as a message (he owes nothing).
-      At admin the pill shows „nelimitat”; the REAL consumption, by component,
-      stays in Admin → Money. The ledgers are NOT touched. */}
+      the menu. */}
       <button
         type="button"
         className={`ghost wallet-badge ${critical ? 'blink-red' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={
-          isAdmin
-            ? ro
-              ? 'Setări și conectare Gmail · consumul real e în Admin → Bani'
-              : 'Settings and Gmail connection · real usage is in Admin → Money'
-            : ro
-              ? 'Creditele tale disponibile — apasă pentru a adăuga'
-              : 'Your available credits — click to add more'
-        }
+        title={ro ? 'Creditele tale disponibile — apasă pentru a adăuga' : 'Your available credits — click to add more'}
       >
-        {/* AT ADMIN NO FIGURE SHOWS ANYMORE (Adrian, Jul 30). „nelimitat” said
-        nothing, and his real balance — the one in Revolut Pro — CANNOT be read
-        by the app: the accounts API is Revolut-Business-only. So here we show
-        either a measured figure or none. The button stays, because behind it
-        sit the Settings and the Gmail connection — without it, the path to
-        them disappears. At the user's it stays exactly as it was: his balance,
-        refreshed on an interval, on tab return and on every credit change. */}
-        <span aria-hidden style={{ marginRight: 5 }}>{isAdmin ? '⚙' : '💳'}</span>
-        {isAdmin
-          ? ro
-            ? 'Setări'
-            : 'Settings'
-          : credits === null
-            ? '…'
-            : `${credits.toLocaleString()} ${t.credits}`}
+        <span aria-hidden style={{ marginRight: 5 }}>💳</span>
+        {credits === null ? '…' : `${credits.toLocaleString()} ${t.credits}`}
       </button>
       {/* PERMANENT paywall = a pill IN the bar (in flow, not absolute) — the
       absolute one covered the monitor tab's title (Adrian, Jul 24: „images
@@ -256,14 +228,10 @@ export function WalletButton({
       )}
       {open && (
         <div className="wallet-menu">
-          {/* CURRENT balance, clearly separated from the add action. At ADMIN it
-          is not shown: his ledger balance goes negative as he consumes (he
-          doesn't buy credits), so the figure would be false as a message. */}
-          {!isAdmin && (
-            <span className="wallet-menu-balance">
-              {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
-            </span>
-          )}
+          {/* CURRENT balance, clearly separated from the add action. */}
+          <span className="wallet-menu-balance">
+            {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
+          </span>
           {/* THE CREDITS PANEL, FOR EVERYONE (Adrian's order: the header
           „Add credits" button opens the EXISTING credits panel for regular
           users too — the 75/150/375 packs + a custom multiple of £5). Before,

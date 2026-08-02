@@ -69,7 +69,22 @@ export const PUBLIC_TEXT = {
   privacyLink: 'Privacy',
   termsLink: 'Terms',
 
-  // The new-version bar (appears on any shell, including logged-out)
-  updateAvailable: 'A new version is available',
-  updateNow: 'Update now',
+  // The email field placeholder (Login) — it was 'email@exemplu.com', Romanian
+  // on the English-by-design public surface (audit Aug 2).
+  emailPlaceholder: 'email@example.com',
+
+  // The visitor live-chat widget (landing page, logged-out surface). Audit
+  // Aug 2: every one of its texts was hardcoded in the component, and a failed
+  // poll/send showed NOTHING — the empty-state hint read as "no replies yet"
+  // while the owner's replies existed, and a failed send looked like success.
+  vchatHead: 'Message us — we reply live',
+  vchatClose: 'Close',
+  vchatHint: "Hi! Leave us a message and we'll reply as soon as we can.",
+  vchatPlaceholder: 'Your message…',
+  vchatToggle: 'Chat',
+  vchatSendFailed: "Your message didn't go through — please try again.",
+  vchatOffline: "We can't reach the server right now — replies may be delayed.",
+
+  // (The old updateAvailable/updateNow lived here too — dead: App.tsx renders
+  // the update banner from i18n's updateReady/updateNow. Removed Aug 2.)
 } as const

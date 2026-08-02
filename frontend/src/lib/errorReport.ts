@@ -14,7 +14,7 @@ let timer: number | null = null
 const seen = new Map<string, number>()
 const RESEND_AFTER_MS = 5 * 60_000
 
-export function reportClientError(msg: string): void {
+function reportClientError(msg: string): void {
   const m = (msg ?? '').slice(0, 400).trim()
   if (!m) return
   const now = Date.now()

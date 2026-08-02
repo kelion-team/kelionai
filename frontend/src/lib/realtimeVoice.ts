@@ -701,13 +701,19 @@ export async function startRealtimeVoice(
     // Here the OpenAI session fills its two pieces: pin the transcription
     // language the server committed (only with OpenAI ears — Chirp detects it
     // per utterance) and cut the mouth through the response queue.
+    // THE MODEL IS THE SERVER'S (audit Aug 2): a literal here used to override
+    // OPENAI_REALTIME_TRANSCRIBE_MODEL from the env on every language commit —
+    // changing the model in prod "worked" only until the first anchor. The
+    // session answer now carries the configured model in `x-transcribe-model`;
+    // the literal below is only the net for a header that never arrived.
+    let transcribeModel = 'gpt-4o-transcribe'
     ancoreazaLimba = (lang: string): void => {
       if (!urechiChirp)
         send({
           type: 'session.update',
           session: {
             type: 'realtime',
-            audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
+            audio: { input: { transcription: { model: transcribeModel, language: lang } } },
           },
         })
     }
@@ -857,11 +863,20 @@ export async function startRealtimeVoice(
           : res.status === 402
             ? 'nu mai ai credit'
             : (corp?.code && dupaCod[corp.code]) || `realtime ${res.status}`
-      const err = new Error(note)
-      // Whoever catches the error can decide whether to show the "try again" button.
-      ;(err as Error & { retryable?: boolean }).retryable = corp?.retryable !== false
+      const err = new Error(note) as Error & { code?: string; retryable?: boolean }
+      // THE MACHINE CODE RIDES ALONG (audit Aug 2): the note above only ever
+      // reached console.error — a user out of credit was told the voice was
+      // "temporarily unavailable" and promised a self-retry that could never
+      // succeed. With `code`, ChatPanel shows the REAL reason in his language.
+      err.code = res.status === 401 ? 'need_login' : res.status === 402 ? 'need_credit' : corp?.code
+      // A missing session or an empty wallet does not fix itself by retrying.
+      err.retryable = res.status === 401 || res.status === 402 ? false : corp?.retryable !== false
       throw err
     }
+    // The transcribe model the SERVER is configured with (see the note at
+    // `transcribeModel` above) — the header is the single source of truth.
+    const modelHdr = res.headers.get('x-transcribe-model')
+    if (modelHdr) transcribeModel = modelHdr
     const answer = await res.text()
     await pc.setRemoteDescription({ type: 'answer', sdp: answer })
     if (closed || signal?.aborted) throw new DOMException('ended-before-live', 'AbortError')

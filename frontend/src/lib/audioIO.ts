@@ -271,7 +271,7 @@ export function estimateRolloff(freqData: Float32Array, sampleRate: number, fftS
 }
 
 // jitter = relative variation of the fundamental period (F0)
-export function estimateJitter(f0s: number[]): number {
+function estimateJitter(f0s: number[]): number {
   if (f0s.length < 2) return 0
   let sum = 0
   for (let i = 1; i < f0s.length; i++) {
@@ -282,7 +282,7 @@ export function estimateJitter(f0s: number[]): number {
 }
 
 // shimmer = relative amplitude variation across consecutive voiced frames
-export function estimateShimmer(energies: number[]): number {
+function estimateShimmer(energies: number[]): number {
   if (energies.length < 2) return 0
   let sum = 0
   for (let i = 1; i < energies.length; i++) {
@@ -293,7 +293,7 @@ export function estimateShimmer(energies: number[]): number {
 }
 
 // Normalizes a feature vector to mean=0, deviation=1, with clipping.
-export function normalizeVector(v: number[]): number[] {
+function normalizeVector(v: number[]): number[] {
   const n = v.length
   if (n === 0) return []
   const mean = v.reduce((a, b) => a + b, 0) / n
@@ -506,15 +506,20 @@ export async function startMic(
         body: JSON.stringify({ audio: b64, lang: getLang(), mime: blob.type || mime }),
       })
       if (!r.ok) {
-        // we no longer die silently — the error reaches Kelion through F12 reporting
+        // The error reaches Kelion through F12 reporting AND the human
+        // (audit Aug 2): before, the red dot stayed lit while the spoken
+        // sentence vanished without a trace — 'asr-failed' is a NOTICE, the
+        // panel shows "say it again" and does NOT tear the microphone down.
         console.error('asr batch a picat:', r.status)
+        onError('asr-failed')
         return
       }
       const j = (await r.json()) as { transcript?: string }
       const text = (j.transcript ?? '').trim()
       if (text) onTranscript(text)
     } catch {
-      /* a lost utterance doesn't stop the microphone */
+      // Network died mid-upload — the utterance is lost; same honest notice.
+      onError('asr-failed')
     }
   }
 
@@ -864,14 +869,17 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
   }
 }
 
-// ── LIP-SYNC pentru pista LiveKit (full-duplex, pasul 4) ────────────────────
-// The agent's voice in full-duplex mode does NOT come through `curVoice` (HTTP playback),
-// but through a separate <audio> attached to the LiveKit track (lib/liveVoice.ts). So
-// the avatar's MOUTH moves there too, we measure that element's amplitude with
-// its own analyser and write into the SAME `voiceLevel` the avatar
-// reads. Mutually exclusive in time with the HTTP path (when one plays, the other is
-// off), so they don't trample each other. Purely visual bonus: if it fails, the voice stays
-// audibly unchanged. Returns a stop function (cleans RAF + routing).
+// ── LIP-SYNC for the LIVE full-duplex track ─────────────────────────────────
+// (Comment refreshed Aug 2 — it still said "LiveKit track (lib/liveVoice.ts)";
+// LiveKit and that file were removed long ago. The mechanism now serves the
+// OpenAI Realtime session's remote track, played by realtimeVoice's <audio>.)
+// The live voice does NOT come through `curVoice` (HTTP playback) but through
+// that separate <audio> element. So the avatar's MOUTH moves there too, we
+// measure that element's amplitude with its own analyser and write into the
+// SAME `voiceLevel` the avatar reads. Mutually exclusive in time with the HTTP
+// path (when one plays, the other is off), so they don't trample each other.
+// Purely visual bonus: if it fails, the voice stays audibly unchanged.
+// Returns a stop function (cleans RAF + routing).
 let extAnalyser: AnalyserNode | null = null
 let extBuf: Uint8Array<ArrayBuffer> | null = null
 let extLevelSource: MediaStreamAudioSourceNode | null = null
@@ -880,9 +888,9 @@ let extLevelRaf = 0
 // the <audio> element. `createMediaElementSource` TAKES OVER the element's output into
 // the Web Audio graph — if the AudioContext is suspended (autoplay policy),
 // the sound disappears completely. `createMediaStreamSource` only LISTENS to the stream in
-// parallel: the LiveKit track's <audio> element plays untouched, and we measure
+// parallel: the live track's <audio> element plays untouched, and we measure
 // the amplitude separately for the avatar's mouth. We don't connect to destination.
-// Lip-sync for the LiveKit track from the <audio> ELEMENT playing it, NOT from the raw
+// Lip-sync for the live track from the <audio> ELEMENT playing it, NOT from the raw
 // WebRTC track. `captureStream()` gives a SEPARATE stream of the element's already-decoded
 // output — the element keeps playing untouched (unlike
 // `createMediaElementSource`, which would steal its output and go silent in a suspended
@@ -903,7 +911,7 @@ export function driveVoiceLevelFromElement(el: HTMLAudioElement): () => void {
   }
 }
 
-export function driveVoiceLevelFrom(stream: MediaStream): () => void {
+function driveVoiceLevelFrom(stream: MediaStream): () => void {
   const noop = (): void => {}
   try {
     const AC =
@@ -946,7 +954,7 @@ export function driveVoiceLevelFrom(stream: MediaStream): () => void {
       extLevelSource = null
     }
   } catch {
-    // the analysis failed — the LiveKit voice stays audible, only the mouth doesn't move
+    // the analysis failed — the live voice stays audible, only the mouth doesn't move
     return noop
   }
 }

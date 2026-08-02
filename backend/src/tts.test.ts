@@ -189,22 +189,24 @@ describe('GET /api/tts/status — booleeni, niciodată chei', () => {
   it('cu sesiune: google/openai reflectă EXACT configurarea, fără chei în răspuns', async () => {
     const app = await buildApp()
     // Both configured.
+    // `maxChars` rides along since Aug 2: the promo narrator chunks against
+    // THE SERVER'S cap instead of a second hardcoded copy in the client.
     let res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ google: true, openai: true })
+    expect(res.json()).toEqual({ google: true, openai: true, maxChars: 5000 })
     // Only Google configured.
     config.openai.key = ''
     res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: true, openai: false })
+    expect(res.json()).toEqual({ google: true, openai: false, maxChars: 5000 })
     // Only OpenAI configured.
     config.openai.key = 'test-openai-key'
     config.googleTtsKey = ''
     res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: false, openai: true })
+    expect(res.json()).toEqual({ google: false, openai: true, maxChars: 5000 })
     // Nothing configured.
     config.openai.key = ''
     res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: false, openai: false })
+    expect(res.json()).toEqual({ google: false, openai: false, maxChars: 5000 })
     // No secret leaks: the body never contains a configured key value.
     expect(res.body).not.toContain('test-google-key')
     expect(res.body).not.toContain('test-openai-key')

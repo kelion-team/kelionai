@@ -19,7 +19,7 @@ export function currentTheme(): ThemeName {
   }
 }
 
-export function applyTheme(name: ThemeName): void {
+function applyTheme(name: ThemeName): void {
   try {
     if (name === 'dark') document.documentElement.dataset.theme = 'dark'
     else delete document.documentElement.dataset.theme

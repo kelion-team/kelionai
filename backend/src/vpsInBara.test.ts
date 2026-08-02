@@ -24,6 +24,8 @@ const sursa = (cale: string): string =>
   readFileSync(fileURLToPath(new URL(cale, import.meta.url)), 'utf8')
 
 const bara = sursa('../../frontend/src/pages/Stage.tsx')
+// The honest wording moved into adminText.ts (i18n audit, Aug 2).
+const texte = sursa('../../frontend/src/lib/adminText.ts')
 const ruta = sursa('./routes/admin.ts')
 const resurse = sursa('./services/resurse.ts')
 
@@ -52,7 +54,9 @@ describe('pilula de VPS există și e alimentată', () => {
 describe('lipsa se arată ca lipsă, nu ca zero', () => {
   it('citirea eșuată dă „⚠ VPS", nu cifre', () => {
     expect(bara).toContain("'⚠ VPS'")
-    expect(bara).toMatch(/Nu pot măsura resursele VPS-ului/)
+    // Textul onest vine acum din adminText (EN bază + RO), nu dintr-un literal.
+    expect(bara).toContain('adminStrings().vpsPillDead')
+    expect(texte).toMatch(/Nu pot măsura resursele VPS-ului/)
   })
 
   it('nicăieri un `?? 0` care să transforme lipsa într-un zero credibil', () => {

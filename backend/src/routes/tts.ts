@@ -11,22 +11,28 @@ import { synthesize, googleTtsAvailable } from '../services/tts.js'
 // services/tts.ts (shared with the chat voice path); this route adds the
 // session gate + cost accounting + the engine-status probe.
 
+// The request cap, in ONE place (frontend audit, Aug 2): the promo narrator
+// used to hardcode its own 3500 next to this 5000 — two constants, no
+// contract, and lowering the server cap would have silently truncated clips.
+// Now the status probe PUBLISHES the cap and the client chunks against it.
+export const TTS_MAX_CHARS = 5000
+
 export async function ttsRoutes(app: FastifyInstance): Promise<void> {
   // ENGINE STATUS (Adrian, Aug 2 — the frontend polls this to decide which
   // mouth to open). BOOLEANS ONLY — a key never leaves the server.
   app.get('/api/tts/status', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
-    return { google: googleTtsAvailable(), openai: !!config.openai.key }
+    return { google: googleTtsAvailable(), openai: !!config.openai.key, maxChars: TTS_MAX_CHARS }
   })
 
   app.post<{ Body: { text?: string; lang?: string } }>('/api/tts', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // 5000-character cap: /api/tts hits Google TTS (paid) and had no limit —
+    // Character cap: /api/tts hits Google TTS (paid) and had no limit —
     // one client could send ~24MB of text at 120 req/min = a huge bill.
-    const text = req.body?.text?.trim()?.slice(0, 5000)
+    const text = req.body?.text?.trim()?.slice(0, TTS_MAX_CHARS)
     if (!text) return reply.code(400).send({ error: 'bad_request' })
 
     try {
