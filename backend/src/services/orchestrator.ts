@@ -129,6 +129,10 @@ export async function runOrchestrator(
     // same input/output shapes, the tool loop stays identical.
     const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
     const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
+    // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
+    // its real duration in the log, so a slow turn shows WHERE the seconds go
+    // (the model, the tool, or the number of rounds) instead of being guessed.
+    const tRunda = Date.now()
     const res = onTextFiltrat
       ? gemini
         ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
@@ -138,6 +142,7 @@ export async function runOrchestrator(
         : await openrouterChat(model, convo, tools, callOpts)
     totalCost += res.costUsd
     served = res.model
+    console.log(`[TIMP] ${served} runda ${round}: ${Date.now() - tRunda}ms (${res.toolCalls.length} apeluri de unelte)`)
     // Without streaming (background agents) the text doesn't go through the
     // filter piece by piece — we pass it whole here, so deduping is the same
     // on both paths.
@@ -282,15 +287,27 @@ export async function runOrchestrator(
     anyToolCalled = true
     // The assistant message ASKING for the tools (keeps tool_calls for linkage).
     convo.push({ role: 'assistant', content: res.text ?? '', tool_calls: res.toolCalls })
-    // Run each tool and append the result as a role:'tool' message.
-    for (const call of res.toolCalls as OrToolCall[]) {
-      let out = ''
-      try {
-        out = await execTool(call.function.name, call.function.arguments || '{}')
-      } catch (e) {
-        out = `tool_error: ${String(e).slice(0, 200)}`
-      }
-      convo.push({ role: 'tool', tool_call_id: call.id, content: out })
+    // TOOLS IN PARALLEL (Aug 2 — the latency mission): the model's calls from
+    // ONE round are independent by definition (it receives all results at
+    // once), so running them one-by-one only stacked their latencies (a
+    // search + a map + a weather = 3 serial HTTP waits). They now leave
+    // TOGETHER; the results are appended in the EXACT order of the calls, so
+    // the conversation the model sees is byte-identical to the serial path.
+    // Correctness is untouched: the same tools run, with the same arguments,
+    // and a failing tool still becomes its own tool_error, never a lost turn.
+    const tUnelte = Date.now()
+    const iesiri = await Promise.all(
+      (res.toolCalls as OrToolCall[]).map(async (call) => {
+        try {
+          return await execTool(call.function.name, call.function.arguments || '{}')
+        } catch (e) {
+          return `tool_error: ${String(e).slice(0, 200)}`
+        }
+      }),
+    )
+    if (iesiri.length > 1) console.log(`[TIMP] ${iesiri.length} unelte în paralel: ${Date.now() - tUnelte}ms`)
+    for (let i = 0; i < res.toolCalls.length; i++) {
+      convo.push({ role: 'tool', tool_call_id: res.toolCalls[i].id, content: iesiri[i] })
     }
   }
 
