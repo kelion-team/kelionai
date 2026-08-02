@@ -145,6 +145,8 @@ export async function execGuestVoiceTool(
   }
 }
 
+// THE single list of the guest-voice tool names — imported by adminTools.ts
+// (dispatch + USER_SCOPED_TOOLS) so the names are never repeated inline.
 export const GUEST_VOICE_TOOLS: ReadonlySet<string> = new Set([
   'allow_guest_voice',
   'approve_guest_voice',

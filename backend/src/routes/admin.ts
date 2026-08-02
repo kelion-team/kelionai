@@ -204,15 +204,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // Batch-translate a conversation's messages into Romanian (the "Translate
   // into Romanian" button in the chat viewer — testers write in any language).
-  // Admin only.
+  // Admin only. `failed` tells the admin how many messages came back as
+  // UNTRANSLATED ORIGINAL (the translation service failed for them) — so a
+  // half-translated conversation is never mistaken for a full one.
   app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const raw = req.body?.texts
     const texts = Array.isArray(raw) ? raw.slice(0, 300).map((t) => String(t ?? '')) : []
-    if (texts.length === 0) return reply.send({ translations: [] })
+    if (texts.length === 0) return reply.send({ translations: [], failed: 0 })
     const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target : 'Romanian'
-    return reply.send({ translations: await translateMany(texts, target) })
+    return reply.send(await translateMany(texts, target))
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.
@@ -278,8 +280,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
-  // (admin only). This is what the admin sees instead of the users' credits.
+  // The owner's REAL-money view: the measured provider spend (USD, from the
+  // cost journal) and the real profit from the payments ledger (admin only).
   app.get('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -385,11 +387,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // The pocket: how much you have, with the breakdown it was added from
       // and where it's missing.
       punga,
+      // USD, unconverted (getAdminAccount no longer multiplies by a hand rate).
       spent: account.spent,
       // The cost journal is kept in USD end to end (cost_events.cost_usd):
-      // spentUsd/today/byKind are the SAME currency, so the Money tab no
-      // longer mixes "total £" with "azi $". `account.spent` stays for older
-      // callers; the tab reads spentUsd.
+      // spentUsd/today/byKind are the SAME currency as `spent` — the Money tab
+      // never mixes "total £" with "azi $".
       spentUsd: costs.total,
       profit: account.profit,
       currency: config.billing.currency,
@@ -448,17 +450,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await getDemoStats())
   })
 
-  // Which brain models actually serve right now (admin only): live ping of
-  // Kimi (primary) and GLM (backup). The old provider fully removed (Adrian,
-  // 12 Jul).
+  // Which brain models actually serve right now (admin only): a real 1-token
+  // ping of the default chat + work models through OpenRouter (services/brain.ts).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain keys live (admin only): Kimi (primary) + GLM (backup). Pings
-  // each with a 1-token call; reports ok/fail without ever exposing the key value.
+  // Verify the brain key live (admin only): pings the OpenRouter chat default
+  // (primary) and the work model (reserve) with a 1-token call; reports
+  // ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

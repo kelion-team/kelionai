@@ -124,27 +124,24 @@ vi.mock('./secrete.js', () => ({
 
 // Where every requested tool landed — this guards "fully equipped".
 const cerute: string[] = []
-vi.mock('./adminTools.js', () => ({
-  SHARED_ADMIN_TOOLS: new Set([
-    'list_source', 'read_source', 'search_source', 'db_tables', 'db_query', 'system_health',
-    'repo_write', 'repo_open_pr', 'repo_merge_pr', 'run_runbook', 'runbook_status',
-    'runbook_log', 'request_repair', 'secret_pune', 'secret_lista', 'secret_publica',
-  ]),
-  execSharedAdminTool: async (n: string) => {
-    cerute.push(`admin:${n}`)
-    return '{}'
-  },
-  // The tools tied to ITSELF — memory, notes, logs, cost, mail.
-  // Adrian, Jul 31: "it must really receive them all."
-  USER_SCOPED_TOOLS: new Set([
-    'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
-    'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
-  ]),
-  execUserScopedTool: async (n: string) => {
-    cerute.push(`user:${n}`)
-    return '{}'
-  },
-}))
+vi.mock('./adminTools.js', async (importOriginal) => {
+  // The tool SETS are the REAL ones: a literal copy here had gone stale (it
+  // was missing the guest-voice tools), so the test would have passed even
+  // with a hardcoded production list. Only the EXECUTION is faked.
+  const real = await importOriginal<typeof import('./adminTools.js')>()
+  return {
+    SHARED_ADMIN_TOOLS: real.SHARED_ADMIN_TOOLS,
+    USER_SCOPED_TOOLS: real.USER_SCOPED_TOOLS,
+    execSharedAdminTool: async (n: string) => {
+      cerute.push(`admin:${n}`)
+      return '{}'
+    },
+    execUserScopedTool: async (n: string) => {
+      cerute.push(`user:${n}`)
+      return '{}'
+    },
+  }
+})
 vi.mock('./browser.js', () => ({
   browserOpen: async () => { cerute.push('browser:open'); return {} },
   browserClick: async () => ({}), browserType: async () => ({}),

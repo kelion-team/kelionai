@@ -82,11 +82,17 @@ import {
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
+
+// THE OWNER NEVER DEBITS HIMSELF (PR #648, Aug 2 — his own testing drained
+// £5.73 of voice from his own wallet in one morning; the rule died first in
+// realtime.ts, this is the same predicate for the chat path). Usage is still
+// RECORDED for the Money tab — recorded, yes; charged, no.
+export const isOwnerEmail = (email: string): boolean => email.toLowerCase() === config.adminEmail
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
-import { formatDeviceTime } from '../services/timeContext.js'
+import { formatDeviceTime, utcDay } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL } from '../services/brainToolDefs.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
@@ -934,9 +940,7 @@ weather, maps, YouTube, translation, Wikipedia knowledge lookup, currency
 conversion, current time by timezone; show_on_screen to put a web page on the
 user's monitor on your own initiative; and generate_image to draw/create a
 picture and show it on the monitor. Call them whenever they help. If a Google
-tool returns an auth error, tell the user to sign in again to grant access. If
-generate_image returns "needs_billing", tell the user image generation needs
-Google AI billing enabled on the Gemini project. When you call get_weather a live
+tool returns an auth error, tell the user to sign in again to grant access. When you call get_weather a live
 weather map for the real location is shown on the monitor automatically — never
 call show_on_screen with a weather website (those guessed URLs often 404). For
 live traffic, open a Waze live map on the monitor: call show_on_screen with url
@@ -1020,6 +1024,74 @@ interface Coords {
   lon: number
 }
 
+// ── THE LOCATION TRUTH, ONE SOURCE (the "câte grade sunt în locația mea → 27°
+// fără GPS" incident) ────────────────────────────────────────────────────────
+// The owner asked for the weather "in my location" and got 27° for a place the
+// model had INVENTED: on a turn with no device GPS and the IP-geo cache still
+// cold, NOTHING in the context said "you have no location" — the get_weather
+// description only said "pass the user's lat/lon (given in your context)", so
+// the model filled the hole from its own memory and quoted live weather for a
+// guessed city as if it were the user's. Resolved ONCE here, then read by BOTH
+// consumers: the system-prompt block below (what the brain knows) and the
+// get_weather guard in runTool (what the tool is allowed to run with).
+export interface DeviceLocation {
+  /** Exact coordinates from the device GPS (req.body.coords), null when absent/invalid. */
+  gps: { lat: number; lon: number } | null
+  /** City-level "City, Region, Country" from the request IP ('' when unknown). */
+  approxPlace: string
+}
+
+export function resolveDeviceLocation(
+  coords: Coords | undefined,
+  geo: { city?: string; region?: string; country?: string } | null,
+): DeviceLocation {
+  const gps =
+    coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)
+      ? { lat: coords.lat, lon: coords.lon }
+      : null
+  const approxPlace = gps
+    ? ''
+    : [geo?.city, geo?.region, geo?.country].filter(Boolean).join(', ')
+  return { gps, approxPlace }
+}
+
+// The honest void, DECLARED. When neither GPS nor the IP estimate exists, the
+// brain must KNOW it has no location — otherwise it manufactures one (that is
+// exactly where the 27° came from). No invented default, ever.
+export const LOCATION_NONE_PROMPT =
+  `\n\nLOCATION: you do NOT have the user's location on this turn — the device did not share its GPS and no network estimate exists. ` +
+  `For "my location" / "here" / local-weather questions, say honestly that you don't have their location and ask them to allow location access on the device. ` +
+  `NEVER guess a city, place or coordinates, and NEVER quote weather, distances or "near me" results for an invented spot.`
+
+// THE get_weather GUARD (deterministic — the model's good will is not enough):
+// a location-less call is filled from the DEVICE GPS first, then from the
+// IP-level approximation; with neither, the tool REFUSES and tells the model to
+// answer honestly instead of geocoding a hallucinated place name.
+export function weatherArgsWithLocation(
+  input: unknown,
+  loc: DeviceLocation,
+): { input: Record<string, unknown> } | { errorJson: string } {
+  const a = (input ?? {}) as Record<string, unknown>
+  const hasCoords =
+    a.lat !== undefined &&
+    a.lon !== undefined &&
+    Number.isFinite(Number(a.lat)) &&
+    Number.isFinite(Number(a.lon))
+  const hasPlace = typeof a.location === 'string' && a.location.trim().length > 0
+  if (hasCoords || hasPlace) return { input: a }
+  // "Locația mea" → the device GPS, exactly as the owner asked.
+  if (loc.gps) return { input: { ...a, lat: loc.gps.lat, lon: loc.gps.lon } }
+  // Rough IP fallback — labelled approximate in the prompt, better than nothing.
+  if (loc.approxPlace) return { input: { ...a, location: loc.approxPlace } }
+  return {
+    errorJson: JSON.stringify({
+      error: 'location_unavailable',
+      message:
+        "The user's location is not available on this turn: the device did not share GPS and no network estimate exists. Answer honestly that you don't have their location and ask them to allow location access — never guess a city or coordinates, never quote weather for an invented spot.",
+    }),
+  }
+}
+
 // The brain API rejects empty-content messages and non-alternating roles, and the
 // first message must be a user turn. The client can produce all three: a
 // monitor-only / tool-only reply leaves an empty assistant turn, and a local
@@ -1047,7 +1119,7 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
 // cap the reserve closes: turns stay on the free pool + the dispatcher's
 // queue, and systemHealth flags rezerva_plina to the owner.
 async function rezervaCheltuitaAzi(): Promise<number> {
-  const zi = new Date().toISOString().slice(0, 10)
+  const zi = utcDay()
   const raw = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
   const n = raw ? Number(raw) : 0
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -1062,7 +1134,7 @@ async function rezervaDeschisa(): Promise<boolean> {
 
 async function adaugaLaRezerva(usd: number): Promise<void> {
   if (!(usd > 0)) return
-  const zi = new Date().toISOString().slice(0, 10)
+  const zi = utcDay()
   const cheltuit = await rezervaCheltuitaAzi()
   await saveKv(`rezerva:zi:${zi}`, String(cheltuit + usd)).catch(() => {})
 }
@@ -1220,8 +1292,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // "instant live chat"): the independent reads leave TOGETHER — every
     // separate await added another DB round trip before the first word.
     // BYOK-PROVIDER REMOVED COMPLETELY (Adrian, Jul 12: "remove the old provider
-    // completely, no patches"): the brain is Kimi→GLM; there is no client key
-    // anymore. All users go through the normal paywall (wallet credit).
+    // completely, no patches"): the brain is 100% OpenRouter (a single key) and
+    // there is no client key anymore. All users go through the normal paywall
+    // (wallet credit).
     const lastForRecall = messages.at(-1)
     // FLUENCY (Jul 24 audit, A1): semantic recall could wait up to 8s for the
     // Google embedding — on the FIRST word's path. A hard 400ms deadline:
@@ -1487,7 +1560,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // I'm connected to Gmail but it can't fetch data").
       (user.googleRefreshToken
         ? 'Google services (Gmail, Calendar, Drive, Tasks, Contacts) are CONNECTED — use those tools directly when asked, without saying "you are connected".'
-        : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Conectează Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
+        : 'IMPORTANT: the heavy Google services (Gmail, Calendar, Drive, Tasks, Contacts) are NOT connected — you CANNOT read email/calendar/etc yet. If asked for any of them, do NOT claim they work or that you are connected; instead ask the user to press "Connect Gmail & Calendar" in the wallet menu once. Everything else works normally.') +
       ' NEVER proactively state whether the user is logged in or connected — the interface already shows it. Just answer what they asked.'
     // EYES ON F12 (Adrian, Jul 24: "it must have access to the logs"). RECENT
     // errors from the user's browser, sent by the client — Kelion diagnoses
@@ -1501,25 +1574,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
     // next turn; the raw lat/lon (all the skills need) is injected immediately.
-    const coords = req.body?.coords
-    if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
-      const place = reverseGeocodeCached(coords.lat, coords.lon)
+    // The location truth is resolved ONCE (resolveDeviceLocation) and shared
+    // with the get_weather guard in runTool — prompt and tool can never
+    // disagree about where the user is.
+    const deviceLoc = resolveDeviceLocation(req.body?.coords, geoLookupCached(clientIp(req)))
+    if (deviceLoc.gps) {
+      const place = reverseGeocodeCached(deviceLoc.gps.lat, deviceLoc.gps.lon)
       systemPrompt +=
-        `\n\nThe user's current device location (live GPS) is latitude ${coords.lat.toFixed(5)}, longitude ${coords.lon.toFixed(5)}` +
+        `\n\nThe user's current device location (live GPS) is latitude ${deviceLoc.gps.lat.toFixed(5)}, longitude ${deviceLoc.gps.lon.toFixed(5)}` +
         (place ? ` — approximately ${place}.` : '.') +
         ` When the user says "here", "near me", "where am I", or asks about weather, places, directions or anything location-dependent without naming a place, use THIS location. For local weather, pass these exact lat/lon to get_weather (don't rely on a place name).`
-    } else {
+    } else if (deviceLoc.approxPlace) {
       // GPS not available yet (permission not yet answered, denied, or the very
       // first turn racing the browser's fix) — fall back to a city-level guess
       // from the request IP (same lookup the visitor-analytics beacon uses) so
       // Kelion is never left with zero location awareness.
-      const ip = clientIp(req)
-      const geo = geoLookupCached(ip)
-      if (geo && (geo.city || geo.country)) {
-        const where = [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
-        systemPrompt +=
-          `\n\nThe user's approximate location (from their network, precise GPS not yet available) is ${where}. Use this ONLY as a rough fallback for "near me"/weather/local questions — mention it's approximate if precision matters, and prefer exact GPS the moment it's available.`
-      }
+      systemPrompt +=
+        `\n\nThe user's approximate location (from their network, precise GPS not yet available) is ${deviceLoc.approxPlace}. Use this ONLY as a rough fallback for "near me"/weather/local questions — mention it's approximate if precision matters, and prefer exact GPS the moment it's available.`
+    } else {
+      // NO LOCATION AT ALL (the "27° without GPS" fix): the void is DECLARED,
+      // so the brain answers "I don't have your location" instead of quoting
+      // live weather for an invented city.
+      systemPrompt += LOCATION_NONE_PROMPT
     }
 
     // Kelion's built-in sense of "now" — the client's real local date/time, so he
@@ -2019,10 +2095,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // tab never saw the cost of search/images/brain.
           void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
         }
-        if (name === 'generate_image') {
-          usage.usd += IMAGE_USD_PER_CALL
-          void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
-        }
+        // NOTE: generate_image is NO LONGER charged a hand-typed flat rate here
+        // — its REAL cost (OpenRouter usage.cost) is booked inside runTool,
+        // where the generation's own response is known. Charging it here too
+        // would double-count and, worse, book an invented figure as fact.
         // SELF-EXTENSION: Kelion proposes a new tool (stays 'pending' until the
         // owner approves it with one click in admin → active instantly).
         if (name === 'propose_tool') {
@@ -2055,6 +2131,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           block, isAdmin, token, reply, baseUrl, user.email,
           req.headers.cookie ?? '', usage,
           (speechPref || isAdminUser) && langName ? langName : '',
+          deviceLoc,
         )
       }
       // FIRST WORD UNDER 1s ON ACTION TURNS TOO (Adrian, Jul 27, live proof:
@@ -2434,7 +2511,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // MONEY IS NOT LOST ON ERROR (Jul 27 audit): the tools already run in this
       // turn (searches, images, ask_brain) COST money — the return from here
       // used to skip the debit and the user consumed for free, repeatably.
-      if (usage.usd > 0) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+      // The OWNER is never debited (PR #648) — recorded, yes; charged, no.
+      if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
       return
     }
 
@@ -2488,14 +2566,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       void learnFromTurn(user.email, lastUserText, assistantText, 'kelion')
     }
 
-    // Debit real provider cost from the wallet — FOR EVERYONE, including ADMIN
-    // (Adrian, Jul 25: "admin is not exempt from reality — these get consumed
-    // and admin must see what he really has"). The admin's credits decrease just
-    // as really as clients'; ONLY the block at 0 (paywall) stays on clients —
-    // the owner does not lock himself out of his own application.
+    // Debit the real provider cost from the wallet — CUSTOMERS ONLY.
+    // The Jul 25 "everyone pays, even the admin" rule DIED on Aug 2 (PR #648,
+    // live proof: the admin's own testing drained £5.73 of voice in one
+    // morning from his own wallet): usage is still RECORDED for the Money tab
+    // (recordCost above), never DEBITED from the owner — the users' credits
+    // pay, the free provider tier is his margin. This chat path had kept the
+    // old rule after realtime.ts was fixed — the same hole, one screen over.
     {
       const cost = usage.usd
-      if (cost > 0) {
+      if (cost > 0 && !isOwnerEmail(user.email)) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
     }
@@ -2514,10 +2594,14 @@ async function runTool(
   /** The requester's session — we pass it to the admin routes so they can do
    *  their own admin check (we do not bypass it). */
   cookie: string,
-  // Kept in the signature (callers send them), but unused in the body since
-  // cost is accounted outside runTool: the `_` prefix says it explicitly.
-  _usage: { usd: number },
+  // The turn's usage accumulator: image generation adds its REAL cost here
+  // (booked where the provider's own usage.cost is known, not estimated
+  // upfront). Other costs are accounted outside runTool.
+  usage: { usd: number },
   _langName: string,
+  // The turn's location truth (resolveDeviceLocation) — the get_weather guard
+  // fills/refuses location-less calls from it. One source with the prompt.
+  loc: DeviceLocation,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
   // Journal trace for EVERY tool called (Jul 25 incident: "it does nothing" —
@@ -2712,6 +2796,19 @@ async function runTool(
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
       const result = await generateImage(prompt)
       if ('error' in result) return JSON.stringify({ error: result.error })
+      // THE REAL COST, BOOKED WHERE IT IS KNOWN (the owner's rule: "show real,
+      // stop fabricating"): the generation's own usage.cost from OpenRouter,
+      // booked as 'image' — a MEASUREMENT (db.ts COSTURI_MASURATE). The flat
+      // IMAGE_USD_PER_CALL rate is reached ONLY when the provider didn't
+      // itemize, under the separate 'image_est' kind, so the masurat/estimat
+      // split never confuses an estimate with a measurement.
+      if (result.costUsd > 0) {
+        usage.usd += result.costUsd
+        void recordCost(email, 'image', result.costUsd)
+      } else {
+        usage.usd += IMAGE_USD_PER_CALL
+        void recordCost(email, 'image_est', IMAGE_USD_PER_CALL)
+      }
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: imageUrl })
@@ -2783,6 +2880,16 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
+        // THE get_weather GUARD (the "27° without GPS" fix): a location-less
+        // weather call is filled deterministically — device GPS first, the
+        // approximate IP place second — and REFUSED with an honest message
+        // when the turn has no location at all. The model can no longer
+        // geocode a hallucinated "locația mea" and quote it as real.
+        if (block.name === 'get_weather') {
+          const guarded = weatherArgsWithLocation(block.input, loc)
+          if ('errorJson' in guarded) return guarded.errorJson
+          block = { ...block, input: guarded.input }
+        }
         const result = await runGoogleTool(block.name, block.input, token)
         // AUTOMATIC DISPLAY: tools that return `screen_url` (map, route,
         // weather, video) must APPEAR on the monitor from a SINGLE call — the

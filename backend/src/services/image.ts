@@ -45,12 +45,14 @@ export async function getImage(id: string): Promise<StoredImage | null> {
   return null
 }
 
-export type ImageResult = { id: string; mime: string } | { error: string }
+export type ImageResult = { id: string; mime: string; costUsd: number } | { error: string }
 
 export async function generateImage(prompt: string): Promise<ImageResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
   const r = await openrouterImage(p)
   if ('error' in r) return { error: r.error }
-  return { id: await put(r.mime, r.buf), mime: r.mime }
+  // The REAL cost of the generation travels WITH the image (OpenRouter's own
+  // usage.cost) — the caller books exactly this, not a hand-typed flat rate.
+  return { id: await put(r.mime, r.buf), mime: r.mime, costUsd: r.costUsd }
 }

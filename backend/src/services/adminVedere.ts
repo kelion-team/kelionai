@@ -21,22 +21,26 @@
 //   • Route names are NOT hand-written here: they are requested from the app,
 //     so a new route shows up in his list on its own.
 //   • Reading is free; WRITING goes through an explicit allowlist, because
-//     among the admin routes are also the ones that move money (`deposit`,
-//     `payout`, `sell-credits`) or restore the database (`backups/restore`).
-//     Those stay with the owner — not because I don't trust him, but because
-//     a mistake there cannot be undone.
+//     among the admin routes are also the ones that move money (`user` with
+//     action credit, `brain-credit`) or destroy what cannot be brought back
+//     (`user` with action delete, `backups/restore`). Those stay with the
+//     owner — not because I don't trust him, but because a mistake there
+//     cannot be undone.
 
 /** The admin routes he may NOT call on his own, with the reason written down.
- *  The rule: if the mistake cannot be undone, you press it yourself. */
+ *  The rule: if the mistake cannot be undone, you press it yourself.
+ *
+ *  KEEP THIS LIST TRUE: the Stripe-era entries (deposit / payout /
+ *  sell-credits / money-circuit/card-key) were removed together with their
+ *  routes (31 Jul) — guarding a route that no longer exists while the REAL
+ *  money route (`/api/admin/user`: credit = money moved, delete = data gone
+ *  forever) stayed open would have been a hole, not a guard. */
 const DOAR_OWNERUL = new Map<string, string>([
-  ['deposit', 'mișcă bani reali în pungă'],
-  ['payout', 'scoate bani din cont'],
-  ['sell-credits', 'creditează un user cu bani'],
+  ['user', 'creditează cu bani reali sau șterge definitiv un user'],
   ['brain-credit', 'mișcă bani reali'],
   ['backups/restore', 'suprascrie baza de date întreagă'],
   ['reset-counters', 'șterge contoare, nu se poate desface'],
   ['unlock/secret', 'poarta ta de admin — nu se atinge singur'],
-  ['money-circuit/card-key', 'expune cheia de card'],
 ])
 
 /** We truncate what is too long so it doesn't eat the brain's context window. */

@@ -109,8 +109,14 @@ export const brain = {
         content: [{ type: 'text', text: r.text }],
         stop_reason: null,
         stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0 },
-      } as unknown as Message
+        // REAL usage, as reported by OpenRouter on the very call that answered
+        // (the previous version returned literal zeros — a fabricated
+        // measurement that silently zeroed the memory agent's cost ledger).
+        usage: { input_tokens: r.inputTokens, output_tokens: r.outputTokens },
+        // The REAL cost of the call (usage.cost), next to the Message so the
+        // caller books a measurement, not an estimate.
+        costUsd: r.costUsd,
+      }
     },
   },
 }

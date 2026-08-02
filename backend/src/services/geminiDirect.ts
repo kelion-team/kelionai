@@ -127,10 +127,17 @@ export function toGeminiPayload(
 
 interface GResp {
   candidates?: { content?: { parts?: GPart[] }; finishReason?: string }[]
+  /** REAL token counts, present on the final response/chunk. */
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
   error?: { code?: number; message?: string; status?: string }
 }
 
-function partsToResult(parts: GPart[], model: string, stop: string): OrChatResult {
+function partsToResult(
+  parts: GPart[],
+  model: string,
+  stop: string,
+  usage?: GResp['usageMetadata'],
+): OrChatResult {
   let text = ''
   const toolCalls: OrToolCall[] = []
   for (const p of parts) {
@@ -144,7 +151,13 @@ function partsToResult(parts: GPart[], model: string, stop: string): OrChatResul
     }
   }
   // Really free: Google doesn't charge the free-tier key → the cost is 0, and that's how we report it.
-  return { text, toolCalls, costUsd: 0, model, stop }
+  // The token counts are the provider's own usageMetadata when it sent them —
+  // never hand-filled.
+  return {
+    text, toolCalls, costUsd: 0, model, stop,
+    inputTokens: Number(usage?.promptTokenCount ?? 0) || 0,
+    outputTokens: Number(usage?.candidatesTokenCount ?? 0) || 0,
+  }
 }
 
 // The shared Gemini call (non-stream + stream): x-goog-api-key headers +
@@ -172,12 +185,12 @@ export async function geminiDirectChat(
   tools: AnthropicTool[] = [],
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key', inputTokens: 0, outputTokens: 0 }
   const r = await geminiFetch(model, 'generateContent', messages, tools, opts)
   if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
   const j = (await r.json()) as GResp
   const cand = j.candidates?.[0]
-  return partsToResult(cand?.content?.parts ?? [], model, cand?.finishReason ?? 'stop')
+  return partsToResult(cand?.content?.parts ?? [], model, cand?.finishReason ?? 'stop', j.usageMetadata)
 }
 
 // The STREAMING variant (SSE): the text flows through onText (first word
@@ -190,17 +203,19 @@ export async function geminiDirectChatStream(
   onText: (delta: string) => void,
   opts: BrainCallOpts = {},
 ): Promise<OrChatResult> {
-  if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key', inputTokens: 0, outputTokens: 0 }
   const r = await geminiFetch(model, 'streamGenerateContent?alt=sse', messages, tools, opts)
   if (!r.ok || !r.body) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
 
   let text = ''
   const collected: GPart[] = []
   let stop = 'stop'
+  let usage: GResp['usageMetadata']
   // The SSE stream reading comes from the shared source (services/sse.ts);
   // the event processing (Gemini format: candidates/parts) stays here.
   await readSSE(r.body, (raw) => {
     const ev = raw as GResp
+    if (ev.usageMetadata) usage = ev.usageMetadata // the final chunk carries it
     const cand = ev.candidates?.[0]
     if (cand?.finishReason) stop = cand.finishReason
     for (const p of cand?.content?.parts ?? []) {
@@ -211,7 +226,7 @@ export async function geminiDirectChatStream(
       if (p.functionCall) collected.push(p)
     }
   })
-  const res = partsToResult(collected, model, stop)
+  const res = partsToResult(collected, model, stop, usage)
   return { ...res, text }
 }
 

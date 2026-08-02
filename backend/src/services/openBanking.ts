@@ -41,6 +41,7 @@
 import jwt from 'jsonwebtoken'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
+import { utcDay } from './timeContext.js'
 
 const API = 'https://api.enablebanking.com'
 
@@ -48,8 +49,6 @@ const API = 'https://api.enablebanking.com'
  *  env, so re-linking (renewed consent) doesn't require republishing: the
  *  admin route writes it by itself. */
 const KV_CONT_LEGAT = 'eb_account_uid'
-/** And the consent expiry date — the panel can warn IN ADVANCE. */
-const KV_CONSENT_EXPIRA = 'eb_consent_expira'
 
 /** A money inflow, cleaned of everything we don't need. */
 export interface TranzactieIntrata {
@@ -124,7 +123,7 @@ export function mapeazaTranzactii(raw: EbTransaction[]): TranzactieIntrata[] {
     const referinta = [...(t.remittance_information ?? []), t.debtor?.name ?? '']
       .filter(Boolean)
       .join(' ')
-    out.push({ id, amount: suma, currency: (t.transaction_amount?.currency ?? 'gbp').toLowerCase(), referinta })
+    out.push({ id, amount: suma, currency: (t.transaction_amount?.currency ?? config.billing.currency).toLowerCase(), referinta })
   }
   return out
 }
@@ -143,7 +142,7 @@ export async function tranzactiiIntrate(): Promise<TranzactieIntrata[] | null> {
   // The last 14 days are enough: pending codes expire after 2 hours, and
   // crediting is idempotent on the bank reference, so re-reading doesn't
   // double.
-  const deLa = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+  const deLa = utcDay(-14)
   const r = await fetch(
     `${API}/accounts/${encodeURIComponent(uid)}/transactions?transaction_status=BOOK&date_from=${deLa}`,
     { headers: { Authorization: `Bearer ${token}`, accept: 'application/json' }, signal: AbortSignal.timeout(20_000) },
@@ -183,7 +182,6 @@ export async function incepeLegaturaPlati(redirectUrl: string): Promise<{ url: s
   if (!r) return { error: 'cannot reach Enable Banking' }
   const j = (await r.json().catch(() => ({}))) as { url?: string; message?: string }
   if (!r.ok || !j.url) return { error: `Enable Banking refused (${r.status}): ${j.message ?? 'no details'}` }
-  await saveKv(KV_CONSENT_EXPIRA, validPanaLa).catch(() => undefined)
   return { url: j.url }
 }
 
@@ -207,12 +205,6 @@ export async function finalizeazaLegaturaPlati(code: string): Promise<{ conturi:
   if (!uid) return { error: 'the bank gave no account in the session' }
   await saveKv(KV_CONT_LEGAT, uid)
   return { conturi: j.accounts?.length ?? 1 }
-}
-
-/** How much is left of the consent — for the IN-ADVANCE warning in the
- *  panel. */
-export async function consentExpiraLa(): Promise<string | null> {
-  return (await loadKv(KV_CONSENT_EXPIRA).catch(() => null)) ?? null
 }
 
 // ── THE LOOP THAT CREDITS BY ITSELF ─────────────────────────────────────────

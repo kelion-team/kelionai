@@ -113,7 +113,7 @@ const SECTIONS: ManualSection[] = [
     title: 'Talking, typing, and being understood',
     paragraphs: [
       'Everything you can do by typing, you can also do by speaking. The two are the same assistant with the same abilities — not a full version and a cut-down one. If a request needs deeper thinking than a quick spoken reply allows, Kelion quietly hands it to its full reasoning brain and comes back with the answer.',
-      'Kelion understands and replies in dozens of languages, spoken and written. It follows the language you use — switch mid-conversation and it switches with you.',
+      'Kelion understands and replies in many languages, spoken and written. It follows the language you use — switch mid-conversation and it switches with you.',
     ],
   },
   {
@@ -144,7 +144,7 @@ const SECTIONS: ManualSection[] = [
   {
     title: 'Privacy',
     paragraphs: [
-      'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. You can delete your account and everything in it at any time — the link is at the bottom of every page.',
+      'Your conversations, memory, notes, voice and face data belong to your account and are never shared with another user. You can delete your account and everything in it at any time, from your account settings.',
     ],
   },
 ]
@@ -195,6 +195,7 @@ export const MANUAL_CAPS: Record<string, { what: string; say: string }> = {
   wikipedia_lookup: { what: 'Looks something up and explains it', say: '"who built this bridge?"' },
   convert_currency: { what: 'Converts between currencies at today\'s rate', say: '"how much is 200 euro in pounds?"' },
   get_time: { what: 'The time and date where you are', say: '"what time is it in Tokyo?"' },
+  lookup_address: { what: 'Turns your coordinates into an address and postcode, or the other way round', say: '"what\'s the postcode here?"' },
 
   // Eyes and grounding
   look: { what: 'Looks through your camera at you or at what you show it', say: '"what is this part?"' },

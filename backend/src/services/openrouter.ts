@@ -109,6 +109,41 @@ export function toModel(m: RawModel): CatalogModel | null {
   }
 }
 
+// ── LIVE PER-MODEL PRICE LOOKUP ─────────────────────────────────────────────
+// The owner's standing order: "the cost table is not real — show real, stop
+// fabricating". A model's price is NEVER written by hand anywhere else in the
+// codebase: it is read from the live /models catalog (which OpenRouter keeps
+// current) and looked up here. Pure matcher, kept separate from the network so
+// it stays under test.
+/** Finds a model's live price in an already-fetched catalog. Accepts the exact
+ *  OpenRouter id, the id without the `:free` suffix, or the bare model name
+ *  after the provider slash (e.g. "gemini-2.5-flash"). null = not in the live
+ *  catalog → the caller must label any fallback as an estimate. */
+export function priceFromCatalog(
+  cat: Catalog,
+  modelId: string,
+): { promptPerM: number; completionPerM: number } | null {
+  const wanted = modelId.trim().toLowerCase()
+  if (!wanted) return null
+  const bare = wanted.split('/').pop() ?? wanted
+  const all = [...cat.chat, ...cat.work]
+  const m =
+    all.find((x) => x.id.toLowerCase() === wanted) ??
+    all.find((x) => x.id.toLowerCase().replace(/:free$/, '') === wanted.replace(/:free$/, '')) ??
+    all.find((x) => (x.id.toLowerCase().split('/').pop() ?? '').replace(/:free$/, '') === bare.replace(/:free$/, ''))
+  return m ? { promptPerM: m.promptPerM, completionPerM: m.completionPerM } : null
+}
+
+/** The LIVE per-1M-token price of a model, from the cached OpenRouter catalog.
+ *  null = the catalog couldn't be read or the model isn't in it — NEVER
+ *  silently 0, so the caller can't present a failed lookup as "free". */
+export async function getLiveModelPricePerM(
+  modelId: string,
+): Promise<{ promptPerM: number; completionPerM: number } | null> {
+  const cat = await getCatalog().catch(() => null)
+  return cat ? priceFromCatalog(cat, modelId) : null
+}
+
 /** Fetches the live catalog (with short cache) and groups it into selectable tiers. */
 export async function getCatalog(force = false): Promise<Catalog> {
   if (!force && cache && Date.now() - cache.fetchedAt < CATALOG_TTL_MS) return cache
@@ -445,6 +480,11 @@ export interface OrChatResult {
   costUsd: number
   model: string
   stop: string
+  /** REAL token counts from the provider's `usage` (0 only when the provider
+   *  didn't send them). Never hand-filled — an adapter that returns literal
+   *  zeros here is fabricating a measurement. */
+  inputTokens: number
+  outputTokens: number
 }
 
 // ── SINGLE SOURCE for the OpenRouter request (headers + fetch + body) ─────────
@@ -502,7 +542,7 @@ async function orCall(
   opts: BrainCallOpts,
   stream: boolean,
 ): Promise<Response | OrChatResult> {
-  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key' }
+  if (!config.openrouter.key) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key', inputTokens: 0, outputTokens: 0 }
   return orFetch(orBody(model, messages, tools, opts, stream))
 }
 
@@ -524,6 +564,8 @@ export async function openrouterChatStream(
 
   let text = ''
   let costUsd = 0
+  let inputTokens = 0
+  let outputTokens = 0
   let served = model
   let stop = 'stop'
   // Tool calls arrive fragmented, by index; we assemble them.
@@ -537,11 +579,13 @@ export async function openrouterChatStream(
         delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
         finish_reason?: string
       }[]
-      usage?: { cost?: number }
+      usage?: { cost?: number; prompt_tokens?: number; completion_tokens?: number }
       model?: string
     }
     if (ev.model) served = ev.model
     if (ev.usage?.cost != null) costUsd = Number(ev.usage.cost)
+    if (ev.usage?.prompt_tokens != null) inputTokens = Number(ev.usage.prompt_tokens) || 0
+    if (ev.usage?.completion_tokens != null) outputTokens = Number(ev.usage.completion_tokens) || 0
     const choice = ev.choices?.[0]
     if (!choice) return
     if (choice.finish_reason) stop = choice.finish_reason
@@ -563,7 +607,7 @@ export async function openrouterChatStream(
   const toolCalls: OrToolCall[] = [...calls.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, c]) => ({ id: c.id || `call_${c.name}`, type: 'function', function: { name: c.name, arguments: c.args } }))
-  return { text, toolCalls, costUsd, model: served, stop }
+  return { text, toolCalls, costUsd, model: served, stop, inputTokens, outputTokens }
 }
 
 /**
@@ -583,7 +627,7 @@ export async function openrouterChat(
   if (!r.ok) throw new Error(`openrouter ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
   const j = (await r.json()) as {
     choices?: { message?: { content?: string; tool_calls?: OrToolCall[] }; finish_reason?: string }[]
-    usage?: { cost?: number }
+    usage?: { cost?: number; prompt_tokens?: number; completion_tokens?: number }
     model?: string
   }
   const choice = j.choices?.[0]
@@ -593,6 +637,8 @@ export async function openrouterChat(
     costUsd: Number(j.usage?.cost ?? 0),
     model: j.model ?? model,
     stop: choice?.finish_reason ?? 'stop',
+    inputTokens: Number(j.usage?.prompt_tokens ?? 0) || 0,
+    outputTokens: Number(j.usage?.completion_tokens ?? 0) || 0,
   }
 }
 

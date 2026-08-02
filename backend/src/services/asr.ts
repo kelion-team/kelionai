@@ -1,6 +1,7 @@
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { normalizeLang } from './tts.js'
+import { googleServiceAccount } from './googleCreds.js'
 
 // Shared Google Cloud Speech-to-Text v2 (chirp_3) transcription. ONE
 // implementation used by BOTH the session-gated /api/asr route (browser sends a
@@ -11,15 +12,19 @@ import { normalizeLang } from './tts.js'
 
 // THE PROVEN REGION (live matrix, 10 Jul): chirp_3 does NOT EXIST in
 // us-central1 — it exists in the 'us' and 'eu' multi-regions. 'eu' = minimum
-// latency for European users. The same region for streaming (asr-stream.ts).
-const REGION = 'eu'
+// latency for European users. SINGLE source: asr-stream.ts (the streaming
+// twin) imports these instead of keeping its own copy.
+export const GOOGLE_STT_REGION = 'eu'
+// The most advanced model Adrian asked for: chirp_3 EVERYWHERE (batch,
+// streaming, full-duplex voice).
+export const GOOGLE_STT_MODEL = 'chirp_3'
 
 let auth: GoogleAuth | null = null
 let projectId = ''
 function getAuth(): GoogleAuth | null {
-  if (!config.googleServiceAccountJson) return null
   if (!auth) {
-    const creds = JSON.parse(config.googleServiceAccountJson) as { project_id?: string }
+    const creds = googleServiceAccount()
+    if (!creds) return null
     projectId = creds.project_id ?? ''
     auth = new GoogleAuth({
       credentials: creds as Record<string, unknown>,
@@ -129,7 +134,7 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
   try {
     const token = await a.getAccessToken()
     if (!token) return { ok: false, status: 502, error: 'asr_auth_failed' }
-    const url = `https://${REGION}-speech.googleapis.com/v2/projects/${projectId}/locations/${REGION}/recognizers/_:recognize`
+    const url = `https://${GOOGLE_STT_REGION}-speech.googleapis.com/v2/projects/${projectId}/locations/${GOOGLE_STT_REGION}/recognizers/_:recognize`
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -137,8 +142,8 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
         config: {
           // chirp_3 EVERYWHERE (Adrian, 10 Jul). Streaming is already
           // chirp_3; the batch path and the full-duplex voice use the same
-          // model.
-          model: 'chirp_3',
+          // model — the single constant above.
+          model: GOOGLE_STT_MODEL,
           languageCodes: langHint ? [langHint] : ['auto'],
           ...decodingConfig,
           features: { enableAutomaticPunctuation: true },
