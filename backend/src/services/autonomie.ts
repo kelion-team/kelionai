@@ -284,7 +284,9 @@ const MISIUNE: Sarcina[] = [
       `MISIUNE REVOLUT, pasul 4 din 5 — CAPĂTUL DINSPRE CLIENT.\n\n` +
       `Ruta /api/billing/checkout dă deja {url, code, amount, currency} — linkul Revolut al ` +
       `ownerului plus codul unic. Ce lipsește e drumul văzut de om, cap-coadă:\n` +
-      `  • sume la alegere (10 / 15 / 20 / altă sumă), nu una singură;\n` +
+      `  • sume la alegere, nu una singură — preseturi + sumă liberă, în acord cu regula ` +
+      `    VIE din validateTopUp (routes/billing.ts): o sumă pe care serverul ar respinge-o ` +
+      `    nu se oferă în interfață (regula se citește din cod, nu se copiază aici);\n` +
       `  • codul afișat MARE, cu buton de copiere, și scris limpede unde se pune: la ` +
       `    referință/notă, în pagina Revolut. Dacă omul nu-l scrie, plata nu se potrivește ` +
       `    singură — deci instrucțiunea e parte din funcționalitate, nu decor;\n` +
@@ -419,9 +421,9 @@ async function randuriDeFacut(): Promise<Sarcina[]> {
 // plus extended autonomous capabilities for learning and development."
 //
 // Half already existed and worked: when a user asks for something Kelion can't
-// do, it gets written to `capability_gaps` (the `log_gap` tool), and
-// `triageGaps()` has him triage his own list — "DE IMPLEMENTAT" or closed as a
-// duplicate.
+// do, it gets written to `capability_gaps` (the `log_unsupported_request`
+// tool), and `triageGaps()` has him triage his own list — "DE IMPLEMENTAT" or
+// closed as a duplicate.
 //
 // The broken half came after: NOBODY built what he marked "DE IMPLEMENTAT".
 // The list sat there. So he saw what he lacked but didn't develop — exactly

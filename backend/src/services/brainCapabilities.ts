@@ -188,7 +188,7 @@ export function inventarulMeu(doarAdmin = true): string {
     `CE POȚI, CONCRET — inventarul tău complet (${vizibile.length} capabilități, ` +
     `toate ACTIVE și apelabile direct, chiar acum):\n${randuri.join('\n')}\n` +
     `Nu ceri voie ca să folosești ce e în lista asta și nu spui „nu pot" pentru ` +
-    `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_gap ` +
+    `ceva ce e aici. Dacă îți lipsește ceva ce NU e în listă, notează-l cu log_unsupported_request ` +
     `sau cere-ți unealta cu propose_tool — nu te opri la „nu am".`
   )
 }
