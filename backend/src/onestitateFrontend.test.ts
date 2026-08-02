@@ -108,3 +108,20 @@ describe('gestul necunoscut lasă urmă', () => {
     expect(panou).toMatch(/gest necunoscut de la server/)
   })
 })
+
+describe('panoul banilor nu mai moare cu un câmp dispărut (Adrian, 2 aug: „mai jos nu mai e nimic")', () => {
+  const adminPanel = readFileSync(cale('../../frontend/src/components/AdminPanel.tsx'), 'utf8')
+  const rutaAdmin = readFileSync(cale('./routes/admin.ts'), 'utf8')
+  it('serverul trimite din nou expenses (murise tăcut cu stripe.ts, #624)', () => {
+    expect(rutaAdmin).toMatch(/expenses: await cheltuieliAplicatiei\(\)\.catch\(\(\) => \[\]\)/)
+  })
+  it('blocul de stare se afișează pe circuit, NU pe expenses', () => {
+    // Garda veche ascundea citirea plăților, autonomia, dovezile și pauza —
+    // TOT — când un câmp secundar lipsea. Nu are voie să revină.
+    expect(adminPanel).not.toMatch(/\{\(circuit\?\.expenses\?\.length \?\? 0\) > 0 && \(\s*<div className="or-wallet">/)
+    expect(adminPanel).toMatch(/\{circuit && \(\s*<div className="or-wallet">/)
+  })
+  it('rândul furnizorilor e gardat LOCAL, fără aserțiuni non-null', () => {
+    expect(adminPanel).not.toContain('circuit!.expenses!')
+  })
+})

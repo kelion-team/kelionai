@@ -880,7 +880,13 @@ export default function AdminPanel({
                 goes straight to the owner, and the providers are paid with his card.
                 What remains useful here is the shortest path to where the card gets
                 changed, at each provider. */}
-                {(circuit?.expenses?.length ?? 0) > 0 && (
+                {/* THE GUARD THAT KILLED THE PANEL (Adrian, Aug 2: „mai jos nu
+                mai e nimic"): this block was gated on `expenses` — a field
+                built in stripe.ts that silently DIED when Stripe was removed
+                (#624). Since Aug 1 the payment reader, the autonomy row, the
+                proofs and the pause were ALL invisible. The status readings
+                gate on `circuit` now; only the provider row needs expenses. */}
+                {circuit && (
                   <div className="or-wallet">
                     <div className="or-wallet-main">
                       <span className="or-wallet-label">Furnizorii plătiți cu cardul tău</span>
@@ -1036,9 +1042,10 @@ export default function AdminPanel({
                         )}
                       </span>
                     )}
+                    {(circuit.expenses?.length ?? 0) > 0 && (
                     <span className="or-wallet-sub">
                       Unde se schimbă cardul, la fiecare:{' '}
-                      {circuit!.expenses!
+                      {(circuit.expenses ?? [])
                         .filter((e) => e.configured)
                         .map((e, i) => (
                           <span key={e.name}>
@@ -1058,6 +1065,7 @@ export default function AdminPanel({
                           </span>
                         ))}
                     </span>
+                    )}
                   </div>
                 )}
                 <div className="fin-breakdown">

@@ -31,6 +31,8 @@ import { browserType, setModDiscret, browserRead, mascheazaCifre } from './brows
 import type { BrowserResult } from './browser.js'
 import { voceRecenta } from './adminLock.js'
 import { loadKv, saveKv } from '../db.js'
+import { config } from '../config.js'
+import type { ExpenseLine } from '../shared/api-types.js'
 
 /** The fields it can fill in. Their names do NOT give away the value. */
 export type CampCard = 'numar' | 'expirare' | 'cvc' | 'nume' | 'cod_postal'
@@ -152,6 +154,49 @@ export async function stareFurnizori(): Promise<StareFurnizor[]> {
 /** The proof for the mission: at least one provider with automatic payment ON. */
 export async function platiAutomatePornite(): Promise<boolean> {
   return (await stareFurnizori()).some((f) => f.automat)
+}
+
+/** The application's expenses and where each is paid from — the `expenses`
+ *  field of the money circuit. IT USED TO LIVE IN stripe.ts and DIED WITH IT
+ *  (Aug 1, #624): nobody noticed that removing Stripe silently removed this
+ *  list, and the panel — whose whole status block was gated on it — went
+ *  blank ("mai jos nu mai e nimic", Adrian, Aug 2). Rebuilt HERE, next to the
+ *  kv it enriches from: `configured` is the key existing in config (a read,
+ *  not a promise), `cardPus`/`platiAutomate` come ONLY from what `card_gata`
+ *  MEASURED on the provider's page — absent if nobody was ever there, because
+ *  "I don't know" must never be written as "no" (rule #1). */
+export async function cheltuieliAplicatiei(): Promise<ExpenseLine[]> {
+  const masurat = await stareFurnizori()
+  const gaseste = (nume: string): StareFurnizor | undefined =>
+    masurat.find((f) => f.furnizor.toLowerCase().includes(nume.toLowerCase()))
+  const linie = (
+    name: string,
+    what: string,
+    configured: boolean,
+    billing: string,
+    billingUrl?: string,
+  ): ExpenseLine => {
+    const m = gaseste(name)
+    return {
+      name,
+      what,
+      configured,
+      billing,
+      ...(billingUrl ? { billingUrl } : {}),
+      ...(m ? { cardPus: m.card, platiAutomate: m.automat } : {}),
+    }
+  }
+  return [
+    linie('OpenRouter', 'the central brain (AI models)', !!config.openrouter.key, 'your card', 'https://openrouter.ai/settings/credits'),
+    linie('OpenAI', 'the reserve voice and ears', !!config.openai.key, 'your card', 'https://platform.openai.com/settings/organization/billing/overview'),
+    linie('Serper', 'the web search', !!config.serperKey, 'your card', 'https://serper.dev/dashboard'),
+    linie(
+      'Google',
+      'the Chirp 3 voice and ears',
+      !!(config.googleTtsKey || config.googleServiceAccountJson),
+      'free tier (1M chars/month)',
+    ),
+  ]
 }
 
 async function noteazaFurnizor(s: StareFurnizor): Promise<void> {

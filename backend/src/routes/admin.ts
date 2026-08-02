@@ -40,6 +40,7 @@ import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
 import { stareAutonomie } from '../services/autonomie.js'
+import { cheltuieliAplicatiei } from '../services/cardFurnizor.js'
 import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
 import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
@@ -570,6 +571,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // the panel couldn't tell "nobody paid" apart from "I can't read the
     // account" — exactly the confusion that cost a whole day on 30 Jul.
     return reply.send({
+      // `expenses` DIED SILENTLY with Stripe (#624) — it was built in
+      // stripe.ts — and the panel's whole status block was gated on it, so
+      // "Citirea plăților", the autonomy row, the proofs and the pause were
+      // ALL invisible since Aug 1 ("mai jos nu mai e nimic", Adrian, Aug 2).
+      // Rebuilt in cardFurnizor.ts, from config keys + what card_gata measured.
+      expenses: await cheltuieliAplicatiei().catch(() => []),
       citirePlati: stareCitirePlati(),
       // `autonomie` = the last pass of the loop that gives Kelion work WITHOUT
       // anyone asking (Adrian, 30 Jul: "make it autonomous"). Shown for the
