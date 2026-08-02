@@ -192,7 +192,23 @@ export const config = {
     // task is heavy (selectedBrainModel in chat.ts). So: "hello" on Gemma,
     // "find the cause of the bug across the whole repo" on Ultra. Without him
     // pressing anything.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
+    //
+    // ── 2 Aug, THE MEASURED REVERSAL (the 38-second weather turn) ──────────
+    //
+    // The "fast BASE" assumption above was re-measured with the REAL Kelion
+    // payload (16.7k-char system prompt + 63 tools, weather question, direct
+    // API calls from production, no Kelion code in the path):
+    //
+    //   gemma-4-26b-a4b:free   22.2s round 1 (and NO tool call) + 36.9s round 2
+    //                          — live, the same day: 70s then EMPTY → rotation
+    //   nemotron-3-ultra:free   6.0s round 1 (CORRECT tool call) + 3.2s round 2
+    //
+    // Gemma was neither fast nor reliable on the real payload — the exact
+    // profile of the 38s turns. Ultra is 4x faster AND thinks (the model
+    // probe: 4/4 with reasoning tokens). Light turns no longer come here at
+    // all (they start on gemini-direct — see chat.ts), so this tier serves
+    // only HEAVY turns, which is exactly what Ultra was chosen for on Jul 31.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
     // The FINAL 'top' tier — same model. There's nothing left to escalate
     // above it: it's the most capable free brain that exists. Escalation
     // stays in the code for the day the top tier becomes a paid model.

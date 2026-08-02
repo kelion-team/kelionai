@@ -52,6 +52,7 @@ import {
   REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
+import { primulCastigator } from '../services/cursa.js'
 import { needsToolForAnswer, autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
 import { brainComplete, describeScene } from '../services/brain.js'
@@ -1968,6 +1969,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // default GPT. All tools + persona + memory identical regardless of model;
     // streaming → instant first word. No OpenRouter key = no brain (no Kimi/GLM
     // safety net, removed permanently) → honest message in catch.
+    // THE TURN CLOCK (Aug 2 — the latency mission): one line at the end of the
+    // turn says how long the WHOLE brain section took, on which model, in how
+    // many rounds. Together with the per-round [TIMP] lines in the
+    // orchestrator, a slow turn is decomposed, not guessed.
+    const tCreier = Date.now()
     try {
       if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
@@ -2082,6 +2088,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // safe only if no text has flowed to the user yet (otherwise it would
       // duplicate).
       let orchestratorModel = orChatModel
+      // GEMINI PRIMARY ON THE LIGHT PATH — MEASURED, NOT GUESSED (Aug 2 probe,
+      // the REAL weather-turn payload: 16.7k-char system + 63 tools):
+      //   google-direct/gemini-2.5-flash   1.2s round 1 (correct tool call) + 1.0s round 2
+      //   nvidia/nemotron-3-ultra :free    6.0s + 3.2s (correct tool call)
+      //   google/gemma-4-26b-a4b :free    22.2s (NO tool call) + 36.9s — and
+      //   live, the same day: 70s then EMPTY → [CHAT MUTE] → silent rotation.
+      // The light-turn race below has elected gemini-direct EVERY single time
+      // for chit-chat; but turns that need a tool (weather, maps, search —
+      // needsToolForAnswer) SKIP the race and were starting on the free
+      // OpenRouter pool: that is where the 38 seconds went. Now the sequential
+      // path starts where the race already finishes. The safety chain is
+      // unchanged: gemini failure → the free-pool rotation below (with the
+      // dispatcher, the failure memory and the paid reserve).
+      // NOT a demotion (iron rule §14): gemini-2.5-flash is the owner's own
+      // "primary" (Jul 27) and strictly stronger than the :free pool; heavy
+      // turns keep escalating to the work/top brain as before.
+      if (!heavyTurn && geminiDirectAvailable()) {
+        const geminiLight = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+        if (eSanatos(geminiLight)) orchestratorModel = geminiLight
+      }
       // ── WHEN THE BRAIN IS BLIND, SIGHT IS DELEGATED (Adrian, Jul 31) ───────
       //
       // Him: "Nemotron 3 Ultra 550B remains, who does the seeing?"
@@ -2296,7 +2322,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             elibereazaSlot(id)
           }
         })
-        const castigator = (await Promise.all(curse)).find((c): c is Castigator => c !== null)
+        const tCursa = Date.now()
+        // FIRST WINNER WINS (Aug 2 — measured live: Promise.all made the user
+        // wait for the SLOWEST racer, 18.6s for a chit-chat turn, even though
+        // gemini-direct had answered in 2-4s). primulCastigator resolves on
+        // the first GOOD answer; the losers keep running in the background
+        // (their slots release in `finally`, their failures still get marked).
+        const castigator = await primulCastigator(curse)
         if (castigator) {
           orchestratorModel = castigator.id
           // The winner's text flows whole — chit-chat is short, and the
@@ -2306,7 +2338,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           reply.raw.write(castigator.curat)
           voice.feed(castigator.curat)
           r = castigator.rez
-          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți`)
+          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți, ${Date.now() - tCursa}ms`)
         }
       }
       // THE DISPATCHER (Adrian, Aug 1 — „să scaleze pe o pungă comună"): a
@@ -2375,6 +2407,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
       void recordCost(user.email, 'chat', r.costUsd)
+      console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${Date.now() - tCreier}ms`)
     } catch (e) {
       // The brain failed — honest, never silent. No Kimi/GLM safety net
       // (removed).

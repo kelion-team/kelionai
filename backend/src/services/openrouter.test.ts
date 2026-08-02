@@ -121,7 +121,11 @@ describe('openrouter catalog', () => {
     // escalation. Now it is on both.
     // It has no vision — no longer matters: vision gets DELEGATED (see
     // vedereaDelegata).
-    expect(await resolveModel('work', null)).toBe('google/gemma-4-26b-a4b-it:free')
+    // AUG 2, MEASURED: on the real payload gemma-4-26b took 22s+37s and called
+    // no tool, while Ultra took 6s+3.2s with the correct tool call (the full
+    // table is in config.ts). The work default is Ultra — the fastest free
+    // model THAT THINKS, measured, not picked from a spec sheet.
+    expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
@@ -134,13 +138,13 @@ describe('openrouter catalog', () => {
   it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
     const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
     expect(cerut.fellBack).toBe(true)
-    expect(cerut.model).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(cerut.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
   it('fără nicio cerere, implicitul NU e o cădere (n-a fost respins nimic)', async () => {
     const implicit = await resolveModelChecked('work', null)
     expect(implicit.fellBack).toBe(false)
-    expect(implicit.model).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(implicit.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
   it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {
