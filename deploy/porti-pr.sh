@@ -44,7 +44,7 @@ GH=https://api.github.com/repos/kelion-team/kelionai
 ruleaza_portile() {
   local dir=$1
   R_TIPURI=PICĂ; R_TESTE=PICĂ; R_BUILD=PICĂ
-  R_DUP=PICĂ; R_EXP=PICĂ; R_SINT=PICĂ; DETALII=''
+  R_DUP=PICĂ; R_EXP=PICĂ; R_SINT=PICĂ; R_BOOT=PICĂ; DETALII=''
 
   ( cd "$dir/backend" && { npm ci --no-audit --no-fund || npm install --no-audit --no-fund; } ) >/dev/null 2>&1
   ( cd "$dir/backend" && npx tsc --noEmit ) >/dev/null 2>&1 && R_TIPURI=TRECE
@@ -70,9 +70,21 @@ ruleaza_portile() {
   ( cd "$dir" && node scripts/verifica-exporturi.mjs ) >/dev/null 2>&1 && R_EXP=TRECE
   ( cd "$dir" && node scripts/verifica-sintaxa.mjs ) >/dev/null 2>&1 && R_SINT=TRECE
 
+  # BOOTUL PE DIST, CU NODE CURAT — poarta care lipsea când a căzut producția
+  # (2 aug, 93be3a6): un ciclu de importuri a omorât bootul cu ReferenceError,
+  # iar tsc + vitest + build erau TOATE verzi — transformele lor de module nu
+  # sunt Node-ul containerului. Singura dovadă că aplicația chiar pornește e
+  # să o pornești: build de emisie + `node dist/index.js` pe un port liber;
+  # „Server listening" în 20s = TRECE. Fără env — aplicația pornește și goală
+  # (dovedit), iar poarta măsoară BOOTUL, nu configurarea.
+  R_BOOT=PICĂ
+  if ( cd "$dir/backend" && npm run build ) >/dev/null 2>&1; then
+    ( cd "$dir/backend" && PORT=18099 timeout 20 node dist/index.js 2>&1 | grep -qm1 'Server listening' ) && R_BOOT=TRECE
+  fi
+
   VERDICT=TRECE
   local r
-  for r in "$R_TIPURI" "$R_TESTE" "$R_BUILD" "$R_DUP" "$R_EXP" "$R_SINT"; do
+  for r in "$R_TIPURI" "$R_TESTE" "$R_BUILD" "$R_DUP" "$R_EXP" "$R_SINT" "$R_BOOT"; do
     [ "$r" = 'PICĂ' ] && VERDICT=PICĂ
   done
 }
@@ -90,6 +102,7 @@ scrie_raportul() {
 |---|---|
 | backend — \`tsc --noEmit\` | $(ico "$R_TIPURI") $R_TIPURI |
 | backend — \`vitest run\` | $(ico "$R_TESTE") $R_TESTE |
+| backend — bootul pe \`dist\` (Node curat) | $(ico "$R_BOOT") $R_BOOT |
 | frontend — \`npm run build\` | $(ico "$R_BUILD") $R_BUILD |
 | cod duplicat (jscpd) | $(ico "$R_DUP") $R_DUP |
 | exporturi fără utilizator | $(ico "$R_EXP") $R_EXP |
