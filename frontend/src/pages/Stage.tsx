@@ -248,6 +248,15 @@ interface BrainCredit {
       low?: boolean
       live?: boolean
     }
+    /** The REAL OpenAI month-to-date spend (USD), from the provider's costs
+     *  API. `live: false` = the read failed or OPENAI_USAGE_KEY is missing —
+     *  the bar writes "⚠ OpenAI", NEVER "$0.00": a failed read is not a zero
+     *  spend (the same rule as the OpenRouter pill). */
+    openai?: {
+      live: boolean
+      monthUsd?: number
+      error?: string
+    }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
      *  NEVER zeros: "0.0 GB / 0%" would look identical to a dead server. */
@@ -947,6 +956,27 @@ export default function Stage({ user }: { user: User }) {
                   : '⚠ OpenRouter'}
               </button>
             )}
+            {/* THE OPENAI PILL (Adrian: "REAL everywhere, zero fabrications"),
+            IMMEDIATELY to the right of the OpenRouter one: the REAL month-to-date
+            spend read from OpenAI's own costs API — the figure the "voice_minutes"
+            estimate in the Money tab can be checked against. Key missing or read
+            failed → "⚠ OpenAI", never "$0.00". */}
+            {brainCredit && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => window.open('https://platform.openai.com/usage', '_blank', 'noopener')}
+                title={
+                  brainCredit.openai?.live
+                    ? `OpenAI (vocea): $${(brainCredit.openai.monthUsd ?? 0).toFixed(2)} cheltuiți luna asta — măsurat din API-ul OpenAI · click pentru detalii`
+                    : 'Nu pot citi cheltuiala OpenAI (OPENAI_USAGE_KEY lipsește sau citirea a picat)'
+                }
+              >
+                {brainCredit.openai?.live
+                  ? `OpenAI $${(brainCredit.openai.monthUsd ?? 0).toFixed(2)}`
+                  : '⚠ OpenAI'}
+              </button>
+            )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
             permanently on the interface in the top bar”). Two figures, because they
             answer two different questions: RAM = does anything else FIT on the
@@ -985,15 +1015,33 @@ export default function Stage({ user }: { user: User }) {
             the app can actually read. */}
           </>
         )}
-        {/* Credit + top-up for ANY logged-in user (Adrian, Jul 24). From the
+        {/* Credit + top-up for regular users (Adrian, Jul 24). From the
         wallet menu you also reach Settings and the Gmail connection — the bar
-        no longer has the separate ⚙ wheel, nor the „Connect Google” button. */}
-        <WalletButton
-          onOpenSettings={() => setSettingsOpen(true)}
-          googleConnected={user.googleConnected}
-          onConnectGoogle={startGoogleConnect}
-          isAdmin={user.role === 'admin'}
-        />
+        no longer has the separate ⚙ wheel, nor the „Connect Google” button.
+        THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
+        his settings live in the Admin panel now, so the header keeps only
+        measurements (OpenRouter / OpenAI / VPS). */}
+        {user.role !== 'admin' && (
+          <WalletButton
+            onOpenSettings={() => setSettingsOpen(true)}
+            googleConnected={user.googleConnected}
+            onConnectGoogle={startGoogleConnect}
+            isAdmin={false}
+          />
+        )}
+        {/* „Add credits" for regular users (Adrian's order — the exact label,
+        English for all users): opens the existing credits panel (the wallet
+        menu with the 75/150/375 packs + custom amount ×5). */}
+        {user.role !== 'admin' && (
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => window.dispatchEvent(new Event('kelion:wallet-open'))}
+            title="Add credits — pick a pack or type an amount"
+          >
+            Add credits
+          </button>
+        )}
         <div className="who">
           {/* App downloads live ONLY on the landing page now — four QR codes,
               click-to-enlarge. The topbar stays clean for signed-in users. */}
@@ -1074,7 +1122,11 @@ export default function Stage({ user }: { user: User }) {
         </div>
       )}
       {adminOpen && (
-        <AdminPanel initialTab={adminTab} onClose={() => setAdminOpen(false)} />
+        <AdminPanel
+          initialTab={adminTab}
+          onClose={() => setAdminOpen(false)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       )}
 
       {contactOpen && <ContactModal onClose={() => setContactOpen(false)} />}

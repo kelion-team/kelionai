@@ -76,6 +76,11 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(byName.ENABLE_BANKING_PRIVATE_KEY_B64).toBeDefined()
   })
 
+  it('OPENAI_USAGE_KEY e cheie așteptată (pastila „OpenAI $x.xx" din bară)', () => {
+    const byName = Object.fromEntries(envCheck().map((v) => [v.name, v]))
+    expect(byName.OPENAI_USAGE_KEY).toBeDefined()
+  })
+
   // ── THE CORE OF ADRIAN'S PROBLEM, Jul 30 ───────────────────────────────
   // "all the keys have been written dozens of times" — and they were. Only he
   // had written GOOGLE_MAPS_API_KEY (the normal name), while the code read
@@ -101,8 +106,25 @@ describe('env-check — nicio valoare nu iese', () => {
   })
 
   it('lista de orfani nu conține valori, doar nume', () => {
-    process.env.STRIPE_ALT_KEY = SECRET
+    process.env.KELION_ALT_KEY = SECRET
     expect(JSON.stringify(envOrphans())).not.toContain(SECRET)
-    delete process.env.STRIPE_ALT_KEY
+    delete process.env.KELION_ALT_KEY
+  })
+
+  // ── STRIPE IS DEAD, AND THE DEAD DON'T GET ROWS (Adrian's order) ──────────
+  // The Tokens tab used to list STRIPE_CURRENCY / STRIPE_SECRET_KEY /
+  // STRIPE_WEBHOOK_SECRET — three rows for a provider that no longer exists
+  // in the app. Leftover env keys must not resurrect them, neither in the
+  // expected list nor as "orphans you have under another name".
+  it('Stripe e mort: cheile STRIPE_* nu apar NICĂIERI în raport', () => {
+    process.env.STRIPE_SECRET_KEY = SECRET
+    process.env.STRIPE_CURRENCY = 'gbp'
+    process.env.STRIPE_WEBHOOK_SECRET = SECRET
+    expect(envCheck().some((v) => v.name.includes('STRIPE'))).toBe(false)
+    expect(envOrphans().some((n) => n.includes('STRIPE'))).toBe(false)
+    expect(JSON.stringify(envSummary())).not.toContain('STRIPE')
+    delete process.env.STRIPE_SECRET_KEY
+    delete process.env.STRIPE_CURRENCY
+    delete process.env.STRIPE_WEBHOOK_SECRET
   })
 })
