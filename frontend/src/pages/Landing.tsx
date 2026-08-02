@@ -11,6 +11,7 @@ import { deviceFingerprint } from '../lib/fingerprint'
 import { strings } from '../lib/i18n'
 import { PUBLIC_TEXT as PT } from '../lib/publicText'
 import { fetchServerVersion, versionLabel, type ServerVersion } from '../lib/updateCheck'
+import { themeBg } from '../lib/theme'
 
 // The four install codes — one per platform. Click → enlarged for scanning.
 const QR_CODES = [
@@ -117,7 +118,9 @@ export default function Landing({ error }: { error?: string | null }) {
         {/* Same proven framing as the in-app stage: camera at chest height looking
             AT the chest (target), so the head and torso fill the hero. */}
         <Canvas shadows="percentage" camera={{ position: [0, 0.7, 2.4], fov: 40 }} dpr={[1, 2]}>
-          <color attach="background" args={['#0b0d12']} />
+          {/* Follows the page theme (Aug 2 — the bright background): the hero
+              no longer sits in a hard-coded black box. */}
+          <color attach="background" args={[themeBg()]} />
           {/* Self-contained lighting (no remote HDR): a third-party CDN failure
               must never leave the marketing hero black. Key + fill + cool rim. */}
           <ambientLight intensity={0.75} />

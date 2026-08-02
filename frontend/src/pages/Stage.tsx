@@ -29,6 +29,8 @@ import { startRecording, type RecordingHandle } from '../lib/recorder'
 import { loadServerPrefs, saveAvatarBox, loadLocalLang } from '../lib/prefs'
 import { keepScreenOn } from '../lib/wakelock'
 import { deviceFingerprint } from '../lib/fingerprint'
+import { renderMarkdown } from '../lib/markdown'
+import { themeBg, currentTheme, toggleTheme, type ThemeName } from '../lib/theme'
 
 // SAVING THE MONITOR CONTENT (Adrian, Jul 25: "you can't save what's on the
 // monitor"). Downloads a text/HTML as a local file — a clean name from the title.
@@ -107,6 +109,175 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
       <pre className="doc-text" style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: `${0.92 * zoom}em` }}>
         {text ?? 'Se încarcă…'}
       </pre>
+    </div>
+  )
+}
+
+// MARKDOWN on the monitor (Aug 2 — "the monitor must run every format the
+// skills provide"): fetched like any text file, then rendered FORMATTED with
+// the mini safe renderer (source escaped first — nothing injected executes).
+function MonitorMarkdown({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
+  const [html, setHtml] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setHtml(null)
+    setFailed(false)
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+      .then((t) => {
+        if (alive) {
+          setHtml(renderMarkdown(t.slice(0, 500_000)))
+          setTaskStatus(taskId, 'ok')
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }
+      })
+    return () => {
+      alive = false
+    }
+  }, [url, taskId])
+  if (failed)
+    return (
+      <div className="workspace-blocked">
+        <p>{uiStrings().wsFileFailed}</p>
+        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+      </div>
+    )
+  return (
+    <div className="workspace-doc">
+      {html === null ? (
+        <pre className="doc-text">Se încarcă…</pre>
+      ) : (
+        // eslint-disable-next-line react/no-danger -- renderMarkdown escapes the source first
+        <div className="doc-text md-view" style={{ fontSize: `${zoom}em` }} dangerouslySetInnerHTML={{ __html: html }} />
+      )}
+    </div>
+  )
+}
+
+// A SAVED .html PAGE on the monitor (Aug 2): runs like the playground 'app' —
+// fetched, then srcDoc in a sandbox WITHOUT allow-same-origin, so the page can
+// never reach the app's session (a plain <iframe src> could, same-origin).
+function MonitorHtmlFile({ url, taskId }: { url: string; taskId: string }) {
+  const [doc, setDoc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setDoc(null)
+    setFailed(false)
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+      .then((t) => {
+        if (alive) {
+          setDoc(t)
+          setTaskStatus(taskId, 'ok')
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }
+      })
+    return () => {
+      alive = false
+    }
+  }, [url, taskId])
+  if (failed)
+    return (
+      <div className="workspace-blocked">
+        <p>{uiStrings().wsFileFailed}</p>
+        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+      </div>
+    )
+  if (doc === null)
+    return (
+      <div className="workspace-doc">
+        <pre className="doc-text">Se încarcă…</pre>
+      </div>
+    )
+  return (
+    <iframe
+      title={url}
+      srcDoc={doc}
+      className="workspace-frame"
+      sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
+    />
+  )
+}
+
+// MEDIA WITH AN HONEST FALLBACK (Aug 2): a failed <img>/<video>/<audio> (a
+// codec the browser lacks — .mkv/.avi — or an inaccessible file) used to leave
+// a DEAD black box while Kelion claimed "it's on the monitor". Now the error
+// swaps in a plain explanation + the open/download link, and get_monitor hears
+// the truth through setTaskStatus('error').
+function MediaFailed({ url }: { url: string }) {
+  return (
+    <div className="workspace-blocked">
+      <p>{uiStrings().wsMediaFailed}</p>
+      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+    </div>
+  )
+}
+
+function MonitorImage({ url, title, taskId }: { url: string; title: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel-solid)' }}>
+      <img
+        src={url}
+        alt={title}
+        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        onLoad={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
+    </div>
+  )
+}
+
+function MonitorVideo({ url, taskId }: { url: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+      <video
+        src={url}
+        controls
+        style={{ maxWidth: '100%', maxHeight: '100%' }}
+        onLoadedData={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
+    </div>
+  )
+}
+
+function MonitorAudio({ url, taskId }: { url: string; taskId: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <MediaFailed url={url} />
+  return (
+    <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <audio
+        src={url}
+        controls
+        style={{ width: '100%', maxWidth: 520 }}
+        onLoadedData={() => setTaskStatus(taskId, 'ok')}
+        onError={() => {
+          setFailed(true)
+          setTaskStatus(taskId, 'error')
+        }}
+      />
     </div>
   )
 }
@@ -307,6 +478,11 @@ export default function Stage({ user }: { user: User }) {
   }
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // THE THEME TOGGLE (Aug 2 — the lighter background): the light palette is the
+  // default; this top-bar moon/sun flips back to the original dark identity
+  // (persisted by lib/theme). Held in state so the click re-renders — which
+  // also re-reads themeBg() for the avatar canvas behind.
+  const [theme, setTheme] = useState<ThemeName>(currentTheme())
   const [recording, setRecording] = useState(false)
   // Zoom/fit for the monitor text (request #27): A− / A+ scales the
   // readable content (doc + live console) so it's framed and legible.
@@ -759,35 +935,11 @@ export default function Stage({ user }: { user: User }) {
                 ) : task.url && task.kind === 'image' ? (
                   // ORICE IMAGINE (Adrian, 27 iul: „pe monitor orice tip de date").
                   // onLoad/onError → the real state, so Kelion factually sees it.
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0d12' }}>
-                    <img
-                      src={task.url}
-                      alt={task.title}
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                      onLoad={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
+                  <MonitorImage url={task.url} title={task.title} taskId={task.id} />
                 ) : task.url && task.kind === 'video' ? (
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                    <video
-                      src={task.url}
-                      controls
-                      style={{ maxWidth: '100%', maxHeight: '100%' }}
-                      onLoadedData={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
+                  <MonitorVideo url={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'audio' ? (
-                  <div className="workspace-doc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-                    <audio
-                      src={task.url}
-                      controls
-                      style={{ width: '100%', maxWidth: 520 }}
-                      onLoadedData={() => setTaskStatus(task.id, 'ok')}
-                      onError={() => setTaskStatus(task.id, 'error')}
-                    />
-                  </div>
+                  <MonitorAudio url={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'pdf' ? (
                   // PDF: the browser's native viewer, in a frame.
                   <DocFrame title={task.title} src={task.url} taskId={task.id} />
@@ -799,6 +951,12 @@ export default function Stage({ user }: { user: User }) {
                     src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(task.url)}`}
                     taskId={task.id}
                   />
+                ) : task.url && task.kind === 'markdown' ? (
+                  // MARKDOWN (Aug 2): rendered formatted, not raw text.
+                  <MonitorMarkdown url={task.url} zoom={monZoom} taskId={task.id} />
+                ) : task.url && task.kind === 'htmlfile' ? (
+                  // A saved .html page: runs sandboxed like the playground 'app'.
+                  <MonitorHtmlFile url={task.url} taskId={task.id} />
                 ) : task.url && task.kind === 'textfile' ? (
                   // Code / text / json / csv: we fetch the content and show it readable.
                   <MonitorTextFile url={task.url} zoom={monZoom} taskId={task.id} />
@@ -808,6 +966,13 @@ export default function Stage({ user }: { user: User }) {
                   <div className="workspace-blocked">
                     <p>Arhivă ({task.title}) — conținutul nu se poate previzualiza în pagină. O poți descărca:</p>
                     <a href={task.url} download className="composer-send">{t.wsDownloadArchive}</a>
+                  </div>
+                ) : task.url && task.kind === 'file' ? (
+                  // BINARIES without an in-page viewer (Aug 2 — epub/exe/apk/dmg/
+                  // fonts): an honest panel + download instead of a dead frame.
+                  <div className="workspace-blocked">
+                    <p>{task.title} — {t.wsFileNoPreview}</p>
+                    <a href={task.url} download className="composer-send">{t.wsDownloadFile}</a>
                   </div>
                 ) : task.url && isEmbeddable(task.url) ? (
                   <iframe
@@ -877,7 +1042,7 @@ export default function Stage({ user }: { user: User }) {
       <Canvas shadows="percentage" camera={{ position: [0, -0.25, 4.6], fov: 40 }} dpr={[1, 2]} gl={{ alpha: true }}>
         {/* Solid backdrop full-screen; TRANSPARENT in presentation (pip) mode so
             Kelion floats over the monitor content instead of sitting in a black box. */}
-        {!monitorOn && <color attach="background" args={['#0b0d12']} />}
+        {!monitorOn && <color attach="background" args={[themeBg()]} />}
         {/* Self-contained lighting (key + cool fill + rim) — NO remote HDR.
             `<Environment preset="city">` fetched a ~1MB HDR from an external CDN
             (githack/pmndrs) INSIDE the avatar's Suspense: on a fresh phone with a
@@ -1037,6 +1202,15 @@ export default function Stage({ user }: { user: User }) {
               Connect Google
             </button>
           )}
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setTheme(toggleTheme())}
+            title={theme === 'light' ? t.themeToDark : t.themeToLight}
+            aria-label={theme === 'light' ? t.themeToDark : t.themeToLight}
+          >
+            {theme === 'light' ? '☾' : '☀'}
+          </button>
           <button type="button" className="ghost" onClick={() => setContactOpen(true)}>
             Contact
           </button>

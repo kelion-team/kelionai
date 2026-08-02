@@ -86,6 +86,16 @@ export interface Strings {
   wsOpenFile: string
   wsPageBlocked: string
   wsDownloadArchive: string
+  // Aug 2 (the monitor runs every format): media that can't play (codec the
+  // browser lacks, e.g. .mkv/.avi) and binaries with no in-page viewer get an
+  // HONEST fallback + download, never a dead black box.
+  wsMediaFailed: string
+  wsFileNoPreview: string
+  wsDownloadFile: string
+  // THE THEME TOGGLE (Aug 2 — the lighter background): top-bar button that
+  // flips between the new light default and the original dark identity.
+  themeToDark: string
+  themeToLight: string
   wsClose: string
   wsCloseAll: string
   wsCopy: string
@@ -211,6 +221,11 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsOpenFile: 'Open the file ↗',
     wsPageBlocked: 'This page cannot be displayed here.',
     wsDownloadArchive: 'Download the archive ↓',
+    wsMediaFailed: "This media can't be played in the browser (unsupported format or codec).",
+    wsFileNoPreview: "This file type can't be previewed in the page — you can download it.",
+    wsDownloadFile: 'Download the file ↓',
+    themeToDark: 'Switch to the dark theme',
+    themeToLight: 'Switch to the light theme',
     wsClose: 'Close',
     wsCloseAll: 'Close everything',
     wsCopy: 'Copy',
@@ -323,6 +338,11 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     wsOpenFile: 'Deschide fișierul ↗',
     wsPageBlocked: 'Această pagină nu poate fi afișată aici.',
     wsDownloadArchive: 'Descarcă arhiva ↓',
+    wsMediaFailed: 'Acest fișier media nu poate fi redat în browser (format sau codec neacceptat).',
+    wsFileNoPreview: 'Acest tip de fișier nu se poate previzualiza în pagină — îl poți descărca.',
+    wsDownloadFile: 'Descarcă fișierul ↓',
+    themeToDark: 'Comută pe tema întunecată',
+    themeToLight: 'Comută pe tema luminoasă',
     wsClose: 'Închide',
     wsCloseAll: 'Închide tot',
     wsCopy: 'Copiază',

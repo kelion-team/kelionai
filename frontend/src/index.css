@@ -1,13 +1,52 @@
+/* THE LIGHT THEME (Adrian, Aug 2: „vreau să te gândești la un fundal mai
+luminos"). The whole app was near-black; the default is now a soft, pale
+blue-gray that rests the eyes — NOT orbital white. Everything themeable reads
+these variables, so the dark identity is kept intact one attribute away:
+`data-theme="dark"` on <html> restores the original palette exactly. */
 :root {
-  --bg: #0b0d12;
-  --panel: rgba(20, 24, 33, 0.72);
-  --text: #e7e9ee;
-  --muted: #9aa3b2;
-  --accent: #6ea8fe;
-  --border: rgba(255, 255, 255, 0.1);
+  --bg: #e9edf4;
+  --bg-soft: #f5f7fb; /* gradient centre — the lightest tone */
+  --bg-deep: #dbe2ec; /* gradient edge — the deepest tone, still light */
+  --panel: rgba(255, 255, 255, 0.75);
+  --panel-solid: #ffffff; /* opaque card surface (admin panel, wallet menu) */
+  --panel-2: #f0f3f8; /* raised card on a solid panel (fin-card, wallet rows) */
+  --panel-3: #e4e9f1; /* deepest inset surface (wallet dropdown base) */
+  --text: #1b2331;
+  --muted: #5a6577;
+  --accent: #2f66d0; /* deeper than the dark theme's — contrast on light */
+  --on-accent: #ffffff; /* text/icons sitting ON the accent colour */
+  --border: rgba(20, 30, 50, 0.14);
+  --line: #d5dce8; /* hairlines inside solid panels */
+  --ok: #1d7a46; /* status green readable on white */
+  --warn: #9a6a12; /* amber readable on white */
+  --danger: #c22f2f; /* status red readable on white */
+  color-scheme: light;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+}
+
+/* THE ORIGINAL DARK IDENTITY, PRESERVED — no toggle mechanism exists in the
+app (Aug 2), so this block is the way back: one attribute, no code forks. */
+[data-theme='dark'] {
+  --bg: #0b0d12;
+  --bg-soft: #141a28;
+  --bg-deep: #0b0d12;
+  --panel: rgba(20, 24, 33, 0.72);
+  --panel-solid: #11141b;
+  --panel-2: #12151c;
+  --panel-3: #0e1117;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #6ea8fe;
+  --on-accent: #0b0d12;
+  --border: color-mix(in srgb, var(--text) 10%, transparent);
+  --line: #2a2f3a; /* the dark theme's original hairline (a self-reference here
+                      would be a cyclic variable — invalid, so the real value) */
+  --ok: #57c98a;
+  --warn: #ffd27a;
+  --danger: #ff7a7a;
+  color-scheme: dark;
 }
 
 * {
@@ -34,7 +73,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: radial-gradient(circle at 50% 40%, #131722, #0b0d12 70%);
+  background: radial-gradient(circle at 50% 40%, var(--bg-soft), var(--bg-deep) 70%);
 }
 .boot-dot {
   width: 10px;
@@ -52,7 +91,8 @@ body {
   font-size: 40px;
   font-weight: 600;
   letter-spacing: -1px;
-  background: linear-gradient(90deg, #8fb6ff, #c9d8ff);
+  /* Brand gradient readable on BOTH themes: starts at the accent, ends lighter. */
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #ffffff));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -64,7 +104,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 35%, #141a28, #0b0d12 70%);
+  background: radial-gradient(circle at 50% 35%, var(--bg-soft), var(--bg-deep) 70%);
 }
 .login-card {
   width: min(92vw, 380px);
@@ -75,7 +115,7 @@ body {
   border-radius: 20px;
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 20px 60px rgba(20, 30, 50, 0.22);
 }
 .tagline {
   color: var(--muted);
@@ -103,7 +143,7 @@ body {
   transform: translateY(-1px);
 }
 .error {
-  color: #ff9a9a;
+  color: var(--danger);
   background: rgba(255, 80, 80, 0.1);
   border: 1px solid rgba(255, 80, 80, 0.3);
   border-radius: 8px;
@@ -122,7 +162,7 @@ body {
   height: 100svh;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
-  background: radial-gradient(circle at 30% 30%, #141a28, #0b0d12 70%);
+  background: radial-gradient(circle at 30% 30%, var(--bg-soft), var(--bg-deep) 70%);
   overflow: hidden;
 }
 .landing-hero {
@@ -138,7 +178,7 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent 55%, rgba(11, 13, 18, 0.85) 100%);
+  background: linear-gradient(90deg, transparent 55%, var(--bg-deep) 100%);
 }
 /* VISIBLE loading state over the 3D avatar (landing hero + in-app stage) so the
    area is NEVER a dead black screen while the ~9MB GLB downloads — otherwise a
@@ -154,18 +194,18 @@ body {
   justify-content: center;
   gap: 14px;
   pointer-events: none;
-  background: radial-gradient(circle at 50% 40%, #141a28, #0b0d12 72%);
+  background: radial-gradient(circle at 50% 40%, var(--bg-soft), var(--bg-deep) 72%);
 }
 .avatar-loading-spinner {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 3px solid rgba(110, 168, 254, 0.22);
-  border-top-color: #6ea8fe;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
   animation: avatar-spin 0.9s linear infinite;
 }
 .avatar-loading-label {
-  color: #cfe0ff;
+  color: var(--text);
   font-size: 14px;
   letter-spacing: 0.4px;
   font-weight: 600;
@@ -197,11 +237,11 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #cfe0ff;
+  color: var(--accent);
   font-size: 13px;
   padding: 8px 12px;
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  background: rgba(110, 168, 254, 0.1);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-radius: 10px;
   margin: 0 0 22px;
 }
@@ -243,7 +283,7 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(110, 168, 254, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .landing-manual li::after {
   content: '';
@@ -252,7 +292,7 @@ body {
   top: 4px;
   width: 5px;
   height: 8px;
-  border: solid #8fb6ff;
+  border: solid var(--accent);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -283,14 +323,14 @@ body {
   border-radius: 12px;
   font-size: 16px;
   font-weight: 600;
-  color: #0b0d12;
-  background: linear-gradient(90deg, #8fb6ff, #6ea8fe);
+  color: var(--on-accent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 82%, #ffffff), var(--accent));
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .cta-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 30px rgba(110, 168, 254, 0.4);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .cta-primary:disabled {
   opacity: 0.6;
@@ -309,7 +349,7 @@ body {
     height: 42svh;
   }
   .landing-hero-fade {
-    background: linear-gradient(180deg, transparent 55%, rgba(11, 13, 18, 0.9) 100%);
+    background: linear-gradient(180deg, transparent 55%, var(--bg-deep) 100%);
   }
   .landing-panel {
     /* Above any spill of the positioned hero — always visible. */
@@ -376,7 +416,7 @@ so it doesn't break the row; it changes by itself on any deploy (versionLabel). 
 /* Gap sent-to-execution marker: stays visible until the admin cleans it. */
 .gap-sent {
   font-size: 12px;
-  color: #4ade80;
+  color: var(--ok);
 }
 /* Server-load readout (bottom-left): small and discreet so it never collides
    with the composer — real percentages, refreshed every minute. */
@@ -401,10 +441,11 @@ so it doesn't break the row; it changes by itself on any deploy (versionLabel). 
 .work-ticker {
   margin-left: 14px;
   padding: 4px 12px;
-  border: 1px solid rgba(255, 179, 71, 0.35);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
   border-radius: 999px;
   font-size: 12px;
-  color: #ffb347;
+  /* Amber readable on BOTH themes (the hard #ffb347 washed out on the light one). */
+  color: var(--warn);
   max-width: 34vw;
   white-space: nowrap;
   overflow: hidden;
@@ -481,7 +522,7 @@ Romanian characters (â/ț/ș) or splitting words into individual letters. */
 }
 /* Admin "Magazine" tab: live store presence. */
 .store-live {
-  color: #4ade80;
+  color: var(--ok);
   text-decoration: none;
   font-weight: 600;
 }
@@ -512,16 +553,16 @@ Romanian characters (â/ț/ș) or splitting words into individual letters. */
   padding: 8px 18px;
   font: inherit;
   font-size: 14px;
-  color: #e9edf6;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .landing-contact-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.35);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text) 35%, transparent);
 }
 .landing-contact-link {
   background: none;
@@ -865,7 +906,7 @@ drag must follow the hand instantly), an overlay that catches the gestures. */
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: #07090d;
+  background: var(--bg);
   opacity: 0;
   pointer-events: none;
   transition: opacity 500ms ease;
@@ -989,7 +1030,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--bg, #11141b);
+  background: var(--panel-solid);
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
@@ -1005,6 +1046,53 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   border: 1px solid var(--border);
   border-radius: 12px;
   background: #fff;
+}
+/* MARKDOWN rendered on the monitor (Aug 2): comfortable reading styles over
+   the shared .doc-text surface — the raw-text era of .md files is over. */
+.md-view h1,
+.md-view h2,
+.md-view h3,
+.md-view h4 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.25;
+}
+.md-view h1:first-child,
+.md-view h2:first-child,
+.md-view h3:first-child {
+  margin-top: 0;
+}
+.md-view p {
+  margin: 0.45em 0;
+}
+.md-view ul {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.md-view code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md-view .md-code {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.md-view .md-code code {
+  background: none;
+  padding: 0;
+}
+.md-view a {
+  color: var(--accent);
+}
+.md-view hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.9em 0;
 }
 /* THE BUILDER'S PANEL on the monitor (Stage 4b) — Preluat→pas→Gata/Eșuat. */
 .build-surface {
@@ -1124,7 +1212,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .topbar .brand {
   font-weight: 600;
   letter-spacing: -0.3px;
-  color: #cdd7ea;
+  color: var(--text);
 }
 .who {
   display: flex;
@@ -1178,13 +1266,13 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
 .admin-day-header {
   position: sticky;
   top: 0;
-  background: var(--bg, #0b0d12);
+  background: var(--bg);
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   text-transform: capitalize;
   padding: 8px 4px 6px;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--line);
   margin: 10px 0 6px;
   z-index: 1;
 }
@@ -1217,7 +1305,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--accent);
-  border: 1px solid rgba(110, 168, 254, 0.4);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
   padding: 1px 6px;
 }
@@ -1231,7 +1319,7 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   font-size: 13px;
 }
 .ghost:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .ghost.rec-on {
   color: #ff5d5d;
@@ -1261,11 +1349,11 @@ crowded buttons”). The top clearance grows to match the wrapped bar. */
   font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.3px;
-  background: linear-gradient(90deg, #8fb6ff, #c9d8ff);
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #ffffff));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 2px 14px rgba(110, 168, 254, 0.25);
+  text-shadow: 0 2px 14px color-mix(in srgb, var(--accent) 25%, transparent);
   pointer-events: none;
 }
 
@@ -1325,8 +1413,8 @@ K streaming); the full ticker remains only in monitor mode, where the log hides.
   overflow-wrap: break-word;
 }
 .chat-msg.me .chat-msg-text {
-  background: rgba(110, 168, 254, 0.22);
-  border: 1px solid rgba(110, 168, 254, 0.35);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   color: var(--text);
   border-bottom-right-radius: 4px;
 }
@@ -1419,7 +1507,7 @@ divergent rules). */
   font-size: 20px;
 }
 .composer-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .composer-icon.live {
   color: #ff5d5d;
@@ -1427,7 +1515,7 @@ divergent rules). */
 }
 .composer-send {
   background: var(--accent);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-size: 19px;
   font-weight: 700;
 }
@@ -1508,7 +1596,7 @@ divergent rules). */
 .scenario-text {
   width: 100%;
   resize: vertical;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1567,9 +1655,9 @@ divergent rules). */
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.5;
-  color: #c5d2e6;
+  color: var(--text);
   padding: 2px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1581,7 +1669,7 @@ divergent rules). */
   margin-bottom: 8px;
   border: 1px solid rgba(255, 93, 93, 0.6);
   background: rgba(255, 93, 93, 0.15);
-  color: #ff8a8a;
+  color: var(--danger);
   border-radius: 999px;
   padding: 6px 16px;
   font-size: 13px;
@@ -1612,7 +1700,7 @@ divergent rules). */
     transparent 0deg,
     transparent 250deg,
     var(--accent) 312deg,
-    #cfe0ff 340deg,
+    color-mix(in srgb, var(--accent) 40%, #ffffff) 340deg,
     transparent 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -1676,7 +1764,7 @@ divergent rules). */
   cursor: pointer;
 }
 .fn-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .fn-item:disabled {
   opacity: 0.4;
@@ -1716,7 +1804,7 @@ itself. */
   height: min(86vh, 640px);
   display: flex;
   flex-direction: column;
-  background: #11141b;
+  background: var(--panel-solid);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
@@ -1833,7 +1921,7 @@ scroll; every <section> in admin is scrollable. */
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #12151c;
+  background: var(--panel-2);
 }
 .fin-label {
   font-size: 12px;
@@ -1873,7 +1961,7 @@ is used by the visitor analytics. */
 .flag-img {
   border-radius: 2px;
   vertical-align: -2px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
 }
 .vis-flagline {
   display: inline-flex;
@@ -1895,10 +1983,10 @@ is used by the visitor analytics. */
   transition: background 0.15s ease;
 }
 .vis-row.vis-clickable:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .vis-open {
-  color: #8ab4ff;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1911,7 +1999,7 @@ is used by the visitor analytics. */
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  background: var(--panel, #12151c);
+  background: var(--panel, #ffffff);
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
@@ -1923,14 +2011,14 @@ is used by the visitor analytics. */
 }
 .convo-sub {
   font-size: 12px;
-  color: #93a5c0;
+  color: var(--muted);
 }
 .convo-insight {
   padding: 10px 16px;
   font-size: 13px;
   line-height: 1.5;
-  color: #cdd7ea;
-  background: rgba(138, 180, 255, 0.08);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-bottom: 1px solid var(--border);
 }
 .convo-body {
@@ -1957,12 +2045,12 @@ is used by the visitor analytics. */
   letter-spacing: 0.5px;
 }
 .vis-badge.human {
-  color: #7ee2a8;
+  color: var(--ok);
   background: rgba(60, 200, 120, 0.14);
   border: 1px solid rgba(60, 200, 120, 0.35);
 }
 .vis-badge.bot {
-  color: #ff9a9a;
+  color: var(--danger);
   background: rgba(255, 80, 80, 0.12);
   border: 1px solid rgba(255, 80, 80, 0.35);
 }
@@ -2002,12 +2090,12 @@ is used by the visitor analytics. */
 }
 
 .vis-badge.kind-visit {
-  color: #9ecbff;
+  color: var(--accent);
   background: rgba(90, 160, 255, 0.12);
   border: 1px solid rgba(90, 160, 255, 0.35);
 }
 .vis-badge.kind-demo {
-  color: #d9b3ff;
+  color: #a855f7;
   background: rgba(160, 90, 255, 0.14);
   border: 1px solid rgba(160, 90, 255, 0.4);
 }
@@ -2046,7 +2134,7 @@ is used by the visitor analytics. */
   color: var(--text);
 }
 .admin-user:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .admin-user.sel {
   background: rgba(110, 168, 254, 0.15);
@@ -2122,8 +2210,8 @@ Clients only. */
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: #12151c;
-  border: 1px solid #2a2f3a;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px;
   min-width: 120px;
@@ -2136,10 +2224,10 @@ Clients only. */
 .wallet-menu-balance {
   font-size: 14px;
   padding: 4px 4px 6px;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--line);
   margin-bottom: 4px;
 }
-.wallet-menu-balance strong { color: #7ee2a8; }
+.wallet-menu-balance strong { color: var(--ok); }
 .wallet-menu-note {
   font-size: 11px;
   line-height: 1.35;
@@ -2160,8 +2248,8 @@ Clients only. */
 .wallet-custom input {
   flex: 1;
   min-width: 0;
-  background: #0e1117;
-  border: 1px solid #2a2f3a;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text);
   padding: 5px 8px;
@@ -2169,7 +2257,7 @@ Clients only. */
 }
 .wallet-menu-sep {
   height: 1px;
-  background: #2a2f3a;
+  background: var(--line);
   margin: 4px 0;
 }
 /* An obvious „＋” on the credit pill, so the top-up can't be missed. */
@@ -2180,8 +2268,8 @@ Clients only. */
 }
 /* At ≤5% a credit indicator stays blinking red — urgent but not blocking. */
 .blink-red {
-  color: #ff5b5b !important;
-  border-color: #ff5b5b !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
   animation: blink-red 1.1s ease-in-out infinite;
 }
 @keyframes blink-red {
@@ -2196,9 +2284,9 @@ Clients only. */
   left: 0;
   z-index: 41;
   white-space: nowrap;
-  background: #12151c;
+  background: var(--panel-2);
   color: var(--text);
-  border: 1px solid #2a2f3a;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 7px 12px;
   font-size: 12px;
@@ -2207,8 +2295,8 @@ Clients only. */
   animation: toast-in 0.35s ease;
 }
 .wallet-toast.urgent {
-  border-color: #ff5b5b;
-  color: #ffd0d0;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 /* The IN-BAR variant (permanent paywall): in the topbar's flow, not absolute —
 so it doesn't cover the monitor tab's title. */
@@ -2248,7 +2336,7 @@ so it doesn't cover the monitor tab's title. */
   gap: 8px;
   padding: 12px 16px;
   font-weight: 600;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--line);
 }
 .card-view-icon {
   font-size: 18px;
@@ -2271,13 +2359,13 @@ so it doesn't cover the monitor tab's title. */
   display: block;
   text-decoration: none;
   color: inherit;
-  background: #12151c;
-  border: 1px solid #232833;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 12px;
 }
 a.card-item:hover {
-  border-color: #3a4150;
+  border-color: var(--line);
 }
 .card-item-primary {
   font-weight: 600;
@@ -2314,16 +2402,16 @@ a.card-item:hover {
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 10px;
-  background: rgba(255,255,255,0.03);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 .inbox-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .inbox-from { font-weight: 700; color: var(--text); }
 .inbox-flag { font-size: 12px; font-weight: 700; }
-.inbox-flag.ok { color: #35e07f; }
+.inbox-flag.ok { color: var(--ok); }
 .inbox-flag.wait { color: #ffb020; }
-.inbox-subj { font-size: 13.5px; color: #cfd6dd; margin: 4px 0; }
+.inbox-subj { font-size: 13.5px; color: var(--text); margin: 4px 0; }
 .inbox-body { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; }
-.inbox-reply { font-size: 12.5px; color: #bfe8cf; margin-top: 6px; white-space: pre-wrap; }
+.inbox-reply { font-size: 12.5px; color: var(--text); margin-top: 6px; white-space: pre-wrap; }
 
 /* Microphone button in the composer (audio in → server → brain; zero voice in the front) */
 .composer-mic {
@@ -2332,7 +2420,7 @@ a.card-item:hover {
   height: 40px;
   border-radius: 50%;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   font-size: 17px;
   cursor: pointer;
@@ -2341,7 +2429,7 @@ a.card-item:hover {
   justify-content: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.composer-mic:hover { background: rgba(255, 255, 255, 0.1); }
+.composer-mic:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
 .composer-mic.live {
   border-color: #ff5d5d;
   color: #ff5d5d;
@@ -2357,11 +2445,11 @@ a.card-item:hover {
   gap: 14px;
   padding: 12px 14px;
   margin-bottom: 12px;
-  border: 1px solid rgba(110, 168, 254, 0.35);
-  background: rgba(110, 168, 254, 0.08);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-radius: 10px;
   font-size: 13.5px;
-  color: #cfe0ff;
+  color: var(--text);
 }
 .gaps-bulk button { white-space: nowrap; }
 
@@ -2383,8 +2471,7 @@ catches no clicks; stays readable on small monitors. */
   font-size: 10px;
   line-height: 1;
   letter-spacing: 0.2px;
-  color: rgba(255, 255, 255, 0.34);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  color: color-mix(in srgb, var(--text) 45%, transparent);
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
@@ -2396,11 +2483,13 @@ catches no clicks; stays readable on small monitors. */
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: #12151c;
+  background: var(--panel-2);
 }
 .or-wallet.low {
   border-color: #b4442e;
-  background: #221312;
+  /* A danger TINT over the panel, not the old near-black slab — readable on
+     the light theme too (the hard #221312 looked like a hole in the page). */
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel-2));
 }
 .or-wallet-main {
   display: flex;
@@ -2419,7 +2508,7 @@ catches no clicks; stays readable on small monitors. */
   font-variant-numeric: tabular-nums;
 }
 .or-wallet.low .or-wallet-val {
-  color: #ff8d8d;
+  color: var(--danger);
 }
 .or-wallet-sub {
   display: block;
@@ -2428,7 +2517,7 @@ catches no clicks; stays readable on small monitors. */
   color: var(--muted);
 }
 .or-wallet-sub a {
-  color: #7db4ff;
+  color: var(--accent);
 }
 .pool-manage {
   margin-top: 14px;
@@ -2450,7 +2539,7 @@ catches no clicks; stays readable on small monitors. */
 .pool-input {
   flex: 1;
   min-width: 120px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 9px 12px;
@@ -2469,7 +2558,7 @@ size (rounding, padding, font) — that stays with each. */
   font-weight: 600;
   cursor: pointer;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   transition: background 120ms ease, border-color 120ms ease;
 }
 
@@ -2480,14 +2569,14 @@ size (rounding, padding, font) — that stays with each. */
 }
 .pool-btn.add {
   border-color: rgba(94, 201, 143, 0.5);
-  color: #7fe0a8;
+  color: var(--ok);
 }
 .pool-btn.add:hover:not(:disabled) {
   background: rgba(94, 201, 143, 0.14);
 }
 .pool-btn.withdraw {
   border-color: rgba(240, 160, 90, 0.5);
-  color: #f0b07a;
+  color: #a85f0f;
 }
 .pool-btn.withdraw:hover:not(:disabled) {
   background: rgba(240, 160, 90, 0.14);
@@ -2512,7 +2601,7 @@ size (rounding, padding, font) — that stays with each. */
   border-radius: 999px;
 }
 .user-badge.blocked {
-  color: #ff9a9a;
+  color: var(--danger);
   background: rgba(240, 90, 90, 0.16);
   border: 1px solid rgba(240, 90, 90, 0.4);
 }
@@ -2522,10 +2611,10 @@ size (rounding, padding, font) — that stays with each. */
   font-size: 13px;
 }
 .user-act:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 .user-act.danger {
-  color: #ff9a9a;
+  color: var(--danger);
   border-color: rgba(240, 90, 90, 0.4);
 }
 .user-act.danger:hover {
@@ -2536,7 +2625,7 @@ size (rounding, padding, font) — that stays with each. */
 .vis-interest {
   margin-top: 6px;
   font-size: 13px;
-  color: #bcd0f5;
+  color: var(--muted);
   font-style: italic;
   opacity: 0.9;
 }
@@ -2559,7 +2648,7 @@ size (rounding, padding, font) — that stays with each. */
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   font-size: 15px;
   outline: none;
@@ -2573,7 +2662,7 @@ size (rounding, padding, font) — that stays with each. */
   border-radius: 10px;
   border: none;
   background: linear-gradient(90deg, #6ea8fe, #9db8ff);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
@@ -2583,7 +2672,7 @@ size (rounding, padding, font) — that stays with each. */
   cursor: not-allowed;
 }
 .landing-lead-done {
-  color: #7fe0a8;
+  color: var(--ok);
   font-weight: 600;
 }
 
@@ -2615,7 +2704,7 @@ size (rounding, padding, font) — that stays with each. */
 }
 .lead-contacted {
   font-size: 11px;
-  color: #7fe0a8;
+  color: var(--ok);
   border: 1px solid rgba(94, 201, 143, 0.4);
   border-radius: 999px;
   padding: 2px 8px;
@@ -2638,7 +2727,7 @@ size (rounding, padding, font) — that stays with each. */
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, #6ea8fe, #9db8ff);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-size: 24px;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -2648,7 +2737,7 @@ size (rounding, padding, font) — that stays with each. */
   height: min(70vh, 460px);
   display: flex;
   flex-direction: column;
-  background: #11141b;
+  background: var(--panel-solid);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
@@ -2702,7 +2791,7 @@ size (rounding, padding, font) — that stays with each. */
 }
 .vchat-bubble.owner {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border: 1px solid var(--border);
   color: var(--text);
 }
@@ -2714,7 +2803,7 @@ size (rounding, padding, font) — that stays with each. */
 }
 .vchat-input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 9px 12px;
@@ -2727,7 +2816,7 @@ size (rounding, padding, font) — that stays with each. */
   border: none;
   border-radius: 12px;
   background: linear-gradient(135deg, #6ea8fe, #9db8ff);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-size: 18px;
   cursor: pointer;
 }
@@ -2880,7 +2969,7 @@ green, Kelion = the K pill on blue; no chat shows outside this space anymore. */
 }
 .kelion-band .ticker-text,
 .kelion-band .speech-tail-text {
-  color: #cfe0ff;
+  color: #cfe0ff; /* neon text on the band's own dark glass — stays on both themes */
 }
 .heard-band-label.kelion-k {
   display: inline-flex;
@@ -2890,7 +2979,7 @@ green, Kelion = the K pill on blue; no chat shows outside this space anymore. */
   height: 20px;
   border-radius: 50%;
   background: var(--accent);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-weight: 800;
   font-size: 12px;
   line-height: 1;
@@ -2981,7 +3070,7 @@ install for anyone already on the target device; scanning stays the same. */
   padding: 4px 14px;
   border-radius: 12px;
   background: var(--accent, #7aa2ff);
-  color: #0b0d12;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
@@ -3008,14 +3097,14 @@ another device (the code itself is now an INSTALL button, per the Jul 26 order).
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #07090d;
+  background: var(--bg);
   padding: 20px;
 }
 .login-card {
   width: 100%;
   max-width: 380px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 18px;
   padding: 26px 22px;
   display: flex;
@@ -3039,19 +3128,19 @@ top-left in the card, the same shape everywhere. */
 .login-title { margin: 4px 0 8px; font-size: 18px; }
 .login-google {
   display: block; text-align: center; padding: 10px; border-radius: 12px;
-  background: var(--accent, #7aa2ff); color: #0b0d12; font-weight: 700; text-decoration: none;
+  background: var(--accent, #7aa2ff); color: var(--on-accent); font-weight: 700; text-decoration: none;
 }
 .login-sep { text-align: center; font-size: 12px; color: var(--muted, #9aa3b5); margin: 4px 0; }
 .login-input {
   padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border, rgba(255,255,255,0.15));
-  background: rgba(0,0,0,0.3); color: var(--text, #e8ecf4); font-size: 15px; outline: none;
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text, #1b2331); font-size: 15px; outline: none;
 }
 .login-submit {
   margin-top: 4px; padding: 10px; border: none; border-radius: 12px;
   background: #3ecf72; color: #06280f; font-weight: 800; font-size: 15px; cursor: pointer;
 }
 .login-submit:disabled { opacity: 0.6; }
-.login-note { font-size: 13px; color: #ffd27a; }
+.login-note { font-size: 13px; color: var(--warn); }
 .login-links { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .login-links button {
   background: none; border: none; color: var(--accent, #7aa2ff);
@@ -3065,7 +3154,7 @@ top-left in the card, the same shape everywhere. */
 .credits-pack {
   display: flex; justify-content: space-between; align-items: center;
   padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border, rgba(255,255,255,0.15));
-  background: rgba(255,255,255,0.05); color: var(--text, #e8ecf4); cursor: pointer; font-size: 15px;
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text, #1b2331); cursor: pointer; font-size: 15px;
 }
 .credits-pack:hover { border-color: var(--accent, #7aa2ff); }
 .credits-pack-n { font-weight: 700; }
@@ -3073,7 +3162,7 @@ top-left in the card, the same shape everywhere. */
 /* The auto top-up checkbox + refill value, chosen at payment time (Aug 1). */
 .credits-autopay {
   margin-top: 10px; padding: 10px 12px; border-radius: 12px;
-  border: 1px solid var(--border, rgba(255,255,255,0.15)); background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border, rgba(255,255,255,0.15)); background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--text, #e8ecf4);
 }
 
@@ -3093,7 +3182,7 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   border-radius: 999px;
   background: rgba(16, 22, 40, 0.92);
   border: 1px solid rgba(122, 162, 255, 0.45);
-  color: #dbe4f8;
+  color: var(--text);
   font-size: 13.5px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   animation: update-banner-in 0.35s ease-out;
@@ -3102,8 +3191,8 @@ reset applies on the button or automatically when the tab is hidden (App.tsx). *
   border: 0;
   border-radius: 999px;
   padding: 6px 13px;
-  background: #7aa2ff;
-  color: #0a0f1e;
+  background: var(--accent);
+  color: var(--on-accent);
   font-weight: 700;
   font-size: 13px;
   cursor: pointer;
@@ -3136,9 +3225,9 @@ audit): the same short entry on all conditionally-mounted overlays. */
   right: 10px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 11px;
-  color: #7ee2a8;
-  background: rgba(10, 16, 28, 0.75);
-  border: 1px solid rgba(126, 226, 168, 0.35);
+  color: var(--ok);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
   border-radius: 999px;
   padding: 2px 9px;
   pointer-events: none;
@@ -3175,12 +3264,12 @@ speech-tail — fluidity #9). */
   font-size: 13.5px;
 }
 .landing-alt-links a {
-  color: #9db8e8;
+  color: var(--accent);
   text-decoration: none;
   border-bottom: 1px dotted rgba(157, 184, 232, 0.5);
 }
-.landing-alt-links a:hover { color: #cfe0ff; }
-.landing-alt-links span { color: #5c6478; }
+.landing-alt-links a:hover { color: var(--text); }
+.landing-alt-links span { color: var(--muted); }
 
 
 /* The single wallet's breakdown (Admin → Money): which real sources the
@@ -3200,11 +3289,11 @@ in production. A new class is never named without searching the name first. */
 .landing-manual-btn {
   position: absolute; top: 18px; right: 20px; z-index: 6;
   padding: 8px 14px; border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.18); background: rgba(12,14,20,.55);
-  color: #dfe4ee; font-size: 13px; font-weight: 600; text-decoration: none;
+  border: 1px solid var(--border); background: var(--panel);
+  color: var(--text); font-size: 13px; font-weight: 600; text-decoration: none;
   backdrop-filter: blur(6px); transition: background .15s ease, border-color .15s ease;
 }
-.landing-manual-btn:hover { background: rgba(24,28,38,.8); border-color: rgba(255,255,255,.34); }
+.landing-manual-btn:hover { background: var(--panel-2); border-color: color-mix(in srgb, var(--text) 35%, transparent); }
 
 .manual-page {
   /* SCROLL (Adrian: „on display you have no scroll”). The app shell has
