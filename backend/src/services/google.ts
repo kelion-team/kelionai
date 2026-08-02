@@ -871,6 +871,12 @@ async function addContact(name: string, email: string, phone: string, token: str
 
 const OSM_UA = 'KelionAI/1.0 (kelionai.app)'
 
+// Wikimedia blocks datacenter IPs (our VPS is Contabo) UNLESS the User-Agent
+// carries real contact info, per https://meta.wikimedia.org/wiki/User-Agent_policy.
+// The bare "(kelionai.app)" form gets a hard 403 ("Contabo networks are
+// forbidden due to abuse") → wikipedia_lookup always answered not_found.
+const WIKIPEDIA_UA = 'KelionAI/1.0 (https://kelionai.app; contact@kelion.ai)'
+
 interface NominatimPlace {
   display_name?: string
   lat?: string
@@ -1193,7 +1199,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       const s = new URL(`https://${ed}.wikipedia.org/w/rest.php/v1/search/page`)
       s.searchParams.set('q', query)
       s.searchParams.set('limit', '3')
-      const sr = await tfetch(s, { headers: { 'User-Agent': OSM_UA } })
+      const sr = await tfetch(s, { headers: { 'User-Agent': WIKIPEDIA_UA } })
       if (!sr.ok) continue
       const sj = (await sr.json()) as { pages?: { key?: string; title?: string }[] }
       for (const p of sj.pages ?? []) if (p.key) candidates.push({ ed, key: p.key, title: p.title ?? '' })
@@ -1211,7 +1217,7 @@ async function wikipediaLookup(query: string): Promise<string> {
       }
     }
     const u = `https://${best.ed}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(best.key)}`
-    const r = await tfetch(u, { headers: { 'User-Agent': OSM_UA } })
+    const r = await tfetch(u, { headers: { 'User-Agent': WIKIPEDIA_UA } })
     if (!r.ok) return JSON.stringify({ error: `wiki_http_${r.status}` })
     const j = (await r.json()) as {
       title?: string
