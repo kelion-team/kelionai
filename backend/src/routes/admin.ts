@@ -280,8 +280,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true })
   })
 
-  // The owner's REAL-money view: provider pool loaded, remaining, spent, profit
-  // (admin only). This is what the admin sees instead of the users' credits.
+  // The owner's REAL-money view: the measured provider spend (USD, from the
+  // cost journal) and the real profit from the payments ledger (admin only).
   app.get('/api/admin/pool', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -387,11 +387,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // The pocket: how much you have, with the breakdown it was added from
       // and where it's missing.
       punga,
+      // USD, unconverted (getAdminAccount no longer multiplies by a hand rate).
       spent: account.spent,
       // The cost journal is kept in USD end to end (cost_events.cost_usd):
-      // spentUsd/today/byKind are the SAME currency, so the Money tab no
-      // longer mixes "total £" with "azi $". `account.spent` stays for older
-      // callers; the tab reads spentUsd.
+      // spentUsd/today/byKind are the SAME currency as `spent` — the Money tab
+      // never mixes "total £" with "azi $".
       spentUsd: costs.total,
       profit: account.profit,
       currency: config.billing.currency,

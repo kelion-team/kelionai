@@ -268,17 +268,27 @@ export const config = {
   billing: {
     currency: (process.env.BILLING_CURRENCY ?? 'gbp').toLowerCase(),
     userShare: Number(process.env.USER_SHARE ?? 0.75),
-    // PRODUCT PRICE, set by the owner — NOT a market figure: how much of the
-    // billing currency one credit is worth (1 credit = £0.10 by default). This
-    // is the owner's own price list, decided by him and editable from env; it
-    // is not "real" or "fake" — it's his, like a shop's price tag.
     creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
-    // STATIC FALLBACK for the USD→billing-currency rate. The rate the code
-    // actually converts money with is read LIVE (services/fx.ts,
-    // open.er-api.com, cached 6h); this value is used ONLY when the live read
-    // fails, and fx.ts labels it `env_static` so a stale figure is never
-    // mistaken for today's rate.
-    usdToCurrency: Number(process.env.USD_TO_CURRENCY ?? 0.8),
+    // ── THE TOP-UP RULES, AS OWNER SETTINGS (not buried constants) ──────────
+    // Adrian, 24 Jul: "first top-up = £20 minimum (brain activation), then any
+    // multiple of £5". Adrian, Aug 1 (auto top-up): the prepared pack obeys the
+    // same rule and is capped at £500. Until now these lived as bare numbers
+    // inside routes/billing.ts — money values written in code, invisible to
+    // the man whose money they move. They are OWNER DECISIONS, so they live
+    // here: documented, env-editable without a deploy.
+    firstTopupMin: Number(process.env.BILLING_FIRST_TOPUP_MIN ?? 20),
+    topupStep: Number(process.env.BILLING_TOPUP_STEP ?? 5),
+    topupMin: Number(process.env.BILLING_TOPUP_MIN ?? 5),
+    topupMax: Number(process.env.BILLING_TOPUP_MAX ?? 500),
+    // The auto top-up DEFAULTS a brand-new user starts from (threshold in
+    // CREDITS, amount in display currency). Same rule: owner settings, not
+    // magic numbers inside db.ts.
+    autoRechargeThreshold: Number(process.env.AUTORECHARGE_DEFAULT_THRESHOLD ?? 20),
+    autoRechargeAmount: Number(process.env.AUTORECHARGE_DEFAULT_AMOUNT ?? 10),
+    // The USD→£ hand rate was deleted: the only place that used it converted
+    // REAL provider costs (USD) into £ with a hand-written rate — a converted
+    // figure presented as a measured one (the exact fabrication punga.ts
+    // killed). The owner's cost view is USD end to end now (spentUsd).
   },
   mail: {
     imapHost: process.env.MAIL_IMAP_HOST ?? 'mail.privateemail.com',

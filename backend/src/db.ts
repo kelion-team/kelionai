@@ -5,7 +5,6 @@ import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.
 export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
-import { getUsdRate } from './services/fx.js'
 
 let pool: pg.Pool | null = null
 
@@ -55,6 +54,9 @@ export async function initDb(): Promise<void> {
     -- the threshold, the app PREPARES the payment (unique code + link) and
     -- the user confirms with one tap. Stored here so it survives sessions.
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_enabled BOOLEAN NOT NULL DEFAULT false;
+    -- The 20/10 column defaults are only a STORAGE BACKSTOP for rows written
+    -- without values; the application-level defaults come from config.billing
+    -- (autoRechargeThreshold/autoRechargeAmount) — see getAutoRecharge.
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_threshold INTEGER NOT NULL DEFAULT 20;
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_amount INTEGER NOT NULL DEFAULT 10;
     -- Voiceprints: timbre + gender + admin flag per account.
@@ -156,15 +158,17 @@ export async function initDb(): Promise<void> {
     -- Stripe is fully out (Adrian, 31 Jul: "the leftovers are not needed") —
     -- the old Stripe customer column is dropped, it had no history to keep.
     ALTER TABLE wallets DROP COLUMN IF EXISTS stripe_customer_id;
-    -- The owner's provider-credit pool (REAL money): the admin loads it; every
-    -- AI call's real cost draws it down. remaining = loaded − total cost. Singleton.
-    CREATE TABLE IF NOT EXISTS admin_pool (
-      id INT PRIMARY KEY DEFAULT 1,
-      loaded NUMERIC(14,6) NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'gbp',
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    INSERT INTO admin_pool (id, loaded) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+    -- THE admin_pool TABLE IS DEAD — dropped, not created (audit, Aug 3).
+    -- Its comment used to say "the owner's provider-credit pool (REAL money):
+    -- the admin loads it" — i.e. a figure TYPED by hand ("+ Add money"),
+    -- presented as the pocket. Adrian killed that on 30 Jul ("one single
+    -- pocket... only real remains, no hardcode"): loadAdminPool/
+    -- withdrawAdminPool were deleted, NOTHING reads this table anymore, and
+    -- the live DB confirms it — one row, (1, 0.000000), untouched since
+    -- Jul 23. A table that only holds a hand-seeded zero is a seed with false
+    -- data; the real pocket is READ from Revolut (Enable Banking) and
+    -- OpenRouter. DROP, not CREATE: existing databases get cleaned on boot.
+    DROP TABLE IF EXISTS admin_pool;
     -- Free-trial usage: one row per demo started — enforces the daily cost cap
     -- and a light anti-reuse (a fingerprint or IP that already tried is refused).
     CREATE TABLE IF NOT EXISTS demo_uses (
@@ -987,7 +991,7 @@ export async function unblockUser(email: string): Promise<void> {
 }
 
 /** Admin grants credit straight to a user's wallet (a gift, no split). */
-export async function grantCredit(email: string, amount: number, currency = 'gbp'): Promise<void> {
+export async function grantCredit(email: string, amount: number, currency = config.billing.currency): Promise<void> {
   if (!dbEnabled() || !email || !(amount !== 0)) return
   const e = email.toLowerCase()
   try {
@@ -1696,15 +1700,15 @@ export async function getAdminAccount(): Promise<{ spent: number; profit: number
   if (!dbEnabled()) return empty
   try {
     const pool = getPool()
-    const costUsd = Number(
+    // USD END TO END (audit, Aug 3): this sum used to be multiplied by the
+    // hand-written USD_TO_CURRENCY rate (0.8) before display — a converted
+    // figure is not a measured one (the same lie punga.ts killed: "OpenRouter
+    // $9.99" vs "Punga £7.99" for the SAME money). The journal is in USD
+    // (cost_events.cost_usd), so `spent` is USD, unconverted — identical to
+    // the `spentUsd` the Money tab already reads.
+    const spent = Number(
       (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
     )
-    // THE RATE IS READ LIVE (services/fx.ts): cost_events are measured in USD,
-    // `profit` is in the billing currency, and converting between them with a
-    // hand-typed rate would be a fabricated figure. On a failed live read the
-    // fx service falls back to the env rate — LABELED env_static there.
-    const fx = await getUsdRate().catch(() => ({ rate: config.billing.usdToCurrency }))
-    const spent = costUsd * fx.rate
     const profit = Number(
       (
         await pool.query<{ t: string | null }>(
@@ -1773,15 +1777,10 @@ export interface CostSummary {
   felul: Record<string, 'masurat' | 'estimat'>
 }
 
-// The kinds of cost that come MEASURED from the provider: brain calls, where
-// OpenRouter returns `usage.cost` with its real money. `chat` = the
-// conversation turns; `memory` = the background memory agent, booked from the
-// provider's own usage.cost since the brain.ts adapter was fixed to return it
-// (before that, it was silently $0 — a fabricated measurement); `image` =
-// generation, booked from the same usage.cost (chat.ts books the flat rate
-// only under the separate 'image_est' kind). Everything else is fixed rates —
-// useful as an order of magnitude, false as "real" — and counts as `estimat`.
-const COSTURI_MASURATE = new Set(['chat', 'memory', 'image'])
+// The only kind of cost that comes MEASURED from the provider: brain calls,
+// where OpenRouter returns `usage.cost` with its real money. Everything else
+// is fixed rates I wrote — useful as an order of magnitude, false as "real".
+const COSTURI_MASURATE = new Set(['chat'])
 
 /** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
  *
@@ -1951,7 +1950,13 @@ export interface AutoRechargePrefs {
 }
 
 export async function getAutoRecharge(email: string): Promise<AutoRechargePrefs> {
-  const def: AutoRechargePrefs = { enabled: false, threshold: 20, topupAmount: 10 }
+  // The defaults are OWNER SETTINGS from config (Billing section), not magic
+  // numbers buried here — threshold in credits, amount in display currency.
+  const def: AutoRechargePrefs = {
+    enabled: false,
+    threshold: config.billing.autoRechargeThreshold,
+    topupAmount: config.billing.autoRechargeAmount,
+  }
   if (!dbEnabled()) return def
   try {
     const r = await getPool().query<{
@@ -3368,7 +3373,7 @@ export interface CodPlata {
 }
 
 /** Give the user a new code for the payment he's starting NOW. */
-export async function creeazaCodPlata(email: string, amount: number, currency = 'gbp'): Promise<CodPlata | null> {
+export async function creeazaCodPlata(email: string, amount: number, currency = config.billing.currency): Promise<CodPlata | null> {
   if (!dbEnabled() || !email || !(amount > 0)) return null
   const e = email.toLowerCase().trim()
   // Collision is practically impossible (31^8), but "practically impossible"
@@ -3468,5 +3473,5 @@ export async function codPlataInAsteptare(email: string): Promise<CodPlata | nul
     )
     .catch(() => null)
   const row = r?.rows[0] as { code?: string; amount?: string; currency?: string } | undefined
-  return row?.code ? { code: row.code, amount: Number(row.amount ?? 0), currency: row.currency ?? 'gbp' } : null
+  return row?.code ? { code: row.code, amount: Number(row.amount ?? 0), currency: row.currency ?? config.billing.currency } : null
 }

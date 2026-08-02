@@ -82,6 +82,12 @@ import {
 } from '../services/browser.js'
 import { startTurn, appendTurn, finishTurn, readTurnFrom, heartbeatSSE } from '../services/sseReplay.js'
 import { randomUUID } from 'node:crypto'
+
+// THE OWNER NEVER DEBITS HIMSELF (PR #648, Aug 2 — his own testing drained
+// £5.73 of voice from his own wallet in one morning; the rule died first in
+// realtime.ts, this is the same predicate for the chat path). Usage is still
+// RECORDED for the Money tab — recorded, yes; charged, no.
+export const isOwnerEmail = (email: string): boolean => email.toLowerCase() === config.adminEmail
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
@@ -2505,7 +2511,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // MONEY IS NOT LOST ON ERROR (Jul 27 audit): the tools already run in this
       // turn (searches, images, ask_brain) COST money — the return from here
       // used to skip the debit and the user consumed for free, repeatably.
-      if (usage.usd > 0) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
+      // The OWNER is never debited (PR #648) — recorded, yes; charged, no.
+      if (usage.usd > 0 && !isOwnerEmail(user.email)) void debitWallet(user.email, usage.usd, `chat-err:${turnId.slice(0, 8)}`)
       return
     }
 
@@ -2559,14 +2566,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       void learnFromTurn(user.email, lastUserText, assistantText, 'kelion')
     }
 
-    // Debit real provider cost from the wallet — FOR EVERYONE, including ADMIN
-    // (Adrian, Jul 25: "admin is not exempt from reality — these get consumed
-    // and admin must see what he really has"). The admin's credits decrease just
-    // as really as clients'; ONLY the block at 0 (paywall) stays on clients —
-    // the owner does not lock himself out of his own application.
+    // Debit the real provider cost from the wallet — CUSTOMERS ONLY.
+    // The Jul 25 "everyone pays, even the admin" rule DIED on Aug 2 (PR #648,
+    // live proof: the admin's own testing drained £5.73 of voice in one
+    // morning from his own wallet): usage is still RECORDED for the Money tab
+    // (recordCost above), never DEBITED from the owner — the users' credits
+    // pay, the free provider tier is his margin. This chat path had kept the
+    // old rule after realtime.ts was fixed — the same hole, one screen over.
     {
       const cost = usage.usd
-      if (cost > 0) {
+      if (cost > 0 && !isOwnerEmail(user.email)) {
         void debitWallet(user.email, cost, `chat:${turnId.slice(0, 8)}`)
       }
     }

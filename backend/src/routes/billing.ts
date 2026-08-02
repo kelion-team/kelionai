@@ -7,15 +7,33 @@ import { getWalletStatus, listTransactionsForUser, creeazaCodPlata, codPlataInAs
 // The checkbox means: "when my credit drops below the threshold, PREPARE my
 // top-up automatically" (the Revolut link cannot pull money by itself — the
 // user always confirms the actual payment with one tap). The amount obeys the
-// same rule as any top-up: a multiple of £5, minimum £5.
+// same rule as any top-up: the owner's settings from config.billing
+// (multiple of topupStep, between topupMin and topupMax).
+// The threshold's 100,000-credit cap is a SANITY BOUND against absurd input,
+// not a money value ever shown to anyone.
 export function validateAutoRecharge(input: unknown): AutoRechargePrefs | null {
   const b = input as { enabled?: unknown; threshold?: unknown; topupAmount?: unknown } | null
   if (!b || typeof b !== 'object') return null
   const threshold = Math.floor(Number(b.threshold))
   const topupAmount = Math.floor(Number(b.topupAmount))
+  const { topupMin, topupMax, topupStep } = config.billing
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100_000) return null
-  if (!Number.isFinite(topupAmount) || topupAmount < 5 || topupAmount > 500 || topupAmount % 5 !== 0) return null
+  if (!Number.isFinite(topupAmount) || topupAmount < topupMin || topupAmount > topupMax || topupAmount % topupStep !== 0) return null
   return { enabled: !!b.enabled, threshold, topupAmount }
+}
+
+// THE TOP-UP RULE (Adrian, 24 Jul): first top-up = £20 minimum (brain
+// activation), then any multiple of £5. The numbers are the owner's settings
+// (config.billing), validated on the server, not just in the UI. Exported so
+// the rule is testable without booting a server.
+export async function validateTopUp(getWalletStatusFn: typeof getWalletStatus, email: string, amount: number): Promise<string | null> {
+  const { firstTopupMin, topupMin, topupStep } = config.billing
+  if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
+  if (amount % topupStep !== 0) return 'must_be_multiple_of_5'
+  const { topupRef } = await getWalletStatusFn(email)
+  const min = topupRef <= 0 ? firstTopupMin : topupMin
+  if (amount < min) return topupRef <= 0 ? 'first_topup_min_20' : 'min_5'
+  return null
 }
 
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
@@ -28,8 +46,8 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const credits = Math.floor(balance / config.billing.creditValue)
     const percent = topupRef > 0 ? Math.max(0, Math.min(100, (balance / topupRef) * 100)) : 100
     // firstTopUp = the user has never topped up (topup_ref is 0). The first
-    // top-up is bigger (brain activation = £20 minimum); then any multiple of
-    // £5.
+    // top-up is bigger (brain activation — config.billing.firstTopupMin);
+    // then any multiple of config.billing.topupStep.
     const firstTopUp = topupRef <= 0
     // AUTO TOP-UP, DUE (Adrian, Aug 1). When the checkbox is on and the credit
     // dropped under the user's threshold, we PREPARE the payment right here:
@@ -37,7 +55,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     // and the reply carries the link — the client shows a one-tap button. The
     // money itself moves only with the user's tap: the Revolut link cannot
     // pull from his account by itself, and we never pretend it can. The first
-    // top-up stays manual (£20 minimum — it activates the brain).
+    // top-up stays manual (firstTopupMin — it activates the brain).
     let autoTopUp: { code: string; amount: number; currency: string; url: string } | null = null
     if (!firstTopUp && config.revolut.payLink && user.role !== 'admin') {
       const ar = await getAutoRecharge(user.email)
@@ -71,17 +89,10 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  // The top-up rule (Adrian, 24 Jul): first top-up = £20 minimum (brain
-  // activation), then any multiple of £5. Validated on the server, not just
-  // in the UI.
-  async function validateTopUp(email: string, amount: number): Promise<string | null> {
-    if (!Number.isFinite(amount) || amount <= 0) return 'bad_amount'
-    if (amount % 5 !== 0) return 'must_be_multiple_of_5'
-    const { topupRef } = await getWalletStatus(email)
-    const min = topupRef <= 0 ? 20 : 5
-    if (amount < min) return topupRef <= 0 ? 'first_topup_min_20' : 'min_5'
-    return null
-  }
+  // The top-up rule moved next to validateAutoRecharge (exported, top of
+  // file): one place for the money rules, both testable without a server.
+  const checkTopUp = (email: string, amount: number): Promise<string | null> =>
+    validateTopUp(getWalletStatus, email, amount)
 
   // ── PAYMENT GOES THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in", "a link to replace everywhere") ───────────
@@ -114,7 +125,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     // displayed as success).
     if (!link) return reply.code(503).send({ error: 'revolut_link_lipsa' })
     const amount = Number(req.body?.amount ?? 0)
-    const bad = await validateTopUp(user.email, amount)
+    const bad = await checkTopUp(user.email, amount)
     if (bad) return reply.code(400).send({ error: bad })
     // We REUSE an unused code (2 hours) instead of giving a new one on every
     // click: otherwise the person clicking three times would have three valid
