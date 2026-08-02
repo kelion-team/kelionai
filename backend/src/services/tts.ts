@@ -1,6 +1,7 @@
 import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
+import { googleServiceAccount } from './googleCreds.js'
 
 // TTS — GOOGLE CHIRP 3 HD IS THE PRIMARY VOICE, OPENAI STRICTLY THE RESERVE.
 //
@@ -35,10 +36,11 @@ export function normalizeLang(raw: string | undefined): string {
 
 let auth: GoogleAuth | null = null
 function getAuth(): GoogleAuth | null {
-  if (!config.googleServiceAccountJson) return null
   if (!auth) {
+    const creds = googleServiceAccount()
+    if (!creds) return null
     auth = new GoogleAuth({
-      credentials: JSON.parse(config.googleServiceAccountJson) as Record<string, unknown>,
+      credentials: creds as Record<string, unknown>,
       scopes: ['https://www.googleapis.com/auth/cloud-platform'],
     })
   }
