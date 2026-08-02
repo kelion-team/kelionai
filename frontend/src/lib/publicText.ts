@@ -61,6 +61,14 @@ export const PUBLIC_TEXT = {
   // The auto top-up checkbox, shown at payment time (Adrian, Aug 1: "auto-pay
   // selectable with a checkbox when the user pays"). Honest wording: we
   // PREPARE the payment, the user always confirms the money move.
+  // THE PAYMENT CODE, SHOWN (M4, Aug 2) — the /credite page used to navigate
+  // to Revolut without ever showing the code the matching depends on.
+  payCodeTitle: 'Your payment code',
+  payCodeHint: 'Write this code in the payment reference (note) — it ties the money to your account.',
+  payCodeCopy: 'Copy the code',
+  payCodeCopied: 'Copied ✓',
+  payCodeOpen: 'Open Revolut and pay ↗',
+  payCodeWaiting: 'Waiting for the payment — the credits arrive by themselves a few minutes after it lands.',
   autoTopUpLabel: 'Auto top-up: when my credit runs low, prepare my refill automatically (I confirm with one tap)',
   autoTopUpAmount: 'Refill amount',
   autoTopUpSaved: 'Saved ✓',

@@ -213,7 +213,7 @@ export async function finalizeazaLegaturaPlati(code: string): Promise<{ conturi:
 // is where the circle closes: we read what came in, search for the code,
 // credit the person. It runs periodically, because nobody can notify us —
 // Revolut Pro has no webhook.
-import { crediteazaDupaCod } from '../db.js'
+import { crediteazaDupaCod, refCreditatDeja, salveazaPlataNeatribuita } from '../db.js'
 
 /** The last pass: what we found and what we did. The panel reads it so it can
  *  say whether the system is actually working — a read that fails MUST NOT
@@ -243,25 +243,46 @@ export async function verificaPlatiNoi(): Promise<number> {
     return 0
   }
   let creditati = 0
-  let faraCod = 0
+  let inPlasa = 0
   for (const t of tranzactii) {
-    const email = await crediteazaDupaCod(t.referinta, t.amount, t.currency, t.id).catch(() => null)
-    if (email) {
+    const rezultat = await proceseazaIntrare(t)
+    if (rezultat.fel === 'creditat') {
       creditati++
-      console.log(`[PLATI] ${email} credited with ${t.amount} ${t.currency} (transaction ${t.id})`)
-    } else if (t.referinta && !/KLN-/i.test(t.referinta)) {
-      // An inflow without our code: it can be any other income of his, not
-      // necessarily a missed payment. We count it, we don't treat it as an
-      // error.
-      faraCod++
+      console.log(`[PLATI] ${rezultat.email} credited with ${t.amount} ${t.currency} (transaction ${t.id})`)
+    } else if (rezultat.fel === 'plasa') {
+      inPlasa++
+      console.log(`[PLATI] inflow ${t.id} (${t.amount} ${t.currency}) landed in the net — no matching code`)
     }
   }
   ultimaCitire = {
     la: new Date().toISOString(),
     ok: true,
-    detaliu: `${tranzactii.length} inflows read · ${creditati} credited · ${faraCod} without our code`,
+    detaliu: `${tranzactii.length} inflows read · ${creditati} credited · ${inPlasa} new in the net`,
   }
   return creditati
+}
+
+/** One inflow's fate — THE NET IS REAL now (M2, Aug 2). Before, an unmatched
+ *  inflow was counted in a local variable and thrown away, while the M2 order
+ *  and RAMAS-DE-FACUT §G described a `plati_neatribuite` table that did not
+ *  exist. Now: match → credit; no match → the net, exactly once.
+ *  The `refCreditatDeja` guard matters: a code closes at 'paid', but the bank
+ *  keeps returning the same transaction on every 5-minute read forever —
+ *  without the guard, every SUCCESSFUL payment would re-enter the net one
+ *  pass later, dressed up as a problem.
+ *  Exported so the end-to-end money test (M5) can walk a transaction through
+ *  the REAL decision, not through a copy of it. */
+export async function proceseazaIntrare(t: {
+  id: string
+  referinta: string
+  amount: number
+  currency: string
+}): Promise<{ fel: 'creditat'; email: string } | { fel: 'vechi' } | { fel: 'plasa' }> {
+  const email = await crediteazaDupaCod(t.referinta, t.amount, t.currency, t.id).catch(() => null)
+  if (email) return { fel: 'creditat', email }
+  if (await refCreditatDeja(t.id).catch(() => false)) return { fel: 'vechi' }
+  const nou = await salveazaPlataNeatribuita(t.id, t.referinta, t.amount, t.currency).catch(() => false)
+  return nou ? { fel: 'plasa' } : { fel: 'vechi' }
 }
 
 /** Start the periodic check. Without keys it does nothing and doesn't say it

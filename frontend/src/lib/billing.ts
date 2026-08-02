@@ -27,14 +27,26 @@ export async function fetchBalance(): Promise<WalletStatus | null> {
   }
 }
 
-// Starts a top-up: asks the server for the payment link and takes the person there.
-// Since Jul 30 the link is the Revolut one, not a Stripe session — but the shape
-// of the reply stayed the same (`{ url }`), precisely so that all payment
-// places (the wallet pill, /credite, paywall) change with a single touch.
+// Starts a top-up: asks the server for the payment link AND THE UNIQUE CODE.
+// M4 (Aug 2): the old version navigated straight to the Revolut link and threw
+// the code away — but the WHOLE matching design depends on the person writing
+// that code in the payment reference (Revolut Pro has no webhook; the code is
+// the only bridge back to the account). A payment without the shown code can
+// only land in the unattributed net. So this no longer navigates: it RETURNS
+// the payment data and the caller shows the code first, big, with a copy
+// button. One source for every payment place (wallet pill, /credite, paywall).
 // It RETURNS the error instead of swallowing it (Adrian, Jul 24: "I press
 // +credits and the procedure doesn't run" — every failure was silent, the
 // button looked dead).
-export async function startCheckout(amount: number): Promise<string | null> {
+export interface CheckoutStart {
+  url: string
+  code: string
+  amount: number
+  currency: string
+}
+export async function startCheckout(
+  amount: number,
+): Promise<{ ok: true; pay: CheckoutStart } | { ok: false; error: string }> {
   try {
     const r = await fetch('/api/billing/checkout', {
       method: 'POST',
@@ -42,20 +54,42 @@ export async function startCheckout(amount: number): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount }),
     })
-    const j = (await r.json().catch(() => ({}))) as { url?: string; error?: string }
-    if (!r.ok) return j.error ?? `checkout_http_${r.status}`
-    if (j.url) {
-      window.location.href = j.url
-      return null
+    const j = (await r.json().catch(() => ({}))) as {
+      url?: string
+      code?: string
+      amount?: number
+      currency?: string
+      error?: string
     }
-    return 'no_checkout_url'
+    if (!r.ok) return { ok: false, error: j.error ?? `checkout_http_${r.status}` }
+    if (j.url && j.code)
+      return { ok: true, pay: { url: j.url, code: j.code, amount: Number(j.amount ?? amount), currency: j.currency ?? 'gbp' } }
+    return { ok: false, error: 'no_checkout_url' }
   } catch {
-    return 'offline'
+    return { ok: false, error: 'offline' }
   }
 }
 
 // HERE STOOD `createPaymentIntent` — the second payment path, on Stripe.js.
 // Nothing in the interface called it, and the back-end route was removed along with Stripe.
-// HERE STOOD `fetchHistory` + `PurchaseRecord` too (dead-code audit, Aug 2):
-// zero callers anywhere — AdminPanel uses the DIFFERENT fetchHistory from
-// lib/admin.ts. This was the sole caller of /api/billing/history.
+
+// The user's purchase history (M4 „istoric"). Removed as dead code on Aug 2
+// (zero callers), restored the same day WITH a real caller: CustomerSettings
+// shows the person their own top-ups.
+export interface PurchaseRecord {
+  id: number
+  amount: number
+  credits: number
+  status: string
+  created_at: string
+}
+export async function fetchHistory(): Promise<PurchaseRecord[] | null> {
+  try {
+    const r = await fetch('/api/billing/history', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { history?: PurchaseRecord[] }
+    return Array.isArray(j.history) ? j.history : null
+  } catch {
+    return null
+  }
+}

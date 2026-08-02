@@ -128,6 +128,55 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
     return null
   }
 }
+
+// ── THE PAYMENTS PANEL (M3, Aug 2): codes + the unattributed net ────────────
+export interface PlatiAdmin {
+  rezumat: {
+    emise: number
+    platite: number
+    inAsteptare: number
+    neatribuite: number
+    recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
+  } | null
+  neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[]
+}
+export async function fetchPlati(): Promise<PlatiAdmin | null> {
+  try {
+    const r = await fetch('/api/admin/plati', { credentials: 'include' })
+    return r.ok ? ((await r.json()) as PlatiAdmin) : null
+  } catch {
+    return null
+  }
+}
+/** Returns the server's verdict ('creditat' | 'deja' | 'negasit' | 'esec') —
+ *  shown as-is, so a double credit REFUSED is never displayed as an error. */
+export async function atribuiePlata(id: number, email: string): Promise<string> {
+  try {
+    const r = await fetch('/api/admin/plati/neatribuite/atribuie', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, email }),
+    })
+    const j = (await r.json().catch(() => ({}))) as { rezultat?: string }
+    return j.rezultat ?? (r.ok ? 'creditat' : 'esec')
+  } catch {
+    return 'esec'
+  }
+}
+export async function ignoraPlata(id: number): Promise<boolean> {
+  try {
+    const r = await fetch('/api/admin/plati/neatribuite/ignora', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
 // AICI A STAT `fetchCardKey` — cheia efemera prin care se afisa numarul cardului
 // virtual Stripe (Issuing Elements). It went away with the card: the component that
 // folosea (CardReveal) a fost stearsa.

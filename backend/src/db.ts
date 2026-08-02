@@ -256,6 +256,26 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_paycode_status ON payment_codes (status, created_at DESC);
     -- THE SAME PAYMENT NEVER CREDITS TWICE, no matter how many reads overlap.
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_paycode_bankref ON payment_codes (bank_ref) WHERE bank_ref IS NOT NULL;
+    -- THE NET (M2, Aug 2): an inflow the reader could NOT tie to anyone lands
+    -- HERE — it never disappears into a local counter again (the old code
+    -- counted faraCod++ and threw the payment away; the M2 order and
+    -- RAMAS-DE-FACUT §G promised this table while it did not exist).
+    -- bank_ref UNIQUE = the 5-minute reader can see the same transaction on
+    -- every pass forever without duplicating rows.
+    CREATE TABLE IF NOT EXISTS plati_neatribuite (
+      id SERIAL PRIMARY KEY,
+      bank_ref TEXT NOT NULL UNIQUE,
+      referinta TEXT,
+      amount NUMERIC(14,6) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'gbp',
+      -- noua → atribuita (the admin gave it to a user) | ignorata (the owner's
+      -- unrelated income — the account also receives money that isn't a top-up)
+      status TEXT NOT NULL DEFAULT 'noua',
+      resolved_email TEXT,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      resolved_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_neatrib_status ON plati_neatribuite (status, seen_at DESC);
     -- The ledger of top-ups (+) and consumptions (−). The "ref" column makes
     -- top-ups idempotent: the same payment is never credited twice, no matter
     -- how many reads or retries overlap.
@@ -3446,10 +3466,11 @@ export async function crediteazaDupaCod(
   return email
 }
 
-/** Payments that came in and we COULDN'T tie to anyone — the safety net. No
- *  payment is lost: whatever doesn't match automatically lands here, and the
- *  admin assigns it with one click. Better to ask than to credit the wrong
- *  person. */
+/** The user's still-pending code from the last 2 hours — REUSED so three
+ *  clicks on "add credit" don't mint three valid codes and leave the person
+ *  guessing which one to write. (The old comment here described the
+ *  unattributed-payments net — a feature that lived only in prose; the real
+ *  net is below: `salveazaPlataNeatribuita` & friends.) */
 export async function codPlataInAsteptare(email: string): Promise<CodPlata | null> {
   if (!dbEnabled() || !email) return null
   const r = await getPool()
@@ -3462,4 +3483,180 @@ export async function codPlataInAsteptare(email: string): Promise<CodPlata | nul
     .catch(() => null)
   const row = r?.rows[0] as { code?: string; amount?: string; currency?: string } | undefined
   return row?.code ? { code: row.code, amount: Number(row.amount ?? 0), currency: row.currency ?? config.billing.currency } : null
+}
+
+// ── THE NET: UNATTRIBUTED PAYMENTS (M2, Aug 2) ─────────────────────────────
+//
+// "O plată fără cod, sau cu cod greșit, ajunge în plati_neatribuite — nu
+// dispare" (the M2 order). Until today that sentence was prose: the reader
+// counted the unmatched inflow in a local variable and threw it away. Now
+// every inflow the reader could not credit lands in the table, exactly once
+// (bank_ref UNIQUE + ON CONFLICT DO NOTHING), and the admin assigns or
+// dismisses it from the panel. Better to ask than to credit the wrong person.
+
+export interface PlataNeatribuita {
+  id: number
+  bankRef: string
+  referinta: string
+  amount: number
+  currency: string
+  status: string
+  seenAt: string
+}
+
+/** Record an inflow nobody could be credited for. Idempotent on the bank's
+ *  transaction id — the 5-minute reader re-sees old transactions forever.
+ *  Returns true only when the row is NEW. */
+export async function salveazaPlataNeatribuita(
+  bankRef: string,
+  referinta: string,
+  amount: number,
+  currency: string,
+): Promise<boolean> {
+  if (!dbEnabled() || !bankRef || !(amount > 0)) return false
+  const r = await getPool()
+    .query(
+      `INSERT INTO plati_neatribuite (bank_ref, referinta, amount, currency) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (bank_ref) DO NOTHING`,
+      [bankRef, referinta || '', amount, currency || config.billing.currency],
+    )
+    .catch(() => null)
+  return (r?.rowCount ?? 0) > 0
+}
+
+/** A payment already credited must NOT re-enter the net: after a code is
+ *  closed (status 'paid'), the same bank transaction keeps appearing in every
+ *  read, `crediteazaDupaCod` correctly returns null for it — and without this
+ *  guard every SUCCESSFUL payment would land in the net one pass later,
+ *  dressed up as a problem. The ledger's `ref` is the bank id, so one lookup
+ *  answers it. */
+export async function refCreditatDeja(bankRef: string): Promise<boolean> {
+  if (!dbEnabled() || !bankRef) return false
+  const r = await getPool()
+    .query(`SELECT 1 FROM billing_events WHERE ref = $1`, [bankRef])
+    .catch(() => null)
+  return (r?.rowCount ?? 0) > 0
+}
+
+/** The open rows of the net, newest first — what the panel shows. */
+export async function listeazaPlatiNeatribuite(limit = 50): Promise<PlataNeatribuita[]> {
+  if (!dbEnabled()) return []
+  const r = await getPool()
+    .query(
+      `SELECT id, bank_ref, referinta, amount, currency, status, seen_at FROM plati_neatribuite
+        WHERE status = 'noua' ORDER BY seen_at DESC LIMIT $1`,
+      [limit],
+    )
+    .catch(() => null)
+  return (r?.rows ?? []).map((row) => {
+    const x = row as {
+      id?: number
+      bank_ref?: string
+      referinta?: string
+      amount?: string
+      currency?: string
+      status?: string
+      seen_at?: string
+    }
+    return {
+      id: Number(x.id ?? 0),
+      bankRef: String(x.bank_ref ?? ''),
+      referinta: String(x.referinta ?? ''),
+      amount: Number(x.amount ?? 0),
+      currency: String(x.currency ?? config.billing.currency),
+      status: String(x.status ?? 'noua'),
+      seenAt: String(x.seen_at ?? ''),
+    }
+  })
+}
+
+/** The admin ties a netted payment to a person. Credits THROUGH `topUpUser`
+ *  with the bank id as the reference — so if the code-matching path somehow
+ *  processes the same transaction later, the unique ledger index refuses the
+ *  double, not anyone's care. Returns:
+ *  'creditat' (done) · 'negasit' (no open row with this id) ·
+ *  'deja' (that bank transaction had already credited someone) · 'esec'. */
+export async function atribuiePlataNeatribuita(
+  id: number,
+  email: string,
+): Promise<'creditat' | 'negasit' | 'deja' | 'esec'> {
+  if (!dbEnabled() || !(id > 0) || !email) return 'esec'
+  const e = email.toLowerCase().trim()
+  const r = await getPool()
+    .query(
+      `SELECT bank_ref, amount, currency FROM plati_neatribuite WHERE id = $1 AND status = 'noua'`,
+      [id],
+    )
+    .catch(() => null)
+  const row = r?.rows[0] as { bank_ref?: string; amount?: string; currency?: string } | undefined
+  if (!row?.bank_ref) return 'negasit'
+  const ok = await topUpUser(e, Number(row.amount ?? 0), row.currency ?? config.billing.currency, row.bank_ref)
+  if (!ok) {
+    // `topUpUser` is idempotent on the reference: false here means either the
+    // transaction had already credited someone, or the write failed. Tell the
+    // truth apart — the caller shows different messages for them.
+    return (await refCreditatDeja(row.bank_ref)) ? 'deja' : 'esec'
+  }
+  await getPool()
+    .query(
+      `UPDATE plati_neatribuite SET status = 'atribuita', resolved_email = $2, resolved_at = now()
+        WHERE id = $1 AND status = 'noua'`,
+      [id, e],
+    )
+    .catch(() => null)
+  return 'creditat'
+}
+
+/** The admin dismisses a netted inflow (the owner's unrelated income). */
+export async function ignoraPlataNeatribuita(id: number): Promise<boolean> {
+  if (!dbEnabled() || !(id > 0)) return false
+  const r = await getPool()
+    .query(
+      `UPDATE plati_neatribuite SET status = 'ignorata', resolved_at = now() WHERE id = $1 AND status = 'noua'`,
+      [id],
+    )
+    .catch(() => null)
+  return (r?.rowCount ?? 0) > 0
+}
+
+/** The panel's summary (M3): codes issued/paid + the open net, with the most
+ *  recent codes so the admin sees WHO owes what and who paid. Every figure is
+ *  a count from the database — a failed read returns null, never zeros. */
+export interface RezumatPlati {
+  emise: number
+  platite: number
+  inAsteptare: number
+  neatribuite: number
+  recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
+}
+export async function rezumatPlati(): Promise<RezumatPlati | null> {
+  if (!dbEnabled()) return null
+  try {
+    const stari = await getPool().query(`SELECT status, count(*)::int AS n FROM payment_codes GROUP BY status`)
+    const net = await getPool().query(`SELECT count(*)::int AS n FROM plati_neatribuite WHERE status = 'noua'`)
+    const recente = await getPool().query(
+      `SELECT code, user_email, amount, currency, status, created_at, paid_at FROM payment_codes
+        ORDER BY created_at DESC LIMIT 30`,
+    )
+    const numar = (st: string): number =>
+      Number((stari.rows as { status?: string; n?: number }[]).find((r2) => r2.status === st)?.n ?? 0)
+    const total = (stari.rows as { n?: number }[]).reduce((s, r2) => s + Number(r2.n ?? 0), 0)
+    return {
+      emise: total,
+      platite: numar('paid'),
+      inAsteptare: numar('pending'),
+      neatribuite: Number((net.rows[0] as { n?: number } | undefined)?.n ?? 0),
+      recente: (recente.rows as Record<string, unknown>[]).map((x) => ({
+        code: String(x.code ?? ''),
+        email: String(x.user_email ?? ''),
+        amount: Number(x.amount ?? 0),
+        currency: String(x.currency ?? config.billing.currency),
+        status: String(x.status ?? ''),
+        createdAt: String(x.created_at ?? ''),
+        paidAt: x.paid_at ? String(x.paid_at) : null,
+      })),
+    }
+  } catch {
+    return null // a failed read is not an empty ledger (rule no. 1)
+  }
 }

@@ -125,8 +125,8 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | I3 | **Traducerile es/fr/de/it/pt pentru cheile noi din #653** (~60 chei: promo, voce onestă, constructor, unlock, monitor) | `i18n.ts` — cheile au EN+RO complete; restul limbilor cad curat pe engleză (mecanismul din 30 iul) | **deschis**, cosmetic |
 | I4 | **Dubluri de politică client-server, documentate, nereparate**: pragurile VPS din bară (`liberPct <= 10 || incarcarePct >= 200`) dublate față de sentinelă; vocabularul gesturilor (`GESTURE_TO_CLIP`, 18 intrări) și lista de limbi (`languages.ts`, 27 coduri) dublate în browser; rotirea la 55 min vs limita 60 a OpenAI; watchdog-ul de stream 50s vs heartbeat 15s | audit 2 aug, TIER B | **deschis** — toate au rațiuni comentate în cod; reparația reală = server ca sursă unică, de făcut punctual |
 | I5 | **Landing.tsx: engleza hardcodată în componentă, nu în `publicText.ts`** (lead-form, QR, Install, Contact) | audit 2 aug | **deschis**, cosmetic — engleza pe suprafața publică e regula; lipsește doar sursa unică |
-| I6 | ~~Promisiunea falsă „încearcă gratis” pe landing (7 limbi) + „3 minute gratuit” în meta/JSON-LD~~ | proba gratuită nu există (decizia lui Adrian, comentată în Landing.tsx) | ✅ **tăiat cu PR #653** (2 aug) — text onest în toate limbile |
-| I7 | ~~Fișierul „raw” al adminului: cip afișat, transmisie zero~~ + ~~conversia picată = atașament dispărut mut~~ + ~~402 la voce = „temporar” cu promisiune falsă~~ + ~~fraza pierdută la ASR = tăcere cu punct roșu aprins~~ | audit 2 aug TIER A, verificate pe cod | ✅ **tăiate cu PR #653**; dovada live rămâne a lui Adrian după publicare |
+| I6 | ~~Promisiunea falsă „încearcă gratis” pe landing (7 limbi) + „3 minute gratuit” în meta/JSON-LD~~ | proba gratuită nu există (decizia lui Adrian, comentată în Landing.tsx) | ✅ **tăiat cu PR #653 + VERIFICAT LIVE** (2 aug, 20:1x): live = `ba912ff`; titlul englez onest pe kelionai.app, „3 minute gratuit” = 0 apariții, „Try it free for 10 minutes” = 0 în bundle, textul onest prezent |
+| I7 | ~~Fișierul „raw” al adminului: cip afișat, transmisie zero~~ + ~~conversia picată = atașament dispărut mut~~ + ~~402 la voce = „temporar” cu promisiune falsă~~ + ~~fraza pierdută la ASR = tăcere cu punct roșu aprins~~ | audit 2 aug TIER A, verificate pe cod | ✅ **tăiate cu PR #653**, live pe `ba912ff` (marker `voiceNeedCredit` prezent în bundle-ul live — măsurat); proba de COMPORTAMENT pe voce/atașamente rămâne a lui Adrian |
 
 ---
 
@@ -182,11 +182,11 @@ Pașii, în ordine, și cum se verifică fiecare:
 | Pas | Ce construiește | Cum vezi că e gata |
 |---|---|---|
 | M0 | **Setările, făcute de EL**: își pune singur cheile (`secret_pune`), le duce pe server (`secret_publica`) și verifică. Tu nu mai intri nicăieri | îți spune ce a configurat — **numele** cheilor, niciodată valorile |
-| M1 | **Veriga lipsă, făcută de EL cu browserul**: intră singur pe `bankaccountdata.gocardless.com`, își face secretele, le pune cu `secret_pune`, leagă contul, publică. Tu apeși o singură dată: aprobarea PSD2 în Revolut, pe telefon. **NU prin email** (ordinul tău) și **nu prin API-ul Revolut** — măsurat: API-ul e doar pe Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate | Admin → Bani scrie ✅ la citirea plăților |
-| M2 | **Plasa**: o plată fără cod, sau cu cod greșit, ajunge în `plati_neatribuite` — nu dispare | Plătești fără cod → apare în panou, necreditată |
-| M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri | Le vezi în Admin → Bani |
-| M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh |
-| M5 | **Proba automată**: test cap-coadă — cod → email → credit → al doilea email nu mai creditează | `npm test` are testul și e verde |
+| M1 | **Veriga lipsă, făcută de EL cu browserul** — pe **Enable Banking** (enablebanking.com), NU GoCardless: măsurat 31 iul, GoCardless a închis conturile noi la final de 2025 („New signups are currently disabled"); codul cititorului e deja pe API-ul Enable Banking (`openBanking.ts`). Tu apeși o singură dată: aprobarea PSD2 în Revolut, pe telefon. **NU prin email** (ordinul tău) și **nu prin API-ul Revolut** — măsurat: API-ul e doar pe Business, plan Grow+, iar Business nu se dă persoanelor fizice autorizate | Admin → Bani scrie ✅ la citirea plăților |
+| M2 | **Plasa**: o plată fără cod, sau cu cod greșit, ajunge în `plati_neatribuite` — nu dispare. **Livrat 2 aug** (măsurarea din aceeași zi găsise doar proză: nicio tabelă, plata se număra într-o variabilă locală și se arunca): tabela + scrierea din cititor + garda anti-„plată reușită reintrată ca problemă" + atribuire/ignorare din panou | Plătești fără cod → apare în panou, necreditată. **Nu pot verifica live încă** — după merge + publicare |
+| M3 | **Panoul**: coduri emise, plăți creditate, plăți neatribuite, totaluri. **Livrat 2 aug** (`GET /api/admin/plati` + blocul din Admin → Bani; citirea picată se spune, nu se afișează zerouri) | Le vezi în Admin → Bani. **Nu pot verifica live încă** |
+| M4 | **Capătul userului**: sume la alegere, cod mare cu buton de copiere, „aștept plata" care se închide singură, istoric. **Livrat 2 aug** — măsurarea găsise gaura fatală: checkout-ul întorcea codul, dar UI-ul naviga la Revolut FĂRĂ să-l arate vreodată, deci nimeni nu putea scrie codul în referință și nicio plată nu se putea potrivi | Un cont obișnuit cumpără credit și îl vede intrând, fără refresh. **Nu pot verifica live încă** |
+| M5 | **Proba automată**: test cap-coadă — cod → **încasare Revolut simulată** (NU email — ordinul tău: plata nu se citește din inbox) → credit exact → aceeași încasare a doua oară nu mai creditează → plata fără cod intră în plasă. **Livrat 2 aug**: `fluxBaniCapCoada.test.ts`, pe funcțiile reale, motorul fake-pg | `npm test` are testul și e verde ✅ (6/6, măsurat 2 aug) |
 | M6 | **Cardul la furnizori + PLĂȚILE AUTOMATE**: îți pune cardul în pagina furnizorului (OpenRouter/Anthropic/OpenAI) fără să vadă vreodată valoarea, și **pornește reîncărcarea automată** — ca să nu mai rămână fără credit | `card_stare` scrie `plati_automate: true`, iar dovada e ce a **citit serverul** pe pagina lor („•••• 4242" + „Auto-recharge"), nu ce a spus el |
 
 **M6 — cele trei lucruri care fac diferența** (31 iul, cerința ta: „asta era
@@ -226,7 +226,9 @@ după trei încercări. Nu mi le ceruse nimeni — sunt scoase (30 iul, PR #593)
 Rămâne „un singur ordin odată", care nu e o permisiune: lucrătorul ia oricum un
 ordin pe rând.
 
-**După 3 încercări, IESE ȘI CAUTĂ** — cerința ta, și e echilibrul corect: nu
+**DE LA PRIMA REÎNCERCARE, IESE ȘI CAUTĂ** — nu de la a treia (corectat 2 aug:
+codul o face deliberat de la prima reîncercare — „pragul de 3 era al meu, nu al
+lui" scrie chiar în `autonomie.ts`; rândul ăsta rămăsese pe varianta veche). Nu
 renunță, dar nici nu se învârte. Schimbă metoda: browser pe mesajul exact de
 eroare și pe documentația oficială → studiu pe date reale → **își instalează**
 ce-i lipsește → alt drum, motivat în PR. Ca un pas greu să nu blocheze restul,
