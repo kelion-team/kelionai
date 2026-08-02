@@ -2000,18 +2000,6 @@ export interface UserSummary {
   last: string
 }
 
-/** How many people have an account with a wallet. We count wallets, not
- *  conversations: an account without a wallet has no credit to protect. */
-export async function countWalletUsers(): Promise<number> {
-  if (!dbEnabled()) return 0
-  try {
-    const r = await getPool().query<{ n: string }>('SELECT COUNT(*)::text AS n FROM wallets')
-    return Number(r.rows[0]?.n ?? 0)
-  } catch {
-    return 0
-  }
-}
-
 export async function listUsers(): Promise<UserSummary[]> {
   if (!dbEnabled()) return []
   try {
