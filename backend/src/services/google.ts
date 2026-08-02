@@ -586,12 +586,92 @@ async function readEmail(query: string, token: string): Promise<string> {
   body = body.replace(/&nbsp;/g, ' ').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000)
   return JSON.stringify({ found: true, from: h('From'), subject: h('Subject'), date: h('Date'), body: body || m.snippet || '' })
 }
+// ── SERPER (google.serper.dev) — the PRIMARY web search ──────────────────────
+// The key existed in config (SERPER_API_KEY/SERPER_KEY) since Jul 30 but NO code
+// read it — web_search went only through the OpenRouter `web` plugin, whose free
+// model returns content:null (degenerate reasoning loop, live-proven Aug 2026)
+// → the user always got search_unavailable while a paid Serper key sat unused.
+// Serper gives REAL Google results: answerBox + knowledgeGraph + peopleAlsoAsk +
+// organic links + fresh news + relatedSearches. On ANY failure (missing/invalid
+// key, quota, network) we fall back to OpenRouter — never a hard error.
+interface SerperHit {
+  title?: string
+  link?: string
+  snippet?: string
+  date?: string
+  source?: string
+}
+interface SerperJson {
+  answerBox?: { answer?: string; snippet?: string; title?: string; link?: string }
+  knowledgeGraph?: { title?: string; type?: string; description?: string; descriptionLink?: string }
+  peopleAlsoAsk?: { question?: string; snippet?: string; link?: string }[]
+  relatedSearches?: { query?: string }[]
+  topStories?: SerperHit[]
+  news?: SerperHit[]
+  organic?: SerperHit[]
+}
+
+// Exported so the shape/merge rules are testable without network (same pattern
+// as composePlace above): one JSON string for the brain, never guessed fields.
+export function composeSerperResult(j: SerperJson, n: number): string | null {
+  const results = (j.organic ?? [])
+    .filter((o) => o.link)
+    .slice(0, n)
+    .map((o) => ({ title: o.title ?? '', link: o.link ?? '', snippet: o.snippet ?? '' }))
+  const answer = j.answerBox?.answer ?? j.answerBox?.snippet ?? ''
+  if (!answer && results.length === 0) return null // empty page → let the fallback try
+  const kg = j.knowledgeGraph?.title
+    ? {
+        title: j.knowledgeGraph.title,
+        type: j.knowledgeGraph.type ?? '',
+        description: j.knowledgeGraph.description ?? '',
+        link: j.knowledgeGraph.descriptionLink ?? '',
+      }
+    : undefined
+  const news = [...(j.topStories ?? []), ...(j.news ?? [])]
+    .filter((s) => s.link)
+    .slice(0, 5)
+    .map((s) => ({ title: s.title ?? '', link: s.link ?? '', source: s.source ?? '', date: s.date ?? '' }))
+  return JSON.stringify({
+    answer,
+    results,
+    knowledge_graph: kg,
+    people_also_ask: (j.peopleAlsoAsk ?? [])
+      .filter((p) => p.question)
+      .slice(0, 4)
+      .map((p) => ({ question: p.question, answer: p.snippet ?? '', link: p.link ?? '' })),
+    news,
+    related_searches: (j.relatedSearches ?? []).map((r) => r.query ?? '').filter(Boolean).slice(0, 6),
+    source: 'serper',
+  })
+}
+
+async function serperSearch(query: string, n: number): Promise<string | null> {
+  if (!config.serperKey) return null
+  try {
+    const res = await tfetch(
+      'https://google.serper.dev/search',
+      {
+        method: 'POST',
+        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
+      },
+      15_000,
+    )
+    // 401/403/429 = bad key / no credits → null, the OpenRouter fallback takes it.
+    if (!res.ok) return null
+    return composeSerperResult((await res.json()) as SerperJson, n)
+  } catch {
+    return null
+  }
+}
+
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-  // Web search through OpenRouter (the `web` plugin) — the same key as the
-  // brain, no Serper/Gemini. Returns a concise answer + the real sources
-  // (citations).
+  // PRIMARY: Serper (real Google results). FALLBACK: OpenRouter `web` plugin.
+  const viaSerper = await serperSearch(query, n)
+  if (viaSerper) return viaSerper
   const r = await openrouterWebSearch(query)
   if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
   return JSON.stringify({
