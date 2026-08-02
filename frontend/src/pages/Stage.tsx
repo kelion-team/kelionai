@@ -407,6 +407,14 @@ function safeFileName(title: string, ext: string): string {
   return `${base}.${ext}`
 }
 
+// ── THE SERPER CREDIT FORMAT ───────────────────────────────────────────────
+// Thousands collapse to one-decimal "k" (49 875 → "49.9k"); under 1000 the raw
+// number stays as-is. The tooltip always carries the EXACT figure, with the
+// Romanian thousands separator (49.875).
+function formatSerperK(credits: number): string {
+  return credits >= 1000 ? `${(credits / 1000).toFixed(1)}k` : String(credits)
+}
+
 // The shape of the /api/admin/brain-credit response — named, so the shared polling
 // (usePolledJson) can type it.
 interface BrainCredit {
@@ -426,6 +434,16 @@ interface BrainCredit {
     openai?: {
       live: boolean
       monthUsd?: number
+      error?: string
+    }
+    /** The REAL Serper search credit (searches left), from the provider's
+     *  /account endpoint. `live: false` = the read failed or SERPER_API_KEY is
+     *  missing — the bar writes "Serper ⚠", NEVER "Serper 0": a failed read is
+     *  not an empty account (the same rule as the OpenAI pill). */
+    serper?: {
+      live: boolean
+      balance?: number
+      rateLimit?: number
       error?: string
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
@@ -1142,6 +1160,28 @@ export default function Stage({ user }: { user: User }) {
                   : '⚠ OpenAI'}
               </button>
             )}
+            {/* THE SERPER PILL (same "REAL everywhere" rule), IMMEDIATELY to
+            the right of the OpenAI one: the REAL remaining search credit read
+            from Serper's own /account endpoint — the wallet the web search
+            skill spends from. Key missing or read failed → "Serper ⚠", never
+            "Serper 0": a failed read is not an empty account. Click → the
+            provider's dashboard. */}
+            {brainCredit && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => window.open('https://serper.dev/dashboard', '_blank', 'noopener')}
+                title={
+                  brainCredit.serper?.live
+                    ? `Serper (căutarea web): ${(brainCredit.serper.balance ?? 0).toLocaleString('ro-RO')} credite reale · click pentru dashboard`
+                    : 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)'
+                }
+              >
+                {brainCredit.serper?.live
+                  ? `Serper ${formatSerperK(brainCredit.serper.balance ?? 0)}`
+                  : 'Serper ⚠'}
+              </button>
+            )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
             permanently on the interface in the top bar”). Two figures, because they
             answer two different questions: RAM = does anything else FIT on the
@@ -1185,7 +1225,7 @@ export default function Stage({ user }: { user: User }) {
         no longer has the separate ⚙ wheel, nor the „Connect Google” button.
         THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
         his settings live in the Admin panel now, so the header keeps only
-        measurements (OpenRouter / OpenAI / VPS). */}
+        measurements (OpenRouter / OpenAI / Serper / VPS). */}
         {user.role !== 'admin' && (
           <WalletButton
             onOpenSettings={() => setSettingsOpen(true)}
