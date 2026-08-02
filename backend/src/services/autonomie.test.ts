@@ -40,6 +40,10 @@ let plafon = 20
 
 // What the loop "sees" when it asks which secrets exist — the proof of the hands steps.
 let secreteExistente: string[] = []
+// The RUNNING server's payment link (2 aug): M0's proof reads config, not the
+// GitHub secret NAMES — on the real VPS the env has REVOLUT_PAY_LINK while the
+// GitHub secret is called REVOLUT_PAY, so the name check could never pass.
+let linkPlataRevolut = ''
 // What the brain says after it worked with its hands.
 let spuseCreierul = 'am pus cheile'
 // How many hands turns were started, and with which tools.
@@ -53,6 +57,12 @@ vi.mock('../config.js', () => ({
     get autonomyDailyMax() {
       return plafon
     },
+    revolut: {
+      get payLink() {
+        return linkPlataRevolut
+      },
+    },
+    enableBanking: { appId: '', privateKeyB64: '' },
   },
 }))
 
@@ -168,6 +178,7 @@ beforeEach(() => {
   urmatorulId = 1
   plafon = 20
   secreteExistente = []
+  linkPlataRevolut = ''
   spuseCreierul = 'am pus cheile'
   turiDeMaini = 0
   uneltePrimite = []
@@ -420,7 +431,8 @@ describe('Kelion se apucă singur de treabă', () => {
   })
 
   it('dovedit prin măsurare → pasul se închide și trece la următorul', async () => {
-    secreteExistente = ['REVOLUT_PAY_LINK']
+    // The proof is the RUNNING server's config (2 aug), not the secret names.
+    linkPlataRevolut = 'https://revolut.me/kelionai'
     await poateSaLucreze()
     expect(JSON.parse(kv.get('autonomie:pas:M0')!).gata).toBe(true)
 

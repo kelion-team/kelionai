@@ -238,8 +238,11 @@ const MISIUNE: Sarcina[] = [
     executant: 'maini',
     dificultate: 4, // configuration on external services, touches the keys
 
-    // Proof, not the claim: the payment link actually exists in the secrets.
-    dovada: () => secreteExista('REVOLUT_PAY_LINK'),
+    // Proof, not the claim — measured on the RUNNING SERVER, not on GitHub
+    // secret NAMES (VPS truth, 2 aug: the env has REVOLUT_PAY_LINK while the
+    // GitHub secret is called REVOLUT_PAY — the same alias disease as the
+    // 30 iul config.ts lesson, one layer up; the old check could NEVER pass).
+    dovada: () => Promise.resolve(!!config.revolut?.payLink),
   },
   {
     cod: 'M1',
@@ -277,9 +280,10 @@ const MISIUNE: Sarcina[] = [
     executant: 'maini',
     dificultate: 4,
 
-    // Proof: the Enable Banking keys actually exist in the secrets. Without them,
-    // the reader never starts, no matter how many pages get opened.
-    dovada: () => secreteExista('ENABLE_BANKING_APP_ID', 'ENABLE_BANKING_PRIVATE_KEY_B64'),
+    // Proof: the RUNNING server sees both keys (same server-truth rule as M0;
+    // measured 2 aug on the VPS: the private key EXISTS — 4364 chars — only
+    // the app id is missing, so this reads the exact remaining gap).
+    dovada: () => Promise.resolve(!!(config.enableBanking?.appId && config.enableBanking?.privateKeyB64)),
   },
   {
     cod: 'M2',
