@@ -1234,7 +1234,12 @@ export default function ChatPanel({
           // 2 voices at the same time"): we mark the handle as a Realtime session — while it's
           // installed, the written chat's Chirp voice is NOT played (see c.audio) and
           // is no longer synthesized on the server either (serverVoiceOff on send).
-          ;(rv as unknown as { isRealtime?: boolean }).isRealtime = true
+          // CHIRP MOUTH (Adrian, Aug 2 — "gura pe Google Chirp 3 HD, OpenAI doar
+          // rezervă"): a guraChirp session is NOT marked — its voice ARRIVES as
+          // the server's {audio} frames, so they must PLAY (not be suppressed at
+          // c.audio) and serverVoiceOff must stay false so the server keeps
+          // synthesizing. The OpenAI reserve keeps the old rule.
+          ;(rv as unknown as { isRealtime?: boolean }).isRealtime = rv.guraChirp !== true
           micRef.current = rv as unknown as MicHandle
           rvLiveRef.current = rv
           // The pre-warmed stream is only for the STT path; Realtime opens
@@ -1247,7 +1252,9 @@ export default function ChatPanel({
           // PROACTIVE ROTATION at 55 min (OpenAI's limit is 60): we restart the session
           // BEFORE the server cuts it — the user feels no break
           // and no "failure" gets counted. The timer dies with the session.
-          const rotateTimer = window.setTimeout(() => {
+          // CHIRP MOUTH (Aug 2): no OpenAI session, no 60-min limit — rotating
+          // would just blip the microphone for nothing, so no timer is armed.
+          const rotateTimer = rv.guraChirp === true ? null : window.setTimeout(() => {
             if (micRef.current === (rv as unknown as MicHandle) && !micManualOffRef.current) {
               rv.stop()
               micRef.current = null
@@ -1290,7 +1297,7 @@ export default function ChatPanel({
             rotStop()
           }
           rv.stop = () => {
-            clearTimeout(rotateTimer)
+            if (rotateTimer !== null) clearTimeout(rotateTimer)
             // Sesiunea s-a oprit → marcajul cade IMEDIAT, pe orice drum de stop
             // (manual, rotation, out of credit) — even if micRef gets cleaned up
             // later, the chat's Chirp voice doesn't stay stuck on mute.

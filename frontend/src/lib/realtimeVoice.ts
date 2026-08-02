@@ -12,16 +12,33 @@
 //     "ROSTEȘTE:" which the model speaks VERBATIM. The session has NO tools
 //     and NEVER answers from its own head — the "two voices / two entities"
 //     bug is impossible by construction.
+//   • THE MOUTH MOVES TO GOOGLE (Adrian, Aug 2 — direct order: "gura lui
+//     Kelion trece pe Google Chirp 3 HD; OpenAI rămâne doar rezervă"). The
+//     ears were already Chirp 3 streaming (free), but the mouth still ran on
+//     OpenAI Realtime — $65 in two weeks, proven live, and the account hit
+//     zero credits. Now: a probe on /api/tts/status decides. google:true →
+//     CHIRP-MOUTH mode, no WebRTC session at all — the server synthesizes the
+//     voice itself (Google TTS Chirp 3 HD, 1M chars/month free tier) and
+//     streams it as {audio} frames. google:false / probe failed → the OpenAI
+//     Realtime path below, unchanged — strictly the reserve.
 //
 // The OpenAI key is NEVER here — the backend holds it. Model + voice + language
 // are injected server-side; the client only sends the current language as a hint.
 
-import { driveVoiceLevelFromElement, registerVoiceAudioElement, buildVoiceFeatures, estimateEnergy, estimateF0, estimateZcr, estimateCentroid, estimateRolloff, type VoiceFeatures } from './audioIO'
+import { driveVoiceLevelFromElement, registerVoiceAudioElement, buildVoiceFeatures, estimateEnergy, estimateF0, estimateZcr, estimateCentroid, estimateRolloff, stopVoice, type VoiceFeatures } from './audioIO'
 import { startMicStream, urechiChirpDisponibile, marcheazaUrechiChirpMoarte, type MicStreamHandle } from './micStream'
 
 export type RealtimeVoiceState = 'connecting' | 'live' | 'error' | 'closed'
 
 export interface RealtimeVoiceHandle {
+  /**
+   * CHIRP-MOUTH MODE (Adrian, Aug 2 — "gura pe Google Chirp 3 HD, OpenAI doar
+   * rezervă"): true when the session runs entirely on Google — Chirp 3 ears +
+   * the server's Chirp 3 HD voice arriving as {audio} frames. ChatPanel reads
+   * this and does NOT mark the handle isRealtime: those frames ARE Kelion's
+   * voice now (they must play, and the server must keep synthesizing them).
+   */
+  guraChirp?: boolean
   stop: () => void
   setMuted: (muted: boolean) => void
   /** Immediately interrupts Kelion's speech (manual barge-in). */
@@ -116,6 +133,32 @@ async function transcriptVerdict(text: string, vf: VoiceFeatures | null): Promis
   }
 }
 
+// ── THE MOUTH'S PROBE (Adrian, Aug 2 — "gura pe Google Chirp 3 HD; OpenAI
+// doar rezervă") ─────────────────────────────────────────────────────────────
+// Contract with the backend: GET /api/tts/status (with the session cookie) →
+// { google: boolean }. google:true → the voice session starts in CHIRP-MOUTH
+// mode (no WebRTC, zero OpenAI cost). google:false or a fallen probe →
+// today's behavior (OpenAI Realtime) — exactly the reserve Adrian asked for.
+// The server's ANSWER is cached per page session (like the ears probe in
+// micStream.ts); a network/HTTP failure is NOT cached, so the next voice
+// start re-asks. The probe runs lazily at the first voice start (the route
+// wants a logged-in session — probing at module load could cache a guest's
+// answer for the whole page session).
+let guraChirpStare: boolean | null = null
+function guraChirpDisponibila(): Promise<boolean> {
+  if (guraChirpStare !== null) return Promise.resolve(guraChirpStare)
+  if (typeof fetch !== 'function') return Promise.resolve(false)
+  return fetch('/api/tts/status', { credentials: 'include', cache: 'no-store' })
+    .then(async (r) => {
+      if (!r.ok) return false // not cached — retried at the next voice start
+      const j = (await r.json().catch(() => null)) as { google?: boolean } | null
+      const ok = j?.google === true
+      guraChirpStare = ok
+      return ok
+    })
+    .catch(() => false) // probe fallen → the OpenAI reserve
+}
+
 // ── ONE SINGLE VOICE SESSION, ACROSS ALL TABS (Jul 25 — Adrian: "the Russian comes
 // peste chatul live, mai e un canal") ────────────────────────────────────────
 // Two Realtime sessions in parallel (an old tab left open, a restart in a
@@ -195,7 +238,10 @@ export async function startRealtimeVoice(
 
   let closed = false
   const cleanups: (() => void)[] = []
-  const pc = new RTCPeerConnection()
+  // THE WEBRTC SESSION EXISTS ONLY ON THE OPENAI RESERVE PATH (Adrian, Aug 2):
+  // in chirp-mouth mode no RTCPeerConnection is built at all — zero OpenAI
+  // cost. The reserve path stores its pc here so stop() can tear it down.
+  let pcRezerva: RTCPeerConnection | null = null
 
   const stop = (): void => {
     if (closed) return
@@ -209,12 +255,12 @@ export async function startRealtimeVoice(
       }
     }
     try {
-      pc.getSenders().forEach((s) => s.track?.stop())
+      pcRezerva?.getSenders().forEach((s) => s.track?.stop())
     } catch {
       /* ignore */
     }
     try {
-      pc.close()
+      pcRezerva?.close()
     } catch {
       /* ignore */
     }
@@ -259,8 +305,158 @@ export async function startRealtimeVoice(
     // session keeps ONE job: the MOUTH. The ear (PCM → /api/asr-stream →
     // finals) starts below and feeds THE SAME gates (timbre → stop → name).
     const urechiChirp = await urechiChirpDisponibile().catch(() => false)
+    // THE MOUTH'S PROBE (Aug 2): chirp-mouth mode needs BOTH Google pieces —
+    // the ear IS the session here, there is no WebRTC left to hang anything
+    // on. No Chirp ears → the whole session falls onto the OpenAI reserve.
+    const guraChirp = urechiChirp ? await guraChirpDisponibila().catch(() => false) : false
     let chirpEar: MicStreamHandle | null = null
     cleanups.push(() => chirpEar?.stop())
+
+    // ── THE GATE, SHARED BY BOTH MOUTHS (hoisted, Aug 2) ────────────────────
+    // Until Aug 2 this gate lived INSIDE the WebRTC wiring. Chirp-mouth mode
+    // has no dataChannel at all, so the gate now stands on its own and both
+    // mouths feed their finals through it — the exact same rules: the TIMBRE
+    // gate is awaited, a foreign voice with no guest approval is ignored
+    // COMPLETELY, the spoken STOP cuts the mouth at once, and the NAME gate
+    // decides per utterance if the turn goes to the brain at all.
+    // The two mode-dependent pieces are filled in by each mode BEFORE any
+    // transcript can arrive: the language anchor (the OpenAI session pins the
+    // committed language; Chirp detects it per utterance) and the mouth-cutter
+    // (the OpenAI response queue vs. the server's {audio} playback).
+    const REPLY_WINDOW_MS = 12_000
+    // THE WINDOW IS OPEN AT SESSION START (bug found live by Adrian, Jul 27):
+    // the user just STARTED the microphone — obviously they're addressing
+    // Kelion; demanding the name on the very first utterance made him
+    // completely mute at opening. If they say nothing in 15s, silence becomes
+    // the default again.
+    let replyUntil = Date.now() + 15_000
+    // Regex TOLERANT to real transcription (live proof: "Kelion, ce faci" came out
+    // as "Elioncevaci"): we also accept the variants without the initial consonant
+    // (elion/eleon), glued to the next word.
+    const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
+    // The last language ANCHORED in the live session — we re-anchor only on change.
+    let anchoredLang = ''
+    let ancoreazaLimba: (lang: string) => void = () => {}
+    let taieGura: () => void = () => {}
+    const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null): void => {
+      // THE TIMBRE GATE IS AWAITED (Adrian, Aug 1: "dacă nu-mi identifică
+      // vocea, trebuie să ignore ce aude — femei, bărbați, tv, radio").
+      // NOTHING leaves for the brain before the server says WHO is speaking.
+      void (async () => {
+        const verdict = await transcriptVerdict(t, vf)
+        // The language COMMITTED by the server anchors the LIVE session's
+        // transcription — ONLY ON CHANGE, and only where a transcription
+        // session exists (the OpenAI reserve; Chirp detects it per utterance).
+        if (verdict?.lang && verdict.lang !== anchoredLang) {
+          anchoredLang = verdict.lang
+          ancoreazaLimba(verdict.lang)
+        }
+        // THE ADMIN PADLOCK: the voiceprint matched → the server set the
+        // unlock cookie; we notify the UI to light up the Admin button.
+        if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
+        // THE STRICT GATE: a voice that is neither the holder NOR an allowed
+        // guest is ignored COMPLETELY — no brain turn, no reply, no warning,
+        // no trace in the chat. This is what stops him from answering the TV.
+        const guest = verdict?.guest ?? verdict?.guestPending
+        if (verdict?.foreignVoice && !guest) {
+          console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
+          return
+        }
+        const speaker = verdict?.guest
+          ? `guest:${verdict.guest.id}:${verdict.guest.name}${verdict.guest.relation ? ` (${verdict.guest.relation})` : ''}`
+          : verdict?.guestPending
+            ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
+            : undefined
+        // THE "STOP" COMMAND (Adrian, Jul 27): spoken ALONE, it cuts AT ONCE
+        // whatever the mouth is saying and empties its queue. Holder/guest
+        // only — a stranger's "stop" is ignored with everything else above.
+        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
+          replyUntil = 0 // STOP closes the reply window too — until the next "Kelion"
+          taieGura()
+          return
+        }
+        if (!t.trim()) return
+        // THE GATE: the name is in this utterance → to the brain. It isn't →
+        // silence, no matter what was said before. The nameless reply to his
+        // own question gets CONSUMED here (`replyUntil = 0`), so one reply
+        // can't open the next one — the old perpetuum mobile that never
+        // closed while something was heard in the room.
+        const named = NAME_RE.test(t)
+        const answering = Date.now() < replyUntil
+        if (named || answering) {
+          replyUntil = 0
+          onAddressed?.(t, vf, speaker)
+        }
+      })()
+    }
+
+    // ── CHIRP-MOUTH MODE (Adrian, Aug 2 — the direct order) ──────────────────
+    // google:true at the probe → NO RTCPeerConnection, NO /api/realtime/session,
+    // ZERO OpenAI cost: the ears are Chirp 3 streaming (as since Aug 1) and
+    // the mouth is the server's own Chirp 3 HD synthesis, which arrives as
+    // {audio} frames and is played by ChatPanel through playVoice (audioIO).
+    // The handle is flagged `guraChirp` so the panel does NOT mark it
+    // isRealtime — otherwise the {audio} frames would stay suppressed and the
+    // server would stop synthesizing (serverVoiceOff).
+    if (guraChirp) {
+      // The mouth-cutter of this mode: the server's Chirp playback stops here.
+      taieGura = stopVoice
+      const ear = await startMicStream({
+        preWarmedStream: mic,
+        onLive: (t) => onUserTranscript?.(t, false),
+        onPhrase: (t, vf) => {
+          onUserTranscript?.(t, true)
+          poartaDupaTranscript(t, vf)
+        },
+        onError: (reason) => {
+          if (closed) return
+          console.error(`[voce] urechea Chirp a murit (${reason}) — sesiunea se reface pe rezerva OpenAI`)
+          marcheazaUrechiChirpMoarte()
+          stop()
+          onState?.('error', `urechi-chirp-${reason}`)
+        },
+        getLang: () => anchoredLang || opts.language || '',
+        onSpeechBegin: () => {
+          // BARGE-IN (Aug 2): your voice cuts Kelion's Chirp playback on the
+          // spot — the aborted turn drains the rest of the server synthesis.
+          stopVoice()
+          onSpeechStart?.()
+        },
+        storePendingFeatures: false,
+      })
+      if (!ear) {
+        // The probe lied (race with a config change) — the onError above
+        // already marked the ear dead and announced; just fail the start so
+        // the panel counts it and the next attempt lands on the reserve.
+        throw new Error('chirp_ear_unavailable')
+      }
+      chirpEar = ear
+      onState?.('live')
+      console.info('[voce] urechi + gură pe Google Chirp 3 HD — OpenAI doar rezervă')
+      return {
+        guraChirp: true,
+        stop,
+        setMuted: (muted: boolean) => {
+          // The mic belongs to the Chirp ear — mute it there (there are no
+          // WebRTC senders in this mode at all).
+          chirpEar?.setMuted(muted)
+        },
+        // Manual barge-in: cut the server's Chirp playback right now.
+        interrupt: () => stopVoice(),
+        // THE MOUTH IS THE SERVER'S (Aug 2): the reply's audio arrives by
+        // itself as {audio} frames — speak() only watches the sentences for
+        // Kelion's QUESTIONS, to open the one-reply window exactly like the
+        // OpenAI mouth's transcript.done does.
+        speak: (text: string) => {
+          if (/\?/.test(text)) replyUntil = Date.now() + REPLY_WINDOW_MS
+        },
+        stopSpeaking: () => stopVoice(),
+      }
+    }
+
+    // ── THE OPENAI RESERVE PATH (the pre-Aug-2 behavior, unchanged) ──────────
+    const pc = new RTCPeerConnection()
+    pcRezerva = pc
     // The voiceprint tap: a parallel analyser on the SAME microphone (doesn't touch
     // WebRTC). It collects frames only when there's speech energy; the voiceprint
     // finalizes per utterance (at the final transcript) — like on the STT path.
@@ -492,92 +688,22 @@ export async function startRealtimeVoice(
       }
     }
 
-    // ── THE NAME GATE, PER UTTERANCE (Adrian, Jul 31 / Aug 1) ────────────────
-    // The name is in the utterance → the utterance goes to the brain. No name →
-    // silence. The only exception: if Kelion just asked you a QUESTION, you may
-    // answer once without calling him — one reply, consumed on use, never
-    // renewed. The gate DOESN'T speak: it hands the transcript to the brain via
-    // onAddressed (the same door typing uses).
-    const REPLY_WINDOW_MS = 12_000
-    // THE WINDOW IS OPEN AT SESSION START (bug found live by Adrian, Jul 27):
-    // the user just STARTED the microphone — obviously they're addressing
-    // Kelion; demanding the name on the very first utterance made him
-    // completely mute at opening. If they say nothing in 15s, silence becomes
-    // the default again.
-    let replyUntil = Date.now() + 15_000
-    // Regex TOLERANT to real transcription (live proof: "Kelion, ce faci" came out
-    // as "Elioncevaci"): we also accept the variants without the initial consonant
-    // (elion/eleon), glued to the next word.
-    const NAME_RE = /[ckg]h?e?l[iy]?[oae]n|elion|eleon|\bkei\b|\bkay\b/i
-    // The last language ANCHORED in the live session — we re-anchor only on change.
-    let anchoredLang = ''
-
-    // ── THE GATE, SHARED BY BOTH EARS (Chirp 3 live + OpenAI fallback) ───────
-    // A FINAL transcript arrives here, no matter which ear heard it:
-    //   1. the TIMBRE gate is awaited — nothing reaches the brain before the
-    //      server says WHO is speaking;
-    //   2. a foreign voice with no guest approval is ignored COMPLETELY;
-    //   3. the spoken STOP cuts the mouth at once;
-    //   4. the NAME gate decides if the turn goes to the brain at all.
-    const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null): void => {
-      // THE TIMBRE GATE IS AWAITED (Adrian, Aug 1: "dacă nu-mi identifică
-      // vocea, trebuie să ignore ce aude — femei, bărbați, tv, radio").
-      // NOTHING leaves for the brain before the server says WHO is speaking.
-      void (async () => {
-        const verdict = await transcriptVerdict(t, vf)
-        // The language COMMITTED by the server anchors the LIVE session's
-        // transcription (session.update, no restart) — ONLY ON CHANGE.
-        // CHIRP EARS: there is no OpenAI transcription to pin — Chirp detects
-        // the language by itself on every utterance.
-        if (verdict?.lang && verdict.lang !== anchoredLang) {
-          anchoredLang = verdict.lang
-          if (!urechiChirp)
-            send({
-              type: 'session.update',
-              session: {
-                type: 'realtime',
-                audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: verdict.lang } } },
-              },
-            })
-        }
-        // THE ADMIN PADLOCK: the voiceprint matched → the server set the
-        // unlock cookie; we notify the UI to light up the Admin button.
-        if (verdict?.adminUnlocked) window.dispatchEvent(new Event('kelion:admin-unlock'))
-        // THE STRICT GATE: a voice that is neither the holder NOR an allowed
-        // guest is ignored COMPLETELY — no brain turn, no reply, no warning,
-        // no trace in the chat. This is what stops him from answering the TV.
-        const guest = verdict?.guest ?? verdict?.guestPending
-        if (verdict?.foreignVoice && !guest) {
-          console.info('[voce] voce străină — ignorată complet (nu ajunge la creier)')
-          return
-        }
-        const speaker = verdict?.guest
-          ? `guest:${verdict.guest.id}:${verdict.guest.name}${verdict.guest.relation ? ` (${verdict.guest.relation})` : ''}`
-          : verdict?.guestPending
-            ? `guest-pending:${verdict.guestPending.id}:${verdict.guestPending.name}${verdict.guestPending.relation ? ` (${verdict.guestPending.relation})` : ''}`
-            : undefined
-        // THE "STOP" COMMAND (Adrian, Jul 27): spoken ALONE, it cuts AT ONCE
-        // whatever the mouth is saying and empties its queue. Holder/guest
-        // only — a stranger's "stop" is ignored with everything else above.
-        if (/^\W*(stop|stai|taci|gata|opre[sș]te(?:-te)?|shut ?up|be quiet|basta)[\s.!…]*$/i.test(t.trim())) {
-          replyUntil = 0 // STOP closes the reply window too — until the next "Kelion"
-          stopSpeaking()
-          return
-        }
-        if (!t.trim()) return
-        // THE GATE: the name is in this utterance → to the brain. It isn't →
-        // silence, no matter what was said before. The nameless reply to his
-        // own question gets CONSUMED here (`replyUntil = 0`), so one reply
-        // can't open the next one — the old perpetuum mobile that never
-        // closed while something was heard in the room.
-        const named = NAME_RE.test(t)
-        const answering = Date.now() < replyUntil
-        if (named || answering) {
-          replyUntil = 0
-          onAddressed?.(t, vf, speaker)
-        }
-      })()
+    // ── THE GATE'S MODE PIECES (OpenAI reserve path) ─────────────────────────
+    // The shared gate itself now stands ABOVE the mouth branch (Aug 2 hoist).
+    // Here the OpenAI session fills its two pieces: pin the transcription
+    // language the server committed (only with OpenAI ears — Chirp detects it
+    // per utterance) and cut the mouth through the response queue.
+    ancoreazaLimba = (lang: string): void => {
+      if (!urechiChirp)
+        send({
+          type: 'session.update',
+          session: {
+            type: 'realtime',
+            audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: lang } } },
+          },
+        })
     }
+    taieGura = stopSpeaking
 
     dc.onmessage = (ev) => {
       let m: Record<string, unknown>
