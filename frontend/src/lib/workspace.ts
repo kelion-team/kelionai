@@ -105,8 +105,8 @@ export function isMonitorWorking(): boolean {
 // any data type — xls, pdf, youtube, code, archives, anything"). Each type has
 // its renderer in Stage: image→<img>, pdf→viewer, video→<video>, audio→
 // <audio>, office(xls/doc/ppt)→vizor Office online, cod/text/json/csv→text,
-// archives→download panel. Same kind = same tab (a new pdf
-// replaces the old one).
+// markdown→rendered doc, .html→sandboxed frame, archives/binaries→download
+// panel. Same kind = same tab (a new pdf replaces the old one).
 const EXT_KIND: Record<string, string> = {
   // imagini
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', bmp: 'image', avif: 'image', ico: 'image',
@@ -118,12 +118,21 @@ const EXT_KIND: Record<string, string> = {
   mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio', flac: 'audio', aac: 'audio', opus: 'audio',
   // office
   xls: 'office', xlsx: 'office', doc: 'office', docx: 'office', ppt: 'office', pptx: 'office', ods: 'office', odt: 'office', odp: 'office',
+  // PAGINI HTML salvate (Aug 2): they run sandboxed like the playground 'app',
+  // not framed as external sites (a raw .html in an <iframe src> can fight the
+  // app's own session through allow-same-origin).
+  html: 'htmlfile', htm: 'htmlfile',
+  // MARKDOWN (Aug 2): rendered formatted, not shown as raw text.
+  md: 'markdown',
   // cod / text / date
-  txt: 'textfile', md: 'textfile', json: 'textfile', csv: 'textfile', tsv: 'textfile', xml: 'textfile', yml: 'textfile', yaml: 'textfile', log: 'textfile',
+  txt: 'textfile', json: 'textfile', csv: 'textfile', tsv: 'textfile', xml: 'textfile', yml: 'textfile', yaml: 'textfile', log: 'textfile',
   js: 'textfile', ts: 'textfile', tsx: 'textfile', jsx: 'textfile', py: 'textfile', java: 'textfile', c: 'textfile', cpp: 'textfile', h: 'textfile',
   go: 'textfile', rs: 'textfile', rb: 'textfile', php: 'textfile', sh: 'textfile', sql: 'textfile', css: 'textfile', ini: 'textfile', conf: 'textfile',
   // arhive
   zip: 'archive', rar: 'archive', '7z': 'archive', tar: 'archive', gz: 'archive', bz2: 'archive', xz: 'archive', tgz: 'archive',
+  // BINARE fără vizor în browser (Aug 2): honest download panel instead of a
+  // dead iframe — epub/exe/apk/dmg/iso/fonts can't render in a page.
+  epub: 'file', exe: 'file', msi: 'file', apk: 'file', ipa: 'file', dmg: 'file', iso: 'file', bin: 'file', woff: 'file', woff2: 'file', ttf: 'file', otf: 'file',
 }
 
 export function kindForUrl(raw: string): string {
@@ -135,6 +144,10 @@ export function kindForUrl(raw: string): string {
     if (mime === 'application/pdf') return 'pdf'
     if (mime.startsWith('video/')) return 'video'
     if (mime.startsWith('audio/')) return 'audio'
+    // text/html runs sandboxed like the playground ('app') — a dead "this page
+    // cannot be displayed here" panel was the old outcome (isEmbeddable refused data:).
+    if (mime === 'text/html') return 'htmlfile'
+    if (mime.startsWith('text/markdown') || mime === 'text/x-markdown') return 'markdown'
     if (mime.startsWith('text/') || mime.includes('json') || mime.includes('csv')) return 'textfile'
     return 'web'
   }
@@ -163,9 +176,10 @@ function upsert(task: WorkspaceTask): void {
 
 export function openWorkspace(title: string, url = ''): void {
   const kind = kindForUrl(url)
-  // The archive renders a download panel (always ok); the rest start 'loading'
-  // and confirm from onLoad/onError — so Kelion factually sees if it appeared.
-  const status = kind === 'archive' ? 'ok' : 'loading'
+  // Archives and raw binaries render a download panel (always ok); the rest
+  // start 'loading' and confirm from onLoad/onError — so Kelion factually
+  // sees if it appeared.
+  const status = kind === 'archive' || kind === 'file' ? 'ok' : 'loading'
   upsert({ id: kind, kind, title, url, card: null, status })
 }
 
