@@ -450,9 +450,17 @@ export function cereCreierFable(orderText) {
  *  Cu marcaj: Fable 5 în cap, gratuitele dedesubt ca plasă (dacă Fable pică
  *  pe furnizor, ordinul degradează pe gratuit — nu se blochează, dar nici nu
  *  urcă pe ALTI bani). */
-export function modelePentruOrdin(orderText, baza = MODEL_LADDER) {
+export function modelePentruOrdin(orderText, baza = MODEL_LADDER, envModel = MODEL, allowPaid = ALLOW_PAID) {
   const gratuite = baza.filter((m) => typeof m === 'string' && m.endsWith(':free'))
-  return cereCreierFable(orderText) ? [FABLE_MODEL, ...gratuite] : gratuite
+  // ORDINUL NOU (Adrian, 2 aug seara: „trebuie fable 5 peste tot") înlocuiește
+  // regula „fără marcaj, scara e 100% :free": un model PLĂTIT pus conștient în
+  // env (CONSTRUCTOR_MODEL + CONSTRUCTOR_ALLOW_PAID=1 — ambele, alegerea lui,
+  // nu un accident) urcă în capul scării pentru FIECARE ordin, cu gratuitele
+  // dedesubt ca plasă. Marcajul „fable 5" din text rămâne valabil pentru
+  // cazul în care env-ul e pe gratuit dar UN ordin anume merită creierul mare.
+  const platitDinEnv = allowPaid && typeof envModel === 'string' && envModel && !envModel.endsWith(':free') ? [envModel] : []
+  const cap = cereCreierFable(orderText) ? [FABLE_MODEL, ...platitDinEnv.filter((m) => m !== FABLE_MODEL)] : platitDinEnv
+  return [...cap, ...gratuite]
 }
 
 let modelIdx = 0
@@ -465,9 +473,13 @@ function pregatesteScaraPentruOrdin(orderText) {
   MODEL_LADDER.length = 0
   MODEL_LADDER.push(...scara)
   modelIdx = 0
-  if (cereCreierFable(orderText)) {
+  const capPlatit = MODEL_LADDER[0] && !MODEL_LADDER[0].endsWith(':free') ? MODEL_LADDER[0] : ''
+  if (capPlatit) {
     log(
-      `🧠 CREIER PLĂTIT: Fable 5 (${FABLE_MODEL}) — cerut EXPRES în ordin (singura excepție de la „totul gratuit"). ` +
+      `🧠 CREIER PLĂTIT: ${capPlatit} în capul scării — ` +
+        (cereCreierFable(orderText)
+          ? 'cerut EXPRES în ordin. '
+          : 'ales conștient în env (CONSTRUCTOR_MODEL + ALLOW_PAID; ordinul lui Adrian, 2 aug: „fable 5 peste tot"). ') +
         `Gratuitele rămân plasă. Tokenii și costul se măsoară din răspunsurile OpenRouter și se raportează.`,
     )
   } else {

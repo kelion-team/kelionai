@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-// ── FABLE 5, ONLY ON EXPRESS REQUEST (Adrian, Aug 2: "Everywhere FREE. The
-// admin can EXPRESSLY request the paid brain Fable 5 for the CONSTRUCTOR only.
-// Nothing else paid, ever.") ─────────────────────────────────────────────────
-// These tests pin the structural rule: the ONLY way a constructor order runs
-// on a paid model is the marker written in the order's own text. Every other
-// path — default ladder, env-configured lists, escalation leftovers — must
-// resolve to :free models only.
+// ── FABLE 5 — THE RULE CHANGED THE SAME EVENING (Adrian, Aug 2, seara:
+// „trebuie fable 5 peste tot") ───────────────────────────────────────────────
+// The morning rule was "everywhere FREE, paid only on the express order-text
+// marker". The evening order supersedes it: a paid model chosen CONSCIOUSLY in
+// env (CONSTRUCTOR_MODEL + CONSTRUCTOR_ALLOW_PAID=1 — both, so never by
+// accident) now heads the ladder for EVERY order, frees underneath as the
+// net. WITHOUT that conscious env pair, everything below still holds: default
+// ladder and env lists resolve to :free only, and the order-text marker stays
+// the one-off escape hatch.
 //
 // HOW they run: the VPS constructor is plain Node ESM OUTSIDE the backend
 // root — vite/vitest cannot load it in-process (SyntaxError at suite load).
@@ -26,6 +28,9 @@ interface Proba {
   subFableDoarFree: boolean
   envCuratata: string[]
   envCuMarcaj: string[]
+  envPlatitAles: string[]
+  envPlatitFaraAllow: string[]
+  envPlatitSiMarcaj: string[]
   modelConstanta: string
 }
 
@@ -51,6 +56,11 @@ function ruleazaProbele(): Proba {
       subFableDoarFree: m.modelePentruOrdin('fable5: refac onboardingul').slice(1).every((x) => x.endsWith(':free')),
       envCuratata: m.modelePentruOrdin('ordin obișnuit, fără marcaj', ['anthropic/claude-sonnet-5', 'anthropic/claude-opus-5', 'google/gemma-4-31b-it:free']),
       envCuMarcaj: m.modelePentruOrdin('creier fable, te rog', ['anthropic/claude-sonnet-5', 'google/gemma-4-31b-it:free']),
+      // ORDINUL NOU (2 aug seara): plătit ales conștient în env ⇒ capul scării
+      // pentru ORICE ordin; fără ALLOW_PAID rămâne totul :free.
+      envPlatitAles: m.modelePentruOrdin('ordin obișnuit', ['google/gemma-4-31b-it:free'], 'anthropic/claude-fable-5', true),
+      envPlatitFaraAllow: m.modelePentruOrdin('ordin obișnuit', ['google/gemma-4-31b-it:free'], 'anthropic/claude-fable-5', false),
+      envPlatitSiMarcaj: m.modelePentruOrdin('cu fable 5', ['google/gemma-4-31b-it:free'], 'anthropic/claude-fable-5', true),
       modelConstanta: m.FABLE_MODEL,
     };
     console.log(JSON.stringify(out));
@@ -105,5 +115,17 @@ describe('rezoluția modelului per ordin', () => {
 
   it('(c2) nici cu marcaj Fable nu reapare alt plătit din lista de bază', () => {
     expect(proba.envCuMarcaj).toEqual(['anthropic/claude-fable-5', 'google/gemma-4-31b-it:free'])
+  })
+
+  it('(d) ORDINUL NOU: plătit ales conștient în env ⇒ capul scării pentru ORICE ordin, gratuitele plasă', () => {
+    expect(proba.envPlatitAles).toEqual(['anthropic/claude-fable-5', 'google/gemma-4-31b-it:free'])
+  })
+
+  it('(d2) fără ALLOW_PAID, modelul plătit din env NU intră — garda structurală ține', () => {
+    expect(proba.envPlatitFaraAllow).toEqual(['google/gemma-4-31b-it:free'])
+  })
+
+  it('(d3) env plătit + marcaj în text ⇒ Fable o singură dată, nu dublat', () => {
+    expect(proba.envPlatitSiMarcaj).toEqual(['anthropic/claude-fable-5', 'google/gemma-4-31b-it:free'])
   })
 })
