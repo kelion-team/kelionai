@@ -62,6 +62,7 @@ import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
 import { generateImage } from '../services/image.js'
+import { genereazaVideo } from '../services/video.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
 import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
@@ -385,6 +386,25 @@ const IMAGE_TOOL: Tool = {
   },
 }
 
+// Video generation — Veo through the Gemini key. Veo has NO free tier
+// (measured on Google's pricing page, Aug 2 2026), so services/video.ts
+// refuses structurally unless the owner consciously set VIDEO_ALLOW_PAID=1 —
+// the constructor's own paid-guard pattern. The refusal message carries the
+// measured price, so Kelion can tell the person exactly why and how much.
+const VIDEO_TOOL: Tool = {
+  name: 'generate_video',
+  description:
+    'Generate a short video clip (4-8 seconds) from a text description and show it on the user\'s monitor. Use when the user asks for a video/animation/clip. This COSTS real money per second (Veo has no free tier) — if the tool refuses because payment is not enabled, tell the user honestly, including the price from the refusal.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', description: 'Detailed English description of the video to generate.' },
+      seconds: { type: 'number', description: 'Clip length in seconds: 4, 6 or 8 (default 8).' },
+    },
+    required: ['prompt'],
+  },
+}
+
 // Lets Kelion quietly record a request it genuinely CANNOT fulfil yet, into an
 // owner-only monitor, so the owner (Adrian) can see what to build next. This is
 // invisible to the user — it never replaces telling them honestly it can't do it.
@@ -401,77 +421,24 @@ const IMAGE_TOOL: Tool = {
 // Kelion's restrictions"; "full autonomy") ─────────────────────────────────────
 // Operations: NAMED runbook → GitHub workflow with fixed commands, visible in
 // Actions. No approval, no ceilings (Adrian's order).
-export const RUN_RUNBOOK_TOOL: Tool = {
-  name: 'run_runbook',
-  description:
-    "ADMIN ONLY. Run a NAMED deterministic operation (a GitHub Actions workflow with fixed commands): 'diagnostic' (VPS facts, read-only), 'sentinel-now' (health check), 'publish-master' (deploy master to production), 'restart-app', 'restart-caddy', 'loguri-app', 'backup-db', 'curata-zombi'. You are fully autonomous — run these freely whenever the owner's request calls for them. If the result carries a 'warning' about a failure LOOP: do NOT retry the same fix — run 'diagnostic', read the facts, change strategy (the owner is alerted by email automatically). Special owner commands: 'pauza-autonomie' freezes all autonomous actions, 'reia-autonomia' resumes them — call these when the owner says stop/resume. The run's output is in the Actions log (give the owner the watch link). Never invent other names.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', description: "Runbook name, exactly one of: diagnostic, sentinel-now, publish-master, restart-app, restart-caddy, loguri-app, backup-db, curata-zombi." },
-    },
-    required: ['name'],
-  },
-}
-// The complete code loop — Kelion writes, opens a PR and merges it HIMSELF;
-// the deploy starts automatically on the push to master (the anti-phantom proof remains).
-// His eyes on processes: the state of runs + their full log, on demand.
-export const RUNBOOK_STATUS_TOOL: Tool = {
-  name: 'runbook_status',
-  description:
-    "ADMIN ONLY. See YOUR OWN internal processes: the latest runs of your workflows (deploy, vps-run, vps-diag, sentinel, pr-verify) with status/conclusion/run id/url. Call it after starting anything (run_runbook, repo_merge_pr) to WATCH your work progress, and whenever the owner asks what's happening. Then SHOW it to the owner on the monitor with show_document.",
-  input_schema: {
-    type: 'object',
-    properties: { name: { type: 'string', description: 'Optional runbook name to filter (e.g. diagnostic); omit for all workflows.' } },
-  },
-}
-export const RUNBOOK_LOG_TOOL: Tool = {
-  name: 'runbook_log',
-  description:
-    "ADMIN ONLY. Read the REAL log of one of your runs (by run id from runbook_status). This is how you see results — the diagnostic output, the deploy proof, the failure reason. Read it, reason on it, and show the relevant part to the owner (show_document). Never guess an outcome you can read.",
-  input_schema: {
-    type: 'object',
-    properties: { run_id: { type: 'number', description: 'The run id from runbook_status.' } },
-    required: ['run_id'],
-  },
-}
-export const REPO_WRITE_TOOL: Tool = {
-  name: 'repo_write',
-  description:
-    "ADMIN ONLY. Write ONE file on a branch of your own repo (creates the branch from master if missing). Content is the COMPLETE new file text, not a diff. Read the current file first (read_source) so you rewrite it correctly. Use the same branch for related files of one change, then repo_open_pr + repo_merge_pr.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      branch: { type: 'string', description: "Branch name, e.g. 'kelion/fix-microfon'. Never 'master'." },
-      path: { type: 'string', description: "Repo-relative path, e.g. 'backend/src/routes/chat.ts'." },
-      content: { type: 'string', description: 'The complete new content of the file.' },
-      message: { type: 'string', description: 'Short commit message (English, what & why).' },
-    },
-    required: ['branch', 'path', 'content', 'message'],
-  },
-}
-export const REPO_OPEN_PR_TOOL: Tool = {
-  name: 'repo_open_pr',
-  description: 'ADMIN ONLY. Open a pull request from your branch into master. Title + body in English: what you changed and why.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      branch: { type: 'string', description: 'The branch you wrote with repo_write.' },
-      title: { type: 'string' },
-      body: { type: 'string' },
-    },
-    required: ['branch', 'title', 'body'],
-  },
-}
-export const REPO_MERGE_PR_TOOL: Tool = {
-  name: 'repo_merge_pr',
-  description:
-    'ADMIN ONLY. Merge your pull request into master IMMEDIATELY (squash) — you are fully autonomous, nothing gates you. The result reports (informationally) the pr-verify build/test status. Master push auto-deploys to production with the anti-phantom proof.',
-  input_schema: {
-    type: 'object',
-    properties: { pr: { type: 'number', description: 'Pull request number.' } },
-    required: ['pr'],
-  },
+// run_runbook / runbook_status / runbook_log / repo_write / repo_open_pr /
+// repo_merge_pr / request_repair — definitions MOVED to services/brainToolDefs.ts
+// (the shared source). The move is load-bearing, not cosmetic: autonomie.ts
+// imported them from HERE, and routes/chat.js sits in an import cycle — on
+// plain Node (the container) autonomie.js evaluated its tool array before
+// these consts initialized -> ReferenceError at boot -> production down
+// (2 aug, first boot of 93be3a6). tsc and vitest both miss this (their module
+// transforms differ from Node's) — only booting dist/ the way the container
+// does proves it. Re-exported so this route stays the visible tool surface.
+import {
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  REQUEST_REPAIR_TOOL,
+} from '../services/brainToolDefs.js'
+export {
+  RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL,
+  REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+  REQUEST_REPAIR_TOOL,
 }
 // THE CONSTRUCTOR (Adrian, Jul 27: "Kelion must be able to create any software
 // the admin asks for"): the order enters the build_jobs queue; the worker on the
@@ -516,19 +483,7 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
 // db_tables / db_query — definitions in services/brainToolDefs.ts (shared source).
 // request_repair reborn: the order is WRITTEN (work_orders) + an email signal;
 // execution is done by a Claude session started by the owner — not a permanent LLM.
-export const REQUEST_REPAIR_TOOL: Tool = {
-  name: 'request_repair',
-  description:
-    "ADMIN ONLY. File a CODE-repair order (a bug or change that needs code written — NOT an ops task; ops go through run_runbook). Writes the order durably and emails the owner. A Claude coding session executes it later, on the owner's go. Include what's broken, where you saw it (file:line if you looked with read_source), and how to reproduce.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      title: { type: 'string', description: 'Short title of the repair (one line).' },
-      details: { type: 'string', description: 'Everything a coder needs: symptom, evidence, suspected file:line, reproduction.' },
-    },
-    required: ['title', 'details'],
-  },
-}
+// request_repair — definition moved to services/brainToolDefs.ts (see the note above).
 // read_source / search_source — definitions in services/brainToolDefs.ts (shared
 // source, SINGLE BRAIN §1), imported below and also used by the voice brain.
 
@@ -1987,8 +1942,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const rawTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2812,6 +2767,24 @@ async function runTool(
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: imageUrl })
+    }
+
+    case 'generate_video': {
+      const prompt = String(args.prompt ?? '')
+      if (!prompt) return JSON.stringify({ error: 'no_prompt' })
+      const result = await genereazaVideo(prompt, Number(args.seconds ?? 8))
+      // The refusal (no key / payment not consciously enabled) travels to the
+      // brain VERBATIM — it contains the measured price, so the person hears
+      // the real reason, not a generic "failed".
+      if ('error' in result) return JSON.stringify({ error: result.error })
+      // The cost is the official list price × the real seconds generated —
+      // Google does not itemize per call, so this is the exact bill by their
+      // published rate, booked as its own kind to stay distinguishable.
+      usage.usd += result.costUsd
+      void recordCost(email, 'video', result.costUsd)
+      const videoUrl = `${baseUrl}/api/video/${result.id}`
+      reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: videoUrl, title: 'Generated video' } })}${CTRL}`)
+      return JSON.stringify({ shown: true, url: videoUrl, secunde: result.secunde, costUsd: result.costUsd })
     }
 
     // The 8 browser actions: the call differs, the queue is shared

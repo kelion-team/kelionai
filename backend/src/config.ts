@@ -71,6 +71,11 @@ export const config = {
   googleMapsKey: env(...ENV_ALIASES.googleMapsKey),
   geminiKey: env(...ENV_ALIASES.geminiKey),
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
+  // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
+  // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
+  videoModel: process.env.VIDEO_MODEL ?? 'veo-3.1-fast-generate-preview',
+  videoAllowPaid: process.env.VIDEO_ALLOW_PAID === '1',
   // LIVE VOICE — OpenAI Realtime (WebRTC). The key lives ONLY on the server;
   // the browser sends the SDP offer to /api/realtime/session, the backend
   // relays it to OpenAI and injects server-side the model + ONE male voice +
