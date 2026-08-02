@@ -42,6 +42,7 @@ import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLo
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
 import { getOpenAiMonthCost } from '../services/openaiCosts.js'
+import { getSerperBalance } from '../services/serperBalance.js'
 import { calcPunga } from '../services/punga.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
@@ -294,7 +295,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps, openaiCost] = await Promise.all([
+    const [pool, orBalance, vps, openaiCost, serperBalance] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       resurseGazda(),
@@ -303,6 +304,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // OpenRouter balance. Cached 5 min in the service, so this 15s poll
       // costs one upstream call per 5 minutes at most.
       getOpenAiMonthCost(),
+      // THE SERPER PILL (same rule): the REAL remaining search credit read
+      // from Serper's /account endpoint. Also cached 5 min in the service.
+      getSerperBalance(),
     ])
     return reply.send({
       active: 'openrouter',
@@ -336,6 +340,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         live: openaiCost.ok,
         monthUsd: openaiCost.ok ? openaiCost.monthUsd : undefined,
         error: openaiCost.error,
+      },
+      // The REAL Serper search credit (searches left). `live: false` means
+      // UNREADABLE (key missing or read failed) — the bar writes "Serper ⚠",
+      // NEVER "Serper 0" (the same honesty rule as the OpenAI pill).
+      serper: {
+        live: serperBalance.ok,
+        balance: serperBalance.ok ? serperBalance.balance : undefined,
+        rateLimit: serperBalance.ok ? serperBalance.rateLimit : undefined,
+        error: serperBalance.error,
       },
       pool,
     })
