@@ -2090,10 +2090,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // tab never saw the cost of search/images/brain.
           void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
         }
-        if (name === 'generate_image') {
-          usage.usd += IMAGE_USD_PER_CALL
-          void recordCost(user.email, 'image', IMAGE_USD_PER_CALL)
-        }
+        // NOTE: generate_image is NO LONGER charged a hand-typed flat rate here
+        // — its REAL cost (OpenRouter usage.cost) is booked inside runTool,
+        // where the generation's own response is known. Charging it here too
+        // would double-count and, worse, book an invented figure as fact.
         // SELF-EXTENSION: Kelion proposes a new tool (stays 'pending' until the
         // owner approves it with one click in admin → active instantly).
         if (name === 'propose_tool') {
@@ -2586,9 +2586,10 @@ async function runTool(
   /** The requester's session — we pass it to the admin routes so they can do
    *  their own admin check (we do not bypass it). */
   cookie: string,
-  // Kept in the signature (callers send them), but unused in the body since
-  // cost is accounted outside runTool: the `_` prefix says it explicitly.
-  _usage: { usd: number },
+  // The turn's usage accumulator: image generation adds its REAL cost here
+  // (booked where the provider's own usage.cost is known, not estimated
+  // upfront). Other costs are accounted outside runTool.
+  usage: { usd: number },
   _langName: string,
   // The turn's location truth (resolveDeviceLocation) — the get_weather guard
   // fills/refuses location-less calls from it. One source with the prompt.
@@ -2787,6 +2788,19 @@ async function runTool(
       if (!prompt) return JSON.stringify({ error: 'no_prompt' })
       const result = await generateImage(prompt)
       if ('error' in result) return JSON.stringify({ error: result.error })
+      // THE REAL COST, BOOKED WHERE IT IS KNOWN (the owner's rule: "show real,
+      // stop fabricating"): the generation's own usage.cost from OpenRouter,
+      // booked as 'image' — a MEASUREMENT (db.ts COSTURI_MASURATE). The flat
+      // IMAGE_USD_PER_CALL rate is reached ONLY when the provider didn't
+      // itemize, under the separate 'image_est' kind, so the masurat/estimat
+      // split never confuses an estimate with a measurement.
+      if (result.costUsd > 0) {
+        usage.usd += result.costUsd
+        void recordCost(email, 'image', result.costUsd)
+      } else {
+        usage.usd += IMAGE_USD_PER_CALL
+        void recordCost(email, 'image_est', IMAGE_USD_PER_CALL)
+      }
       const imageUrl = `${baseUrl}/api/image/${result.id}`
       reply.raw.write(`${CTRL}${JSON.stringify({ monitor: { url: imageUrl, title: 'Generated image' } })}${CTRL}`)
       return JSON.stringify({ shown: true, url: imageUrl })

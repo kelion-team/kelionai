@@ -268,7 +268,16 @@ export const config = {
   billing: {
     currency: (process.env.BILLING_CURRENCY ?? 'gbp').toLowerCase(),
     userShare: Number(process.env.USER_SHARE ?? 0.75),
+    // PRODUCT PRICE, set by the owner — NOT a market figure: how much of the
+    // billing currency one credit is worth (1 credit = £0.10 by default). This
+    // is the owner's own price list, decided by him and editable from env; it
+    // is not "real" or "fake" — it's his, like a shop's price tag.
     creditValue: Number(process.env.CREDIT_VALUE ?? 0.1),
+    // STATIC FALLBACK for the USD→billing-currency rate. The rate the code
+    // actually converts money with is read LIVE (services/fx.ts,
+    // open.er-api.com, cached 6h); this value is used ONLY when the live read
+    // fails, and fx.ts labels it `env_static` so a stale figure is never
+    // mistaken for today's rate.
     usdToCurrency: Number(process.env.USD_TO_CURRENCY ?? 0.8),
   },
   mail: {
