@@ -297,6 +297,10 @@ export default function AdminPanel({
   const [roOn, setRoOn] = useState(false)
   const [roMap, setRoMap] = useState<Record<string, string>>({})
   const [roBusy, setRoBusy] = useState(false)
+  // How many messages could NOT be translated (shown as the original text) —
+  // the admin must SEE that the "translation" is partial, not believe a
+  // silently half-failed one.
+  const [roFailed, setRoFailed] = useState(0)
 
   async function toggleRo(rows: HistoryRow[]): Promise<void> {
     if (roOn) {
@@ -306,12 +310,13 @@ export default function AdminPanel({
     const missing = Array.from(new Set(rows.map((r) => r.content).filter((c) => c && !(c in roMap))))
     if (missing.length > 0) {
       setRoBusy(true)
-      const translated = await translateToRo(missing)
+      const { translations: translated, failed } = await translateToRo(missing)
       setRoMap((m) => {
         const next = { ...m }
         missing.forEach((src, i) => (next[src] = translated[i] ?? src))
         return next
       })
+      setRoFailed(failed)
       setRoBusy(false)
     }
     setRoOn(true)
@@ -322,6 +327,7 @@ export default function AdminPanel({
   async function openUserConvo(u: UserActivityRow): Promise<void> {
     setUserConvoLoading(true)
     setRoOn(false)
+    setRoFailed(0)
     setUserConvo({ u, rows: [] })
     const rows = await fetchHistory(u.email)
     setUserConvo({ u, rows })
@@ -2161,6 +2167,7 @@ export default function AdminPanel({
                 className={`admin-user ${selected === u.email ? 'sel' : ''}`}
                 onClick={() => {
                   setRoOn(false)
+                  setRoFailed(0)
                   setSelected(u.email)
                 }}
               >
@@ -2183,6 +2190,11 @@ export default function AdminPanel({
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
                 </button>
+                {roOn && roFailed > 0 && (
+                  <span className="chat-hint" style={{ color: '#d97706' }}>
+                    ⚠ {roFailed} mesaje netraduse (serviciul de traducere nu a răspuns) — vezi textul original
+                  </span>
+                )}
               </div>
             )}
             {selected &&
@@ -2230,6 +2242,11 @@ export default function AdminPanel({
                 >
                   {roBusy ? 'Traduc…' : roOn ? 'Arată originalul' : '🌐 Tradu în română'}
                 </button>
+                {roOn && roFailed > 0 && (
+                  <span className="chat-hint" style={{ color: '#d97706' }}>
+                    ⚠ {roFailed} netraduse
+                  </span>
+                )}
                 <button type="button" className="ghost" onClick={() => setUserConvo(null)}>
                   Close
                 </button>

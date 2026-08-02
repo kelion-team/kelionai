@@ -204,15 +204,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // Batch-translate a conversation's messages into Romanian (the "Translate
   // into Romanian" button in the chat viewer — testers write in any language).
-  // Admin only.
+  // Admin only. `failed` tells the admin how many messages came back as
+  // UNTRANSLATED ORIGINAL (the translation service failed for them) — so a
+  // half-translated conversation is never mistaken for a full one.
   app.post<{ Body: { texts?: unknown; target?: unknown } }>('/api/admin/translate', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const raw = req.body?.texts
     const texts = Array.isArray(raw) ? raw.slice(0, 300).map((t) => String(t ?? '')) : []
-    if (texts.length === 0) return reply.send({ translations: [] })
+    if (texts.length === 0) return reply.send({ translations: [], failed: 0 })
     const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target : 'Romanian'
-    return reply.send({ translations: await translateMany(texts, target) })
+    return reply.send(await translateMany(texts, target))
   })
 
   // Live real-cost / credit monitor (admin only) — total, today, per-AI breakdown.

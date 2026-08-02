@@ -419,10 +419,17 @@ export async function fetchHistory(email: string): Promise<HistoryRow[]> {
 }
 
 // Batch-translates a conversation's messages into Romanian (the "Translate to Romanian"
-// button in the chat viewer). Returns translations aligned 1:1 with the input;
-// on error, returns the original texts so the display doesn't empty.
-export async function translateToRo(texts: string[]): Promise<string[]> {
-  if (texts.length === 0) return []
+// button in the chat viewer). Returns translations aligned 1:1 with the input, plus
+// `failed` — how many messages came back as the UNTRANSLATED ORIGINAL because the
+// translation service failed for them (or the whole request failed, in which case
+// failed = all). The caller must surface that count, not show it as a clean translation.
+export interface TranslateRoResult {
+  translations: string[]
+  failed: number
+}
+
+export async function translateToRo(texts: string[]): Promise<TranslateRoResult> {
+  if (texts.length === 0) return { translations: [], failed: 0 }
   try {
     const r = await fetch('/api/admin/translate', {
       method: 'POST',
@@ -430,11 +437,14 @@ export async function translateToRo(texts: string[]): Promise<string[]> {
       credentials: 'include',
       body: JSON.stringify({ texts, target: 'Romanian' }),
     })
-    if (!r.ok) return texts
-    const j = (await r.json()) as { translations?: string[] }
-    return Array.isArray(j.translations) && j.translations.length === texts.length ? j.translations : texts
+    if (!r.ok) return { translations: texts, failed: texts.length }
+    const j = (await r.json()) as { translations?: string[]; failed?: number }
+    if (Array.isArray(j.translations) && j.translations.length === texts.length) {
+      return { translations: j.translations, failed: typeof j.failed === 'number' ? j.failed : 0 }
+    }
+    return { translations: texts, failed: texts.length }
   } catch {
-    return texts
+    return { translations: texts, failed: texts.length }
   }
 }
 
