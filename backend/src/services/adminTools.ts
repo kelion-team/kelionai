@@ -14,8 +14,11 @@
 // only executes.
 
 import { listSource, readSource, searchSource } from './sourceCode.js'
-import { dbTablesOverview, dbQuery } from '../db.js'
+import { dbTablesOverview, dbQuery, memoriePune, memorieIa, memorieLista } from '../db.js'
 import { systemHealth } from './health.js'
+import { resurseGazda } from './resurse.js'
+import { stareCitirePlati } from './openBanking.js'
+import { stareAutonomie } from './autonomie.js'
 import { repoWrite, repoOpenPR, repoMergePR } from './github.js'
 import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks.js'
 import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
@@ -39,6 +42,9 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   // The whole admin panel (Jul 31, the third request): he sees what the owner
   // sees on screen and can change what can be undone.
   'admin_vezi', 'admin_schimba',
+  // HIS OWN WISHLIST, granted (Aug 2, „implementează-i ce cere"): persistent
+  // project memory + full observability of his own state, as tools.
+  'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
 ])
 
 // Executes a SHARED admin tool. Returns the result (string) or `null` if the
@@ -59,6 +65,31 @@ export async function execSharedAdminTool(
     case 'db_tables': return dbTablesOverview()
     case 'db_query': return dbQuery(String(args.sql ?? ''))
     case 'system_health': return systemHealth()
+    // KELION'S PROJECT MEMORY (his own request, Aug 2): keyed, persistent,
+    // queryable — survives every deploy, unlike the conversation window.
+    case 'memorie_pune': return memoriePune(String(args.cheie ?? ''), String(args.continut ?? ''))
+    case 'memorie_ia': return memorieIa(String(args.cheie ?? ''))
+    case 'memorie_lista': return memorieLista(String(args.prefix ?? ''))
+    // FULL OBSERVABILITY in one call (his request #3): every figure below is a
+    // MEASUREMENT — a failed read arrives as null and is said, never a zero.
+    case 'stare_masurata': {
+      const [sanatate, resurse, cost] = await Promise.all([
+        systemHealth().catch(() => 'nu pot citi sănătatea'),
+        resurseGazda().catch(() => null),
+        getCostSummary().catch(() => null),
+      ])
+      return JSON.stringify(
+        {
+          sanatate,
+          resurse: resurse ?? 'nu pot citi /proc (memorie/încărcare)',
+          costAzi: cost ?? 'nu pot citi jurnalul de cost',
+          citirePlati: stareCitirePlati() ?? 'cititorul de plăți n-a rulat încă în procesul ăsta',
+          autonomie: stareAutonomie() ?? 'bucla n-a trecut încă în procesul ăsta',
+        },
+        null,
+        1,
+      )
+    }
     case 'repo_write': return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
     case 'repo_open_pr': return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
     case 'repo_merge_pr': return repoMergePR(Number(args.pr ?? 0))

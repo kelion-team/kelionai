@@ -504,6 +504,51 @@ export const ADMIN_SCHIMBA_TOOL: Tool = {
 //
 // This list is the order the model sees them in; whatever is here MUST also
 // exist in SHARED_ADMIN_TOOLS (there's a test). No more editing in two places.
+// ── HIS OWN WISHLIST, GRANTED (Aug 2 — Kelion himself asked, Adrian: „da, o
+// aprob" · „implementează-i ce cere") ────────────────────────────────────────
+// #1 on his list: "persistent, structured working memory — a project context
+// I can query and update programmatically". #3: "complete observability of my
+// own state — logs, metrics, costs, as TOOLS". Both delivered below. (#2 —
+// stronger reasoning — was already solved the same evening: Fable 5
+// everywhere; his context predated it.)
+export const MEMORIE_PUNE_TOOL: Tool = {
+  name: 'memorie_pune',
+  description:
+    'ADMIN ONLY. Your PROJECT MEMORY — write or update a keyed entry that survives every restart and deploy (unlike the conversation). Use dotted keys for structure (e.g. "misiune.revolut.stare", "proiect.decizii.voce"). Empty continut DELETES the key. Never store secret VALUES here (use secret_pune for those — it refuses card shapes by design).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      cheie: { type: 'string', description: 'the key, dotted for structure (max 200 chars)' },
+      continut: { type: 'string', description: 'the content (max 20000 chars); empty = delete the key' },
+    },
+    required: ['cheie', 'continut'],
+  },
+}
+export const MEMORIE_IA_TOOL: Tool = {
+  name: 'memorie_ia',
+  description: 'ADMIN ONLY. Read one entry of your project memory, whole, with its last-update time.',
+  input_schema: {
+    type: 'object',
+    properties: { cheie: { type: 'string', description: 'the exact key' } },
+    required: ['cheie'],
+  },
+}
+export const MEMORIE_LISTA_TOOL: Tool = {
+  name: 'memorie_lista',
+  description:
+    'ADMIN ONLY. The index of your project memory: keys (optionally by prefix), sizes and last-update times, newest first. Call this when you start substantial work — your own notes may already hold the context.',
+  input_schema: {
+    type: 'object',
+    properties: { prefix: { type: 'string', description: 'optional key prefix filter, e.g. "misiune."' } },
+  },
+}
+export const STARE_MASURATA_TOOL: Tool = {
+  name: 'stare_masurata',
+  description:
+    'ADMIN ONLY. Your COMPLETE state in one MEASURED call: health (sync, red runs, disk, DB), host resources (RAM/load), today\'s costs by kind, the payment reader\'s last pass, the autonomy loop\'s last pass. Every figure is a real reading — a failed read is SAID, never shown as zero. Use it when the owner asks "how are you / what\'s wrong / what does it cost".',
+  input_schema: { type: 'object', properties: {} },
+}
+
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
@@ -519,5 +564,7 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   COST_TOOL, LIST_UPDATES_TOOL, LOG_GAP_TOOL,
   // The whole admin panel — he sees what you see, and can change what can be undone.
   ADMIN_VEZI_TOOL, ADMIN_SCHIMBA_TOOL,
+  // His own wishlist, granted (Aug 2): project memory + measured observability.
+  MEMORIE_PUNE_TOOL, MEMORIE_IA_TOOL, MEMORIE_LISTA_TOOL, STARE_MASURATA_TOOL,
 ]
 
