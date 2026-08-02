@@ -141,6 +141,18 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     }
     app.log.info('asr-stream: WS conectat (sesiune OK) — aștept audio')
 
+    // DIAGNOSTIC (Adrian, Aug 2 — „urechea NU PORNEȘTE deloc", live): the
+    // browser's watchdog fired «silent» (audio left the browser) while the
+    // server journal showed NOTHING. The blind spot: we counted nowhere how
+    // much audio ACTUALLY arrives on the socket. Now every socket reports at
+    // close how many frames/bytes of client audio it received — the next live
+    // test says instantly WHICH leg is deaf:
+    //   0 cadre  → the browser/VAD never sent (client leg);
+    //   N cadre  → the audio arrives here, the break is downstream (Google leg).
+    let cadreAudioClient = 0
+    let octetiAudioClient = 0
+    let primulCadruLa = 0
+
     let gStream: GStream | null = null
     let started = false
     let closed = false
@@ -205,7 +217,12 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       let stream: GStream
       try {
         stream = c._streamingRecognize()
-      } catch {
+      } catch (e) {
+        // Was a SILENT catch (the only log was the client dying «silent» 15s
+        // later — the exact blind spot of the Aug 2 live failure).
+        const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
+        app.log.error('asr-stream: _streamingRecognize() a aruncat sincron: ' + detail)
+        noteazaEroareChirp(clasificaEroareGoogle(e), 'streamingRecognize-throw: ' + detail)
         send({ type: 'error', error: 'asr_failed' })
         return
       }
@@ -298,7 +315,12 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         noteazaStreamChirp()
         ultimulAudioLa = Date.now()
         armKeepalive() // Google never idles out from now on — see the header block
-      } catch {
+      } catch (e) {
+        // Was a SILENT catch — same blind spot as above: a bad config write
+        // killed the stream with NO journal trace and the client died «silent».
+        const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
+        app.log.error('asr-stream: scrierea configului către Google a aruncat: ' + detail)
+        noteazaEroareChirp(clasificaEroareGoogle(e), 'config-write-throw: ' + detail)
         send({ type: 'error', error: 'asr_failed' })
         stopGoogle()
       }
@@ -324,6 +346,12 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         return
       }
       // binary audio → Google (starts lazy if the browser skipped "start")
+      cadreAudioClient++
+      octetiAudioClient += data.length
+      if (!primulCadruLa) {
+        primulCadruLa = Date.now()
+        app.log.info(`asr-stream: primul cadru audio de la client (${data.length} bytes) — urechea primește semnal`)
+      }
       if (!started) startGoogle()
       if (gStream) {
         try {
@@ -342,6 +370,14 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
+      // THE VERDICT LINE (Aug 2): 0 cadre = the browser leg never spoke (VAD /
+      // mic / muted client-side); N cadre = the audio DID arrive — the break
+      // is downstream. One line per socket, at close.
+      app.log.info(
+        `asr-stream: WS închis — ${cadreAudioClient} cadre audio de la client ` +
+          `(${(octetiAudioClient / 32 / 1000).toFixed(1)}s la 16kHz)` +
+          (primulCadruLa ? '' : ' — NICIUN cadru primit pe acest socket'),
+      )
       stopGoogle()
     }
     socket.on('close', cleanup)
