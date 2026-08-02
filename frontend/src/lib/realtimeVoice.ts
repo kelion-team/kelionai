@@ -144,19 +144,27 @@ async function transcriptVerdict(text: string, vf: VoiceFeatures | null): Promis
 // start re-asks. The probe runs lazily at the first voice start (the route
 // wants a logged-in session — probing at module load could cache a guest's
 // answer for the whole page session).
+// THE 401 CASE (Aug 2 — live logs): the route requires the session cookie;
+// one probe fired before the session was established and got 401, the mouth
+// fell onto the OpenAI reserve (zero credits) and Kelion went MUTE — while a
+// later probe got 200. The rule: a non-OK probe (401 above all) is NOT a
+// "google:false" answer and is NEVER cached — the mouth's mode is chosen per
+// voice start, so the very next start re-probes and can still get Chirp.
 let guraChirpStare: boolean | null = null
 function guraChirpDisponibila(): Promise<boolean> {
   if (guraChirpStare !== null) return Promise.resolve(guraChirpStare)
   if (typeof fetch !== 'function') return Promise.resolve(false)
   return fetch('/api/tts/status', { credentials: 'include', cache: 'no-store' })
     .then(async (r) => {
-      if (!r.ok) return false // not cached — retried at the next voice start
+      // 401/network/5xx: NOT a verdict — nothing is cached, the next voice
+      // start asks again. Only a 200 body decides (and caches) the mode.
+      if (!r.ok) return false
       const j = (await r.json().catch(() => null)) as { google?: boolean } | null
       const ok = j?.google === true
       guraChirpStare = ok
       return ok
     })
-    .catch(() => false) // probe fallen → the OpenAI reserve
+    .catch(() => false) // probe fallen → the OpenAI reserve (not cached either)
 }
 
 // ── ONE SINGLE VOICE SESSION, ACROSS ALL TABS (Jul 25 — Adrian: "the Russian comes

@@ -9,6 +9,20 @@ import { openMicGraph } from './audioGraph'
 // "mute mic" from module loading doesn't reappear), downsample it to 16kHz mono
 // LINEAR16 and send it in binary frames. We send frames ONLY when there's voice (+3s
 // tail) so silence doesn't flow to Google (wasted cost).
+//
+// THE SELF-HEALING EAR (Adrian, Aug 2 — the standing order: "solutions, not
+// patches"; live data: 57 "voce realtime a picat" in 24h, one per redeploy):
+// an unexpected WS drop used to kill the ear MID-SESSION — no reconnect, no
+// error, just deaf — and the death mark was PERMANENT for the page session, so
+// every later session landed on the zero-credit OpenAI reserve and the mic
+// died completely. Now: (a) the WS reconnects BY ITSELF on any unexpected
+// drop (same mic graph, fresh socket, the start frame resent), with a bounded
+// budget (5 reconnects inside any 60s window) — only an exhausted budget
+// escalates through onError; (b) the death mark is a 60s COOLDOWN after which
+// the capability probe runs again (deploys are routine here); (c) a dead mic
+// track reopens ONCE in place before escalating. A clean stop() NEVER
+// reconnects. Barge-in, mute, pre-roll, voiceprint and the 15s 'silent'
+// safety net (its timer resets on every reconnect) are untouched.
 
 import {
   estimateF0,
@@ -29,6 +43,16 @@ const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
 const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre vocale nu mai sunt pierdute
 
+// THE SELF-HEALING BUDGET (Aug 2): how many WS reconnects the ear attempts
+// inside any sliding 60s window before it gives up and escalates. A stable
+// connection earns its budget back as the window slides.
+const RECONNECT_BUDGET = 5
+const RECONNECT_WINDOW_MS = 60_000
+// THE EAR'S COOLDOWN (Aug 2): a dead ear is NOT a life sentence. After this
+// long, /api/asr-stream/capability is re-probed and a healthy (redeployed)
+// server earns the ear back without a page reload.
+const URECHI_COOLDOWN_MS = 60_000
+
 // ── STREAMING STT: DISPONIBIL SAU NU? (28 iul) ──────────────────────────────
 // WHY this code exists: on the host (VPS) GOOGLE_SERVICE_ACCOUNT_JSON is NOT set
 // — verified live in the env file. Without it the /api/asr-stream route refuses
@@ -45,8 +69,23 @@ const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre voca
 // exactly as before.
 let streamingAsrAvailable: boolean | null = null
 let capabilityProbe: Promise<boolean> | null = null
+let chirpEarCooldownUntil = 0
+
+// The ear is marked down, but ONLY for the cooldown (Aug 2 — was permanent,
+// which is exactly how one redeploy deafened Kelion for the whole page
+// session and threw him onto the zero-credit OpenAI reserve).
+function markUrechiIndisponibile(): void {
+  streamingAsrAvailable = false
+  chirpEarCooldownUntil = Date.now() + URECHI_COOLDOWN_MS
+  capabilityProbe = null
+}
 
 function canStreamAsr(): Promise<boolean> {
+  // The cooldown expired → forget the mark and probe the server again.
+  if (streamingAsrAvailable === false && Date.now() >= chirpEarCooldownUntil) {
+    streamingAsrAvailable = null
+    capabilityProbe = null
+  }
   if (streamingAsrAvailable !== null) return Promise.resolve(streamingAsrAvailable)
   if (typeof fetch !== 'function') {
     streamingAsrAvailable = true
@@ -108,9 +147,11 @@ export function urechiChirpDisponibile(): Promise<boolean> {
 
 // If a started Chirp ear DIES mid-session (Google outage, WS drop), the
 // caller marks it here and the NEXT voice session starts on the proven
-// OpenAI ears instead of looping into the same failure.
+// OpenAI ears instead of looping into the same failure. NOT permanent (Aug
+// 2): it is a cooldown — after URECHI_COOLDOWN_MS the capability probe runs
+// again, because deploys are routine on this host.
 export function marcheazaUrechiChirpMoarte(): void {
-  streamingAsrAvailable = false
+  markUrechiIndisponibile()
 }
 
 function floatToPcm16(input: Float32Array): ArrayBuffer {
@@ -149,21 +190,24 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     return null
   }
   // The same microphone opening as voice (lib/audioGraph.ts) — single source.
-  const graph = await openMicGraph(opts.onError, opts.preWarmedStream)
-  if (!graph) return null
-  const { stream, ctx } = graph
-  void ctx.resume().catch(() => {})
-  const source = ctx.createMediaStreamSource(stream)
-  // ScriptProcessor is deprecated but universal and needs no separate file — the
-  // safest for "just works", exactly what's needed on the voice critical path.
-  const proc = ctx.createScriptProcessor(4096, 1, 1)
+  const firstGraph = await openMicGraph(opts.onError, opts.preWarmedStream)
+  if (!firstGraph) return null
 
-  // Analizor paralel pentru features vocale (identificare speaker + gen).
-  const featAnalyser = ctx.createAnalyser()
-  featAnalyser.fftSize = 2048
-  source.connect(featAnalyser)
-  const featTimeBuf = new Float32Array(featAnalyser.fftSize)
-  const featFreqBuf = new Float32Array(featAnalyser.frequencyBinCount)
+  // THE AUDIO GRAPH IS REBUILDABLE IN PLACE (Aug 2): a mic track can die
+  // mid-session (browser suspend, device grab). The nodes below are `let` so
+  // onTrackEnded can reopen the microphone through the same openMicGraph and
+  // rewire them WITHOUT touching the WS, the phrase state or the voiceprint
+  // buffers — the ear survives the device hiccup.
+  let stream = firstGraph.stream
+  let ctx = firstGraph.ctx
+  let source: MediaStreamAudioSourceNode
+  let proc: ScriptProcessorNode
+  let featAnalyser: AnalyserNode
+  // Explicit <ArrayBuffer>: TS 5.7+ types a bare Float32Array as
+  // Float32Array<ArrayBufferLike>, which the AnalyserNode getters (strict
+  // Float32Array<ArrayBuffer>) refuse — the whole frontend build broke on it.
+  let featTimeBuf: Float32Array<ArrayBuffer>
+  let featFreqBuf: Float32Array<ArrayBuffer>
 
   let closed = false
   let muted = false
@@ -180,6 +224,11 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let sentAudio = false
   let gotAnyMsg = false
   let silentTimer: ReturnType<typeof setTimeout> | null = null
+  // THE RECONNECT LEDGER (Aug 2): timestamps of the reconnects inside the
+  // sliding window — the budget is "RECONNECT_BUDGET inside any 60s", not a
+  // lifetime count, so a stable connection earns its budget back.
+  const reconnectsAt: number[] = []
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   // Pre-roll ring: keeps the last ~400 ms of audio EVEN WHEN the VAD
   // hasn't declared "voice" yet. When it fires, we send the buffer first,
@@ -262,25 +311,6 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     phraseFrames = 0
   }
 
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  try {
-    ws = new WebSocket(`${proto}://${location.host}/api/asr-stream`)
-    ws.binaryType = 'arraybuffer'
-  } catch {
-    // WS didn't start → clean up the audio graph and fall to batch (don't leave AudioContext
-    // + microphone hanging — leak/race from the Jul 10 audit).
-    try {
-      proc.disconnect()
-      source.disconnect()
-    } catch {
-      /* deja deconectat */
-    }
-    stream.getTracks().forEach((t) => t.stop())
-    void ctx.close().catch(() => {})
-    opts.onError('failed')
-    return null
-  }
-
   const closePhrase = (): void => {
     if (phraseTimer) {
       clearTimeout(phraseTimer)
@@ -306,26 +336,76 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     phraseTimer = setTimeout(closePhrase, PHRASE_PAUSE_MS)
   }
 
-  // ONE SINGLE handover to batch: on a server refusal BOTH fire
-  // (`onerror` AND `onclose`), and ChatPanel restarted the mic twice —
-  // exactly the short restart loop we want eliminated.
+  // ONE SINGLE escalation to batch: on a server refusal BOTH `onerror` AND
+  // `onclose` used to fire, and ChatPanel restarted the mic twice — exactly
+  // the short restart loop we want eliminated. Every path (refusal, exhausted
+  // reconnect budget) comes through here, once.
   let fellBack = false
   const fallbackToBatch = (): void => {
     if (fellBack || closed) return
     fellBack = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     opts.onError('ws')
   }
 
-  if (ws) {
-    ws.onopen = () => {
+  // THE SELF-HEALING RECONNECT (Aug 2): transparent, bounded, never on a
+  // clean stop. The 15s 'silent' safety net RESETS here — the fresh socket
+  // re-arms it when the first voice frame goes out.
+  const scheduleReconnect = (): void => {
+    if (closed || fellBack || reconnectTimer) return
+    const now = Date.now()
+    while (reconnectsAt.length > 0 && now - reconnectsAt[0] > RECONNECT_WINDOW_MS) reconnectsAt.shift()
+    if (reconnectsAt.length >= RECONNECT_BUDGET) {
+      // The budget ran out — ONLY NOW we escalate (the old immediate behavior).
+      fallbackToBatch()
+      return
+    }
+    reconnectsAt.push(now)
+    if (silentTimer) {
+      clearTimeout(silentTimer)
+      silentTimer = null
+    }
+    sentAudio = false
+    gotAnyMsg = false
+    // Small backoff (400ms → 3.2s): a redeploy blip heals before the user
+    // finishes the sentence; a dead server hits the budget in seconds, not minutes.
+    const delay = Math.min(400 * 2 ** (reconnectsAt.length - 1), 3200)
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      openWs()
+    }, delay)
+  }
+
+  // Opens ONE socket and wires its handlers. Called for the first connection
+  // and for every self-healing reconnect — the mic graph, the phrase state
+  // and the VAD are untouched by the swap.
+  const openWs = (): void => {
+    if (closed || fellBack) return
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    let sock: WebSocket
+    try {
+      sock = new WebSocket(`${proto}://${location.host}/api/asr-stream`)
+      sock.binaryType = 'arraybuffer'
+    } catch {
+      // The constructor itself threw (malformed URL, blocked) — heal like any drop.
+      scheduleReconnect()
+      return
+    }
+    ws = sock
+    wsReady = false
+    sock.onopen = () => {
+      if (closed || sock !== ws) return
       wsReady = true
       try {
-        ws?.send(JSON.stringify({ type: 'start', lang: opts.getLang() }))
+        sock.send(JSON.stringify({ type: 'start', lang: opts.getLang() }))
       } catch {
         /* resumes on the first chunk */
       }
     }
-    ws.onmessage = (ev) => {
+    sock.onmessage = (ev) => {
       let m: { type?: string; transcript?: string; error?: string }
       try {
         m = JSON.parse(String(ev.data))
@@ -359,30 +439,36 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
         opts.onSpeechBegin?.()
         if (muted) opts.onBargeIn?.()
       } else if (m.type === 'error' && !closed) {
+        // The SERVER declared the Google stream persistently dead (its own
+        // reconnect budget is already spent — see routes/asr-stream.ts):
+        // no client-side reconnect can fix that → escalate at once.
         opts.onError('silent')
       }
     }
-    ws.onerror = () => {
-      fallbackToBatch()
+    sock.onerror = () => {
+      // onclose ALWAYS follows an onerror — the single handling point below.
+      // (Before, both fired the fallback and ChatPanel restarted twice.)
     }
-    ws.onclose = (ev) => {
+    sock.onclose = (ev) => {
+      if (closed || sock !== ws) return // clean stop() or a stale socket — NEVER reconnect
       wsReady = false
       // CONTRACT cu backend/src/routes/asr-stream.ts: (1011, 'asr_not_configured')
-      // = "the server has no streaming STT". We remember it for the WHOLE page
-      // session, so later mic starts skip the WS right away
-      // (see the guard at the top of startMicStream) — zero console errors, zero
-      // retries. The reason can be swallowed by a proxy, so we also accept
-      // the bare code: 1011 isn't used anywhere else on this route.
-      if (ev.code === 1011 || ev.reason === 'asr_not_configured') streamingAsrAvailable = false
-      // Refuz CURAT de la server (ex. 1011 asr_not_configured, 1008 auth):
-      // only onclose arrives, never onerror — without this net the batch
-      // fallback never fired (permanently deaf). 'ws' is the label
-      // ChatPanel maps to falling into batch.
-      if (!gotAnyMsg) fallbackToBatch()
+      // = "the server has no streaming STT at all". Not a drop to heal but a
+      // config refusal → cooldown (NOT the old permanent mark) + batch.
+      // The reason can be swallowed by a proxy, so we also accept the bare
+      // code: 1011 isn't used anywhere else on this route.
+      if (ev.code === 1011 || ev.reason === 'asr_not_configured') {
+        markUrechiIndisponibile()
+        fallbackToBatch()
+        return
+      }
+      // ANY other close — a redeploy, a proxy idle timeout, a network blip:
+      // the ear heals itself, transparently. Only an exhausted budget escalates.
+      scheduleReconnect()
     }
   }
 
-  proc.onaudioprocess = (e: AudioProcessingEvent): void => {
+  const onAudioProcess = (e: AudioProcessingEvent): void => {
     if (closed || muted || !ws || !wsReady || ws.readyState !== WebSocket.OPEN) return
     const input = e.inputBuffer.getChannelData(0)
     let sum = 0
@@ -432,21 +518,84 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     }
   }
 
-  source.connect(proc)
-  proc.connect(ctx.destination) // necesar ca onaudioprocess să ruleze în unele browsere
+  // THE MIC TRACK DIED (browser suspend, device grab, headset unplugged):
+  // before, the ear died with it and NOBODY reopened the mic — the session
+  // fell onto the OpenAI reserve and (zero credits) the mic went mute. Now we
+  // reopen the microphone ONCE through the same openMicGraph and rebuild the
+  // audio graph in place; the WS, the phrase state and the voiceprint
+  // collection survive. Only if the reopen fails do we escalate, as before.
+  let micReopened = false
+  const onTrackEnded = (): void => {
+    if (closed) return
+    if (micReopened) {
+      opts.onError('track-ended')
+      return
+    }
+    micReopened = true
+    void (async () => {
+      const g = await openMicGraph(() => {}, null)
+      if (closed) {
+        g?.stream.getTracks().forEach((t) => t.stop())
+        if (g) void g.ctx.close().catch(() => {})
+        return
+      }
+      if (!g) {
+        opts.onError('track-ended')
+        return
+      }
+      // Rewire FIRST, tear down the old graph after — never a moment with no graph.
+      const old = { proc, source, stream, ctx }
+      wireGraph(g)
+      try {
+        old.proc.disconnect()
+        old.source.disconnect()
+      } catch {
+        /* already gone */
+      }
+      old.stream.getTracks().forEach((t) => t.stop())
+      void old.ctx.close().catch(() => {})
+      console.info('[micStream] microfon redeschis în loc (track-ended vindecat, urechea a rămas vie)')
+    })()
+  }
 
-  // the track dies from outside (call, headset unplugged) → we notify, the panel reopens.
-  stream.getAudioTracks().forEach((t) =>
-    t.addEventListener('ended', () => {
-      if (!closed) opts.onError('track-ended')
-    }),
-  )
+  // Builds (or rebuilds) the whole audio graph on a mic stream: source →
+  // ScriptProcessor (PCM tap) and source → analyser (voiceprint tap), the
+  // frame handler, and the track-ended healer.
+  const wireGraph = (g: { stream: MediaStream; ctx: AudioContext }): void => {
+    stream = g.stream
+    ctx = g.ctx
+    void ctx.resume().catch(() => {})
+    source = ctx.createMediaStreamSource(stream)
+    // ScriptProcessor is deprecated but universal and needs no separate file — the
+    // safest for "just works", exactly what's needed on the voice critical path.
+    proc = ctx.createScriptProcessor(4096, 1, 1)
+
+    // Analizor paralel pentru features vocale (identificare speaker + gen).
+    featAnalyser = ctx.createAnalyser()
+    featAnalyser.fftSize = 2048
+    source.connect(featAnalyser)
+    featTimeBuf = new Float32Array(featAnalyser.fftSize)
+    featFreqBuf = new Float32Array(featAnalyser.frequencyBinCount)
+
+    proc.onaudioprocess = onAudioProcess
+    source.connect(proc)
+    proc.connect(ctx.destination) // necesar ca onaudioprocess să ruleze în unele browsere
+    stream.getAudioTracks().forEach((t) => t.addEventListener('ended', onTrackEnded))
+  }
+
+  wireGraph(firstGraph)
+  openWs()
 
   const stop = (): void => {
     if (closed) return
     closed = true
     if (phraseTimer) clearTimeout(phraseTimer)
     if (silentTimer) clearTimeout(silentTimer)
+    // A clean stop NEVER reconnects: the healing timer dies with the session.
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     try {
       // Only on an OPEN socket: send() on a closed one doesn't throw — it spits
       // «WebSocket is already in CLOSING or CLOSED state» into the console (seen
