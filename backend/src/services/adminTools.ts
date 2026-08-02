@@ -175,14 +175,15 @@ import { updatesList } from './updates.js'
 import { fetchRecentInbox } from './mailbox.js'
 import { recentLogs } from './logbuffer.js'
 import { getMemories, deleteMemory, logCapabilityGap, getCostSummary, proposeKelionTool } from '../db.js'
-import { execGuestVoiceTool } from './guestVoices.js'
+import { execGuestVoiceTool, GUEST_VOICE_TOOLS } from './guestVoices.js'
 
 export const USER_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   'list_updates', 'read_inbox', 'server_logs', 'get_real_cost',
   'list_memories', 'forget_memory', 'log_unsupported_request', 'propose_tool',
   // GUEST VOICES (Adrian, Aug 1): holder-only by construction — they act on
   // the SESSION user's own account (every user is the holder of theirs).
-  'allow_guest_voice', 'approve_guest_voice', 'forget_guest',
+  // The names come from the single source in guestVoices.ts.
+  ...GUEST_VOICE_TOOLS,
 ])
 
 export async function execUserScopedTool(
@@ -194,7 +195,7 @@ export async function execUserScopedTool(
   const denied = JSON.stringify({ error: 'admin_only' })
   // GUEST VOICES: not admin-gated — every holder manages the guests of their
   // OWN account.
-  if (name === 'allow_guest_voice' || name === 'approve_guest_voice' || name === 'forget_guest')
+  if (GUEST_VOICE_TOOLS.has(name))
     return execGuestVoiceTool(name, args, email)
   switch (name) {
     case 'list_updates': {

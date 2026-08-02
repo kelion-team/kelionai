@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify'
 import { v2, protos } from '@google-cloud/speech'
-import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
 import { recordCost } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
@@ -46,23 +45,19 @@ import {
 //      budget exhausted) — and THAT is when the admin gets paged instantly
 //      (see services/urechiChirp.ts).
 
-// THE PROVEN REGION (live matrix, Jul 10): chirp_3 does NOT exist in
-// us-central1 — Google: 'The model "chirp_3" does not exist in the location
-// named "us-central1"'. Accepted in 'us' and 'eu' (tested with auto and
-// ro-RO). 'eu' = minimal latency for Adrian and the European users.
-const REGION = 'eu'
-// The most advanced model Adrian asked for. chirp_2 is proven in batch;
-// Adrian confirms: chirp_3 SUPPORTS streaming → we keep chirp_3. The muted mic
-// at the first deploy is NOT from the model — the bug is on the path
-// (WS/auth/format), to be found.
-const ASR_MODEL = 'chirp_3'
+// Region + model come from the SINGLE source in services/asr.ts (the proven
+// 'eu' multi-region — chirp_3 does NOT exist in us-central1 — and chirp_3
+// everywhere). No local copies: the batch path and the streaming path can
+// never drift apart.
+import { GOOGLE_STT_REGION as REGION, GOOGLE_STT_MODEL as ASR_MODEL } from '../services/asr.js'
+import { googleServiceAccount } from '../services/googleCreds.js'
 
 let client: v2.SpeechClient | null = null
 let projectId = ''
 function getClient(): v2.SpeechClient | null {
-  if (!config.googleServiceAccountJson) return null
   if (!client) {
-    const creds = JSON.parse(config.googleServiceAccountJson) as { project_id?: string }
+    const creds = googleServiceAccount()
+    if (!creds) return null
     projectId = creds.project_id ?? ''
     client = new v2.SpeechClient({
       credentials: creds as Record<string, unknown>,
@@ -84,17 +79,10 @@ function getClient(): v2.SpeechClient | null {
 // (the /api/asr-stream/capability route below), and the client asks it ONCE
 // per page load.
 // A CHEAP predicate, intentionally without `getClient()`: we don't build the
-// Google client (and don't risk a broken-JSON exception) just to answer a
-// public probe. It mirrors exactly the guard in the WS handler
-// (`!c || !projectId`).
+// Google client just to answer a public probe. It mirrors exactly the guard
+// in the WS handler (`!c || !projectId`).
 function streamingAsrConfigured(): boolean {
-  if (!config.googleServiceAccountJson) return false
-  try {
-    const creds = JSON.parse(config.googleServiceAccountJson) as { project_id?: string }
-    return Boolean(creds.project_id)
-  } catch {
-    return false
-  }
+  return Boolean(googleServiceAccount()?.project_id)
 }
 
 type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>

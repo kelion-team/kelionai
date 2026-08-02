@@ -415,12 +415,6 @@ export async function reverseGeocodeInfo(lat: number, lon: number): Promise<GeoP
   }
 }
 
-export async function reverseGeocode(lat: number, lon: number): Promise<string> {
-  const info = await reverseGeocodeInfo(lat, lon)
-  if (!info) return ''
-  return info.postcode ? `${info.place} — postcode ${info.postcode}` : info.place
-}
-
 // Non-blocking variant for the chat hot path: returns the cached place name
 // instantly ('' when not resolved yet) and warms the cache in the background.
 // The GPS place name must NEVER delay a reply — the raw lat/lon (which the

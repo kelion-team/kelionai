@@ -4,6 +4,7 @@ import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } fr
 import { getOpenRouterBalance } from './openrouter.js'
 import { stareDispecer, poateFolosiRezerva, REZERVA_CAP_ZILNIC_DEFAULT_USD } from './dispecer.js'
 import { stareUrechiChirp } from './urechiChirp.js'
+import { utcDay } from './timeContext.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -266,7 +267,7 @@ export async function systemHealth(): Promise<string> {
   // but the owner must know the safety net is closed until tomorrow.
   try {
     info.dispecer = stareDispecer()
-    const zi = new Date().toISOString().slice(0, 10)
+    const zi = utcDay()
     const rawSpent = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
     const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
     const spent = rawSpent ? Number(rawSpent) : 0
