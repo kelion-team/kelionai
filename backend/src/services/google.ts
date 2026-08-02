@@ -55,7 +55,7 @@ export const googleTools: Tool[] = [
   {
     name: 'web_search',
     description:
-      'Search the live web for current, real information (news, facts, prices, anything recent). Returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches — use it whenever the answer depends on up-to-date or external information you do not already know.',
+      'Search the live web for current, real information (news, facts, prices, anything recent). Use it whenever the answer depends on up-to-date or external information you do not already know. The PRIMARY engine (source:"serper") returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches. When the primary engine is unavailable you get the FALLBACK instead — clearly marked source:"openrouter" + fallback:true — which carries ONLY an answer and bare links (no knowledge graph, no news, no related searches); say that honestly, do not present it as the full search. On error:"search_unavailable" BOTH engines failed — admit you could not search, never invent results.',
     input_schema: {
       type: 'object',
       properties: {
@@ -666,6 +666,34 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
   }
 }
 
+// Exported so the shape/marking rules are testable without network (the same
+// pattern as composeSerperResult / composePlace): the OpenRouter FALLBACK
+// answer, CLEARLY marked as degraded — the brain must never present it as the
+// full Serper search, and an answer without any cited source must be flagged
+// as unverified (it may be model memory, not the live web).
+export function composeOpenrouterFallback(
+  text: string,
+  sources: { title: string; url: string }[],
+  n: number,
+): string | null {
+  if (!text && sources.length === 0) return null // nothing at all → honest error
+  const notes = [
+    'FALLBACK: the primary engine (Serper) was unavailable. This carries ONLY an answer and bare links — no knowledge graph, no people-also-ask, no news, no related searches. Say so; do not present it as the full search.',
+  ]
+  const uncited = Boolean(text) && sources.length === 0
+  if (uncited) {
+    notes.push('The answer has NO cited sources — it may come from model memory, not the live web. Tell the user it is unverified.')
+  }
+  return JSON.stringify({
+    answer: text,
+    results: sources.slice(0, n).map((s) => ({ title: s.title, link: s.url, snippet: '' })),
+    source: 'openrouter',
+    fallback: true,
+    uncited_sources: uncited || undefined,
+    note: notes.join(' '),
+  })
+}
+
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
@@ -673,12 +701,9 @@ async function webSearch(query: string, max: number): Promise<string> {
   const viaSerper = await serperSearch(query, n)
   if (viaSerper) return viaSerper
   const r = await openrouterWebSearch(query)
-  if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
-  return JSON.stringify({
-    answer: r.text,
-    results: r.sources.slice(0, n).map((s) => ({ title: s.title, link: s.url, snippet: '' })),
-    source: 'openrouter',
-  })
+  const viaFallback = composeOpenrouterFallback(r.text, r.sources, n)
+  if (!viaFallback) return JSON.stringify({ error: 'search_unavailable' })
+  return viaFallback
 }
 
 const WEATHER_CODES: Record<number, string> = {
@@ -1159,18 +1184,23 @@ async function ytPlayable(link: string): Promise<boolean> {
   }
 }
 
-async function youtubeSearch(query: string, max: number): Promise<string> {
-  if (!query) return JSON.stringify({ error: 'empty_query' })
-  const n = Math.min(Math.max(max, 1), 10)
-  // Through OpenRouter (web plugin) — we ask for REAL watch links. No Serper.
-  const r = await openrouterWebSearch(
-    `${query} — best YouTube videos`,
-    'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
-  )
+export interface YoutubeCandidate {
+  title: string
+  link: string
+}
+
+// Exported so the parsing rules are testable without network (the same pure-
+// composer pattern as composeSerperResult): real YouTube links from the search
+// answer — citations first (the safest), then any labelled/bare link in the
+// text — deduplicated, nothing invented here.
+export function extractYoutubeCandidates(
+  text: string,
+  sources: { title: string; url: string }[],
+): YoutubeCandidate[] {
   const seen = new Set<string>()
-  const videos: { title: string; link: string }[] = []
+  const videos: YoutubeCandidate[] = []
   // From the real sources (citations) — the safest.
-  for (const s of r.sources) {
+  for (const s of sources) {
     if (ytEmbed(s.url) && !seen.has(s.url)) {
       seen.add(s.url)
       videos.push({ title: s.title, link: s.url })
@@ -1180,7 +1210,7 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
   const ytUrl = '(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com\\/watch\\?v=[\\w-]+|youtu\\.be\\/[\\w-]+)'
   const labelled = new RegExp(`(?:\\[([^\\]]+)\\]\\((${ytUrl})\\)|([^\\n—\\-]+?)\\s*[—-]\\s*(${ytUrl}))`, 'g')
   let m: RegExpExecArray | null
-  while ((m = labelled.exec(r.text)) !== null) {
+  while ((m = labelled.exec(text)) !== null) {
     const title = (m[1] ?? m[3] ?? '').trim()
     let link = (m[2] ?? m[4] ?? '').trim()
     if (!link.startsWith('http')) link = `https://${link}`
@@ -1188,6 +1218,25 @@ async function youtubeSearch(query: string, max: number): Promise<string> {
     seen.add(link)
     videos.push({ title, link })
   }
+  return videos
+}
+
+// Exported for the honesty tests (search-backend-down vs. no-videos-found are
+// different answers and the tests pin them apart).
+export async function youtubeSearch(query: string, max: number): Promise<string> {
+  if (!query) return JSON.stringify({ error: 'empty_query' })
+  const n = Math.min(Math.max(max, 1), 10)
+  // Through OpenRouter (web plugin) — we ask for REAL watch links. No Serper.
+  const r = await openrouterWebSearch(
+    `${query} — best YouTube videos`,
+    'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
+  )
+  // The search backend itself failed (no text AND no citations). "I could not
+  // search" and "no videos exist" are different truths — the old code merged
+  // them into not_found, and the brain would tell the user there are no
+  // videos when in fact the search never ran.
+  if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
+  const videos = extractYoutubeCandidates(r.text, r.sources)
   if (videos.length > 0) {
     // Only clips that can ACTUALLY play on the monitor (checked in parallel,
     // a single network round) — a dead player never gets displayed again.
@@ -1237,28 +1286,43 @@ async function translateText(text: string, target: string): Promise<string> {
   if (!res.ok) return JSON.stringify({ error: `translate_http_${res.status}` })
   const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
   const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-  return JSON.stringify({ translation: out ?? '', target })
+  // An EMPTY answer is NOT a translation — the old code returned
+  // { translation: "" }, which the caller could not tell apart from success.
+  // Say it failed, like the OpenRouter path above already does.
+  if (!out) return JSON.stringify({ error: 'translate_empty' })
+  return JSON.stringify({ translation: out, target })
 }
 
 // BULK TRANSLATION (Adrian, Jul 10: "a button that translates into Romanian
 // instantly from any language" — in the admin conversation viewer). Translates
 // a LIST of messages into `target`, in parallel; if one translation fails
 // (Gemini unconfigured or an error), it returns the ORIGINAL text for that
-// message — nothing is lost.
-export async function translateMany(texts: string[], target: string): Promise<string[]> {
-  return Promise.all(
+// message — nothing is lost — and counts it in `failed`, so the admin SEES
+// that part of the "translation" is actually untranslated original, instead
+// of silently believing everything was translated.
+export interface TranslateManyResult {
+  /** Aligned 1:1 with the input; a failed message keeps its ORIGINAL text. */
+  translations: string[]
+  /** How many messages could NOT be translated (their text is the original). */
+  failed: number
+}
+
+export async function translateMany(texts: string[], target: string): Promise<TranslateManyResult> {
+  const results = await Promise.all(
     texts.map(async (t) => {
       const s = (t ?? '').trim()
-      if (!s) return t ?? ''
+      if (!s) return { text: t ?? '', ok: true } // nothing to translate — not a failure
       try {
         const r = await translateText(s, target)
         const j = JSON.parse(r) as { translation?: string }
-        return j.translation && j.translation.trim() ? j.translation : (t ?? '')
+        if (j.translation && j.translation.trim()) return { text: j.translation, ok: true }
+        return { text: t ?? '', ok: false }
       } catch {
-        return t ?? ''
+        return { text: t ?? '', ok: false }
       }
     }),
   )
+  return { translations: results.map((r) => r.text), failed: results.filter((r) => !r.ok).length }
 }
 
 // Knowledge lookup — keyless Wikipedia REST API (search → page summary). Gives
