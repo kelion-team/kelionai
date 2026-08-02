@@ -448,17 +448,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await getDemoStats())
   })
 
-  // Which brain models actually serve right now (admin only): live ping of
-  // Kimi (primary) and GLM (backup). The old provider fully removed (Adrian,
-  // 12 Jul).
+  // Which brain models actually serve right now (admin only): a real 1-token
+  // ping of the default chat + work models through OpenRouter (services/brain.ts).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain keys live (admin only): Kimi (primary) + GLM (backup). Pings
-  // each with a 1-token call; reports ok/fail without ever exposing the key value.
+  // Verify the brain key live (admin only): pings the OpenRouter chat default
+  // (primary) and the work model (reserve) with a 1-token call; reports
+  // ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })

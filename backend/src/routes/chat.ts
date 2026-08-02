@@ -1020,6 +1020,74 @@ interface Coords {
   lon: number
 }
 
+// ── THE LOCATION TRUTH, ONE SOURCE (the "câte grade sunt în locația mea → 27°
+// fără GPS" incident) ────────────────────────────────────────────────────────
+// The owner asked for the weather "in my location" and got 27° for a place the
+// model had INVENTED: on a turn with no device GPS and the IP-geo cache still
+// cold, NOTHING in the context said "you have no location" — the get_weather
+// description only said "pass the user's lat/lon (given in your context)", so
+// the model filled the hole from its own memory and quoted live weather for a
+// guessed city as if it were the user's. Resolved ONCE here, then read by BOTH
+// consumers: the system-prompt block below (what the brain knows) and the
+// get_weather guard in runTool (what the tool is allowed to run with).
+export interface DeviceLocation {
+  /** Exact coordinates from the device GPS (req.body.coords), null when absent/invalid. */
+  gps: { lat: number; lon: number } | null
+  /** City-level "City, Region, Country" from the request IP ('' when unknown). */
+  approxPlace: string
+}
+
+export function resolveDeviceLocation(
+  coords: Coords | undefined,
+  geo: { city?: string; region?: string; country?: string } | null,
+): DeviceLocation {
+  const gps =
+    coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)
+      ? { lat: coords.lat, lon: coords.lon }
+      : null
+  const approxPlace = gps
+    ? ''
+    : [geo?.city, geo?.region, geo?.country].filter(Boolean).join(', ')
+  return { gps, approxPlace }
+}
+
+// The honest void, DECLARED. When neither GPS nor the IP estimate exists, the
+// brain must KNOW it has no location — otherwise it manufactures one (that is
+// exactly where the 27° came from). No invented default, ever.
+export const LOCATION_NONE_PROMPT =
+  `\n\nLOCATION: you do NOT have the user's location on this turn — the device did not share its GPS and no network estimate exists. ` +
+  `For "my location" / "here" / local-weather questions, say honestly that you don't have their location and ask them to allow location access on the device. ` +
+  `NEVER guess a city, place or coordinates, and NEVER quote weather, distances or "near me" results for an invented spot.`
+
+// THE get_weather GUARD (deterministic — the model's good will is not enough):
+// a location-less call is filled from the DEVICE GPS first, then from the
+// IP-level approximation; with neither, the tool REFUSES and tells the model to
+// answer honestly instead of geocoding a hallucinated place name.
+export function weatherArgsWithLocation(
+  input: unknown,
+  loc: DeviceLocation,
+): { input: Record<string, unknown> } | { errorJson: string } {
+  const a = (input ?? {}) as Record<string, unknown>
+  const hasCoords =
+    a.lat !== undefined &&
+    a.lon !== undefined &&
+    Number.isFinite(Number(a.lat)) &&
+    Number.isFinite(Number(a.lon))
+  const hasPlace = typeof a.location === 'string' && a.location.trim().length > 0
+  if (hasCoords || hasPlace) return { input: a }
+  // "Locația mea" → the device GPS, exactly as the owner asked.
+  if (loc.gps) return { input: { ...a, lat: loc.gps.lat, lon: loc.gps.lon } }
+  // Rough IP fallback — labelled approximate in the prompt, better than nothing.
+  if (loc.approxPlace) return { input: { ...a, location: loc.approxPlace } }
+  return {
+    errorJson: JSON.stringify({
+      error: 'location_unavailable',
+      message:
+        "The user's location is not available on this turn: the device did not share GPS and no network estimate exists. Answer honestly that you don't have their location and ask them to allow location access — never guess a city or coordinates, never quote weather for an invented spot.",
+    }),
+  }
+}
+
 // The brain API rejects empty-content messages and non-alternating roles, and the
 // first message must be a user turn. The client can produce all three: a
 // monitor-only / tool-only reply leaves an empty assistant turn, and a local
@@ -1501,25 +1569,28 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // GPS must NEVER delay the reply: only synchronous cache reads happen here.
     // The place-name/IP lookups run in the background and are ready for the
     // next turn; the raw lat/lon (all the skills need) is injected immediately.
-    const coords = req.body?.coords
-    if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
-      const place = reverseGeocodeCached(coords.lat, coords.lon)
+    // The location truth is resolved ONCE (resolveDeviceLocation) and shared
+    // with the get_weather guard in runTool — prompt and tool can never
+    // disagree about where the user is.
+    const deviceLoc = resolveDeviceLocation(req.body?.coords, geoLookupCached(clientIp(req)))
+    if (deviceLoc.gps) {
+      const place = reverseGeocodeCached(deviceLoc.gps.lat, deviceLoc.gps.lon)
       systemPrompt +=
-        `\n\nThe user's current device location (live GPS) is latitude ${coords.lat.toFixed(5)}, longitude ${coords.lon.toFixed(5)}` +
+        `\n\nThe user's current device location (live GPS) is latitude ${deviceLoc.gps.lat.toFixed(5)}, longitude ${deviceLoc.gps.lon.toFixed(5)}` +
         (place ? ` — approximately ${place}.` : '.') +
         ` When the user says "here", "near me", "where am I", or asks about weather, places, directions or anything location-dependent without naming a place, use THIS location. For local weather, pass these exact lat/lon to get_weather (don't rely on a place name).`
-    } else {
+    } else if (deviceLoc.approxPlace) {
       // GPS not available yet (permission not yet answered, denied, or the very
       // first turn racing the browser's fix) — fall back to a city-level guess
       // from the request IP (same lookup the visitor-analytics beacon uses) so
       // Kelion is never left with zero location awareness.
-      const ip = clientIp(req)
-      const geo = geoLookupCached(ip)
-      if (geo && (geo.city || geo.country)) {
-        const where = [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
-        systemPrompt +=
-          `\n\nThe user's approximate location (from their network, precise GPS not yet available) is ${where}. Use this ONLY as a rough fallback for "near me"/weather/local questions — mention it's approximate if precision matters, and prefer exact GPS the moment it's available.`
-      }
+      systemPrompt +=
+        `\n\nThe user's approximate location (from their network, precise GPS not yet available) is ${deviceLoc.approxPlace}. Use this ONLY as a rough fallback for "near me"/weather/local questions — mention it's approximate if precision matters, and prefer exact GPS the moment it's available.`
+    } else {
+      // NO LOCATION AT ALL (the "27° without GPS" fix): the void is DECLARED,
+      // so the brain answers "I don't have your location" instead of quoting
+      // live weather for an invented city.
+      systemPrompt += LOCATION_NONE_PROMPT
     }
 
     // Kelion's built-in sense of "now" — the client's real local date/time, so he
@@ -2055,6 +2126,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           block, isAdmin, token, reply, baseUrl, user.email,
           req.headers.cookie ?? '', usage,
           (speechPref || isAdminUser) && langName ? langName : '',
+          deviceLoc,
         )
       }
       // FIRST WORD UNDER 1s ON ACTION TURNS TOO (Adrian, Jul 27, live proof:
@@ -2518,6 +2590,9 @@ async function runTool(
   // cost is accounted outside runTool: the `_` prefix says it explicitly.
   _usage: { usd: number },
   _langName: string,
+  // The turn's location truth (resolveDeviceLocation) — the get_weather guard
+  // fills/refuses location-less calls from it. One source with the prompt.
+  loc: DeviceLocation,
 ): Promise<string> {
   const args = block.input as Record<string, unknown>
   // Journal trace for EVERY tool called (Jul 25 incident: "it does nothing" —
@@ -2783,6 +2858,16 @@ async function runTool(
     default: {
       // Google tools are handled by the googleTools router.
       if (googleTools.some((t) => t.name === block.name)) {
+        // THE get_weather GUARD (the "27° without GPS" fix): a location-less
+        // weather call is filled deterministically — device GPS first, the
+        // approximate IP place second — and REFUSED with an honest message
+        // when the turn has no location at all. The model can no longer
+        // geocode a hallucinated "locația mea" and quote it as real.
+        if (block.name === 'get_weather') {
+          const guarded = weatherArgsWithLocation(block.input, loc)
+          if ('errorJson' in guarded) return guarded.errorJson
+          block = { ...block, input: guarded.input }
+        }
         const result = await runGoogleTool(block.name, block.input, token)
         // AUTOMATIC DISPLAY: tools that return `screen_url` (map, route,
         // weather, video) must APPEAR on the monitor from a SINGLE call — the

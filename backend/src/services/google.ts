@@ -234,7 +234,7 @@ export const googleTools: Tool[] = [
   {
     name: 'lookup_address',
     description:
-      'Resolve EXACT coordinates (latitude/longitude) to the real address and POSTCODE at that point (reverse geocoding). Use whenever the user gives coordinates and wants the address or postcode, or asks "what is the postcode here / of this place". For the user\'s CURRENT location, pass the GPS coordinates injected in the context (or from get_location).',
+      'Resolve EXACT coordinates (latitude/longitude) to the real address and POSTCODE at that point (reverse geocoding). Use whenever the user gives coordinates and wants the address or postcode, or asks "what is the postcode here / of this place". For the user\'s CURRENT location, pass the GPS coordinates injected in your context (no other tool gives them — if they are not in the context, say honestly you do not have the location).',
     input_schema: {
       type: 'object',
       properties: {
@@ -1012,7 +1012,7 @@ async function lookupAddress(lat: number, lon: number): Promise<string> {
   if (!Number.isFinite(lat) || !Number.isFinite(lon))
     return JSON.stringify({
       error: 'missing_coordinates',
-      hint: 'Ask the user for the coordinates, or use the device GPS (get_location / the injected GPS) for their current spot.',
+      hint: 'Ask the user for the coordinates, or use the device GPS injected in your context for their current spot (there is no get_location tool — it does not exist).',
     })
   const info = await reverseGeocodeInfo(lat, lon)
   if (!info)
