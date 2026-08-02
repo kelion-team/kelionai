@@ -2,15 +2,17 @@ import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 
-// TTS — ONE SINGLE MALE VOICE ACROSS THE WHOLE APP.
+// TTS — GOOGLE CHIRP 3 HD IS THE PRIMARY VOICE, OPENAI STRICTLY THE RESERVE.
 //
-// Adrian (24 Jul): "there are 2 voices, chat and brain — unify them". The
-// full-duplex live voice is OpenAI Realtime, intrinsically tied to OpenAI
-// voices (`ash`) and unable to render Chirp. To sound IDENTICAL everywhere
-// (typed chat, landing greeting, /api/tts), synthesis uses the SAME OpenAI
-// `ash` voice as the live voice.
-// Google Chirp 3 HD remains ONLY a safety net — used only when OpenAI is
-// unavailable (no key / failed call), so he is never left mute.
+// Adrian, Aug 2: "openai ramine rezerva doar daca google pica" + "voce
+// masculina in orice limba". The old order (OpenAI first, to sound IDENTICAL
+// to the OpenAI Realtime live voice) died when the live mouth itself moved
+// to Google — the unification reason is gone. And OpenAI TTS burned $65 in 2
+// weeks of voice, while Chirp 3 HD has a 1M characters/month free tier and
+// the service account (GOOGLE_SERVICE_ACCOUNT_JSON on the server) is PROVEN
+// live: it synthesizes fine and there are 30 ro-RO-Chirp3-HD-* voices.
+// So: 1) Google Chirp 3 HD first; 2) OpenAI TTS only when Google is not
+// configured OR the call failed — he is never left mute.
 
 const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
 const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech'
@@ -43,8 +45,9 @@ function getAuth(): GoogleAuth | null {
   return auth
 }
 
-/** Google Chirp 3 HD is available (service account OR API key). */
-function googleTtsAvailable(): boolean {
+/** Google Chirp 3 HD is available (service account OR API key).
+ *  Exported for GET /api/tts/status — booleans only, never the keys. */
+export function googleTtsAvailable(): boolean {
   return getAuth() !== null || !!config.googleTtsKey
 }
 
@@ -53,8 +56,10 @@ export function ttsConfigured(): boolean {
   return googleTtsAvailable() || !!config.openai.key
 }
 
+export type TtsEngine = 'google' | 'openai'
+
 export type TtsResult =
-  | { ok: true; audio: Buffer }
+  | { ok: true; audio: Buffer; engine: TtsEngine }
   | { ok: false; status: number; error: string }
 
 export interface SynthOpts {
@@ -69,10 +74,11 @@ export interface SynthOpts {
 }
 
 /**
- * Synthesizes `text` in language `langRaw`. Tries Chirp 3 HD (Google) first;
- * if not configured or it fails, falls back to OpenAI. Typed result so the
- * caller can map errors to the right HTTP status. MP3 by default;
- * `{ encoding: 'LINEAR16' }` → raw PCM (24kHz) for the voice agent.
+ * Synthesizes `text` in language `langRaw`. Tries Chirp 3 HD (Google) FIRST —
+ * the primary voice; if not configured or it fails, falls back to the OpenAI
+ * reserve. Typed result so the caller can map errors to the right HTTP status.
+ * MP3 by default; `{ encoding: 'LINEAR16' }` → raw PCM (24kHz) for the voice
+ * agent.
  */
 export async function synthesize(
   text: string,
@@ -88,20 +94,20 @@ export async function synthesize(
   // target language so they are pronounced correctly. Pure text layer.
   const spoken = academicPronounce(clean, lang.split('-')[0])
 
-  // ONE SINGLE MALE VOICE ACROSS THE WHOLE APP (Adrian: "there are 2 voices,
-  // chat and brain — unify them"). The full-duplex live voice comes from OpenAI
-  // Realtime, which is INTRINSICALLY tied to OpenAI voices (`ash`) and CANNOT
-  // render Chirp. To sound IDENTICAL everywhere, typed chat uses the SAME
-  // OpenAI voice as the live voice.
-  // 1) OpenAI TTS with the `ash` voice (= the Realtime voice) — the one voice.
-  if (config.openai.key) {
-    const r = await synthOpenAI(spoken, opts)
+  // GOOGLE FIRST, OPENAI STRICTLY THE RESERVE (Adrian, Aug 2: "openai ramine
+  // rezerva doar daca google pica"). The old reason for OpenAI-first — sound
+  // identical to the OpenAI Realtime live mouth — is gone: the live mouth is
+  // Google now. OpenAI TTS burned $65 in 2 weeks; Chirp 3 HD has 1M free
+  // characters/month.
+  // 1) Google Chirp 3 HD — the app voice (male, in any language).
+  if (googleTtsAvailable()) {
+    const r = await synthChirp(spoken, lang, opts)
     if (r.ok) return r
-    // OpenAI failed (e.g. out of credit) → we don't stay mute, fall to Google below.
+    // Google failed → we don't stay mute, fall to the OpenAI reserve below.
   }
 
-  // 2) Safety net: Google Chirp 3 HD (only when OpenAI is unavailable).
-  if (googleTtsAvailable()) return synthChirp(spoken, lang, opts)
+  // 2) Reserve: OpenAI TTS (only when Google is unconfigured or failed).
+  if (config.openai.key) return synthOpenAI(spoken, opts)
 
   return { ok: false, status: 502, error: 'tts_failed' }
 }
@@ -132,16 +138,29 @@ async function ttsPost(
 }
 
 // ── Chirp 3 HD (Google) ──────────────────────────────────────────────────────
+// MALE VOICE IN EVERY LANGUAGE (Adrian, Aug 2: "voce masculina in orice
+// limba"). The known FEMALE Chirp3-HD styles. A female style — from env, from
+// a full voice name, from anywhere — must NEVER reach the Google API: the
+// order is male everywhere, so any female style is rewritten to Charon.
+const FEMININE_CHIRP_STYLES = new Set([
+  'Aoede', 'Callirrhoe', 'Despina', 'Erinome', 'Gacrux', 'Kore', 'Laomedeia',
+  'Leda', 'Pulcherrima', 'Sulafat', 'Vindemiatrix', 'Zephyr', 'Achernar',
+  'Autonoe',
+])
+const MALE_CHIRP_DEFAULT = 'Charon' // warm male voice, valid in every Chirp3-HD locale
+
 async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promise<TtsResult> {
-  // We always force Chirp 3 HD: the env style can be a full voice name
-  // (e.g. "ro-RO-Chirp3-HD-Charon") or just the style (e.g. "Charon").
-  // Anything else falls back to Charon — a warm male voice.
+  // We always force Chirp 3 HD. The env style can be a full voice name
+  // (e.g. "ro-RO-Chirp3-HD-Charon") or just the style (e.g. "Charon"); either
+  // way we keep ONLY the style and rebuild the name with the language being
+  // spoken, so the voice matches the text. Anything unknown — and ANY female
+  // style — falls back to Charon (male, see the guard above).
   const configured = config.ttsVoiceStyle.trim()
-  const voiceName = /Chirp3-HD/i.test(configured)
-    ? configured
-    : /^[A-Z][a-z]+$/.test(configured)
-      ? `${lang}-Chirp3-HD-${configured}`
-      : `${lang}-Chirp3-HD-Charon`
+  const style = /Chirp3-HD/i.test(configured) ? (configured.split('-').pop() ?? '') : configured
+  const safeStyle = /^[A-Z][a-z]+$/.test(style) && !FEMININE_CHIRP_STYLES.has(style)
+    ? style
+    : MALE_CHIRP_DEFAULT
+  const voiceName = `${lang}-Chirp3-HD-${safeStyle}`
 
   const a = getAuth()
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -166,10 +185,10 @@ async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promis
   if (!(r instanceof Response)) return r
   const j = (await r.json().catch(() => ({}))) as { audioContent?: string }
   if (!j.audioContent) return { ok: false, status: 502, error: 'tts_empty' }
-  return { ok: true, audio: Buffer.from(j.audioContent, 'base64') }
+  return { ok: true, audio: Buffer.from(j.audioContent, 'base64'), engine: 'google' }
 }
 
-// ── Backup: OpenAI TTS ───────────────────────────────────────────────────────
+// ── Reserve: OpenAI TTS ──────────────────────────────────────────────────────
 async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> {
   // OpenAI TTS: `pcm` = LINEAR16 24kHz mono; otherwise `mp3`. Single male voice.
   const format = opts.encoding === 'LINEAR16' ? 'pcm' : 'mp3'
@@ -186,5 +205,5 @@ async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> 
   if (!(r instanceof Response)) return r
   const audio = Buffer.from(await r.arrayBuffer())
   if (audio.length === 0) return { ok: false, status: 502, error: 'tts_empty' }
-  return { ok: true, audio }
+  return { ok: true, audio, engine: 'openai' }
 }

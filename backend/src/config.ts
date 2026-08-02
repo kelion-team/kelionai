@@ -63,6 +63,9 @@ export const config = {
   databaseUrl: env(...ENV_ALIASES.databaseUrl),
   googleServiceAccountJson: env(...ENV_ALIASES.googleServiceAccountJson),
   googleTtsKey: env(...ENV_ALIASES.googleTtsKey),
+  // Chirp 3 HD voice style — MALE in every language (Adrian, Aug 2: "voce
+  // masculina in orice limba"). Default Charon (male). services/tts.ts has a
+  // hard guard: any known FEMALE style is rewritten to Charon before the API.
   ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
   serperKey: env(...ENV_ALIASES.serperKey),
   googleMapsKey: env(...ENV_ALIASES.googleMapsKey),
@@ -100,14 +103,14 @@ export const config = {
       .split(',')
       .map((v) => v.trim())
       .filter(Boolean),
-    // TTS on OpenAI (same key) — for the landing greeting + /api/tts.
-    // Without a Google TTS key: OpenAI covers this too (Adrian: "2 keys,
-    // period"). `onyx` = male voice, consistent with the live voice.
+    // TTS on OpenAI (same key) — STRICTLY THE RESERVE since Aug 2 (Adrian:
+    // "openai ramine rezerva doar daca google pica"): used only when Google
+    // Chirp 3 HD is unconfigured or failed (see services/tts.ts). `onyx` =
+    // male voice, consistent with the live voice.
     ttsModel: (process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts').trim(),
-    // ONE male voice across the WHOLE app (Adrian, 24 Jul: "unify — right now
+    // Male voice for the OpenAI RESERVE (Adrian, 24 Jul: "unify — right now
     // the brain has one voice, the chat another"). `ash` = EXACTLY the voice
-    // from Realtime (full-duplex), also available in TTS → written chat
-    // sounds IDENTICAL to the live voice, not different. Follows the Realtime
+    // from Realtime (full-duplex), also available in TTS. Follows the Realtime
     // voice if changed from env, so they always stay the same.
     ttsVoice: (process.env.OPENAI_TTS_VOICE ?? process.env.OPENAI_REALTIME_VOICE ?? 'ash').trim(),
     // Fallback STT on the same OpenAI key (hearing MUST NOT die if Realtime
