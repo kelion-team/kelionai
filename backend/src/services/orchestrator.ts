@@ -11,6 +11,7 @@ import {
   geminiDirectChatStream,
 } from './geminiDirect.js'
 import { filtruRepetitie } from './fluxUnic.js'
+import { parseFakeToolCalls, stripToolMarkup } from './toolMarkup.js'
 
 // ── THE ORCHESTRATOR — one brain, any model ─────────────────────────────────
 // Runs a conversation WITH tool-use through a chosen model (GPT/Gemini/Claude
@@ -148,6 +149,57 @@ export async function runOrchestrator(
     allText = flux.emis()
 
     if (res.toolCalls.length === 0) {
+      // ── THE FAKE-CALL INTERPRETER (Adrian, Aug 2) ──────────────────────────
+      //
+      // Him: "everything you give it by voice never reaches the brain; in
+      // writing it only says 'Am preluat sarcina'".
+      //
+      // Live cause (server journal): weak free models TYPE the tool call as
+      // text — `<|tool_call>call:system_health{}<tool_call|>` — instead of
+      // invoking it. The old path HID that text from the human and ended the
+      // turn empty: the ack was heard, then silence, and nothing was ever
+      // executed. Now we run what the model MEANT: parse the typed call (only
+      // names really offered this turn, only valid JSON args), execute it,
+      // hand the result back and let the turn continue — exactly as if the
+      // model had called the tool properly.
+      const fakeCalls = res.text
+        ? parseFakeToolCalls(res.text, new Set(tools.map((t) => t.name)))
+        : []
+      if (fakeCalls.length > 0) {
+        console.error(
+          `[orchestrator] runda ${round}: modelul a TASTAT apelul în loc să-l cheme ` +
+            `— îl execut eu (${fakeCalls.map((f) => f.name).join(', ')}) [${served}]`,
+        )
+        // Same spin guard as the real-call path: nothing new + the very same
+        // typed calls twice in a row = a stuck model, we stop paying rounds.
+        const semnF = fakeCalls
+          .map((f) => `${f.name}(${f.argsJson.slice(0, 300)})`)
+          .join('|')
+        if (rundaGoala && semnF === semnaturaTrecuta) {
+          console.error(`[orchestrator] runda ${round}: aceleași apeluri tastate de două ori → opresc bucla (${served})`)
+          return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
+        }
+        semnaturaTrecuta = semnF
+        anyToolCalled = true
+        const calls: OrToolCall[] = fakeCalls.map((f, i) => ({
+          id: `fake_${round}_${i}`,
+          type: 'function',
+          function: { name: f.name, arguments: f.argsJson },
+        }))
+        // The assistant turn is kept with the markup STRIPPED — history must
+        // not teach the model that typing calls is the way to make them.
+        convo.push({ role: 'assistant', content: stripToolMarkup(res.text ?? ''), tool_calls: calls })
+        for (const call of calls) {
+          let out = ''
+          try {
+            out = await execTool(call.function.name, call.function.arguments || '{}')
+          } catch (e) {
+            out = `tool_error: ${String(e).slice(0, 200)}`
+          }
+          convo.push({ role: 'tool', tool_call_id: call.id, content: out })
+        }
+        continue
+      }
       // THE DEED GATE (Adrian, Jul 27): if the model says it DID an action
       // ("am trimis/salvat/reparat...") but NEVER called any tool in the whole
       // turn, it's not a deed — it's empty talk. We force it once to execute or
@@ -206,7 +258,8 @@ export async function runOrchestrator(
         continue
       }
       // On streaming the text already flowed through onText; we don't re-emit it.
-      return { text: allText, costUsd: totalCost, model: served, rounds: round }
+      // allText is returned CLEAN: history must never contain typed fake calls.
+      return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
     }
 
     // ── SPINNING IN PLACE? ───────────────────────────────────────────────────
@@ -222,7 +275,7 @@ export async function runOrchestrator(
       .join('|')
     if (rundaGoala && semnatura && semnatura === semnaturaTrecuta) {
       console.error(`[orchestrator] runda ${round}: nimic nou + aceleași unelte → opresc bucla (${served})`)
-      return { text: allText, costUsd: totalCost, model: served, rounds: round }
+      return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: round }
     }
     semnaturaTrecuta = semnatura
 
@@ -242,5 +295,5 @@ export async function runOrchestrator(
   }
 
   // Too many tool rounds — return what we have, without blocking the user.
-  return { text: allText, costUsd: totalCost, model: served, rounds: maxRounds }
+  return { text: stripToolMarkup(allText), costUsd: totalCost, model: served, rounds: maxRounds }
 }
