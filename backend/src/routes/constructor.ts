@@ -47,7 +47,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
@@ -59,6 +59,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // 'în curs' = it couldn't be confirmed within the worker's budget (the
     // workshop had passed anyway).
     const ci = ['verde', 'roșu', 'în curs'].includes(String(req.body?.ci)) ? String(req.body?.ci) : undefined
+    // THE BRAIN USED (Adrian, Aug 2: "Everything FREE. The admin can EXPRESSLY
+    // request the paid Fable 5 brain for the CONSTRUCTOR only"): only two
+    // honest labels are accepted — 'fable-5' (paid, expressly marked in the
+    // order) or 'free'. The cost is the one MEASURED by the worker from
+    // OpenRouter's usage.cost; anything non-numeric/negative is dropped, so
+    // the Money views never show a fabricated figure.
+    const brain = ['fable-5', 'free'].includes(String(req.body?.brain)) ? String(req.body?.brain) : undefined
+    const costRaw = Number(req.body?.costUsd)
+    const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
     await reportBuildJob(id, {
       status,
       branch: req.body?.branch,
@@ -66,6 +75,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       tokens: Number(req.body?.tokens ?? 0),
       log: req.body?.log,
       ci,
+      brain,
+      costUsd,
     })
     // The report to Adrian — by email, with the PR to press (the merge is his).
     const dovadaCI =
@@ -78,9 +89,18 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       status === 'done'
         ? `[Kelion] Constructorul a terminat ordinul #${id} — PR gata de merge`
         : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
+    // The brain is stated in the email too (Aug 2 rule: the model choice must
+    // be VISIBLE everywhere the order is reported). A Fable order says what it
+    // cost — measured, or honestly "not reported by the provider".
+    const linieCreier =
+      brain === 'fable-5'
+        ? `Creier: Fable 5 (PLĂTIT, cerut expres în ordin) — ${costUsd != null ? `cost măsurat OpenRouter: $${costUsd.toFixed(4)}` : 'cost neraportat de OpenRouter'}.\n\n`
+        : brain === 'free'
+          ? `Creier: gratuit (:free).\n\n`
+          : ''
     const body =
       status === 'done'
-        ? `Ordinul #${id} e construit. ${dovadaCI}\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
+        ? `Ordinul #${id} e construit. ${dovadaCI}\n\n${linieCreier}PR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
         : ci === 'roșu'
           ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
           : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`

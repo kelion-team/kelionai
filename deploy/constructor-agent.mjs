@@ -18,8 +18,6 @@
 // CONSTRUCTOR_MAX_STEPS (24 — pași CU UNELTE, nu ture), CONSTRUCTOR_MAX_TOKENS
 // (900000), CONSTRUCTOR_MAX_STERILE (8 — ture în care modelul doar povestește),
 // CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
-// CONSTRUCTOR_MODEL_CAPABIL (pe ce urcă atunci când gratuitul dovedește că nu
-// poate) + CONSTRUCTOR_ESCALADARE=0 ca s-o stingi,
 // CONSTRUCTOR_BUDGET_MS (1560000 = 26 min, sub timeout-ul dur de 30 min din
 // constructor-worker.sh, ca să apucăm SĂ RAPORTĂM înainte să fim omorâți).
 import { execSync, execFileSync } from 'node:child_process'
@@ -63,12 +61,15 @@ if (!MODEL.endsWith(':free') && !ALLOW_PAID) {
   )
   process.exit(0)
 }
-// GARDA DE MAI SUS PRIVEȘTE DOAR MODELUL DE PORNIRE. Escaladarea pe neputință
-// (mai jos, `escaladeazaPeNeputinta`) urcă pe un model plătit DUPĂ ce gratuitul
-// a dovedit că nu poate — și e intenționat neatinsă de garda asta. Regula din
-// 27 iul apăra împotriva „plătit LA FIECARE rulare"; aici se plătește doar
-// acolo unde gratuitul a picat deja, o dată pe ordin. Se stinge cu
-// CONSTRUCTOR_ESCALADARE=0.
+// GARDA DE MAI SUS PRIVEȘTE DOAR MODELUL DE PORNIRE DIN ENV — și rămâne
+// neatinsă. SINGURA excepție plătită din tot constructorul nu vine din env,
+// ci din ORDINUL ÎNSUȘI: marcajul „Fable 5" scris expres de admin (vezi
+// `cereCreierFable` / `modelePentruOrdin`, mai jos). Adrian, 2 aug: „Peste tot
+// GRATUIT. Adminul poate cere EXPRES creierul plătit Fable 5, DOAR pentru
+// CONSTRUCTOR. Nimic altceva plătit, niciodată." — vechea escaladare plătită
+// pe neputință (CONSTRUCTOR_MODEL_CAPABIL / CONSTRUCTOR_ESCALADARE) și vechea
+// alegere plătită pe nivel de dificultate (CONSTRUCTOR_MODEL_GREU/MEDIU) au
+// fost DESFIINȚATE de regula asta: fără marcaj Fable, scara e 100% :free.
 const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
@@ -421,68 +422,57 @@ const MODELE_DOVEDIT_PROASTE = new Set([
   'nvidia/nemotron-3-super-120b-a12b:free',
 ])
 if (MODEL && !MODEL_LADDER.includes(MODEL) && !MODELE_DOVEDIT_PROASTE.has(MODEL)) MODEL_LADDER.unshift(MODEL)
-// ── ESCALADAREA ÎN SUS, PE NEPUTINȚĂ (Adrian, 30 iul: „de ce nu se escaladează
-// pe model potențial? automat") ──────────────────────────────────────────────
-// Scara de mai sus e LATERALĂ: patru modele GRATUITE, între care ne rotim când
-// unul dă 429 sau moare. Escalada pe PANĂ DE FURNIZOR exista. Escalada pe
-// NEPUTINȚĂ — nu. Dacă toate patru povestesc în loc să lucreze, se roteau între
-// ele la nesfârșit și ordinul murea cu „modelul nu folosește uneltele", iar
-// cerința ownerului rămânea nefăcută.
-//
-// Acum: gratuit ÎNTÂI, mereu. Dar când gratuitul a DOVEDIT că nu poate — ture
-// sterile epuizate, sau rundele de reparație terminate — urcăm O SINGURĂ DATĂ
-// pe un model capabil, plătit, pentru ordinul ăsta.
-//
-// De ce e apărat și de regula din 27 iul („doar gratuit, să nu mai ardă bani"):
-// atunci constructorul rula PLĂTIT LA FIECARE RULARE. Aici se plătește doar
-// acolo unde gratuitul a picat deja, o dată per ordin, cu motivul scris în
-// jurnal și în PR. Se stinge cu CONSTRUCTOR_ESCALADARE=0.
-const MODEL_CAPABIL = env.CONSTRUCTOR_MODEL_CAPABIL || 'anthropic/claude-sonnet-5'
-const ESCALADARE_ON = env.CONSTRUCTOR_ESCALADARE !== '0'
-let escaladat = false
-let modelIdx = 0
 
-// ── NIVELUL DE DIFICULTATE ALEGE MÂNA, DE LA ÎNCEPUT ─────────────────────────
-// Adrian, 30 iul: „nu, în sus, pe 200" · „pe nivel de dificultate setabil
-// automat pe cerință".
+// ── CREIERUL PLĂTIT „FABLE 5" — DOAR LA CERERE EXPRESĂ, PER ORDIN ────────────
+// Adrian, 2 aug: „Peste tot GRATUIT. Adminul poate cere EXPRES creierul plătit
+// Fable 5, DOAR pentru CONSTRUCTOR. Nimic altceva plătit, niciodată."
 //
-// Escaladarea DUPĂ eșec (mai jos) rămâne ca plasă, dar e prea târziu ca regulă:
-// o sarcină grea pornită pe un model mic arde 8 ture povestind, apoi urcă — cu
-// jumătate din buget deja pierdut. Corect e să pornească direct pe mâna
-// potrivită.
-//
-// Ordinul poartă cu el o linie „NIVEL DE DIFICULTATE: N/5", pusă de cine îl
-// scrie (bucla autonomă o cere creierului odată cu evaluarea variantelor). De
-// aici alegem scara:
-//   1-2  banal / simplu   → doar gratuite (o redenumire nu merită bani)
-//   3    mediu            → model mediu în cap, gratuitele ca plasă
-//   4-5  greu / foarte greu → modelul mare în cap, apoi mediu, apoi gratuitele
-//
-// Dacă un model plătit nu există în catalog, logica de „model mort" îl scoate
-// și rămânem pe gratuite — deci o setare greșită degradează, nu blochează.
-const MODEL_GREU = env.CONSTRUCTOR_MODEL_GREU || 'anthropic/claude-opus-5'
-const MODEL_MEDIU = env.CONSTRUCTOR_MODEL_MEDIU || 'anthropic/claude-sonnet-5'
+// Până azi existau două căi care urcau pe bani FĂRĂ ca ordinul să ceară asta:
+// escaladarea pe neputință (CONSTRUCTOR_MODEL_CAPABIL, default un model plătit)
+// și alegerea mâinii după „NIVEL DE DIFICULTATE" (CONSTRUCTOR_MODEL_GREU/MEDIU,
+// tot plătite). Ambele sunt DESFIINȚATE de regula de mai sus. Singura mână
+// plătită rămasă e Fable 5, iar ea pornește EXCLUSIV din marcajul scris de
+// admin în textul ordinului („fable 5" / „fable5" / „creier fable") — ordinul
+// însuși e alegerea conștientă, nu-i trebuie CONSTRUCTOR_ALLOW_PAID în env.
+// Id-ul OpenRouter e același folosit în restul aplicației (vezi brain.ts).
+export const FABLE_MODEL = 'anthropic/claude-fable-5'
 
-/** Citește nivelul din textul ordinului. Fără marcaj → 3 (mediu): mai bine
- *  pornim cu o mână bună decât să ardem bugetul descoperind că era greu. */
-function nivelDinOrdin(text) {
-  const m = /NIVEL DE DIFICULTATE:\s*(\d)/i.exec(String(text ?? ''))
-  const n = m ? Number(m[1]) : 3
-  return Math.max(1, Math.min(5, Number.isFinite(n) ? n : 3))
+/** MARCAJUL FABLE, în textul ordinului. PUR (fără stare) — probat din teste.
+ *  Acceptă: „fable 5", „fable5", „fable-5" (orice caz) și „creier fable". */
+export function cereCreierFable(orderText) {
+  const t = String(orderText ?? '')
+  return /fable[\s\-_]?5/i.test(t) || /creier\s+fable/i.test(t)
 }
 
-/** Pune în capul scării mâna potrivită nivelului. Gratuitele rămân dedesubt,
- *  ca plasă — deci nici la nivel 5 nu rămânem fără opțiuni dacă plătitul pică. */
-function pregatesteScaraPentruNivel(nivel) {
-  const sus = nivel >= 4 ? [MODEL_GREU, MODEL_MEDIU] : nivel === 3 ? [MODEL_MEDIU] : []
-  for (const m of [...sus].reverse()) {
-    if (m && !MODEL_LADDER.includes(m)) MODEL_LADDER.unshift(m)
-  }
+/** SCARA COMPLETĂ pentru un ordin, în ordinea încercării. PUR — probat din
+ *  teste. REGULA STRUCTURALĂ: fără marcaj Fable, scara e 100% :free (orice
+ *  model plătit din lista de bază — ex. rămas dintr-un env vechi — e scos).
+ *  Cu marcaj: Fable 5 în cap, gratuitele dedesubt ca plasă (dacă Fable pică
+ *  pe furnizor, ordinul degradează pe gratuit — nu se blochează, dar nici nu
+ *  urcă pe ALTI bani). */
+export function modelePentruOrdin(orderText, baza = MODEL_LADDER) {
+  const gratuite = baza.filter((m) => typeof m === 'string' && m.endsWith(':free'))
+  return cereCreierFable(orderText) ? [FABLE_MODEL, ...gratuite] : gratuite
+}
+
+let modelIdx = 0
+
+/** Pune în fața scării mâna cerută de ORDIN (Fable 5 doar dacă e marcat expres)
+ *  și scrie alegerea în jurnal + pe monitor — creierul folosit trebuie să fie
+ *  VIZIBIL (regula din 2 aug), nu dedus după. */
+function pregatesteScaraPentruOrdin(orderText) {
+  const scara = modelePentruOrdin(orderText)
+  MODEL_LADDER.length = 0
+  MODEL_LADDER.push(...scara)
   modelIdx = 0
-  log(
-    `nivel de dificultate ${nivel}/5 → pornesc pe „${modelCurent()}"` +
-      (sus.length ? ` (plătit, ales de dificultate; gratuitele rămân ca plasă)` : ` (gratuit — sarcina nu cere mai mult)`),
-  )
+  if (cereCreierFable(orderText)) {
+    log(
+      `🧠 CREIER PLĂTIT: Fable 5 (${FABLE_MODEL}) — cerut EXPRES în ordin (singura excepție de la „totul gratuit"). ` +
+        `Gratuitele rămân plasă. Tokenii și costul se măsoară din răspunsurile OpenRouter și se raportează.`,
+    )
+  } else {
+    log(`scara gratuită: ${MODEL_LADDER.join(' → ')} — nimic plătit pentru ordinul ăsta`)
+  }
 }
 // Modele scoase din joc pentru rularea asta (nu există, n-au unelte, au context
 // prea mic) — nu le mai atingem, ca rotația să nu ne întoarcă la ele.
@@ -504,27 +494,11 @@ function treciLaUrmatorulModel() {
   return false // toată scara e moartă
 }
 
-/** URCĂ pe modelul capabil, o singură dată per ordin, când gratuitul a DOVEDIT
- *  că nu poate duce sarcina. Întoarce `true` dacă am urcat — atunci apelantul
- *  NU aruncă eroarea, ci mai încearcă o dată, cu mâna bună. */
-function escaladeazaPeNeputinta(motiv) {
-  if (!ESCALADARE_ON || escaladat) return false
-  escaladat = true
-  // Îl punem în capul scării și mergem pe el ACUM. Dacă modelul nu există în
-  // catalog, logica de „model mort" existentă îl scoate și ne întoarce pe
-  // gratuite — deci o setare greșită degradează, nu blochează.
-  MODEL_LADDER.unshift(MODEL_CAPABIL)
-  modelIdx = 0
-  // NU atingem `pasiSterili` de aici: e declarat în main(), iar un modul ES e în
-  // mod strict — o atribuire din afară ar arunca ReferenceError exact în clipa
-  // escaladării, adică fix când aveam nevoie de ea. Îl resetează apelantul.
-  log(
-    `ESCALADEZ pe model capabil (${MODEL_CAPABIL}): ${motiv}. ` +
-      `Gratuitul a dovedit că nu poate — de-acum se plătește, o singură dată pe ordinul ăsta. ` +
-      `Se stinge cu CONSTRUCTOR_ESCALADARE=0.`,
-  )
-  return true
-}
+// NOTĂ (2 aug): vechea funcție `escaladeazaPeNeputinta` — care urca pe un
+// model capabil PLĂTIT când gratuitul dovedea că nu poate — a fost DESFIINȚATĂ
+// de regula „nimic altceva plătit, niciodată". Un ordin fără marcaj Fable care
+// epuizează turele sterile / rundele de reparație EȘUEAZĂ onest, cu diagnostic
+// — nu mai „se salvează" singur pe banii ownerului.
 
 // CLASIFICAREA ERORILOR OPENROUTER (dovadă live 28 iul, ordinul #13: a murit
 // INSTANT cu „OpenRouter 400: Provider returned error … DEGRADED function
@@ -569,7 +543,10 @@ async function llm(messages) {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000 }),
+        // `usage.include` = cerem OpenRouter și COSTUL real al apelului în
+        // `usage.cost` (0 la modelele :free) — costul ordinului pe Fable 5 se
+        // MĂSOARĂ din răspuns, nu se estimează (regula de onestitate din 2 aug).
+        body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000, usage: { include: true } }),
         // Fără plafon, un endpoint :free care atârnă ținea agentul blocat până
         // la `timeout 1800` din worker — adică moarte fără raport.
         signal: AbortSignal.timeout(Math.max(30_000, Math.min(180_000, ramase()))),
@@ -606,6 +583,11 @@ async function llm(messages) {
             : 'răspuns gol de la model (200 fără mesaj)',
         )
       }
+      // Modelul care a SERVIT apelul, atașat răspunsului: contabilitatea de
+      // cost din main() trebuie să știe sigur ce treaptă a lucrat (rotirea pe
+      // scară schimbă modelul între apeluri, iar `resp.model` poate lipsi la
+      // unii furnizori — atunci rămâne modelul cerut).
+      parsed.modelServit = String(parsed.model ?? model)
       return parsed
     } catch (e) {
       if (e?.fatal) throw e
@@ -784,18 +766,31 @@ async function main() {
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
-  // MÂNA POTRIVITĂ, DE LA ÎNCEPUT — după cât de grea e sarcina, nu după ce a
-  // eșuat deja o dată (Adrian: „pe nivel de dificultate setabil automat pe
-  // cerință"). Se face AICI, nu la încărcarea modulului, fiindcă nivelul vine
-  // din ordinul pe care tocmai l-am luat.
-  pregatesteScaraPentruNivel(nivelDinOrdin(job.orderText))
+  // CREIERUL ORDINULUI (Adrian, 2 aug): GRATUIT mereu, cu O SINGURĂ excepție —
+  // marcajul „Fable 5" scris expres de admin în textul ordinului. Se face AICI,
+  // nu la încărcarea modulului, fiindcă marcajul vine din ordinul proaspăt luat.
+  const peFable = cereCreierFable(job.orderText)
+  pregatesteScaraPentruOrdin(job.orderText)
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
-      { method: 'POST', body: JSON.stringify({ id: job.id, status, log: logLines.join('\n'), ...extra }) },
+      {
+        method: 'POST',
+        // Creierul și costul merg în FIECARE raport (succes sau eșec): rândul
+        // din build_jobs e dovada cheltuielii — „fable-5" vs „free", cu costul
+        // măsurat din răspunsurile OpenRouter când e disponibil.
+        body: JSON.stringify({
+          id: job.id,
+          status,
+          log: logLines.join('\n'),
+          brain: tokensPaid > 0 ? 'fable-5' : 'free',
+          costUsd: costMasurat ? Number(costUsd.toFixed(6)) : undefined,
+          ...extra,
+        }),
+      },
       tries,
     )
   raportCurent = report // ca handlerul de SIGTERM să poată raporta eșecul
@@ -812,6 +807,13 @@ async function main() {
       { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
     ]
     let tokens = 0
+    // CONTABILITATEA DE COST (2 aug): separat pe creierul PLĂTIT. Doar apelurile
+    // servite de un model non-:free (în practică: Fable 5, doar la ordin marcat)
+    // intră în tokensPaid; costul în USD vine din `usage.cost` al OpenRouter și
+    // se raportează DOAR măsurat (costMasurat) — zero estimări, zero fabricație.
+    let tokensPaid = 0
+    let costUsd = 0
+    let costMasurat = false
     let finish = null
     // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
     // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio
@@ -834,17 +836,13 @@ async function main() {
       while (!finish) {
         if (pasiUtili >= MAX_STEPS)
           throw new Error(`plafon de pași atins fără finish (${pasiUtili} pași cu unelte, ${pasiSterili} sterili)`)
-        // NEPUTINȚĂ DOVEDITĂ: modelul povestește în loc să lucreze. Înainte
-        // muream aici, cu cerința ownerului nefăcută. Acum urcăm o dată pe
-        // modelul capabil — și abia dacă și ăla nu poate, ne oprim.
+        // NEPUTINȚĂ: modelul povestește în loc să lucreze. Până la 2 aug se
+        // urca aici pe un model capabil PLĂTIT — desființat („nimic altceva
+        // plătit, niciodată"): ordinul eșuează onest, cu diagnostic.
         if (pasiSterili >= MAX_STERILE) {
-          if (escaladeazaPeNeputinta(`${pasiSterili} ture fără nicio unealtă validă pe ${modelCurent()}`)) {
-            pasiSterili = 0 // mâna nouă pornește cu contorul curat
-          } else {
-            throw new Error(
-              `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
-            )
-          }
+          throw new Error(
+            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
+          )
         }
         // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
         // rămână timp de verificare + push + PR + RAPORT. Omorâți de timeout am
@@ -853,7 +851,20 @@ async function main() {
         if (ramase() < 6 * 60_000)
           throw new Error(`timpul rulării s-a terminat înainte de finish (${pasiUtili} pași utili, ${pasiSterili} sterili)`)
         const resp = await llm(messages)
-        tokens += Number(resp.usage?.total_tokens ?? 0)
+        const tokPas = Number(resp.usage?.total_tokens ?? 0)
+        tokens += tokPas
+        // Apel PLĂTIT? Treapta care a servit nu e :free (pe o scară fără marcaj
+        // Fable asta nu se poate întâmpla — dar contabilizăm pe DOVADĂ, nu pe
+        // presupunere). Costul: doar ce a raportat OpenRouter în usage.cost.
+        if (resp.modelServit && !resp.modelServit.endsWith(':free')) {
+          tokensPaid += tokPas
+          const c = Number(resp.usage?.cost ?? NaN)
+          if (Number.isFinite(c)) {
+            costUsd += c
+            costMasurat = true
+          }
+          log(`⚠ apel PLĂTIT pe ${resp.modelServit}: ${tokPas} tokeni${Number.isFinite(c) ? `, $${c.toFixed(4)}` : ''}`)
+        }
         if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
         const msg = resp.choices?.[0]?.message
         if (!msg) throw new Error('răspuns gol de la model')
@@ -958,12 +969,9 @@ async function main() {
       // scriere; asta singură explică o parte din ordinele picate „end-to-end".
       // Mărginită: MAX_REPAIR runde ȘI doar dacă mai avem timp de încă un ciclu
       // complet de npm ci/build/test (altfel murim la timeout, fără raport).
-      // A DOUA NEPUTINȚĂ DOVEDITĂ: a scris cod, dar nu poate să-l facă să treacă
-      // verificarea, nici după rundele de reparație. Mai dăm o șansă, cu mâna
-      // bună — dar numai dacă mai avem timp de un ciclu complet de verificare.
-      if (reparatii >= MAX_REPAIR && ramase() >= 10 * 60_000 && escaladeazaPeNeputinta('rundele de reparație s-au terminat, verificarea tot roșie')) {
-        reparatii = 0
-      } else if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) {
+      // NOTĂ (2 aug): aici se urca pe un model PLĂTIT după rundele de reparație
+      // — desființat („nimic altceva plătit, niciodată"): eșec onest.
+      if (reparatii >= MAX_REPAIR || ramase() < 10 * 60_000) {
         throw new Error(problema)
       }
       reparatii++
@@ -987,12 +995,18 @@ async function main() {
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
+    // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ):
+    // pe Fable — ce a costat, măsurat; pe gratuit — spune clar „free".
+    const linieCreier = peFable
+      ? `Creier folosit: Fable 5 (${FABLE_MODEL}) — PLĂTIT, cerut expres în ordin · tokeni: ${tokens} (plătiți: ${tokensPaid})` +
+        (costMasurat ? ` · cost măsurat OpenRouter: $${costUsd.toFixed(4)}` : ' · costul nu a fost raportat de OpenRouter')
+      : `Creier folosit: gratuit (:free) · tokeni: ${tokens}`
     const prUrl = await deschidePR(
       titlu,
-      `${finish.body}\n\n---\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
+      `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
       branch,
     )
-    log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
+    log(`PR deschis: ${prUrl} (tokeni: ${tokens}${tokensPaid ? `, plătiți: ${tokensPaid}` : ''})`)
 
     // VERIFICARE INDEPENDENTĂ (Etapa 6): aștept CI-ul pe PR, mărginit de bugetul
     // rămas (las 60s tampon ca să apuc să raportez înainte de timeout-ul dur).
