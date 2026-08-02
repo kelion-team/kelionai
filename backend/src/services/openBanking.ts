@@ -286,10 +286,24 @@ export async function proceseazaIntrare(t: {
 }
 
 /** Start the periodic check. Without keys it does nothing and doesn't say it
- *  a thousand times — once, at startup. */
+ *  a thousand times — once, at startup, AND in the panel: before (audit
+ *  2 aug, „nu apare acel rând"), `ultimaCitire` stayed null forever, so the
+ *  „Citirea plăților" row simply DIDN'T RENDER — the admin saw nothing
+ *  instead of seeing what's missing, by name. */
 export function startCitirePlati(): void {
   if (!config.enableBanking.appId || !config.enableBanking.privateKeyB64) {
-    console.log('[PLATI] automatic reading is off: Enable Banking keys missing')
+    const lipsesc = [
+      !config.enableBanking.appId ? 'ENABLE_BANKING_APP_ID' : '',
+      !config.enableBanking.privateKeyB64 ? 'ENABLE_BANKING_PRIVATE_KEY_B64' : '',
+    ]
+      .filter(Boolean)
+      .join(' + ')
+    ultimaCitire = {
+      la: new Date().toISOString(),
+      ok: false,
+      detaliu: `neconfigurat — lipsește: ${lipsesc}`,
+    }
+    console.log(`[PLATI] automatic reading is off: ${lipsesc} missing`)
     return
   }
   // Every 5 minutes: often enough that the person doesn't wait for credits,

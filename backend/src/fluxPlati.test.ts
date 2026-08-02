@@ -65,7 +65,11 @@ describe('fluxul plăților e legat cap-coadă — măsurat în cod, nu descris'
   // themselves. It's not a bug; it's a gate. But a silently closed gate looks
   // exactly like a broken chain, that's why we assert it here.
   it('7. fără chei, cititorul se oprește EXPLICIT și o spune — nu tace', () => {
-    expect(banking).toMatch(/enableBanking\.appId[\s\S]{0,200}return/)
+    // De pe 2 aug e și MAI explicit: înainte de `return`, starea „neconfigurat
+    // — lipsește: <numele cheilor>" se scrie în `ultimaCitire`, deci rândul
+    // „Citirea plăților" APARE în panou și spune exact ce lipsește (înainte
+    // rămânea null și rândul nu se randa deloc — „nu apare acel rând").
+    expect(banking).toMatch(/enableBanking\.appId[\s\S]{0,900}?neconfigurat — lipsește[\s\S]{0,400}?return/)
     expect(banking).toMatch(/console\.log\([\s\S]{0,120}(off|missing)/i)
   })
 })
