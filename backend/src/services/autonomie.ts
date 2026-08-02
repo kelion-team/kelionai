@@ -46,6 +46,7 @@
 import { config } from '../config.js'
 import {
   createBuildJob, listBuildJobs, loadKv, saveKv, getCapabilityGaps, setGapResolved,
+  rezumatPlati,
   type BuildJob,
 } from '../db.js'
 import { brainCompleteWithTools, expertModelLadder } from './brain.js'
@@ -138,6 +139,44 @@ async function secreteExista(...nume: string[]): Promise<boolean> {
   }
 }
 
+/** A repo file, tried on the same paths the RAMAS reader uses. `null` = not
+ *  readable — a proof that depends on it stays UNPROVEN, it never guesses. */
+async function fisierDinRepo(rel: string): Promise<string | null> {
+  for (const baza of [process.cwd(), path.resolve(process.cwd(), '..'), '/root/kelion/repo']) {
+    const text = await readFile(path.resolve(baza, rel), 'utf8').catch(() => '')
+    if (text) return text
+  }
+  return null
+}
+
+// ── THE MEASURED PROOFS OF M2–M5 (Aug 2) ────────────────────────────────────
+// The constructor's 'done' means "a PR was opened and CI wasn't red" — the
+// code may not even be merged, let alone deployed. These measure the RUNNING
+// server (the database answers) and the shipped sources instead; a step with
+// a proof closes ONLY when the proof passes.
+/** M2: the net + the codes actually answer from THIS server's database.
+ *  `rezumatPlati` returns null when any of its queries fails (missing table
+ *  included) — so a non-null answer is the table existing, measured. */
+async function plasaRaspunde(): Promise<boolean> {
+  return (await rezumatPlati().catch(() => null)) !== null
+}
+/** M3: the data layer answers AND the panel actually renders it. */
+async function panoulPlatilorExista(): Promise<boolean> {
+  if (!(await plasaRaspunde())) return false
+  const panou = await fisierDinRepo('frontend/src/components/AdminPanel.tsx')
+  return panou !== null && panou.includes('payNetHead')
+}
+/** M4: the payment code is truly SHOWN to the user (both payment surfaces). */
+async function codulSeArata(): Promise<boolean> {
+  const portofel = await fisierDinRepo('frontend/src/components/WalletButton.tsx')
+  const credite = await fisierDinRepo('frontend/src/pages/Credits.tsx')
+  return portofel !== null && portofel.includes('pay-code-big') && credite !== null && credite.includes('pay-code-big')
+}
+/** M5: the end-to-end money test exists in the shipped sources. */
+async function probaCapCoadaExista(): Promise<boolean> {
+  return (await fisierDinRepo('backend/src/fluxBaniCapCoada.test.ts')) !== null
+}
+
 /** What we remember about a step between passes. */
 interface StarePas {
   /** The order opened for this step (0 = none right now). */
@@ -157,8 +196,9 @@ interface StarePas {
 //
 // What's ALREADY written (not redone): the unique `KLN-XXXX-XXXX` codes, the
 // `payment_codes` table, matching the code from the reference, idempotent
-// crediting (`topUpUser`), and the GoCardless bank reader
-// (`services/openBanking.ts`).
+// crediting (`topUpUser`), and the Enable Banking reader
+// (`services/openBanking.ts` — GoCardless closed new signups end-2025; only
+// history mentions it now).
 //
 // What's MISSING, and why it doesn't work: **the link through which the app
 // FINDS OUT that money came in.** The bank reader requires an account on a
@@ -259,6 +299,8 @@ const MISIUNE: Sarcina[] = [
       `→ un singur rând; atribuirea manuală creditează o singură dată.`,
     executant: 'constructor',
     dificultate: 4, // touches money: a mistake here credits the wrong person
+    // PROOF (Aug 2): the net's queries answer from THIS server's database.
+    dovada: plasaRaspunde,
   },
   {
     cod: 'M3',
@@ -277,6 +319,7 @@ const MISIUNE: Sarcina[] = [
       `Teste pe potrivire/totaluri. La frontend rulează comanda EXACTĂ: cd frontend && npm run build.`,
     executant: 'constructor',
     dificultate: 3,
+    dovada: panoulPlatilorExista,
   },
   {
     cod: 'M4',
@@ -298,6 +341,7 @@ const MISIUNE: Sarcina[] = [
       `(ownerul, 30 iul: „0 stripe").`,
     executant: 'constructor',
     dificultate: 3,
+    dovada: codulSeArata,
   },
   {
     cod: 'M5',
@@ -316,6 +360,7 @@ const MISIUNE: Sarcina[] = [
       `și taie ce nu mai e adevărat.`,
     executant: 'constructor',
     dificultate: 3,
+    dovada: probaCapCoadaExista,
   },
   {
     cod: 'M6',
@@ -1021,10 +1066,31 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   for (const { x: s, st } of sarcini) {
 
     // It already gave an order on this task — what came of it?
+    if (st.job && !dupaId.has(st.job)) {
+      // AUDIT Aug 2: verdict(undefined) read as 'in progress' — a job fallen
+      // out of the 40-row read window parked its step FOREVER on „aștept
+      // ordinul #N". Unknown is unknown, not in-progress: free the slot so the
+      // step can be retried, and say so in the log.
+      console.log(`[AUTONOM] ordinul #${st.job} (${s.cod}) a ieșit din fereastra citită — pasul se eliberează`)
+      await scrieStare(s.cod, { ...st, job: 0 })
+      st.job = 0
+    }
     if (st.job) {
       const v = verdict(dupaId.get(st.job))
       if (v === 'inLucru') return { pornit: false, motiv: `aștept ordinul #${st.job} (${s.cod})` }
       if (v === 'gata') {
+        // MEASURED, NOT ASSUMED (Aug 2): a constructor 'done' = "a PR was
+        // opened and CI wasn't red" — the code may still be waiting for the
+        // owner's merge. A step WITH a proof closes only when the measurement
+        // passes; until then the job stays attached and the check repeats on
+        // every pass (after the merge deploys, the proof turns true here).
+        if (s.dovada && !(await s.dovada().catch(() => false))) {
+          console.log(
+            `[AUTONOM] ${s.cod}: ordinul #${st.job} e 'done', dar măsurătoarea NU confirmă încă ` +
+              `(PR-ul așteaptă probabil merge + publicare) — nu se marchează gata`,
+          )
+          continue
+        }
         await scrieStare(s.cod, { ...st, job: 0, gata: true })
         // A built gap also gets closed in HIS list of lacks — otherwise he'd
         // retake it forever, or "can't" would stay written for something he can.
@@ -1135,6 +1201,18 @@ export function startAutonomie(): void {
     // work at all" — exactly the confusion rule #1 forbids.
     await saveKv('autonomie:ultima', JSON.stringify(ultima)).catch(() => {})
   }
+  // THE ROW SURVIVES THE DEPLOY (audit Aug 2): the kv copy was written but
+  // NOTHING read it back at boot — after every publish, „Kelion, de capul
+  // lui" showed blank for at least 3 minutes and the loop looked dead when it
+  // wasn't. Load the last saved pass into memory right away.
+  void loadKv('autonomie:ultima')
+    .then((v) => {
+      if (!v || ultima) return
+      const j = JSON.parse(v) as { la?: string; ok?: boolean; detaliu?: string }
+      if (j?.la && typeof j.detaliu === 'string')
+        ultima = { la: j.la, ok: !!j.ok, detaliu: `${j.detaliu} (dinainte de repornire)` }
+    })
+    .catch(() => {})
   // First pass 3 minutes after startup (the container must be ready), then
   // every hour.
   setTimeout(() => {

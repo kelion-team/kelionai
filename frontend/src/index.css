@@ -2124,6 +2124,30 @@ Clients only. */
   opacity: 0.7;
   padding: 2px 4px;
 }
+/* THE PAYMENT CODE (M4, Aug 2): big, unmistakable, copyable — matching
+   depends on the person writing it in the transfer reference. */
+.pay-code-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+.pay-code-big {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 1.35em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+.pay-code-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
 .wallet-menu-balance {
   font-size: 14px;
   padding: 4px 4px 6px;

@@ -150,6 +150,15 @@ export interface Strings {
   unlockNetError: string
   unlockPlaceholder: string
   lockedTitle: string
+  // ── THE PAYMENT CODE, SHOWN (M4, Aug 2): matching depends on the person
+  // writing this code in the transfer reference — and the UI used to navigate
+  // away without ever showing it. ────────────────────────────────────────────
+  payCodeTitle: string
+  payCodeHint: string
+  payCodeCopy: string
+  payCodeCopied: string
+  payCodeOpen: string
+  payCodeWaiting: string
 }
 
 // ── ENGLEZA E BAZA, PE FIECARE CHEIE ────────────────────────────────────────
@@ -304,6 +313,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     unlockNetError: 'Network error — try again.',
     unlockPlaceholder: 'Activation secret',
     lockedTitle: 'Locked — talk to Kelion (your voiceprint opens it) or type the secret',
+    payCodeTitle: 'Your payment code',
+    payCodeHint: 'Write this code in the payment reference (note) — it ties the money to your account.',
+    payCodeCopy: 'Copy the code',
+    payCodeCopied: 'Copied ✓',
+    payCodeOpen: 'Open Revolut and pay ↗',
+    payCodeWaiting: 'Waiting for the payment — the credits arrive by themselves a few minutes after it lands.',
   },
   ro: {
     signIn: 'Conectează-te cu Google',
@@ -443,6 +458,12 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     unlockNetError: 'Eroare de rețea — reîncearcă.',
     unlockPlaceholder: 'Secretul de activare',
     lockedTitle: 'Încuiat — vorbește cu Kelion (amprenta ta îl deschide) sau tastează secretul',
+    payCodeTitle: 'Codul tău de plată',
+    payCodeHint: 'Scrie codul ăsta în referința (nota) plății — el leagă banii de contul tău.',
+    payCodeCopy: 'Copiază codul',
+    payCodeCopied: 'Copiat ✓',
+    payCodeOpen: 'Deschide Revolut și plătește ↗',
+    payCodeWaiting: 'Aștept plata — creditele intră singure la câteva minute după ce ajunge.',
   },
   es: {
     signIn: 'Iniciar sesión con Google',

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchBalance, startCheckout } from '../lib/billing'
+import { fetchBalance, startCheckout, type CheckoutStart } from '../lib/billing'
 import { loadLocalLang } from '../lib/prefs'
 import { strings, resolveLang } from '../lib/i18n'
 
@@ -47,7 +47,7 @@ export function WalletButton({
   // AUTO TOP-UP, prepared by the server (the checkbox in Settings): when the
   // credit drops under the user's threshold, the payment is already prepared
   // (unique code + link) and this button completes it with ONE tap.
-  const [autoPay, setAutoPay] = useState<{ amount: number; url: string } | null>(null)
+  const [autoPay, setAutoPay] = useState<{ amount: number; url: string; code: string; currency: string } | null>(null)
   const [firstTopUp, setFirstTopUp] = useState(false)
   const [custom, setCustom] = useState('')
   // The checkout error DISPLAYED, not swallowed ("I press and nothing runs").
@@ -63,6 +63,14 @@ export function WalletButton({
   const prevCreditsRef = useRef<number | null>(null)
   const addedTimerRef = useRef<number | null>(null)
 
+  // THE PAYMENT CODE PANEL (M4, Aug 2): matching depends on the person writing
+  // the unique code in the transfer reference — and this button used to
+  // navigate away without showing it. Now the code comes FIRST, big, with a
+  // copy button; Revolut opens in a new tab; the panel closes ITSELF when the
+  // balance grows (the same read that fires the "credits added" toast).
+  const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
+  const [codeCopied, setCodeCopied] = useState(false)
+
   const errText = (code: string): string => {
     if (code === 'must_be_multiple_of_5') return ro ? 'Suma trebuie să fie multiplu de £5.' : 'Amount must be a multiple of £5.'
     if (code === 'first_topup_min_20') return ro ? 'Prima alimentare: minim £20.' : 'First top-up: £20 minimum.'
@@ -75,13 +83,17 @@ export function WalletButton({
     if (payBusy) return // anti-dublu-click cât se deschide plata
     setPayErr('')
     setPayBusy(true)
-    void startCheckout(amount).then((err) => {
-      if (err) {
-        setPayBusy(false)
-        setPayErr(errText(err))
-        console.error('checkout failed:', err) // ajunge și la Kelion (F12 → server)
+    void startCheckout(amount).then((r) => {
+      setPayBusy(false)
+      if (!r.ok) {
+        setPayErr(errText(r.error))
+        console.error('checkout failed:', r.error) // ajunge și la Kelion (F12 → server)
+        return
       }
-      // success → the page navigates to the payment link; the state dies with it.
+      // The CODE first (M4): the person sees and copies it BEFORE paying —
+      // Revolut opens in a new tab from the panel's button.
+      setCodeCopied(false)
+      setPayCode(r.pay)
     })
   }
 
@@ -93,6 +105,9 @@ export function WalletButton({
       const prev = prevCreditsRef.current
       if (prev !== null && b.credits > prev) {
         setAddedCredits(b.credits - prev)
+        // The payment LANDED — the code panel's job is done; it closes itself
+        // („aștept plata" care se închide singură — M4).
+        setPayCode(null)
         if (addedTimerRef.current != null) clearTimeout(addedTimerRef.current)
         addedTimerRef.current = window.setTimeout(() => setAddedCredits(null), 8000)
       }
@@ -100,7 +115,13 @@ export function WalletButton({
       setCredits(b.credits)
       setPercent(b.percent)
       setFirstTopUp(!!b.firstTopUp)
-      setAutoPay(b.autoTopUp ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url } : null)
+      // The CODE is kept (M4): the one-tap button used to drop it, sending the
+      // person to pay with no way to reference the payment back to them.
+      setAutoPay(
+        b.autoTopUp
+          ? { amount: b.autoTopUp.amount, url: b.autoTopUp.url, code: b.autoTopUp.code, currency: b.autoTopUp.currency }
+          : null,
+      )
       // reflects reality: at balance 0 it stays paywalled, otherwise it exits — otherwise
       // a refresh with credits=0 left the top-up menu stuck open forever.
       setPaywalled(b.credits <= 0)
@@ -209,7 +230,12 @@ export function WalletButton({
           type="button"
           className="wallet-toast urgent"
           onClick={() => {
-            window.location.href = autoPay.url
+            // The CODE first (M4): the panel with the code opens here, Revolut
+            // in a new tab — navigating away used to lose the code forever.
+            setCodeCopied(false)
+            setPayCode({ url: autoPay.url, code: autoPay.code, amount: autoPay.amount, currency: autoPay.currency })
+            setOpen(true)
+            window.open(autoPay.url, '_blank', 'noopener')
           }}
         >
           ⚡ {ro ? `Reîncarcă £${autoPay.amount} — o apăsare` : `Top up £${autoPay.amount} — one tap`}
@@ -232,6 +258,32 @@ export function WalletButton({
           <span className="wallet-menu-balance">
             {ro ? 'Ai acum' : 'You have'} <strong>{credits === null ? '…' : credits.toLocaleString()}</strong> {t.credits}
           </span>
+          {/* THE PAYMENT CODE (M4): shown BEFORE the person leaves for Revolut.
+          It closes itself when the balance grows — „aștept plata" real, not a
+          promise. */}
+          {payCode && (
+            <div className="pay-code-panel">
+              <span className="wallet-menu-title">{t.payCodeTitle}</span>
+              <div className="pay-code-big">{payCode.code}</div>
+              <span className="wallet-menu-note">{t.payCodeHint}</span>
+              <div className="pay-code-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(payCode.code)
+                    setCodeCopied(true)
+                  }}
+                >
+                  {codeCopied ? t.payCodeCopied : t.payCodeCopy}
+                </button>
+                <button type="button" className="ghost" onClick={() => window.open(payCode.url, '_blank', 'noopener')}>
+                  {t.payCodeOpen}
+                </button>
+              </div>
+              <span className="wallet-menu-note">⏳ {t.payCodeWaiting}</span>
+            </div>
+          )}
           {/* THE CREDITS PANEL, FOR EVERYONE (Adrian's order: the header
           „Add credits" button opens the EXISTING credits panel for regular
           users too — the 75/150/375 packs + a custom multiple of £5). Before,

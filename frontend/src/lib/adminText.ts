@@ -47,6 +47,15 @@ export interface AdminStrings {
   noLettersYet: string
   // Pastilele din bara de sus (Stage.tsx, doar admin) — audit Aug 2: titlurile
   // erau scrise direct în cod, în română. `{n}` etc. = valorile măsurate.
+  // Panoul de plăți (M3, Aug 2) — codurile emise/plătite + plasa neatribuită.
+  payHead: string
+  payTotals: string
+  payReadFail: string
+  payNetHead: string
+  payNetEmpty: string
+  payAssign: string
+  payIgnore: string
+  payAssignPrompt: string
   orPillLive: string
   orPillLow: string
   orPillDead: string
@@ -120,6 +129,14 @@ const en: AdminStrings = {
   noMessagesYet: 'They have not written a message yet.',
   noContactMessagesYet: 'No contact message yet.',
   noLettersYet: 'No letters yet (or MAIL_PASS is not set).',
+  payHead: 'Payments with a code',
+  payTotals: '{emise} codes issued · {platite} paid · {pending} pending · {net} in the net',
+  payReadFail: 'Could not read the payments — this is a failed read, NOT an empty ledger.',
+  payNetHead: 'Unattributed payments — the net (inflows nobody matched)',
+  payNetEmpty: 'Nothing in the net.',
+  payAssign: 'Assign',
+  payIgnore: 'Ignore',
+  payAssignPrompt: 'The email of the user this payment of {amount} belongs to:',
   orPillLive: 'OpenRouter (the central brain): ${n} real{low} · click to top up',
   orPillLow: ' — deposit money!',
   orPillDead: 'Cannot read the OpenRouter balance (key missing or account unreachable)',
@@ -183,6 +200,14 @@ const ro: AdminStrings = {
   noMessagesYet: 'Nu a scris niciun mesaj încă.',
   noContactMessagesYet: 'Niciun mesaj de contact încă.',
   noLettersYet: 'Nicio scrisoare încă (sau MAIL_PASS nesetat).',
+  payHead: 'Plăți cu cod',
+  payTotals: '{emise} coduri emise · {platite} plătite · {pending} în așteptare · {net} în plasă',
+  payReadFail: 'Nu am putut citi plățile — e o citire eșuată, NU un registru gol.',
+  payNetHead: 'Plăți neatribuite — plasa (intrări pe care nu le-a potrivit nimeni)',
+  payNetEmpty: 'Nimic în plasă.',
+  payAssign: 'Atribuie',
+  payIgnore: 'Ignoră',
+  payAssignPrompt: 'Emailul userului căruia îi aparține plata de {amount}:',
   orPillLive: 'OpenRouter (creierul central): ${n} real{low} · click pentru alimentare',
   orPillLow: ' — depune bani!',
   orPillDead: 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)',

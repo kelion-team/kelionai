@@ -30,6 +30,10 @@ import {
   listBuildJobs,
   listClientErrorGroups,
   resetCostCounters,
+  rezumatPlati,
+  listeazaPlatiNeatribuite,
+  atribuiePlataNeatribuita,
+  ignoraPlataNeatribuita,
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -634,6 +638,45 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const r = await finalizeazaLegaturaPlati(String(req.body?.code ?? ''))
     if ('error' in r) return reply.code(502).send(r)
     return reply.send(r)
+  })
+
+  // ── THE PAYMENTS PANEL (M3, Aug 2) ────────────────────────────────────────
+  // Codes issued / paid / pending + the NET (unattributed inflows). Until
+  // today none of this had a window: `payment_codes` was written and matched,
+  // but the admin could not see a single row of it, and the net's table did
+  // not even exist. Every figure is a database read; a failed read arrives as
+  // null, never as zeros (rule no. 1).
+  app.get('/api/admin/plati', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({
+      rezumat: await rezumatPlati(),
+      neatribuite: await listeazaPlatiNeatribuite().catch(() => []),
+    })
+  })
+
+  // The admin ties a netted inflow to a person (credits through the same
+  // idempotent path as automatic matching — the bank id is the reference, so
+  // a double credit is refused by the unique index, not by anyone's care).
+  app.post<{ Body: { id?: number; email?: string } }>('/api/admin/plati/neatribuite/atribuie', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.body?.id ?? 0)
+    const email = String(req.body?.email ?? '').trim()
+    if (!(id > 0) || !email.includes('@')) return reply.code(400).send({ error: 'bad_request' })
+    const rezultat = await atribuiePlataNeatribuita(id, email)
+    if (rezultat === 'creditat') return reply.send({ ok: true, rezultat })
+    const cod = rezultat === 'negasit' ? 404 : rezultat === 'deja' ? 409 : 502
+    return reply.code(cod).send({ ok: false, rezultat })
+  })
+
+  app.post<{ Body: { id?: number } }>('/api/admin/plati/neatribuite/ignora', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.body?.id ?? 0)
+    if (!(id > 0)) return reply.code(400).send({ error: 'bad_request' })
+    const ok = await ignoraPlataNeatribuita(id)
+    return ok ? reply.send({ ok: true }) : reply.code(404).send({ ok: false })
   })
 
   // Here used to live the Stripe virtual card routes, the Stripe

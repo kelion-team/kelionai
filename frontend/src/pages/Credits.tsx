@@ -6,6 +6,7 @@
 // Revolut link + unique code).
 import React, { useEffect, useState } from 'react'
 import { PUBLIC_TEXT as T } from '../lib/publicText'
+import { startCheckout, type CheckoutStart } from '../lib/billing'
 import BackLink from '../components/BackLink'
 
 const CREDITS_PER_POUND = 7.5
@@ -57,6 +58,12 @@ export default function Credits(): React.JSX.Element {
       .catch(() => {})
   }
 
+  // THE PAYMENT CODE, SHOWN (M4, Aug 2): this page used to navigate straight
+  // to Revolut and throw away the code the whole matching depends on — a
+  // payment made that way could never be tied back to the account.
+  const [payCode, setPayCode] = useState<CheckoutStart | null>(null)
+  const [codeCopied, setCodeCopied] = useState(false)
+
   const buy = async (amount: number): Promise<void> => {
     if (!signedIn) {
       window.location.href = '/login'
@@ -65,15 +72,13 @@ export default function Credits(): React.JSX.Element {
     setBusy(amount)
     setErr('')
     try {
-      const r = await fetch('/api/billing/checkout', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      })
-      const j = (await r.json().catch(() => ({}))) as { url?: string; error?: string }
-      if (j.url) window.location.href = j.url
-      else setErr(j.error ?? T.errPaymentStart)
+      const r = await startCheckout(amount)
+      if (r.ok) {
+        setCodeCopied(false)
+        setPayCode(r.pay)
+      } else {
+        setErr(r.error === 'offline' || r.error.startsWith('checkout_http') ? T.errPaymentStart : r.error)
+      }
     } finally {
       setBusy(0)
     }
@@ -94,6 +99,30 @@ export default function Credits(): React.JSX.Element {
             <span className="credits-pack-price">£{p}</span>
           </button>
         ))}
+        {/* THE CODE, before the money leaves (M4). */}
+        {payCode && (
+          <div className="pay-code-panel">
+            <h3 style={{ margin: '10px 0 4px' }}>{T.payCodeTitle}</h3>
+            <div className="pay-code-big">{payCode.code}</div>
+            <p className="login-note">{T.payCodeHint}</p>
+            <div className="pay-code-actions">
+              <button
+                type="button"
+                className="credits-pack"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(payCode.code)
+                  setCodeCopied(true)
+                }}
+              >
+                {codeCopied ? T.payCodeCopied : T.payCodeCopy}
+              </button>
+              <button type="button" className="credits-pack" onClick={() => window.open(payCode.url, '_blank', 'noopener')}>
+                {T.payCodeOpen}
+              </button>
+            </div>
+            <p className="login-note">⏳ {T.payCodeWaiting}</p>
+          </div>
+        )}
         {/* AUTO TOP-UP, chosen at payment time: the checkbox + the refill
         value. Only for signed-in users (the preference is per account). */}
         {signedIn === true && ar && (

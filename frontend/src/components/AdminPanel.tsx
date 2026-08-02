@@ -19,6 +19,10 @@ import {
   fetchMoneyCircuit,
   pauzaAutonomie,
   fetchDoveziAutonomie,
+  fetchPlati,
+  atribuiePlata,
+  ignoraPlata,
+  type PlatiAdmin,
   type DovadaAutonomie,
   type MoneyCircuit,
   fetchLeads,
@@ -339,6 +343,9 @@ export default function AdminPanel({
   const [pauzaBusy, setPauzaBusy] = useState(false)
   // THE EIGHT PROOFS (Adrian, Jul 31: „there must be 8 out of 8 proofs”).
   const [dovezi, setDovezi] = useState<{ dovedite: number; din: number; dovezi: DovadaAutonomie[] } | null>(null)
+  // THE PAYMENTS PANEL (M3, Aug 2): 'necitit' until the read lands; null = the
+  // read FAILED (shown as failure, never as an empty ledger — rule no. 1).
+  const [plati, setPlati] = useState<PlatiAdmin | null | 'necitit'>('necitit')
   async function onPauzaAutonomie(oprit: boolean): Promise<void> {
     setPauzaBusy(true)
     await pauzaAutonomie(oprit)
@@ -352,6 +359,7 @@ export default function AdminPanel({
     void fetchFinance().then(setFinance)
     void fetchMoneyCircuit().then(setCircuit)
     void fetchDoveziAutonomie().then(setDovezi)
+    void fetchPlati().then(setPlati)
     void fetchDemos().then(setDemos)
     void fetchLeads().then(setLeads)
     void fetchVisitorConvos().then(setVconvos)
@@ -965,6 +973,67 @@ export default function AdminPanel({
                     {circuit?.autonomie && (
                       <span className="or-wallet-sub" style={{ color: circuit.autonomie.ok ? undefined : '#8a8f98' }}>
                         {circuit.autonomie.ok ? '🤖' : '·'} Kelion, de capul lui: {circuit.autonomie.detaliu}
+                      </span>
+                    )}
+                    {/* THE PAYMENTS PANEL (M3, Aug 2): until today `payment_codes`
+                    was written and matched but the admin could not see one row of
+                    it, and the net's table did not exist at all. Every figure is
+                    a database read; a failed read is SAID, never shown as zeros. */}
+                    {plati !== 'necitit' && (
+                      <span className="or-wallet-sub">
+                        💳 {A.payHead}:{' '}
+                        {plati === null || !plati.rezumat ? (
+                          <i>{A.payReadFail}</i>
+                        ) : (
+                          <>
+                            {A.payTotals
+                              .replace('{emise}', String(plati.rezumat.emise))
+                              .replace('{platite}', String(plati.rezumat.platite))
+                              .replace('{pending}', String(plati.rezumat.inAsteptare))
+                              .replace('{net}', String(plati.rezumat.neatribuite))}
+                            {plati.rezumat.recente.slice(0, 8).map((c) => (
+                              <span key={c.code} style={{ display: 'block', paddingLeft: 12, opacity: c.status === 'paid' ? 1 : 0.7 }}>
+                                {c.status === 'paid' ? '✅' : '⏳'} <b>{c.code}</b> · {c.email} · £{c.amount}
+                                {c.paidAt ? ` · ${new Date(c.paidAt).toLocaleDateString()}` : ''}
+                              </span>
+                            ))}
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {plati !== 'necitit' && plati !== null && (
+                      <span className="or-wallet-sub">
+                        🕸 {A.payNetHead}:{' '}
+                        {plati.neatribuite.length === 0 ? (
+                          A.payNetEmpty
+                        ) : (
+                          plati.neatribuite.map((p) => (
+                            <span key={p.id} style={{ display: 'block', paddingLeft: 12 }}>
+                              £{p.amount} · „{p.referinta || '—'}” · {new Date(p.seenAt).toLocaleString()}{' '}
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => {
+                                  const email = window.prompt(A.payAssignPrompt.replace('{amount}', `£${p.amount}`))
+                                  if (!email) return
+                                  void atribuiePlata(p.id, email).then((rezultat) => {
+                                    window.alert(rezultat)
+                                    void fetchPlati().then(setPlati)
+                                  })
+                                }}
+                              >
+                                {A.payAssign}
+                              </button>{' '}
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => void ignoraPlata(p.id).then(() => void fetchPlati().then(setPlati))}
+                              >
+                                {A.payIgnore}
+                              </button>
+                            </span>
+                          ))
+                        )}
                       </span>
                     )}
                     <span className="or-wallet-sub">

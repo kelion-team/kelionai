@@ -9,7 +9,7 @@ import {
   loadLocalLang,
   saveVoicePref,
 } from '../lib/prefs'
-import { fetchBalance, type WalletStatus } from '../lib/billing'
+import { fetchBalance, fetchHistory, type WalletStatus, type PurchaseRecord } from '../lib/billing'
 import { LANGS } from '../lib/languages'
 
 // CLIENT SETTINGS (paying). A client has less access than the admin — doesn't
@@ -117,6 +117,9 @@ export default function CustomerSettings({
   const [voice, setVoice] = useState<string>('')
   const [voices, setVoices] = useState<string[]>([])
   const [wallet, setWallet] = useState<WalletStatus | null>(null)
+  // THE HISTORY (M4 „istoric", Aug 2): the person's own top-ups. `null` =
+  // could not read (shown as such), `[]` = truly no purchases yet.
+  const [istoric, setIstoric] = useState<PurchaseRecord[] | null | 'necitit'>('necitit')
   const [busy, setBusy] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   // Selectable models (OpenRouter) + automatic reload.
@@ -131,11 +134,12 @@ export default function CustomerSettings({
 
   useEffect(() => {
     void (async () => {
-      const [p, b] = await Promise.all([loadServerPrefs(), fetchBalance()])
+      const [p, b, h] = await Promise.all([loadServerPrefs(), fetchBalance(), fetchHistory()])
       if (p?.speechLang) setLang(p.speechLang)
       if (p?.voices?.length) setVoices(p.voices)
       setVoice(p?.voice ?? '')
       if (b) setWallet(b)
+      setIstoric(h) // null = read failed (said as such, never an empty list)
       try {
         const [cat, s, a] = await Promise.all([
           fetch('/api/models/catalog', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
@@ -300,6 +304,32 @@ export default function CustomerSettings({
                 ? 'Când ajungi sub prag, îți pregătim plata automat (cod unic + link) — confirmi cu o singură apăsare. Banii se mișcă doar la confirmarea ta: linkul Revolut nu poate trage singur din cont.'
                 : 'When you drop below the threshold, we prepare your payment automatically (unique code + link) — you confirm with a single tap. Money moves only on your confirmation: the Revolut link cannot pull from your account by itself.'}
             </p>
+          )}
+
+          {/* THE PURCHASE HISTORY (M4 „istoric", Aug 2): the route existed with
+          zero callers — the person could never see their own top-ups. A failed
+          read says so; it is NOT shown as "no purchases" (rule no. 1). */}
+          {istoric !== 'necitit' && (
+            <div style={{ marginTop: 12 }}>
+              <label className="contact-label">{ro ? 'Istoricul plăților' : 'Payment history'}</label>
+              {istoric === null ? (
+                <p className="settings-note">
+                  {ro ? 'Nu am putut citi istoricul — reîncearcă.' : 'Could not read the history — try again.'}
+                </p>
+              ) : istoric.length === 0 ? (
+                <p className="settings-note">{ro ? 'Nicio plată încă.' : 'No payments yet.'}</p>
+              ) : (
+                <ul className="settings-history">
+                  {istoric.slice(0, 10).map((r) => (
+                    <li key={r.id} className="settings-note" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span>{new Date(r.created_at).toLocaleDateString()}</span>
+                      <span>£{r.amount} → {r.credits.toLocaleString()} {ro ? 'credite' : 'credits'}</span>
+                      <span>{r.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </section>
 
