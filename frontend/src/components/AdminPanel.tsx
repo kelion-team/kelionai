@@ -219,11 +219,19 @@ export default function AdminPanel({
     branch: string | null
     prUrl: string | null
     tokens: number
+    // Aug 2: 'fable-5' when the order ran on the expressly requested paid
+    // brain, 'free' otherwise (null until the worker reports).
+    brain: string | null
     updatedAt: string
   }
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
   const [buildOrder, setBuildOrder] = useState('')
   const [buildMsg, setBuildMsg] = useState('')
+  // THE PAID BRAIN TOGGLE (Adrian, Aug 2: "Everything FREE. The admin can
+  // EXPRESSLY request the paid Fable 5 brain for the CONSTRUCTOR only"). Off by
+  // default; when on, the order text carries the "Fable 5" marker that the VPS
+  // constructor parses.
+  const [buildFable, setBuildFable] = useState(false)
   // RECOVERY (Adrian, Jul 27): saved versions + saving the current version.
   interface RecoveryRow {
     tag: string
@@ -484,11 +492,14 @@ export default function AdminPanel({
   }, [tab])
 
   const sendBuildOrder = (): void => {
-    const order = buildOrder.trim()
-    if (order.length < 8) {
+    const text = buildOrder.trim()
+    if (text.length < 8) {
       setBuildMsg('Scrie ordinul complet (ce construiește, unde, cum verifici).')
       return
     }
+    // The Fable toggle prepends the marker the VPS constructor parses — the
+    // order itself is the conscious paid choice, no magic words to remember.
+    const order = buildFable ? `Fable 5 — ${text}` : text
     void fetch('/api/admin/constructor', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -499,6 +510,7 @@ export default function AdminPanel({
       .then((j: { id?: number } | null) => {
         if (j?.id) {
           setBuildOrder('')
+          setBuildFable(false)
           setBuildMsg(`Ordin #${j.id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`)
         } else setBuildMsg('Nu s-a putut trimite — reîncearcă.')
       })
@@ -1420,6 +1432,23 @@ export default function AdminPanel({
                   Trimite ordinul
                 </button>
               </form>
+              {/* THE PAID BRAIN, OFF BY DEFAULT (Adrian, Aug 2: "Everything
+                  FREE. The admin can EXPRESSLY request the paid Fable 5 brain
+                  for the CONSTRUCTOR only"). Ticking it marks THIS order for
+                  Anthropic's claude-fable-5 via OpenRouter; everything else in
+                  the app stays on free models. The hint says plainly that real
+                  money is spent. */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={buildFable} onChange={(e) => setBuildFable(e.target.checked)} />
+                <span>Use Fable 5 brain (paid)</span>
+              </label>
+              {buildFable && (
+                <div className="chat-hint">
+                  This order runs on Anthropic's Fable 5 via OpenRouter and spends real money from the OpenRouter
+                  balance. Only this order — everything else stays free. The measured cost appears on the order and
+                  in the report email.
+                </div>
+              )}
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
@@ -1432,6 +1461,18 @@ export default function AdminPanel({
                     <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
                       {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'GATA' : 'eșuat'}
                     </span>{' '}
+                    {/* FABLE 5 BADGE: after the run we trust the worker's report
+                        (j.brain); while queued/running we read the marker the
+                        admin's toggle wrote into the order text. */}
+                    {(j.brain === 'fable-5' || (j.brain == null && /fable[\s\-_]?5|creier\s+fable/i.test(j.orderText))) && (
+                      <span
+                        className="vis-badge"
+                        style={{ background: '#7c3aed', color: '#fff' }}
+                        title="Paid brain (OpenRouter) — expressly requested for this order"
+                      >
+                        Fable 5
+                      </span>
+                    )}{' '}
                     {j.orderText.slice(0, 90)}
                     {j.orderText.length > 90 ? '…' : ''}
                   </span>

@@ -471,6 +471,14 @@ export async function initDb(): Promise<void> {
     -- here. Kelion can NARRATE it ("Done, verified by CI") and the owner sees
     -- it in the report.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS ci TEXT;
+    -- THE BRAIN USED + ITS MEASURED COST (Adrian, Aug 2: "Everything FREE.
+    -- The admin can EXPRESSLY request the paid Fable 5 brain for the
+    -- CONSTRUCTOR only"): the worker writes 'fable-5' or 'free' here, plus the
+    -- cost in USD as MEASURED from OpenRouter's usage.cost (null when the
+    -- provider didn't report one — never estimated). This makes paid orders
+    -- distinguishable in the Money views without any fabrication.
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS brain TEXT;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -3081,6 +3089,10 @@ export interface BuildJob {
   log: string | null
   progress: string | null
   ci: string | null
+  // Aug 2: which brain ran the order ('fable-5' | 'free') and the cost in USD
+  // as measured from OpenRouter (null = not reported by the provider).
+  brain: string | null
+  costUsd: number | null
   createdAt: string
   updatedAt: string
 }
@@ -3097,6 +3109,8 @@ interface BuildJobDbRow {
   log: string | null
   progress?: string | null
   ci?: string | null
+  brain?: string | null
+  cost_usd?: string | number | null
   created_at: Date
   updated_at: Date
 }
@@ -3114,6 +3128,8 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     log: r.log,
     progress: r.progress ?? null,
     ci: r.ci ?? null,
+    brain: r.brain ?? null,
+    costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -3161,13 +3177,24 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
 ): Promise<void> {
   if (!dbEnabled()) return
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
-       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), updated_at = now() WHERE id = $1`,
-    [id, fields.status, fields.branch ?? null, fields.prUrl ?? null, fields.tokens ?? 0, (fields.log ?? '').slice(-20000) || null, fields.ci ?? null],
+       tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
+       updated_at = now() WHERE id = $1`,
+    [
+      id,
+      fields.status,
+      fields.branch ?? null,
+      fields.prUrl ?? null,
+      fields.tokens ?? 0,
+      (fields.log ?? '').slice(-20000) || null,
+      fields.ci ?? null,
+      fields.brain ?? null,
+      fields.costUsd ?? null,
+    ],
   )
 }
 
