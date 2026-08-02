@@ -240,6 +240,12 @@ export default function ChatPanel({
   // the failure counter resets — a fixed deploy recovers on its own.
   const realtimeOffAtRef = useRef(0)
   const REALTIME_RECOVER_MS = 90_000
+  // THE ONE HONEST STATUS (Aug 2 — live data: 57 "voce realtime a picat" in
+  // 24h and the human heard NOTHING, just silence): when BOTH mouths are down
+  // (the Google probe failed AND the OpenAI reserve won't connect), the panel
+  // says so ONCE in chat instead of looping silent retries. The latch → STT
+  // dictation keeps the ears working; a later `live` re-arms the notice.
+  const voiceDownAckedRef = useRef(false)
   // NO SEMI-DUPLEX ANYMORE (Aug 1 — one brain): the old escalation muted the
   // microphone while the heavy brain thought. The voice session no longer
   // thinks at all — the spoken turn goes through send() like a typed one, and
@@ -1193,6 +1199,7 @@ export default function ChatPanel({
               // counter: full-duplex works, any earlier mishap is forgiven.
               if (s === 'live') {
                 realtimeFailCountRef.current = 0
+                voiceDownAckedRef.current = false // the voice is back — a future outage is announced again
                 return
               }
               if (s === 'error') {
@@ -1202,6 +1209,7 @@ export default function ChatPanel({
                 // full-duplex for good). OpenAI's 60-min limit is a NORMAL
                 // life cycle: we restart WITHOUT penalizing.
                 const isRotation = /maximum duration|session.*(expired|limit)|60 minutes/i.test(note ?? '')
+                let gaveUp = false
                 if (!isRotation) {
                   // We count the REAL failure. Latch onto STT ONLY after 3 failures; below
                   // the threshold the next start RETRIES full-duplex.
@@ -1211,7 +1219,7 @@ export default function ChatPanel({
                     `voce realtime a picat (${realtimeFailCountRef.current}/${REALTIME_MAX_FAILS}):`,
                     note ?? 'fără detalii',
                   )
-                  if (giveUp) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now() }
+                  if (giveUp) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now(); gaveUp = true }
                 }
                 if (micRef.current) {
                   // Cleans up the Realtime session if it still exists (mic + WebRTC),
@@ -1221,7 +1229,18 @@ export default function ChatPanel({
                   setListening(false)
                   setLiveVoice('')
                   micStartingRef.current = false
-                  void ensureMicRef.current()
+                  // ONE honest status when we give up (Aug 2): both mouths are
+                  // down — the human hears it ONCE, in chat, instead of silence.
+                  if (gaveUp && !voiceDownAckedRef.current) {
+                    voiceDownAckedRef.current = true
+                    ack('My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.')
+                  }
+                  // BACKOFF, not a tight loop (Aug 2 — 57 restarts in 24h came
+                  // from this instant re-entry): the restart waits on the same
+                  // backoff as the STT path's onMicErr.
+                  if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+                  micRetryRef.current = window.setTimeout(() => void ensureMicRef.current(), micBackoffRef.current)
+                  micBackoffRef.current = Math.min(micBackoffRef.current * 2, 15_000)
                 }
               }
             },
@@ -1271,7 +1290,11 @@ export default function ChatPanel({
           // The position is read on demand, in the location tools — see
           // onToolCall + getFreshCoords.)
           let lastTick = Date.now()
-          const voiceTick = window.setInterval(() => {
+          // CHIRP MOUTH (Aug 2 — the tick pulsed even in Chirp mode): the
+          // per-minute voice pulse exists for the OpenAI reserve ONLY. In
+          // chirp mode the server bills each synthesis itself (tts:google) —
+          // /api/realtime/tick must NOT fire at all.
+          const voiceTick = rv.guraChirp === true ? null : window.setInterval(() => {
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {
@@ -1293,7 +1316,7 @@ export default function ChatPanel({
           }, 20_000)
           const rotStop = rv.stop.bind(rv)
           const origStop = () => {
-            clearInterval(voiceTick)
+            if (voiceTick !== null) clearInterval(voiceTick)
             rotStop()
           }
           rv.stop = () => {
@@ -1313,7 +1336,16 @@ export default function ChatPanel({
           // same way: 3 chances before latching onto STT — a transient start failure
           // no longer extinguishes full-duplex for the whole session.
           realtimeFailCountRef.current += 1
-          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) { realtimeOffRef.current = true; realtimeOffAtRef.current = Date.now() }
+          if (realtimeFailCountRef.current >= REALTIME_MAX_FAILS) {
+            realtimeOffRef.current = true
+            realtimeOffAtRef.current = Date.now()
+            // ONE honest status (Aug 2): both mouths failed — say it once,
+            // then dictation carries the conversation.
+            if (!voiceDownAckedRef.current) {
+              voiceDownAckedRef.current = true
+              ack('My live voice is temporarily unavailable — dictation and typing still work, and I will retry the full voice by myself shortly.')
+            }
+          }
         }
       }
 

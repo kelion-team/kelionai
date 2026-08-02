@@ -2097,8 +2097,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // raw in the bubble). Small free models sometimes EMIT tool-call syntax
       // as plain text. Everything between the markers is dropped from the
       // stream AND from the voice, and logged whole for diagnosis.
-      const markupStrip = makeToolMarkupStripper((swallowed) =>
-        console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+      // THE TURN'S TOOL NAMES feed the display stripper (Aug 2 — live
+      // screenshot: a bare line `get_weather` above the real answer): a
+      // standalone line that is EXACTLY a typed call of a tool that EXISTS
+      // this turn never reaches the user — stream, final text and voice.
+      // The set comes from the tools offered, never hardcoded.
+      const toolNamesThisTurn = new Set(tools.map((t) => t.name))
+      const markupStrip = makeToolMarkupStripper(
+        (swallowed) => console.error('[TOOL MARKUP — hidden from user]', swallowed.slice(0, 300)),
+        toolNamesThisTurn,
       )
       const runBrainOnce = (): ReturnType<typeof runOrchestrator> => runOrchestrator(
         orchestratorModel,
@@ -2209,7 +2216,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           if (!iaSlotDacaLiber(id)) return null // busy — racing is about speed, no queue here
           try {
             const rez = await runOrchestrator(id, orMsgs, [], execTool, { maxTokens: 800 })
-            const curat = stripToolMarkup(rez.text).trim()
+            const curat = stripToolMarkup(rez.text, undefined, toolNamesThisTurn).trim()
             if (!curat) {
               noteazaEsuare(id)
               console.error(`[CURSA] ${id} a răspuns gol — marcat bolnav`)
@@ -2258,7 +2265,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             const cand = await runBrainOnce()
             // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
             // the next free model instead of showing/saying garbage or nothing.
-            if (stripToolMarkup(cand.text).trim() || textFlowed || sawVisible) { r = cand; break }
+            if (stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim() || textFlowed || sawVisible) { r = cand; break }
             // A brain that "succeeds" but says nothing must not close the turn
             // mute — rotate silently to the next free model.
             console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
@@ -2288,7 +2295,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_rotation_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
-      assistantText += stripToolMarkup(r.text)
+      assistantText += stripToolMarkup(r.text, undefined, toolNamesThisTurn)
       usage.usd += r.costUsd
       // THE PURSE LEDGER: a turn served by a PAID FALLBACK (reached through
       // rotation, not by choice) spends from the reserve — count it against
