@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog, classifyCost } from './openrouter.js'
+import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog, classifyCost, priceFromCatalog } from './openrouter.js'
+import type { Catalog, CatalogModel } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
 describe('openrouter catalog', () => {
@@ -161,5 +162,29 @@ describe('openrouter catalog', () => {
     expect(hasActionIntent('publică fixul în producție')).toBe(true)
     expect(hasActionIntent('bună, ce mai faci?')).toBe(false)
     expect(hasActionIntent('mulțumesc pentru ajutor')).toBe(false)
+  })
+})
+
+describe('priceFromCatalog — prețul unui model, DOAR din catalogul live', () => {
+  const m = (id: string, promptPerM: number, completionPerM: number): CatalogModel => ({
+    id, name: id, provider: id.split('/')[0], vision: true, contextLength: 1000,
+    costClass: 'cheap', promptPerM, completionPerM,
+  })
+  const cat: Catalog = {
+    chat: [m('google/gemini-2.5-flash', 0.3, 2.5), m('nvidia/nemotron-ultra:free', 0, 0)],
+    work: [m('anthropic/claude-sonnet-5', 3, 15)],
+    fetchedAt: 0,
+  }
+
+  it('potrivește id-ul exact, id-ul fără :free și numele gol (după slash)', () => {
+    expect(priceFromCatalog(cat, 'google/gemini-2.5-flash')).toEqual({ promptPerM: 0.3, completionPerM: 2.5 })
+    expect(priceFromCatalog(cat, 'gemini-2.5-flash')).toEqual({ promptPerM: 0.3, completionPerM: 2.5 })
+    expect(priceFromCatalog(cat, 'nvidia/nemotron-ultra')).toEqual({ promptPerM: 0, completionPerM: 0 })
+    expect(priceFromCatalog(cat, 'anthropic/claude-sonnet-5')).toEqual({ promptPerM: 3, completionPerM: 15 })
+  })
+
+  it('model lipsă din catalog → null (NICIODATĂ 0 tăcut, care ar arăta a „gratis")', () => {
+    expect(priceFromCatalog(cat, 'openai/model-inexistent')).toBeNull()
+    expect(priceFromCatalog(cat, '')).toBeNull()
   })
 })

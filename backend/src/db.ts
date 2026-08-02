@@ -5,6 +5,7 @@ import type { DemoRecent, DemoStats, UserActivityRow } from './shared/api-types.
 export type { DemoRecent, DemoStats, UserActivityRow }
 import { config } from './config.js'
 import { embedText, embeddingsEnabled, cosine } from './services/embeddings.js'
+import { getUsdRate } from './services/fx.js'
 
 let pool: pg.Pool | null = null
 
@@ -1698,7 +1699,12 @@ export async function getAdminAccount(): Promise<{ spent: number; profit: number
     const costUsd = Number(
       (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
     )
-    const spent = costUsd * config.billing.usdToCurrency
+    // THE RATE IS READ LIVE (services/fx.ts): cost_events are measured in USD,
+    // `profit` is in the billing currency, and converting between them with a
+    // hand-typed rate would be a fabricated figure. On a failed live read the
+    // fx service falls back to the env rate — LABELED env_static there.
+    const fx = await getUsdRate().catch(() => ({ rate: config.billing.usdToCurrency }))
+    const spent = costUsd * fx.rate
     const profit = Number(
       (
         await pool.query<{ t: string | null }>(
@@ -1767,10 +1773,15 @@ export interface CostSummary {
   felul: Record<string, 'masurat' | 'estimat'>
 }
 
-// The only kind of cost that comes MEASURED from the provider: brain calls,
-// where OpenRouter returns `usage.cost` with its real money. Everything else
-// is fixed rates I wrote — useful as an order of magnitude, false as "real".
-const COSTURI_MASURATE = new Set(['chat'])
+// The kinds of cost that come MEASURED from the provider: brain calls, where
+// OpenRouter returns `usage.cost` with its real money. `chat` = the
+// conversation turns; `memory` = the background memory agent, booked from the
+// provider's own usage.cost since the brain.ts adapter was fixed to return it
+// (before that, it was silently $0 — a fabricated measurement); `image` =
+// generation, booked from the same usage.cost (chat.ts books the flat rate
+// only under the separate 'image_est' kind). Everything else is fixed rates —
+// useful as an order of magnitude, false as "real" — and counts as `estimat`.
+const COSTURI_MASURATE = new Set(['chat', 'memory', 'image'])
 
 /** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
  *
