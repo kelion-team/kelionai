@@ -37,7 +37,12 @@ import {
 
 const TARGET_RATE = 16000
 const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza (ordinul lui Adrian)
-const VOICE_RMS = 0.02 // prag ABSOLUT de voce (ridicat de la 0.012 — scoate zgomotul de fond)
+// Prag ABSOLUT de voce — readus la 0.012 (valoarea din #35, cu care dictarea
+// a mers live): ridicarea la 0.02 din #36 tăia complet microfoanele mai
+// liniștite (urechea „nu auzea nimic" — nu trecea NIMIC de VAD), iar
+// protecția anti-zgomot reală stă oricum în DOMINANCE + anti-poc + poarta de
+// timbru de pe server, nu într-un prag absolut mai sus.
+const VOICE_RMS = 0.012 // prag ABSOLUT de voce (sub el = zgomot de fond, peste = posibilă voce)
 const DOMINANCE = 2.2 // vocea apropiată trebuie să domine podeaua de zgomot de-atâtea ori
 const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim (un poc = 1 cadru, se ignoră)
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
@@ -224,6 +229,23 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let sentAudio = false
   let gotAnyMsg = false
   let silentTimer: ReturnType<typeof setTimeout> | null = null
+  // THE DEAF-EAR DIAGNOSTIC (Adrian, Aug 2 — „microfonul nu aude nimic", live):
+  // the server journal and the client watchdog each saw only THEIR half. When
+  // the watchdog fires we now report — through the console hook, straight into
+  // client_errors — how much audio ACTUALLY left the browser and how loud the
+  // loudest frame was. Read together with the server's per-socket close line
+  // (routes/asr-stream.ts), the next live test says WHICH leg is deaf:
+  //   cadre=0 / rmsMax tiny → the mic or the VAD (client leg);
+  //   cadre>0, server saw 0 → the transport; both saw frames → the Google leg.
+  let framesSent = 0
+  let maxRms = 0
+  const raporteazaSilent = (): void => {
+    console.error(
+      `[voce] urechea Chirp silent — diagnostic: cadreAudioTrimise=${framesSent}, ` +
+        `rmsMax=${maxRms.toFixed(4)} (pragVAD=${VOICE_RMS}), rataAudioContext=${ctx.sampleRate}Hz`,
+    )
+    opts.onError('silent')
+  }
   // THE RECONNECT LEDGER (Aug 2): timestamps of the reconnects inside the
   // sliding window — the budget is "RECONNECT_BUDGET inside any 60s", not a
   // lifetime count, so a stable connection earns its budget back.
@@ -246,10 +268,11 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       const ds = downsample(frame, ctx.sampleRate)
       try {
         ws?.send(floatToPcm16(ds))
+        framesSent++
         if (!sentAudio) {
           sentAudio = true
           silentTimer = setTimeout(() => {
-            if (!gotAnyMsg && !closed) opts.onError('silent')
+            if (!gotAnyMsg && !closed) raporteazaSilent()
           }, 15000)
         }
       } catch {
@@ -474,6 +497,7 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     let sum = 0
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
     const rms = Math.sqrt(sum / input.length)
+    if (rms > maxRms) maxRms = rms // diagnosticul urechii moarte (vezi raporteazaSilent)
     const now = performance.now()
     // Adaptive NOISE FLOOR (like batch): rises slowly when quiet. Real
     // voice = above the absolute threshold AND dominating the floor this many times. Without it
@@ -506,11 +530,12 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     const ds = downsample(input, ctx.sampleRate)
     try {
       ws.send(floatToPcm16(ds))
+      framesSent++
       if (!sentAudio) {
         sentAudio = true
         // first real voice sent → we arm the 15s "mute mic" safety net
         silentTimer = setTimeout(() => {
-          if (!gotAnyMsg && !closed) opts.onError('silent')
+          if (!gotAnyMsg && !closed) raporteazaSilent()
         }, 15000)
       }
     } catch {
