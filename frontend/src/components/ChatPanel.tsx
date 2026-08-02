@@ -1290,11 +1290,14 @@ export default function ChatPanel({
           // The position is read on demand, in the location tools — see
           // onToolCall + getFreshCoords.)
           let lastTick = Date.now()
-          // CHIRP MOUTH (Aug 2 — the tick pulsed even in Chirp mode): the
-          // per-minute voice pulse exists for the OpenAI reserve ONLY. In
-          // chirp mode the server bills each synthesis itself (tts:google) —
-          // /api/realtime/tick must NOT fire at all.
-          const voiceTick = rv.guraChirp === true ? null : window.setInterval(() => {
+          // THE VOICE METER RUNS IN EVERY MODE (Adrian, Aug 2): the per-minute
+          // pulse is the PRODUCT price of voice — the user's credits pay for
+          // the service, not for a specific provider. Chirp mode costs US ≈ 0
+          // (Google free tier), which is exactly the margin the owner wants;
+          // an earlier change stopped the pulse in Chirp mode and silently
+          // made voice FREE for every user — reverted. The wallet side is in
+          // routes/realtime.ts (admin exempt — the owner doesn't pay himself).
+          const voiceTick = window.setInterval(() => {
             const secs = Math.round((Date.now() - lastTick) / 1000)
             lastTick = Date.now()
             void fetch('/api/realtime/tick', {

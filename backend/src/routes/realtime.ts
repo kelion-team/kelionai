@@ -112,11 +112,19 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       if (billSec <= 0) return reply.send({ ok: true, charged: 0, balance: await getBalance(user.email) })
       const cost = (billSec / 60) * VOICE_USD_PER_MINUTE
       void recordCost(user.email, 'voice_minutes', cost)
-      // EVERYONE gets debited, including the admin (the Jul 25 rule).
-      void debitWallet(user.email, cost, `voice_min:${billSec}s`)
+      // THE OWNER DOESN'T PAY HIMSELF (Adrian, Aug 2 — his £10 vanished during
+      // his OWN testing: 482 voice-minute debits in one morning = £5.73/day
+      // drained from the admin wallet by the admin's own app). The Jul 25
+      // "everyone pays, even the admin" rule dies here: the admin's usage is
+      // still RECORDED (the Money tab keeps honest visibility) but never
+      // DEBITED. Paying users are debited exactly as before — the per-minute
+      // price is the product, the free provider tier is the owner's margin.
+      const isOwner = user.email.toLowerCase() === config.adminEmail
+      if (!isOwner) void debitWallet(user.email, cost, `voice_min:${billSec}s`)
       const bal = await getBalance(user.email)
       // We signal the client if it ran out of credit → it stops the voice.
-      return reply.send({ ok: true, charged: cost, balance: bal, stop: Boolean(config.revolut.payLink) && user.role !== 'admin' && bal <= 0 })
+      // `charged` reports what was ACTUALLY debited (0 for the owner).
+      return reply.send({ ok: true, charged: isOwner ? 0 : cost, balance: bal, stop: Boolean(config.revolut.payLink) && user.role !== 'admin' && bal <= 0 })
     },
   )
 
