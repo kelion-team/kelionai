@@ -62,8 +62,8 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
     expect(await execSharedAdminTool('constructor_status', {})).toBeNull()
   })
 
-  it('SHARED_ADMIN_TOOLS conține exact cele 24 unelte partajate', () => {
-    expect(SHARED_ADMIN_TOOLS.size).toBe(24)
+  it('SHARED_ADMIN_TOOLS conține exact cele 28 unelte partajate', () => {
+    expect(SHARED_ADMIN_TOOLS.size).toBe(28)
     for (const n of [
       'list_source', 'db_query', 'repo_merge_pr', 'run_runbook', 'request_repair',
       // Jul 30: he does his OWN settings — the same three in writing and in voice.
@@ -74,6 +74,8 @@ describe('execSharedAdminTool — dispatch unic al uneltelor admin partajate (ri
       'card_stare', 'card_completeaza', 'card_gata',
       // Jul 31, the third request: sees EVERYTHING the admin contains and can change it.
       'admin_vezi', 'admin_schimba',
+      // Aug 2, LISTA LUI, aprobată de Adrian: memoria de proiect + starea măsurată.
+      'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
     ])
       expect(SHARED_ADMIN_TOOLS.has(n)).toBe(true)
     expect(SHARED_ADMIN_TOOLS.has('build_software')).toBe(false)

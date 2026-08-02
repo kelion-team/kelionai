@@ -50,7 +50,13 @@ ruleaza_portile() {
   ( cd "$dir/backend" && npx tsc --noEmit ) >/dev/null 2>&1 && R_TIPURI=TRECE
 
   local ies
-  ies=$( cd "$dir/backend" && npx vitest run 2>&1 | tail -30 )
+  # Culorile ANSI se CURĂȚĂ înainte de orice verdict. Dovadă (2 aug, PR #661,
+  # sha 47b70eb): vitest a scris „Tests 844 passed (844)" — dar colorat,
+  # adică „Tests \e[22m \e[1m\e[32m844 passed", iar grep-ul de mai jos nu
+  # vedea numărul după „Tests" prin coduri. Condiția de TRECE nu se putea
+  # împlini NICIODATĂ pe ieșire colorată; doar cea de PICĂ trecea prin coduri.
+  # Exact regula 1: o citire picată (sumar de neparsat) dădea verdict „PICĂ".
+  ies=$( cd "$dir/backend" && npx vitest run 2>&1 | tail -30 | sed 's/\x1b\[[0-9;]*m//g' )
   # „passed" ȘI zero „failed": un fișier picat printre 40 verzi tot e PICĂ.
   if echo "$ies" | grep -qE '^\s*Tests +[0-9]+ passed' && ! echo "$ies" | grep -qiE '[0-9]+ failed'; then
     R_TESTE=TRECE

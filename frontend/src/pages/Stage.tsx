@@ -73,18 +73,23 @@ function DocFrame({ title, src, taskId }: { title: string; src: string; taskId: 
   )
 }
 
-function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
-  const [text, setText] = useState<string | null>(null)
+// ── One road from URL to content for EVERY file on the monitor ─────────────
+// Text, markdown and saved-html all did the same dance — fetch, keep-alive
+// guard, `ok`/`error` reported to get_monitor, identical failure screen —
+// copied three times. Now the dance lives ONCE here; each format keeps only
+// what really differs: its transform and its rendering.
+function useMonitorFile(url: string, taskId: string, transform: (t: string) => string): { data: string | null; failed: boolean } {
+  const [data, setData] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     let alive = true
-    setText(null)
+    setData(null)
     setFailed(false)
     fetch(url)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
       .then((t) => {
         if (alive) {
-          setText(t.slice(0, 500_000))
+          setData(transform(t))
           setTaskStatus(taskId, 'ok')
         }
       })
@@ -97,14 +102,25 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
     return () => {
       alive = false
     }
+    // transform stays OUT of the deps on purpose: callers pass it inline, so
+    // its identity changes every render — including it would refetch forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, taskId])
-  if (failed)
-    return (
-      <div className="workspace-blocked">
-        <p>{uiStrings().wsFileFailed}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
-      </div>
-    )
+  return { data, failed }
+}
+
+function MonitorFileBlocked({ url }: { url: string }): React.JSX.Element {
+  return (
+    <div className="workspace-blocked">
+      <p>{uiStrings().wsFileFailed}</p>
+      <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
+    </div>
+  )
+}
+
+function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
+  const { data: text, failed } = useMonitorFile(url, taskId, (t) => t.slice(0, 500_000))
+  if (failed) return <MonitorFileBlocked url={url} />
   return (
     <div className="workspace-doc">
       <pre className="doc-text" style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: `${0.92 * zoom}em` }}>
@@ -118,37 +134,8 @@ function MonitorTextFile({ url, zoom, taskId }: { url: string; zoom: number; tas
 // skills provide"): fetched like any text file, then rendered FORMATTED with
 // the mini safe renderer (source escaped first — nothing injected executes).
 function MonitorMarkdown({ url, zoom, taskId }: { url: string; zoom: number; taskId: string }) {
-  const [html, setHtml] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let alive = true
-    setHtml(null)
-    setFailed(false)
-    fetch(url)
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
-      .then((t) => {
-        if (alive) {
-          setHtml(renderMarkdown(t.slice(0, 500_000)))
-          setTaskStatus(taskId, 'ok')
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setFailed(true)
-          setTaskStatus(taskId, 'error')
-        }
-      })
-    return () => {
-      alive = false
-    }
-  }, [url, taskId])
-  if (failed)
-    return (
-      <div className="workspace-blocked">
-        <p>{uiStrings().wsFileFailed}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
-      </div>
-    )
+  const { data: html, failed } = useMonitorFile(url, taskId, (t) => renderMarkdown(t.slice(0, 500_000)))
+  if (failed) return <MonitorFileBlocked url={url} />
   return (
     <div className="workspace-doc">
       {html === null ? (
@@ -165,37 +152,8 @@ function MonitorMarkdown({ url, zoom, taskId }: { url: string; zoom: number; tas
 // fetched, then srcDoc in a sandbox WITHOUT allow-same-origin, so the page can
 // never reach the app's session (a plain <iframe src> could, same-origin).
 function MonitorHtmlFile({ url, taskId }: { url: string; taskId: string }) {
-  const [doc, setDoc] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let alive = true
-    setDoc(null)
-    setFailed(false)
-    fetch(url)
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
-      .then((t) => {
-        if (alive) {
-          setDoc(t)
-          setTaskStatus(taskId, 'ok')
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setFailed(true)
-          setTaskStatus(taskId, 'error')
-        }
-      })
-    return () => {
-      alive = false
-    }
-  }, [url, taskId])
-  if (failed)
-    return (
-      <div className="workspace-blocked">
-        <p>{uiStrings().wsFileFailed}</p>
-        <a href={url} target="_blank" rel="noreferrer" className="composer-send">{uiStrings().wsOpenFile}</a>
-      </div>
-    )
+  const { data: doc, failed } = useMonitorFile(url, taskId, (t) => t)
+  if (failed) return <MonitorFileBlocked url={url} />
   if (doc === null)
     return (
       <div className="workspace-doc">

@@ -276,6 +276,16 @@ export async function initDb(): Promise<void> {
       resolved_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_neatrib_status ON plati_neatribuite (status, seen_at DESC);
+    -- KELION'S PROJECT MEMORY (his own request, Aug 2: "persistent, structured
+    -- working memory... a project context I can query and update
+    -- programmatically, not just chat history"). Keyed notes he writes and
+    -- reads through his own tools — they survive every restart and deploy,
+    -- unlike the conversation window.
+    CREATE TABLE IF NOT EXISTS memorie_proiect (
+      cheie TEXT PRIMARY KEY,
+      continut TEXT NOT NULL,
+      actualizat TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     -- The ledger of top-ups (+) and consumptions (−). The "ref" column makes
     -- top-ups idempotent: the same payment is never credited twice, no matter
     -- how many reads or retries overlap.
@@ -3659,4 +3669,54 @@ export async function rezumatPlati(): Promise<RezumatPlati | null> {
   } catch {
     return null // a failed read is not an empty ledger (rule no. 1)
   }
+}
+
+// ── KELION'S PROJECT MEMORY (his own request, Aug 2) ────────────────────────
+// Structured, keyed, persistent — the working context he asked for. The tools
+// (memorie_pune / memorie_ia / memorie_lista) go through here. Content only;
+// no secrets (the secrets tools have their own guarded path).
+
+/** Write (upsert) a memory entry. Empty content DELETES the key — one verb,
+ *  no separate delete tool for the model to fumble. */
+export async function memoriePune(cheie: string, continut: string): Promise<string> {
+  if (!dbEnabled()) return 'baza de date nu e configurată'
+  const k = cheie.trim().slice(0, 200)
+  if (!k) return 'cheia lipsește'
+  if (!continut.trim()) {
+    await getPool().query(`DELETE FROM memorie_proiect WHERE cheie = $1`, [k]).catch(() => null)
+    return `șters: ${k}`
+  }
+  const r = await getPool()
+    .query(
+      `INSERT INTO memorie_proiect (cheie, continut, actualizat) VALUES ($1, $2, now())
+        ON CONFLICT (cheie) DO UPDATE SET continut = $2, actualizat = now()`,
+      [k, continut.slice(0, 20_000)],
+    )
+    .catch(() => null)
+  return r ? `scris: ${k} (${continut.length} caractere)` : 'scrierea a picat'
+}
+
+/** Read one memory entry, whole. */
+export async function memorieIa(cheie: string): Promise<string> {
+  if (!dbEnabled()) return 'baza de date nu e configurată'
+  const r = await getPool()
+    .query(`SELECT continut, actualizat FROM memorie_proiect WHERE cheie = $1`, [cheie.trim()])
+    .catch(() => null)
+  const row = r?.rows[0] as { continut?: string; actualizat?: string } | undefined
+  return row?.continut ? `[${row.actualizat}] ${row.continut}` : `nimic sub cheia „${cheie}"`
+}
+
+/** List keys (optionally by prefix), newest first — the index of his memory. */
+export async function memorieLista(prefix = ''): Promise<string> {
+  if (!dbEnabled()) return 'baza de date nu e configurată'
+  const r = await getPool()
+    .query(
+      `SELECT cheie, length(continut)::int AS marime, actualizat FROM memorie_proiect
+        WHERE cheie LIKE $1 ORDER BY actualizat DESC LIMIT 100`,
+      [`${prefix.trim()}%`],
+    )
+    .catch(() => null)
+  const rows = (r?.rows ?? []) as { cheie?: string; marime?: number; actualizat?: string }[]
+  if (!rows.length) return prefix ? `nicio cheie cu prefixul „${prefix}"` : 'memoria e goală'
+  return rows.map((x) => `${x.cheie} (${x.marime} car., ${x.actualizat})`).join('\n')
 }

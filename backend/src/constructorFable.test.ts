@@ -49,13 +49,19 @@ function ruleazaProbele(): Proba {
         'undefined': m.cereCreierFable(undefined),
         'o poveste despre o fable': m.cereCreierFable('o poveste despre o fable'),
       },
-      capFaraLista: m.modelePentruOrdin('repară typo-ul din footer')[0],
-      capCuMarcaj: m.modelePentruOrdin('Te rog construiește portalul, cu fable 5')[0],
+      // FIECARE probă despre lumea „fără perechea aleasă conștient" dă
+      // envModel/allowPaid EXPLICIT. Motivul, măsurat pe poarta VPS (2 aug):
+      // modulul își citește env-ul din /root/kelion/kelionai.env (cale FIXĂ,
+      // cronul nu are mediu de shell) — pe VPS fișierul există cu perechea
+      // plătită REALĂ, deci default-urile funcției sunt plătite acolo și
+      // probele astea ar măsura altă lume decât cea din numele testului.
+      capFaraLista: m.modelePentruOrdin('repară typo-ul din footer', undefined, '', false)[0],
+      capCuMarcaj: m.modelePentruOrdin('Te rog construiește portalul, cu fable 5', undefined, '', false)[0],
       toateFreeFaraMarcaj: ['repară typo-ul din footer', 'NIVEL DE DIFICULTATE: 5 — migrează baza', '']
-        .every((o) => m.modelePentruOrdin(o).every((x) => x.endsWith(':free'))),
-      subFableDoarFree: m.modelePentruOrdin('fable5: refac onboardingul').slice(1).every((x) => x.endsWith(':free')),
-      envCuratata: m.modelePentruOrdin('ordin obișnuit, fără marcaj', ['anthropic/claude-sonnet-5', 'anthropic/claude-opus-5', 'google/gemma-4-31b-it:free']),
-      envCuMarcaj: m.modelePentruOrdin('creier fable, te rog', ['anthropic/claude-sonnet-5', 'google/gemma-4-31b-it:free']),
+        .every((o) => m.modelePentruOrdin(o, undefined, '', false).every((x) => x.endsWith(':free'))),
+      subFableDoarFree: m.modelePentruOrdin('fable5: refac onboardingul', undefined, '', false).slice(1).every((x) => x.endsWith(':free')),
+      envCuratata: m.modelePentruOrdin('ordin obișnuit, fără marcaj', ['anthropic/claude-sonnet-5', 'anthropic/claude-opus-5', 'google/gemma-4-31b-it:free'], '', false),
+      envCuMarcaj: m.modelePentruOrdin('creier fable, te rog', ['anthropic/claude-sonnet-5', 'google/gemma-4-31b-it:free'], '', false),
       // ORDINUL NOU (2 aug seara): plătit ales conștient în env ⇒ capul scării
       // pentru ORICE ordin; fără ALLOW_PAID rămâne totul :free.
       envPlatitAles: m.modelePentruOrdin('ordin obișnuit', ['google/gemma-4-31b-it:free'], 'anthropic/claude-fable-5', true),
