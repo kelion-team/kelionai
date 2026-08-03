@@ -48,6 +48,7 @@ import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
 import { getOpenRouterBalance } from '../services/openrouter.js'
+import { geminiLive } from '../services/geminiDirect.js'
 import { getOpenAiMonthCost } from '../services/openaiCosts.js'
 import { getSerperBalance } from '../services/serperBalance.js'
 import { calcPunga } from '../services/punga.js'
@@ -304,7 +305,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost] = await Promise.all([
+    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost, geminiState] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       resurseGazda(),
@@ -316,11 +317,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // THE SERPER PILL (same rule): the REAL remaining search credit read
       // from Serper's /account endpoint. Also cached 5 min in the service.
       getSerperBalance(),
-      // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd și aici creditul de la
-      // gemini"): creierul de lucru e Gemini Tier 2, plătit postpaid pe contul
-      // Google. Nu are „sold" de citit — arătăm cheltuiala REALĂ pe luna curentă
-      // din propriul jurnal (cost_events kind='gemini'). Măsurat, nu inventat.
+      // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd că am bani la gemini").
+      // Creditul prepay real (£11.58) NU e expus de niciun API Google — verificat
+      // 3 aug. Deci: (1) starea LIVE — un ping mic la Gemini spune dacă cheia
+      // Tier 2 servește (200 = ai credit + merge; „depleted" = epuizat), cache
+      // 5 min; (2) cheltuiala REALĂ pe luna curentă din jurnalul nostru
+      // (cost_events kind='gemini'). Amândouă măsurate, niciun număr inventat.
       getGeminiMonthUsd(),
+      geminiLive(),
     ])
     return reply.send({
       active: 'openrouter',
@@ -364,13 +368,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         rateLimit: serperBalance.ok ? serperBalance.rateLimit : undefined,
         error: serperBalance.error,
       },
-      // The REAL Gemini spend this month (USD) from our own cost journal. The
-      // work brain is Gemini Tier 2 (paid on the owner's Google account), so
-      // there is no prepaid balance to read — month-to-date spend is the honest
-      // figure. `live: false` (DB down) → the bar writes "Gemini ⚠", not "$0".
-      // `live: true` with monthUsd 0 is a REAL zero (nothing spent yet), shown.
+      // THE GEMINI PILL. `serving` = the live ping (Tier 2 key returned 200 →
+      // green "Gemini ✓": credit present + working; false → red "Gemini ⚠" with
+      // the reason: 'depleted' (prepay credit gone), 'quota', 'error'/network).
+      // `checked: false` = the ping itself couldn't run (no key / network) — a
+      // "⚠", never a fake "OK". `monthUsd` = REAL month-to-date Gemini spend from
+      // our journal (tooltip detail). Nothing fabricated — the £11.58 prepay
+      // credit is not exposed by any Google API (verified), so we show the honest
+      // signal that reflects it: green while it serves, red the moment it can't.
       gemini: {
-        live: geminiCost.ok,
+        checked: geminiState.ok,
+        serving: geminiState.serving,
+        reason: geminiState.reason,
         monthUsd: geminiCost.ok ? geminiCost.monthUsd : undefined,
       },
       pool,
