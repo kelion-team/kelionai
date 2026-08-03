@@ -6,20 +6,8 @@
   height: 100vh;
   overflow: hidden;
   z-index: -1; 
-  background-color: #000;
-}
-
-.background-image {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 3840px; /* Intrinsic width of the image */
-  height: 2160px; /* Intrinsic height of the image */
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  transform-origin: top left;
-  transition: transform 0.2s ease-out;
+  background-color: var(--bg, #0b0e14);
+  background-image: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
 }
 
 /* Elemente "vii" - Animatii subtile */
@@ -99,5 +87,16 @@
   }
   100% {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-element, .radar-sweep::before {
+    animation: none;
+    opacity: 0.4;
+  }
+
+  .light-pulse {
+    opacity: 0.4;
   }
 }
