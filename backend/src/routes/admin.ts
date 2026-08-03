@@ -9,6 +9,7 @@ import {
   getCostSummary,
   getCapabilityGaps,
   setGapResolved,
+  deleteCapabilityGap,
   getAdminAccount,
   blockUser,
   unblockUser,
@@ -60,7 +61,7 @@ import { triageGaps } from '../services/gapsTriage.js'
 import { runAllTokenChecks } from '../services/tokenChecks.js'
 import { envCheck, envOrphans, envSummary, processStartedAt } from '../services/envCheck.js'
 import { sendMail } from '../services/mail.js'
-import { fetchRecentInbox } from '../services/mailbox.js'
+import { fetchRecentInbox, deleteInboxMessages } from '../services/mailbox.js'
 import { translateMany } from '../services/google.js'
 
 // ── Store presence (the admin's REAL market control) ───────────────────────
@@ -186,6 +187,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ emails: await fetchRecentInbox(40) })
   })
 
+  // ȘTERGEREA DIN INBOX (Adrian, 3 aug: „să șterg de aici câte una sau prin
+  // selecție toate"). UID-uri exacte din panou; serviciul mută în coșul REAL al
+  // serverului când există (recuperabil), altfel șterge definitiv — și spune
+  // care din ele s-a întâmplat. Întoarce câte s-au șters DE FAPT.
+  app.post<{ Body: { uids?: number[] } }>('/api/admin/mailbox-delete', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const uids = Array.isArray(req.body?.uids) ? req.body.uids.map(Number) : []
+    if (!uids.length) return reply.code(400).send({ error: 'uids_lipsa' })
+    const r = await deleteInboxMessages(uids)
+    return reply.send({ ok: r.sterse > 0, ...r })
+  })
+
   // Market control: live store presence + direct-download counts + WHO
   // downloaded (email when signed in, else IP + country). Store installs are
   // aggregate-only by design — no store exposes user identities.
@@ -288,6 +302,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'bad_request' })
     await setGapResolved(id, req.body?.resolved !== false)
     return reply.send({ ok: true })
+  })
+
+  // ȘTERGEREA DEFINITIVĂ a unei cereri neacoperite (Adrian, 3 aug: „trebuie să
+  // aibă butoane de ștergere, sau rezolvate și arhivate"). Rezolvarea de mai
+  // sus e arhivarea; asta e pentru zgomot/duplicate — rândul dispare de tot.
+  app.delete<{ Params: { id: string } }>('/api/admin/gaps/:id', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'bad_request' })
+    return reply.send({ ok: await deleteCapabilityGap(id) })
   })
 
   // The owner's REAL-money view: the measured provider spend (USD, from the

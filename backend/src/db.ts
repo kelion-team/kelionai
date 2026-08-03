@@ -1868,7 +1868,13 @@ export interface CostSummary {
 // The only kind of cost that comes MEASURED from the provider: brain calls,
 // where OpenRouter returns `usage.cost` with its real money. Everything else
 // is fixed rates I wrote — useful as an order of magnitude, false as "real".
-const COSTURI_MASURATE = new Set(['chat', 'gemini', 'memory', 'image'])
+// 'gemini' și 'image' SCOASE de aici (agenții de debug, 3 aug, verdict REAL):
+// după migrarea pe cheia Tier 2, Google NU întoarce dolari în răspuns —
+// tokenii sunt măsurați, dar prețul e tariful publicat scris de mână
+// (geminiDirect.ts) → după chiar definiția acestui set, e „estimat", nu
+// „măsurat". Un 0 (sau orice produs tarif×tokeni) afișat ca „măsurat" e exact
+// cifra falsă din regula #1.
+const COSTURI_MASURATE = new Set(['chat', 'memory'])
 
 // ── PASTILA GEMINI (Adrian, 3 aug: „vreau să văd și aici creditul de la gemini") ─
 // Gemini Tier 2 e plătit postpaid pe contul Google al ownerului — nu are un
@@ -2429,6 +2435,20 @@ export async function setGapResolved(id: number, resolved: boolean): Promise<voi
     await getPool().query('UPDATE capability_gaps SET resolved = $2 WHERE id = $1', [id, resolved])
   } catch {
     /* non-fatal */
+  }
+}
+
+/** Șterge DEFINITIV o cerere neacoperită (Adrian, 3 aug: „trebuie să aibă
+ *  butoane de ștergere, sau rezolvate și arhivate"). Rezolvarea = arhivare
+ *  (rândul iese din lista implicită, rămâne la „toate"); asta e ștergerea
+ *  adevărată, pentru zgomot/duplicate. `true` doar dacă rândul chiar a existat. */
+export async function deleteCapabilityGap(id: number): Promise<boolean> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+  try {
+    const r = await getPool().query('DELETE FROM capability_gaps WHERE id = $1', [id])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
   }
 }
 
