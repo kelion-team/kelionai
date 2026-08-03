@@ -110,4 +110,41 @@ describe('LACĂT — auz (chirp_3 peste tot, regiunea eu)', () => {
     expect(GOOGLE_STT_MODEL).toBe('chirp_3')
     expect(GOOGLE_STT_REGION).toBe('eu')
   })
+
+  it('calea streaming/full-duplex folosește ACEEAȘI sursă unică — nu poate drifta', () => {
+    // Adrian, 3 aug: „sistemul de auzit sper să nu se mai schimbe niciodată".
+    // asr-stream.ts (streaming) importă modelul/regiunea din asr.ts — nu are
+    // copie locală care să dea alt model pe tăcute.
+    const stream = sursa('./routes/asr-stream.ts')
+    expect(/GOOGLE_STT_MODEL/.test(stream)).toBe(true)
+    expect(/GOOGLE_STT_REGION/.test(stream)).toBe(true)
+    expect(/from '\.\.\/services\/asr\.js'/.test(stream)).toBe(true)
+    // Iar cererea către Google trimite CHIAR constanta, nu un model hardcodat.
+    const asr = sursa('./services/asr.ts')
+    expect(/model:\s*GOOGLE_STT_MODEL/.test(asr)).toBe(true)
+  })
+})
+
+describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier, DOAR a lui)', () => {
+  const voce = sursa('../../frontend/src/lib/realtimeVoice.ts')
+  const server = sursa('./routes/realtime.ts')
+
+  it('vocea PROPRIETARULUI verificat ajunge la creier fără „Kelion" de fiecare dată', () => {
+    // Adrian, 3 aug: „vocea actuală la creier fără să eșueze". Poarta lasă vocea
+    // la creier pe semnalul POZITIV `holder` (proprietar verificat), nu doar pe nume.
+    expect(/verdict\?\.holder === true/.test(voce)).toBe(true)
+    expect(/if \(named \|\| answering \|\| holder\)/.test(voce)).toBe(true)
+  })
+
+  it('serverul dă semnalul POZITIV doar când e chiar proprietarul contului', () => {
+    // holder = există referință ȘI se potrivește (isHolder). Admin în admin,
+    // fiecare user în contul lui — verdictul se calculează pe user.email al sesiunii.
+    expect(/holder = hasRef && isHolder/.test(server)).toBe(true)
+  })
+
+  it('SIGURANȚA rămâne: vocea străină (TV/necunoscuți) NU ajunge la creier', () => {
+    // Cerința obligatorie: doar vocea user/admin. Poarta de amprentă care aruncă
+    // vocea străină trebuie să rămână — dacă dispare, testul cade.
+    expect(/if \(verdict\?\.foreignVoice && !guest\)/.test(voce)).toBe(true)
+  })
 })

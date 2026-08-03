@@ -31,13 +31,15 @@ describe('poarta numelui se judecă per frază, nu pe ceas', () => {
     expect(voce).not.toContain('GATE_WINDOW_MS')
   })
 
-  it('răspunde dacă numele e în FRAZA curentă', () => {
+  it('răspunde dacă numele e în FRAZA curentă (SAU e proprietarul verificat — Adrian, 3 aug)', () => {
     expect(voce).toMatch(/const named = NAME_RE\.test\(t\)/)
-    expect(voce).toMatch(/if \(named \|\| answering\)/)
+    // Poarta lasă la creier pe nume, pe fereastra de răspuns SAU pe proprietarul
+    // verificat de amprentă (`holder`) — full-duplex fără „Kelion" la fiecare tură.
+    expect(voce).toMatch(/if \(named \|\| answering \|\| holder\)/)
   })
 
   it('replica fără nume SE CONSUMĂ — nu poate deschide următoarea', () => {
-    expect(voce).toMatch(/if \(named \|\| answering\) \{\s*\n\s*replyUntil = 0/)
+    expect(voce).toMatch(/if \(named \|\| answering \|\| holder\) \{\s*\n\s*replyUntil = 0/)
   })
 })
 
