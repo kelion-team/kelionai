@@ -3075,6 +3075,49 @@ audit): the same short entry on all conditionally-mounted overlays. */
   pointer-events: none;
 }
 
+/* CLEPSIDRA + CRONOMETRU (Adrian, 3 aug): perechea amber a latency-chip-ului —
+   verde = GATA (timpul măsurat), amber = ÎN LUCRU (timpul care curge acum).
+   Colț STÂNGA ca să nu se ciocnească niciodată cu latency-chip (dreapta). */
+.kelion-workclock {
+  position: absolute;
+  top: -26px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  pointer-events: none;
+  max-width: 60vw;
+}
+.kelion-workclock-glass {
+  display: inline-block;
+  animation: kelion-workclock-turn 1.8s ease-in-out infinite;
+}
+@keyframes kelion-workclock-turn {
+  0% { transform: rotate(0deg); }
+  55% { transform: rotate(180deg); }
+  100% { transform: rotate(180deg); }
+}
+.kelion-workclock-time {
+  font-variant-numeric: tabular-nums;
+}
+.kelion-workclock-label {
+  opacity: 0.8;
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kelion-workclock-glass { animation: none; }
+}
+
 /* FLUIDITY #9: the final teletext no longer ends on EMPTY — the loop is
 continuous (the text re-enters from the right, like a real teletext). */
 .ticker-text { animation-iteration-count: infinite; }

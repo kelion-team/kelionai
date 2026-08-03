@@ -149,19 +149,31 @@ const FEMININE_CHIRP_STYLES = new Set([
   'Leda', 'Pulcherrima', 'Sulafat', 'Vindemiatrix', 'Zephyr', 'Achernar',
   'Autonoe',
 ])
-const MALE_CHIRP_DEFAULT = 'Charon' // warm male voice, valid in every Chirp3-HD locale
+export const MALE_CHIRP_DEFAULT = 'Charon' // warm male voice, valid in every Chirp3-HD locale
+
+/**
+ * VOCE MASCULINĂ PESTE TOT (Adrian, 2 aug: „voce masculină în orice limbă").
+ * Din stilul configurat — un stil simplu („Charon") SAU un nume complet
+ * („ro-RO-Chirp3-HD-Charon") — păstrăm DOAR stilul; orice stil FEMININ, sau
+ * necunoscut, sau gol → devine Charon (masculin). Pură și EXPORTATĂ dinadins ca
+ * regula să fie bătută în cuie cu test (lacat.test.ts): dacă cineva o schimbă,
+ * testul din CI cade și schimbarea nu se poate face merge. Nu se mai distruge.
+ */
+export function resolveChirpStyle(configured: string | null | undefined): string {
+  const c = (configured ?? '').trim()
+  const style = /Chirp3-HD/i.test(c) ? (c.split('-').pop() ?? '') : c
+  return /^[A-Z][a-z]+$/.test(style) && !FEMININE_CHIRP_STYLES.has(style)
+    ? style
+    : MALE_CHIRP_DEFAULT
+}
 
 async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promise<TtsResult> {
   // We always force Chirp 3 HD. The env style can be a full voice name
   // (e.g. "ro-RO-Chirp3-HD-Charon") or just the style (e.g. "Charon"); either
   // way we keep ONLY the style and rebuild the name with the language being
   // spoken, so the voice matches the text. Anything unknown — and ANY female
-  // style — falls back to Charon (male, see the guard above).
-  const configured = config.ttsVoiceStyle.trim()
-  const style = /Chirp3-HD/i.test(configured) ? (configured.split('-').pop() ?? '') : configured
-  const safeStyle = /^[A-Z][a-z]+$/.test(style) && !FEMININE_CHIRP_STYLES.has(style)
-    ? style
-    : MALE_CHIRP_DEFAULT
+  // style — falls back to Charon (male, see resolveChirpStyle above).
+  const safeStyle = resolveChirpStyle(config.ttsVoiceStyle)
   const voiceName = `${lang}-Chirp3-HD-${safeStyle}`
 
   const a = getAuth()

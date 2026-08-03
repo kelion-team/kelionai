@@ -87,6 +87,8 @@ export interface Strings {
   adminUnlock: string
   // ── THE LATENCY AND LISTENING BANDS (ChatPanel.tsx) ──────────────────────
   latencyChip: string
+  /** Tooltip of the hourglass+stopwatch shown while Kelion really works. */
+  workClockTitle: string
   heardYouTitle: string
   heardBrainTitle: string
   /** Title of the K band — the reply flowing FROM the brain. */
@@ -267,6 +269,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     adminLockedHint: 'Talk to Kelion — your voiceprint opens it by itself — or type the unlock secret.',
     adminUnlock: 'Unlock',
     latencyChip: 'sent → first word / full answer',
+    workClockTitle: 'Kelion is really working on the task — live elapsed time',
     heardYouTitle: 'You — on the way to the brain',
     heardBrainTitle: 'The brain got it and is thinking',
     heardKelionTitle: 'Kelion — from the brain',
@@ -416,6 +419,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     adminLockedHint: 'Vorbește cu Kelion — amprenta ta vocală îl deschide singură — sau tastează secretul de activare.',
     adminUnlock: 'Deblochează',
     latencyChip: 'trimis → primul cuvânt / răspuns complet',
+    workClockTitle: 'Kelion chiar lucrează la sarcină — timp scurs, live',
     heardYouTitle: 'Tu — înspre creier',
     heardBrainTitle: 'Creierul a primit și gândește',
     heardKelionTitle: 'Kelion — dinspre creier',

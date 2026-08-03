@@ -12,6 +12,7 @@ import {
 import { streamChat, type ChatMessage, type Coords, type ChatControl } from '../lib/chat'
 import { strings, resolveLang, uiStrings, type Lang } from '../lib/i18n'
 import CameraView from './CameraView'
+import { WorkClock } from './WorkClock'
 import { cameraSupported, type Facing } from '../lib/camera'
 import { defaultSpeechLang } from '../lib/languages'
 import { loadLocalLang, loadServerPrefs, mirrorLang } from '../lib/prefs'
@@ -165,6 +166,13 @@ export default function ChatPanel({
     }
   }, [input])
   const [busy, setBusy] = useState(false)
+  // ECOUL A CE TRANSMIT EU — ținut mai mult pe ecran (Adrian, 3 aug: „afișarea
+  // foarte scurtă a ce transmit eu — triplat timpul de afișat pe interfață").
+  // Banda 👤 cu textul meu dispărea în clipa în care sosea primul cuvânt al lui
+  // Kelion (o sclipire sub o secundă cu creierul rapid). Acum textul meu rămâne
+  // vizibil cel puțin USER_ECHO_HOLD_MS (~3× cât stătea), ca să pot să-l citesc.
+  const [userEchoHold, setUserEchoHold] = useState(false)
+  const userEchoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Microphone (input) — capture → server (STT) → brain. It is NOT "voice in front".
   const [listening, setListening] = useState(false)
   // VOICE VOLUME (Jul 25): the value persisted from audioIO, mirrored in the slider.
@@ -983,6 +991,12 @@ export default function ChatPanel({
     const ac = new AbortController()
     abortRef.current = ac
     setBusy(true)
+    // Ține ecoul textului MEU pe ecran ~3× mai mult (Adrian, 3 aug). Se reia la
+    // fiecare tură (și la barge-in): anulăm cronometrul vechi și pornim unul nou.
+    const USER_ECHO_HOLD_MS = 2600
+    if (userEchoTimerRef.current) clearTimeout(userEchoTimerRef.current)
+    setUserEchoHold(true)
+    userEchoTimerRef.current = setTimeout(() => setUserEchoHold(false), USER_ECHO_HOLD_MS)
     let acc = ''
     // THE MOUTH, FED BY THE BRAIN (Aug 1 — one brain): while the reply streams,
     // complete sentences go to the live voice session's speak() queue and are
@@ -1967,6 +1981,11 @@ export default function ChatPanel({
           ⚡ {(realLatency.firstMs / 1000).toFixed(1)}s · {(realLatency.totalMs / 1000).toFixed(1)}s
         </span>
       )}
+      {/* CLEPSIDRA + CRONOMETRU (Adrian, 3 aug): vizibilă DOAR cât Kelion chiar
+          lucrează la tura curentă (busy). Cinstită: nu poate curge fără ca serverul
+          să proceseze cu adevărat. Vezi WorkClock.tsx. */}
+      <WorkClock busy={busy} title={t.workClockTitle} />
+
       {isAdmin && scenarioOpen && (
         <div className="scenario-panel">
           <div className="scenario-head">
@@ -2030,22 +2049,23 @@ export default function ChatPanel({
             never a second display; 🧠 = the brain is thinking (only when there
             is no user text to show); K = the reply flows FROM the brain (text
             tail while streaming, ticker when done). One row, always. */}
-        {busy && !lastAssistant?.content ? (
-          heard || lastUser?.content ? (
-            <div className="heard-band user-band" aria-live="polite">
-              <span className="heard-band-label" title={uiStrings().heardYouTitle}>👤</span>
-              <span className="speech-tail">
-                <span className="speech-tail-text">{(heard || lastUser?.content || '').slice(0, 400)}</span>
-              </span>
-            </div>
-          ) : (
-            <div className="heard-band" aria-live="polite">
-              <span className="heard-band-label" title={uiStrings().heardBrainTitle}>🧠</span>
-              <span className="speech-tail">
-                <span className="speech-tail-text">…</span>
-              </span>
-            </div>
-          )
+        {(heard || lastUser?.content) && (userEchoHold || (busy && !lastAssistant?.content)) ? (
+          // 👤 ECOUL A CE TRANSMIT EU — rămâne pe ecran ~3× mai mult: cât ține
+          // userEchoHold, textul meu stă chiar dacă Kelion a și început să răspundă
+          // (Adrian, 3 aug). Fără hold, ar dispărea la primul cuvânt al lui Kelion.
+          <div className="heard-band user-band" aria-live="polite">
+            <span className="heard-band-label" title={uiStrings().heardYouTitle}>👤</span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">{(heard || lastUser?.content || '').slice(0, 400)}</span>
+            </span>
+          </div>
+        ) : busy && !lastAssistant?.content ? (
+          <div className="heard-band" aria-live="polite">
+            <span className="heard-band-label" title={uiStrings().heardBrainTitle}>🧠</span>
+            <span className="speech-tail">
+              <span className="speech-tail-text">…</span>
+            </span>
+          </div>
         ) : (lastAssistant?.content && !idleBandHidden && (busy || monitorMode)) || busy ? (
           <div className="heard-band kelion-band" aria-live="polite">
             <span className="heard-band-label kelion-k" title={t.heardKelionTitle}>K</span>

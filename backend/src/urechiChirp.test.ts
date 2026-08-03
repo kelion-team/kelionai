@@ -29,7 +29,7 @@ describe('client: urechile live sunt Chirp 3', () => {
     expect(voce).toMatch(/ears: urechiChirp \? 'chirp' : 'openai'/)
   })
   it('finalurile Chirp trec prin ACEEAȘI poartă (timbru → stop → nume)', () => {
-    expect(voce).toMatch(/onPhrase: \(t, vf\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf\)/)
+    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
     expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,400}transcriptVerdict\(t, vf\)/)
   })
   it('urechia moartă marchează și cade pe urechile OpenAI, fără bucle', () => {
@@ -43,8 +43,8 @@ describe('client: urechile live sunt Chirp 3', () => {
 
 describe('micStream: urechea Chirp dă tot ce poarta cere', () => {
   it('onPhrase duce și amprenta frazei (poarta de timbru are nevoie direct)', () => {
-    expect(mic).toMatch(/onPhrase: \(text: string, features: VoiceFeatures \| null\) => void/)
-    expect(mic).toMatch(/opts\.onPhrase\(text, features\)/)
+    expect(mic).toMatch(/onPhrase: \(text: string, features: VoiceFeatures \| null, audio\?: string\) => void/)
+    expect(mic).toMatch(/opts\.onPhrase\(text, features, audio\)/)
   })
   it('full-duplex NU murdărește depozitul partajat de features', () => {
     expect(mic).toMatch(/storePendingFeatures/)

@@ -126,7 +126,10 @@ describe('openrouter catalog', () => {
     // no tool, while Ultra took 6s+3.2s with the correct tool call (the full
     // table is in config.ts). The work default is Ultra — the fastest free
     // model THAT THINKS, measured, not picked from a spec sheet.
-    expect(await resolveModel('work', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    // ADRIAN, 3 AUG: creierul de LUCRU e Gemini free PERMANENT. Turele grele
+    // trec prin orchestrator → prefixul google-direct/ → geminiDirect CU unelte
+    // (măsurat 1,2s + 1,0s cu apel corect). nemotron rămâne pe treapta „top".
+    expect(await resolveModel('work', null)).toBe('google-direct/gemini-2.5-flash')
     expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
@@ -139,13 +142,13 @@ describe('openrouter catalog', () => {
   it('resolveModelChecked SPUNE când modelul cerut a fost respins', async () => {
     const cerut = await resolveModelChecked('work', 'furnizor/model-scos-de-pe-piata')
     expect(cerut.fellBack).toBe(true)
-    expect(cerut.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(cerut.model).toBe('google-direct/gemini-2.5-flash')
   })
 
   it('fără nicio cerere, implicitul NU e o cădere (n-a fost respins nimic)', async () => {
     const implicit = await resolveModelChecked('work', null)
     expect(implicit.fellBack).toBe(false)
-    expect(implicit.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(implicit.model).toBe('google-direct/gemini-2.5-flash')
   })
 
   it('resolveModel rămâne exact ce era (aceeași valoare ca varianta verificată)', async () => {
