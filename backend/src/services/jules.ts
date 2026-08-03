@@ -17,10 +17,6 @@ import { config } from '../config.js'
 
 const BAZA = 'https://jules.googleapis.com/v1alpha'
 
-export function julesDisponibil(): boolean {
-  return Boolean(config.julesKey)
-}
-
 async function julesFetch(cale: string, init?: RequestInit): Promise<{ ok: true; j: unknown } | { ok: false; error: string }> {
   if (!config.julesKey) return { ok: false, error: 'jules_neconfigurat (JULES_API_KEY lipsă — vps-keys → jules)' }
   let r: Response
