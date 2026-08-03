@@ -114,6 +114,10 @@ export interface TranscriptVerdict {
   lang?: string
   foreignVoice?: boolean
   adminUnlocked?: boolean
+  // PROPRIETAR VERIFICAT (Adrian, 3 aug): serverul a confirmat că vocea CHIAR e a
+  // proprietarului acestui cont (referință + potrivire). Doar atunci lăsăm vocea
+  // să ajungă la creier FĂRĂ „Kelion" (full-duplex real, doar pentru user/admin).
+  holder?: boolean
   guest?: { id: number; name: string; relation: string }
   guestPending?: { id: number; name: string; relation: string }
 }
@@ -389,9 +393,16 @@ export async function startRealtimeVoice(
         // own question gets CONSUMED here (`replyUntil = 0`), so one reply
         // can't open the next one — the old perpetuum mobile that never
         // closed while something was heard in the room.
+        // FULL-DUPLEX PENTRU PROPRIETARUL VERIFICAT (Adrian, 3 aug: „vocea actuală
+        // la creier fără să eșueze, doar user/admin"): dacă serverul a confirmat
+        // POZITIV că e vocea proprietarului acestui cont (`holder`), nu-i mai
+        // cerem „Kelion" la fiecare tură — vocea lui merge direct la creier. TV-ul
+        // și străinii sunt deja opriți mai sus (foreignVoice); înrolarea rămâne pe
+        // poarta de nume, deci nu trece nimeni neidentificat.
         const named = NAME_RE.test(t)
         const answering = Date.now() < replyUntil
-        if (named || answering) {
+        const holder = verdict?.holder === true
+        if (named || answering || holder) {
           replyUntil = 0
           onAddressed?.(t, vf, speaker, audio)
         }

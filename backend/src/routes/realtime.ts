@@ -173,6 +173,15 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
       // existing reference opens the Admin button (signed cookie) — the first
       // enrolment does NOT unlock.
       let adminUnlocked: boolean | undefined
+      // POARTA POZITIVĂ (Adrian, 3 aug: „vocea actuală la creier fără să eșueze,
+      // OBLIGATORIU doar vocea user/admin — admin în admin, fiecare user în contul
+      // lui"). `holder` e ADEVĂRAT doar când există o referință ȘI vocea CHIAR se
+      // potrivește cu proprietarul ACESTUI cont. Clientul folosește exact acest
+      // semnal ca să ducă vocea la creier FĂRĂ să fie nevoie de „Kelion" la fiecare
+      // tură (full-duplex real) — dar NUMAI pentru proprietarul verificat. TV-ul /
+      // străinii rămân blocați de amprentă (foreignVoice), iar în perioada de
+      // înrolare (fără referință) rămâne poarta de nume, ca să nu treacă nimeni.
+      let holder: boolean | undefined
       const isAdmin = user.email.toLowerCase() === config.adminEmail
       const vf = req.body?.voiceFeatures
       if (role === 'user' && vf?.vector?.length && vf?.meta) {
@@ -205,6 +214,8 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
             )
           }
           foreignVoice = hasRef && !isHolder ? true : undefined
+          // Semnal POZITIV de proprietar verificat: referință + potrivire.
+          holder = hasRef && isHolder ? true : undefined
           // GUEST RECOGNITION — only when it is NOT the holder.
           if (foreignVoice) {
             // 1. An APPROVED guest's timbre? → allowed, with guest rights.
@@ -246,7 +257,7 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       // ADMIN: the live session stays anchored on Romanian at EVERY turn.
-      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', foreignVoice, adminUnlocked, guest, guestPending })
+      if (text && role === 'user' && isAdmin) return reply.send({ ok: true, lang: 'ro', foreignVoice, adminUnlocked, guest, guestPending, holder })
       if (text && role === 'user' && !isAdmin) {
         // LANGUAGE DETECTION FROM VOICE (Jul 24 audit, P4): a new language
         // confirmed on 2 consecutive messages → persisted per user; the client
@@ -254,9 +265,9 @@ export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
         const current = await getSpeechLang(user.email)
         const committed = trackSpeechLang(user.email, text, current)
         if (committed) void setSpeechLangPref(user.email, committed)
-        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), foreignVoice, guest, guestPending })
+        if (committed) return reply.send({ ok: true, lang: committed.slice(0, 2).toLowerCase(), foreignVoice, guest, guestPending, holder })
       }
-      return reply.send({ ok: true, foreignVoice, guest, guestPending })
+      return reply.send({ ok: true, foreignVoice, guest, guestPending, holder })
     },
   )
 }
