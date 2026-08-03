@@ -44,13 +44,17 @@ describe('poarta numelui se judecă per frază, nu pe ceas', () => {
 })
 
 describe('Kelion nu-și mai ține singur poarta deschisă', () => {
-  it('după ce vorbește, poarta se deschide DOAR dacă a pus o întrebare', () => {
-    expect(voce).toMatch(/replyUntil = \/\\\?\/\.test\(t\) \? Date\.now\(\) \+ REPLY_WINDOW_MS : 0/)
+  it('după ce vorbește, poarta se deschide DOAR dacă a pus o întrebare (speak)', () => {
+    // Gura e a serverului acum (cadre {audio}); speak() doar deschide fereastra
+    // când replica lui Kelion e o ÎNTREBARE. O afirmație nu potrivește /\?/.
+    expect(voce).toMatch(/if \(\/\\\?\/\.test\(text\)\) replyUntil = Date\.now\(\) \+ REPLY_WINDOW_MS/)
   })
 
-  it('o afirmație a lui închide poarta pe loc (numele redevine obligatoriu)', () => {
-    // The `: 0` branch in the line above is exactly this — a statement doesn't invite.
-    expect(voce).toMatch(/REPLY_WINDOW_MS : 0/)
+  it('o afirmație a lui NU deschide poarta (fereastra se setează o SINGURĂ dată, pe întrebare)', () => {
+    // Nu mai există `? ... : 0`: fereastra viitoare se deschide EXCLUSIV în
+    // spatele testului de întrebare, o singură dată în tot fișierul.
+    const hits = voce.match(/Date\.now\(\) \+ REPLY_WINDOW_MS/g) ?? []
+    expect(hits.length).toBe(1)
   })
 
   it('fără transcript NU există răspuns deloc — sesiunea nu mai răspunde singură', () => {
@@ -62,7 +66,7 @@ describe('Kelion nu-și mai ține singur poarta deschisă', () => {
     expect(voce).not.toContain('speechStopTimer')
   })
 
-  it('STOP taie și replica rămasă', () => {
-    expect(voce).toMatch(/replyUntil = 0 \/\/ STOP/)
+  it('STOP taie și replica rămasă (închide fereastra + taie gura serverului)', () => {
+    expect(voce).toMatch(/replyUntil = 0\s*\n\s*stopVoice\(\)/)
   })
 })

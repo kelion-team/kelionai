@@ -1,102 +1,35 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { getSpeechLang, setSpeechLangPref, saveMessage, getBalance, debitWallet, recordCost, loadKv, saveKv, getVoiceprint, saveVoiceprint, getVoicePref, saveGuestVoice, latestPendingGuest } from '../db.js'
+import { getSpeechLang, setSpeechLangPref, saveMessage, getBalance, debitWallet, recordCost, loadKv, saveKv, getVoiceprint, saveVoiceprint, saveGuestVoice, latestPendingGuest } from '../db.js'
 import { grantUnlock, isArmed, hasUnlock, marcheazaVoce } from '../services/adminLock.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { trackSpeechLang } from '../services/lang.js'
-import { openaiRealtimeAnswer } from '../services/realtime.js'
-import { isQuotaError, alertOpenAiQuota } from '../services/openaiAlert.js'
 import { matchApprovedGuest, activeGuestWindow } from '../services/guestVoices.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { vectorDistance } from '../db.js'
 
-// ── LIVE VOICE (OpenAI Realtime) — THE NEW ARCHITECTURE (Adrian, Aug 1) ──────
-// The voice session is PURE EARS AND MOUTH (see services/realtime.ts). There
-// are NO voice tools and NO escalation endpoint here anymore: the ONE brain
-// (POST /api/chat — same pipeline, tools, escalation ladder and billing as
-// writing) thinks and acts; the Realtime model only transcribes and speaks the
-// brain's words.
+// ── LIVE VOICE — GOOGLE + GEMINI (OpenAI scos complet, Adrian 3 aug) ──────────
+// Sesiunea vocală rulează integral pe Google Chirp 3 (urechi, /api/asr-stream)
+// + Gemini (creierul unic /api/chat) + Chirp 3 HD (gura, sintetizată de server
+// și trimisă ca {audio}). NU mai există proxy SDP către OpenAI.
 //
 // Endpoints left, each with a single job:
-//   /api/realtime/session    : SDP proxy (start the WebRTC call, pin the voice
-//                              + transcription language, voice paywall).
-//   /api/realtime/tick       : per-minute billing of the Realtime connection.
+//   /api/realtime/session    : DEZACTIVAT — întoarce 410. Clientul nu mai
+//                              deschide nicio sesiune WebRTC OpenAI; ruta rămâne
+//                              doar ca un client vechi să primească un răspuns
+//                              clar, nu o pană de rețea.
+//   /api/realtime/tick       : per-minute billing of the live voice connection.
 //   /api/realtime/transcript : language anchoring + the voiceprint padlock
 //                              (voice unlock for admin). It does NOT save
 //                              messages — /api/chat owns the history now.
 export async function realtimeRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: { sdp?: string; language?: string; ears?: string } }>(
-    '/api/realtime/session',
-    async (req, reply) => {
-      const user = getSessionUser(req)
-      if (!user) return reply.code(401).send({ error: 'unauthorized' })
-
-      // VOICE PAYWALL (Jul 25): no credit → no session; the admin is exempt.
-      // Without a configured payment link, the app is free.
-      const isAdminPay = user.email.toLowerCase() === config.adminEmail
-      if (
-        config.revolut.payLink &&
-        !isAdminPay &&
-        (await getBalance(user.email)) <= 0
-      ) {
-        return reply.code(402).send({ error: 'no_credit' })
-      }
-
-      const raw = String(req.body?.sdp ?? '')
-      if (!raw.trim()) return reply.code(400).send({ error: 'bad_request: sdp required' })
-      // NO trim(): the SDP must end with \r\n — .trim() cut it and OpenAI's
-      // parser (pion) gave "unmarshal SDP: EOF" (the cause of "it can't hear me").
-      const offer = raw.endsWith('\n') ? raw : raw + '\r\n'
-
-      // LANGUAGE (Adrian, Jul 24 — FINAL rule: "default startup English; ADMIN =
-      // Romanian always; the rest of the users: detect and keep per user"). The
-      // ADMIN speaks fixed ROMANIAN — we pin the transcription to Romanian too.
-      // The rest: the PERSISTED language; none → EMPTY → English, then mirror.
-      const isAdmin = user.email.toLowerCase() === config.adminEmail
-      let lang: string
-      if (isAdmin) {
-        lang = 'ro'
-      } else {
-        lang = String((await getSpeechLang(user.email)) || '').slice(0, 2).toLowerCase()
-        if (!/^[a-z]{2}$/.test(lang)) lang = ''
-      }
-
-      // THE VOICE CHOSEN BY THIS PERSON, not one for everyone (Adrian, Jul 30).
-      const vocePref = await getVoicePref(user.email).catch(() => null)
-      // THE BIG STEP (Aug 1): 'chirp' = the live ears are Google Chirp 3 —
-      // this session is PURE MOUTH (no input transcription, no VAD).
-      const urechiChirp = String(req.body?.ears ?? '') === 'chirp'
-      const res = await openaiRealtimeAnswer(offer, lang, isAdmin, vocePref, urechiChirp)
-      if (!res.ok) {
-        // The REAL reason for the refusal goes into the log — otherwise F12
-        // shows only "502" and the diagnosis is blind (Adrian, Jul 24).
-        req.log.warn(
-          { upstreamStatus: res.status, upstreamError: res.error, sdpLen: offer.length, sdpHead: offer.slice(0, 40) },
-          'realtime upstream refusal',
-        )
-        // ACCOUNT WITHOUT CREDIT: notify the admin by email IMMEDIATELY.
-        if (isQuotaError(res.error)) alertOpenAiQuota()
-        const code = res.status === 503 ? 503 : 502
-        return reply.code(code).send({
-          error: 'realtime_upstream',
-          status: res.status,
-          code: res.code,
-          retryable: res.code !== 'realtime_not_configured' && res.code !== 'upstream_refuz',
-        })
-      }
-      // The client reads the response as text (SDP answer) → setRemoteDescription.
-      // THE TRANSCRIBE MODEL RIDES ALONG (frontend audit, Aug 2): the client's
-      // language anchor re-sends `session.update` with a transcription model,
-      // and it used to hardcode its own copy — silently overriding
-      // OPENAI_REALTIME_TRANSCRIBE_MODEL from the env on the first language
-      // commit. The header makes the server's config the single source.
-      return reply
-        .header('content-type', 'application/sdp')
-        .header('x-transcribe-model', config.openai.realtimeTranscribeModel)
-        .send(res.sdp)
-    },
+  // OPENAI SCOS COMPLET (Adrian, 3 aug: „OpenAI scos din toată aplicația").
+  // Nu se mai relayează niciun SDP către OpenAI. Ruta răspunde 410 „disabled"
+  // ca orice client rămas în urmă să afle clar, nu să pară o pană intermitentă.
+  app.post('/api/realtime/session', async (_req, reply) =>
+    reply.code(410).send({ error: 'realtime_disabled', code: 'realtime_not_configured', retryable: false }),
   )
 
   // VOICE BILLING BY THE MINUTE (Adrian, Jul 25): while voice is active, the

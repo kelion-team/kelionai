@@ -534,6 +534,57 @@ export default function AdminPanel({
       .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
   }
 
+  // ── ȘTERGE / CURĂȚĂ / REIA un ordin din coadă (Adrian, 3 aug: „scoate 30/31
+  //    dacă nu le poate face … aici nu apar butoane de ștergere"). Rutele existau
+  //    (db.ts → constructor.ts); aici sunt butoanele care le cheamă.
+  const refreshBuildJobs = (): void => {
+    fetch('/api/admin/constructor', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { jobs?: BuildJobRow[] } | null) => {
+        if (j?.jobs) setBuildJobs(j.jobs)
+      })
+      .catch(() => {})
+  }
+  const deleteBuildOrder = (id: number): void => {
+    if (!window.confirm(`Ștergi definitiv ordinul #${id}?`)) return
+    void fetch(`/api/admin/constructor/${id}`, { method: 'DELETE', credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(() => {
+        setBuildJobs((prev) => prev.filter((j) => j.id !== id))
+        setBuildMsg(`Ordinul #${id} șters.`)
+      })
+      .catch(() => setBuildMsg('Nu s-a putut șterge — reîncearcă.'))
+  }
+  const cleanBuildOrders = (): void => {
+    if (!window.confirm('Ștergi din coadă toate ordinele eșuate și terminate? (rămân doar cele în curs)')) return
+    void fetch('/api/admin/constructor/curata', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ scope: 'failed_done' }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { sterse?: number } | null) => {
+        refreshBuildJobs()
+        setBuildMsg(j ? `Curățat: ${j.sterse ?? 0} ordine șterse.` : 'Nu s-a putut curăța.')
+      })
+      .catch(() => setBuildMsg('Nu s-a putut curăța — reîncearcă.'))
+  }
+  const retryBuildOrder = (id: number): void => {
+    void fetch(`/api/admin/constructor/${id}/reia`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({}),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { ok?: boolean } | null) => {
+        refreshBuildJobs()
+        setBuildMsg(j?.ok ? `Ordinul #${id} repus în coadă.` : 'Nu s-a putut relua.')
+      })
+      .catch(() => setBuildMsg('Nu s-a putut relua — reîncearcă.'))
+  }
+
   // Tab „Recuperare” open → loads the saved recovery points.
   const loadRecovery = (): void => {
     setRecoveryLoading(true)
@@ -1499,7 +1550,20 @@ export default function AdminPanel({
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
-              <div className="fin-breakdown-head">Coada ordinelor</div>
+              <div className="fin-breakdown-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span>Coada ordinelor</span>
+                {buildJobs.some((j) => j.status === 'failed' || j.status === 'done') && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ fontSize: 12 }}
+                    onClick={cleanBuildOrders}
+                    title="Șterge din coadă toate ordinele eșuate și terminate (rămân doar cele în curs)"
+                  >
+                    Curăță eșuate/terminate
+                  </button>
+                )}
+              </div>
               {buildJobs.length === 0 && <div className="chat-hint">{A.noOrdersYet}</div>}
               {buildJobs.map((j) => (
                 <div className="fin-row" key={j.id}>
@@ -1523,15 +1587,40 @@ export default function AdminPanel({
                     {j.orderText.slice(0, 90)}
                     {j.orderText.length > 90 ? '…' : ''}
                   </span>
-                  <span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                     {j.prUrl && (
                       <a href={j.prUrl} target="_blank" rel="noreferrer">
                         PR ↗
                       </a>
                     )}
-                    {j.tokens > 0 && ` · ${Math.round(j.tokens / 1000)}k tok`}
-                    {' · '}
-                    {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {j.tokens > 0 && <span>{`· ${Math.round(j.tokens / 1000)}k tok`}</span>}
+                    <span style={{ opacity: 0.7 }}>
+                      · {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {/* REIA — doar pentru cele care nu sunt în curs (eșuat/GATA/în coadă). */}
+                    {(j.status === 'failed' || j.status === 'done' || j.status === 'queued') && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12 }}
+                        onClick={() => retryBuildOrder(j.id)}
+                        title="Repune ordinul în coadă (îl reia de la zero)"
+                      >
+                        ↻ reia
+                      </button>
+                    )}
+                    {/* ȘTERGE — un ordin viu ('running') nu se șterge din greșeală. */}
+                    {j.status !== 'running' && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, color: '#ff7a7a' }}
+                        onClick={() => deleteBuildOrder(j.id)}
+                        title="Șterge definitiv ordinul"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </span>
                 </div>
               ))}

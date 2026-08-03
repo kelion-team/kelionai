@@ -2,41 +2,36 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── PASUL MARE (Adrian, Aug 1: „faci acum pasul mare" + „Chirp 3 hd peste
-// tot") ─────────────────────────────────────────────────────────────────────
-// The LIVE full-duplex ears are Google Chirp 3 streaming; the OpenAI Realtime
-// session keeps ONE job: the mouth. Guards against anyone rewiring the ears
-// back to the weak transcription, dropping the shared gate, or billing input
-// audio to OpenAI again.
+// ── VOCE GOOGLE-ONLY (Adrian, 3 aug: „OpenAI scos din toată aplicația") ──────
+// Urechile live sunt Google Chirp 3 streaming; vocea BRUTĂ a frazei ajunge
+// nativ la creierul Gemini (câmpul `audio` din onPhrase → onAddressed →
+// /api/chat). Gura o sintetizează serverul (Chirp 3 HD, cadre {audio}). NU mai
+// există sesiune WebRTC OpenAI, nici proxy SDP, nici transcriere OpenAI.
+// Testele astea prind pe oricine ar recabla OpenAI înapoi în calea vocală.
 
 const voce = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)), 'utf8')
 const mic = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/micStream.ts', import.meta.url)), 'utf8')
 const serviciu = readFileSync(fileURLToPath(new URL('./services/realtime.ts', import.meta.url)), 'utf8')
 const ruta = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
 
-describe('client: urechile live sunt Chirp 3', () => {
-  it('clientul întreabă ÎNAINTE de sesiune dacă Chirp streaming există', () => {
-    expect(voce).toMatch(/urechiChirpDisponibile\(\)/)
+describe('client: urechile live sunt Chirp 3 (Google), fără OpenAI', () => {
+  it('sesiunea pornește urechea Chirp (startMicStream), NU o sesiune WebRTC', () => {
+    expect(voce).toMatch(/await startMicStream\(\{/)
+    expect(voce).not.toMatch(/RTCPeerConnection|addTransceiver|addTrack/)
   })
-  it('cu urechi Chirp, microfonul NU mai ajunge la OpenAI (gura e receive-only)', () => {
-    expect(voce).toMatch(/if \(urechiChirp\) \{\s*pc\.addTransceiver\('audio', \{ direction: 'recvonly' \}\)/)
-  })
-  it('fără Chirp, calea veche (addTrack + transcriere OpenAI) rămâne neatinsă', () => {
-    expect(voce).toMatch(/pc\.addTrack\(track, mic\)/)
-    expect(voce).toMatch(/input_audio_transcription\.completed/)
-  })
-  it('sesiunea spune serverului ce urechi are', () => {
-    expect(voce).toMatch(/ears: urechiChirp \? 'chirp' : 'openai'/)
+  it('vocea BRUTĂ a frazei ajunge NATIV la creierul Gemini (audio în onPhrase → onAddressed)', () => {
+    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
+    expect(voce).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
   })
   it('finalurile Chirp trec prin ACEEAȘI poartă (timbru → stop → nume)', () => {
-    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
-    expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,400}transcriptVerdict\(t, vf\)/)
+    expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,600}transcriptVerdict\(t, vf\)/)
   })
-  it('urechia moartă marchează și cade pe urechile OpenAI, fără bucle', () => {
+  it('fără ureche Chirp NU se deschide OpenAI — se aruncă, panoul cade pe dictarea nativă', () => {
     expect(voce).toMatch(/marcheazaUrechiChirpMoarte\(\)/)
+    expect(voce).toMatch(/throw new Error\('chirp_ear_unavailable'\)/)
     expect(mic).toMatch(/streamingAsrAvailable = false/)
   })
-  it('mute-ul ajunge la urechea Chirp (gura receive-only nu are sender de mic)', () => {
+  it('mute-ul ajunge la urechea Chirp (nu există sender de mic WebRTC)', () => {
     expect(voce).toMatch(/chirpEar\?\.setMuted\(muted\)/)
   })
 })
@@ -55,18 +50,19 @@ describe('micStream: urechea Chirp dă tot ce poarta cere', () => {
   })
 })
 
-describe('server: sesiunea pur-gură la urechi Chirp', () => {
-  it('ruta primește ears și îl duce la serviciu', () => {
-    expect(ruta).toMatch(/ears\?: string/)
-    expect(ruta).toMatch(/=== 'chirp'/)
-    expect(ruta).toMatch(/openaiRealtimeAnswer\(offer, lang, isAdmin, vocePref, urechiChirp\)/)
+describe('server: fără proxy OpenAI, doar Google + Gemini', () => {
+  it('ruta /api/realtime/session NU mai apelează OpenAI (openaiRealtimeAnswer a dispărut)', () => {
+    expect(ruta).not.toContain('openaiRealtimeAnswer')
+    expect(ruta).toMatch(/'\/api\/realtime\/session'[\s\S]{0,300}reply\.code\(410\)/)
   })
-  it('la urechi Chirp sesiunea NU mai are transcriere de input nici VAD', () => {
-    expect(serviciu).toMatch(/urechiChirp = false/)
-    expect(serviciu).toMatch(/\.\.\.\(urechiChirp\s*\?\s*\{\}\s*:\s*\{/)
+  it('rutele de facturare + transcript rămân intacte (nu le-a atins scoaterea OpenAI)', () => {
+    expect(ruta).toContain('/api/realtime/tick')
+    expect(ruta).toContain('/api/realtime/transcript')
   })
-  it('calea fallback păstrează transcrierea + semantic_vad', () => {
-    expect(serviciu).toMatch(/realtimeTranscribeModel/)
-    expect(serviciu).toMatch(/semantic_vad/)
+  it('serviciul realtime.ts nu mai are proxy SDP OpenAI, doar helperii puri', () => {
+    expect(serviciu).not.toContain('openaiRealtimeAnswer')
+    expect(serviciu).not.toMatch(/api\.openai\.com/)
+    expect(serviciu).toMatch(/export function realtimeInstructions/)
+    expect(serviciu).toMatch(/export function resolveVoice/)
   })
 })

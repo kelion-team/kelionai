@@ -428,6 +428,11 @@ interface BrainCredit {
       serving: boolean
       reason?: 'depleted' | 'quota' | 'error' | 'no_key'
       monthUsd?: number
+      /** Creditul pe care ownerul îl VEDE în AI Studio și-l spune o dată (Google
+       *  nu-l expune prin API). Afișat ca ATARE pe pastilă, cu data — cifra lui,
+       *  nu o măsurătoare. Absent → pastila arată „Gemini ✓/⚠". */
+      creditGbp?: number
+      creditAt?: string
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
@@ -1135,14 +1140,63 @@ export default function Stage({ user }: { user: User }) {
               <button
                 type="button"
                 className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
-                onClick={() => window.open('https://aistudio.google.com/billing', '_blank', 'noopener')}
+                onClick={() => {
+                  // Click = pui/actualizezi creditul pe care-l vezi în AI Studio.
+                  // Google nu-l dă prin API, deci îl arăt ca fiind SPUS DE TINE, cu
+                  // data. Gol → deschide pagina Google; „-" → șterge cifra.
+                  const g = brainCredit.gemini
+                  const curent = g?.creditGbp != null ? String(g.creditGbp) : ''
+                  const raspuns = window.prompt(
+                    'Creditul Gemini pe care îl vezi în AI Studio (£).\n' +
+                      'Google nu-l expune prin API, așa că-l arăt ca fiind spus de tine, cu data.\n\n' +
+                      'Scrie suma (ex: 10.88) · gol = deschide pagina Google · „-" = șterge cifra.',
+                    curent,
+                  )
+                  if (raspuns == null) return
+                  const val = raspuns.trim()
+                  if (val === '') {
+                    window.open('https://aistudio.google.com/billing', '_blank', 'noopener')
+                    return
+                  }
+                  const clear = val === '-'
+                  const gbp = clear ? null : Number(val.replace(',', '.'))
+                  if (!clear && !Number.isFinite(gbp)) return
+                  void fetch('/api/admin/gemini-credit', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ gbp }),
+                  })
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then(() =>
+                      setBrainCredit((prev) =>
+                        prev && prev.gemini
+                          ? {
+                              ...prev,
+                              gemini: {
+                                ...prev.gemini,
+                                creditGbp: clear ? undefined : (gbp as number),
+                                creditAt: new Date().toISOString(),
+                              },
+                            }
+                          : prev,
+                      ),
+                    )
+                    .catch(() => {})
+                }}
                 title={
-                  brainCredit.gemini?.serving
-                    ? adminStrings().gemPillLive.replace('{n}', (brainCredit.gemini.monthUsd ?? 0).toFixed(2))
-                    : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
+                  brainCredit.gemini?.creditGbp != null
+                    ? `Credit Gemini: £${brainCredit.gemini.creditGbp.toFixed(2)} — spus de tine${brainCredit.gemini.creditAt ? ' la ' + new Date(brainCredit.gemini.creditAt).toLocaleDateString('ro-RO') : ''} (Google nu-l dă prin API). Cheltuit luna asta: $${(brainCredit.gemini.monthUsd ?? 0).toFixed(2)}. Click ca să-l actualizezi.`
+                    : brainCredit.gemini?.serving
+                      ? adminStrings().gemPillLive.replace('{n}', (brainCredit.gemini.monthUsd ?? 0).toFixed(2))
+                      : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
                 }
               >
-                {brainCredit.gemini?.serving ? 'Gemini ✓' : 'Gemini ⚠'}
+                {brainCredit.gemini?.creditGbp != null
+                  ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}${brainCredit.gemini.serving ? '' : ' ⚠'}`
+                  : brainCredit.gemini?.serving
+                    ? 'Gemini ✓'
+                    : 'Gemini ⚠'}
               </button>
             )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS

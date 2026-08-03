@@ -1,18 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import jwt from 'jsonwebtoken'
 
-// ── GOOGLE CHIRP 3 HD = PRIMARY VOICE, OPENAI = STRICT RESERVE ──────────────
+// ── GOOGLE CHIRP 3 HD = SINGURA VOCE, OPENAI SCOS COMPLET (Adrian, 3 aug) ────
 //
-// Adrian, Aug 2: "openai ramine rezerva doar daca google pica" + "voce
-// masculina in orice limba". The old OpenAI-first order existed ONLY to sound
-// identical to the OpenAI Realtime live mouth — the live mouth is Google now,
-// so the reason died. OpenAI TTS burned $65 in 2 weeks; Chirp 3 HD has 1M
-// free characters/month and the service account is proven live.
+// Adrian, 3 aug: „OpenAI scos din toată aplicația". Rezerva OpenAI TTS a murit
+// (contul OpenAI a ars $65 în 2 săptămâni); Chirp 3 HD are 1M caractere/lună
+// gratis și serviciul e dovedit live.
 //
-// These tests guard the NEW order behaviorally (with a mocked fetch, in the
-// house style): Google is tried FIRST; a Google failure falls to OpenAI;
-// without Google it goes straight to OpenAI; a female style NEVER reaches the
-// API (rewritten to Charon); /api/tts/status returns booleans, never keys.
+// Aceste teste garantează comportamental noul ordin (cu fetch mock-uit, în
+// stilul casei): sinteza e DOAR pe Google; un eșec Google întoarce eroare
+// (NU se mai cade pe OpenAI); fără Google → 503, fără niciun apel; un stil
+// feminin NU ajunge NICIODATĂ la API (rescris la Charon); /api/tts/status
+// întoarce booleeni, niciodată chei.
 
 import { config } from './config.js'
 import { synthesize, googleTtsAvailable, ttsConfigured } from './services/tts.js'
@@ -71,8 +70,10 @@ function mockFetch(handler: (url: string) => Response): void {
   }))
 }
 
-describe('ordinul motoarelor: Google PRIMUL, OpenAI STRICT rezervă (Adrian, Aug 2)', () => {
-  it('cu ambele configurate, Google e încercat PRIMUL și OpenAI NU e atins', async () => {
+describe('GOOGLE-ONLY: Chirp 3 HD e singura voce, OpenAI SCOS complet (Adrian, 3 aug)', () => {
+  it('cu Google configurat, sintetizează pe Google și OpenAI NU e atins NICIODATĂ', async () => {
+    // Cheia OpenAI e prezentă în config, dar sinteza nu trebuie s-o atingă:
+    // OpenAI e scos din toată aplicația.
     mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : openaiOk()))
     const r = await synthesize('Bună ziua', 'ro')
     expect(r.ok).toBe(true)
@@ -81,27 +82,26 @@ describe('ordinul motoarelor: Google PRIMUL, OpenAI STRICT rezervă (Adrian, Aug
     expect(calls.map((c) => c.url).join()).not.toContain(OPENAI_URL)
   })
 
-  it('la eșec Google → cade pe rezerva OpenAI (nu rămâne mut)', async () => {
+  it('la eșec Google → EROARE onestă, FĂRĂ rezervă OpenAI (OpenAI nu se mai atinge)', async () => {
     mockFetch((u) => (u.includes(GOOGLE_URL) ? googleDown() : openaiOk()))
     const r = await synthesize('Bună ziua', 'ro')
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(r.engine).toBe('openai')
-    // ORDER in the call log: Google first, OpenAI second.
+    expect(r.ok).toBe(false)
+    // Doar apelul Google a fost făcut; OpenAI nu e chemat deloc.
+    expect(calls).toHaveLength(1)
     expect(calls[0].url).toContain(GOOGLE_URL)
-    expect(calls[1].url).toContain(OPENAI_URL)
-    expect(calls).toHaveLength(2)
+    expect(calls.map((c) => c.url).join()).not.toContain(OPENAI_URL)
   })
 
-  it('fără Google configurat → direct OpenAI, fără apel Google', async () => {
+  it('fără Google configurat → 503 tts_not_configured, NICIUN apel (nici la OpenAI)', async () => {
     config.googleTtsKey = ''
     config.googleServiceAccountJson = ''
+    // Cheia OpenAI rămâne setată — dar nu mai e o cale de sinteză.
     expect(googleTtsAvailable()).toBe(false)
+    expect(ttsConfigured()).toBe(false)
     mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : openaiOk()))
     const r = await synthesize('Bună ziua', 'ro')
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(r.engine).toBe('openai')
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toContain(OPENAI_URL)
+    expect(r).toEqual({ ok: false, status: 503, error: 'tts_not_configured' })
+    expect(calls).toHaveLength(0)
   })
 
   it('fără niciun motor → 503 tts_not_configured', async () => {

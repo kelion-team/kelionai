@@ -14,3 +14,6 @@ deploy/last-updates.txt
 
 # jscpd — rapoartele detectorului de duplicare
 .jscpd/
+
+# Claude Code agent worktrees (schele temporare, nu cod)
+.claude/worktrees/

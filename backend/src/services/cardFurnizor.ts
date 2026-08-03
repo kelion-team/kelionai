@@ -186,9 +186,19 @@ export async function cheltuieliAplicatiei(): Promise<ExpenseLine[]> {
       ...(m ? { cardPus: m.card, platiAutomate: m.automat } : {}),
     }
   }
+  // OpenRouter + OpenAI SCOASE din listă (Adrian, 3 aug: „setările sunt din
+  // openrouteri și celălalt, și asta se scoate" — migrare completă pe Gemini).
+  // Creierul, urechea, gura, vederea, imaginile, constructorul: toate pe cheia
+  // Gemini a ownerului. Rămân doar cardurile care CHIAR se schimbă în aplicație:
+  // Gemini (creier+voce+vedere), Serper (căutare web), Google (tier gratuit).
   return [
-    linie('OpenRouter', 'the central brain (AI models)', !!config.openrouter.key, 'your card', 'https://openrouter.ai/settings/credits'),
-    linie('OpenAI', 'the reserve voice and ears', !!config.openai.key, 'your card', 'https://platform.openai.com/settings/organization/billing/overview'),
+    linie(
+      'Gemini',
+      'the brain, ears, mouth and eyes (all Kelion)',
+      !!config.geminiKey,
+      'your card',
+      'https://aistudio.google.com/billing',
+    ),
     linie('Serper', 'the web search', !!config.serperKey, 'your card', 'https://serper.dev/dashboard'),
     linie(
       'Google',

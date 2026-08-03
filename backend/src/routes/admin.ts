@@ -35,6 +35,8 @@ import {
   atribuiePlataNeatribuita,
   ignoraPlataNeatribuita,
   getGeminiMonthUsd,
+  loadKv,
+  saveKv,
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -305,7 +307,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost, geminiState] = await Promise.all([
+    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       resurseGazda(),
@@ -318,14 +320,31 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // from Serper's /account endpoint. Also cached 5 min in the service.
       getSerperBalance(),
       // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd că am bani la gemini").
-      // Creditul prepay real (£11.58) NU e expus de niciun API Google — verificat
-      // 3 aug. Deci: (1) starea LIVE — un ping mic la Gemini spune dacă cheia
-      // Tier 2 servește (200 = ai credit + merge; „depleted" = epuizat), cache
-      // 5 min; (2) cheltuiala REALĂ pe luna curentă din jurnalul nostru
-      // (cost_events kind='gemini'). Amândouă măsurate, niciun număr inventat.
+      // Creditul promoțional (£10.88) NU e expus de niciun API Google (nici
+      // Cloud Billing nu are „credit balance") — deci nu-l pot CITI, nu-l pot
+      // inventa (regula #1). Ce arăt sunt DOUĂ măsurători + o valoare pe care o
+      // spui TU: (1) starea LIVE — un ping mic zice dacă cheia Tier 2 servește
+      // (200 = ai credit + merge; „depleted" = epuizat); (2) cheltuiala REALĂ pe
+      // luna curentă (cost_events kind='gemini'); (3) `creditGbp` — cifra pe care
+      // o vezi în AI Studio și mi-o dai o dată (kv 'gemini:credit'), afișată ca
+      // ATARE, cu data, fiindcă Google n-o dă automat. A ta, nu inventată de mine.
       getGeminiMonthUsd(),
       geminiLive(),
+      loadKv('gemini:credit'),
     ])
+    // Creditul „spus de owner" — citit onest din kv. Dacă lipsește sau e stricat,
+    // rămâne undefined (pastila arată ✓/⚠, nu o cifră falsă).
+    let geminiCreditGbp: number | undefined
+    let geminiCreditAt: string | undefined
+    try {
+      const c = geminiCreditRaw ? (JSON.parse(geminiCreditRaw) as { gbp?: number; at?: string }) : null
+      if (c && Number.isFinite(c.gbp) && (c.gbp as number) >= 0) {
+        geminiCreditGbp = c.gbp
+        geminiCreditAt = typeof c.at === 'string' ? c.at : undefined
+      }
+    } catch {
+      /* kv stricat → „nu știu", niciodată un zero fals */
+    }
     return reply.send({
       active: 'openrouter',
       // ── THE VPS, PERMANENTLY IN THE BAR (Adrian, 31 Jul: "permanently show
@@ -381,9 +400,33 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         serving: geminiState.serving,
         reason: geminiState.reason,
         monthUsd: geminiCost.ok ? geminiCost.monthUsd : undefined,
+        // Creditul spus de owner (GBP) + când. Afișat ca ATARE pe pastilă.
+        creditGbp: geminiCreditGbp,
+        creditAt: geminiCreditAt,
       },
       pool,
     })
+  })
+
+  // ── CREDITUL GEMINI SPUS DE OWNER (Adrian, 3 aug: „gemini nu e afișată
+  //    valoarea pe aplicație", cu poza £10.88 din AI Studio) ─────────────────
+  // Google NU expune creditul promoțional prin niciun API — deci nu-l pot citi
+  // și n-am voie să-l inventez (regula #1). Soluția onestă: îl spui O DATĂ (aici
+  // sau prin Kelion în chat), se salvează cu data, și pastila îl arată ca ATARE
+  // — cifra TA, nu o măsurătoare. `gbp` gol/negativ/absent → șterge ancora
+  // (pastila revine la ✓/⚠), niciodată un zero fals.
+  app.post<{ Body: { gbp?: number | string | null } }>('/api/admin/gemini-credit', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const raw = req.body?.gbp
+    const n = typeof raw === 'string' ? Number(raw.replace(',', '.').trim()) : raw
+    if (raw == null || raw === '' || !Number.isFinite(n) || (n as number) < 0) {
+      await saveKv('gemini:credit', '').catch(() => {})
+      return reply.send({ ok: true, cleared: true })
+    }
+    const at = new Date().toISOString()
+    await saveKv('gemini:credit', JSON.stringify({ gbp: n, at, by: user.email }))
+    return reply.send({ ok: true, gbp: n, at })
   })
 
   // The REAL OpenAI spend, month-to-date (admin only) — the provider's own
