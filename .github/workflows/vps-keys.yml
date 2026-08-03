@@ -12,10 +12,13 @@
 #   KIMI_KEY           — cheia Kimi for Coding (dacă vrei s-o scrii/rotești)
 #   GLM_KEY            — cheia GLM Coding Plan
 #   VPS_GITHUB_TOKEN   — token GitHub fin-granulat pentru VPS
+#   OPENAI_USAGE_KEY   — cheia Admin OpenAI (sk-admin-…) pentru /v1/organization/costs
 #
 # Scrie pe VPS exact în fișierele pe care le citește workerul:
 #   /root/kelion/kimi-key.txt · /root/kelion/glm-key.txt ·
 #   /root/kelion/github-token.txt
+# iar OPENAI_USAGE_KEY în env-file-ul aplicației (/root/kelion/kelionai.env),
+# fiindcă openaiCosts.ts o citește din process.env.OPENAI_USAGE_KEY.
 name: vps-keys
 
 on:
@@ -25,7 +28,7 @@ on:
         description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
         type: choice
-        options: [kimi, glm, github, all]
+        options: [kimi, glm, github, openai_usage, all]
 
 jobs:
   put:
@@ -39,6 +42,7 @@ jobs:
           KIMI_KEY: ${{ secrets.KIMI_KEY }}
           GLM_KEY: ${{ secrets.GLM_KEY }}
           GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
+          OPENAI_USAGE_KEY: ${{ secrets.OPENAI_USAGE_KEY }}
           WHICH: ${{ inputs.which }}
         run: |
           set -euo pipefail
@@ -71,9 +75,27 @@ jobs:
               'cat > /root/kelion/github-token.txt && chmod 600 /root/kelion/github-token.txt && echo "github-token.txt scris: $(wc -c < /root/kelion/github-token.txt) octeti"'
           fi
 
+          if want openai_usage; then
+            # Cheia Admin OpenAI (sk-admin-…) merge în ENV-FILE, nu într-un .txt,
+            # fiindcă openaiCosts.ts o citește din process.env.OPENAI_USAGE_KEY.
+            # Dedup: ștergem orice linie veche OPENAI_USAGE_KEY= și adăugăm una singură.
+            [ -n "$OPENAI_USAGE_KEY" ] || { echo "::error::secretul OPENAI_USAGE_KEY lipsește"; exit 1; }
+            printf '%s' "$OPENAI_USAGE_KEY" | sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
+              'K=$(cat); F=/root/kelion/kelionai.env; touch "$F";
+               grep -v "^OPENAI_USAGE_KEY=" "$F" > "$F.tmp" 2>/dev/null || true; mv "$F.tmp" "$F";
+               printf "OPENAI_USAGE_KEY=%s\n" "$K" >> "$F"; chmod 600 "$F";
+               echo "OPENAI_USAGE_KEY scris in kelionai.env: ${#K} octeti (linii OPENAI_USAGE_KEY: $(grep -c "^OPENAI_USAGE_KEY=" "$F"))"'
+          fi
+
 
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
           sshpass -e ssh $SSHOPTS root@"$VPS_HOST" \
             'for f in /root/kelion/kimi-key.txt /root/kelion/glm-key.txt /root/kelion/github-token.txt; do
                if [ -f "$f" ]; then echo "$f: $(wc -c < "$f") octeti, permisiuni $(stat -c %a "$f")"; else echo "$f: LIPSĂ"; fi
-             done'
+             done
+             F=/root/kelion/kelionai.env
+             if [ -f "$F" ] && grep -q "^OPENAI_USAGE_KEY=" "$F"; then
+               echo "kelionai.env: OPENAI_USAGE_KEY prezent ($(awk -F= "/^OPENAI_USAGE_KEY=/{print length(\$2)}" "$F") octeti valoare)"
+             else
+               echo "kelionai.env: OPENAI_USAGE_KEY LIPSĂ"
+             fi'
