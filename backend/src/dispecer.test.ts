@@ -149,18 +149,19 @@ describe('chat.ts chiar folosește dispecerul', () => {
 })
 
 describe('latența (Adrian: timpi exceptionali de mari)', () => {
-  it('tururile ușoare aleargă în PARALEL — primul răspuns bun câștigă', () => {
+  it('tururile ușoare rămân pe drumul rapid — primul răspuns bun câștigă', () => {
     expect(chat).toMatch(/!heavyTurn && !turnHasImage/)
-    expect(chat).toMatch(/slice\(0, 3\)/)
     // Aug 2, măsurat live: Promise.all aștepta și concurentul MORT (18,6s la
     // chit-chat). Cursa se închide la primul răspuns bun — vezi services/cursa.ts.
     expect(chat).toMatch(/primulCastigator\(curse\)/)
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
-  it('Gemini direct e PRIMUL concurent, apoi rezerva rapidă nemotron (3 aug)', () => {
-    // Gemini întâi (calitatea românei, 1-3s); imediat după, rezerva rapidă
-    // (nemotron, config.openrouter.topDefault) înaintea pool-ului free lent.
-    expect(chat).toMatch(/new Set\(\[[\s\S]{0,240}geminiDirectAvailable\(\) && eSanatos\(geminiLightRace\)[\s\S]{0,300}rezervaRapida/)
+  it('cursa e DOAR Gemini — rivalii :free OpenRouter au ieșit (3 aug seara)', () => {
+    // Auditul multi-agent a prins cursa lansând până la 2 rivali :free din
+    // catalogul OpenRouter la fiecare tură ușoară publică — furnizorul scos.
+    // Acum: un singur drum rapid, Gemini; restul cade pe calea secvențială.
+    expect(chat).toMatch(/const concurenti =\s*\n?\s*geminiDirectAvailable\(\) && eSanatos\(geminiLightRace\) \? \[geminiLightRace\] : \[\]/)
+    expect(chat).not.toMatch(/candidatiFree/)
   })
   it('concurenții NU primesc unelte (fără dublă execuție)', () => {
     expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)

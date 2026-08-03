@@ -164,12 +164,15 @@ describe('LACĂT — Gemini pică → răspunde pe rezerva reală (nu „Try aga
     expect(chat.includes('[CHAT-IN]')).toBe(true)
   })
 
-  it('rezerva rapidă = nemotron (topDefault) în cursa ușoară, nu gemma lent', () => {
-    // Adrian, 3 aug: „fă cota de rezervă nemotron rapid". Când Gemini e jos, chatul
-    // simplu cade pe nemotron (~6s), nu pe gemma (~25s → cei 27s).
-    expect(/rezervaRapida = config\.openrouter\.topDefault/.test(chat)).toBe(true)
-    // Rezerva rapidă intră în concurenții cursei, dedus cu Set.
-    expect(/new Set\(\[[\s\S]{0,400}rezervaRapida/.test(chat)).toBe(true)
+  it('cursa ușoară e DOAR Gemini — niciun rival OpenRouter (3 aug seara, bate ordinul de dimineață)', () => {
+    // Dimineața: „rezerva rapidă nemotron". Seara, cu mailurile „sold scăzut
+    // $-0.20" în mână: „openrouter scos din toată aplicația" + „verifică cu
+    // toți agenții că folosește doar gemini". Ordinul din urmă câștigă:
+    // cursa nu mai are rivali :free; punga de rezervă plătită e închisă.
+    expect(/const concurenti =\s*\n?\s*geminiDirectAvailable\(\) && eSanatos\(geminiLightRace\) \? \[geminiLightRace\] : \[\]/.test(chat)).toBe(true)
+    expect(/rezervaRapida/.test(chat)).toBe(false)
+    // Punga de rezervă (modele OpenRouter PLĂTITE) — închisă definitiv.
+    expect(/async function rezervaDeschisa\(\): Promise<boolean> \{[\s\S]{0,900}?return false\s*\n\}/.test(chat)).toBe(true)
   })
 })
 
