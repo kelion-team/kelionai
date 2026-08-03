@@ -313,6 +313,9 @@ export default function ChatPanel({
   // turn — "guest:<id>:<name> (<relation>)" / "guest-pending:...". It rides
   // with exactly ONE send() (the turn it belongs to), then clears.
   const pendingSpeakerRef = useRef<string | null>(null)
+  // AUDIO NATIV → CREIER (Adrian, 3 aug): vocea BRUTĂ a frazei vocale curente,
+  // pusă de onAddressed și citită de send(), ca să ajungă la creierul care aude.
+  const pendingAudioRef = useRef<string | null>(null)
   // Synchronous guard against overlapping turns. `busy` state lags a render, so
   // two voice utterances firing in the same tick could both start a stream and
   // fragment the reply ("chat starts from several parts"). This ref locks now.
@@ -962,6 +965,9 @@ export default function ChatPanel({
     // The guest label set by the voice gate (null for the holder / typed turns).
     const speaker = pendingSpeakerRef.current ?? undefined
     pendingSpeakerRef.current = null
+    // Vocea brută a acestei ture (dacă a venit pe voce cu audio nativ).
+    const nativeAudio = pendingAudioRef.current ?? undefined
+    pendingAudioRef.current = null
     // The facial descriptor READY in the background (if the camera is on and it caught a
     // face). Instant — it waits for no inference, it doesn't slow down the send.
     const face = getPendingFaceDescriptor()
@@ -1044,6 +1050,9 @@ export default function ChatPanel({
         // GUEST SPEAKER (the voice gate's verdict): the server strips ALL admin
         // powers from this turn, whoever is logged in.
         speaker,
+        // AUDIO NATIV → CREIER: vocea brută a frazei (WAV), pentru creierul care
+        // aude nativ (Gemini). Gol pe turele scrise.
+        nativeAudio,
       )) {
         if (!firstAt && chunk && chunk.trim()) firstAt = performance.now() // first REAL word
         acc += chunk
@@ -1297,9 +1306,11 @@ export default function ChatPanel({
             // (speaker check, like on the STT dictation path); the second
             // argument marks the turn as spoken so the server shapes the reply
             // for speech (clean sentences, no markdown tables).
-            onAddressed: (text, vf, speaker) => {
+            onAddressed: (text, vf, speaker, audio) => {
               setPendingVoiceFeatures(vf)
               pendingSpeakerRef.current = speaker ?? null
+              // AUDIO NATIV: vocea brută a frazei merge la creier prin send().
+              pendingAudioRef.current = audio ?? null
               void sendRef.current(text, true)
             },
             // NO onToolCall (Aug 1 — one brain): the voice session has NO tools

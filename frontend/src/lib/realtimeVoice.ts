@@ -71,7 +71,7 @@ export interface RealtimeVoiceOpts {
    * send() — identical to a typed message. `vf` is the voiceprint of the
    * utterance (speaker verification, same as on the STT path).
    */
-  onAddressed?: (text: string, vf: VoiceFeatures | null, speaker?: string) => void
+  onAddressed?: (text: string, vf: VoiceFeatures | null, speaker?: string, audio?: string) => void
   /**
    * The VAD heard speech start while Kelion was SILENT (never while he
    * speaks — echo protection; a real talk-over still cuts his speech the
@@ -346,7 +346,7 @@ export async function startRealtimeVoice(
     let anchoredLang = ''
     let ancoreazaLimba: (lang: string) => void = () => {}
     let taieGura: () => void = () => {}
-    const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null): void => {
+    const poartaDupaTranscript = (t: string, vf: VoiceFeatures | null, audio?: string): void => {
       // THE TIMBRE GATE IS AWAITED (Adrian, Aug 1: "dacă nu-mi identifică
       // vocea, trebuie să ignore ce aude — femei, bărbați, tv, radio").
       // NOTHING leaves for the brain before the server says WHO is speaking.
@@ -393,7 +393,7 @@ export async function startRealtimeVoice(
         const answering = Date.now() < replyUntil
         if (named || answering) {
           replyUntil = 0
-          onAddressed?.(t, vf, speaker)
+          onAddressed?.(t, vf, speaker, audio)
         }
       })()
     }
@@ -408,9 +408,9 @@ export async function startRealtimeVoice(
       startMicStream({
         preWarmedStream: mic,
         onLive: (t) => onUserTranscript?.(t, false),
-        onPhrase: (t, vf) => {
+        onPhrase: (t, vf, audio) => {
           onUserTranscript?.(t, true)
-          poartaDupaTranscript(t, vf)
+          poartaDupaTranscript(t, vf, audio)
         },
         onError: (reason) => {
           if (closed) return

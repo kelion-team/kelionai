@@ -131,7 +131,7 @@ export interface MicStreamOpts {
   onLive: (text: string) => void
   // the whole utterance, on pause > 3s → sent to the brain; the utterance's
   // voice features ride along (the full-duplex timbre gate needs them directly)
-  onPhrase: (text: string, features: VoiceFeatures | null) => void
+  onPhrase: (text: string, features: VoiceFeatures | null, audio?: string) => void
   onError: (reason: string) => void
   getLang: () => string
   // voice was heard while Kelion spoke → barge-in (cuts Kelion's voice)
@@ -172,6 +172,50 @@ function floatToPcm16(input: Float32Array): ArrayBuffer {
     out[i] = s < 0 ? s * 0x8000 : s * 0x7fff
   }
   return out.buffer
+}
+
+// AUDIO NATIV → CREIER (Adrian, 3 aug): împachetează cadrele PCM 16kHz (Float32)
+// ale frazei într-un WAV mono 16-bit, ca data-URI base64 — exact formatul dovedit
+// că Gemini îl „aude" nativ (feasibilitate confirmată pe server). Returnează ''
+// dacă nu e destul audio; orice eroare cade grațios (fraza pleacă doar cu text).
+const MAX_PHRASE_SAMPLES = TARGET_RATE * 30 // cap la ~30s de voce (memorie/upload)
+function wavDataUri16k(chunks: Float32Array[]): string {
+  let total = 0
+  for (const c of chunks) total += c.length
+  if (total < TARGET_RATE / 10) return '' // sub ~0.1s = nimic util
+  const pcm = new Int16Array(total)
+  let o = 0
+  for (const c of chunks) {
+    for (let i = 0; i < c.length; i++) {
+      const s = Math.max(-1, Math.min(1, c[i]))
+      pcm[o++] = s < 0 ? s * 0x8000 : s * 0x7fff
+    }
+  }
+  const bytes = new Uint8Array(44 + pcm.byteLength)
+  const dv = new DataView(bytes.buffer)
+  const wr = (off: number, s: string): void => {
+    for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i))
+  }
+  wr(0, 'RIFF')
+  dv.setUint32(4, 36 + pcm.byteLength, true)
+  wr(8, 'WAVE')
+  wr(12, 'fmt ')
+  dv.setUint32(16, 16, true)
+  dv.setUint16(20, 1, true) // PCM
+  dv.setUint16(22, 1, true) // mono
+  dv.setUint32(24, TARGET_RATE, true)
+  dv.setUint32(28, TARGET_RATE * 2, true) // byte rate
+  dv.setUint16(32, 2, true) // block align
+  dv.setUint16(34, 16, true) // bits
+  wr(36, 'data')
+  dv.setUint32(40, pcm.byteLength, true)
+  bytes.set(new Uint8Array(pcm.buffer), 44)
+  let bin = ''
+  const CH = 0x8000 // base64 în bucăți (evită „Maximum call stack" pe buffere mari)
+  for (let i = 0; i < bytes.length; i += CH) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CH))
+  }
+  return `data:audio/wav;base64,${btoa(bin)}`
 }
 
 // linear downsampling (ctx.sampleRate → 16kHz) — enough for voice
@@ -297,6 +341,10 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let phraseZcrSum = 0
   let phraseEnergySum = 0
   let phraseFrames = 0
+  // AUDIO NATIV: cadrele PCM 16kHz ale frazei curente, adunate ca să fie trimise
+  // ca voce BRUTĂ la creier (Gemini) la închiderea frazei.
+  let phrasePcm: Float32Array[] = []
+  let phrasePcmLen = 0
 
   const collectFrame = (): void => {
     featAnalyser.getFloatTimeDomainData(featTimeBuf)
@@ -330,6 +378,8 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   }
 
   const resetFeatures = (): void => {
+    phrasePcm = []
+    phrasePcmLen = 0
     phraseF0.length = 0
     phraseEnergies.length = 0
     phraseCentroidSum = 0
@@ -354,7 +404,16 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (text) {
       const features = finalizeFeatures()
       if (features && opts.storePendingFeatures !== false) setPendingVoiceFeatures(features)
-      opts.onPhrase(text, features)
+      // AUDIO NATIV: vocea BRUTĂ a frazei (WAV 16kHz) pentru creierul care aude
+      // nativ. Orice eroare de împachetare cade grațios → fraza pleacă doar cu
+      // text (comportamentul de dinainte), nu se rupe nimic.
+      let audio: string | undefined
+      try {
+        audio = wavDataUri16k(phrasePcm) || undefined
+      } catch {
+        audio = undefined
+      }
+      opts.onPhrase(text, features, audio)
     }
     resetFeatures()
   }
@@ -542,6 +601,13 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
     if (!lastVoiceAt || now - lastVoiceAt > TAIL_MS) return
     collectFrame()
     const ds = downsample(input, ctx.sampleRate)
+    // AUDIO NATIV: adună aceleași cadre 16kHz care merg la Chirp, ca să le trimitem
+    // ca voce brută la creier la finalul frazei. Copie — bufferul de intrare se
+    // reciclează între apeluri; fără copie am stoca zgomot.
+    if (phrasePcmLen < MAX_PHRASE_SAMPLES) {
+      phrasePcm.push(new Float32Array(ds))
+      phrasePcmLen += ds.length
+    }
     try {
       ws.send(floatToPcm16(ds))
       framesSent++
