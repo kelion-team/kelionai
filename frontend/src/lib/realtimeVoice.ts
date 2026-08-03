@@ -421,6 +421,11 @@ export async function startRealtimeVoice(
         },
         getLang: () => anchoredLang || opts.language || '',
         onSpeechBegin,
+        // BARGE-IN LOCAL (Adrian, 3 aug): cât Kelion vorbește, urechea e mută pt
+        // anti-ecou, deci serverul NU trimite speech_begin (n-are audio). Detecția
+        // locală din micStream (voce clară susținută peste redare) taie AICI vocea
+        // lui Kelion — aceeași acțiune ca speech_begin.
+        onBargeIn: onSpeechBegin,
         storePendingFeatures: false,
       })
 
