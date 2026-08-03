@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { v2, protos } from '@google-cloud/speech'
 import { getSessionUser } from '../session.js'
-import { recordCost } from '../db.js'
+import { recordCost, getSpeechLang } from '../db.js'
 import { ASR_USD_PER_CALL } from '../services/cost.js'
 import { normalizeLang } from '../services/tts.js'
 import {
@@ -145,6 +145,23 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     let started = false
     let closed = false
     let langHint = ''
+    // LIMBA CUNOSCUTĂ A USERULUI — rezerva pentru chirp_3 când clientul nu trimite
+    // un hint valid, ca să NU cădem pe 'auto' (care stâlcea româna — Adrian, 3 aug).
+    // Adminul e mereu 'ro'. Ceilalți useri primesc limba lor STOCATĂ (getSpeechLang
+    // — aceeași sursă ca i18n și calea realtime): odată ce limba unui user e
+    // stabilită (2 mesaje → salvată per-user), urechea lui e corectă chiar dacă
+    // hint-ul clientului lipsește. Doar un user NOU, fără limbă încă stabilită,
+    // rămâne pe 'auto' (nu-i știm încă limba). Citită o dată, la conectare.
+    let userLangFallback = user.role === 'admin' ? 'ro' : ''
+    if (user.role !== 'admin') {
+      void getSpeechLang(user.email)
+        .then((l) => {
+          userLangFallback = String(l ?? '').slice(0, 5)
+        })
+        .catch(() => {
+          /* fără limbă stocată → rămâne '' (auto) */
+        })
+    }
     // Keepalive + transparent reconnect state (Aug 2 — see the header block).
     let keepalive: ReturnType<typeof setInterval> | null = null
     let ultimulAudioLa = 0 // last time ANY frame (voice or silence) went to Google
@@ -323,16 +340,15 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
           if (m.type === 'start') {
             const raw = String(m.lang ?? '').trim()
             const clientLang = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(raw) ? normalizeLang(raw) : ''
-            // ADMINUL → limba lui pe SERVER, niciodată 'auto' (Adrian, 3 aug:
-            // chirp_3 pe 'auto' stâlcea româna — „E surt hanspuskelion"). Dacă
-            // hint-ul clientului lipsește sau e greșit, adminul primește 'ro-RO',
-            // nu 'auto' (consistent cu calea realtime, realtime.ts:57-62).
-            // Ceilalți useri își păstrează hint-ul (sau 'auto' dacă nu trimit).
-            langHint = user.role === 'admin' ? clientLang || normalizeLang('ro') : clientLang
+            // Limba pentru chirp_3: întâi hint-ul clientului; dacă lipsește, limba
+            // CUNOSCUTĂ a userului (admin → 'ro', ceilalți → limba lor stocată), ca
+            // să NU cădem pe 'auto' (care stâlcea româna — „E surt hanspuskelion").
+            // Un user nou, fără limbă stabilită, ajunge pe 'auto' (nu-i știm limba).
+            langHint = clientLang || (userLangFallback ? normalizeLang(userLangFallback) : '')
             // Log de diagnostic: ce limbă folosește Chirp de fapt (măsurabil pe
             // următoarea încercare reală — 'auto' vs 'ro-RO' — fără a ghici).
             app.log.info(
-              `asr-stream: limbă = ${langHint || 'auto'} (rol=${user.role}, hint client='${raw}')`,
+              `asr-stream: limbă = ${langHint || 'auto'} (rol=${user.role}, hint client='${raw}', stocat='${userLangFallback}')`,
             )
             startGoogle()
           } else if (m.type === 'stop') {
