@@ -30,7 +30,7 @@ on:
         description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
         type: choice
-        options: [kimi, glm, github, openai_usage, all]
+        options: [kimi, glm, github, openai_usage, gemini, all]
 
 jobs:
   put:
@@ -45,6 +45,7 @@ jobs:
           GLM_KEY: ${{ secrets.GLM_KEY }}
           GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
           OPENAI_USAGE_KEY: ${{ secrets.OPENAI_USAGE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WHICH: ${{ inputs.which }}
         run: |
           set -euo pipefail
@@ -89,6 +90,23 @@ jobs:
                echo "OPENAI_USAGE_KEY scris in kelionai.env: ${#K} octeti (linii OPENAI_USAGE_KEY: $(grep -c "^OPENAI_USAGE_KEY=" "$F"))"'
           fi
 
+
+          if want gemini; then
+            # Cheia Gemini (AI Studio) în ENV-FILE — config.ts o citește din
+            # process.env.GEMINI_API_KEY. Dedup, apoi TEST DE TIER pe loc: dacă
+            # proiectul e plătit (Tier 2), apelul dă HTTP 200; dacă e tot free și
+            # cota e atinsă, dă 429 „free_tier". Cheia rămâne mascată — arătăm doar
+            # statusul + eventual metrica de cotă, niciodată valoarea.
+            [ -n "$GEMINI_API_KEY" ] || { echo "::error::secretul GEMINI_API_KEY lipsește (Settings → Secrets → Actions → GEMINI_API_KEY)"; exit 1; }
+            printf '%s' "$GEMINI_API_KEY" | ssh $SSHOPTS root@"$VPS_HOST" \
+              'K=$(cat); F=/root/kelion/kelionai.env; touch "$F";
+               grep -v "^GEMINI_API_KEY=" "$F" > "$F.tmp" 2>/dev/null || true; mv "$F.tmp" "$F";
+               printf "GEMINI_API_KEY=%s\n" "$K" >> "$F"; chmod 600 "$F";
+               echo "GEMINI_API_KEY scris in kelionai.env: ${#K} octeti";
+               echo "--- TEST TIER (200 = merge / platit; 429 free_tier = inca free) ---";
+               curl -sS -o /tmp/gt.json -w "HTTP %{http_code}\n" "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$K" -H "Content-Type: application/json" -d "{\"contents\":[{\"parts\":[{\"text\":\"hi\"}]}]}";
+               echo "semnal cota:"; grep -oE "free_tier|RESOURCE_EXHAUSTED|GenerateRequestsPerDay[A-Za-z]*|quotaValue[^}]*" /tmp/gt.json | head -4 || echo "(fara 429 — probabil 200, merge)"'
+          fi
 
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
           ssh $SSHOPTS root@"$VPS_HOST" \
