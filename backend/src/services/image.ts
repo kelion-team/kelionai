@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
-import { openrouterImage } from './openrouter.js'
+import { geminiImage } from './geminiDirect.js'
 
 // Generated images — persisted in the DB, with a level-1 cache in memory.
-// Generation goes through OpenRouter (the same key as the brain), not through
-// Gemini direct: "2 keys, period" (Adrian). See services/openrouter.ts
-// openrouterImage.
+// Generation runs on the owner's Gemini key (Adrian, 3 aug: OpenRouter removed
+// entirely) — Imagen, then the Gemini image model. See services/geminiDirect.ts
+// geminiImage.
 interface StoredImage {
   mime: string
   buf: Buffer
@@ -50,9 +50,10 @@ export type ImageResult = { id: string; mime: string; costUsd: number } | { erro
 export async function generateImage(prompt: string): Promise<ImageResult> {
   const p = prompt.trim()
   if (!p) return { error: 'empty_prompt' }
-  const r = await openrouterImage(p)
+  const r = await geminiImage(p)
   if ('error' in r) return { error: r.error }
-  // The REAL cost of the generation travels WITH the image (OpenRouter's own
-  // usage.cost) — the caller books exactly this, not a hand-typed flat rate.
+  // The cost travels WITH the image (geminiImage reports 0 — Google's key
+  // meters no per-call cost here). The caller books exactly this figure, never
+  // a hand-typed flat rate.
   return { id: await put(r.mime, r.buf), mime: r.mime, costUsd: r.costUsd }
 }
