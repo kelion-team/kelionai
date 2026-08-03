@@ -947,6 +947,14 @@ async function main() {
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
+  // CONTABILITATEA DE COST — DECLARATĂ AICI, în scope-ul lui `report`, NU în
+  // try (bug dovedit live, 3 aug, ordinele #32/#34: `let` în try + `report`
+  // definit în afara lui → „ReferenceError: tokensPaid is not defined" FIX în
+  // report(), DUPĂ ce PR-ul fusese deschis — jobul rămânea „running" deși
+  // munca era gata, se relua de 3 ori și părea eșuat cu PR-ul deschis).
+  let tokensPaid = 0
+  let costUsd = 0
+  let costMasurat = false
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
@@ -980,13 +988,8 @@ async function main() {
       { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
     ]
     let tokens = 0
-    // CONTABILITATEA DE COST (2 aug): separat pe creierul PLĂTIT. Doar apelurile
-    // servite de un model non-:free (în practică: Fable 5, doar la ordin marcat)
-    // intră în tokensPaid; costul în USD vine din `usage.cost` al OpenRouter și
-    // se raportează DOAR măsurat (costMasurat) — zero estimări, zero fabricație.
-    let tokensPaid = 0
-    let costUsd = 0
-    let costMasurat = false
+    // (tokensPaid / costUsd / costMasurat sunt declarate SUS, lângă `report` —
+    // vezi comentariul de acolo; aici doar se incrementează.)
     let finish = null
     // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
     // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio
