@@ -817,9 +817,19 @@ function aleBuclei(jobs: BuildJob[]): BuildJob[] {
   return jobs.filter((j) => String(j.orderedBy ?? '').toLowerCase().startsWith('kelion'))
 }
 
-/** Did all recent orders fail? Then we don't hand out the eleventh one the same way. */
-function zidul(jobs: BuildJob[]): { blocat: boolean; cate: number; cauza: string } {
-  const ale = aleBuclei(jobs).filter((j) => j.status === 'done' || j.status === 'failed')
+/** Did all recent orders fail? Then we don't hand out the eleventh one the same way.
+ *
+ *  `granita` = the highest loop-job id at the moment the LAST wall fell. The
+ *  streak counts ONLY orders newer than it. Without the boundary the wall was
+ *  a deadlock, measured live (2-3 aug): the historical streak of failures
+ *  never changes on a new sha, so every world change burned one diagnostic
+ *  turn and re-walled — and since the wall hands out no orders, nothing could
+ *  ever become 'done' to break the streak. "The wall falls and work restarts"
+ *  (the spec above) requires the COUNT to restart too, not just the kv row. */
+function zidul(jobs: BuildJob[], granita = 0): { blocat: boolean; cate: number; cauza: string } {
+  const ale = aleBuclei(jobs).filter(
+    (j) => (j.status === 'done' || j.status === 'failed') && Number(j.id ?? 0) > granita,
+  )
   const consecutive: BuildJob[] = []
   for (const j of ale) {
     if (j.status === 'done') break // a success breaks the streak — no longer a wall
@@ -973,15 +983,23 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // receiving order N+1 — it gets repaired by looking at what its logs say.
   // This order is carried by THE HANDS, which have browser and logs; the
   // constructor is the broken one.
-  const zid = zidul(jobs)
   const zidVechi = await citesteZid()
   const reusite = aleBuclei(jobs).filter((j) => j.status === 'done').length
   const acum = semnaturaLumii(reusite)
+  let granita = Number((await loadKv('autonomie:zid:granita').catch(() => null)) ?? 0) || 0
 
   // DID THE WALL FALL? Not because time passed — because SOMETHING CHANGED:
   // newly published code, an appeared key, a successful order. As long as the
   // world is identical, a retry would give identically the same failure.
   if (zidVechi && zidVechi.semnatura !== acum) {
+    // The fall moves the COUNTING BOUNDARY too: "work restarts" means the new
+    // world gets a fresh attempt, judged on ITS orders — not a re-diagnosis
+    // of the streak from the old world. Measured live (2-3 aug): without the
+    // boundary, every new sha burned one diagnostic turn and re-walled on the
+    // same 11 historical failures, and since the wall hands out no orders,
+    // nothing could ever break the streak — a deadlock dressed as prudence.
+    granita = aleBuclei(jobs).reduce((mx, j) => Math.max(mx, Number(j.id ?? 0)), granita)
+    await saveKv('autonomie:zid:granita', String(granita)).catch(() => {})
     await saveKv('autonomie:zid', '').catch(() => {})
   } else if (zidVechi) {
     // WALL STANDING, WORLD UNCHANGED → NOTHING GETS SPENT. Zero model calls,
@@ -998,6 +1016,7 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     }
   }
 
+  const zid = zidul(jobs, granita)
   if (zid.blocat && !mainileOcupate) {
     mainileOcupate = true
     try {
