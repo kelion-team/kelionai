@@ -3,20 +3,15 @@ import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 import { googleServiceAccount } from './googleCreds.js'
 
-// TTS — GOOGLE CHIRP 3 HD IS THE PRIMARY VOICE, OPENAI STRICTLY THE RESERVE.
+// TTS — GOOGLE CHIRP 3 HD, SINGURA VOCE (OpenAI scos complet, Adrian 3 aug:
+// „OpenAI scos din toată aplicația").
 //
-// Adrian, Aug 2: "openai ramine rezerva doar daca google pica" + "voce
-// masculina in orice limba". The old order (OpenAI first, to sound IDENTICAL
-// to the OpenAI Realtime live voice) died when the live mouth itself moved
-// to Google — the unification reason is gone. And OpenAI TTS burned $65 in 2
-// weeks of voice, while Chirp 3 HD has a 1M characters/month free tier and
-// the service account (GOOGLE_SERVICE_ACCOUNT_JSON on the server) is PROVEN
-// live: it synthesizes fine and there are 30 ro-RO-Chirp3-HD-* voices.
-// So: 1) Google Chirp 3 HD first; 2) OpenAI TTS only when Google is not
-// configured OR the call failed — he is never left mute.
+// Rezerva OpenAI TTS a murit: contul OpenAI a ars $65 în 2 săptămâni, iar Chirp
+// 3 HD are 1M caractere/lună gratis, cu serviciul (GOOGLE_SERVICE_ACCOUNT_JSON)
+// dovedit live (sintetizează + 30 voci ro-RO-Chirp3-HD-*). Dacă Google nu e
+// configurat sau pică, întoarcem eroare (nu mai cădem pe OpenAI) — Google-only.
 
 const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
-const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech'
 
 const DEFAULT_REGION: Record<string, string> = {
   en: 'US', ro: 'RO', fr: 'FR', de: 'DE', es: 'ES', it: 'IT', pt: 'BR', nl: 'NL',
@@ -53,12 +48,12 @@ export function googleTtsAvailable(): boolean {
   return getAuth() !== null || !!config.googleTtsKey
 }
 
-/** True when a synthesis path EXISTS: Google Chirp 3 HD or OpenAI as backup. */
+/** True when a synthesis path EXISTS: Google Chirp 3 HD (singura sursă acum). */
 export function ttsConfigured(): boolean {
-  return googleTtsAvailable() || !!config.openai.key
+  return googleTtsAvailable()
 }
 
-export type TtsEngine = 'google' | 'openai'
+export type TtsEngine = 'google'
 
 export type TtsResult =
   | { ok: true; audio: Buffer; engine: TtsEngine }
@@ -76,11 +71,11 @@ export interface SynthOpts {
 }
 
 /**
- * Synthesizes `text` in language `langRaw`. Tries Chirp 3 HD (Google) FIRST —
- * the primary voice; if not configured or it fails, falls back to the OpenAI
- * reserve. Typed result so the caller can map errors to the right HTTP status.
- * MP3 by default; `{ encoding: 'LINEAR16' }` → raw PCM (24kHz) for the voice
- * agent.
+ * Synthesizes `text` in language `langRaw` cu Google Chirp 3 HD — SINGURA voce
+ * (OpenAI scos, Adrian 3 aug). Dacă Google nu e configurat → 503; dacă apelul
+ * pică → eroarea lui Chirp (nu se mai cade pe OpenAI). Typed result ca apelantul
+ * să mapeze erorile pe statusul HTTP corect. MP3 by default; `{ encoding:
+ * 'LINEAR16' }` → raw PCM (24kHz) pentru agentul vocal.
  */
 export async function synthesize(
   text: string,
@@ -96,29 +91,15 @@ export async function synthesize(
   // target language so they are pronounced correctly. Pure text layer.
   const spoken = academicPronounce(clean, lang.split('-')[0])
 
-  // GOOGLE FIRST, OPENAI STRICTLY THE RESERVE (Adrian, Aug 2: "openai ramine
-  // rezerva doar daca google pica"). The old reason for OpenAI-first — sound
-  // identical to the OpenAI Realtime live mouth — is gone: the live mouth is
-  // Google now. OpenAI TTS burned $65 in 2 weeks; Chirp 3 HD has 1M free
-  // characters/month.
-  // 1) Google Chirp 3 HD — the app voice (male, in any language).
-  if (googleTtsAvailable()) {
-    const r = await synthChirp(spoken, lang, opts)
-    if (r.ok) return r
-    // Google failed → we don't stay mute, fall to the OpenAI reserve below.
-  }
-
-  // 2) Reserve: OpenAI TTS (only when Google is unconfigured or failed).
-  if (config.openai.key) return synthOpenAI(spoken, opts)
-
-  return { ok: false, status: 502, error: 'tts_failed' }
+  // GOOGLE-ONLY (Adrian, 3 aug): Chirp 3 HD e singura voce — voce masculină în
+  // orice limbă, 1M caractere/lună gratis. Fără rezervă OpenAI. Dacă pică,
+  // întoarcem eroarea lui Chirp (apelantul o mapează), nu mai chemăm OpenAI.
+  return synthChirp(spoken, lang, opts)
 }
 
-// The shared POST of both TTS engines (Google Chirp + OpenAI): fetch with a
-// 30s timeout, returns 502 `tts_failed` on throw or non-ok response. Audio
-// parsing differs (JSON base64 at Google, arrayBuffer at OpenAI) and stays with
-// the caller. Returns Response on success, otherwise an error TtsResult.
-// Single source (no duplicates).
+// The POST of the Google Chirp TTS call: fetch with a 30s timeout, returns 502
+// `tts_failed` on throw or non-ok response. Audio parsing (JSON base64) stays
+// with the caller. Returns Response on success, otherwise an error TtsResult.
 async function ttsPost(
   url: string,
   headers: Record<string, string>,
@@ -202,22 +183,3 @@ async function synthChirp(spoken: string, lang: string, opts: SynthOpts): Promis
   return { ok: true, audio: Buffer.from(j.audioContent, 'base64'), engine: 'google' }
 }
 
-// ── Reserve: OpenAI TTS ──────────────────────────────────────────────────────
-async function synthOpenAI(spoken: string, opts: SynthOpts): Promise<TtsResult> {
-  // OpenAI TTS: `pcm` = LINEAR16 24kHz mono; otherwise `mp3`. Single male voice.
-  const format = opts.encoding === 'LINEAR16' ? 'pcm' : 'mp3'
-  const r = await ttsPost(
-    OPENAI_SPEECH,
-    { Authorization: `Bearer ${config.openai.key}`, 'Content-Type': 'application/json' },
-    {
-      model: config.openai.ttsModel,
-      voice: opts.voice && config.openai.realtimeVoices.includes(opts.voice) ? opts.voice : config.openai.ttsVoice,
-      input: spoken,
-      response_format: format,
-    },
-  )
-  if (!(r instanceof Response)) return r
-  const audio = Buffer.from(await r.arrayBuffer())
-  if (audio.length === 0) return { ok: false, status: 502, error: 'tts_empty' }
-  return { ok: true, audio, engine: 'openai' }
-}

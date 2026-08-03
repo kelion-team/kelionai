@@ -76,18 +76,13 @@ describe('track-ended: microfonul se redeschide O DATĂ înainte de escaladare',
   })
 })
 
-describe('proba gurii: 401 NU e un verdict — se re-sondează la următorul start', () => {
-  it('un răspuns non-OK nu se cache-uiește; doar corpul 200 decide modul', () => {
-    const idxProbe = voce.indexOf("fetch('/api/tts/status'")
-    const idxNotOk = voce.indexOf('if (!r.ok) return false', idxProbe)
-    const idxCache = voce.indexOf('guraChirpStare = ok', idxProbe)
-    expect(idxNotOk).toBeGreaterThan(idxProbe)
-    expect(idxCache).toBeGreaterThan(idxNotOk) // caching happens only AFTER the ok gate
+describe('gura e MEREU a serverului (Google) — proba OpenAI-vs-Chirp a dispărut', () => {
+  it('clientul nu mai sondează /api/tts/status ca să aleagă gura (o singură gură acum)', () => {
+    expect(voce).not.toContain('/api/tts/status')
+    expect(voce).not.toContain('guraChirpStare')
   })
-  it('proba picată (rețea) nu lasă modul rezervă lipit pe sesiune', () => {
-    expect(voce).toMatch(/\.catch\(\(\) => false\)/)
-    const hits = voce.match(/guraChirpStare = ok/g) ?? []
-    expect(hits.length).toBe(1) // o singură atribuire, în spatele porții r.ok
+  it('handle-ul e MEREU guraChirp: true (panoul redă {audio} serverului, fără rezervă OpenAI)', () => {
+    expect(voce).toMatch(/guraChirp: true/)
   })
 })
 

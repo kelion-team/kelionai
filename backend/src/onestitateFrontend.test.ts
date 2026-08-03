@@ -16,14 +16,15 @@ const rutaRealtime = readFileSync(cale('./routes/realtime.ts'), 'utf8')
 const rutaTts = readFileSync(cale('./routes/tts.ts'), 'utf8')
 const serviciuRealtime = readFileSync(cale('./services/realtime.ts'), 'utf8')
 
-describe('modelul de transcriere: serverul e singura sursă', () => {
-  it('ruta trimite modelul configurat în header, lângă răspunsul SDP', () => {
-    expect(rutaRealtime).toMatch(/\.header\('x-transcribe-model', config\.openai\.realtimeTranscribeModel\)/)
+describe('transcrierea: fără model OpenAI (Chirp detectează limba per rostire)', () => {
+  it('ruta nu mai trimite header de model de transcriere OpenAI', () => {
+    expect(rutaRealtime).not.toContain('x-transcribe-model')
+    expect(rutaRealtime).not.toContain('realtimeTranscribeModel')
   })
-  it('clientul citește header-ul și NU mai are literalul drept unică sursă', () => {
-    expect(voce).toMatch(/res\.headers\.get\('x-transcribe-model'\)/)
-    // ancora de limbă folosește variabila, nu literalul
-    expect(voce).toMatch(/transcription: \{ model: transcribeModel, language: lang \}/)
+  it('clientul nu mai are model de transcriere OpenAI — urechea Chirp folosește getLang', () => {
+    expect(voce).not.toContain('x-transcribe-model')
+    expect(voce).not.toContain('transcribeModel')
+    expect(voce).toMatch(/getLang: \(\) => anchoredLang \|\| opts\.language/)
   })
 })
 
@@ -48,21 +49,20 @@ describe('plafonul TTS: publicat de server, nu dublat în client', () => {
   })
 })
 
-describe('protocolul gurii: prefixul rostirii există în ambele capete', () => {
-  it('clientul și persona serverului folosesc același prefix', () => {
-    // O schimbare doar într-o parte = gura citește prefixul cu voce tare sau
-    // ignoră replica. Token-ul comun e „ROSTEȘTE:" — clientul îl trimite (cu
-    // un spațiu după), persona îl recunoaște la începutul itemului.
-    expect(voce).toMatch(/const SPEAK_PREFIX = 'ROSTEȘTE: '/)
+describe('protocolul gurii: clientul NU mai rostește (gura e a serverului)', () => {
+  it('clientul nu mai are prefix de rostire — mouth = cadre {audio} ale serverului', () => {
+    expect(voce).not.toContain('SPEAK_PREFIX')
+    expect(voce).not.toContain('ROSTEȘTE')
+  })
+  it('persona istorică (pură, doar pentru teste) încă poartă tokenul ROSTEȘTE', () => {
     expect(serviciuRealtime).toContain('ROSTEȘTE:')
   })
 })
 
 describe('vocea picată spune motivul REAL (401/402 ≠ „temporar")', () => {
-  it('clientul atașează codul mașină și retryable=false pe 401/402', () => {
-    expect(voce).toMatch(/err\.code = res\.status === 401 \? 'need_login' : res\.status === 402 \? 'need_credit'/)
-    expect(voce).toMatch(/err\.retryable = res\.status === 401 \|\| res\.status === 402 \? false/)
-  })
+  // Codurile need_login/need_credit veneau din paywall-ul /api/realtime/session
+  // (acum dezactivat). Panoul le tratează încă la nevoie; contorul /tick
+  // oprește vocea la epuizarea creditului. Aserțiile de panou rămân valide.
   it('panoul arată mesajul specific, nu promisiunea falsă de reîncercare', () => {
     expect(panou).toMatch(/err\.code === 'need_credit' \? t\.voiceNeedCredit : t\.voiceNeedLogin/)
   })

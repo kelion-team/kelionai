@@ -2,112 +2,81 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── GURA PE GOOGLE CHIRP 3 HD; OPENAI DOAR REZERVĂ (Adrian, Aug 2) ──────────
-// Direct order, Aug 2: the live voice's ears already ran on Google Chirp 3
-// streaming (free), but the MOUTH still ran on OpenAI Realtime — $65 in two
-// weeks, proven live, and the account hit zero credits. From here on the
-// mouth is the server's Google TTS Chirp 3 HD (1M chars/month free tier) and
-// OpenAI stays STRICTLY the reserve.
-// The frontend has no test runner; we read it from here, like urechiChirp.test.ts.
+// ── VOCE GOOGLE-ONLY: OPENAI SCOS COMPLET (Adrian, 3 aug) ────────────────────
+// Ordin direct, 3 aug: „OpenAI scos din toată aplicația". Sesiunea vocală
+// rulează integral pe Google + Gemini: urechi Chirp 3 streaming, creier Gemini
+// (/api/chat), gura = Google TTS Chirp 3 HD sintetizată de server și trimisă ca
+// {audio}. NU se mai deschide NICIO sesiune WebRTC OpenAI, nici rezervă.
+// Frontend-ul n-are test runner; îl citim de aici, ca urechiChirp.test.ts.
 const voce = readFileSync(fileURLToPath(new URL('../../frontend/src/lib/realtimeVoice.ts', import.meta.url)), 'utf8')
 const panou = readFileSync(fileURLToPath(new URL('../../frontend/src/components/ChatPanel.tsx', import.meta.url)), 'utf8')
+const ruta = readFileSync(fileURLToPath(new URL('./routes/realtime.ts', import.meta.url)), 'utf8')
 
-describe('proba gurii: GET /api/tts/status, o dată pe sesiunea de pagină', () => {
-  it('întreabă serverul cu cookie-ul de sesiune dacă Google TTS e disponibil', () => {
-    expect(voce).toMatch(/fetch\('\/api\/tts\/status', \{ credentials: 'include'/)
+describe('clientul de voce: ZERO OpenAI, niciun WebRTC', () => {
+  it('nu se construiește NICIUN RTCPeerConnection', () => {
+    expect(voce).not.toMatch(/RTCPeerConnection/)
   })
-  it('răspunsul serverului se cache-uiește per sesiune de pagină', () => {
-    expect(voce).toMatch(/guraChirpStare !== null/)
-    expect(voce).toMatch(/guraChirpStare = ok/)
+  it('nu se apelează NICIODATĂ /api/realtime/session (SDP-ul OpenAI a dispărut)', () => {
+    expect(voce).not.toContain('/api/realtime/session')
   })
-  it('google:false sau proba picată → rezerva OpenAI (comportamentul de până acum)', () => {
-    expect(voce).toMatch(/j\?\.google === true/)
-    expect(voce).toMatch(/\.catch\(\(\) => false\)/)
+  it('nu mai există coada de rostire OpenAI (ROSTEȘTE / SPEAK_PREFIX / response.create)', () => {
+    expect(voce).not.toContain('SPEAK_PREFIX')
+    expect(voce).not.toContain('ROSTEȘTE')
+    expect(voce).not.toMatch(/response\.create/)
+    expect(voce).not.toMatch(/dataChannel|createDataChannel|oai-events/)
+  })
+  it('niciun apel direct către API-ul OpenAI (nici SDP, nici altceva)', () => {
+    expect(voce).not.toMatch(/api\.openai\.com/)
   })
 })
 
-describe('modul gură-Chirp: ZERO OpenAI', () => {
-  it('ramura chirp returnează ÎNAINTE să se construiască vreun RTCPeerConnection', () => {
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    const idxPc = voce.indexOf('new RTCPeerConnection()')
-    expect(idxBranch).toBeGreaterThanOrEqual(0)
-    expect(idxPc).toBeGreaterThan(idxBranch)
+describe('sesiunea vocală rulează pe Google/Gemini și e marcată guraChirp', () => {
+  it('handle-ul întoarce guraChirp: true (panoul redă {audio} serverului)', () => {
+    expect(voce).toMatch(/guraChirp: true/)
   })
-  it('niciun apel la /api/realtime/session pe ramura chirp (SDP-ul e doar al rezervei)', () => {
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    const idxSdp = voce.indexOf("fetch('/api/realtime/session'")
-    expect(idxSdp).toBeGreaterThan(idxBranch)
+  it('log-ul live anunță modul Google-only (Chirp + Gemini, fără OpenAI)', () => {
+    expect(voce).toContain('fără OpenAI')
   })
-  it('speak() nu trimite nimic nicăieri; interrupt/stopSpeaking = stopVoice (audioIO)', () => {
+  it('interrupt/stopSpeaking = stopVoice (audioIO), nu trimit nimic nicăieri', () => {
     expect(voce).toMatch(/interrupt: \(\) => stopVoice\(\)/)
     expect(voce).toMatch(/stopSpeaking: \(\) => stopVoice\(\)/)
-    // The ROSTEȘTE prefix stays ONLY in the reserve's speech queue.
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    const idxPrefix = voce.indexOf('SPEAK_PREFIX')
-    expect(idxPrefix).toBeGreaterThan(idxBranch)
   })
-  it('barge-in: speech_begin taie redarea Chirp pe loc și anunță UI-ul', () => {
-    // The barge-in callback is the chirp-mouth mode's piece of the ONE ear
-    // starter: your voice cuts the server playback, then wakes the UI.
-    expect(voce).toMatch(/pornesteUrecheaChirp\('rezerva OpenAI', \(\) => \{[\s\S]{0,200}?stopVoice\(\)\s*\n\s*onSpeechStart/)
+  it('barge-in: vocea ta taie redarea Chirp a serverului (stopVoice) și trezește UI-ul', () => {
+    // Atât speech_begin (server) cât și detecția locală (onBargeIn) taie prin stopVoice.
+    expect(voce).toMatch(/onSpeechBegin: \(\) => \{[\s\S]{0,120}stopVoice\(\)[\s\S]{0,60}onSpeechStart/)
+    expect(voce).toMatch(/onBargeIn: \(\) => \{[\s\S]{0,120}stopVoice\(\)[\s\S]{0,60}onSpeechStart/)
   })
-  it('STOP-ul vorbit taie gura serverului (taieGura = stopVoice)', () => {
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    const idxCut = voce.indexOf('taieGura = stopVoice')
-    expect(idxCut).toBeGreaterThan(idxBranch) // set inside the branch, before the ear starts
-    expect(idxCut).toBeLessThan(voce.indexOf('new RTCPeerConnection()'))
+  it('STOP-ul vorbit taie gura serverului pe loc (stopVoice) și închide fereastra', () => {
+    expect(voce).toMatch(/replyUntil = 0\s*\n\s*stopVoice\(\)/)
   })
-  it('mute-ul ajunge la urechea Chirp și în acest mod (nu există senderi WebRTC)', () => {
-    const hits = voce.match(/chirpEar\?\.setMuted\(muted\)/g) ?? []
-    expect(hits.length).toBeGreaterThanOrEqual(2)
+  it('mute-ul ajunge la urechea Chirp (nu există senderi WebRTC de mutat)', () => {
+    expect(voce).toMatch(/chirpEar\?\.setMuted\(muted\)/)
   })
-  it('urechia moartă marchează și cade pe rezervă, fără bucle', () => {
-    // The death wiring lives ONCE, in the shared ear starter defined before
-    // both mode branches — and the chirp-mouth branch starts its ear through
-    // it, so the marking cannot diverge between modes.
-    const idxStarter = voce.indexOf('const pornesteUrecheaChirp')
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    expect(idxStarter).toBeGreaterThanOrEqual(0)
-    expect(idxStarter).toBeLessThan(idxBranch)
-    const starter = voce.slice(idxStarter, idxBranch)
-    expect(starter).toContain('marcheazaUrechiChirpMoarte()')
-    expect(starter).toMatch(/onError:[\s\S]{0,200}?stop\(\)/)
-    expect(voce.indexOf("await pornesteUrecheaChirp('rezerva OpenAI'", idxBranch)).toBeGreaterThan(idxBranch)
+  it('finalurile Chirp trec prin poarta comună (timbru → stop → nume)', () => {
+    expect(voce).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
+    expect(voce).toMatch(/poartaDupaTranscript[\s\S]{0,600}transcriptVerdict\(t, vf\)/)
   })
-  it('log-ul live anunță exact modul cerut de Adrian', () => {
-    expect(voce).toContain('urechi + gură pe Google Chirp 3 HD — OpenAI doar rezervă')
+  it('urechea moartă marchează și închide (fără OpenAI, fără buclă)', () => {
+    expect(voce).toMatch(/marcheazaUrechiChirpMoarte\(\)/)
+    // Fără ureche Chirp NU se deschide OpenAI — se aruncă și panoul cade pe dictarea nativă.
+    expect(voce).toMatch(/throw new Error\('chirp_ear_unavailable'\)/)
   })
-  it('finalurile Chirp trec prin ACEEAȘI poartă și în acest mod', () => {
-    // One starter, one gate: the onPhrase → poartaDupaTranscript wiring sits
-    // in the shared starter, and the chirp-mouth branch uses that starter —
-    // the finals CANNOT reach the brain around the gate in this mode.
-    const idxStarter = voce.indexOf('const pornesteUrecheaChirp')
-    const idxBranch = voce.indexOf('if (guraChirp) {')
-    const starter = voce.slice(idxStarter, idxBranch)
-    expect(starter).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
-    const branch = voce.slice(idxBranch, voce.indexOf('new RTCPeerConnection()'))
-    expect(branch).toContain("pornesteUrecheaChirp('rezerva OpenAI'")
+})
+
+describe('ruta /api/realtime/session: DEZACTIVATĂ, fără upstream OpenAI', () => {
+  it('nu mai relayează nimic la OpenAI (openaiRealtimeAnswer a dispărut)', () => {
+    expect(ruta).not.toContain('openaiRealtimeAnswer')
+  })
+  it('răspunde 410 „disabled" ca un client vechi să afle clar', () => {
+    expect(ruta).toMatch(/'\/api\/realtime\/session'[\s\S]{0,300}reply\.code\(410\)/)
   })
 })
 
 describe('panoul: sesiunea vocală rămâne activă, dar NU e isRealtime', () => {
-  it('handle-ul gură-Chirp NU primește isRealtime — {audio} nu mai e suprimat, serverVoiceOff iese false', () => {
+  it('handle-ul guraChirp NU primește isRealtime — {audio} nu mai e suprimat, serverVoiceOff iese false', () => {
     expect(panou).toMatch(/isRealtime = rv\.guraChirp !== true/)
   })
-  it('rotația proactivă de 55 min rămâne DOAR pentru rezerva OpenAI', () => {
+  it('rotația proactivă de 55 min rămâne DOAR pentru sesiunea non-guraChirp (mereu null acum)', () => {
     expect(panou).toMatch(/rv\.guraChirp === true \? null : window\.setTimeout/)
-  })
-})
-
-describe('rezerva OpenAI rămâne intactă', () => {
-  it('calea WebRTC + SDP + coada ROSTEȘTE există în continuare', () => {
-    expect(voce).toMatch(/new RTCPeerConnection\(\)/)
-    expect(voce).toMatch(/\/api\/realtime\/session/)
-    expect(voce).toContain('ROSTEȘTE: ')
-    expect(voce).toMatch(/response\.create/)
-  })
-  it('poarta își primește piesele de mod și pe calea de rezervă', () => {
-    expect(voce).toMatch(/taieGura = stopSpeaking/)
-    expect(voce).toMatch(/ancoreazaLimba = \(lang: string\)/)
   })
 })
