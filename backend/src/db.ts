@@ -3359,6 +3359,93 @@ export async function listMonitorBuildJobs(): Promise<BuildJob[]> {
   }
 }
 
+// ── KELION POATE STĂPÂNI ORDINELE (Adrian, 3 aug: „kelion nu are instrument să
+// modifice, să șteargă, sau să le șteargă în grup") ─────────────────────────
+// Până acum putea DOAR să creeze (build_software) și să vadă (constructor_status).
+// Acum poate și: să șteargă unul, să șteargă în GRUP (toate eșuate / toate
+// terminate), să reia (opțional cu textul reformulat = „modifică"), și să
+// anuleze unul în curs. Toate ADMIN-only, expuse prin unealta `constructor_manage`.
+
+/** Șterge DEFINITIV un ordin după id. `true` dacă a existat și s-a șters. */
+export async function deleteBuildJob(id: number): Promise<boolean> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+  try {
+    const r = await getPool().query('DELETE FROM build_jobs WHERE id=$1', [id])
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+/** Ștergere în GRUP după stare. `scope`: 'failed' (doar eșuate), 'done' (doar
+ *  terminate), 'failed_done' (eșuate + terminate — cele „istorice", NU cele în
+ *  curs), 'all' (chiar tot). Nu atinge NICIODATĂ ordinele 'queued'/'running'
+ *  decât la 'all' — un ordin viu nu se șterge din greșeală. Întoarce câte a șters. */
+export async function deleteBuildJobsByScope(
+  scope: 'failed' | 'done' | 'failed_done' | 'all',
+): Promise<number> {
+  if (!dbEnabled()) return 0
+  const stariCurente: Record<typeof scope, string[] | null> = {
+    failed: ['failed'],
+    done: ['done'],
+    failed_done: ['failed', 'done'],
+    all: null, // null = fără filtru (chiar tot)
+  }
+  const stari = stariCurente[scope]
+  try {
+    const r =
+      stari === null
+        ? await getPool().query('DELETE FROM build_jobs')
+        : await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stari])
+    return r.rowCount ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/** Reia un ordin (îl repune în coadă). Opțional cu textul REFORMULAT — asta e
+ *  „modificarea": schimbă comanda și o repornește curat (attempts=0). Merge doar
+ *  pe ordine care NU sunt deja în curs ('failed'/'done'/'queued'); un 'running'
+ *  nu se rescrie sub picioarele lucrătorului. Întoarce jobul actualizat sau null. */
+export async function retryBuildJob(id: number, newOrderText?: string): Promise<BuildJob | null> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return null
+  const text = (newOrderText ?? '').trim()
+  try {
+    const r = await getPool().query<BuildJobDbRow>(
+      `UPDATE build_jobs
+         SET status='queued', attempts=0,
+             order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
+             log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
+             updated_at = now()
+       WHERE id=$1 AND status IN ('failed','done','queued')
+       RETURNING *`,
+      [id, text.slice(0, 4000)],
+    )
+    return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
+  } catch {
+    return null
+  }
+}
+
+/** Anulează un ordin în curs sau în coadă: îl trece pe 'failed' cu marcaj de
+ *  anulare, ca lucrătorul să nu-l mai ia. `true` dacă exista ceva de oprit. */
+export async function cancelBuildJob(id: number): Promise<boolean> {
+  if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return false
+  try {
+    const r = await getPool().query(
+      `UPDATE build_jobs
+         SET status='failed',
+             log = COALESCE(log,'') || E'\\n[anulat de owner]',
+             updated_at = now()
+       WHERE id=$1 AND status IN ('queued','running')`,
+      [id],
+    )
+    return (r.rowCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 // AUTOMATIC HEALING OF ORDERS THAT FAILED ON MONEY (Adrian, 27 Jul: "why
 // doesn't the healing system see it, fix it? — automatically?"): an order that
 // failed because the brain had no credit (402/credits) is not an impossible

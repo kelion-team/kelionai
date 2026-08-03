@@ -36,6 +36,10 @@ import {
   loadKv,
   createBuildJob,
   listBuildJobs,
+  deleteBuildJob,
+  deleteBuildJobsByScope,
+  retryBuildJob,
+  cancelBuildJob,
   attachGuestPhoto,
   userKey,
   saveKv,
@@ -462,6 +466,26 @@ const CONSTRUCTOR_STATUS_TOOL: Tool = {
   description:
     'ADMIN ONLY. See the state of your build orders (queued/running/done/failed, PR link, tokens used). Call it when the owner asks how a build is going, then show the result with show_document.',
   input_schema: { type: 'object', properties: {} },
+}
+// MANAGE YOUR OWN BUILD ORDERS (Adrian, 3 aug: „kelion nu are instrument să
+// modifice, să șteargă, sau să le șteargă în grup"). Before this Kelion could
+// only CREATE (build_software) and SEE (constructor_status). Now it can delete
+// one, delete a GROUP (all failed / all finished), retry (optionally with a
+// reformulated order = MODIFY) or cancel one that is queued/running.
+const CONSTRUCTOR_MANAGE_TOOL: Tool = {
+  name: 'constructor_manage',
+  description:
+    "ADMIN ONLY. Manage EXISTING build orders (from constructor_status). Actions: 'delete' one by id; 'delete_group' by scope ('failed' = all failed, 'done' = all finished, 'failed_done' = all failed+finished but NOT the ones still queued/running, 'all' = every order); 'retry' one by id (optionally with `order` = the REFORMULATED text — this is how you MODIFY an order: it re-queues it with the new wording); 'cancel' one queued/running by id. Do it ONLY when the owner explicitly asks to remove/redo/modify/clear orders. Report exactly what changed (how many deleted, new state).",
+  input_schema: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['delete', 'delete_group', 'retry', 'cancel'], description: 'What to do.' },
+      id: { type: 'number', description: 'The order id — required for delete / retry / cancel.' },
+      scope: { type: 'string', enum: ['failed', 'done', 'failed_done', 'all'], description: "For delete_group only: which orders to remove. 'all' also removes queued/running." },
+      order: { type: 'string', description: 'For retry only, OPTIONAL: the reformulated order text (modify + re-queue). Omit to re-run the same order.' },
+    },
+    required: ['action'],
+  },
 }
 // ITS OWN HEALTH (Adrian, Jul 27: "Kelion must see this and be able to tell the
 // admin through chat that it has problems x,y,z and ask whether to fix them"):
@@ -1602,7 +1626,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // promise.
     if (user.role === 'admin') {
       systemPrompt +=
-        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN (Adrian, 31 Jul: "when he says he will analyse, he must FACTUALLY open the monitor and show what he is doing"). The words "analizez", "mă uit", "verific", "let me look into it" are a PROMISE, and until now they were where turns died: it sounded like work, and he was left staring at an empty screen. From now on, the moment you say any of them, IN THE SAME TURN: (1) call show_document FIRST with what you are about to look at, so the monitor lights up before the waiting starts; (2) actually call the tools (read_source, search_source, db_query, system_health, runbook_log — whatever fits); (3) call show_document AGAIN with what you FOUND — file and line, the log excerpt, the query result. If you have nothing to look with, say so plainly instead of promising. Never announce an analysis you do not immediately perform and display. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. HEALTH FIRST: on the owner's FIRST message of a conversation (a greeting, a "ce faci", anything), call system_health before answering; if it reports problems, tell him BRIEFLY "am problemele: x, y, z" and REPAIR them straight away with your own tools — do not ask for permission first. If everything is healthy, don't bring it up unless he asks. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`
+        `\n\nOWNER — ACT, DON'T DEFER: you are talking to Adrian, your owner, and you are FULLY AUTONOMOUS with REAL tools. When he asks for a repair, a change, or an operation: DO IT NOW, in this conversation, with your tools — read_source/search_source to find the cause; repo_write + repo_open_pr + repo_merge_pr to SHIP the fix yourself (your merge auto-deploys to production); run_runbook for operations (diagnostic, restart-app, publish-master, loguri-app...). As you work, narrate CONCRETELY what you are doing: which file and line, which branch, the PR number, the Actions link — so Adrian can watch the work happen. NEVER say "I'll have it built", "I've sent it to be fixed" or "my developer will handle it" — there is no other developer, YOU are the builder now. Use log_unsupported_request ONLY for things genuinely impossible with all your tools. If a fix is too big for one turn, state the exact steps and START step 1 immediately (worst case: request_repair to file the order durably) — never a dead end, never an empty reassurance. IF YOU SAY YOU WILL ANALYSE, ANALYSE — ON SCREEN (Adrian, 31 Jul: "when he says he will analyse, he must FACTUALLY open the monitor and show what he is doing"). The words "analizez", "mă uit", "verific", "let me look into it" are a PROMISE, and until now they were where turns died: it sounded like work, and he was left staring at an empty screen. From now on, the moment you say any of them, IN THE SAME TURN: (1) call show_document FIRST with what you are about to look at, so the monitor lights up before the waiting starts; (2) actually call the tools (read_source, search_source, db_query, system_health, runbook_log — whatever fits); (3) call show_document AGAIN with what you FOUND — file and line, the log excerpt, the query result. If you have nothing to look with, say so plainly instead of promising. Never announce an analysis you do not immediately perform and display. MAKE YOUR WORK VISIBLE: you CAN see your own internal processes — runbook_status (latest runs of your workflows) and runbook_log (the full real log of a run) — and you CAN display them: call show_document (title + text) to put your progress and results ON THE MONITOR while you work (what you started, run status, the relevant log excerpt, the deploy proof). Never tell the owner "I can't see my internal processes" or "I can't show this on the monitor" — you have both tools; use them. ANSWER WHAT HE ASKED — DON'T RAMBLE SYSTEM STATUS (Adrian, 3 aug: „bate câmpii" — every reply opened with the same system-problems monologue instead of answering): answer EXACTLY what Adrian asked and ONLY that. Do NOT open replies with unsolicited system status, health, deploy state, failed build orders, or reserve/limit reports, and do NOT call system_health or constructor_status on your own initiative unless he ASKS about status/health/builds, or it is directly needed to carry out what he asked. Surface a system problem ONLY when it directly blocks the request he just made — then in ONE short sentence, after doing the task — or when he explicitly asks how things are, in which case say them briefly and, if he wants, repair them with your own tools (no permission question). Never lead an answer with problems he did not ask about. SELF-INSTALL WHAT YOU LACK (never stop at "I don't have that library/tool"): when a task needs a dependency you don't have — an npm package, or a system tool — ADD it yourself the DURABLE way, through the constructor: order build_software to add the npm package to backend/package.json (or the system package to the Dockerfile's apt-get line), which builds with tests and opens a PR; once it merges, the image rebuilds and the dependency is LIVE and permanent (it survives redeploys). For a tiny change you may instead use repo_write on package.json/Dockerfile + repo_open_pr directly. Say which package and why, order it, then finish the task once it is deployed. NEVER run an ad-hoc live "apt install"/"npm install" on the server as the way to gain a capability — that is ephemeral and unsafe; the package.json/Dockerfile route is the only permanent, auditable one. Only say you cannot when a thing is truly impossible, not merely missing a package.`
       // NO CONFIRMATIONS TO THE OWNER (Adrian, Jul 31). The general rule above
       // ("confirm only before irreversible ones") is written for public users.
       // Here it is the owner: if he asked for something, the request IS the
@@ -1992,7 +2016,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
-          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL,
+          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, CONSTRUCTOR_MANAGE_TOOL,
           DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL,
           RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
           LIST_UPDATES_TOOL, READ_INBOX_TOOL, PROPOSE_TOOL,
@@ -2804,6 +2828,46 @@ async function runTool(
         // verified by CI (green)" — not on the worker's word.
         jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 160), progress: j.progress, ci: j.ci, pr: j.prUrl, branch: j.branch, tokens: j.tokens, updated: j.updatedAt })),
       })
+    }
+    // STĂPÂNIREA ORDINELOR (Adrian, 3 aug): șterge / șterge-în-grup / reia
+    // (modifică) / anulează. Admin-only, ca și celelalte unelte de constructor.
+    case 'constructor_manage': {
+      if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      const action = String(args.action ?? '').trim()
+      switch (action) {
+        case 'delete': {
+          const id = Number(args.id)
+          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
+          const ok = await deleteBuildJob(id)
+          return JSON.stringify(ok ? { ok: true, sters: id } : { ok: false, error: 'inexistent', id })
+        }
+        case 'delete_group': {
+          const scope = String(args.scope ?? 'failed')
+          if (!['failed', 'done', 'failed_done', 'all'].includes(scope))
+            return JSON.stringify({ error: 'scope_invalid' })
+          const n = await deleteBuildJobsByScope(scope as 'failed' | 'done' | 'failed_done' | 'all')
+          return JSON.stringify({ ok: true, sterse: n, scope })
+        }
+        case 'retry': {
+          const id = Number(args.id)
+          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
+          const order = args.order != null ? String(args.order) : undefined
+          const job = await retryBuildJob(id, order)
+          return JSON.stringify(
+            job
+              ? { ok: true, repus: job.id, stare: job.status, modificat: Boolean(order && order.trim()) }
+              : { ok: false, error: 'nu_poate_fi_repus', id },
+          )
+        }
+        case 'cancel': {
+          const id = Number(args.id)
+          if (!Number.isInteger(id) || id <= 0) return JSON.stringify({ error: 'id_lipsa' })
+          const ok = await cancelBuildJob(id)
+          return JSON.stringify(ok ? { ok: true, anulat: id } : { ok: false, error: 'nimic_de_oprit', id })
+        }
+        default:
+          return JSON.stringify({ error: 'actiune_necunoscuta', action })
+      }
     }
 
     case 'show_document': {

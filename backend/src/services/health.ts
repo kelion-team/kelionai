@@ -273,14 +273,25 @@ export async function systemHealth(): Promise<string> {
     const spent = rawSpent ? Number(rawSpent) : 0
     const capN = rawCap ? Number(rawCap) : NaN
     const cap = Number.isFinite(capN) && capN > 0 ? capN : REZERVA_CAP_ZILNIC_DEFAULT_USD
-    info.rezerva = `$${(Number.isFinite(spent) ? spent : 0).toFixed(4)} cheltuiți azi din rezervă (cap $${cap})`
-    if (!poateFolosiRezerva(Number.isFinite(spent) ? spent : 0, cap))
-      problems.push({
-        id: 'rezerva_plina',
-        grav: 'mediu',
-        desc: `Rezerva de plată a atins capul zilnic ($${Number(spent).toFixed(2)} ≥ $${cap}) — până mâine tururile stau DOAR pe pool-ul gratuit (cu coada dispecerului).`,
-        reparabil: 'dacă traficul o cere, ownerul ridică capul: saveKv rezerva:cap_zilnic (prin db_query) — e o decizie de bani, NU o lua singur',
-      })
+    const spentAzi = Number.isFinite(spent) ? spent : 0
+    // NU E SĂRĂCIE (Adrian, 3 aug: „nu vede că are bani"). cap=0 e starea ALEASĂ
+    // dinadins (leak-stop): fallback-ul PLĂTIT pe OpenRouter e închis special ca
+    // să nu pornească modele plătite din greșeală. Creierul de LUCRU e Gemini
+    // Tier 2, plătit pe cheia ownerului și funcțional — deci „rezerva la 0" NU e
+    // o problemă și NU înseamnă „doar pool gratuit". Raportăm rezerva_plina DOAR
+    // când ownerul a DESCHIS explicit rezerva (cap>0) și s-a epuizat.
+    if (cap <= 0) {
+      info.rezerva = `oprită intenționat (cap $0, leak-stop) — creierul de lucru e Gemini Tier 2 (plătit, pe cheia ownerului); fallback-ul plătit OpenRouter e închis dinadins, nu din lipsă de bani`
+    } else {
+      info.rezerva = `$${spentAzi.toFixed(4)} cheltuiți azi din rezervă (cap $${cap})`
+      if (!poateFolosiRezerva(spentAzi, cap))
+        problems.push({
+          id: 'rezerva_plina',
+          grav: 'mediu',
+          desc: `Rezerva de plată deschisă de owner a atins capul zilnic ($${Number(spent).toFixed(2)} ≥ $${cap}) — până mâine fallback-ul plătit OpenRouter stă (creierul de lucru Gemini Tier 2 merge normal).`,
+          reparabil: 'dacă traficul o cere, ownerul ridică capul: saveKv rezerva:cap_zilnic (prin db_query) — e o decizie de bani, NU o lua singur',
+        })
+    }
   } catch {
     /* kv unreachable — the DB check above already reports */
   }

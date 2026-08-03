@@ -96,6 +96,10 @@ describe('Kelion nu-i mai cere ownerului voie pentru ce tocmai i-a cerut', () =>
   })
 
   it('problemele găsite la system_health se repară, nu se raportează cu întrebare', () => {
-    expect(chat).toMatch(/REPAIR them straight away[\s\S]{0,60}do not ask for permission first/)
+    // Regula de sănătate NU se mai raportează la fiecare tură (Adrian, 3 aug:
+    // „bate câmpii") — dar când problemele SE raportează, se REPARĂ fără a cere
+    // permisiune (nu „doriți să repar?"). Textul păstrat e în blocul OWNER — NO
+    // CONFIRMATIONS.
+    expect(chat).toMatch(/say them briefly and repair them; don't ask permission first/)
   })
 })
