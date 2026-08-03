@@ -5,6 +5,7 @@ import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updat
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
+import { procentDinProgres } from '../services/progresOrdin.js'
 
 // ── THE CONSTRUCTOR — the "order → code → PR" pipeline (Adrian, Jul 27:
 // "Kelion must be able to create any software the admin asks for, any change,
@@ -32,7 +33,14 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ jobs: await listBuildJobs(40) })
+    // BARA 0–100% (Adrian, 3 aug): `pct` e harta etapei REALE raportate de
+    // lucrător (progresOrdin.ts) — bara din panou o afișează lângă textul
+    // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
+    const jobs = (await listBuildJobs(40)).map((j) => ({
+      ...j,
+      pct: procentDinProgres(j.status, j.progress),
+    }))
+    return reply.send({ jobs })
   })
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
@@ -194,7 +202,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const jobs = await listMonitorBuildJobs()
     return reply.send({
-      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
+      jobs: jobs.map((j) => ({ id: j.id, status: j.status, order: j.orderText.slice(0, 120), progress: j.progress, pct: procentDinProgres(j.status, j.progress), ci: j.ci, prUrl: j.prUrl, attempts: j.attempts, updatedAt: j.updatedAt })),
     })
   })
 }
