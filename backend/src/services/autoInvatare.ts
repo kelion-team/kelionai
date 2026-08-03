@@ -74,6 +74,7 @@ export async function ruleazaInvatare(): Promise<{ stats: KindStat[]; lectii: st
   if (!rows.length) return null
   const stats = agregaTimpi(rows)
   const lectii = lectiiDin(stats)
+  lectiiCache = lectii // bucla închisă: creierul le citește din cache (chat.ts)
   await saveKv('invatare:performanta', JSON.stringify({ at: new Date().toISOString(), stats })).catch(() => {})
   if (lectii.length) {
     // Memoria cu cheie a creierului — invizibilă userului, dar la îndemâna
@@ -82,6 +83,15 @@ export async function ruleazaInvatare(): Promise<{ stats: KindStat[]; lectii: st
   }
   console.log(`[INVATARE] ${rows.length} timpi, ${stats.length} tipuri, ${lectii.length} lecții`)
   return { stats, lectii }
+}
+
+// BUCLA ÎNCHISĂ (Adrian, 3 aug, aprobat: „închide bucla — creierul aplică
+// lecțiile automat"). Lecțiile curente stau într-un cache în memorie (actualizat
+// la fiecare trecere), ca `chat.ts` să le bage în contextul creierului admin FĂRĂ
+// o citire din DB la fiecare tură (latență zero pe drumul cald).
+let lectiiCache: string[] = []
+export function lectiiCurente(): string[] {
+  return lectiiCache
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

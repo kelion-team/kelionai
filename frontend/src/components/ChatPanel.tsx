@@ -44,6 +44,7 @@ import {
   getVoiceVolume,
   setVoiceVolume,
   type MicHandle,
+  type VoiceFeatures,
 } from '../lib/audioIO'
 import { getPendingFaceDescriptor } from '../lib/faceprint'
 import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/latency'
@@ -264,6 +265,19 @@ export default function ChatPanel({
   // into a single thought, before sending it to the brain. Rebuilt on every
   // (re)start of the microphone — see ensureMic below.
   const coalescerRef = useRef<UtteranceCoalescer | null>(null)
+  // COALESCER DE VOCE (Adrian, 3 aug — „trecerea spre creier nu se face"): pe
+  // voce, o rostire se taie de Chirp în mai multe fraze (pauze de respirație).
+  // Fără unire, FIECARE frază pornea un send() nou care ANULA (barge-in) tura
+  // precedentă → nicio tură nu ajungea completă la creier (dovadă live: /api/chat
+  // anulat la 0,19s, zero [TIMP]). Acum unim frazele apropiate (fereastră scurtă)
+  // într-o SINGURĂ tură. Audio nativ se păstrează DOAR când e o singură frază.
+  const voceMergeRef = useRef<{
+    parts: string[]
+    vf: VoiceFeatures | null
+    speaker: string | null
+    audio: string | null
+    timer: number | null
+  }>({ parts: [], vf: null, speaker: null, audio: null, timer: null })
   // The voiceprint — restricts the permanent microphone to Adrian's
   // voice. Without a UI entry point, hasVoiceprint() stays false forever: the button
   // below is the only place where the profile can be enrolled/reset.
@@ -1321,11 +1335,35 @@ export default function ChatPanel({
             // argument marks the turn as spoken so the server shapes the reply
             // for speech (clean sentences, no markdown tables).
             onAddressed: (text, vf, speaker, audio) => {
-              setPendingVoiceFeatures(vf)
-              pendingSpeakerRef.current = speaker ?? null
-              // AUDIO NATIV: vocea brută a frazei merge la creier prin send().
-              pendingAudioRef.current = audio ?? null
-              void sendRef.current(text, true)
+              // UNIM frazele apropiate într-o singură tură (vezi voceMergeRef).
+              // Fereastra scurtă (VOCE_MERGE_MS) prinde pauzele de respirație din
+              // mijlocul unei rostiri, dar nu întârzie simțitor răspunsul.
+              const VOCE_MERGE_MS = 650
+              const m = voceMergeRef.current
+              const t = (text ?? '').trim()
+              if (t) m.parts.push(t)
+              if (vf) m.vf = vf
+              m.speaker = speaker ?? m.speaker
+              // Audio nativ DOAR la o singură frază; la unire (mai multe fraze)
+              // trimitem doar textul (payload mic → upload instant, nu se mai taie).
+              m.audio = m.parts.length === 1 ? (audio ?? null) : null
+              if (m.timer !== null) window.clearTimeout(m.timer)
+              m.timer = window.setTimeout(() => {
+                const merged = m.parts.join(' ').trim()
+                const vfSnap = m.vf
+                const spSnap = m.speaker
+                const auSnap = m.audio
+                m.parts = []
+                m.vf = null
+                m.speaker = null
+                m.audio = null
+                m.timer = null
+                if (!merged) return
+                setPendingVoiceFeatures(vfSnap)
+                pendingSpeakerRef.current = spSnap
+                pendingAudioRef.current = auSnap
+                void sendRef.current(merged, true)
+              }, VOCE_MERGE_MS)
             },
             // NO onToolCall (Aug 1 — one brain): the voice session has NO tools
             // at all. Every action the user asks for by voice goes through

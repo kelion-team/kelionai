@@ -51,7 +51,11 @@ describe('același text, același traseu — dovada de paritate', () => {
     expect(fePanel).toMatch(/async function send\(text: string, spoken = false\)/)
     const idxAddressed = fePanel.indexOf('onAddressed: (text, vf, speaker, audio)')
     expect(idxAddressed).toBeGreaterThanOrEqual(0)
-    expect(fePanel.slice(idxAddressed, idxAddressed + 600)).toMatch(/sendRef\.current\(text, true/)
+    // Frazele apropiate se UNESC într-o singură tură (voceMergeRef, Adrian 3 aug),
+    // apoi merg la ACEEAȘI send() ca textul tastat, marcate spoken=true.
+    const bloc = fePanel.slice(idxAddressed, idxAddressed + 2400)
+    expect(bloc).toMatch(/voceMergeRef\.current/)
+    expect(bloc).toMatch(/sendRef\.current\(merged, true\)/)
   })
 
   it('`spoken` schimbă DOAR stilul răspunsului, niciodată traseul', () => {

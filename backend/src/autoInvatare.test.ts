@@ -67,4 +67,10 @@ describe('auto-învățare — cablarea (măsoară + învață în spate, invizi
     expect(inv.includes("saveKv('invatare:performanta'")).toBe(true)
     expect(inv.includes("memoriePune('invatare:timpi'")).toBe(true)
   })
+
+  it('bucla e ÎNCHISĂ: lecțiile intră automat în contextul creierului admin', () => {
+    // Aprobat de Adrian, 3 aug. Fără pasul ăsta, timpii nu scad singuri.
+    const chat = sursa('./routes/chat.ts')
+    expect(/isAdminUser[\s\S]{0,200}lectiiCurente\(\)/.test(chat)).toBe(true)
+  })
 })
