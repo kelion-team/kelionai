@@ -171,7 +171,7 @@ export async function ruleazaLucrator(
 
   const token = config.githubToken
   if (!token) return { ...gol, motiv: 'lipsește GITHUB_TOKEN — nu pot clona', secunde: sec() }
-  if (!config.openrouter.key) return { ...gol, motiv: 'lipsește cheia OpenRouter — n-are creier', secunde: sec() }
+  if (!config.geminiKey) return { ...gol, motiv: 'lipsește cheia Gemini — n-are creier', secunde: sec() }
 
   let lucru = ''
   try {
@@ -191,9 +191,13 @@ export async function ruleazaLucrator(
       GIT_COMMITTER_NAME: `Kelion (${lucrator.nume})`,
       GIT_COMMITTER_EMAIL: 'kelion@kelionai.app',
       // OpenHands takes the model from the environment, not as a CLI argument.
-      LLM_MODEL: `openrouter/${model}`,
-      LLM_API_KEY: config.openrouter.key,
-      OPENROUTER_API_KEY: config.openrouter.key,
+      // GEMINI DIRECT (3 aug — OpenRouter extirpat): toți muncitorii primesc
+      // cheia Gemini a ownerului; `model` vine deja în forma LiteLLM
+      // `gemini/...` (vezi MODELE în panouLucratori.ts), pe care o înțeleg
+      // toate trei uneltele (aider/cline/openhands folosesc LiteLLM dedesubt).
+      LLM_MODEL: model.includes('/') ? model : `gemini/${model}`,
+      LLM_API_KEY: config.geminiKey,
+      GEMINI_API_KEY: config.geminiKey,
     }
     await ruleaza('git', ['checkout', '-b', branch], { cwd: lucru, env, limitaMs: 30_000 })
     const inainte = await ruleaza('git', ['rev-parse', 'HEAD'], { cwd: lucru, env, limitaMs: 20_000 })

@@ -79,7 +79,7 @@ import {
   browserOpen, browserClick, browserType, browserRead, browserBack,
   browserScroll, browserKey, browserClickAt, browserClose,
 } from './browser.js'
-import type { AnthropicTool } from './openrouter.js'
+import type { AnthropicTool } from './brainContract.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -387,8 +387,8 @@ const MISIUNE: Sarcina[] = [
       `CUM, EXACT:\n` +
       `  1. card_stare — vezi ce câmpuri sunt configurate pe server și dacă vocea lui e ` +
       `     recunoscută acum. Dacă nu e: spui atât, și te oprești.\n` +
-      `  2. browser_open pe pagina de facturare a furnizorului (openrouter.ai/credits, ` +
-      `     console.anthropic.com → Billing, platform.openai.com → Billing), browser_read ` +
+      `  2. browser_open pe pagina de facturare a furnizorului (aistudio.google.com / ` +
+      `     console.cloud.google.com → Billing, serper.dev → Billing), browser_read ` +
       `     ca să vezi câmpurile numerotate.\n` +
       `  3. card_completeaza, câmp cu câmp: numar, expirare, cvc, nume, cod_postal. TU NU ` +
       `     PRIMEȘTI VALOAREA și nu ai ce cere — spui doar CE câmp și ÎN CE index. Serverul ` +
@@ -849,7 +849,7 @@ function zidul(jobs: BuildJob[], granita = 0): { blocat: boolean; cate: number; 
  *  put the TOP at the head, and the rest of the ladder stays below as a net. */
 function scaraPentru(dificultate = 3): string[] | undefined {
   if (dificultate < 4) return undefined // the usual ladder fits
-  const top = config.openrouter.topDefault
+  const top = config.brain.topDefault
   const restul = expertModelLadder()
   return top ? [top, ...restul.filter((m) => m !== top)] : restul
 }

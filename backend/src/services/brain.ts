@@ -1,65 +1,55 @@
 import { config } from '../config.js'
-import { openrouterChat } from './openrouter.js'
-import type { AnthropicTool, OrMessage, BrainCallOpts, OrChatResult } from './openrouter.js'
-import { geminiDirectChat, GEMINI_DIRECT_PREFIX } from './geminiDirect.js'
+import { GEMINI_DIRECT_PREFIX, geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
+import type { AnthropicTool, OrChatResult, OrMessage } from './brainContract.js'
 import type { Message } from './brain-types.js'
 
-// ── THE BRAIN — Gemini direct primar (3 aug) ────────────────────────────────
-// Auditul multi-agent din 3 aug a prins DEFECTUL STRUCTURAL: fișierul ăsta
-// n-avea NICIO rută spre Gemini — expertul (memoria după fiecare tură,
-// secretarul de mailuri, triajul cererilor) mergea 100% pe OpenRouter, deși
-// scara începe acum cu modele `google-direct/…` (config). Trimise prin
-// clientul OpenRouter, alea picau mereu → totul cădea pe rezervele `:free`
-// (429 toată ziua). Rutarea de mai jos e aceeași ca în orchestrator: prefixul
-// `google-direct/` → API-ul Google direct; restul → OpenRouter.
-function brainChat(
-  model: string,
-  msgs: OrMessage[],
-  tools: AnthropicTool[],
-  opts: BrainCallOpts,
-): Promise<OrChatResult> {
-  return model.startsWith(GEMINI_DIRECT_PREFIX)
-    ? geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), msgs, tools, opts)
-    : openrouterChat(model, msgs, tools, opts)
-}
+// ── THE BRAIN — GEMINI DIRECT, UNIC ─────────────────────────────────────────
+// (Extirparea totală OpenRouter + OpenAI, 3 aug: „openrouter și open ai scos
+// din toată aplicația".) Tot creierul merge pe cheia Gemini a ownerului
+// (config.geminiKey). The selectable chat model is managed in chat.ts
+// (orchestrator); only the non-streaming utilities used outside the chat
+// remain here: memory (agents), short summaries (mailbox/admin) and the key
+// check.
 
-
-// ── THE RELIABLE EXPERT (Stage 1, owner order Jul 29) ───────────────────────
-// THE CAUSE (confirmed in code + the constructor's logs): brainComplete/
-// WithTools called `workModel()` ONLY ONCE; on 429/`:free` saturation,
-// openrouterChat threw, and `catch { return '' }` returned empty → "the expert
-// doesn't answer" (exactly the symptom Kelion reported). Now the expert walks
-// a LADDER of free models (work → top → reserves), skips the saturated/dead
-// ones and answers from the first free rung. Only if the WHOLE ladder fails
-// does it stay silent — but only after trying everything, not on the first
-// attempt. The same cure as the constructor's.
-
-// A TRANSIENT error (provider saturated/down) — worth moving to another model.
-// 400/401/404 (our request/key) are NOT here: they're not transient, but we
-// still move to the next model (a wrong name must not kill the expert).
+// A TRANSIENT error (provider saturated/down) — worth a pause before the next
+// rung. 400/401/404 (our request/key) are NOT here: they're not transient, but
+// we still move to the next model (a wrong name must not kill the expert).
 export function isTransientBrainError(err: unknown): boolean {
   const s = String((err as { message?: string })?.message ?? err)
-  return /\b429\b|rate.?limit|resourceexhausted|degraded|provider returned error|openrouter (5\d\d|408|409)|timed? ?out|econnreset|etimedout|fetch failed/i.test(
+  return /\b429\b|rate.?limit|resourceexhausted|degraded|gemini (5\d\d|408|409)|timed? ?out|econnreset|etimedout|fetch failed/i.test(
     s,
   )
 }
 
-// The expert's model ladder: work → top → free reserves. Editable from env
-// (OPENROUTER_EXPERT_FALLBACKS) without a deploy. Deduplicated, order kept.
+// The expert's model ladder — Gemini-only: work → top (flash → pro). Extra
+// rungs from env (BRAIN_EXPERT_FALLBACKS) are accepted ONLY if they are
+// google-direct/* — anything else (an old OpenRouter id left in env) is
+// silently dropped, so the ladder can never route to a dead provider.
 export function expertModelLadder(): string[] {
-  // REZERVELE :free OPENROUTER SCOASE din implicit (3 aug, „Gemini peste tot"):
-  // scara = treptele Gemini din config (flash → pro). Dacă amândouă pică,
-  // expertul tace CINSTIT — nu mai colindă furnizorul scos. Env-ul poate
-  // adăuga rezerve doar printr-o alegere conștientă a ownerului.
-  const extra = (process.env.OPENROUTER_EXPERT_FALLBACKS ?? '')
+  const extra = (process.env.BRAIN_EXPERT_FALLBACKS ?? '')
     .split(',')
     .map((s) => s.trim())
-    .filter(Boolean)
+    .filter((s) => s.startsWith(GEMINI_DIRECT_PREFIX))
   const out: string[] = []
-  for (const m of [config.openrouter.workDefault, config.openrouter.topDefault, ...extra]) {
+  for (const m of [config.brain.workDefault, config.brain.topDefault, ...extra]) {
     if (m && !out.includes(m)) out.push(m)
   }
   return out
+}
+
+// The one call every rung goes through: strips the google-direct/ prefix and
+// talks to Gemini. A rung WITHOUT the prefix has no engine behind it anymore —
+// named error, never a silent fall to a provider that no longer exists.
+function brainChat(
+  model: string,
+  messages: OrMessage[],
+  tools: AnthropicTool[] = [],
+  opts: { maxTokens?: number; temperature?: number; reasoning?: 'low' | 'medium' | 'high' } = {},
+): Promise<OrChatResult> {
+  if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
+    return Promise.reject(new Error(`model_necunoscut: „${model}" — creierul e Gemini-only (google-direct/*)`))
+  }
+  return geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), messages, tools, opts)
 }
 
 // Runs a call across the model ladder: tries each rung, skips the saturated/
@@ -123,54 +113,22 @@ export const brain = {
         content: [{ type: 'text', text: r.text }],
         stop_reason: null,
         stop_sequence: null,
-        // REAL usage, as reported by OpenRouter on the very call that answered
-        // (the previous version returned literal zeros — a fabricated
+        // REAL usage, as reported by the provider on the very call that
+        // answered (the previous version returned literal zeros — a fabricated
         // measurement that silently zeroed the memory agent's cost ledger).
         usage: { input_tokens: r.inputTokens, output_tokens: r.outputTokens },
-        // The REAL cost of the call (usage.cost), next to the Message so the
-        // caller books a measurement, not an estimate.
+        // The REAL cost of the call, next to the Message so the caller books a
+        // measurement, not an estimate. (Gemini free-tier reports 0.)
         costUsd: r.costUsd,
       }
     },
   },
 }
 
-// VISION IN VOICE (Adrian: "why can't he see?"). In the Realtime session
-// (audio only) Kelion had no eyes. The client captures a camera frame and
-// sends it here; we give it to a vision model (GPT/Gemini via OpenRouter) and
-// return a short, natural description to speak aloud. Empty on failure —
-// never throws.
-export async function describeScene(
-  imageDataUrl: string,
-  question?: string,
-  onCost?: (usd: number) => void,
-): Promise<string> {
-  try {
-    const r = await brainChat(
-      config.openrouter.chatDefault,
-      [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text:
-                question?.trim() ||
-                'Privește prin camera utilizatorului și spune scurt și natural ce vezi ACUM, ca și cum te-ai uita chiar acum. Fără liste, fără markdown.',
-            },
-            { type: 'image_url', image_url: { url: imageDataUrl } },
-          ],
-        },
-      ],
-      [],
-      { maxTokens: 400 },
-    )
-    if (onCost && r.costUsd > 0) onCost(r.costUsd)
-    return r.text.trim()
-  } catch {
-    return ''
-  }
-}
+// (describeScene — „vederea delegată" pentru creierele OARBE din pool-ul
+// OpenRouter — a fost ȘTEARSĂ, 3 aug: creierul e Gemini-only și VEDE nativ
+// (toGeminiPayload → inline_data), deci nu mai există niciun creier orb căruia
+// să-i descrii poza.)
 
 // A short text answer from the brain (mailbox, admin). Empty on failure —
 // never throws. onCost (Jul 25): voice must DEBIT the real cost of the
@@ -251,15 +209,13 @@ export async function brainCompleteWithTools(
   }
 }
 
-// Checks the default models (chat + work) with a real ping through OpenRouter.
+// Checks the default models (chat + work) with a real ping through Gemini.
 export async function verifyModels(): Promise<Record<string, string>> {
   const ping = async (model: string): Promise<string> => {
     try {
-      // 64, not 16: models with internal reasoning (e.g. claude-fable-5) spend
-      // budget tokens ON THINKING before the answer — live proof, Jul 25: with
-      // 16 tokens, 11 went to "reasoning_tokens" and the content came out empty
-      // (finish_reason:"length"), so the ping falsely reported "fail" on a live
-      // model.
+      // 64, not 16: thinking models spend budget tokens ON THINKING before the
+      // answer — with a tiny cap the content comes out empty and the ping
+      // falsely reports "fail" on a live model.
       const r = await brainChat(model, [{ role: 'user', content: 'Reply with the single word: ok' }], [], {
         maxTokens: 64,
       })
@@ -269,28 +225,28 @@ export async function verifyModels(): Promise<Record<string, string>> {
     }
   }
   return {
-    [config.openrouter.chatDefault]: await ping(config.openrouter.chatDefault),
-    [config.openrouter.workDefault]: await ping(config.openrouter.workDefault),
+    [config.brain.chatDefault]: await ping(config.brain.chatDefault),
+    [config.brain.workDefault]: await ping(config.brain.workDefault),
   }
 }
 
-// Checks the OpenRouter key (a single key for the whole brain).
+// Checks the Gemini key (a single key for the whole brain).
 export async function verifyKeys(): Promise<{
   primary: string
   reserve: string
   diag: Record<string, unknown>
 }> {
-  if (!config.openrouter.key) {
-    return { primary: 'not_configured', reserve: 'not_configured', diag: { openrouterKeyLen: 0 } }
+  if (!geminiDirectAvailable()) {
+    return { primary: 'not_configured', reserve: 'not_configured', diag: { geminiKeyLen: 0 } }
   }
   let primary = 'fail'
   try {
-    const r = await brainChat(config.openrouter.chatDefault, [{ role: 'user', content: 'ping' }], [], {
+    const r = await brainChat(config.brain.chatDefault, [{ role: 'user', content: 'ping' }], [], {
       maxTokens: 1,
     })
     primary = r.model ? 'ok' : 'fail'
   } catch {
     primary = 'fail'
   }
-  return { primary, reserve: primary, diag: { openrouterKeyLen: config.openrouter.key.length } }
+  return { primary, reserve: primary, diag: { geminiKeyLen: config.geminiKey.length } }
 }

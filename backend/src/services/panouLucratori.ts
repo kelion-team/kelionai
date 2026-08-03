@@ -52,11 +52,12 @@ export interface RezultatPanou {
 }
 
 /** DIFFERENT models for different workers — that's why it's a panel, not an
- *  echo. All free; the order is the capability measured on Jul 31. */
+ *  echo. GEMINI-ONLY (3 aug — OpenRouter extirpat): trei trepte Gemini pe
+ *  aceeași cheie, în forma LiteLLM `gemini/...` pe care o vorbesc uneltele. */
 const MODELE = [
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'cohere/north-mini-code:free',
-  'inclusionai/ling-3.0-flash:free',
+  'gemini/gemini-2.5-pro',
+  'gemini/gemini-2.5-flash',
+  'gemini/gemini-2.5-flash-lite',
 ]
 
 /** A proposal's summary, for the brain. Facts only, in the order they matter

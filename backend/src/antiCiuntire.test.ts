@@ -64,22 +64,22 @@ describe('AMBELE căi de scriere au paznicul, cu ACELAȘI prag', () => {
 })
 
 describe('fișierul distrus e la loc, întreg', () => {
-  it('constructor-agent.mjs are peste o mie de rânduri, nu paisprezece', () => {
+  it('constructor-agent.mjs are sute de rânduri, nu paisprezece', () => {
+    // (Pragul coborât de la 1000 la 900 pe 3 aug: extirparea scării OpenRouter
+    // a scos ~270 de rânduri LEGITIM — fișierul întreg are acum ~970.)
     const randuri = constructor.split('\n').length
-    expect(randuri).toBeGreaterThan(1000)
+    expect(randuri).toBeGreaterThan(900)
   })
 
-  it('scara de modele conține schimbarea pe care PR #613 o voia', () => {
-    // Kelion's diagnosis was good: the model really is broken. The change
-    // stays — just applied without destroying the rest of the file.
-    expect(constructor).toMatch(/MODELE_DOVEDIT_PROASTE = new Set\(\[[\s\S]{0,600}nvidia\/nemotron-3-super-120b-a12b:free/)
-    expect(constructor).not.toMatch(/MODEL_LADDER = \[\s*\n\s*'nvidia\/nemotron-3-super-120b-a12b:free'/)
-  })
+  // (Testul „scara de modele conține schimbarea PR #613" a fost ȘTERS, 3 aug —
+  // scara de modele OpenRouter a fost extirpată cu totul din constructor;
+  // creierul e Gemini-only, deci nu mai există MODELE_DOVEDIT_PROASTE.)
 
   it('bucățile mari ale constructorului sunt toate acolo', () => {
     // A coarse but real check: if the file were maimed again, at least one of
-    // these would be missing.
-    for (const bucata of ['function toolWrite', 'function toolEdit', 'MODEL_LADDER', 'RUN_ALLOWED', 'compactHistory'])
+    // these would be missing. (MODEL_LADDER → llmGemini după extirparea
+    // OpenRouter, 3 aug.)
+    for (const bucata of ['function toolWrite', 'function toolEdit', 'function llmGemini', 'RUN_ALLOWED', 'compactHistory'])
       expect(constructor).toContain(bucata)
   })
 })

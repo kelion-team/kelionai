@@ -55,7 +55,9 @@ describe('sunt trei, și chiar sunt independenți', () => {
     const ids = m.match(/'([^']+)'/g) ?? []
     expect(ids.length).toBeGreaterThanOrEqual(3)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toContain(':free')
+    // GEMINI-ONLY (3 aug — OpenRouter extirpat): toate treptele sunt Gemini,
+    // în forma LiteLLM `gemini/...`, pe cheia ownerului.
+    for (const id of ids) expect(id).toContain("'gemini/")
   })
 
   it('pornesc simultan, iar unul care crapă nu-i oprește pe ceilalți', () => {

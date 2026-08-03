@@ -1,25 +1,21 @@
 // ── COST ACCOUNTING: WHAT IS MEASURED vs WHAT IS ESTIMATED ─────────────────
 //
 // The owner's standing order: "the cost table is not real — show REAL, stop
-// fabricating". So every figure in this file is one of three honest things:
+// fabricating". So every figure in this file is one of two honest things:
 //
-//   1. MEASURED — read from the provider's own response. The real cost of a
-//      brain call comes from OpenRouter's `usage.cost` (see chat.ts / the
-//      `costUsd` field of every result in openrouter.ts). Nothing here
-//      replaces it; this file only handles the residual utilities.
-//   2. LIVE PRICE — a per-token price read from the live OpenRouter /models
-//      catalog (cached 10 min), used only where the provider billed us but
-//      did not itemize the call (the background memory agent, which runs on
-//      the chat-default model through a non-streaming adapter).
-//   3. ESTIMATE — a fixed rate, LABELED as such here AND downstream
-//      (db.ts getCostSummary splits every kind into `masurat`/`estimat`, so
-//      the Money tab can never present an estimate as a measurement).
+//   1. MEASURED — read from the provider's own response (the `costUsd` field
+//      of every brain result — see brainContract.ts). Nothing here replaces
+//      it; this file only handles the residual utilities. (Gemini free-tier
+//      reports cost 0, and that IS the measurement.)
+//   2. ESTIMATE — a fixed rate or a published list price, LABELED as such
+//      here AND downstream (db.ts getCostSummary splits every kind into
+//      `masurat`/`estimat`, so the Money tab can never present an estimate as
+//      a measurement). The live OpenRouter price catalog is GONE (extirpat,
+//      3 aug) — there is no per-token live price source anymore.
 //
 // A number whose source cannot be named does not belong in this file.
 
-import { getLiveModelPricePerM } from './openrouter.js'
-
-export type CostSource = 'live_openrouter' | 'static_estimate' | 'unknown'
+export type CostSource = 'static_estimate' | 'unknown'
 
 export interface BrainCostEstimate {
   usd: number
@@ -28,12 +24,10 @@ export interface BrainCostEstimate {
   source: CostSource
 }
 
-// ── STATIC FALLBACK TABLE — LAST-RESORT ESTIMATE, NOT A PRICE LIST ─────────
-// Used ONLY when the live OpenRouter catalog is unreadable (no key, network
-// down, provider renamed the model). The figures were the provider's
-// published list prices at the time they were noted; they can drift, which is
-// exactly why they are a labeled fallback, never the primary source.
-// Adding a model here is NOT the way to price it — the live catalog is.
+// ── STATIC PRICE TABLE — LABELED ESTIMATE, NOT A MEASUREMENT ───────────────
+// The figures are the provider's published list prices at the time they were
+// noted; they can drift, which is exactly why every result from here is
+// labeled 'static_estimate', never presented as a measured cost.
 const STATIC_FALLBACK_PRICES: Record<string, { input: number; output: number }> = {
   // Google published list price for Gemini 2.5 Flash ($0.30/1M in, $2.50/1M
   // out), noted 2026-07 — estimate, kept only for the no-catalog case.
@@ -52,27 +46,16 @@ export function costFromPrice(
 
 /**
  * The cost of a brain call whose provider did NOT itemize `usage.cost`
- * (today: the background memory agent). The price is read LIVE from the
- * OpenRouter catalog first; only if the catalog is unreadable do we fall back
- * to the static estimate table, and the result says so. `unknown` = we have
- * no price at all — better an honest 0 labeled "unknown" than a made-up one.
+ * (today: the background memory agent). The only price source left is the
+ * static table above (the live OpenRouter catalog is gone — extirpat, 3 aug),
+ * and the result says so. `unknown` = we have no price at all — better an
+ * honest 0 labeled "unknown" than a made-up one.
  */
 export async function brainCostUsd(
   model: string,
   inputTokens: number,
   outputTokens: number,
 ): Promise<BrainCostEstimate> {
-  // try/catch (not .catch): a synchronous throw from the lookup must fall back
-  // just the same — the ledger never breaks because a price source hiccuped.
-  let live: { promptPerM: number; completionPerM: number } | null = null
-  try {
-    live = await getLiveModelPricePerM(model)
-  } catch {
-    live = null
-  }
-  if (live) {
-    return { usd: costFromPrice(live.promptPerM, live.completionPerM, inputTokens, outputTokens), source: 'live_openrouter' }
-  }
   const base = model.replace(/-\d{6,}$/, '')
   const bare = base.split('/').pop() ?? base
   const p = STATIC_FALLBACK_PRICES[base] ?? STATIC_FALLBACK_PRICES[bare]
@@ -102,16 +85,15 @@ export const ASR_USD_PER_CALL = Number(process.env.ASR_USD_PER_CALL ?? 0.0015)
 // but not a per-call cost, so the ledger entry stays an ESTIMATE.
 export const SERPER_USD_PER_CALL = Number(process.env.SERPER_USD_PER_CALL ?? 0.001)
 
-// Image generation FALLBACK rate, used only when OpenRouter did not return
-// the call's real `usage.cost` (openrouterImage reports it — chat.ts books
-// the REAL figure whenever it exists and reaches for this only as a labeled
-// estimate). Hand-set ESTIMATE; override with IMAGE_USD_PER_CALL.
+// Image generation FALLBACK rate, used only when the generator did not report
+// the call's real `usage.cost` (geminiImage reports 0 — Google's image
+// endpoints itemize no per-call cost). Hand-set ESTIMATE; override with
+// IMAGE_USD_PER_CALL.
 export const IMAGE_USD_PER_CALL = Number(process.env.IMAGE_USD_PER_CALL ?? 0.04)
 
 // VOICE BILLING PER MINUTE (Adrian, 25 Jul: "when users use voice/extra
 // payments, take the costs out of their credits"). This is OUR price to the
-// user — a product decision, not a provider measurement; the OpenAI Realtime
-// spend underneath is read separately from the provider (openaiCosts.ts).
+// user — a product decision, not a provider measurement.
 // The ledger marks `voice_minutes` as an estimate (db.ts COSTURI_MASURATE).
 // Editable from env.
 export const VOICE_USD_PER_MINUTE = Number(process.env.VOICE_USD_PER_MINUTE ?? 0.35)

@@ -1,18 +1,15 @@
 import { config } from '../config.js'
-import type { AnthropicTool, BrainCallOpts, OrChatResult, OrImage, OrMessage, OrToolCall } from './openrouter.js'
+import type { AnthropicTool, BrainCallOpts, OrChatResult, OrImage, OrMessage, OrToolCall } from './brainContract.js'
 import { readSSE } from './sse.js'
 
-// ── THE MAIN BRAIN: GEMINI DIRECT FROM GOOGLE (Adrian, 27 Jul: "switch to
-// the other free one... gemini... as primary, and what's now primary becomes
-// secondary") ──────────────────────────────────────────────────────────────
-// The REAL top free tier: the free key from AI Studio (the owner's Google
-// account) gives gemini-2.5-flash with vision+tools+thinking, above any :free
-// model on OpenRouter. Here is the direct client on the Google API
-// (generatelanguage), with the SAME input/output shapes as
-// openrouterChat/Stream — the orchestrator can't tell the difference.
-// Nemotron :free stays SECONDARY: chat.ts falls back to it automatically on
-// Gemini quota exhaustion/error. The voice (OpenAI Realtime) doesn't go
-// through here.
+// ── CREIERUL UNIC: GEMINI DIRECT DE LA GOOGLE ───────────────────────────────
+// (Extirparea totală OpenRouter + OpenAI, 3 aug: „openrouter și open ai scos
+// din toată aplicația".) Cheia Tier 2 a ownerului (AI Studio) dă
+// gemini-2.5-flash/pro cu vedere+unelte+gândire. Aici e clientul direct pe
+// API-ul Google (generativelanguage); formele de intrare/ieșire sunt
+// contractul casei (services/brainContract.ts). Nu mai există niciun furnizor
+// secundar: dacă Gemini pică, tura se încheie onest (mesajul neutru din
+// chat.ts), nu cade pe alt creier.
 
 const G_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -74,7 +71,8 @@ export async function geminiLive(): Promise<GeminiLive> {
   return val
 }
 
-/** The internal prefix that routes the orchestrator to Google instead of OpenRouter. */
+/** The internal prefix of every brain model id — the orchestrator refuses
+ *  anything else (Gemini-only, 3 aug). */
 export const GEMINI_DIRECT_PREFIX = 'google-direct/'
 
 interface GPart {
@@ -277,8 +275,8 @@ export async function geminiDirectChat(
 }
 
 // The STREAMING variant (SSE): the text flows through onText (first word
-// instantly), the tool calls are collected from chunks — same shape as at
-// OpenRouter.
+// instantly), the tool calls are collected from chunks — the same OrChatResult
+// contract as the non-streaming call.
 export async function geminiDirectChatStream(
   model: string,
   messages: OrMessage[],
@@ -313,8 +311,8 @@ export async function geminiDirectChatStream(
   return { ...res, text }
 }
 
-/** Free quota exhausted / service unavailable — the signal to fall back to
- *  the SECONDARY (nemotron :free through OpenRouter). */
+/** Free quota exhausted / service unavailable — a TRANSIENT provider state
+ *  (worth a retry / a clear log line), not a broken request of ours. */
 export function isGeminiQuotaError(e: unknown): boolean {
   return /gemini (429|500|503)|RESOURCE_EXHAUSTED|quota/i.test(String(e))
 }
@@ -325,7 +323,7 @@ export function isGeminiQuotaError(e: unknown): boolean {
 // endpoints are tried in order and the FIRST that returns real image bytes wins:
 //   1) Imagen predict     — bytes at predictions[0].bytesBase64Encoded
 //   2) Gemini image model — bytes inline at candidates[0].content.parts[].inlineData.data
-// Same return shape as openrouterImage (OrImage): mime + bytes, so image.ts's
+// Return shape: OrImage (brainContract.ts) — mime + bytes, so image.ts's
 // storage/URL logic is unchanged. costUsd is 0 — these endpoints report no
 // per-call cost, and an unmeasured number would be a fabrication (rule no. 1).
 const IMAGEN_MODEL = 'imagen-3.0-generate-002'
@@ -400,8 +398,8 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
 }
 
 /** Image generation on the owner's Gemini key. Tries Imagen, then the Gemini
- *  image model, and returns the FIRST that yields bytes — in the SAME shape as
- *  openrouterImage (OrImage) so image.ts is unchanged.
+ *  image model, and returns the FIRST that yields bytes — as OrImage
+ *  (brainContract.ts) so image.ts is unchanged.
  *  COSTUL (agenții de debug, 3 aug, verdict REAL: 0 hardcodat ținea imaginile
  *  în afara jurnalului — `if (costUsd > 0)` nu înregistra nimic pe cheia
  *  PLĂTITĂ): Google nu întoarce dolari; punem tariful PUBLICAT per imagine

@@ -1,10 +1,9 @@
 import fs from 'node:fs/promises'
-import { getPool, dbEnabled, listBuildJobs, loadKv } from '../db.js'
+import { getPool, dbEnabled, listBuildJobs } from '../db.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
-import { getOpenRouterBalance } from './openrouter.js'
-import { stareDispecer, poateFolosiRezerva, REZERVA_CAP_ZILNIC_DEFAULT_USD } from './dispecer.js'
+import { geminiLive } from './geminiDirect.js'
+import { stareDispecer } from './dispecer.js'
 import { stareUrechiChirp } from './urechiChirp.js'
-import { utcDay } from './timeContext.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -168,19 +167,22 @@ export async function systemHealth(): Promise<string> {
     info.resurse = 'nu se pot măsura de aici'
   }
 
-  // 6. The brain's pouch (OpenRouter).
+  // 6. The brain (Gemini direct — OpenRouter extirpat, 3 aug). Semnalul ONEST
+  // măsurabil: pingul live geminiLive() — verde = cheia Tier 2 servește (bani +
+  // merge), roșu = epuizat/cotă/stricat. Nu există un „sold" citibil la Google
+  // (verificat 3 aug), deci nu afișăm o cifră inventată.
   try {
-    const b = await getOpenRouterBalance()
-    info.creier = b.ok ? `$${b.balance.toFixed(2)}` : 'necunoscut'
-    if (b.ok && b.low)
+    const g = await geminiLive()
+    info.creier = !g.ok ? 'necitibil' : g.serving ? 'Gemini servește (Tier 2 activ)' : `Gemini NU servește (${g.reason ?? 'necunoscut'})`
+    if (g.ok && !g.serving)
       problems.push({
         id: 'creier_sarac',
         grav: 'critic',
-        desc: `Soldul OpenRouter e $${b.balance.toFixed(2)} — sub prag; creierul se poate opri.`,
-        reparabil: 'doar ownerul poate alimenta (openrouter.ai/credits)',
+        desc: `Gemini (creierul unic) nu servește: ${g.reason ?? 'necunoscut'} — chatul se poate opri.`,
+        reparabil: 'doar ownerul poate alimenta/verifica cheia (aistudio.google.com → Billing)',
       })
   } catch {
-    /* balance unavailable */
+    /* ping unavailable */
   }
 
   // 7. THE ADMIN'S BUTTONS, WATCHED (Adrian, Aug 1: „Kelion must monitor all
@@ -261,39 +263,14 @@ export async function systemHealth(): Promise<string> {
     /* the prints table answered nothing — the DB check above already reports */
   }
 
-  // 9. THE DISPATCHER + THE RESERVE PURSE (Adrian, Aug 1: one purse, many
-  // users). Telemetry always visible; a PROBLEM only when the day's reserve
-  // spend passed the owner's cap — the app keeps running on the free pool,
-  // but the owner must know the safety net is closed until tomorrow.
+  // 9. THE DISPATCHER (Adrian, Aug 1: one brain, many users). Telemetry always
+  // visible. (Punga de rezervă pe modele plătite a fost EXTIRPATĂ odată cu
+  // OpenRouter, 3 aug: nu mai există niciun fallback plătit — creierul e
+  // Gemini-only, pe cheia ownerului.)
   try {
     info.dispecer = stareDispecer()
-    const zi = utcDay()
-    const rawSpent = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
-    const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
-    const spent = rawSpent ? Number(rawSpent) : 0
-    const capN = rawCap ? Number(rawCap) : NaN
-    const cap = Number.isFinite(capN) && capN > 0 ? capN : REZERVA_CAP_ZILNIC_DEFAULT_USD
-    const spentAzi = Number.isFinite(spent) ? spent : 0
-    // NU E SĂRĂCIE (Adrian, 3 aug: „nu vede că are bani"). cap=0 e starea ALEASĂ
-    // dinadins (leak-stop): fallback-ul PLĂTIT pe OpenRouter e închis special ca
-    // să nu pornească modele plătite din greșeală. Creierul de LUCRU e Gemini
-    // Tier 2, plătit pe cheia ownerului și funcțional — deci „rezerva la 0" NU e
-    // o problemă și NU înseamnă „doar pool gratuit". Raportăm rezerva_plina DOAR
-    // când ownerul a DESCHIS explicit rezerva (cap>0) și s-a epuizat.
-    if (cap <= 0) {
-      info.rezerva = `oprită intenționat (cap $0, leak-stop) — creierul de lucru e Gemini Tier 2 (plătit, pe cheia ownerului); fallback-ul plătit OpenRouter e închis dinadins, nu din lipsă de bani`
-    } else {
-      info.rezerva = `$${spentAzi.toFixed(4)} cheltuiți azi din rezervă (cap $${cap})`
-      if (!poateFolosiRezerva(spentAzi, cap))
-        problems.push({
-          id: 'rezerva_plina',
-          grav: 'mediu',
-          desc: `Rezerva de plată deschisă de owner a atins capul zilnic ($${Number(spent).toFixed(2)} ≥ $${cap}) — până mâine fallback-ul plătit OpenRouter stă (creierul de lucru Gemini Tier 2 merge normal).`,
-          reparabil: 'dacă traficul o cere, ownerul ridică capul: saveKv rezerva:cap_zilnic (prin db_query) — e o decizie de bani, NU o lua singur',
-        })
-    }
   } catch {
-    /* kv unreachable — the DB check above already reports */
+    /* telemetry unreadable — we don't invent problems */
   }
 
   // 10. THE CHIRP EARS, UNDER CONSTANT WATCH (Adrian, Aug 2, direct order:
@@ -311,7 +288,7 @@ export async function systemHealth(): Promise<string> {
       problems.push({
         id: 'urechi_chirp_bolnave',
         grav: 'mediu',
-        desc: `Urechile Chirp (Google STT streaming) au căzut: ${u.motiv}. Vocea merge pe urechile OpenAI (plătite) până la reparare.`,
+        desc: `Urechile Chirp (Google STT streaming) au căzut: ${u.motiv}. Auzul e JOS până la reparare (nu mai există nicio ureche de rezervă — OpenAI extirpat, 3 aug).`,
         reparabil: 'citește ultima eroare din jurnal («asr-stream»); dacă e auth/config → verifică GOOGLE_SERVICE_ACCOUNT_JSON pe VPS și regiunea «eu»',
       })
   } catch {

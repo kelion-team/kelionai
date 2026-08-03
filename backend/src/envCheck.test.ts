@@ -12,8 +12,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 vi.mock('./config.js', () => ({
   config: {},
   ENV_ALIASES: {
-    openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
-    openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
     databaseUrl: ['DATABASE_URL', 'POSTGRES_URL'],
     sessionSecret: ['SESSION_SECRET'],
     geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
@@ -76,9 +74,18 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(byName.ENABLE_BANKING_PRIVATE_KEY_B64).toBeDefined()
   })
 
-  it('OPENAI_USAGE_KEY e cheie așteptată (pastila „OpenAI $x.xx" din bară)', () => {
-    const byName = Object.fromEntries(envCheck().map((v) => [v.name, v]))
-    expect(byName.OPENAI_USAGE_KEY).toBeDefined()
+  // ── OPENAI/OPENROUTER SUNT MORȚI, CA STRIPE (extirparea totală, 3 aug) ───
+  // Cheile lor nu mai sunt nici așteptate, nici listate ca orfane: un
+  // OPENAI_API_KEY rămas pe VPS e un cadavru, nu „ceva de configurat".
+  it('OpenAI/OpenRouter sunt morți: cheile lor nu apar NICĂIERI în raport', () => {
+    process.env.OPENAI_API_KEY = SECRET
+    process.env.OPENROUTER_API_KEY = SECRET
+    process.env.OPENAI_USAGE_KEY = SECRET
+    expect(envCheck().some((v) => /OPENAI|OPENROUTER/.test(v.name))).toBe(false)
+    expect(envOrphans().some((n) => /OPENAI|OPENROUTER/.test(n))).toBe(false)
+    delete process.env.OPENAI_API_KEY
+    delete process.env.OPENROUTER_API_KEY
+    delete process.env.OPENAI_USAGE_KEY
   })
 
   // ── THE CORE OF ADRIAN'S PROBLEM, Jul 30 ───────────────────────────────

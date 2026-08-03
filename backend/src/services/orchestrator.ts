@@ -1,10 +1,4 @@
-import {
-  openrouterChat,
-  openrouterChatStream,
-  type AnthropicTool,
-  type OrMessage,
-  type OrToolCall,
-} from './openrouter.js'
+import type { AnthropicTool, OrMessage, OrToolCall } from './brainContract.js'
 import {
   GEMINI_DIRECT_PREFIX,
   geminiDirectChat,
@@ -13,13 +7,13 @@ import {
 import { filtruRepetitie } from './fluxUnic.js'
 import { parseFakeToolCalls, stripToolMarkup } from './toolMarkup.js'
 
-// ── THE ORCHESTRATOR — one brain, any model ─────────────────────────────────
-// Runs a conversation WITH tool-use through a chosen model (GPT/Gemini/Claude
-// via OpenRouter), IDENTICALLY regardless of model: same tools, same persona
-// (the system message), same memory (arriving in `messages`). The loop: call
-// the model → if it asks for tools, run them (callback) → append the results
-// → repeat, until the model gives a final answer. The REAL cost accumulates
-// across all rounds.
+// ── THE ORCHESTRATOR — one brain: GEMINI DIRECT ─────────────────────────────
+// (Extirparea OpenRouter/OpenAI, 3 aug: creierul e Gemini-ONLY.) Runs a
+// conversation WITH tool-use through the Gemini model (`google-direct/…`):
+// same tools, same persona (the system message), same memory (arriving in
+// `messages`). The loop: call the model → if it asks for tools, run them
+// (callback) → append the results → repeat, until the model gives a final
+// answer. The REAL cost accumulates across all rounds.
 
 export interface OrchestratorResult {
   text: string
@@ -76,7 +70,7 @@ const ANALIZA_CLAIM_RE =
   /\b(?:o\s+s[ăa]\s+)?(?:analizez|verific|investighez|cercetez|examinez|studiez|inspectez)\b|\b(?:m[ăa]\s+uit|arunc\s+o\s+privire|dau\s+o\s+cautare|caut\s+prin|sap\s+in)\b|\b(?:let\s+me\s+)?(?:analy[sz]e|investigate|examine|inspect|look\s+into|take\s+a\s+look|check\s+the)\b|\bi(?:'|’)?ll\s+(?:analy[sz]e|check|look|investigate|examine)\b/i
 
 /**
- * @param model      OpenRouter id (e.g. openai/gpt-4.1-mini, anthropic/claude-sonnet-5)
+ * @param model      Gemini-direct id (e.g. google-direct/gemini-2.5-flash)
  * @param messages   the conversation (system + history + current turn)
  * @param tools      the tools in Anthropic format (the ones from chat.ts)
  * @param execTool   runs a tool: (name, argsJson) → text result
@@ -136,22 +130,21 @@ export async function runOrchestrator(
       reasoning: opts.reasoning,
       toolChoice,
     }
-    // THE MAIN GEMINI BRAIN (Adrian, Jul 27): models with the google-direct/
-    // prefix go through Google's API (the free key), not through OpenRouter —
-    // same input/output shapes, the tool loop stays identical.
-    const gemini = model.startsWith(GEMINI_DIRECT_PREFIX)
-    const gModel = gemini ? model.slice(GEMINI_DIRECT_PREFIX.length) : model
+    // GEMINI-ONLY (3 aug — extirparea OpenRouter): orice model al creierului
+    // poartă prefixul google-direct/ și merge prin API-ul Google. Un id fără
+    // prefix nu mai are niciun motor în spate — eroare NUMITĂ, nu o cădere
+    // tăcută pe un furnizor care nu mai există.
+    if (!model.startsWith(GEMINI_DIRECT_PREFIX)) {
+      throw new Error(`model_necunoscut: „${model}" — creierul e Gemini-only (google-direct/*)`)
+    }
+    const gModel = model.slice(GEMINI_DIRECT_PREFIX.length)
     // PROFILING (Aug 2 — the 38-second weather turn): every brain round gets
     // its real duration in the log, so a slow turn shows WHERE the seconds go
     // (the model, the tool, or the number of rounds) instead of being guessed.
     const tRunda = Date.now()
     const res = onTextFiltrat
-      ? gemini
-        ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
-        : await openrouterChatStream(model, convo, tools, onTextFiltrat, callOpts)
-      : gemini
-        ? await geminiDirectChat(gModel, convo, tools, callOpts)
-        : await openrouterChat(model, convo, tools, callOpts)
+      ? await geminiDirectChatStream(gModel, convo, tools, onTextFiltrat, callOpts)
+      : await geminiDirectChat(gModel, convo, tools, callOpts)
     totalCost += res.costUsd
     served = res.model
     console.log(`[TIMP] ${served} runda ${round}: ${Date.now() - tRunda}ms (${res.toolCalls.length} apeluri de unelte)`)

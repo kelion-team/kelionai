@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { toGeminiPayload, GEMINI_DIRECT_PREFIX, isGeminiQuotaError } from './geminiDirect.js'
-import type { OrMessage } from './openrouter.js'
+import type { OrMessage } from './brainContract.js'
 
 describe('gemini direct (creierul principal gratuit)', () => {
   it('convertește conversația casei în formatul Gemini (system + tool-uri + funcții)', () => {

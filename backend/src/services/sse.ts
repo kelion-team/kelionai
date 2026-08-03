@@ -1,5 +1,5 @@
 // ── SINGLE SOURCE for reading an SSE stream (`data: {json}` lines) ──────────
-// The brain's streaming (OpenRouter OpenAI-format + Gemini direct) delivers
+// The brain's streaming (Gemini direct) delivers
 // events as `data: {…}` lines; both services used to MANUALLY parse the exact
 // same skeleton (reader + decoder + buffer + split on \n + `data:` prefix +
 // [DONE] + JSON.parse). Here, once (the permanent principle: unique, no

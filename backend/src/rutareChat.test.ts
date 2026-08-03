@@ -24,7 +24,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { areCevaDeVazut, conteazaCaVizibil } from './routes/chat.js'
-import { hasActionIntent } from './services/openrouter.js'
+import { hasActionIntent } from './services/brainContract.js'
 
 const CTRL = String.fromCharCode(31)
 const cadru = (o: unknown): string => `${CTRL}${JSON.stringify(o)}${CTRL}`
@@ -59,11 +59,12 @@ describe('ack-ul instant NU e răspunsul (cauza exactă a „am preluat sarcina"
     expect(sursaChat).toMatch(/ackInstantZbor = true\s*\n\s*reply\.raw\.write\(ackText\)\s*\n\s*ackInstantZbor = false/)
   })
 
-  it('rotirea NU mai poate accepta un răspuns gol doar pentru că a ieșit ack-ul', () => {
+  it('reîncercarea NU mai poate accepta un răspuns gol doar pentru că a ieșit ack-ul', () => {
     // Condiția de acceptare există în continuare (text / text curgat / suprafață
     // pusă de unelte) — dar sawVisible nu mai poate fi otrăvit de ack (testele
     // de mai sus). Dacă cineva scoate conteazaCaVizibil din interceptor, cade aici.
-    expect(sursaChat).toMatch(/returned empty — silent rotation/)
+    // (3 aug: „silent rotation" a devenit „reîncercare" pe același creier Gemini.)
+    expect(sursaChat).toMatch(/returned empty — reîncercare/)
   })
 
   it('plasa anti-tăcere rămâne ultima linie: orice tură fără conținut primește mesaj onest', () => {

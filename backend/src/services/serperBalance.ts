@@ -1,11 +1,11 @@
 // ── THE REAL SERPER CREDIT, READ FROM THE PROVIDER ──────────────────────────
 //
-// The same standing order that produced the OpenAI costs pill (openaiCosts.ts):
-// "show REAL, stop fabricating". Serper powers the web search skill, and its
-// remaining credit IS readable: GET https://google.serper.dev/account with the
-// X-API-KEY header answers { balance: 49875, rateLimit: 50 }.
+// The standing order: "show REAL, stop fabricating". Serper powers the web
+// search skill, and its remaining credit IS readable: GET
+// https://google.serper.dev/account with the X-API-KEY header answers
+// { balance: 49875, rateLimit: 50 }.
 //
-// The honesty rule is identical to getOpenRouterBalance / getOpenAiMonthCost:
+// The honesty rule (regula #1 a ownerului):
 // when the key is missing or the read fails we say we CANNOT READ (ok: false)
 // and the header pill shows "Serper ⚠" — NEVER "Serper 0", because "I couldn't
 // read it" and "you have no credit" would look identical if we stayed silent.
@@ -41,8 +41,8 @@ export async function getSerperBalance(force = false): Promise<SerperBalance> {
   const base: SerperBalance = { ok: false, balance: 0 }
   // Read LIVE from process.env on every call (not from the boot-time config):
   // Adrian adds the key on the server and expects the pill to heal without a
-  // redeploy — the same live-read rule as openaiCosts.ts. Both accepted names
-  // from config.ts (SERPER_API_KEY, SERPER_KEY) are honored here.
+  // redeploy. Both accepted names from config.ts (SERPER_API_KEY, SERPER_KEY)
+  // are honored here.
   const key = (process.env.SERPER_API_KEY ?? process.env.SERPER_KEY ?? '').trim()
   if (!key) return { ...base, error: 'not_configured' }
   if (!force && accountCache && Date.now() - accountCache.at < ACCOUNT_TTL_MS) return accountCache.val

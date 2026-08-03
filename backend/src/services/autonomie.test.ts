@@ -53,7 +53,7 @@ let uneltePrimite: string[] = []
 vi.mock('../config.js', () => ({
   config: {
     adminEmail: 'adrianenc11@gmail.com',
-    openrouter: { topDefault: 'model-top' },
+    brain: { topDefault: 'model-top' },
     get autonomyDailyMax() {
       return plafon
     },

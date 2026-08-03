@@ -8,36 +8,28 @@ import { fileURLToPath } from 'node:url'
 // platitori" + "userul free plateste la aplicatie, prin credite […] lui
 // trebuie sa functioneze permanent fara mesaje de genul acela".
 //
-// REGULA: erorile creierului (429 rate-limit, 402 fonduri, model mort,
-// răspuns gol) se absorb prin ROTIRE SILENȚIOASĂ în pool-ul de modele free
-// din catalogul live. Userul aude un mesaj NEUTRU ("încearcă din nou") ABIA
-// dacă tot pool-ul pică. Detaliile tehnice rămân doar în logul serverului.
+// REGULA (adaptată la Gemini-only, 3 aug — extirparea totală OpenRouter):
+// erorile creierului (429, răspuns gol, model căzut) se absorb prin
+// REÎNCERCĂRI pe ACELAȘI creier Gemini. Userul aude un mesaj NEUTRU
+// ("încearcă din nou") ABIA dacă toate încercările pică. Detaliile tehnice
+// rămân doar în logul serverului. NU mai există rotire pe alt furnizor.
 //
 // Testul citește codul REAL. Dacă cineva repune un mesaj despre modele /
 // plafon / bani în calea vizibilă userului, cade aici.
 const sursa = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
-describe('rotirea silențioasă între modelele free', () => {
-  it('parcurge pool-ul free din catalogul live', () => {
-    expect(sursa).toMatch(/listaCandidati[\s\S]{0,400}getCatalog/)
-    expect(sursa).toMatch(/m\.id\.endsWith\(':free'\)/)
+describe('reîncercările tăcute pe creierul Gemini (fără alt furnizor)', () => {
+  it('un model gol sau picat NU închide turul din prima — se reîncearcă', () => {
+    expect(sursa).toMatch(/reîncercare/)
+    expect(sursa).toMatch(/brain_gemini_exhausted/)
   })
 
-  // Adrian, Aug 1 — punga de rezervă aprobată („da"): când TOT pool-ul free
-  // pică, tura trece pe cele mai ieftine modele plătite din catalog. Userul
-  // NU află nimic — aplicația pur și simplu nu se oprește.
-  it('după pool-ul free cade pe modelele plătite IEFTINE (punga comună)', () => {
-    expect(sursa).toMatch(/classifyCost\(m\.promptPerM, m\.completionPerM\) === 'cheap'/)
-    expect(sursa).toMatch(/blendedPerM\(a\.promptPerM/)
-  })
-
-  it('un model gol sau picat NU închide turul — se rotește', () => {
-    expect(sursa).toMatch(/silent rotation/)
-    expect(sursa).toMatch(/brain_rotation_exhausted/)
-  })
-
-  it('textul parțial ajuns la user oprește rotirea (nu dublăm răspunsul)', () => {
+  it('textul parțial ajuns la user oprește reîncercarea (nu dublăm răspunsul)', () => {
     expect(sursa).toMatch(/if \(textFlowed\) throw ge/)
+  })
+
+  it('nu mai există pool/catalog de alt furnizor pe calea creierului', () => {
+    expect(sursa).not.toMatch(/getCatalog|listaCandidati|classifyCost|blendedPerM/)
   })
 })
 

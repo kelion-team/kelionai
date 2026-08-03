@@ -158,7 +158,7 @@ export const CARD_GATA_TOOL: Tool = {
   input_schema: {
     type: 'object',
     properties: {
-      furnizor: { type: 'string', description: 'Which provider this page belongs to: openrouter, anthropic, openai…' },
+      furnizor: { type: 'string', description: 'Which provider this page belongs to: gemini, serper, google…' },
     },
     required: ['furnizor'],
   },

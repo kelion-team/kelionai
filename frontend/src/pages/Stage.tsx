@@ -388,28 +388,13 @@ function formatSerperK(credits: number): string {
 // The shape of the /api/admin/brain-credit response — named, so the shared polling
 // (usePolledJson) can type it.
 interface BrainCredit {
+    // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns și din
+    // tipul ăsta, 3 aug — furnizorii au fost extirpați; creierul e Gemini.)
     active: string | null
-    openrouter: {
-      ok: boolean
-      topup: string
-      // Soldul REAL, exact din contul OpenRouter (USD) — „punga lui Kelion".
-      balance?: number
-      low?: boolean
-      live?: boolean
-    }
-    /** The REAL OpenAI month-to-date spend (USD), from the provider's costs
-     *  API. `live: false` = the read failed or OPENAI_USAGE_KEY is missing —
-     *  the bar writes "⚠ OpenAI", NEVER "$0.00": a failed read is not a zero
-     *  spend (the same rule as the OpenRouter pill). */
-    openai?: {
-      live: boolean
-      monthUsd?: number
-      error?: string
-    }
     /** The REAL Serper search credit (searches left), from the provider's
      *  /account endpoint. `live: false` = the read failed or SERPER_API_KEY is
      *  missing — the bar writes "Serper ⚠", NEVER "Serper 0": a failed read is
-     *  not an empty account (the same rule as the OpenAI pill). */
+     *  not an empty account (regula de onestitate #1). */
     serper?: {
       live: boolean
       balance?: number
@@ -532,8 +517,8 @@ export default function Stage({ user }: { user: User }) {
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
-  // Creierul e 100% OpenRouter (Kimi/GLM scoase). Un singur indicator: cheia e
-  // configured + the admin's REAL fund (loaded − real cost), not unlimited.
+  // Creierul e 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). Pastilele
+  // din bară: Gemini (starea live) + Serper + VPS + fondul REAL al adminului.
   const [brainCredit, setBrainCredit] = useState<BrainCredit | null>(null)
   // The padlock state at entry + the unlock coming from voice (the voiceprint
   // matched → realtimeVoice emits `kelion:admin-unlock`).
@@ -582,7 +567,7 @@ export default function Stage({ user }: { user: User }) {
   // Polling from the shared source (lib/usePolledJson) — the `alive` guard and the
   // interval stop are guaranteed there, once only.
   usePolledJson<BrainCredit>('/api/admin/brain-credit', user.role === 'admin', (j) => {
-    if (j && j.openrouter && j.pool) setBrainCredit(j)
+    if (j && j.pool) setBrainCredit(j)
   })
   // REAL APP ACCESS VIA VOICE/CHAT (Adrian, Jul 24: "Kelion must be able to
   // enter any app tab, for real"). Kelion calls the tool
@@ -1136,8 +1121,8 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* THE SERPER PILL (same "REAL everywhere" rule), IMMEDIATELY to
-            the right of the OpenAI one: the REAL remaining search credit read
+            {/* THE SERPER PILL (same "REAL everywhere" rule): the REAL
+            remaining search credit read
             from Serper's own /account endpoint — the wallet the web search
             skill spends from. Key missing or read failed → "Serper ⚠", never
             "Serper 0": a failed read is not an empty account. Click → the
@@ -1263,9 +1248,9 @@ export default function Stage({ user }: { user: User }) {
             Jul 30, together with Stripe: the users' money no longer passes through
             it — they pay on the Revolut link, straight into Adrian's account. The
             figure left there would have never shown anything but zero — exactly
-            the kind of „0” that means nothing and scares for no reason. What
-            remains in the bar is the brain's balance (OpenRouter), the only one
-            the app can actually read. */}
+            the kind of „0” that means nothing and scares for no reason. (Pastila
+            de sold OpenRouter a murit și ea, 3 aug — furnizorul a fost extirpat;
+            starea creierului se vede pe pastila Gemini.) */}
           </>
         )}
         {/* Credit + top-up for regular users (Adrian, Jul 24). From the
@@ -1273,7 +1258,7 @@ export default function Stage({ user }: { user: User }) {
         no longer has the separate ⚙ wheel, nor the „Connect Google” button.
         THE ADMIN NO LONGER HAS THE „⚙ Setări" PILL HERE (Adrian's order):
         his settings live in the Admin panel now, so the header keeps only
-        measurements (OpenRouter / OpenAI / Serper / VPS). */}
+        measurements (Gemini / Serper / VPS). */}
         {user.role !== 'admin' && (
           <WalletButton
             onOpenSettings={() => setSettingsOpen(true)}
