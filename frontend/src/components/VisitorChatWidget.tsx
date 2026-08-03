@@ -94,10 +94,18 @@ export default function VisitorChatWidget() {
         body: JSON.stringify({ conv: conv.current, text: t }),
       })
       if (r.ok) {
-        const j = (await r.json()) as { id: number }
-        setMsgs((m) => [...m, { id: j.id, role: 'visitor', text: t }])
-        lastId.current = Math.max(lastId.current, j.id)
-        setText('')
+        const j = (await r.json()) as { ok?: boolean; id: number }
+        // ȘI CORPUL, nu doar statusul HTTP (auditul admin, 3 aug): serverul
+        // vechi răspundea 200 cu {ok:false, id:0} când INSERT-ul picase —
+        // bula apărea „livrată" deși mesajul nu exista nicăieri și adminul
+        // nu l-ar fi văzut niciodată. (Serverul dă acum 502, dar plasa rămâne.)
+        if (j.ok === false || !(j.id > 0)) {
+          setSendFailed(true) // the text stays in the input for a retry
+        } else {
+          setMsgs((m) => [...m, { id: j.id, role: 'visitor', text: t }])
+          lastId.current = Math.max(lastId.current, j.id)
+          setText('')
+        }
       } else {
         setSendFailed(true) // the text stays in the input for a retry
       }

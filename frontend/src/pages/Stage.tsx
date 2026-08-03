@@ -380,7 +380,9 @@ function safeFileName(title: string, ext: string): string {
 // ── THE SERPER CREDIT FORMAT ───────────────────────────────────────────────
 // Thousands collapse to one-decimal "k" (49 875 → "49.9k"); under 1000 the raw
 // number stays as-is. The tooltip always carries the EXACT figure, with the
-// Romanian thousands separator (49.875).
+// thousands separator of the BROWSER's locale (toLocaleString fără argument) —
+// comentariul vechi promitea „separatorul românesc", fals față de cod
+// (corectat la auditul admin, 3 aug).
 function formatSerperK(credits: number): string {
   return credits >= 1000 ? `${(credits / 1000).toFixed(1)}k` : String(credits)
 }
@@ -430,7 +432,9 @@ interface BrainCredit {
       incarcare: [number, number, number]
       incarcarePct: number
     } | null
-    pool: { loaded: number; remaining: number; spent: number; profit: number }
+    // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
+    // desena, iar tipul lui mințea: loaded/remaining erau forma moartă a
+    // „pungii" OpenRouter, extirpată; backend-ul nu-l mai trimite.)
   }
 
 export default function Stage({ user }: { user: User }) {
@@ -512,14 +516,24 @@ export default function Stage({ user }: { user: User }) {
   // also re-reads themeBg() for the avatar canvas behind.
   const [theme, setTheme] = useState<ThemeName>(currentTheme())
   const [recording, setRecording] = useState(false)
+  // Motivul pentru care înregistrarea NU a pornit (auditul admin, 3 aug) —
+  // 3 secunde de „Rec ⚠" cu title, în loc de un buton care pare mort.
+  const [recErr, setRecErr] = useState('')
   // Zoom/fit for the monitor text (request #27): A− / A+ scales the
   // readable content (doc + live console) so it's framed and legible.
   const [monZoom, setMonZoom] = useState(1)
   const zoomOut = (): void => setMonZoom((z) => Math.max(0.7, +(z - 0.1).toFixed(2)))
   const zoomIn = (): void => setMonZoom((z) => Math.min(1.8, +(z + 0.1).toFixed(2)))
   // Creierul e 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). Pastilele
-  // din bară: Gemini (starea live) + Serper + VPS + fondul REAL al adminului.
+  // din bară: Gemini (starea live) + Serper + VPS.
   const [brainCredit, setBrainCredit] = useState<BrainCredit | null>(null)
+  // EȘECUL POLLING-ULUI SE DECLARĂ (auditul admin, 3 aug): brainLocked = 423
+  // (lacătul admin blochează /api/admin/*) → pastila unică 🔒; brainFails =
+  // eșecuri consecutive — de la 3 (~90s) pastilele trec pe ⚠ „citire veche",
+  // în loc să rămână verzi pe valori înghețate prezentate ca actuale.
+  const [brainLocked, setBrainLocked] = useState(false)
+  const [brainFails, setBrainFails] = useState(0)
+  const brainOkAtRef = useRef<number | null>(null)
   // The padlock state at entry + the unlock coming from voice (the voiceprint
   // matched → realtimeVoice emits `kelion:admin-unlock`).
   useEffect(() => {
@@ -566,9 +580,23 @@ export default function Stage({ user }: { user: User }) {
   }
   // Polling from the shared source (lib/usePolledJson) — the `alive` guard and the
   // interval stop are guaranteed there, once only.
+  // Gardul e pe `active` (auditul admin, 3 aug): vechiul `j.pool` verifica un
+  // câmp pe care backend-ul nu-l mai trimite — pastilele n-ar mai fi apărut.
   usePolledJson<BrainCredit>('/api/admin/brain-credit', user.role === 'admin', (j) => {
-    if (j && j.pool) setBrainCredit(j)
+    if (j && j.active === 'gemini') {
+      setBrainCredit(j)
+      setBrainLocked(false)
+      setBrainFails(0)
+      brainOkAtRef.current = Date.now()
+    }
+  }, 30_000, (status) => {
+    setBrainLocked(status === 423)
+    setBrainFails((n) => n + 1)
   })
+  // Vechimea ultimei citiri bune, pentru titlul ⚠ (minute întregi).
+  const brainStaleMin =
+    brainOkAtRef.current != null ? Math.max(1, Math.round((Date.now() - brainOkAtRef.current) / 60_000)) : null
+  const brainStale = brainFails >= 3 && brainCredit != null
   // REAL APP ACCESS VIA VOICE/CHAT (Adrian, Jul 24: "Kelion must be able to
   // enter any app tab, for real"). Kelion calls the tool
   // `open_app_view` → ChatPanel emite `kelion:navigate` → aici deschidem chiar
@@ -764,7 +792,18 @@ export default function Stage({ user }: { user: User }) {
         // Clip finished — promo scenes still pending get cancelled, stage cleared.
         window.dispatchEvent(new Event('kelion:rec-stopped'))
       },
-      () => setRecording(false),
+      (reason) => {
+        // FEEDBACK LA REFUZ (auditul admin, 3 aug): recording era deja false,
+        // deci pe ecran nu se întâmpla NIMIC — pe mobil (fără getDisplayMedia)
+        // „● Rec" părea buton mort. Eticheta devine „Rec ⚠" 3s, cu motivul.
+        setRecording(false)
+        setRecErr(
+          reason === 'unsupported'
+            ? 'Browserul nu suportă captura de ecran (getDisplayMedia/MediaRecorder lipsesc).'
+            : 'Înregistrarea a fost refuzată (ai închis fereastra de alegere sau ai blocat permisiunea).',
+        )
+        window.setTimeout(() => setRecErr(''), 3000)
+      },
       recNameRef.current ?? undefined,
     )
     if (handle) {
@@ -1121,16 +1160,37 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
+            {/* LACĂTUL SPUS, NU BARĂ GOALĂ (auditul admin, 3 aug): cu lacătul
+            armat, 423 pe /api/admin/* lăsa bara fără NICIO pastilă și fără
+            explicație. Pastila unică 🔒 duce la fereastra de cod. */}
+            {brainLocked && (
+              <button type="button" className="ghost" onClick={() => openAdmin()} title={adminStrings().pillsLocked}>
+                🔒 admin
+              </button>
+            )}
+            {/* CITIRE VECHE ≠ CITIRE ACTUALĂ (auditul admin, 3 aug): după ≥3
+            polluri picate (~90s), pastilele se estompează și marcajul ⚠ spune
+            de când sunt cifrele — nu mai stau verzi la nesfârșit. */}
+            {brainStale && !brainLocked && (
+              <span
+                className="ghost"
+                style={{ opacity: 0.9, color: '#e6a23c' }}
+                title={adminStrings().pillsStale.replace('{min}', String(brainStaleMin ?? '?'))}
+              >
+                ⚠ {brainStaleMin != null ? `${brainStaleMin}m` : ''}
+              </span>
+            )}
             {/* THE SERPER PILL (same "REAL everywhere" rule): the REAL
             remaining search credit read
             from Serper's own /account endpoint — the wallet the web search
             skill spends from. Key missing or read failed → "Serper ⚠", never
             "Serper 0": a failed read is not an empty account. Click → the
             provider's dashboard. */}
-            {brainCredit && (
+            {brainCredit && !brainLocked && (
               <button
                 type="button"
                 className="ghost"
+                style={brainStale ? { opacity: 0.55 } : undefined}
                 onClick={() => window.open('https://serper.dev/dashboard', '_blank', 'noopener')}
                 title={
                   brainCredit.serper?.live
@@ -1149,22 +1209,20 @@ export default function Stage({ user }: { user: User }) {
             REALĂ pe luna curentă, din jurnalul nostru (cost_events kind='gemini').
             DB necitibil → „Gemini ⚠", niciodată „$0.00"; live cu 0 = zero real
             (nimic cheltuit încă luna asta). Click → Google AI Studio. */}
-            {brainCredit && (
+            {brainCredit && !brainLocked && (
               <button
                 type="button"
                 className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
+                style={brainStale ? { opacity: 0.55 } : undefined}
                 onClick={() => {
                   // Click = pui/actualizezi creditul pe care-l vezi în AI Studio.
                   // Google nu-l dă prin API, deci îl arăt ca fiind SPUS DE TINE, cu
                   // data. Gol → deschide pagina Google; „-" → șterge cifra.
+                  // Textele vin din adminText (auditul admin, 3 aug: erau
+                  // hardcodate în română — regresie față de auditul i18n din 2 aug).
                   const g = brainCredit.gemini
                   const curent = g?.creditGbp != null ? String(g.creditGbp) : ''
-                  const raspuns = window.prompt(
-                    'Creditul Gemini pe care îl vezi în AI Studio (£).\n' +
-                      'Google nu-l expune prin API, așa că-l arăt ca fiind spus de tine, cu data.\n\n' +
-                      'Scrie suma (ex: 10.88) · gol = deschide pagina Google · „-" = șterge cifra.',
-                    curent,
-                  )
+                  const raspuns = window.prompt(adminStrings().gemCreditPrompt, curent)
                   if (raspuns == null) return
                   const val = raspuns.trim()
                   if (val === '') {
@@ -1173,37 +1231,67 @@ export default function Stage({ user }: { user: User }) {
                   }
                   const clear = val === '-'
                   const gbp = clear ? null : Number(val.replace(',', '.'))
-                  if (!clear && !Number.isFinite(gbp)) return
+                  // NEGATIVUL ȘI NE-NUMERICUL SE RESPING CU MESAJ (auditul admin,
+                  // 3 aug): „-5" ar fi fost tratat de server ca ȘTERGERE, iar
+                  // „abc" era ignorat complet — buton mut.
+                  if (!clear && (!Number.isFinite(gbp) || (gbp as number) < 0)) {
+                    window.alert(adminStrings().gemCreditInvalid)
+                    return
+                  }
                   void fetch('/api/admin/gemini-credit', {
                     method: 'POST',
                     headers: { 'content-type': 'application/json' },
                     credentials: 'include',
                     body: JSON.stringify({ gbp }),
                   })
-                    .then((r) => (r.ok ? r.json() : null))
-                    .then(() =>
+                    .then((r) => (r.ok ? (r.json() as Promise<{ ok?: boolean; gbp?: number; at?: string; cleared?: boolean }>) : null))
+                    .then((j) => {
+                      // STAREA SE SCRIE DOAR DIN RĂSPUNSUL SERVERULUI (auditul
+                      // admin, 3 aug): vechiul lanț rula .then-ul de afișare și
+                      // pe null — la 500/423 pastila arăta creditul tastat ca
+                      // „salvat", fals până la următorul poll.
+                      if (!j?.ok) {
+                        window.alert(adminStrings().gemCreditSaveFailed)
+                        return
+                      }
                       setBrainCredit((prev) =>
                         prev && prev.gemini
                           ? {
                               ...prev,
                               gemini: {
                                 ...prev.gemini,
-                                creditGbp: clear ? undefined : (gbp as number),
-                                creditAt: new Date().toISOString(),
+                                creditGbp: j.cleared ? undefined : j.gbp,
+                                creditAt: j.cleared ? undefined : j.at,
                               },
                             }
                           : prev,
-                      ),
-                    )
-                    .catch(() => {})
+                      )
+                    })
+                    .catch(() => window.alert(adminStrings().gemCreditSaveFailed))
                 }}
-                title={
-                  brainCredit.gemini?.creditGbp != null
-                    ? `Credit Gemini: £${brainCredit.gemini.creditGbp.toFixed(2)} — spus de tine${brainCredit.gemini.creditAt ? ' la ' + new Date(brainCredit.gemini.creditAt).toLocaleDateString('ro-RO') : ''} (Google nu-l dă prin API). Cheltuit luna asta: $${(brainCredit.gemini.monthUsd ?? 0).toFixed(2)}. Click ca să-l actualizezi.`
-                    : brainCredit.gemini?.serving
-                      ? adminStrings().gemPillLive.replace('{n}', (brainCredit.gemini.monthUsd ?? 0).toFixed(2))
-                      : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
-                }
+                title={(() => {
+                  // {spend} = măsurătoarea reușită SAU declararea eșecului —
+                  // niciodată „$0.00 (măsurat)" fabricat dintr-un ?? 0 (auditul
+                  // admin, 3 aug; tiparul „£0.00" din 30 iul).
+                  const spend =
+                    brainCredit.gemini?.monthUsd != null
+                      ? adminStrings().gemSpendMeasured.replace('{n}', brainCredit.gemini.monthUsd.toFixed(2))
+                      : adminStrings().gemSpendUnreadable
+                  if (brainCredit.gemini?.creditGbp != null) {
+                    return adminStrings()
+                      .gemCreditTitle.replace('{gbp}', brainCredit.gemini.creditGbp.toFixed(2))
+                      .replace(
+                        '{date}',
+                        brainCredit.gemini.creditAt
+                          ? ' · ' + new Date(brainCredit.gemini.creditAt).toLocaleDateString('ro-RO')
+                          : '',
+                      )
+                      .replace('{spend}', spend)
+                  }
+                  return brainCredit.gemini?.serving
+                    ? adminStrings().gemPillLive.replace('{spend}', spend)
+                    : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
+                })()}
               >
                 {brainCredit.gemini?.creditGbp != null
                   ? `Gemini £${brainCredit.gemini.creditGbp.toFixed(2)}${brainCredit.gemini.serving ? '' : ' ⚠'}`
@@ -1219,7 +1307,7 @@ export default function Stage({ user }: { user: User }) {
             or the load passes 200% — the same thresholds as the sentinel's email
             alarm, so the bar and the mail never contradict. When it can't be
             measured it writes „⚠ VPS”, not zeros (see the type). */}
-            {brainCredit && (
+            {brainCredit && !brainLocked && (
               <button
                 type="button"
                 className={`ghost ${
@@ -1227,6 +1315,7 @@ export default function Stage({ user }: { user: User }) {
                     ? 'blink-red'
                     : ''
                 }`}
+                style={brainStale ? { opacity: 0.55 } : undefined}
                 onClick={() => openAdmin()}
                 title={
                   brainCredit.vps
@@ -1293,9 +1382,9 @@ export default function Stage({ user }: { user: User }) {
                 setRecArmed(false)
                 void toggleRecording()
               }}
-              title={recording ? t.recStopTitle : t.recStartTitle}
+              title={recErr || (recording ? t.recStopTitle : t.recStartTitle)}
             >
-              {recording ? '■ Rec' : '● Rec'}
+              {recErr ? 'Rec ⚠' : recording ? '■ Rec' : '● Rec'}
             </button>
           )}
           {user.role === 'admin' && (
