@@ -171,8 +171,11 @@ export async function verificaPlatiEmail(): Promise<number> {
   // emailurile de la revolut.com (merge și dacă folderul e gol), DAR includem și
   // eticheta lui, dacă le-a filat acolo (Adrian, 3 aug: „acolo să ajungă"). Așa
   // le prindem oricum. Dovada că e chiar Revolut o dă DKIM-ul, per-mesaj, mai jos.
+  // `in:anywhere` = INCLUSIV spam și trash (Adrian, 3 aug) — un email de plată
+  // ajuns din greșeală în spam nu are voie să piardă un credit. Gmail exclude
+  // implicit spam/trash; îl forțăm.
   const q = encodeURIComponent(
-    `(from:revolut.com OR label:${config.revolut.mailLabel}) newer_than:7d`,
+    `(from:revolut.com OR label:${config.revolut.mailLabel}) newer_than:7d in:anywhere`,
   )
   const listRes = await fetch(`${GMAIL}?maxResults=25&q=${q}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -206,14 +209,20 @@ export async function verificaPlatiEmail(): Promise<number> {
     }
     const subject = headers.find((h) => h.name.toLowerCase() === 'subject')?.value ?? ''
     if (!esteIncasare(subject)) continue
-    const plata = extragePlata(subject, corpDinPayload(m.payload))
+    const corp = corpDinPayload(m.payload)
+    const plata = extragePlata(subject, corp)
     if (!plata) continue
     incasari++
+    // CODUL POATE FI ORIUNDE ÎN EMAIL (referință, corp, subiect) — îl căutăm în
+    // TOT textul, ca o plată corectă să nu fie ratată dintr-un singur câmp.
+    // crediteazaDupaCod extrage tiparul strict KLN-XXXX-XXXX de oriunde și
+    // creditează EXACT clientul acelui cod (fără ghicit după sumă/nume).
+    const refComplet = [plata.referinta, subject, corp].join('\n')
     // id-ul stabil al plății = id-ul mesajului Gmail → creditarea e idempotentă
     // (refCreditatDeja împiedică dublul credit la fiecare trecere).
     const r = await proceseazaIntrare({
       id: `gmail:${id}`,
-      referinta: plata.referinta,
+      referinta: refComplet,
       amount: plata.amount,
       currency: plata.currency,
     }).catch(() => ({ fel: 'vechi' as const }))
