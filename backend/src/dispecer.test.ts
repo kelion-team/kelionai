@@ -132,6 +132,10 @@ describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   it('NICIO rotație pe alt furnizor: pool-ul de candidați și rezerva plătită au dispărut din cod', () => {
     expect(chat).not.toMatch(/listaCandidati|rezervaDeschisa|adaugaLaRezerva|getCatalog|openrouterChat/)
   })
+  // (Blocurile „pool-ul plătit e oprit de pragul pungii" și „latența/cursa doar
+  // Gemini" au fost absorbite de extirparea totală, 3 aug seara: cursa, pool-ul
+  // de candidați și punga de rezervă NU MAI EXISTĂ în cod — gardul de mai sus
+  // le pinuiează absența, iar reîncercările de mai jos pinuiează noua formă.)
   it('un răspuns gol sau o eroare se notează (telemetrie) și se reîncearcă pe Gemini', () => {
     expect(chat).toMatch(/returned empty — reîncercare/)
     expect(chat).toMatch(/noteazaEsuare\(orchestratorModel\)/)

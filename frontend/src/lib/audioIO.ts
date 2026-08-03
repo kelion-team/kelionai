@@ -869,95 +869,11 @@ function attachLevelAnalysis(audio: HTMLAudioElement): void {
   }
 }
 
-// ── LIP-SYNC for the LIVE full-duplex track ─────────────────────────────────
-// (Comment refreshed Aug 2 — it still said "LiveKit track (lib/liveVoice.ts)";
-// LiveKit and that file were removed long ago. The mechanism now serves the
-// OpenAI Realtime session's remote track, played by realtimeVoice's <audio>.)
-// The live voice does NOT come through `curVoice` (HTTP playback) but through
-// that separate <audio> element. So the avatar's MOUTH moves there too, we
-// measure that element's amplitude with its own analyser and write into the
-// SAME `voiceLevel` the avatar reads. Mutually exclusive in time with the HTTP
-// path (when one plays, the other is off), so they don't trample each other.
-// Purely visual bonus: if it fails, the voice stays audibly unchanged.
-// Returns a stop function (cleans RAF + routing).
-let extAnalyser: AnalyserNode | null = null
-let extBuf: Uint8Array<ArrayBuffer> | null = null
-let extLevelSource: MediaStreamAudioSourceNode | null = null
-let extLevelRaf = 0
-// IMPORTANT ("audio doesn't work" bug, Jul 13): we analyze the STREAM (MediaStream), NOT
-// the <audio> element. `createMediaElementSource` TAKES OVER the element's output into
-// the Web Audio graph — if the AudioContext is suspended (autoplay policy),
-// the sound disappears completely. `createMediaStreamSource` only LISTENS to the stream in
-// parallel: the live track's <audio> element plays untouched, and we measure
-// the amplitude separately for the avatar's mouth. We don't connect to destination.
-// Lip-sync for the live track from the <audio> ELEMENT playing it, NOT from the raw
-// WebRTC track. `captureStream()` gives a SEPARATE stream of the element's already-decoded
-// output — the element keeps playing untouched (unlike
-// `createMediaElementSource`, which would steal its output and go silent in a suspended
-// context) and without a second consumer on the raw track (the cause of the hum, Jul 13).
-// Failure-tolerant: no captureStream → no mouth, but the voice stays clean.
-export function driveVoiceLevelFromElement(el: HTMLAudioElement): () => void {
-  const noop = (): void => {}
-  try {
-    const cap =
-      (el as HTMLAudioElement & { captureStream?: () => MediaStream }).captureStream ??
-      (el as HTMLAudioElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream
-    if (!cap) return noop
-    const stream = cap.call(el)
-    if (!stream || stream.getAudioTracks().length === 0) return noop
-    return driveVoiceLevelFrom(stream)
-  } catch {
-    return noop
-  }
-}
-
-function driveVoiceLevelFrom(stream: MediaStream): () => void {
-  const noop = (): void => {}
-  try {
-    const AC =
-      globalThis.AudioContext ??
-      (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AC) return noop
-    if (!levelCtx) levelCtx = new AC()
-    if (levelCtx.state === 'suspended') void levelCtx.resume().catch(() => {})
-    if (!extAnalyser) {
-      extAnalyser = levelCtx.createAnalyser()
-      extAnalyser.fftSize = 256
-      extAnalyser.smoothingTimeConstant = 0.5
-      extBuf = new Uint8Array(extAnalyser.frequencyBinCount)
-    }
-    const analyser = extAnalyser
-    const buf = extBuf
-    if (!buf) return noop
-    extLevelSource = levelCtx.createMediaStreamSource(stream)
-    extLevelSource.connect(analyser) // DOAR spre analizor — NU spre destination
-    const step = (): void => {
-      analyser.getByteTimeDomainData(buf)
-      let sum = 0
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128
-        sum += v * v
-      }
-      voiceLevel = Math.min(1, Math.sqrt(sum / buf.length) * 6)
-      extLevelRaf = requestAnimationFrame(step)
-    }
-    extLevelRaf = requestAnimationFrame(step)
-    return () => {
-      if (extLevelRaf) cancelAnimationFrame(extLevelRaf)
-      extLevelRaf = 0
-      voiceLevel = 0
-      try {
-        extLevelSource?.disconnect()
-      } catch {
-        /* deja deconectat */
-      }
-      extLevelSource = null
-    }
-  } catch {
-    // the analysis failed — the live voice stays audible, only the mouth doesn't move
-    return noop
-  }
-}
+// ── LIP-SYNC-ul pentru pista live externă — ȘTERS (3 aug, „exporturi fără
+// utilizator"): driveVoiceLevelFromElement + driveVoiceLevelFrom serveau
+// <audio>-ul sesiunii OpenAI Realtime, scoasă azi complet (vocea e Chirp +
+// Gemini; redarea trece prin playNow/attachLevelAnalysis de mai jos, care își
+// mișcă singură gura). Istoria completă e în git.
 
 // Playback queue: the brain now sends voice IN CHUNKS (utterance by utterance, see
 // streamVoice/backend chat.ts) so synthesis no longer waits for the whole reply.
@@ -1012,12 +928,8 @@ export function setVoiceVolume(v: number): void {
   for (const el of voiceElements) el.volume = voiceVolume
 }
 
-/** Enrolls a voice audio element to follow the global volume (now and on changes). */
-export function registerVoiceAudioElement(el: HTMLAudioElement): () => void {
-  el.volume = voiceVolume
-  voiceElements.add(el)
-  return () => voiceElements.delete(el)
-}
+// (registerVoiceAudioElement ȘTERS — 3 aug: îl folosea doar <audio>-ul sesiunii
+// OpenAI Realtime, scoasă azi; elementele interne intră în voiceElements direct.)
 
 function playNow(base64Mp3: string): void {
   try {

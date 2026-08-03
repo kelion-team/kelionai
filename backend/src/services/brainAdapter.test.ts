@@ -33,9 +33,10 @@ describe('brain.messages.create — adaptorul NU mai fabulează usage-ul', () =>
     })
     expect(res.usage.input_tokens).toBe(321)
     expect(res.usage.output_tokens).toBe(9)
-    // Gemini nu itemizează un cost per apel → 0 e MĂSURĂTOAREA (free tier /
-    // cheia ownerului), nu o fabricație.
-    expect(res.costUsd).toBe(0)
+    // Google nu întoarce dolari; costUsd e ESTIMAREA din tokenii REALI ×
+    // tariful publicat flash ($0.30/1M in, $2.50/1M out — vezi partsToResult;
+    // etichetată „estimat" în jurnal: 'gemini' a ieșit din COSTURI_MASURATE).
+    expect(res.costUsd).toBeCloseTo((321 * 0.3 + 9 * 2.5) / 1_000_000, 12)
     expect(res.content[0]).toEqual({ type: 'text', text: '["fapt"]' })
   })
 })

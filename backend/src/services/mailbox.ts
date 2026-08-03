@@ -420,6 +420,57 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
   return out
 }
 
+// ── ȘTERGEREA DIN INBOX (Adrian, 3 aug: „posibilitate să șterg de aici câte
+// una sau prin selecție toate") ──────────────────────────────────────────────
+// Ștergem pe UID-uri EXACTE (cele afișate în panou), niciodată „tot inboxul":
+// întâi încercăm mutarea în coșul REAL al serverului (folderul cu special-use
+// \Trash, descoperit la conexiune — recuperabil de acolo), și doar dacă serverul
+// n-are coș cădem pe ștergerea IMAP directă (\Deleted + expunge). Întoarcem
+// câte s-au șters DE FAPT — cifra vine din operațiile reușite, nu din cerere.
+export async function deleteInboxMessages(uids: number[]): Promise<{ sterse: number; detaliu: string }> {
+  const curate = [...new Set(uids)].filter((u) => Number.isInteger(u) && u > 0)
+  if (!mailEnabled()) return { sterse: 0, detaliu: 'mail neconfigurat (MAIL_PASS lipsă)' }
+  if (!curate.length) return { sterse: 0, detaliu: 'niciun UID valid' }
+  const client = newImapClient()
+  let sterse = 0
+  let detaliu = ''
+  try {
+    await client.connect()
+    // Coșul real al serverului, dacă există (ex: "Trash", "Deleted Items").
+    let trash: string | null = null
+    try {
+      const foldere = await client.list()
+      trash = foldere.find((f) => f.specialUse === '\\Trash')?.path ?? null
+    } catch {
+      trash = null
+    }
+    const lock = await client.getMailboxLock('INBOX')
+    try {
+      for (const uid of curate) {
+        try {
+          if (trash) await client.messageMove({ uid }, trash, { uid: true })
+          else await client.messageDelete({ uid }, { uid: true })
+          sterse++
+        } catch (e) {
+          console.error(`[mailbox] ștergere uid=${uid} a picat:`, (e as Error).message)
+        }
+      }
+      detaliu = trash ? `mutate în coșul serverului („${trash}")` : 'șterse definitiv (serverul n-are coș)'
+    } finally {
+      lock.release()
+    }
+  } catch (e) {
+    return { sterse, detaliu: `conexiunea IMAP a picat: ${(e as Error).message}` }
+  } finally {
+    try {
+      await client.logout()
+    } catch {
+      /* ignore */
+    }
+  }
+  return { sterse, detaliu }
+}
+
 // Start the mailbox poller. Off entirely until MAIL_PASS is set (mailEnabled()).
 export function startMailbox(): void {
   if (!mailEnabled()) {

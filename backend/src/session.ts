@@ -68,3 +68,25 @@ export function getSessionUser(req: FastifyRequest): SessionUser | null {
     return null
   }
 }
+
+// ── GARDUL „admin + :id întreg pozitiv" — O SINGURĂ DATĂ (jscpd, 3 aug) ──────
+// Șablonul „getSessionUser → 403 → Number(:id) → 400" apărea identic în trei
+// rute (constructor șterge/reia, cereri neacoperite șterge). Aici e o dată:
+// întoarce id-ul valid, sau null DUPĂ ce a scris deja răspunsul de refuz.
+export function adminSiId(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  rawId: string,
+): number | null {
+  const user = getSessionUser(req)
+  if (!user || user.role !== 'admin') {
+    void reply.code(403).send({ error: 'forbidden' })
+    return null
+  }
+  const id = Number(rawId)
+  if (!Number.isInteger(id) || id <= 0) {
+    void reply.code(400).send({ error: 'id_invalid' })
+    return null
+  }
+  return id
+}

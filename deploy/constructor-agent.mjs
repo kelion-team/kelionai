@@ -700,6 +700,11 @@ async function main() {
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
+  // (CONTABILITATEA DE COST a fost EXTIRPATĂ cu totul, 3 aug — Gemini nu
+  // itemizează cost per apel. Invariantul din bug-ul ordinelor #32/#34 —
+  // „report() nu moare pe variabile din alt scope" („ReferenceError:
+  // tokensPaid is not defined" DUPĂ ce PR-ul fusese deschis) — e ținut prin
+  // ELIMINARE: report() nu mai citește nicio variabilă de cost.)
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
@@ -733,9 +738,12 @@ async function main() {
       { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
     ]
     let tokens = 0
-    // (Contabilitatea „tokensPaid/costUsd" pe scara plătită OpenRouter a fost
-    // EXTIRPATĂ, 3 aug: Gemini nu itemizează cost per apel; tokenii se numără
-    // din usageMetadata și se raportează ca atare.)
+    // (Contabilitatea „tokensPaid/costUsd/costMasurat" pe scara plătită
+    // OpenRouter a fost EXTIRPATĂ, 3 aug: Gemini nu itemizează cost per apel;
+    // tokenii se numără din usageMetadata și se raportează ca atare.
+    // Invariantul din bug-ul ordinelor #32/#34 — `report()` nu are voie să
+    // moară pe variabile din alt scope — e ținut prin ELIMINARE: report() nu
+    // mai citește nicio variabilă de cost.)
     let finish = null
     // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
     // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio

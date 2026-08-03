@@ -383,8 +383,11 @@ try {
   // AUTO-ÎNVĂȚARE DIN TIMPI (Adrian, 3 aug): în spate, invizibil, citește
   // registrul task_timings și învață tiparele (lent/eșec) ca să nu le repete.
   startAutoInvatare()
-  // (Alerta de sold OpenRouter a fost EXTIRPATĂ, 3 aug — creierul e Gemini-only;
-  // starea lui live se vede în pastila Gemini din bară + system_health.)
+  // SANTINELA DE SOLD OPENROUTER — EXTIRPATĂ DE TOT (Adrian, 3 aug, cu
+  // mailurile în mână: „de ce încă îmi vin mesaje cu soldul care descrește?").
+  // Creierul e Gemini-only; alarma „depune bani la OpenRouter" păzea un
+  // furnizor scos. Serviciul openrouterAlert.ts a fost ȘTERS cu totul —
+  // starea creierului se vede în pastila Gemini din bară + system_health.
   // Daily AUTONOMOUS TRIAGE of uncovered requests (Adrian, 24 Jul): Kelion
   // decides by itself what brings value (stays "TO IMPLEMENT") and what gets
   // closed automatically. 1h after boot, then every 24h. Best-effort — blocks

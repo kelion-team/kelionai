@@ -1088,9 +1088,11 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   return out
 }
 
-// (PUNGA DE REZERVĂ a fost EXTIRPATĂ, 3 aug: exista doar pentru fallback-ul
-// PLĂTIT pe modele OpenRouter din rotație — rotația și furnizorul au dispărut,
-// creierul e Gemini-only. Nicio cheltuială „de rezervă" nu mai există.)
+// (PUNGA DE REZERVĂ a fost EXTIRPATĂ DE TOT, 3 aug — întâi ÎNCHISĂ definitiv
+// („deschisă → false"; Adrian, cu mailurile „sold scăzut $-0.20" în mână:
+// rotația aluneca pe modele OpenRouter PLĂTITE), apoi ștearsă cu tot cu
+// rotație și furnizor. Creierul e Gemini-only; la eșec, mesaj neutru onest —
+// nu se mai cumpără nimic pe ascuns de la alt furnizor.)
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
   // client reconnects with the Last-Event-ID it last saw and we replay the
@@ -2028,7 +2030,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the whole conversation again; (3) if the BASE alone ever reaches the
     // ceiling, we trim from the tail (the rarest tools) and log it loudly,
     // so the chat degrades instead of dying.
-    const MAX_PROVIDER_TOOLS = 64
+    // UNELTE COMPLETE PE GEMINI (Adrian, 3 aug: „nu are unelte complete" /
+    // „leagă-i toate uneltele nativ de Gemini, tot ce are nevoie"). Plafonul 64
+    // era al API-ului VECHI (OpenRouter, 400 „at most 64 tools", 1 aug) și tăia
+    // ~16 unelte din coada adminului LA FIECARE TURĂ. Gemini acceptă 128 de
+    // declarații de funcții — pe creierul google-direct intră TOT inventarul,
+    // netăiat. Plafonul 64 rămâne doar pentru drumul OpenRouter (rezerva).
+    const MAX_PROVIDER_TOOLS = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
     const seenNames = new Set<string>()
     const baseTools: Tool[] = []
     for (const t of rawTools) {
@@ -2316,6 +2324,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // încheie CINSTIT cu mesajul neutru din catch — niciodată pe alt creier.
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
+      // (CURSA a fost EXTIRPATĂ de tot: ajunsese deja „doar Gemini, fără
+      // rivali OpenRouter" prin auditul din 3 aug, iar cu un singur concurent
+      // o cursă nu mai e cursă — calea secvențială de mai jos e ACELAȘI creier
+      // Gemini, cu unelte. services/cursa.ts a fost șters.)
       const MAX_INCERCARI_GEMINI = 3
       let slotTinut: string | null = null
       try {

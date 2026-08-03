@@ -173,9 +173,14 @@ describe('LACĂT — Gemini-only: la eșec, mesaj ONEST, nu alt furnizor (3 aug)
     expect(chat.includes('[CHAT-IN]')).toBe(true)
   })
 
-  it('nu mai există nicio cale spre OpenRouter în creierul chatului', () => {
+  it('nu mai există nicio cale spre OpenRouter în creierul chatului (3 aug seara, bate ordinul de dimineață)', () => {
+    // Dimineața: „rezerva rapidă nemotron". Seara, cu mailurile „sold scăzut
+    // $-0.20" în mână: „openrouter scos din toată aplicația" + „verifică cu
+    // toți agenții că folosește doar gemini". Extirparea totală a dus fix-urile
+    // intermediare (cursa doar-Gemini, rezervaDeschisa → false) până la capăt:
+    // cursa, rotația și punga de rezervă NU MAI EXISTĂ în cod deloc.
     // (simboluri FUNCȚIONALE, nu mențiuni istorice din comentarii)
-    expect(/openrouterChat|getCatalog|listaCandidati|rezervaRapida/.test(chat)).toBe(false)
+    expect(/openrouterChat|getCatalog|listaCandidati|rezervaRapida|rezervaDeschisa|primulCastigator/.test(chat)).toBe(false)
   })
 })
 
