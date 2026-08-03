@@ -70,8 +70,13 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   // Meaning at every picture, the 550B brain was BYPASSED, and a 26B carried
   // the turn — the eyes ended up also deciding. Now the eyes DESCRIBE, the
   // brain DECIDES.
-  it('se declanșează la imagine lipită sau cadru de cameră', () => {
-    expect(chat).toMatch(/if \(image \|\| camFrames\.length > 0\) \{/)
+  it('se declanșează DOAR când chiar e o imagine atașată (turnHasImage), nu pe orice cadru de cameră', () => {
+    // Adrian, 3 aug (latența „ULTRA enorm"): înainte poarta era
+    // `image || camFrames.length > 0` → rula ~11s degeaba pe FIECARE tură cu
+    // camera pornită. Acum e `turnHasImage` — adevărat doar la poză atașată sau
+    // cameră + intenție vizuală.
+    expect(chat).toMatch(/if \(turnHasImage\) \{/)
+    expect(chat).not.toMatch(/if \(image \|\| camFrames\.length > 0\) \{/)
   })
 
   it('nu face nimic dacă modelul ales vede deja', () => {
@@ -83,7 +88,7 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
   // assignment back into this block, image turns start bypassing the chosen
   // brain again — the regression this test repairs.
   it('creierul rămâne același — nicio atribuire de model în blocul de vedere', () => {
-    const bloc = /if \(image \|\| camFrames\.length > 0\) \{[\s\S]*?\r?\n      \}\r?\n/.exec(chat)?.[0] ?? ''
+    const bloc = /if \(turnHasImage\) \{[\s\S]*?\r?\n      \}\r?\n/.exec(chat)?.[0] ?? ''
     expect(bloc.length).toBeGreaterThan(200)
     expect(bloc).not.toMatch(/orchestratorModel\s*=[^=]/)
   })

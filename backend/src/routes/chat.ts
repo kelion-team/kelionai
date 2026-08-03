@@ -2172,7 +2172,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       //
       // The image blocks are removed from what is sent onward: a blind model
       // either ignores them or fails on them. The description replaces them.
-      if (image || camFrames.length > 0) {
+      //
+      // GATE PE `turnHasImage`, NU pe „camera pornită" (Adrian, 3 aug — latența
+      // „ULTRA enorm"): înainte, condiția era `image || camFrames.length > 0`, care
+      // e ADEVĂRATĂ pe ORICE tură cu camera pornită, chiar dacă userul n-a cerut
+      // nimic vizual → pasul de descriere (pe un model lent) rula ~11s DEGEABA pe
+      // fiecare tură (măsurat: total 12356ms cu creierul real doar 1077ms).
+      // `turnHasImage` (setat sus, la 1756) e ADEVĂRAT doar când chiar s-a atașat
+      // o imagine (poză încărcată SAU cameră + intenție vizuală VISION_INTENT) —
+      // deci descrierea rulează exact când e nevoie, nu pe fiecare tură.
+      if (turnHasImage) {
         const cat = await getCatalog().catch(() => null)
         const vedeAcum = cat?.chat.some((m) => m.id === orchestratorModel) ?? false
         if (!vedeAcum) {
