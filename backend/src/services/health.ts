@@ -98,7 +98,8 @@ export async function systemHealth(): Promise<string> {
 
   // 3. Failed build orders (the constructor).
   try {
-    const jobs = await listBuildJobs(10)
+    // null = coada nu s-a putut citi (semnalat separat de db_moarta, mai jos).
+    const jobs = (await listBuildJobs(10)) ?? []
     const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 48 * 3600_000)
     if (failed.length)
       problems.push({

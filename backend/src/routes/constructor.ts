@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser, adminSiId } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob, cancelBuildJob } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
@@ -33,14 +33,22 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/constructor', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    // AUDIT ADMIN (3 aug): coada necitibilă (DB picat) → 500, nu 200 cu [] —
+    // panoul scria „Niciun ordin încă" fără nicio măsurătoare reușită.
+    const raw = await listBuildJobs(40)
+    if (!raw) return reply.code(500).send({ error: 'db_unreadable' })
     // BARA 0–100% (Adrian, 3 aug): `pct` e harta etapei REALE raportate de
     // lucrător (progresOrdin.ts) — bara din panou o afișează lângă textul
     // etapei, ca cifra să poată fi confruntată oricând cu sursa ei.
-    const jobs = (await listBuildJobs(40)).map((j) => ({
+    const jobs = raw.map((j) => ({
       ...j,
       pct: procentDinProgres(j.status, j.progress),
     }))
-    return reply.send({ jobs })
+    // `paused` (auditul admin, 3 aug): pauza de autonomie oprea și lucrătorul
+    // (/api/constructor/next nu predă nimic), dar Constructorul n-o arăta
+    // nicăieri — ordinul stătea „în coadă · 0%" la nesfârșit după promisiunea
+    // „max. 2 minute". Panoul afișează bannerul și corectează promisiunea.
+    return reply.send({ jobs, paused: await isOpsPaused().catch(() => false) })
   })
 
   // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
@@ -65,8 +73,23 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const scope = ['failed', 'done', 'failed_done', 'all'].includes(String(req.body?.scope))
       ? (String(req.body?.scope) as 'failed' | 'done' | 'failed_done' | 'all')
       : 'failed_done'
+    // AUDIT ADMIN (3 aug): eroarea de DB devenea „Curățat: 0 ordine șterse."
+    // — zero fals. null = eșec → 500 („Nu s-a putut curăța." în panou);
+    // 0 rămâne posibil doar ca număr real.
     const sterse = await deleteBuildJobsByScope(scope)
+    if (sterse === null) return reply.code(500).send({ error: 'db_unreadable' })
     return reply.send({ ok: true, sterse })
+  })
+
+  // ANULAREA unui ordin viu (auditul admin, 3 aug): cancelBuildJob exista în
+  // db.ts din 3 aug, dar era legat DOAR de unealta constructor_manage din chat
+  // — un ordin 'running' nu putea fi oprit din panou (✕ e ascuns pe running).
+  // Aici e ruta pe care o cheamă butonul „oprește" de pe rândurile în curs.
+  app.post<{ Params: { id: string } }>('/api/admin/constructor/:id/anuleaza', async (req, reply) => {
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
+    const oprit = await cancelBuildJob(id)
+    return reply.send({ ok: oprit })
   })
 
   // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat.

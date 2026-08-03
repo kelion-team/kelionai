@@ -21,6 +21,9 @@ describe('Token checks', () => {
     expect(names).toContain('Revolut pay link')
     expect(names).toContain('Enable Banking (citire plăți)')
     expect(names).toContain('Google service account')
+    // Serper — SINGURUL motor de căutare post-extirpare, cheie plătită; lipsea
+    // complet din „verificarea LIVE" (adăugat la auditul admin, 3 aug).
+    expect(names).toContain('Serper (căutarea web)')
     expect(names).toContain('Gemini API key')
     expect(names).toContain('Mail SMTP')
     expect(names).toContain('Mail IMAP')

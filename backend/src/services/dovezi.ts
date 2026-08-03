@@ -33,7 +33,8 @@ function alLui(j: { orderedBy?: string }): boolean {
 }
 
 export async function dovezileAutonomiei(): Promise<{ dovedite: number; din: number; dovezi: Dovada[] }> {
-  const jobs = await listBuildJobs(200).catch(() => [])
+  // null = coada necitibilă (auditul admin, 3 aug) — dovezile lipsă rămân „nedovedite".
+  const jobs = (await listBuildJobs(200).catch(() => null)) ?? []
   const aleLui = jobs.filter(alLui)
   const gata = aleLui.filter((j) => j.status === 'done')
   const cuPr = gata.filter((j) => j.prUrl)

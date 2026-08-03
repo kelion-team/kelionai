@@ -362,8 +362,19 @@ function isValidEnvelopeDate(d: unknown): d is string | Date {
   return !isNaN(ts)
 }
 
-export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
-  if (!mailEnabled()) return []
+// AUDIT ADMIN (3 aug, Inbox): [] însemna și „cutia e goală", și „IMAP a picat",
+// și „MAIL_PASS lipsește" — trei stări strivite într-un singur gol, iar UI-ul
+// afișa un text ambiguu. Acum răspunsul spune CE s-a măsurat: `ok:false` +
+// `motiv` ('mail_neconfigurat' sau mesajul erorii IMAP) = citire eșuată;
+// `ok:true` + emails [] = cutia INBOX chiar e goală.
+export interface InboxLiveResult {
+  ok: boolean
+  motiv: string | null
+  emails: InboxLiveItem[]
+}
+
+export async function fetchRecentInbox(limit = 40): Promise<InboxLiveResult> {
+  if (!mailEnabled()) return { ok: false, motiv: 'mail_neconfigurat', emails: [] }
   const client = newImapClient()
   const out: InboxLiveItem[] = []
   try {
@@ -378,7 +389,7 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
         // avoids the sequence-number-vs-UID confusion and we don't read the
         // whole inbox.
         const uids = await client.search({ all: true }, { uid: true })
-        if (!uids || !Array.isArray(uids)) return out
+        if (!uids || !Array.isArray(uids)) return { ok: true, motiv: null, emails: out }
         uids.sort((a, b) => b - a)
         const wantedUids = new Set(uids.slice(0, limit))
         if (wantedUids.size > 0) {
@@ -410,6 +421,8 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
     }
   } catch (e) {
     console.error('[mailbox] live fetch failed:', (e as Error).message)
+    // Citirea a PICAT — nu o servim drept cutie goală (regula #1).
+    return { ok: false, motiv: (e as Error).message, emails: out }
   } finally {
     try {
       await client.logout()
@@ -417,7 +430,7 @@ export async function fetchRecentInbox(limit = 40): Promise<InboxLiveItem[]> {
       /* ignore */
     }
   }
-  return out
+  return { ok: true, motiv: null, emails: out }
 }
 
 // ── ȘTERGEREA DIN INBOX (Adrian, 3 aug: „posibilitate să șterg de aici câte

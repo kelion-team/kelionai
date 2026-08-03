@@ -21,12 +21,11 @@ export interface HistoryRow {
 // (Stripe is fully out — 31 Jul. „Punga" — soldul OpenRouter — și cheltuiala
 // OpenAI au fost EXTIRPATE pe 3 aug, împreună cu furnizorii.)
 export interface Finance {
-  spent: number
-  /** The SAME cost journal as `spent`, but unconverted (USD end to end) —
-   *  the Money tab shows ONLY this, so "total" and "azi" can't be in two
-   *  currencies anymore. */
+  // (`spent` și `profit` au fost SCOASE — auditul admin, 3 aug: tabul nu le
+  // desena, iar sursa lor din backend inventa zerouri la eșec de DB.)
+  /** The cost journal, unconverted (USD end to end) — the Money tab shows
+   *  ONLY this, so "total" and "azi" can't be in two currencies anymore. */
   spentUsd: number
-  profit: number
   currency: string
   byKind: Record<string, number>
   // Consumed TODAY at the AI providers (USD, real) — the "Spent today" card.
@@ -111,7 +110,9 @@ export interface PlatiAdmin {
     neatribuite: number
     recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
   } | null
-  neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[]
+  /** null = citirea plasei a EȘUAT (auditul admin, 3 aug) — se scrie ca eșec,
+   *  niciodată ca „Nimic în plasă"; [] = plasa e chiar goală. */
+  neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[] | null
 }
 export async function fetchPlati(): Promise<PlatiAdmin | null> {
   try {
@@ -187,7 +188,9 @@ export interface DownloadRow {
 }
 export interface StoresData {
   stores: StoreRow[]
-  downloads: { counts: { file: string; total: number }[]; recent: DownloadRow[] }
+  /** `dbOk:false` = jurnalul de descărcări NU s-a putut citi (auditul admin,
+   *  3 aug) — counts goale nu înseamnă atunci „nicio descărcare". */
+  downloads: { dbOk: boolean; counts: { file: string; total: number }[]; recent: DownloadRow[] }
 }
 
 export async function fetchStores(): Promise<StoresData | null> {
@@ -246,22 +249,28 @@ export interface Lead {
   created_at: string
 }
 
-export async function fetchLeads(): Promise<Lead[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — tabul o scrie ca eșec,
+// nu ca „Niciun contact încă".
+export async function fetchLeads(): Promise<Lead[] | null> {
   try {
     const r = await fetch('/api/admin/leads', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { leads: Lead[] }).leads
   } catch {
-    return []
+    return null
   }
 }
 
+/** Verdictul MĂSURAT al trimiterii (auditul admin, 3 aug): vechiul boolean
+ *  colapsa 400 (adresă/subiect invalide) cu 502 (SMTP a refuzat) și cu rețeaua
+ *  picată, iar alerta inventa cauza „verifică MAIL_PASS". Acum alerta spune ce
+ *  s-a măsurat: 'ok' | 'bad_request' | 'send_failed' | 'network'. */
 export async function emailLead(
   id: number,
   to: string,
   subject: string,
   body: string,
-): Promise<boolean> {
+): Promise<'ok' | 'bad_request' | 'send_failed' | 'network'> {
   try {
     const r = await fetch('/api/admin/lead/email', {
       method: 'POST',
@@ -269,9 +278,10 @@ export async function emailLead(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, to, subject, body }),
     })
-    return r.ok
+    if (r.ok) return 'ok'
+    return r.status === 400 ? 'bad_request' : 'send_failed'
   } catch {
-    return false
+    return 'network'
   }
 }
 
@@ -290,13 +300,15 @@ export interface VisitorMsg {
   created_at: string
 }
 
-export async function fetchVisitorConvos(): Promise<VisitorConvo[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — pot exista vizitatori care
+// scriu chiar atunci; tabul scrie eșecul, iar pollul de 5s reîncearcă singur.
+export async function fetchVisitorConvos(): Promise<VisitorConvo[] | null> {
   try {
     const r = await fetch('/api/admin/visitor-chats', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { convos: VisitorConvo[] }).convos
   } catch {
-    return []
+    return null
   }
 }
 
@@ -360,13 +372,15 @@ export interface InboundEmail {
   received_at: string
 }
 
-export async function fetchInbound(): Promise<InboundEmail[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug: o sesiune expirată vopsea
+// simultan trei secțiuni din Inbox ca „goale" — trei ❌ dintr-un singur apel).
+export async function fetchInbound(): Promise<InboundEmail[] | null> {
   try {
     const r = await fetch('/api/admin/inbound', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { emails?: InboundEmail[] }).emails ?? []
   } catch {
-    return []
+    return null
   }
 }
 
@@ -380,13 +394,23 @@ export interface MailboxLiveItem {
   date: string
   seen: boolean
 }
-export async function fetchMailboxLive(): Promise<MailboxLiveItem[]> {
+/** Răspunsul cutiei spune și DE CE e goală lista (auditul admin, 3 aug):
+ *  `ok:false` + `motiv` ('mail_neconfigurat' sau eroarea IMAP) = citire
+ *  eșuată; `ok:true` + emails [] = INBOX-ul chiar e gol. null = ruta însăși
+ *  a picat (rețea/403/500). Trei stări, trei texte în panou. */
+export interface MailboxLiveResult {
+  ok: boolean
+  motiv: string | null
+  emails: MailboxLiveItem[]
+}
+export async function fetchMailboxLive(): Promise<MailboxLiveResult | null> {
   try {
     const r = await fetch('/api/admin/mailbox-live', { credentials: 'include' })
-    if (!r.ok) return []
-    return ((await r.json()) as { emails?: MailboxLiveItem[] }).emails ?? []
+    if (!r.ok) return null
+    const j = (await r.json()) as Partial<MailboxLiveResult>
+    return { ok: j.ok === true, motiv: j.motiv ?? null, emails: j.emails ?? [] }
   } catch {
-    return []
+    return null
   }
 }
 
@@ -404,13 +428,14 @@ export interface ContactMessage {
   created_at: string
 }
 
-export async function fetchContactMessages(): Promise<ContactMessage[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — nu „Niciun mesaj de contact".
+export async function fetchContactMessages(): Promise<ContactMessage[] | null> {
   try {
     const r = await fetch('/api/admin/contact-messages', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     return ((await r.json()) as { messages?: ContactMessage[] }).messages ?? []
   } catch {
-    return []
+    return null
   }
 }
 
@@ -424,20 +449,32 @@ export async function fetchActivity(): Promise<UserActivity | null> {
   }
 }
 
-export async function fetchUsers(): Promise<UserSummary[]> {
-  const r = await fetch('/api/admin/users', { credentials: 'include' })
-  if (!r.ok) return []
-  const j = (await r.json()) as { users?: UserSummary[] }
-  return j.users ?? []
+// AUDIT ADMIN (3 aug): fetchUsers/fetchHistory erau SINGURELE funcții de aici
+// fără try/catch — o eroare de rețea arunca (loading blocat pe veci +
+// unhandled rejection), iar un 403/500 colapsa în [] („No history yet." /
+// „Nu a scris niciun mesaj" pentru o citire picată). null = eșec, spus ca atare.
+export async function fetchUsers(): Promise<UserSummary[] | null> {
+  try {
+    const r = await fetch('/api/admin/users', { credentials: 'include' })
+    if (!r.ok) return null
+    const j = (await r.json()) as { users?: UserSummary[] }
+    return j.users ?? []
+  } catch {
+    return null
+  }
 }
 
-export async function fetchHistory(email: string): Promise<HistoryRow[]> {
-  const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
-    credentials: 'include',
-  })
-  if (!r.ok) return []
-  const j = (await r.json()) as { history?: HistoryRow[] }
-  return j.history ?? []
+export async function fetchHistory(email: string): Promise<HistoryRow[] | null> {
+  try {
+    const r = await fetch(`/api/admin/history?email=${encodeURIComponent(email)}`, {
+      credentials: 'include',
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { history?: HistoryRow[] }
+    return j.history ?? []
+  } catch {
+    return null
+  }
 }
 
 // Batch-translates a conversation's messages into Romanian (the "Translate to Romanian"
@@ -486,11 +523,14 @@ export interface CapabilityGap {
 }
 
 // Triggers Kelion's autonomous triage over all open gaps.
-export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number } | null> {
+// `error` PĂSTRAT în tip (auditul admin, 3 aug): backend-ul răspunde 200 și
+// când creierul pică ({triaged:0, error:'brain_unavailable'|'bad_brain_json'})
+// — vechiul tip îl tăia și butonul tăcea, indiferent de rezultat.
+export async function runGapsTriage(): Promise<{ triaged: number; kept: number; closed: number; error?: string } | null> {
   try {
     const r = await fetch('/api/admin/gaps/triage', { method: 'POST', credentials: 'include' })
     if (!r.ok) return null
-    return (await r.json()) as { triaged: number; kept: number; closed: number }
+    return (await r.json()) as { triaged: number; kept: number; closed: number; error?: string }
   } catch {
     return null
   }
@@ -519,27 +559,34 @@ export async function fetchAudit(): Promise<AuditReport | null> {
   }
 }
 
-export async function fetchGaps(all = false): Promise<CapabilityGap[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug): contractul tabului e „a
+// dispărut = auto-rezolvat", deci un [] fals pe 403/500 se citea ca „totul
+// rezolvat" și refresh-ul de 15s ȘTERGEA lista bună de pe ecran.
+export async function fetchGaps(all = false): Promise<CapabilityGap[] | null> {
   try {
     const r = await fetch(`/api/admin/gaps${all ? '?all=1' : ''}`, { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     const j = (await r.json()) as { gaps?: CapabilityGap[] }
     return j.gaps ?? []
   } catch {
-    return []
+    return null
   }
 }
 
-export async function resolveGap(id: number, resolved = true): Promise<void> {
+// Boolean MĂSURAT (auditul admin, 3 aug): vechiul void înghițea orice eroare,
+// iar „Rezolvat (arhivează)" scotea rândul de pe ecran chiar când POST-ul
+// picase — apăsarea se pierdea în tăcere și rândul reapărea la refresh.
+export async function resolveGap(id: number, resolved = true): Promise<boolean> {
   try {
-    await fetch('/api/admin/gaps/resolve', {
+    const r = await fetch('/api/admin/gaps/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ id, resolved }),
     })
+    return r.ok
   } catch {
-    /* non-fatal */
+    return false
   }
 }
 
@@ -555,10 +602,12 @@ export interface VoiceprintRow {
   updatedAt: string
 }
 
-export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug) — o pană de DB/rețea nu mai
+// arată identic cu „chiar nu există amprente" (factorul de voce al ownerului).
+export async function fetchVoiceprints(): Promise<VoiceprintRow[] | null> {
   try {
     const r = await fetch('/api/voiceprint/list', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     const j = (await r.json()) as { rows?: unknown[] }
     return (j.rows ?? []).map((row: unknown) => {
       const r = row as Record<string, unknown>
@@ -574,7 +623,7 @@ export async function fetchVoiceprints(): Promise<VoiceprintRow[]> {
       }
     })
   } catch {
-    return []
+    return null
   }
 }
 
@@ -600,7 +649,12 @@ export async function deleteVoiceprint(email: string): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     })
-    return r.ok
+    if (!r.ok) return false
+    // CORPUL, nu doar statusul (auditul admin, 3 aug): backend-ul răspunde
+    // 200 cu {ok:false} când DELETE-ul din DB pică — rândul dispărea din
+    // listă „șters" și reapărea la refresh-ul de 10s.
+    const j = (await r.json().catch(() => null)) as { ok?: boolean } | null
+    return j?.ok === true
   } catch {
     return false
   }

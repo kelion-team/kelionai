@@ -30,14 +30,22 @@ const { envCheck, envSummary, envOrphans } = await import('./services/envCheck.j
 const SECRET = 'valoare-foarte-secreta-1234567890'
 
 describe('env-check — nicio valoare nu iese', () => {
+  // ACTUALIZAT (auditul admin, 3 aug): rândul GOOGLE_MAPS_KEY a fost SCOS din
+  // ASTEPTATE (cheia nu are NICIUN consumator — hărțile merg exclusiv pe OSM),
+  // deci „prezent/gol/lipsă" se testează acum pe chei care CHIAR sunt citite:
+  // SERPER (prezent), GOOGLE_TTS_API_KEY (gol), GEMINI_API_KEY (lipsă).
   beforeEach(() => {
     process.env.SERPER_API_KEY = SECRET
-    process.env.GOOGLE_MAPS_KEY = ''
-    delete process.env.GOOGLE_TTS_API_KEY
+    process.env.GOOGLE_TTS_API_KEY = ''
+    delete process.env.GOOGLE_TTS_KEY
+    delete process.env.GOOGLE_API_KEY
+    delete process.env.GEMINI_API_KEY
+    delete process.env.GEMINI_KEY
+    delete process.env.GOOGLE_GEMINI_API_KEY
   })
   afterEach(() => {
     delete process.env.SERPER_API_KEY
-    delete process.env.GOOGLE_MAPS_KEY
+    delete process.env.GOOGLE_TTS_API_KEY
   })
 
   it('raportul întreg NU conține valoarea, nici măcar o bucată din ea', () => {
@@ -53,16 +61,28 @@ describe('env-check — nicio valoare nu iese', () => {
     expect(byName.SERPER_API_KEY.present).toBe(true)
     expect(byName.SERPER_API_KEY.length).toBe(SECRET.length)
     // Present but EMPTY — different from "missing", and fixed differently.
-    expect(byName.GOOGLE_MAPS_KEY.present).toBe(true)
-    expect(byName.GOOGLE_MAPS_KEY.length).toBe(0)
+    expect(byName.GOOGLE_TTS_API_KEY.present).toBe(true)
+    expect(byName.GOOGLE_TTS_API_KEY.length).toBe(0)
     // Missing altogether.
-    expect(byName.GOOGLE_TTS_API_KEY.present).toBe(false)
+    expect(byName.GEMINI_API_KEY.present).toBe(false)
+  })
+
+  // O CHEIE DOAR-DIN-SPAȚII E GOALĂ (auditul admin, 3 aug): înainte apărea
+  // „✅ prezentă, 1+ caractere" deși config.env() o trimuiește și serviciile o
+  // văd ca inexistentă — „am scris-o de zeci de ori" / „nu o vede", ambele
+  // adevărate. Lungimea se calculează pe valoarea TRIMUITĂ.
+  it('whitespace-only = prezentă dar GOALĂ (length 0), aliniat cu config.env()', () => {
+    process.env.SERPER_API_KEY = '   '
+    const byName = Object.fromEntries(envCheck().map((v) => [v.name, v]))
+    expect(byName.SERPER_API_KEY.present).toBe(true)
+    expect(byName.SERPER_API_KEY.length).toBe(0)
+    expect(envSummary().nume).toContain('SERPER_API_KEY') // numărată la „goale"
   })
 
   it('rezumatul numără goalele separat de lipsuri și dă numele de pus', () => {
     const s = envSummary()
-    expect(s.nume).toContain('GOOGLE_MAPS_KEY') // empty
-    expect(s.nume).toContain('GOOGLE_TTS_API_KEY') // missing
+    expect(s.nume).toContain('GOOGLE_TTS_API_KEY') // empty
+    expect(s.nume).toContain('GEMINI_API_KEY') // missing
     expect(s.nume).not.toContain('SERPER_API_KEY') // set
     expect(s.total).toBeGreaterThan(s.lipsa + s.goale)
   })
@@ -89,16 +109,31 @@ describe('env-check — nicio valoare nu iese', () => {
   })
 
   // ── THE CORE OF ADRIAN'S PROBLEM, Jul 30 ───────────────────────────────
-  // "all the keys have been written dozens of times" — and they were. Only he
-  // had written GOOGLE_MAPS_API_KEY (the normal name), while the code read
-  // ONLY GOOGLE_MAPS_KEY. These tests exist so that silence never repeats.
+  // "all the keys have been written dozens of times" — and they were: the key
+  // written under a REASONABLE alias must be found, and the report must say
+  // under which name. (Exemplul istoric era GOOGLE_MAPS_*, dar rândul lui a
+  // fost scos la auditul din 3 aug — cheia n-are consumatori; mecanismul de
+  // aliasuri se pinuiește acum pe rândul TTS, care e viu.)
   it('găsește cheia scrisă cu un nume rezonabil, nu doar cu cel canonic', () => {
-    process.env.GOOGLE_MAPS_API_KEY = 'cheia-de-harti'
-    delete process.env.GOOGLE_MAPS_KEY
-    const maps = envCheck().find((v) => v.name === 'GOOGLE_MAPS_KEY')
-    expect(maps?.present).toBe(true)
+    process.env.GOOGLE_TTS_KEY = 'cheia-vocii'
+    delete process.env.GOOGLE_TTS_API_KEY
+    const tts = envCheck().find((v) => v.name === 'GOOGLE_TTS_API_KEY')
+    expect(tts?.present).toBe(true)
     // And it says UNDER WHICH name it found it — otherwise the person still doesn't know why it works now.
-    expect(maps?.foundAs).toBe('GOOGLE_MAPS_API_KEY')
+    expect(tts?.foundAs).toBe('GOOGLE_TTS_KEY')
+    delete process.env.GOOGLE_TTS_KEY
+  })
+
+  // ── GOOGLE MAPS E MORT, CA STRIPE/OPENAI (auditul admin, 3 aug) ─────────
+  // config.googleMapsKey nu avea NICIUN consumator (hărțile merg pe OSM/OSRM,
+  // cu sau fără cheie) — rândul îl trimitea pe owner să configureze o cheie
+  // fără efect (regula #4). Cheile rămase în env sunt cadavre, nu orfani.
+  it('GOOGLE_MAPS_* nu apare NICĂIERI: nici așteptat, nici orfan', () => {
+    process.env.GOOGLE_MAPS_KEY = SECRET
+    process.env.GOOGLE_MAPS_API_KEY = SECRET
+    expect(envCheck().some((v) => /MAPS/.test(v.name))).toBe(false)
+    expect(envOrphans().some((n) => /MAPS/.test(n))).toBe(false)
+    delete process.env.GOOGLE_MAPS_KEY
     delete process.env.GOOGLE_MAPS_API_KEY
   })
 

@@ -53,11 +53,25 @@ const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] 
   { name: 'GOOGLE_CLIENT_SECRET', what: 'login cu Google', breaks: 'butonul Google nu merge' },
   { alias: ENV_ALIASES.geminiKey, name: 'GEMINI_API_KEY', what: 'CREIERUL (unic — Gemini direct) + vedere + traduceri', breaks: 'nu răspunde nimic' },
   { alias: ENV_ALIASES.serperKey, name: 'SERPER_API_KEY', what: 'căutarea pe web', breaks: 'nu poate căuta nimic pe internet' },
-  { alias: ENV_ALIASES.googleMapsKey, name: 'GOOGLE_MAPS_KEY', what: 'hărți, locuri, trasee bune', breaks: 'rămâne doar harta gratuită (OSM)' },
-  { alias: ENV_ALIASES.googleTtsKey, name: 'GOOGLE_TTS_API_KEY', what: 'vocea sintetizată Google', breaks: 'gura tace (nu există altă voce — OpenAI extirpat)' },
-  { name: 'GOOGLE_API_KEY', what: 'alternativă pentru TTS/Gemini', breaks: '—' },
-  { alias: ENV_ALIASES.googleServiceAccountJson, name: 'GOOGLE_SERVICE_ACCOUNT_JSON', what: 'Chirp 3 HD (auz/voce de calitate)', breaks: 'auzul și gura mor (nu există rezervă — OpenAI extirpat)' },
-  { name: 'MAIL_USER', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
+  // (Rândul GOOGLE_MAPS_KEY a fost SCOS — auditul admin, 3 aug: cheia n-are
+  // NICIUN consumator în cod (hărțile merg exclusiv pe OSM/OSRM, cu sau fără
+  // ea). Un rând care-l trimite pe owner să configureze o cheie fără efect
+  // încalcă regula #4. Numele GOOGLE_MAPS_* sunt acum în setul „morților",
+  // ca STRIPE/OPENAI — vezi filtrarea din envOrphans.)
+  // Breaks-urile TTS/SA rescrise la adevărul din tts.ts/asr.ts (auditul admin,
+  // 3 aug): calea PRIMARĂ a gurii e service account-ul; cheia API e doar
+  // rezerva (tts.ts trece pe ?key= când nu e SA). Vechile texte afirmau
+  // consecințe inventate („gura tace" cu SA prezent; „nu există rezervă").
+  { alias: ENV_ALIASES.googleTtsKey, name: 'GOOGLE_TTS_API_KEY', what: 'vocea sintetizată Google (rezerva TTS)', breaks: 'nimic cât există GOOGLE_SERVICE_ACCOUNT_JSON — gura tace doar dacă lipsesc amândouă' },
+  // (Rândul GOOGLE_API_KEY a fost SCOS — auditul admin, 3 aug: descrierea
+  // „alternativă pentru TTS/Gemini" era falsă pentru Gemini (creierul citește
+  // doar aliasurile GEMINI_*), iar numele e deja alias al rândului TTS de mai
+  // sus — aceeași cheie fizică se număra de două ori la „prezente".)
+  { alias: ENV_ALIASES.googleServiceAccountJson, name: 'GOOGLE_SERVICE_ACCOUNT_JSON', what: 'Chirp 3 HD (auz/voce de calitate)', breaks: 'auzul moare (rămâne doar Vosk local dacă USE_LOCAL_VOSK=1); gura cade pe GOOGLE_TTS_API_KEY dacă e setată, altfel tace și ea' },
+  // (Rândul MAIL_USER a fost SCOS — auditul admin, 3 aug: are default
+  // contact@kelionai.app în config.ts, iar mailEnabled() depinde DOAR de
+  // MAIL_PASS. Cu MAIL_USER absent mailurile merg normal — ⚠-ul de aici era
+  // o alarmă falsă care-l trimitea pe owner să seteze o cheie inutilă.)
   { alias: ENV_ALIASES.mailPass, name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
   { alias: ENV_ALIASES.githubToken, name: 'GITHUB_TOKEN', what: 'mâinile lui Kelion pe runbook-uri', breaks: 'nu poate publica singur' },
   { alias: ENV_ALIASES.bridgeSecret, name: 'BRIDGE_SECRET', what: 'raportările constructorului', breaks: 'constructorul nu poate raporta progresul' },
@@ -74,7 +88,12 @@ export function envCheck(): EnvVarState[] {
       name: v.name,
       what: v.what,
       present: raw != null,
-      length: (raw ?? '').length,
+      // LUNGIMEA PE VALOAREA TRIMUITĂ (auditul admin, 3 aug): o cheie setată
+      // doar din spații apărea „✅ prezentă, 1 caracter", deși config.env() o
+      // trimuiește și toate serviciile o văd ca inexistentă — panoul spunea
+      // „e acolo", aplicația se purta ca și cum lipsește. Whitespace-only =
+      // „prezentă dar GOALĂ" (length 0), aliniat cu ce vede config.env().
+      length: (raw ?? '').trim().length,
       breaks: v.breaks,
       foundAs: gasit,
       accepts: nume,
@@ -100,7 +119,11 @@ export function envCheck(): EnvVarState[] {
 // OPENAI/OPENROUTER, LA FEL (3 aug — extirparea totală): furnizorii nu mai
 // există în cod, deci o cheie OPENAI_*/OPENROUTER_* rămasă pe VPS e un cadavru,
 // nu „ceva scris sub alt nume" — n-o listăm ca orfană.
+// GOOGLE_MAPS_*, LA FEL (auditul admin, 3 aug): câmpul mort config.googleMapsKey
+// a fost șters (niciun consumator — hărțile merg exclusiv pe OSM); o cheie de
+// Maps rămasă în env e un cadavru, nu un orfan de reparat.
 const CUVINTE = /(ANTHROPIC|CLAUDE|GEMINI|GOOGLE|SERPER|MAPS?|MAIL|SMTP|IMAP|TTS|STT|VOICE|DATABASE|POSTGRES|SESSION|BRIDGE|GITHUB|KELION)/i
+const MORTI = /^(OPENAI_|OPENROUTER_|GOOGLE_MAPS?_|MAPS_API_KEY$)/
 
 export function envOrphans(): string[] {
   const stiute = new Set<string>()
@@ -109,7 +132,7 @@ export function envOrphans(): string[] {
     'GEMINI_MODEL', 'ADMIN_EMAIL', 'ALLOWLIST', 'MAIL_USER', 'MAIL_FORWARD_TO', 'MAIL_IMAP_HOST',
     'MAIL_IMAP_PORT', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'BILLING_CURRENCY', 'ENABLE_BANKING_ACCOUNT_UID', 'NODE_ENV']) stiute.add(n)
   return Object.keys(process.env)
-    .filter((n) => CUVINTE.test(n) && !stiute.has(n) && !/^(OPENAI|OPENROUTER)_/.test(n))
+    .filter((n) => CUVINTE.test(n) && !stiute.has(n) && !MORTI.test(n))
     .sort()
 }
 

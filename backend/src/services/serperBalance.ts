@@ -10,9 +10,10 @@
 // and the header pill shows "Serper ⚠" — NEVER "Serper 0", because "I couldn't
 // read it" and "you have no credit" would look identical if we stayed silent.
 //
-// Cached 5 minutes: the header polls /api/admin/brain-credit every 15s, and
-// the balance only moves when a search actually runs — 15s of freshness would
-// buy nothing but wasted upstream calls.
+// Cached 5 minutes: the header polls /api/admin/brain-credit every 30s
+// (usePolledJson, intervalul implicit — cifra corectată la auditul din 3 aug:
+// comentariul vechi jura „15s"), and the balance only moves when a search
+// actually runs — 30s of freshness would buy nothing but wasted upstream calls.
 
 export interface SerperBalance {
   /** true ONLY when the provider answered with a shape we understand. */

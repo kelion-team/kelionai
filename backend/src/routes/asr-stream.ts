@@ -31,19 +31,21 @@ import {
 //
 // THE EARS NO LONGER DIE OF SILENCE (Adrian, Aug 2 — the live failure: Google
 // «10 ABORTED: Stream timed out after receiving no more client requests» while
-// nobody spoke, then the session rebuilt on the PAID OpenAI ears). The client
-// only streams when the local VAD hears voice (deliberate: silence isn't
-// billed) — so an unfed Google stream used to idle out and die. Now:
+// nobody spoke). The client only streams when the local VAD hears voice
+// (deliberate: silence isn't billed) — so an unfed Google stream used to idle
+// out and die. Now:
 //   1. KEEPALIVE — while the stream is open and no audio has flowed for
 //      KEEPALIVE_IDLE_MS, we write a 100 ms frame of digital silence. Google
 //      never idles out; the ear stays warm at ~1.2 billed seconds/minute.
 //   2. TRANSPARENT RECONNECT — transient drops (idle timeout, UNAVAILABLE,
 //      RST_STREAM, max stream lifetime) reopen the stream WITHOUT a word to
 //      the client: the browser never declares the ear dead for those.
-//   3. The client sees {type:'error'} — and falls back to the paid OpenAI
-//      ears — ONLY on real persistent failure (auth/config, or the reconnect
-//      budget exhausted) — and THAT is when the admin gets paged instantly
-//      (see services/urechiChirp.ts).
+//   3. The client sees {type:'error'} ONLY on real persistent failure
+//      (auth/config, or the reconnect budget exhausted) — and THAT is when the
+//      admin gets paged instantly (see services/urechiChirp.ts). NU există
+//      nicio ureche de rezervă (OpenAI extirpat, 3 aug): la eroare persistentă
+//      auzul e JOS până la reparare — vechiul text „falls back to the paid
+//      OpenAI ears" era fals și l-ar fi liniștit pe admin degeaba.
 
 // Region + model come from the SINGLE source in services/asr.ts (the proven
 // 'eu' multi-region — chirp_3 does NOT exist in us-central1 — and chirp_3
@@ -92,8 +94,8 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
   // CAPABILITY PROBE — plain HTTP, no session, no cost, no Google.
   // The browser asks it before opening the microphone: if `streaming:false`,
   // it doesn't even try the WS and switches DIRECTLY to batch dictation
-  // (/api/asr, which has an OpenAI fallback in services/asr.ts) — so dictation
-  // KEEPS working, just without live partials, and the console stays clean.
+  // (/api/asr — tot Google; fără nicio rezervă OpenAI, extirpat 3 aug) — so
+  // dictation KEEPS working, just without live partials, console stays clean.
   // When Google IS configured it returns `true` and streaming works EXACTLY as
   // before — this route changes nothing on the happy path.
   app.get('/api/asr-stream/capability', async (_req, reply) => {
@@ -186,8 +188,8 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
 
     // The stream dies at ~10s unfed; while the speaker is silent the client
     // sends NOTHING (deliberate — silence isn't billed), so WE feed Google a
-    // 100 ms silence frame instead. The ear stays warm; nobody pays for an
-    // OpenAI-ear fallback over a mere pause.
+    // 100 ms silence frame instead. The ear stays warm; a mere pause never
+    // kills the stream (nici n-ar avea pe ce să cadă — nu există rezervă).
     const armKeepalive = (): void => {
       stopKeepalive()
       keepalive = setInterval(() => {
@@ -254,9 +256,9 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         // the server journal, so we see EXACTLY why Google rejects.
         // Aug 2: the message no longer goes blindly to the client. Classified
         // first — an idle timeout or a transient drop reopens the stream
-        // TRANSPARENTLY (the ear does NOT die, no paid OpenAI-ear fallback);
-        // only a real persistent failure (auth/config, or the reconnect
-        // budget exhausted) reaches the client AND pages the admin instantly.
+        // TRANSPARENTLY (the ear does NOT die); only a real persistent
+        // failure (auth/config, or the reconnect budget exhausted) reaches
+        // the client AND pages the admin instantly.
         const detail = String((e as { message?: string })?.message ?? e).slice(0, 400)
         if (gStream !== stream && gStream !== null) return // late error from an already-replaced stream
         const cauza = clasificaEroareGoogle(e)
@@ -272,7 +274,8 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         }
         if (closed) return
         if (trebuieFallbackDupaEroare(cauza, reconectari, RECONECTARI_MAX)) {
-          app.log.error(`asr-stream: eroare PERSISTENTĂ (${cauza}) — clientul cade pe urechile OpenAI: ` + detail)
+          // Text corectat (audit 3 aug): fără rezervă OpenAI — auzul e JOS.
+          app.log.error(`asr-stream: eroare PERSISTENTĂ (${cauza}) — fără ureche de rezervă (OpenAI extirpat), auzul e JOS până la reparare: ` + detail)
           noteazaFallbackChirp(detail)
           send({ type: 'error', error: 'asr_failed', detail })
           void alertaAdminUrechiChirp(cauza, detail)

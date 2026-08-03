@@ -294,7 +294,9 @@ export default function AvatarModel() {
   // Ce gesturi a scos Adrian din Admin → Gesturi (public /api/gestures/state).
   // Reloaded every 30s, so panel changes take effect without a reload.
   useEffect(() => {
-    const load = (): void => void fetchDisabledGestures().then((l) => (disabledG.current = new Set(l)))
+    // null = citirea a picat (auditul admin, 3 aug) — păstrăm ultima listă
+    // bună; nu tratăm eșecul drept „totul e permis".
+    const load = (): void => void fetchDisabledGestures().then((l) => { if (l) disabledG.current = new Set(l) })
     load()
     const id = window.setInterval(load, 30_000)
     return () => window.clearInterval(id)

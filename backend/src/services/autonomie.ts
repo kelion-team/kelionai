@@ -934,7 +934,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     return { pornit: false, motiv: '⏸ oprit de tine — nu fac nimic și nu cheltuiesc nimic' }
   }
   if (mainileOcupate) return { pornit: false, motiv: 'lucrează chiar acum cu browserul' }
-  const jobs = await listBuildJobs(40).catch(() => [] as BuildJob[])
+  // null = coada necitibilă (auditul admin, 3 aug) — bucla nu pornește nimic
+  // peste o coadă pe care n-a văzut-o.
+  const jobs = (await listBuildJobs(40).catch(() => null)) ?? ([] as BuildJob[])
   const dupaId = new Map(jobs.map((j) => [j.id, j]))
 
   // 1. Already busy? One thing at a time — otherwise it finishes nothing.
