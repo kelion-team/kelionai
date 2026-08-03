@@ -2564,7 +2564,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
-      void recordCost(user.email, 'chat', r.costUsd)
+      // PASTILA GEMINI (Adrian, 3 aug): apelurile google-direct (creierul de lucru,
+      // Gemini Tier 2) se contabilizează separat, sub 'gemini', ca să alimenteze
+      // pastila din bară. Restul creierului (OpenRouter) rămâne 'chat'.
+      void recordCost(
+        user.email,
+        orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'gemini' : 'chat',
+        r.costUsd,
+      )
       const totalMs = Date.now() - tCreier
       console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
       // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.

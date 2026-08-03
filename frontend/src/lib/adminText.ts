@@ -63,6 +63,8 @@ export interface AdminStrings {
   oaPillDead: string
   serperPillLive: string
   serperPillDead: string
+  gemPillLive: string
+  gemPillDead: string
   vpsPillLive: string
   vpsPillDead: string
   // Magazine
@@ -144,6 +146,8 @@ const en: AdminStrings = {
   oaPillDead: 'Cannot read the OpenAI spend (OPENAI_USAGE_KEY missing or the read failed)',
   serperPillLive: 'Serper (web search): {n} real credits · click for the dashboard',
   serperPillDead: 'Cannot read the Serper credit (SERPER_API_KEY missing or the read failed)',
+  gemPillLive: 'Gemini (the work brain, Tier 2): ${n} spent this month — measured from our own journal · click for Google AI Studio',
+  gemPillDead: 'Cannot read the Gemini spend (the database is unreadable)',
   vpsPillLive: 'VPS: {free} GB free of {total} GB · load {load}% of {cpus} processors ({avg} at 1/5/15 min)',
   vpsPillDead: 'Cannot measure the VPS resources (/proc is not answering)',
   checkingStores: 'Checking the stores live…',
@@ -215,6 +219,8 @@ const ro: AdminStrings = {
   oaPillDead: 'Nu pot citi cheltuiala OpenAI (OPENAI_USAGE_KEY lipsește sau citirea a picat)',
   serperPillLive: 'Serper (căutarea web): {n} credite reale · click pentru dashboard',
   serperPillDead: 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)',
+  gemPillLive: 'Gemini (creierul de lucru, Tier 2): ${n} cheltuiți luna asta — măsurat din jurnalul propriu · click pentru Google AI Studio',
+  gemPillDead: 'Nu pot citi cheltuiala Gemini (baza de date necitibilă)',
   vpsPillLive: 'VPS: {free} GB liberi din {total} GB · încărcare {load}% din {cpus} procesoare ({avg} la 1/5/15 min)',
   vpsPillDead: 'Nu pot măsura resursele VPS-ului (nu răspunde /proc)',
   checkingStores: 'Se verifică magazinele live…',

@@ -416,6 +416,15 @@ interface BrainCredit {
       rateLimit?: number
       error?: string
     }
+    /** The REAL Gemini month-to-date spend (USD), from our own cost journal
+     *  (cost_events kind='gemini'). The work brain is Gemini Tier 2 (paid on the
+     *  owner's Google account), so there is no prepaid balance — month spend is
+     *  the honest figure. `live: false` (DB down) → "Gemini ⚠", never "$0.00";
+     *  `live: true` with 0 is a REAL zero (nothing spent this month yet). */
+    gemini?: {
+      live: boolean
+      monthUsd?: number
+    }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
      *  in the top bar"). `null` = they couldn't be measured — the bar writes "⚠ VPS",
      *  NEVER zeros: "0.0 GB / 0%" would look identical to a dead server. */
@@ -1152,6 +1161,28 @@ export default function Stage({ user }: { user: User }) {
                 {brainCredit.serper?.live
                   ? `Serper ${formatSerperK(brainCredit.serper.balance ?? 0)}`
                   : 'Serper ⚠'}
+              </button>
+            )}
+            {/* THE GEMINI PILL (Adrian, 3 aug: „vreau să văd și aici creditul de la
+            gemini"), lângă restul: creierul de LUCRU e Gemini Tier 2 (plătit pe
+            contul Google al ownerului). N-are sold de citit → arătăm cheltuiala
+            REALĂ pe luna curentă, din jurnalul nostru (cost_events kind='gemini').
+            DB necitibil → „Gemini ⚠", niciodată „$0.00"; live cu 0 = zero real
+            (nimic cheltuit încă luna asta). Click → Google AI Studio. */}
+            {brainCredit && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => window.open('https://aistudio.google.com/usage', '_blank', 'noopener')}
+                title={
+                  brainCredit.gemini?.live
+                    ? adminStrings().gemPillLive.replace('{n}', (brainCredit.gemini.monthUsd ?? 0).toFixed(2))
+                    : adminStrings().gemPillDead
+                }
+              >
+                {brainCredit.gemini?.live
+                  ? `Gemini $${(brainCredit.gemini.monthUsd ?? 0).toFixed(2)}`
+                  : 'Gemini ⚠'}
               </button>
             )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS

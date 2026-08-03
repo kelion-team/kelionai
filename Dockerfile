@@ -37,8 +37,14 @@ RUN cd frontend && npm run build
 
 # --- backend build ---
 COPY backend/package.json backend/package-lock.json ./backend/
-# npm install (not ci) to auto-heal any lock drift; production deps only
-RUN cd backend && npm install
+# npm install (not ci) to auto-heal any lock drift; production deps only.
+# RETRY pe eroarea TRECĂTOARE `esbuild ETXTBSY` (3 aug: deploy-ul 96437bc a
+# picat aici — esbuild rulează `esbuild --version` imediat după ce-și scrie
+# binarul, iar uneori fișierul e încă „busy"). O a doua încercare după o scurtă
+# pauză trece de cursa asta; fără ea, publicarea moare tăcut și live-ul rămâne
+# pe build-ul vechi (exact ce s-a întâmplat). Nu ascunde erori reale: dacă pică
+# și a doua oară (lipsă modul, lock stricat), build-ul tot cade.
+RUN cd backend && (npm install || (echo "npm install: reîncerc după eroare trecătoare (ex. esbuild ETXTBSY)" && sleep 5 && npm install))
 # Playwright browsers are NOT in the image (the VPS image builder often fails
 # on system deps installation). They are installed by deploy.sh step 4b right
 # after the container starts, into the persistent /root/kelion/pw-cache volume

@@ -1868,7 +1868,28 @@ export interface CostSummary {
 // The only kind of cost that comes MEASURED from the provider: brain calls,
 // where OpenRouter returns `usage.cost` with its real money. Everything else
 // is fixed rates I wrote — useful as an order of magnitude, false as "real".
-const COSTURI_MASURATE = new Set(['chat', 'memory', 'image'])
+const COSTURI_MASURATE = new Set(['chat', 'gemini', 'memory', 'image'])
+
+// ── PASTILA GEMINI (Adrian, 3 aug: „vreau să văd și aici creditul de la gemini") ─
+// Gemini Tier 2 e plătit postpaid pe contul Google al ownerului — nu are un
+// „sold" ca OpenRouter. Măsura ONESTĂ e cheltuiala reală făcută pe apelurile
+// google-direct, luată din PROPRIUL nostru jurnal (cost_events, kind='gemini',
+// scris cu usageMetadata-ul lui Gemini). Luna curentă, ca pastila OpenAI.
+// Întotdeauna „live" (e jurnalul nostru, mereu citibil); 0 REAL înseamnă 0
+// cheltuit luna asta, nu o citire eșuată.
+export async function getGeminiMonthUsd(): Promise<{ ok: boolean; monthUsd: number }> {
+  if (!dbEnabled()) return { ok: false, monthUsd: 0 }
+  try {
+    const r = await getPool().query<{ s: string | null }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS s
+         FROM cost_events
+        WHERE kind = 'gemini' AND created_at >= date_trunc('month', now())`,
+    )
+    return { ok: true, monthUsd: Number(r.rows[0]?.s ?? 0) }
+  } catch {
+    return { ok: false, monthUsd: 0 }
+  }
+}
 
 /** ── RESETTING THE CONSUMPTION COUNTERS ─────────────────────────────────────
  *

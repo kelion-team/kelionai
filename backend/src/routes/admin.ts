@@ -34,6 +34,7 @@ import {
   listeazaPlatiNeatribuite,
   atribuiePlataNeatribuita,
   ignoraPlataNeatribuita,
+  getGeminiMonthUsd,
 } from '../db.js'
 import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
@@ -303,7 +304,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps, openaiCost, serperBalance] = await Promise.all([
+    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost] = await Promise.all([
       getAdminAccount(),
       getOpenRouterBalance(),
       resurseGazda(),
@@ -315,6 +316,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // THE SERPER PILL (same rule): the REAL remaining search credit read
       // from Serper's /account endpoint. Also cached 5 min in the service.
       getSerperBalance(),
+      // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd și aici creditul de la
+      // gemini"): creierul de lucru e Gemini Tier 2, plătit postpaid pe contul
+      // Google. Nu are „sold" de citit — arătăm cheltuiala REALĂ pe luna curentă
+      // din propriul jurnal (cost_events kind='gemini'). Măsurat, nu inventat.
+      getGeminiMonthUsd(),
     ])
     return reply.send({
       active: 'openrouter',
@@ -357,6 +363,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         balance: serperBalance.ok ? serperBalance.balance : undefined,
         rateLimit: serperBalance.ok ? serperBalance.rateLimit : undefined,
         error: serperBalance.error,
+      },
+      // The REAL Gemini spend this month (USD) from our own cost journal. The
+      // work brain is Gemini Tier 2 (paid on the owner's Google account), so
+      // there is no prepaid balance to read — month-to-date spend is the honest
+      // figure. `live: false` (DB down) → the bar writes "Gemini ⚠", not "$0".
+      // `live: true` with monthUsd 0 is a REAL zero (nothing spent yet), shown.
+      gemini: {
+        live: geminiCost.ok,
+        monthUsd: geminiCost.ok ? geminiCost.monthUsd : undefined,
       },
       pool,
     })
