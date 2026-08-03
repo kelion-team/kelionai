@@ -2420,7 +2420,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // was never callable, no screen_url, no {monitor} frame. Those turns now
       // SKIP the race and take the sequential path WITH tools below. Chit-chat
       // keeps the race's speed; questions keep the truth and the visual.
-      if (!heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
+      // ADMINUL NU TRECE PRIN CURSA FĂRĂ UNELTE (Adrian, 3 aug: „preia sarcina și
+      // crapă" + „nu folosește căutările Serper"). Cauza: detectorul de unelte
+      // (needsToolForAnswer) rata fraze („starea vremii") → turele TALE intrau pe
+      // cursă FĂRĂ unelte → Kelion zicea că face, dar nu putea chema get_weather/
+      // căutarea. Regula #14 (creierul ownerului = agent COMPLET, cu toate uneltele):
+      // pe drumul adminului mergem MEREU pe calea cu unelte + poarta faptei. Cu
+      // Gemini Tier 2 (~1,5s/rundă) nu se pierde viteză. Cursa rămâne pentru userii
+      // publici pe chit-chat.
+      if (!isAdminUser && !heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
         const geminiLightRace = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
         // REZERVA RAPIDĂ (Adrian, 3 aug: „fă cota de rezervă nemotron rapid"):
         // când Gemini e JOS (cotă gratuită epuizată — 429 „exceeded your quota"),

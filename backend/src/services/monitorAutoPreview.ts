@@ -46,7 +46,7 @@ export interface MonitorPreview {
 const TOOL_QUESTION_RE = new RegExp(
   [
     // weather — RO + EN ("Câte grade sunt afară?", "ce vreme e", "weather")
-    '\\bvreme\\w*|prognoz\\w*|temperatur\\w*|grade\\b|plou[ăa]|[îi]nzinghet|ninge\\w*|senin\\b',
+    '\\bvrem[eiu]\\w*|prognoz\\w*|temperatur\\w*|grade\\b|plou[ăa]|[îi]nghe[țt]\\w*|ninge\\w*|senin\\b',
     'weather|forecast|temperature\\w*|raining|sunny|snowing',
     // maps / directions / "where am I" / "near me"
     'hart[ăa]\\w*|drumul?\\b|rut[ăa]\\w*|naviga\\w*|unde\\s+(?:sunt|m[ăa]\\s+aflu|e\\s+)',
