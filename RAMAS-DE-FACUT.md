@@ -19,6 +19,16 @@
 > care le descriau au fost extirpate. Se taie DOAR după merge + verificare live,
 > conform regulii; până atunci rămân, cu nota asta drept context.
 
+> **3 aug 2026 (mai târziu) — REPARAȚIA TOTALĂ A PANOULUI DE ADMIN (branch de
+> worktree, PR în lucru, NEVERIFICAT LIVE):** toate cele 83 de probleme din
+> auditul multi-agent pe 8 zone (bani, utilizatori-vizitatori, istoric-cereri,
+> magazine-inbox, tokenuri-envcheck, constructor-recuperare, amprente-gesturi-
+> setări, bara-pastile) au fost reparate sau confirmate deja-reparate de
+> extirpare — lista completă în AI-HANDOFF §13, intrarea „REPARAȚIA TOTALĂ A
+> PANOULUI DE ADMIN". Tiparul central: nicio citire eșuată nu se mai afișează
+> ca cifră/gol (null + declarare explicită, peste tot). K7 (OPENAI_USAGE_KEY în
+> vps-keys.yml) e acum curățat ÎN COD — se taie după merge + verificare live.
+
 ---
 
 ## A. CODAT, DAR MORT PE LIVE — cheia nu ajunge în procesul care rulează
