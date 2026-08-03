@@ -57,17 +57,12 @@ describe('soldul: lipsa se declară, nu se inventează', () => {
   })
 })
 
-describe('bara arată lipsa ca lipsă (partea care era deja corectă)', () => {
-  const bara = readFileSync(
-    fileURLToPath(new URL('../../frontend/src/pages/Stage.tsx', import.meta.url)),
-    'utf8',
-  )
-
-  it('cifra se scrie DOAR când citirea a reușit', () => {
-    expect(bara).toMatch(/brainCredit\.openrouter\.live\s*\n?\s*\? `OpenRouter \$/)
-    expect(bara).toContain("'⚠ OpenRouter'")
-  })
-
+// PASTILA OPENROUTER SCOASĂ DIN BARĂ (Adrian, 3 aug: „dezafectat de peste tot" —
+// migrare completă pe Gemini). Vechiul test care verifica pastila OpenRouter din
+// Stage.tsx („OpenRouter $…" / „⚠ OpenRouter") a fost eliminat: pastila nu mai
+// există în interfață. Onestitatea CITIRII rămâne pinată mai sus (openrouter.ts)
+// + backend-ul de mai jos, fiindcă getOpenRouterBalance încă e folosit intern.
+describe('citirea soldului rămâne onestă în backend, chiar dacă pastila e scoasă', () => {
   it('`live` vine din `ok`-ul măsurătorii, nu din altceva', () => {
     const ruta = readFileSync(fileURLToPath(new URL('./routes/admin.ts', import.meta.url)), 'utf8')
     expect(ruta).toMatch(/live: orBalance\.ok/)
