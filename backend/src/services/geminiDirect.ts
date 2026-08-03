@@ -83,11 +83,24 @@ export function toGeminiPayload(
     if (typeof m.content === 'string') {
       if (m.content) parts.push({ text: m.content })
     } else if (Array.isArray(m.content)) {
-      // Multimodal in OpenAI format (text + image_url with data-URI) → Gemini parts.
-      for (const b of m.content as { type: string; text?: string; image_url?: { url?: string } }[]) {
+      // Multimodal in OpenAI format (text + image_url + audio_url, all as
+      // data-URIs) → Gemini parts. AUDIO NATIV (Adrian, 3 aug: „deep learning
+      // legat de creier direct"): Gemini 2.5 e nativ multimodal pe voce — primește
+      // audio-ul BRUT (inline_data audio/*) și îl „aude" (ton, accent, pauze),
+      // fără să depindă de un STT care poate stâlci („E surt hanspuskelion").
+      // Fezabilitate dovedită pe cheia serverului (promptTokensDetails: AUDIO).
+      for (const b of m.content as {
+        type: string
+        text?: string
+        image_url?: { url?: string }
+        audio_url?: { url?: string }
+      }[]) {
         if (b.type === 'text' && b.text) parts.push({ text: b.text })
         else if (b.type === 'image_url' && b.image_url?.url) {
           const mm = /^data:([^;]+);base64,(.+)$/.exec(b.image_url.url)
+          if (mm) parts.push({ inline_data: { mime_type: mm[1], data: mm[2] } })
+        } else if (b.type === 'audio_url' && b.audio_url?.url) {
+          const mm = /^data:([^;]+);base64,(.+)$/.exec(b.audio_url.url)
           if (mm) parts.push({ inline_data: { mime_type: mm[1], data: mm[2] } })
         }
       }

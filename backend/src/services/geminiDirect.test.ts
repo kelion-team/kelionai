@@ -46,4 +46,30 @@ describe('gemini direct (creierul principal gratuit)', () => {
     expect(isGeminiQuotaError(new Error('gemini 400: bad request'))).toBe(false)
     expect(`${GEMINI_DIRECT_PREFIX}gemini-2.5-flash`.startsWith('google-direct/')).toBe(true)
   })
+
+  // AUDIO NATIV → CREIER DIRECT (Adrian, 3 aug: „deep learning legat de creier
+  // direct"). Un mesaj cu `audio_url` (data-URI) devine `inline_data` audio pentru
+  // Gemini — brainul primește vocea BRUTĂ, nu un text stâlcit de STT.
+  it('audio_url (data-URI) → inline_data audio pentru Gemini, lângă textul turei', () => {
+    const messages: OrMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'audio_url', audio_url: { url: 'data:audio/wav;base64,QUJDRA==' } },
+          { type: 'text', text: 'ce am spus?' },
+        ],
+      } as unknown as OrMessage,
+    ]
+    const body = toGeminiPayload(messages, [], {}) as {
+      contents: { role: string; parts: Record<string, unknown>[] }[]
+    }
+    const parts = body.contents[0].parts
+    const audio = parts.find((p) => 'inline_data' in p) as {
+      inline_data: { mime_type: string; data: string }
+    }
+    expect(audio.inline_data.mime_type).toBe('audio/wav')
+    expect(audio.inline_data.data).toBe('QUJDRA==')
+    const text = parts.find((p) => 'text' in p) as { text: string }
+    expect(text.text).toBe('ce am spus?')
+  })
 })
