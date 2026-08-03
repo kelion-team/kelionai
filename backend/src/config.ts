@@ -241,6 +241,10 @@ export const config = {
   // the user into a void.
   revolut: {
     payLink: (process.env.REVOLUT_PAY_LINK ?? '').trim(),
+    // The Gmail label where the owner routes Revolut payment emails; the
+    // email-reader searches ONLY here (Adrian, 3 aug: „acolo trebuie să ajungă
+    // emailurile și de acolo să se caute").
+    mailLabel: (process.env.REVOLUT_MAIL_LABEL ?? 'Revolut_kelionai_plati').trim(),
   },
   // ── READING TRANSACTIONS FROM THE REVOLUT ACCOUNT (Open Banking) ─────────
   // How the app finds out a user paid, when Revolut Pro has no webhook: it
