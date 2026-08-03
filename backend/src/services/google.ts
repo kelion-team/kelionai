@@ -640,19 +640,25 @@ export function composeSerperResult(j: SerperJson, n: number): string | null {
   })
 }
 
+// UN SINGUR apel Serper (jscpd, 3 aug): search și videos difereau DOAR prin
+// endpoint — cererea (cheie, headere, num plafonat 1..12, timeout) e una.
+async function serperPost(endpoint: 'search' | 'videos', query: string, n: number): Promise<Response> {
+  return tfetch(
+    `https://google.serper.dev/${endpoint}`,
+    {
+      method: 'POST',
+      headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
+    },
+    15_000,
+  )
+}
+
 async function serperSearch(query: string, n: number): Promise<string | null> {
   if (!config.serperKey) return null
   try {
-    const res = await tfetch(
-      'https://google.serper.dev/search',
-      {
-        method: 'POST',
-        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
-      },
-      15_000,
-    )
-    // 401/403/429 = bad key / no credits → null, the OpenRouter fallback takes it.
+    const res = await serperPost('search', query, n)
+    // 401/403/429 = cheie rea / fără credit → null → search_unavailable, onest.
     if (!res.ok) return null
     return composeSerperResult((await res.json()) as SerperJson, n)
   } catch {
@@ -667,15 +673,7 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
 async function serperVideos(query: string, n: number): Promise<{ title: string; url: string }[]> {
   if (!config.serperKey) return []
   try {
-    const res = await tfetch(
-      'https://google.serper.dev/videos',
-      {
-        method: 'POST',
-        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
-      },
-      15_000,
-    )
+    const res = await serperPost('videos', query, n)
     if (!res.ok) return []
     const j = (await res.json()) as { videos?: { title?: string; link?: string }[] }
     return (j.videos ?? [])
