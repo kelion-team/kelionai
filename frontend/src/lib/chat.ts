@@ -168,6 +168,10 @@ export async function* streamChat(
   // the speaker as an approved/pending GUEST of the account — the server
   // strips every admin power from this turn and tells the brain who's talking.
   speaker?: string,
+  // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier direct"):
+  // vocea BRUTĂ a frazei (WAV data-URI). Gemini 2.5 o aude nativ (ton/accent);
+  // celelalte modele primesc textul (serverul scoate blocul audio). Creier unic.
+  audio?: string,
 ): AsyncGenerator<string> {
   // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
   // whose response was NEVER read — openStream() below opened A SECOND identical
@@ -297,6 +301,7 @@ export async function* streamChat(
             serverVoiceOff,
             spoken: spoken || undefined,
             speaker,
+            audio,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }),
