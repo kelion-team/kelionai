@@ -290,3 +290,42 @@ poate citi). Runbook-ul e scris, corect și sub test. Se rulează când revin.
 
 **Ce rămâne al tău:** B5 (cheia `sk_live`, un click în dashboardul tău) și B8
 (arderea — acum ai cifra la vedere, deci decizia e informată).
+
+---
+
+## K. TOT CE MI-AI CERUT PE 3 AUG (dimineața) — și ce am făcut cu fiecare
+
+> Adrian, 3 aug: „cauta tot ce ti-am scris pune in tabel si arata ce ai facut
+> din tot ce am scris ca asa nu se mai poate." · „tot ce zic parca ricoseaza din
+> tine." Are dreptate — prea mult diagnostic, prea puțin pus negru pe alb. Ăsta
+> e tabelul. ✅ = făcut și publicat · 🔧 = de reparat (pe listă) · ⛔ = blocat pe
+> tine, cu motivul · 🔎 = măsurat/diagnosticat, urmează reparația.
+
+| # | Ce ai cerut/raportat | Stare | Dovada / ce urmează |
+|---|---|---|---|
+| K1 | „continuă și repară" autonomia | ✅ | Ritm dinamic al buclei (2 min după o acțiune, nu o oră fixă) — PR #666, unit. |
+| K2 | Cerințele nu primesc ordin decât după ce se termină toată misiunea | ✅ | Coada schimbată: cerința analizată primește ordin și cu misiunea deschisă — PR #666, unit. |
+| K3 | „a rămas vreun PR nemerge-uit?" | ✅ | Am închis 17 PR-uri vechi, depășite (schelării de constructor iul, bug „litere sparte", docs Railway, soneria #110). Rămâne deschis doar #401 (ghid Google OAuth), decizia ta. |
+| K4 | Citirea plăților Revolut: lipsește `ENABLE_BANKING_APP_ID` | ⛔ | Înregistrarea aplicației Enable Banking cere titularul + trece prin **reCAPTCHA cu imagini** (măsurat cu browserul de pe VPS) — nu o pot face eu. Ți-am dat cheia PUBLICĂ (derivată din cea privată de pe server, neatinsă) + pașii + redirect `kelionai.app/admin`. Îmi dai App ID → îl pun eu în env + verific M1. |
+| K5 | (găsit reparând K4) Browserul mâinilor mort la fiecare publicare | ✅ | `/root/.cache/ms-playwright` nu exista în container → orice `browser_open` crăpa. Reparat: volum persistent + instalare la deploy (pas 4b) — PR #667, unit. |
+| K6 | La pornire să NU spună „văd că ați trimis o imagine" — s-o **primească și s-o salveze**, atât; doar salut ancorat pe **oră** | 🔧 | Măsurat live: „Bună ziua, Adrian. Văd că ați trimis o imagine…". Contrazice regula din 12 iul (interzis „Văd/Observ"). De reparat: salut pe oră (dimineața/seara), imaginea salvată tăcut. |
+| K7 | Cheia OpenAI nu e corect legată — pastila dă „⚠ OpenAI" | 🔎 | Panoul „Ce chei vede serverul" zice `OPENAI_USAGE_KEY — nu e în proces` (pastila arată ⚠ în loc de cifra reală). De verificat sub ce nume e cheia pe VPS + dacă cheia de folosire (usage) e alta decât cea de chat. |
+| K8 | De unde apar cuvinte ca „Greț" — n-am scris nimic | 🔧 | Intrare-fantomă în chat (bulă user „Greț." fără ca tu să scrii). Cel mai probabil transcrierea vocală (STT) inventează cuvinte din tăcere/zgomot. De reparat: prag de energie + să nu trimită transcrieri fără vorbire reală. |
+| K9 | Golește istoricul cu joburi eșuate | 🔧 | 12 ordine picate în `build_jobs` (11 vechi + #28). Zidul le ignoră deja (granița=26), dar tu le vezi în panou. De curățat/arhivat + de ascuns cele vechi din panou. |
+| K10 | Când dai ordin de build și creierul nu poate, să te anunțe „bifează creier superior" (auto dacă se poate, dar și manual ca acum) | 🔧 | Azi #28 a picat pe „creier" fără să-ți spună clar că e nevoie de treaptă superioară. De adăugat: la eșec de tip „creierul nu poate", anunț explicit către admin cu butonul de escaladare. |
+| K11 | Trecut la cereri neacoperite | 🔧 | De legat lista de cereri neacoperite (`plati_neatribuite` + cereri de la useri) în fluxul de lucru + panou. |
+| K12 | Curățat ce nu mai e de actualitate | 🔧 (parțial) | PR-urile vechi — făcut (K3). Rândurile moarte din liste + joburi — de curățat (K9). |
+| K13 | Sistem automat de curățare care **arhivează** când e gata | 🔧 | De construit: la închiderea unei cerințe/job, mută în arhivă în loc să lase gunoiul la vedere. |
+| K14 | Sistem de rezolvări care **anunță adminul** că sunt cereri | 🔧 | De construit: când apare o cerere nouă (scris/voce/plată neatribuită), notificare la admin. |
+| K15 | „ceva toacă creditul OpenRouter, caută soluții, că e faliment curat" | 🔎 | MĂSURAT: constructorul pe **Fable 5 plătit** = ~$4-5 per ordin de build (30 apeluri azi = $5.04; ora 02 = $4.21 doar pentru cei 24 de pași ai ordinului #28). Ultimul apel al constructorului: 03:23 — deci scurgerea mică de acum (chat/analiză) e alta. Soluții de decis (mai jos). |
+| K16 | „de ce sistemul nu monitorizează cerințele până la capăt? se ajung la dubluri, timp și bani" | 🔧 | Gaură reală: captarea cerințelor nu deduplică după text, iar bucla re-analizează → dubluri. De reparat: dedup la captare + urmărire clară până la „verificat", ca o cerință dusă la capăt să nu fie reluată. |
+| K17 | iOS: user/pass în fișierul „kei" de pe desktop | ⛔ | **Nu am acces la desktopul tău** — rulez într-un container izolat care vede doar repo-ul, VPS-ul și site-ul live. Nu pot citi un fișier de pe Windows-ul tău. Dacă e nevoie, mi-l dai tu (dar parolele nu în chat dacă nu e musai). |
+
+### Soluțiile pentru arderea de credit (K15) — decizia ta, cu cifre
+
+Constructorul rulează structural pe `:free`; pe VPS e pus **conștient** `CONSTRUCTOR_MODEL=fable-5` + `CONSTRUCTOR_ALLOW_PAID=1` (alegerea ta din 2 aug, „fable 5 peste tot"). Asta arde ~$4-5 de fiecare ordin de build. Trei pârghii, oricare sau combinate:
+1. **Plafon zilnic de cheltuială** pe buclă: când s-a ars X$ azi, oprește ordinele plătite și te anunță (exact „faliment curat" prevenit). Se poate face și cu buton manual.
+2. **Constructorul pe `:free` implicit**, escaladează la Fable 5 **doar** când pasul pică pe neputința modelului (design-ul de escaladare există deja) — plătești doar unde chiar e nevoie.
+3. **Analiza cerințelor pe model ieftin** (deja e pe `:free`), doar construirea pe plătit.
+
+Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 5 unde contează, dar taie falimentul.
