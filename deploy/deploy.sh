@@ -118,11 +118,25 @@ docker rm -f kelionai-app 2>/dev/null || true
 # GIT_COMMIT_SHA intră în container ca /api/version să întoarcă EXACT sha-ul
 # publicat (backend/src/index.ts îl suportă deja) — verificarea anti-fantomă
 # devine „live == master", nu doar „s-a schimbat ceva".
+# Volumul pw-cache ține Chromium-ul DESCĂRCAT peste publicări (containerul e
+# nou la fiecare deploy; fără volum, browserul mâinilor murea la fiecare
+# publicare — măsurat 3 aug: /root/.cache/ms-playwright inexistent, deci
+# browser_open crăpa pe „Executable doesn't exist", iar comentariul din
+# Dockerfile promitea un „check la startup" pe care nu-l făcea nimeni).
 docker run -d --name kelionai-app --restart unless-stopped \
   --network host --env-file "$ENVFILE" \
   -e PORT=8080 -e NODE_ENV=production \
   -e GIT_COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD)" \
+  -v /root/kelion/pw-cache:/root/.cache/ms-playwright \
   kelionai:latest
+
+echo "== 4b. Browserul mâinilor (Chromium) — prezent, nu promis =="
+# Idempotent: cu volumul plin, descărcarea se sare; rămân doar bibliotecile
+# de sistem (apt), care se pierd cu containerul vechi. Eșecul NU oprește
+# publicarea — dar se spune, nu se tace.
+docker exec kelionai-app sh -c 'cd /app/backend && npx playwright install --with-deps chromium >/dev/null 2>&1' \
+  && echo "Chromium prezent — browserul mâinilor e viu" \
+  || echo "AVERTISMENT: instalarea Chromium a picat — pașii pe mâini cu browser vor pica până la următoarea publicare"
 
 echo "== 5. (Re)pornesc Caddy cu Caddyfile-ul aplicației =="
 install -D -m 644 "$REPO/deploy/Caddyfile" "$CADDY_DIR/Caddyfile"

@@ -39,8 +39,12 @@ RUN cd frontend && npm run build
 COPY backend/package.json backend/package-lock.json ./backend/
 # npm install (not ci) to auto-heal any lock drift; production deps only
 RUN cd backend && npm install
-# Playwright browsers installed at runtime (not build time) — the image builder
-# often fails on system deps installation. The backend checks at startup.
+# Playwright browsers are NOT in the image (the VPS image builder often fails
+# on system deps installation). They are installed by deploy.sh step 4b right
+# after the container starts, into the persistent /root/kelion/pw-cache volume
+# — measured 3 Aug: nothing else installed them, so the hands' browser was
+# dead on every deploy while an old comment here claimed "the backend checks
+# at startup" (it never did).
 COPY backend ./backend
 RUN cd backend && npm run build
 
