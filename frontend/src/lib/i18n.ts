@@ -15,6 +15,7 @@ export interface Strings {
   functionsTitle: string
   attachTitle: string
   imagePrompt: string
+  greetPrompt: string
   scenarioTitle: string
   scenarioHint: string
   scenarioRecord: string
@@ -187,6 +188,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     functionsTitle: 'Functions',
     attachTitle: 'Attach file',
     imagePrompt: 'What do you see in this image?',
+    greetPrompt: 'Greet me briefly, suited to the time of day. Do NOT describe or comment on the camera or the image.',
     scenarioTitle: 'Promo scenario (record)',
     scenarioHint: 'One step per line — Kelion runs them while recording. Keep it short (~15s).',
     scenarioRecord: 'Record',
@@ -338,6 +340,7 @@ const dict: { en: Strings } & Partial<Record<Lang, Partial<Strings>>> = {
     functionsTitle: 'Funcții',
     attachTitle: 'Atașează fișier',
     imagePrompt: 'Ce vezi în această imagine?',
+    greetPrompt: 'Salută-mă scurt, potrivit cu ora zilei. NU descrie și NU comenta camera sau imaginea.',
     scenarioTitle: 'Scenariu promo (înregistrare)',
     scenarioHint: 'Câte un pas pe linie — Kelion le rulează în timp ce înregistrează. Ține-l scurt (~15s).',
     scenarioRecord: 'Înregistrează',

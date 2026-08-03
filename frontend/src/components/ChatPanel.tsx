@@ -937,7 +937,18 @@ export default function ChatPanel({
     // reads them as part of this turn.
     const docs = atts.filter((a) => a.text)
     const docBlock = docs.map((d) => `[Document: ${d.name}]\n${d.text}`).join('\n\n')
-    const base = msg || (docBlock ? t.docPrompt : t.imagePrompt)
+    // STOP THE DEFAULT IMAGE NARRATION (Adrian, 3 aug: „la pornire să NU spună
+    // default ce vede în imagine — captura e DOAR ca să lege imaginea de timbrul
+    // vocii, ca securitate, salvată tăcut"). `imagePrompt` („Ce vezi în această
+    // imagine?") is still correct when the user EXPLICITLY attached a picture —
+    // then they DO want it described. But a bare camera frame with no text must
+    // NOT be turned into a „describe what you see" request: we send a plain
+    // greeting instead, which carries NO vision-intent words, so the backend
+    // vision gate does not attach the frame → no narration. The frame still
+    // leaves silently (camFrames / faceDescriptor / facePhoto) for the
+    // faceprint↔voiceprint security binding the server saves without a word.
+    const base =
+      msg || (docBlock ? t.docPrompt : attached ? t.imagePrompt : t.greetPrompt)
     const outgoing = docBlock ? `${docBlock}\n\n${base}` : base
     // CONTINUOUS VISION (Adrian, Jul 11): with the camera on, the LAST 8 FRAMES leave
     // (≈2s of motion at 4 fps), not a single one — the brain sees MOTION, not a
