@@ -137,7 +137,17 @@ Admin blocat `ro-RO` (`adminLocked` în chat.ts). Restul: detecție determinist�
 **Îmbunătățiri detecție limbă (13 iul):** `detectLang` primește limbă anterioară opțională (`previousLang`) și aplică trei heuristici noi:
 1. **Cuvinte-cheie clare** (`CLEAR_KEYWORDS`) — cuvinte foarte specifice unei limbi (`bună`, `hola`, `olá`, `bonjour`, `ciao`, `hello`, `hallo`, `mulțumesc` etc.) determină limba imediat, fără prag.
 2. **Fallback la limba anterioară** pentru fraze scurte/ambigue (`da`, `ok`, `nu`, `thanks`) — conversația nu-și pierde limba stabilită.
-3. **Fallback la limba anterioară** și pentru propoziții mai lungi fără câștigător clar în stopwords/script-hints.
+	3. **Fallback la limba anterioară** și pentru propoziții mai lungi fără câștigător clar în stopwords/script-hints.
+
+#### 4.2.1 Pipeline vocal local
+Dacă variabila de mediu `USE_LOCAL_VOSK` este setată la `1`, aplicația va folosi un microserviciu local pentru STT (Speech-to-Text) și TTS (Text-to-Speech), în locul serviciilor plătite de la Google. URL-ul microserviciului este specificat în variabila `LOCAL_VOSK_URL`.
+
+Acest pipeline rulează pe același VPS cu aplicația principală și folosește:
+*   **STT**: `faster-whisper` (model `small` sau `base`, `int8`, optimizat pentru CPU).
+*   **TTS**: `Piper`, un sintetizator de voce open-source de calitate înaltă.
+
+Comutarea între serviciile cloud și cele locale se face transparent în `services/asr.ts` și `services/tts.ts`, permițând un fallback la Google dacă serviciul local nu este configurat sau eșuează, deși implementarea curentă tratează lipsa serviciului local ca o eroare de configurare (503).
+
 `detectSpeechLang` și `trackSpeechLang` propagă `previousLang` (limba curentă) ca fallback. Testat cu 22 fraze multilingve: 100% acuratețe (față de rate mult mai slabe pe fraze scurte înainte).
 ### 4.3 Router model (capabilitate↔cost)
 `services/modelRouter.ts`: `MODEL_FAST` (env `KELION_FAST_MODEL`, azi `claude-fable-5`) / `MODEL_TOP` (env `KELION_TOP_MODEL`, azi `claude-opus-4-8`). `taskDifficulty()` euristic (0 cost) + **marjă +10%** → `chooseModel` ia cel mai IEFTIN model care acoperă necesarul; eșec/refuz pe FAST → re-servit pe TOP + odihnă 10 min. Model nou în viitor = setezi variabila în env-ul gazdei, intră la următorul restart. Teste: `backend/src/modelRouter.test.ts`.

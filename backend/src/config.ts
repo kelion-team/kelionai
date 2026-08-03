@@ -38,6 +38,8 @@ export const ENV_ALIASES: Record<string, string[]> = {
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
   githubToken: ['GITHUB_TOKEN', 'KELION_GITHUB_TOKEN'],
+  useLocalVosk: ['USE_LOCAL_VOSK'],
+  localVoskUrl: ['LOCAL_VOSK_URL'],
 }
 
 function required(name: string): string {
@@ -53,6 +55,8 @@ const isProd = process.env.NODE_ENV === 'production'
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8080),
+  useLocalVosk: env(...ENV_ALIASES.useLocalVosk) === '1',
+  localVoskUrl: env(...ENV_ALIASES.localVoskUrl),
   google: {
     clientId: required('GOOGLE_CLIENT_ID'),
     clientSecret: required('GOOGLE_CLIENT_SECRET'),

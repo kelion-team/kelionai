@@ -1,6 +1,8 @@
 import { GoogleAuth } from 'google-auth-library'
 import { normalizeLang } from './tts.js'
 import { googleServiceAccount } from './googleCreds.js'
+import { config } from '../config.js'
+import { localTranscribe, localVoskAvailable } from './localVosk.js'
 
 // Shared Google Cloud Speech-to-Text v2 (chirp_3) transcription. ONE
 // implementation used by BOTH the session-gated /api/asr route (browser sends a
@@ -67,6 +69,19 @@ export interface TranscribeOpts {
 export async function transcribe(audioBase64: string, opts: TranscribeOpts = {}): Promise<TranscribeResult> {
   const audio = audioBase64.trim()
   if (!audio) return { ok: false, status: 400, error: 'bad_request' }
+
+  if (config.useLocalVosk) {
+    if (!localVoskAvailable()) {
+      return { ok: false, status: 503, error: 'asr_not_configured' }
+    }
+    const result = await localTranscribe(audio, opts.langHint ?? 'auto')
+    if (result.ok) {
+      return { ok: true, lang: result.lang, transcript: result.transcript }
+    } else {
+      return { ok: false, status: 502, error: result.error }
+    }
+  }
+
   const a = getAuth()
   if (!a || !projectId) return { ok: false, status: 503, error: 'asr_not_configured' }
 
