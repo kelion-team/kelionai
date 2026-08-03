@@ -20,7 +20,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip curl git \
     && pip3 install --break-system-packages --no-cache-dir 'markitdown[pdf,docx,pptx,xlsx,xls]' aider-chat \
-    && npm install -g cline \
+    && npm install -g cline @google/gemini-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- frontend build ---

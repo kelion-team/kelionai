@@ -85,6 +85,17 @@ export const LUCRATORI: Lucrator[] = [
     comanda: (s) => ['openhands', ['--headless', '-t', s]],
     descriere: 'are BROWSER — poate deschide pagina live și verifica vizual, nu doar rula teste',
   },
+  {
+    // AGENTUL OFICIAL GOOGLE (Adrian, 3 aug: „dă-mi... și suita oficială de la
+    // Google"). Gemini CLI rulează headless pe cheia GEMINI_API_KEY din mediu
+    // (aceeași ca tot creierul): `-p` = prompt non-interactiv, `--yolo` =
+    // execută uneltele fără să aștepte un om la terminal. Modelul vine fără
+    // prefixul LiteLLM (`gemini/`), fiindcă CLI-ul e nativ Google.
+    nume: 'gemini-cli',
+    verificare: ['gemini', ['--version']],
+    comanda: (s, m) => ['gemini', ['-p', s, '-m', m.replace(/^gemini\//, ''), '--yolo']],
+    descriere: 'agentul OFICIAL Google — nativ pe cheia Gemini, scrie cod și execută comenzi în terminal; al doilea punct de vedere „de la sursă"',
+  },
 ]
 
 export interface Propunere {
