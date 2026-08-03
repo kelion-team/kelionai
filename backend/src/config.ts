@@ -213,7 +213,11 @@ export const config = {
     // probe: 4/4 with reasoning tokens). Light turns no longer come here at
     // all (they start on gemini-direct — see chat.ts), so this tier serves
     // only HEAVY turns, which is exactly what Ultra was chosen for on Jul 31.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
+    // LACĂT ÎN COD (Adrian, 3 aug: „blochează-le cu cod ca să nu se mai schimbe
+    // la orice update"): creierul de LUCRU e Gemini free PERMANENT, în cod — nu în
+    // env (care se poate reseta). Env-ul poate suprascrie punctual, dar dacă lipsește
+    // sau se golește, NU se mai întoarce la plătit din greșeală: default sigur = free.
+    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
     // The FINAL 'top' tier — same model. There's nothing left to escalate
     // above it: it's the most capable free brain that exists. Escalation
     // stays in the code for the day the top tier becomes a paid model.
