@@ -64,7 +64,11 @@ describe('openai-costs — citirea reală din API-ul furnizorului', () => {
     expect(r.ok).toBe(true)
     expect(r.monthUsd).toBeCloseTo(65.0, 6) // the real ~$65, not the $204 estimate
     expect(seenUrl).toContain(`start_time=${monthStartUtc()}`)
-    expect(seenUrl).toContain('bucket_width=1mo')
+    // 1d, NU 1mo: OpenAI întoarce HTTP 400 pe „1mo" („Supported values are:
+    // '1d'"), de-aia pastila arăta ⚠ deși cheia funcționa (Adrian, 3 aug).
+    expect(seenUrl).toContain('bucket_width=1d')
+    expect(seenUrl).not.toContain('1mo')
+    expect(seenUrl).toContain('limit=31')
     expect(seenAuth).toBe('Bearer sk-admin-test')
   })
 
