@@ -585,6 +585,39 @@ describe('Kelion se apucă singur de treabă', () => {
     expect(r.motiv).not.toContain('ZID')
   })
 
+  // CĂDEREA ZIDULUI MUTĂ ȘI GRANIȚA DE NUMĂRARE (impasul măsurat live, 2-3
+  // aug): seria istorică de eșecuri nu se schimbă la un sha nou, deci zidul se
+  // re-ridica din aceleași 11 ordine vechi la FIECARE schimbare de lume — câte
+  // o tură de diagnostic arsă de fiecare dată, și niciun ordin nou, deci nimic
+  // nu putea rupe seria vreodată. „Zidul cade și lucrul repornește" cere ca și
+  // NUMĂRĂTOAREA să repornească.
+  it('lumea schimbată → zidul cade DE TOT: lucrul repornește, nu încă un diagnostic pe seria veche', async () => {
+    zidDe(5, 'Eroare X')
+    kv.set('autonomie:zid', JSON.stringify({
+      cate: 5, cauza: 'Eroare X', cand: '2026-08-02T21:55:03Z',
+      semnatura: 'LUME-VECHE|9|0', diagnosticat: true, raport: 'ceva',
+    }))
+    const r = await poateSaLucreze()
+    // Nu s-a oprit pe zid și nu a re-diagnosticat seria veche.
+    expect(r.motiv).not.toContain('ZID')
+    expect(r.motiv).not.toContain('OPRIT pe zid')
+    expect(kv.get('autonomie:zid') ?? '').toBe('')
+    // Granița s-a mutat peste ordinele lumii vechi (id-urile 100..104).
+    expect(Number(kv.get('autonomie:zid:granita'))).toBeGreaterThanOrEqual(104)
+  })
+
+  it('după cădere, seria veche nu mai contează — dar o serie NOUĂ de eșecuri ridică zidul iar', async () => {
+    zidDe(5, 'Eroare veche')                 // lumea veche, sub graniță
+    kv.set('autonomie:zid:granita', '150')   // zidul a căzut după ordinul 150
+    for (let i = 0; i < 3; i++) {
+      jobs.push({ id: 200 + i, orderText: 'x', status: 'failed', log: 'Eroare noua', orderedBy: 'kelion-autonom' })
+    }
+    const r = await poateSaLucreze()
+    // Doar cele 3 de după graniță se numără — zid nou, cu cifra lor.
+    expect(r.motiv).toContain('ZID')
+    expect(r.motiv).toContain('3 ordine picate la rând')
+  })
+
   it('eșecurile cerute de OM nu opresc bucla — numai ale ei', async () => {
     for (let i = 0; i < 6; i++) {
       jobs.push({ id: 200 + i, orderText: 'x', status: 'failed', log: 'Eroare', orderedBy: 'adrianenc11@gmail.com' })
