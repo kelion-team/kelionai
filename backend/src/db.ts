@@ -59,6 +59,21 @@ export async function initDb(): Promise<void> {
     -- (autoRechargeThreshold/autoRechargeAmount) — see getAutoRecharge.
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_threshold INTEGER NOT NULL DEFAULT 20;
     ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS autorecharge_amount INTEGER NOT NULL DEFAULT 10;
+    -- EVIDENȚA TIMPILOR DE REZOLVARE (Adrian, 3 aug: „un sistem care ține evidența
+    -- timpilor de rezolvare, ca să se poată măsura" + auto-învățare în spate).
+    -- O linie per sarcină reală: cât a durat creierul, ce model, câte runde,
+    -- reușită sau nu. Din asta învață bucla din spate (services/autoInvatare.ts).
+    CREATE TABLE IF NOT EXISTS task_timings (
+      id BIGSERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      model TEXT,
+      ms INTEGER NOT NULL,
+      ok BOOLEAN NOT NULL DEFAULT true,
+      rounds INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_timings_kind ON task_timings (kind, created_at);
     -- Voiceprints: timbre + gender + admin flag per account.
     -- The vector is normalized client-side; meta keeps the raw values for debug.
     CREATE TABLE IF NOT EXISTS voiceprints (
@@ -1762,6 +1777,49 @@ export async function recordCost(email: string, kind: string, costUsd: number): 
     )
   } catch {
     // Never break a request because metering failed.
+  }
+}
+
+// EVIDENȚA TIMPILOR (Adrian, 3 aug). Fire-and-forget, ca recordCost — nu rupe
+// niciodată tura dacă măsurarea eșuează. `ms` = durata reală a creierului.
+export interface TaskTiming {
+  email: string
+  kind: string
+  model?: string | null
+  ms: number
+  ok?: boolean
+  rounds?: number | null
+}
+export async function recordTiming(t: TaskTiming): Promise<void> {
+  if (!dbEnabled() || !(t.ms >= 0)) return
+  try {
+    await getPool().query(
+      'INSERT INTO task_timings (user_email, kind, model, ms, ok, rounds) VALUES ($1,$2,$3,$4,$5,$6)',
+      [t.email, t.kind, t.model ?? null, Math.round(t.ms), t.ok ?? true, t.rounds ?? null],
+    )
+  } catch {
+    // Never break a request because timing failed.
+  }
+}
+
+export interface TimingRow {
+  kind: string
+  model: string | null
+  ms: number
+  ok: boolean
+  rounds: number | null
+  created_at: string
+}
+export async function recentTimings(limit = 500): Promise<TimingRow[]> {
+  if (!dbEnabled()) return []
+  try {
+    const r = await getPool().query<TimingRow>(
+      'SELECT kind, model, ms, ok, rounds, created_at FROM task_timings ORDER BY created_at DESC LIMIT $1',
+      [Math.max(1, Math.min(5000, limit))],
+    )
+    return r.rows
+  } catch {
+    return []
   }
 }
 
