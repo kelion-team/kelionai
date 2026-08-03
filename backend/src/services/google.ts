@@ -1,6 +1,6 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
-import { openrouterComplete, openrouterWebSearch } from './openrouter.js'
+import { openrouterComplete } from './openrouter.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -717,13 +717,12 @@ export function composeOpenrouterFallback(
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
-  // PRIMARY: Serper (real Google results). FALLBACK: OpenRouter `web` plugin.
+  // SERPER ONLY (Adrian, 3 aug: OpenRouter scos TOTAL din aplicație). Serper dă
+  // rezultate Google reale; dacă pică (cheie lipsă / cotă / rețea), spunem cinstit
+  // că nu putem căuta acum — NU mai cădem pe pluginul web OpenRouter (eliminat).
   const viaSerper = await serperSearch(query, n)
   if (viaSerper) return viaSerper
-  const r = await openrouterWebSearch(query)
-  const viaFallback = composeOpenrouterFallback(r.text, r.sources, n)
-  if (!viaFallback) return JSON.stringify({ error: 'search_unavailable' })
-  return viaFallback
+  return JSON.stringify({ error: 'search_unavailable' })
 }
 
 const WEATHER_CODES: Record<number, string> = {
