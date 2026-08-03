@@ -549,6 +549,40 @@ export const STARE_MASURATA_TOOL: Tool = {
   input_schema: { type: 'object', properties: {} },
 }
 
+// ── JULES — agentul asincron OFICIAL Google, prin API (3 aug 2026) ──────────
+// Ownerul a legat cheia (JULES_API_KEY, vps-keys → jules). Kelion poate da
+// sarcini lui Jules (lucrează în VM-ul Google, deschide PR) și urmări progresul.
+export const JULES_REPOS_TOOL: Tool = {
+  name: 'jules_repos',
+  description:
+    'ADMIN ONLY. List the GitHub repos connected to Google Jules (the official async coding agent). Call this FIRST to get the exact source name needed by jules_task.',
+  input_schema: { type: 'object', properties: {} },
+}
+export const JULES_TASK_TOOL: Tool = {
+  name: 'jules_task',
+  description:
+    "ADMIN ONLY. Give Jules (Google's official async coding agent) a task on a connected repo: it works in an isolated Google VM and opens a PR. The merge stays with the owner. Use jules_repos first for the exact source name.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', description: 'The task, complete and specific: what to build/fix and how it is verified.' },
+      sursa: { type: 'string', description: 'The source name from jules_repos (e.g. sources/github/kelion-team/kelionai).' },
+      ramura: { type: 'string', description: "Starting branch (default 'master')." },
+    },
+    required: ['prompt', 'sursa'],
+  },
+}
+export const JULES_STATUS_TOOL: Tool = {
+  name: 'jules_status',
+  description:
+    'ADMIN ONLY. The REAL state of a Jules session (created with jules_task): status, latest activities, the PR when it appears.',
+  input_schema: {
+    type: 'object',
+    properties: { sesiune: { type: 'string', description: 'The session name returned by jules_task (sessions/...).' } },
+    required: ['sesiune'],
+  },
+}
+
 export const TOATE_UNELTELE_ADMIN: Tool[] = [
   LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
   DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL,
@@ -557,6 +591,9 @@ export const TOATE_UNELTELE_ADMIN: Tool[] = [
   SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
   CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
   CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+  // Jules — agentul asincron oficial Google (3 aug): și bucla autonomă poate
+  // delega sarcini (PR-ul îl îmbină tot ownerul, deci fără risc de noapte).
+  JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL,
   // About HIMSELF: memory, notes, logs, cost, the mailbox, and the right to
   // ask for a missing tool on his own. Without these he remembers nothing from
   // one turn to the next — that's why he repeated the same mistakes.

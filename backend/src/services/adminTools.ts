@@ -26,6 +26,7 @@ import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
 import { voceRecenta, minuteRamaseVoce } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
+import { julesSurse, julesSarcina, julesStare } from './jules.js'
 
 // The names of the shared admin tools (chat ∩ voice). The caller checks
 // membership to know whether to delegate here or handle it itself
@@ -45,6 +46,8 @@ export const SHARED_ADMIN_TOOLS: ReadonlySet<string> = new Set([
   // HIS OWN WISHLIST, granted (Aug 2, „implementează-i ce cere"): persistent
   // project memory + full observability of his own state, as tools.
   'memorie_pune', 'memorie_ia', 'memorie_lista', 'stare_masurata',
+  // JULES (3 aug) — agentul asincron oficial Google, pe cheia pusă de owner.
+  'jules_repos', 'jules_task', 'jules_status',
 ])
 
 // Executes a SHARED admin tool. Returns the result (string) or `null` if the
@@ -90,6 +93,10 @@ export async function execSharedAdminTool(
         1,
       )
     }
+    // JULES — sarcini către agentul asincron oficial Google (PR-ul îl îmbină ownerul).
+    case 'jules_repos': return julesSurse()
+    case 'jules_task': return julesSarcina(String(args.prompt ?? ''), String(args.sursa ?? ''), args.ramura ? String(args.ramura) : 'master')
+    case 'jules_status': return julesStare(String(args.sesiune ?? ''))
     case 'repo_write': return repoWrite(String(args.branch ?? ''), String(args.path ?? ''), String(args.content ?? ''), String(args.message ?? ''))
     case 'repo_open_pr': return repoOpenPR(String(args.branch ?? ''), String(args.title ?? ''), String(args.body ?? ''))
     case 'repo_merge_pr': return repoMergePR(Number(args.pr ?? 0))

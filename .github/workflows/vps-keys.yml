@@ -30,7 +30,7 @@ on:
         description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
         type: choice
-        options: [kimi, glm, github, openai_usage, gemini, all]
+        options: [kimi, glm, github, openai_usage, gemini, jules, all]
 
 jobs:
   put:
@@ -46,6 +46,7 @@ jobs:
           GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
           OPENAI_USAGE_KEY: ${{ secrets.OPENAI_USAGE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
           WHICH: ${{ inputs.which }}
         run: |
           set -euo pipefail
@@ -106,6 +107,23 @@ jobs:
                echo "--- TEST TIER (200 = merge / platit; 429 free_tier = inca free) ---";
                curl -sS -o /tmp/gt.json -w "HTTP %{http_code}\n" "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$K" -H "Content-Type: application/json" -d "{\"contents\":[{\"parts\":[{\"text\":\"hi\"}]}]}";
                echo "semnal cota:"; grep -oE "free_tier|RESOURCE_EXHAUSTED|GenerateRequestsPerDay[A-Za-z]*|quotaValue[^}]*" /tmp/gt.json | head -4 || echo "(fara 429 — probabil 200, merge)"'
+          fi
+
+          if want jules; then
+            # Cheia API Jules (agentul asincron Google, jules.google) în ENV-FILE —
+            # serviciul jules.ts o citește din process.env.JULES_API_KEY. Dedup +
+            # TEST PE LOC: listăm sursele (repo-urile legate) prin API — arătăm
+            # DOAR codul HTTP și numărul de surse, niciodată cheia.
+            [ -n "$JULES_API_KEY" ] || { echo "::error::secretul JULES_API_KEY lipsește (Settings → Secrets → Actions → JULES_API_KEY)"; exit 1; }
+            printf '%s' "$JULES_API_KEY" | ssh $SSHOPTS root@"$VPS_HOST" \
+              'K=$(cat); F=/root/kelion/kelionai.env; touch "$F";
+               grep -v "^JULES_API_KEY=" "$F" > "$F.tmp" 2>/dev/null || true; mv "$F.tmp" "$F";
+               printf "JULES_API_KEY=%s\n" "$K" >> "$F"; chmod 600 "$F";
+               echo "JULES_API_KEY scris in kelionai.env: ${#K} octeti";
+               echo "--- TEST API (200 = cheia e vie) ---";
+               curl -sS -o /tmp/jl.json -w "HTTP %{http_code}\n" -H "X-Goog-Api-Key: $K" "https://jules.googleapis.com/v1alpha/sources";
+               echo "surse legate (repo-uri):"; grep -o "\"name\"" /tmp/jl.json | wc -l;
+               docker restart kelionai-app >/dev/null 2>&1 && echo "container repornit — cheia e in proces" || echo "restart esuat — cheia intra la urmatorul deploy"'
           fi
 
           echo "=== stare fișiere-cheie pe VPS (doar lungimi, niciodată conținut) ==="
