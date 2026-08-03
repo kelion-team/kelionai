@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
 import { getSessionUser } from '../session.js'
-import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs } from '../db.js'
+import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
 import { uneltele } from '../services/autonomie.js'
@@ -33,6 +33,45 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({ jobs: await listBuildJobs(40) })
+  })
+
+  // ── ȘTERGE / CURĂȚĂ / REIA din PANOU (Adrian, 3 aug: „aici nu apar butoane de
+  // ștergere" + „scoate 30/31 dacă nu le poate face, ai funcțiile făcute") ─────
+  // Funcțiile existau demult în db.ts (deleteBuildJob / deleteBuildJobsByScope /
+  // retryBuildJob) și erau folosite DOAR de unealta `constructor_manage` a lui
+  // Kelion din chat. Panoul n-avea nicio rută spre ele → niciun buton. Le expun
+  // aici, admin-only ca restul panoului. Ștergerea nu atinge un ordin 'running'
+  // decât la scope='all' — un ordin viu nu piere din greșeală.
+  app.delete<{ Params: { id: string } }>('/api/admin/constructor/:id', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'id_invalid' })
+    const sters = await deleteBuildJob(id)
+    return reply.send({ ok: sters })
+  })
+
+  // Ștergere în GRUP: scope=failed|done|failed_done|all (implicit failed_done —
+  // curăță istoricul „eșuat/GATA", lasă cele vii). Întoarce câte a șters.
+  app.post<{ Body: { scope?: string } }>('/api/admin/constructor/curata', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const scope = ['failed', 'done', 'failed_done', 'all'].includes(String(req.body?.scope))
+      ? (String(req.body?.scope) as 'failed' | 'done' | 'failed_done' | 'all')
+      : 'failed_done'
+    const sterse = await deleteBuildJobsByScope(scope)
+    return reply.send({ ok: true, sterse })
+  })
+
+  // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat.
+  app.post<{ Params: { id: string }; Body: { order?: string } }>('/api/admin/constructor/:id/reia', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    const id = Number(req.params.id)
+    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'id_invalid' })
+    const job = await retryBuildJob(id, req.body?.order)
+    if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
+    return reply.send({ ok: true, job })
   })
 
   // ── The VPS worker's endpoint (x-bridge-secret auth, like ops/pulse) ─────
