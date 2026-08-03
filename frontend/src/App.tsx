@@ -119,7 +119,12 @@ export default function App() {
 
   return (
     <>
-      <DynamicBackground />
+      <DynamicBackground
+        imageUrl="https://i.imgur.com/4z2yV2s.jpeg" // Example image
+        imageWidth={1920} // Example image width
+        imageHeight={1080} // Example image height
+        virtualMonitor={{ x: 450, y: 235, width: 1024, height: 600 }} // Example coordinates
+      />
       {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
       before, a LOGGED-IN user could not reach it even by typing the address:
