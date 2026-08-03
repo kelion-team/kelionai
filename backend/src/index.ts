@@ -30,6 +30,7 @@ import { authLocalRoutes } from './routes/authLocal.js'
 import { contactRoutes } from './routes/contact.js'
 import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
+import { startPlatiEmail } from './services/platiEmail.js'
 import { startAutonomie } from './services/autonomie.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
@@ -362,6 +363,12 @@ try {
   // intervals. Without the Enable Banking keys it does nothing (and says so
   // once, at startup).
   startCitirePlati()
+  // PLĂȚILE PE PRO, DIN EMAIL (Adrian, 3 aug): Revolut Pro n-are webhook și
+  // Open Banking nu face UK, dar Revolut trimite email la fiecare încasare, iar
+  // aplicația citește deja Gmailul owner-ului. Citim „Ai primit …", scoatem
+  // suma + codul și credităm — fără cont nou, fără Stripe. Zero dacă Google nu
+  // e conectat (și spune de ce).
+  startPlatiEmail()
   // KELION GETS TO WORK BY ITSELF: every hour it takes the next undone row
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
   // anyone.
