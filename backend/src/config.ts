@@ -5,7 +5,6 @@ import 'dotenv/config'
 // Adrian, 30 Jul, twice: "all the keys have been written dozens of times."
 // He was right, and the fault was this code. Look at what used to be below:
 //   OPENAI_API_KEY     or  OPENAI_KEY      → two accepted names
-//   OPENROUTER_API_KEY or  OPENROUTER_KEY  → two accepted names
 //   GOOGLE_TTS_API_KEY or  GOOGLE_API_KEY  → two accepted names
 //   GOOGLE_MAPS_KEY                        → ONE only, and without "_API_"
 //   SERPER_API_KEY, GEMINI_API_KEY         → one each
@@ -33,7 +32,6 @@ export const ENV_ALIASES: Record<string, string[]> = {
   googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
   openaiKey: ['OPENAI_API_KEY', 'OPENAI_KEY'],
-  openrouterKey: ['OPENROUTER_API_KEY', 'OPENROUTER_KEY'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
@@ -136,111 +134,6 @@ export const config = {
     // the balance recommended by OpenAI.
     realtimeVadEagerness: (process.env.OPENAI_REALTIME_VAD_EAGERNESS ?? 'auto').trim(),
   },
-  // SELECTABLE BRAIN/CHAT — ONE OpenRouter key for all models
-  // (GPT/Gemini/Claude). The catalog is fetched LIVE from /api/v1/models
-  // (auto-update: new models appear without a deploy). The REAL cost comes
-  // from the response (usage.cost) → precise ledger. Voice = OpenAI direct
-  // (OpenRouter has no realtime).
-  openrouter: {
-    key: env(...ENV_ALIASES.openrouterKey),
-    // Default models per tier (editable from env, no deploy). Chat = fast,
-    // Work = heavy reasoning/tool-use.
-    // FREE BY DEFAULT, REALLY TESTED (Adrian, 25 Jul: "free default with
-    // scaling by difficulty level"; "we keep in the lists only the ones 100%
-    // compatible with voice and brain, vision etc."): tested live on
-    // OpenRouter with a real tool call — `openai/gpt-oss-20b:free` called the
-    // tool correctly BUT leaked dirty internal "thinking" into the content
-    // (`<|end|>` and incoherent fragments), and has NO vision (catalog:
-    // vision=false). `google/gemma-4-26b-a4b-it:free` came out CLEAN (empty
-    // content, correct tool_call) AND has real vision — photos/camera frames
-    // work directly on the free tier, no escalation needed.
-    // (`google/gemma-4-31b-it:free`, tested in parallel, failed on a 429
-    // upstream rate-limit right during the test — avoided as default for
-    // this reason.)
-    // Escalation to the work tier (paid) stays ONLY on heavy/real-action
-    // requests (taskDifficulty / hasActionIntent) — see selectedBrainModel in
-    // chat.ts. Editable from env if you want a different free model.
-    // ── GEMINI PESTE TOT (Adrian, 3 aug, ordin repetat de 7+ ori: „openrouter
-    // si open ai scos din toata aplicatia"): TOATE treptele creierului pornesc
-    // pe Gemini direct (cheia Tier 2 a ownerului). Rotația OpenRouter :free
-    // rămâne DOAR plasă de ultimă urgență dacă Gemini însuși pică — nu mai e
-    // niciodată primul drum. Lacătul (verifica-gemini.mjs) pinuiește toate trei.
-    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
-    // ── FULL FREE BRAIN (Adrian, 27 Jul: "yes" to the $0 plan — the whole
-    // brain on free models; paid remains ONLY the OpenAI voice, which has no
-    // free alternative anywhere, proven across all 345 models in the
-    // catalog). ─────────────────────────────────────────────────────────────
-    // ── THE BRAIN, SET BY ADRIAN ON 31 JUL: "make the brain nemotron-3-ultra"
-    //
-    // It was `nemotron-3-nano-omni-30b-a3b` — 30B total, of which only 3B
-    // ACTIVE. Meaning its work went through a third-tier model, while the
-    // most capable free brain in the world sat unused on the 'top' tier,
-    // reachable only through escalation.
-    //
-    // Nemotron 3 Ultra: 550B parameters (55B active), ONE MILLION context,
-    // tools, reasoning. The only free model in the catalog with a
-    // one-million context — the next one has 262k, four times less.
-    //
-    // It has no vision, and that's why it couldn't be picked until today.
-    // That no longer matters: vision is DELEGATED (bestVisionModel +
-    // chat.ts) — only the turn with a photo goes to a model that sees, the
-    // rest stays here.
-    //
-    // WHAT FREE MEANS HERE, measured, so there are no surprises: $0 per
-    // token, 20 requests per minute, and 1,000 per day — the 1,000 cap
-    // (versus 50) unlocks if $10 has ever been bought on the account, which
-    // is the case. Reverting to something else = one env variable, no
-    // deploy.
-    // ── 31 Jul, evening: "you broke the whole app, nothing works" ──────────
-    //
-    // I had put Ultra 550B on THIS tier too (the base), not just at the top.
-    // Meaning EVERY owner message — even "hello" — went to a 550B model that
-    // thinks internally for whole seconds, on the free tier with 20 requests
-    // per minute. Result: slow at everything, and a tool turn (up to 8 calls)
-    // hit 429 and the chat "didn't work". His order was "make Ultra the
-    // brain" — but a brain for WORK, not a parrot for every word.
-    //
-    // Correct, and that was exactly the point of the tiers: a fast BASE
-    // (Gemma 4 26B, 4B active — answers instantly, sees, knows tools), while
-    // Ultra stays at 'top' and enters through automatic ESCALATION when the
-    // task is heavy (selectedBrainModel in chat.ts). So: "hello" on Gemma,
-    // "find the cause of the bug across the whole repo" on Ultra. Without him
-    // pressing anything.
-    //
-    // ── 2 Aug, THE MEASURED REVERSAL (the 38-second weather turn) ──────────
-    //
-    // The "fast BASE" assumption above was re-measured with the REAL Kelion
-    // payload (16.7k-char system prompt + 63 tools, weather question, direct
-    // API calls from production, no Kelion code in the path):
-    //
-    //   gemma-4-26b-a4b:free   22.2s round 1 (and NO tool call) + 36.9s round 2
-    //                          — live, the same day: 70s then EMPTY → rotation
-    //   nemotron-3-ultra:free   6.0s round 1 (CORRECT tool call) + 3.2s round 2
-    //
-    // Gemma was neither fast nor reliable on the real payload — the exact
-    // profile of the 38s turns. Ultra is 4x faster AND thinks (the model
-    // probe: 4/4 with reasoning tokens). Light turns no longer come here at
-    // all (they start on gemini-direct — see chat.ts), so this tier serves
-    // only HEAVY turns, which is exactly what Ultra was chosen for on Jul 31.
-    // LACĂT ÎN COD (Adrian, 3 aug: „blochează-le cu cod ca să nu se mai schimbe
-    // la orice update"): creierul de LUCRU e Gemini free PERMANENT, în cod — nu în
-    // env (care se poate reseta). Env-ul poate suprascrie punctual, dar dacă lipsește
-    // sau se golește, NU se mai întoarce la plătit din greșeală: default sigur = free.
-    workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
-    // Treapta 'top' (escaladarea grea) — Gemini 2.5 PRO pe aceeași cheie
-    // (dovedit pe cheia ta: constructorul rulează deja pe gemini-2.5-pro).
-    // Nemotron :free (OpenRouter) SCOS din drum — ordinul „Gemini peste tot".
-    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'google-direct/gemini-2.5-pro').trim(),
-    // Images through OpenRouter (same key) — a model that returns an image in
-    // the response (`message.images[].image_url.url`). No separate Gemini
-    // key.
-    imageModel: (process.env.OPENROUTER_IMAGE_MODEL ?? 'google/gemini-3.1-flash-image').trim(),
-    // Web search through OpenRouter: the chat model + the `web` plugin (any
-    // model accepts it). No Serper key. Model editable from env.
-    // FULL FREE (27 Jul): the model summarizing the search is free — the
-    // remaining cost is only the web plugin's (per search), not the model's.
-    searchModel: (process.env.OPENROUTER_SEARCH_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
-  },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────
   // The Revolut Pro account has no Merchant API (that's Business only), so
@@ -256,7 +149,7 @@ export const config = {
     payLink: (process.env.REVOLUT_PAY_LINK ?? '').trim(),
     // The Gmail label where the owner routes Revolut payment emails; the
     // email-reader searches ONLY here (Adrian, 3 aug: „acolo trebuie să ajungă
-    // emailurile și de acolo să se caute").
+    // emailurile și de acolo să se caute”).
     mailLabel: (process.env.REVOLUT_MAIL_LABEL ?? 'Revolut_kelionai_plati').trim(),
   },
   // ── READING TRANSACTIONS FROM THE REVOLUT ACCOUNT (Open Banking) ─────────
