@@ -10,7 +10,6 @@ import {
   getCapabilityGaps,
   setGapResolved,
   deleteCapabilityGap,
-  getAdminAccount,
   blockUser,
   unblockUser,
   grantCredit,
@@ -147,7 +146,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/backups', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ points: await listRecoveryPoints() })
+    // AUDIT ADMIN (3 aug): citirea picată (token lipsă / GitHub ne-ok) NU mai
+    // e servită ca listă goală — 503, iar panoul scrie „nu pot citi
+    // versiunile", distinct de „nicio versiune salvată încă".
+    const points = await listRecoveryPoints()
+    if (!points) return reply.code(503).send({ error: 'recovery_unreadable' })
+    return reply.send({ points })
   })
   app.post<{ Body: { note?: string } }>('/api/admin/backups', async (req, reply) => {
     const user = getSessionUser(req)
@@ -181,7 +185,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/mailbox-live', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ emails: await fetchRecentInbox(40) })
+    // AUDIT ADMIN (3 aug): răspunsul spune și DE CE e goală lista — `ok:false`
+    // + `motiv` deosebește „cutia e goală" de „IMAP a picat" / „MAIL_PASS
+    // lipsă"; UI-ul desenează trei texte diferite, nu unul ambiguu.
+    return reply.send(await fetchRecentInbox(40))
   })
 
   // ȘTERGEREA DIN INBOX (Adrian, 3 aug: „să șterg de aici câte una sau prin
@@ -262,7 +269,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     const [healthRaw, jobs, clientErrors] = await Promise.all([
       systemHealth().catch(() => '{}'),
-      listBuildJobs(12).catch(() => []),
+      // listBuildJobs întoarce null la eșec (auditul admin, 3 aug); aici e
+      // best-effort — auditul restului rămâne chiar dacă coada nu se citește.
+      listBuildJobs(12).then((j) => j ?? []).catch(() => []),
       listClientErrorGroups(48, 30).catch(() => []),
     ])
     let health: unknown = {}
@@ -310,23 +319,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: await deleteCapabilityGap(id) })
   })
 
-  // The owner's REAL-money view: the measured provider spend (USD, from the
-  // cost journal) and the real profit from the payments ledger (admin only).
-  app.get('/api/admin/pool', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getAdminAccount())
-  })
+  // (Ruta GET /api/admin/pool a fost ȘTEARSĂ DE-ADEVĂRATELEA — auditul admin,
+  // 3 aug: trăia aici deși comentariul de mai jos, „was DELETED (Adrian, 30
+  // Jul)", jura contrariul, n-o chema nimeni din frontend, iar getAdminAccount
+  // — sursa ei — inventa {spent:0, profit:0} la orice eșec de DB. Funcția a
+  // fost ștearsă din db.ts odată cu ruta.)
 
   // The brain is 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). The
   // bar polls this route: the Gemini live state + real month spend, the Serper
-  // search credit, the VPS resources and the admin's internal fund. STRICTLY
-  // admin (users don't see it).
+  // search credit and the VPS resources. STRICTLY admin (users don't see it).
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
-      getAdminAccount(),
+    const [vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
       resurseGazda(),
       // THE SERPER PILL: the REAL remaining search credit read from Serper's
       // /account endpoint. Cached 5 min in the service.
@@ -342,7 +347,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // ATARE, cu data, fiindcă Google n-o dă automat. A ta, nu inventată de mine.
       getGeminiMonthUsd(),
       geminiLive(),
-      loadKv('gemini:credit'),
+      // GARDAT (auditul admin, 3 aug): loadKv era singura citire NEgardată din
+      // acest Promise.all — un sughiț de DB pe KV respingea tot lanțul, ruta
+      // dădea 500 și TOATE pastilele se stingeau, deși Serper/VPS/Gemini se
+      // măsuraseră cu succes. Eșecul se declară per câmp, nu omoară răspunsul.
+      loadKv('gemini:credit').catch(() => null),
     ])
     // Creditul „spus de owner" — citit onest din kv. Dacă lipsește sau e stricat,
     // rămâne undefined (pastila arată ✓/⚠, nu o cifră falsă).
@@ -363,9 +372,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       active: 'gemini',
       // ── THE VPS, PERMANENTLY IN THE BAR (Adrian, 31 Jul: "permanently show
       // VPS on the interface in the top bar") ───────────────────────────────
-      // It rides on this route, not a new one: the bar polls it every 15s
-      // anyway, and reading /proc costs microseconds. An extra poller would
-      // have been cost with no gain.
+      // It rides on this route, not a new one: the bar polls it every 30s
+      // anyway (usePolledJson, intervalul implicit — cifra corectată la audit,
+      // 3 aug: comentariul vechi jura „15s"), and reading /proc costs
+      // microseconds. An extra poller would have been cost with no gain.
       // `null` when it can't be measured — the bar writes "⚠ VPS", NOT zeros.
       // A "0.0 GB / 0%" would look identical to a dead server and would be
       // exactly the error he keeps complaining about: a failed reading
@@ -397,7 +407,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         creditGbp: geminiCreditGbp,
         creditAt: geminiCreditAt,
       },
-      pool,
+      // (Câmpul `pool` a fost SCOS — auditul admin, 3 aug: nicio pastilă nu-l
+      // desena, tipul din frontend mințea (loaded/remaining nu mai existau),
+      // iar sursa lui, getAdminAccount, rula două SUM-uri la fiecare poll
+      // pentru o valoare nefolosită și întorcea zerouri fabricate la eșec.)
     })
   })
 
@@ -432,18 +445,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [account, costs] = await Promise.all([
-      getAdminAccount(),
-      getCostSummary(),
-    ])
+    const costs = await getCostSummary()
     return reply.send({
-      // USD, unconverted (getAdminAccount no longer multiplies by a hand rate).
-      spent: account.spent,
-      // The cost journal is kept in USD end to end (cost_events.cost_usd):
-      // spentUsd/today/byKind are the SAME currency as `spent` — the Money tab
-      // never mixes "total £" with "azi $".
+      // (Câmpurile `spent` și `profit` au fost SCOASE — auditul admin, 3 aug:
+      // tabul Bani nu le desena (citește spentUsd/masurat/estimat/today), iar
+      // sursa lor, getAdminAccount, dubla SELECT-ul din getCostSummary și
+      // inventa zerouri la eșec. Funcția a fost ștearsă din db.ts.)
+      // The cost journal is kept in USD end to end (cost_events.cost_usd) —
+      // the Money tab never mixes "total £" with "azi $".
       spentUsd: costs.total,
-      profit: account.profit,
       currency: config.billing.currency,
       byKind: costs.byKind,
       // Consumed TODAY (USD, real) — for the "Consumed today" card in the
@@ -475,7 +485,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/activity', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getUserActivity())
+    // AUDIT ADMIN (3 aug): DB picat NU mai răspunde 200 cu liste goale („nu
+    // s-a strâns activitate" nemăsurat) — 500, iar panoul scrie „nu pot citi".
+    const activity = await getUserActivity()
+    if (!activity) return reply.code(500).send({ error: 'db_unreadable' })
+    return reply.send(activity)
   })
 
   // Free-trial visitor analytics (admin only): where trials come from — country,
@@ -483,7 +497,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/demos', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getDemoStats())
+    // AUDIT ADMIN (3 aug): zerourile fabricate de vechiul `empty` nu mai ies
+    // pe ușă — o citire picată e 500, nu „Vizite 0/0".
+    const demos = await getDemoStats()
+    if (!demos) return reply.code(500).send({ error: 'db_unreadable' })
+    return reply.send(demos)
   })
 
   // Which brain models actually serve right now (admin only): a real 1-token
@@ -693,7 +711,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({
       rezumat: await rezumatPlati(),
-      neatribuite: await listeazaPlatiNeatribuite().catch(() => []),
+      // AUDIT ADMIN (3 aug): mascarea `.catch(() => [])` a fost scoasă — o
+      // plasă necitită ajungea în panou ca „Nimic în plasă." Acum null trece
+      // până în UI, care îl scrie ca citire eșuată (ca la `rezumat`).
+      neatribuite: await listeazaPlatiNeatribuite(),
     })
   })
 
@@ -769,7 +790,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/leads', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ leads: await listLeads() })
+    // AUDIT ADMIN (3 aug): eșec de DB → 500, nu „Niciun contact încă".
+    const leads = await listLeads()
+    if (!leads) return reply.code(500).send({ error: 'db_unreadable' })
+    return reply.send({ leads })
   })
 
   // The messages from the "Contact" form — ALWAYS saved in the DB, so the
@@ -809,7 +833,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/admin/visitor-chats', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send({ convos: await listVisitorConvos() })
+    // AUDIT ADMIN (3 aug): DB picat → 500, nu „Nicio conversație încă" — pot
+    // exista vizitatori care scriu chiar atunci.
+    const convos = await listVisitorConvos()
+    if (!convos) return reply.code(500).send({ error: 'db_unreadable' })
+    return reply.send({ convos })
   })
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
@@ -832,7 +860,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       const text = String(req.body?.text ?? '')
       if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
       const id = await addVisitorMessage(conv, 'owner', text)
-      return reply.send({ ok: id > 0, id })
+      // AUDIT ADMIN (3 aug): INSERT picat = 502, nu 200 cu {ok:false} —
+      // un răspuns „salvat" pe care vizitatorul nu-l va vedea niciodată.
+      if (!(id > 0)) return reply.code(502).send({ ok: false, error: 'save_failed', id: 0 })
+      return reply.send({ ok: true, id })
     },
   )
 }

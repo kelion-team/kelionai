@@ -71,14 +71,17 @@ export function previewGesture(clip: string): void {
 // The gesture state (the disabled list) — read by the avatar so it doesn't
 // play what's removed. Cached on window so AvatarModel sees it without
 // depending on the admin.
-export async function fetchDisabledGestures(): Promise<string[]> {
+// null = citirea a EȘUAT (auditul admin, 3 aug): vechiul [] arăta toate cele
+// 39 de gesturi ca „active", iar primul toggle salva peste lista reală de pe
+// server, ȘTERGÂND dezactivările anterioare — o scriere peste o bază necitită.
+export async function fetchDisabledGestures(): Promise<string[] | null> {
   try {
     const r = await fetch('/api/gestures/state', { credentials: 'include' })
-    if (!r.ok) return []
+    if (!r.ok) return null
     const j = (await r.json()) as { disabled?: string[] }
     return Array.isArray(j.disabled) ? j.disabled : []
   } catch {
-    return []
+    return null
   }
 }
 

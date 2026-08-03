@@ -244,8 +244,11 @@ export async function execUserScopedTool(
     case 'read_inbox': {
       if (!isAdmin) return denied
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 40)
-      const items = await fetchRecentInbox(limit)
-      return JSON.stringify({ count: items.length, items })
+      // fetchRecentInbox spune acum și DE CE nu a citit (auditul admin, 3
+      // aug): ok:false + motiv — unealta relatează eșecul, nu o cutie goală.
+      const r = await fetchRecentInbox(limit)
+      if (!r.ok) return JSON.stringify({ error: 'inbox_unreadable', motiv: r.motiv })
+      return JSON.stringify({ count: r.emails.length, items: r.emails })
     }
     case 'server_logs': {
       if (!isAdmin) return denied

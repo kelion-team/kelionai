@@ -865,8 +865,11 @@ export interface VisitorConvo {
   visitor_msgs: number
 }
 
-export async function listVisitorConvos(): Promise<VisitorConvo[]> {
-  if (!dbEnabled()) return []
+// AUDIT ADMIN (3 aug, Chat live): DB picat întorcea [] cu 200 → panoul afișa
+// „Nicio conversație încă" deși vizitatorii puteau scrie chiar atunci. null la
+// eșec — ruta răspunde 500, iar pollul de 5s al panoului reîncearcă singur.
+export async function listVisitorConvos(): Promise<VisitorConvo[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<VisitorConvo>(
       `SELECT conv_id,
@@ -890,7 +893,7 @@ export async function listVisitorConvos(): Promise<VisitorConvo[]> {
     )
     return r.rows
   } catch {
-    return []
+    return null
   }
 }
 
@@ -920,15 +923,17 @@ export async function addLead(email: string, note: string, fp: string): Promise<
   }
 }
 
-export async function listLeads(): Promise<Lead[]> {
-  if (!dbEnabled()) return []
+// AUDIT ADMIN (3 aug, tab Vizitatori): eșecul citirii colapsa în [] → panoul
+// afișa „Niciun contact încă" fără nicio măsurătoare. null la eșec → 500.
+export async function listLeads(): Promise<Lead[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<Lead>(
       'SELECT id, email, note, contacted, created_at::text FROM leads ORDER BY created_at DESC LIMIT 200',
     )
     return r.rows
   } catch {
-    return []
+    return null
   }
 }
 
@@ -956,6 +961,9 @@ export interface ContactMessage {
   created_at: string
 }
 
+// Întoarce id-ul rândului (sau null la eșec) — ca `emailed` să poată fi
+// actualizat DUPĂ ce trimiterea chiar s-a măsurat (auditul admin, 3 aug:
+// „✉️ redirecționat" era scris ÎNAINTE de orice trimitere).
 export async function saveContactMessage(m: {
   name: string
   email: string
@@ -964,12 +972,12 @@ export async function saveContactMessage(m: {
   department: string
   lang: string
   emailed: boolean
-}): Promise<boolean> {
-  if (!dbEnabled() || !m.email || !m.message) return false
+}): Promise<number | null> {
+  if (!dbEnabled() || !m.email || !m.message) return null
   try {
-    await getPool().query(
+    const r = await getPool().query<{ id: number }>(
       `INSERT INTO contact_messages (name, email, subject, message, department, lang, emailed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [
         m.name.slice(0, 120),
         m.email.slice(0, 200),
@@ -980,9 +988,20 @@ export async function saveContactMessage(m: {
         m.emailed,
       ],
     )
-    return true
+    return Number(r.rows[0]?.id ?? 0) || null
   } catch {
-    return false
+    return null
+  }
+}
+
+/** Marchează un mesaj de contact ca REDIRECȚIONAT pe email — se cheamă doar
+ *  după ce sendMail a întors true (măsurat, nu presupus). */
+export async function marcheazaContactEmailat(id: number): Promise<void> {
+  if (!dbEnabled() || !(id > 0)) return
+  try {
+    await getPool().query('UPDATE contact_messages SET emailed = true WHERE id = $1', [id])
+  } catch {
+    /* non-fatal — rândul rămâne onest pe „doar salvat" */
   }
 }
 
@@ -1238,19 +1257,28 @@ export interface DownloadRow {
   created_at: string
 }
 
+// AUDIT ADMIN (3 aug, tab Magazine): fără DB, {counts:[]} arăta în panou ca
+// „Nicio descărcare înregistrată încă" — un zero fără măsurătoare. `dbOk`
+// spune dacă cifrele CHIAR vin dintr-o citire; false → panoul scrie „nu pot
+// citi jurnalul", nu zeroul fals.
 export async function getDownloadStats(): Promise<{
+  dbOk: boolean
   counts: { file: string; total: number }[]
   recent: DownloadRow[]
 }> {
-  if (!dbEnabled()) return { counts: [], recent: [] }
-  const counts = await getPool().query<{ file: string; total: number }>(
-    'SELECT file, COUNT(*)::int AS total FROM app_downloads GROUP BY file',
-  )
-  const recent = await getPool().query<DownloadRow>(
-    `SELECT file, user_email, ip, country, created_at
-     FROM app_downloads ORDER BY created_at DESC LIMIT 100`,
-  )
-  return { counts: counts.rows, recent: recent.rows }
+  if (!dbEnabled()) return { dbOk: false, counts: [], recent: [] }
+  try {
+    const counts = await getPool().query<{ file: string; total: number }>(
+      'SELECT file, COUNT(*)::int AS total FROM app_downloads GROUP BY file',
+    )
+    const recent = await getPool().query<DownloadRow>(
+      `SELECT file, user_email, ip, country, created_at
+       FROM app_downloads ORDER BY created_at DESC LIMIT 100`,
+    )
+    return { dbOk: true, counts: counts.rows, recent: recent.rows }
+  } catch {
+    return { dbOk: false, counts: [], recent: [] }
+  }
 }
 
 // ── Shared memory: the common notebook both sides read + write ──
@@ -1570,11 +1598,15 @@ export interface UserSessionRow {
 // The owner's per-USER activity: WHO signed in, from what IP/place/device,
 // how long they stayed (presence pings), how active they were, plus their
 // latest sessions one by one. Admin only.
+// AUDIT ADMIN (3 aug, tab Utilizatori): o eroare de DB întorcea {users:[],
+// sessions:[]} cu 200 — panoul afișa „încă nu s-a strâns activitate", o
+// afirmație nemăsurată (forma „Cardul: necreat"). Acum: null la eșec → ruta
+// răspunde 500, panoul spune „nu pot citi", nu „nu există activitate".
 export async function getUserActivity(): Promise<{
   users: UserActivityRow[]
   sessions: UserSessionRow[]
-}> {
-  if (!dbEnabled()) return { users: [], sessions: [] }
+} | null> {
+  if (!dbEnabled()) return null
   try {
     const pool = getPool()
     const users = (
@@ -1614,7 +1646,7 @@ export async function getUserActivity(): Promise<{
     ).rows
     return { users, sessions }
   } catch {
-    return { users: [], sessions: [] }
+    return null
   }
 }
 
@@ -1625,11 +1657,12 @@ export async function getUserActivity(): Promise<{
 // The "demo probes" half is DEAD (nothing writes demo_uses anymore), so we no
 // longer query that table; the demo fields stay 0/empty so the SHAPE of the
 // DemoStats type doesn't change (the frontend doesn't break).
-export async function getDemoStats(): Promise<DemoStats> {
-  const empty: DemoStats = {
-    total: 0, today: 0, bots: 0, visitsTotal: 0, visitsToday: 0, byCountry: [], recent: [],
-  }
-  if (!dbEnabled()) return empty
+// AUDIT ADMIN (3 aug, tab Vizitatori): o eroare de DB întorcea `empty`
+// (visitsTotal:0, bots:0) cu 200 — cardurile arătau „Vizite 0/0" ca măsurătoare,
+// fix tiparul „£0.00" din 30 iul. Acum: null la eșec (ruta răspunde 500, panoul
+// scrie „nu pot citi"), zerourile rămân DOAR pentru o citire reușită.
+export async function getDemoStats(): Promise<DemoStats | null> {
+  if (!dbEnabled()) return null
   try {
     const pool = getPool()
     const vCounts = (
@@ -1714,7 +1747,7 @@ export async function getDemoStats(): Promise<DemoStats> {
       recent,
     }
   } catch {
-    return empty
+    return null
   }
 }
 
@@ -1740,32 +1773,13 @@ export async function getDemoStats(): Promise<DemoStats> {
 // LIVE from the Revolut account (through Enable Banking). (Soldul OpenRouter a
 // dispărut odată cu furnizorul — extirpat, 3 aug; starea creierului Gemini se
 // vede prin pingul live geminiLive().) The source of truth is with the bank.
-export async function getAdminAccount(): Promise<{ spent: number; profit: number }> {
-  const empty = { spent: 0, profit: 0 }
-  if (!dbEnabled()) return empty
-  try {
-    const pool = getPool()
-    // USD END TO END (audit, Aug 3): this sum used to be multiplied by the
-    // hand-written USD_TO_CURRENCY rate (0.8) before display — a converted
-    // figure is not a measured one (the same lie punga.ts killed: "OpenRouter
-    // $9.99" vs "Punga £7.99" for the SAME money). The journal is in USD
-    // (cost_events.cost_usd), so `spent` is USD, unconverted — identical to
-    // the `spentUsd` the Money tab already reads.
-    const spent = Number(
-      (await pool.query<{ t: string | null }>('SELECT COALESCE(SUM(cost_usd),0) AS t FROM cost_events')).rows[0]?.t ?? 0,
-    )
-    const profit = Number(
-      (
-        await pool.query<{ t: string | null }>(
-          "SELECT COALESCE(SUM(amount),0) AS t FROM billing_events WHERE kind = 'profit'",
-        )
-      ).rows[0]?.t ?? 0,
-    )
-    return { spent, profit }
-  } catch {
-    return empty
-  }
-}
+//
+// AICI A STAT `getAdminAccount` (spent/profit). ȘTEARSĂ (auditul admin, 3 aug):
+// `spent` era EXACT suma pe care tabul Bani o citește deja din getCostSummary
+// (același SELECT SUM(cost_usd)), `profit` nu era desenat nicăieri, iar la
+// eșec funcția inventa {spent:0, profit:0} — fix tiparul „£0.00" din 30 iul.
+// Consumatorii ei (ruta /api/admin/pool, câmpul `pool` din brain-credit și
+// spent/profit din finance) au fost scoși odată cu ea.
 
 // Record the real provider cost of one AI call (admin-only accounting).
 export async function recordCost(email: string, kind: string, costUsd: number): Promise<void> {
@@ -3331,13 +3345,17 @@ export async function reportBuildJob(
   )
 }
 
-export async function listBuildJobs(limit = 40): Promise<BuildJob[]> {
-  if (!dbEnabled()) return []
+// AUDIT ADMIN (3 aug, Constructor): eroarea de DB colapsa în [] cu 200 →
+// coada apărea „goală" deși nu fusese citită. null la eșec; consumatorii
+// best-effort (audit, health, dovezi) cad explicit pe `?? []`, iar ruta
+// panoului răspunde 500 ca UI-ul să scrie „nu pot citi coada".
+export async function listBuildJobs(limit = 40): Promise<BuildJob[] | null> {
+  if (!dbEnabled()) return null
   try {
     const r = await getPool().query<BuildJobDbRow>('SELECT * FROM build_jobs ORDER BY created_at DESC LIMIT $1', [limit])
     return r.rows.map(rowToBuildJob)
   } catch {
-    return []
+    return null
   }
 }
 
@@ -3401,10 +3419,14 @@ export async function deleteBuildJob(id: number): Promise<boolean> {
  *  terminate), 'failed_done' (eșuate + terminate — cele „istorice", NU cele în
  *  curs), 'all' (chiar tot). Nu atinge NICIODATĂ ordinele 'queued'/'running'
  *  decât la 'all' — un ordin viu nu se șterge din greșeală. Întoarce câte a șters. */
+// AUDIT ADMIN (3 aug): la eroare de DB întorcea 0 → panoul afișa „Curățat: 0
+// ordine șterse." ca rezultat măsurat, deși ștergerea nu rulase deloc (zeroul
+// fals interzis de regula #1). null = eșec (ruta răspunde 500); 0 rămâne
+// posibil DOAR ca număr real de rânduri șterse.
 export async function deleteBuildJobsByScope(
   scope: 'failed' | 'done' | 'failed_done' | 'all',
-): Promise<number> {
-  if (!dbEnabled()) return 0
+): Promise<number | null> {
+  if (!dbEnabled()) return null
   const stariCurente: Record<typeof scope, string[] | null> = {
     failed: ['failed'],
     done: ['done'],
@@ -3419,7 +3441,7 @@ export async function deleteBuildJobsByScope(
         : await getPool().query('DELETE FROM build_jobs WHERE status = ANY($1)', [stari])
     return r.rowCount ?? 0
   } catch {
-    return 0
+    return null
   }
 }
 
@@ -3734,9 +3756,14 @@ export async function refCreditatDeja(bankRef: string): Promise<boolean> {
   return (r?.rowCount ?? 0) > 0
 }
 
-/** The open rows of the net, newest first — what the panel shows. */
-export async function listeazaPlatiNeatribuite(limit = 50): Promise<PlataNeatribuita[]> {
-  if (!dbEnabled()) return []
+/** The open rows of the net, newest first — what the panel shows.
+ *
+ *  AUDIT ADMIN (3 aug, plasa): o citire EȘUATĂ colapsa în [] și panoul afișa
+ *  senin „Nimic în plasă." — un gol fals, exact ce interzice regula #1 (aici
+ *  stau banii pe care nu i-a potrivit nimeni). Acum null = citirea a picat
+ *  (UI-ul o spune ca eșec), [] = plasa e CHIAR goală. */
+export async function listeazaPlatiNeatribuite(limit = 50): Promise<PlataNeatribuita[] | null> {
+  if (!dbEnabled()) return null
   const r = await getPool()
     .query(
       `SELECT id, bank_ref, referinta, amount, currency, status, seen_at FROM plati_neatribuite
@@ -3744,7 +3771,8 @@ export async function listeazaPlatiNeatribuite(limit = 50): Promise<PlataNeatrib
       [limit],
     )
     .catch(() => null)
-  return (r?.rows ?? []).map((row) => {
+  if (!r) return null
+  return r.rows.map((row) => {
     const x = row as {
       id?: number
       bank_ref?: string
