@@ -1952,7 +1952,35 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const dynTools = (await dynamicToolDefs().catch(() => [])) as unknown as Tool[]
     const dynNames = await dynamicToolNames().catch(() => new Set<string>())
     const rawTools: Tool[] = isAdmin
-      ? [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, COST_TOOL, PROMO_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, LIST_UPDATES_TOOL, RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL, BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      ? // ORDINEA CONTEAZĂ la plafonul furnizorului de 64 (Adrian, 3 aug: „nu e
+        // conștient de tot inventarul lui"). Cu 80 de unelte, 16 se taie din COADĂ.
+        // Deci punem PRIMELE uneltele fără de care zice „nu pot" (memorie, mâini,
+        // sursă, dezvoltator, DB, sănătate) și lăsăm la coadă pe cele ocazionale
+        // (rol, cost, promo, secrete, cerințe, card, voci-invitați) — ele se taie
+        // primele, nu uneltele de aur. Vezi plafonul de mai jos.
+        [
+          ...googleTools,
+          ...escalationTools,
+          // Bază + vedere
+          SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
+          ...(gestureTool ? [gestureTool] : []),
+          // Memorie + mâini (browser) — NU se mai taie
+          ...NOTE_TOOLS,
+          ...BROWSER_TOOLS,
+          // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
+          LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
+          REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
+          BUILD_SOFTWARE_TOOL, PANOU_COD_TOOL, CONSTRUCTOR_STATUS_TOOL,
+          DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, SERVER_LOGS_TOOL,
+          RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
+          LIST_UPDATES_TOOL, READ_INBOX_TOOL, PROPOSE_TOOL,
+          // ── COADĂ: se taie prima la plafon (ocazionale) ──
+          SET_ROLE_TOOL, LOG_GAP_TOOL, COST_TOOL, PROMO_TOOL,
+          SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL,
+          CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL,
+          CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
+          ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
+        ]
       : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
@@ -1971,8 +1999,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       baseTools.push(t)
     }
     const tools: Tool[] = baseTools.slice(0, MAX_PROVIDER_TOOLS)
-    if (baseTools.length > MAX_PROVIDER_TOOLS)
-      console.error(`[chat] lista de unelte (${baseTools.length}) a depășit plafonul furnizorului — trimise primele ${MAX_PROVIDER_TOOLS}`)
+    if (baseTools.length > MAX_PROVIDER_TOOLS) {
+      // Numim EXACT ce s-a tăiat — după reordonare astea trebuie să fie doar
+      // ocazionalele din coadă (rol/cost/promo/secrete/cerințe/card/invitați),
+      // niciodată uneltele de aur. Dacă apar aici repo/db/health, ordinea s-a stricat.
+      const taiate = baseTools.slice(MAX_PROVIDER_TOOLS).map((t) => t.name).join(', ')
+      console.error(`[chat] ${baseTools.length} unelte > plafon ${MAX_PROVIDER_TOOLS} — tăiate din coadă: ${taiate}`)
+    }
     for (const t of dynTools) {
       if (tools.length >= MAX_PROVIDER_TOOLS) break
       if (!seenNames.has(t.name)) {
