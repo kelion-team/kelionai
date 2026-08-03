@@ -32,6 +32,7 @@ import { startMailbox } from './services/mailbox.js'
 import { startCitirePlati } from './services/openBanking.js'
 import { startPlatiEmail } from './services/platiEmail.js'
 import { startAutonomie } from './services/autonomie.js'
+import { startAutoInvatare } from './services/autoInvatare.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { checkOpenRouterBalance } from './services/openrouterAlert.js'
 import { runSelfHeal } from './services/selfHeal.js'
@@ -380,6 +381,9 @@ try {
   // from RAMAS-DE-FACUT.md and sends it to the builder. Without waiting for
   // anyone.
   startAutonomie()
+  // AUTO-ÎNVĂȚARE DIN TIMPI (Adrian, 3 aug): în spate, invizibil, citește
+  // registrul task_timings și învață tiparele (lent/eșec) ca să nu le repete.
+  startAutoInvatare()
   // OPENROUTER BALANCE ALERT (Adrian, 24 Jul: "notify the admin when money
   // needs to be deposited"): the brain is fed CENTRALLY from Kelion's pocket;
   // when the real balance drops below the threshold, we email the admin (once

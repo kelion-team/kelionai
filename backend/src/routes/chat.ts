@@ -15,6 +15,7 @@ import {
 import {
   saveMessage,
   recordCost,
+  recordTiming,
   getBalance,
   debitWallet,
   getSpeechLang,
@@ -2511,7 +2512,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
       void recordCost(user.email, 'chat', r.costUsd)
-      console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${Date.now() - tCreier}ms`)
+      const totalMs = Date.now() - tCreier
+      console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
+      // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.
+      void recordTiming({ email: user.email, kind: 'chat', model: orchestratorModel, ms: totalMs, ok: true, rounds: r.rounds })
     } catch (e) {
       // The brain failed — honest, never silent. No Kimi/GLM safety net
       // (removed).
@@ -2535,6 +2539,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       reply.raw.end()
       void saveMessage(user.email, 'assistant', spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
+      // EVIDENȚA TIMPILOR — și eșecul se măsoară (bucla din spate învață din el).
+      // `orchestratorModel` e local blocului try; aici, pe eșec, notăm doar durata.
+      void recordTiming({ email: user.email, kind: 'chat', ms: Date.now() - tCreier, ok: false })
       // MONEY IS NOT LOST ON ERROR (Jul 27 audit): the tools already run in this
       // turn (searches, images, ask_brain) COST money — the return from here
       // used to skip the debit and the user consumed for free, repeatably.

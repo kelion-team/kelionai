@@ -150,6 +150,8 @@ Server: stall punte public 12s (era 45s); voce din prima frază; recall DB în p
 `commands.ts` (interpretor server, instant) → creierul admin decide reparația → constructor (`kelion-builder-server.mjs`) execută → `orders.ts` ține registrul (conflict vs eroare, duplicate) → `supervisor.ts` verifică progresul (1 re-asignare, apoi giveup) → `feedback.ts` re-cheamă creierul admin cu verdictul → `autonomy.ts` plafonează totul (20 reparații/24h, stop la eroare repetată de 2×).
 ### 4.7 Browser live + documente
 `services/browser.ts` — Chromium real navigabil de Kelion (o sesiune per user, gard SSRF, capturi `/api/browser/shot/:id`). `ingest.ts` + `markitdown.ts` — orice document (PDF/Word/Excel) → Markdown, tăiat la 120.000 car.
+### 4.8 Evidența timpilor + auto-învățare (Adrian, 3 aug)
+**Vizibil:** clepsidra + cronometru (`WorkClock.tsx`) — vizibil DOAR cât `busy` (serverul chiar lucrează), colț stânga; perechea verde `latency-chip` = timpul măsurat la final. **Măsurabil:** tabelul `task_timings` (db.ts) + `recordTiming` (o linie per tură: kind, model, ms, ok, runde), agățat la finalul creierului în `chat.ts` (și pe reușită, și pe eșec). **Auto-învățare, în spate, invizibil:** `services/autoInvatare.ts` (pornită în `index.ts`, la 30 min) citește registrul, agregă pe tip (medie/p90/rată eșec) și scrie lecțiile în `kv_state['invatare:performanta']` + memoria cu cheie a creierului `invatare:timpi` — ca să nu repete greșeli. Bătut în cuie: `autoInvatare.test.ts`.
 
 ## 5. BANII (nu confunda portofelele!)
 | Portofel | Cine consumă | Unde se vede/încarcă |
