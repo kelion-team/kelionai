@@ -1,14 +1,27 @@
 import { config } from '../config.js'
 import { openrouterChat } from './openrouter.js'
-import type { AnthropicTool, OrMessage } from './openrouter.js'
+import type { AnthropicTool, OrMessage, BrainCallOpts, OrChatResult } from './openrouter.js'
+import { geminiDirectChat, GEMINI_DIRECT_PREFIX } from './geminiDirect.js'
 import type { Message } from './brain-types.js'
 
-// ── THE BRAIN — 100% OpenRouter ─────────────────────────────────────────────
-// Kimi and GLM REMOVED FOR GOOD (Adrian: "0 kimi, 0 glm, never"). The whole
-// brain goes through a single OpenRouter key (GPT/Gemini/Claude). The
-// selectable chat model is managed in chat.ts (orchestrator); only the
-// non-streaming utilities used outside the chat remain here: memory (agents),
-// short summaries (mailbox/admin) and the key check.
+// ── THE BRAIN — Gemini direct primar (3 aug) ────────────────────────────────
+// Auditul multi-agent din 3 aug a prins DEFECTUL STRUCTURAL: fișierul ăsta
+// n-avea NICIO rută spre Gemini — expertul (memoria după fiecare tură,
+// secretarul de mailuri, triajul cererilor) mergea 100% pe OpenRouter, deși
+// scara începe acum cu modele `google-direct/…` (config). Trimise prin
+// clientul OpenRouter, alea picau mereu → totul cădea pe rezervele `:free`
+// (429 toată ziua). Rutarea de mai jos e aceeași ca în orchestrator: prefixul
+// `google-direct/` → API-ul Google direct; restul → OpenRouter.
+function brainChat(
+  model: string,
+  msgs: OrMessage[],
+  tools: AnthropicTool[],
+  opts: BrainCallOpts,
+): Promise<OrChatResult> {
+  return model.startsWith(GEMINI_DIRECT_PREFIX)
+    ? geminiDirectChat(model.slice(GEMINI_DIRECT_PREFIX.length), msgs, tools, opts)
+    : openrouterChat(model, msgs, tools, opts)
+}
 
 
 // ── THE RELIABLE EXPERT (Stage 1, owner order Jul 29) ───────────────────────
@@ -34,10 +47,11 @@ export function isTransientBrainError(err: unknown): boolean {
 // The expert's model ladder: work → top → free reserves. Editable from env
 // (OPENROUTER_EXPERT_FALLBACKS) without a deploy. Deduplicated, order kept.
 export function expertModelLadder(): string[] {
-  const extra = (
-    process.env.OPENROUTER_EXPERT_FALLBACKS ??
-    'nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,cohere/north-mini-code:free'
-  )
+  // REZERVELE :free OPENROUTER SCOASE din implicit (3 aug, „Gemini peste tot"):
+  // scara = treptele Gemini din config (flash → pro). Dacă amândouă pică,
+  // expertul tace CINSTIT — nu mai colindă furnizorul scos. Env-ul poate
+  // adăuga rezerve doar printr-o alegere conștientă a ownerului.
+  const extra = (process.env.OPENROUTER_EXPERT_FALLBACKS ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -101,7 +115,7 @@ export const brain = {
       const ladder = params.model
         ? [params.model, ...expertModelLadder().filter((m) => m !== params.model)]
         : expertModelLadder()
-      const r = await runBrainLadder(ladder, (m) => openrouterChat(m, msgs, [], { maxTokens: params.max_tokens }))
+      const r = await runBrainLadder(ladder, (m) => brainChat(m, msgs, [], { maxTokens: params.max_tokens }))
       return {
         id: '',
         role: 'assistant',
@@ -132,7 +146,7 @@ export async function describeScene(
   onCost?: (usd: number) => void,
 ): Promise<string> {
   try {
-    const r = await openrouterChat(
+    const r = await brainChat(
       config.openrouter.chatDefault,
       [
         {
@@ -173,7 +187,7 @@ export async function brainComplete(
     // The model LADDER (Jul 29): on 429 on the current rung, it moves to the
     // next one instead of going silent on the first attempt.
     const r = await runBrainLadder(expertModelLadder(), (m) =>
-      openrouterChat(m, [{ role: 'user', content: prompt }], [], { maxTokens, reasoning: 'medium' }),
+      brainChat(m, [{ role: 'user', content: prompt }], [], { maxTokens, reasoning: 'medium' }),
     )
     if (onCost && r.costUsd > 0) onCost(r.costUsd)
     return r.text.trim()
@@ -210,7 +224,7 @@ export async function brainCompleteWithTools(
   try {
     for (let round = 0; round < maxRounds; round++) {
       const r = await runBrainLadder(ladder, (m) =>
-        openrouterChat(m, messages, tools, { maxTokens: opts.maxTokens ?? 2000, reasoning: 'medium' }),
+        brainChat(m, messages, tools, { maxTokens: opts.maxTokens ?? 2000, reasoning: 'medium' }),
       )
       if (opts.onCost && r.costUsd > 0) opts.onCost(r.costUsd)
       if (!r.toolCalls.length) return r.text.trim()
@@ -228,7 +242,7 @@ export async function brainCompleteWithTools(
     }
     // round ceiling reached — we ask for the final answer without more tools
     const last = await runBrainLadder(ladder, (m) =>
-      openrouterChat(m, messages, [], { maxTokens: opts.maxTokens ?? 2000 }),
+      brainChat(m, messages, [], { maxTokens: opts.maxTokens ?? 2000 }),
     )
     if (opts.onCost && last.costUsd > 0) opts.onCost(last.costUsd)
     return last.text.trim()
@@ -246,7 +260,7 @@ export async function verifyModels(): Promise<Record<string, string>> {
       // 16 tokens, 11 went to "reasoning_tokens" and the content came out empty
       // (finish_reason:"length"), so the ping falsely reported "fail" on a live
       // model.
-      const r = await openrouterChat(model, [{ role: 'user', content: 'Reply with the single word: ok' }], [], {
+      const r = await brainChat(model, [{ role: 'user', content: 'Reply with the single word: ok' }], [], {
         maxTokens: 64,
       })
       return r.text ? `ok (served by ${r.model})` : 'fail'
@@ -271,7 +285,7 @@ export async function verifyKeys(): Promise<{
   }
   let primary = 'fail'
   try {
-    const r = await openrouterChat(config.openrouter.chatDefault, [{ role: 'user', content: 'ping' }], [], {
+    const r = await brainChat(config.openrouter.chatDefault, [{ role: 'user', content: 'ping' }], [], {
       maxTokens: 1,
     })
     primary = r.model ? 'ok' : 'fail'

@@ -2520,25 +2520,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // publici pe chit-chat.
       if (!isAdminUser && !heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
         const geminiLightRace = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-        // REZERVA RAPIDĂ (Adrian, 3 aug: „fă cota de rezervă nemotron rapid"):
-        // când Gemini e JOS (cotă gratuită epuizată — 429 „exceeded your quota"),
-        // cursa să prindă ÎNTÂI nemotron (măsurat 6s), NU gemma (măsurat 22-37s pe
-        // payload real → exact cei 27s ai tăi). Pus imediat după Gemini, înaintea
-        // restului pool-ului free; dedus cu Set ca să nu curgă de două ori.
-        const rezervaRapida = config.openrouter.topDefault
-        const candidatiFree = (await listaCandidati(triedModels)).filter(
-          (id) => id.endsWith(':free') && eSanatos(id),
-        )
-        const concurenti = [
-          ...new Set([
-            // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step): Google's own API on
-            // the free key — real Romanian, 1-3s. When healthy it wins every time.
-            ...(geminiDirectAvailable() && eSanatos(geminiLightRace) ? [geminiLightRace] : []),
-            // Rezerva rapidă: nemotron free, înaintea pool-ului lent.
-            ...(rezervaRapida.endsWith(':free') && eSanatos(rezervaRapida) ? [rezervaRapida] : []),
-            ...candidatiFree,
-          ]),
-        ].slice(0, 3)
+        // CURSA E DOAR GEMINI (auditul din 3 aug, cale ACTIVĂ non-Gemini: cursa
+        // lansa în paralel până la 2 rivali :free din catalogul OpenRouter la
+        // FIECARE tură ușoară publică — furnizorul scos, ordinul „Gemini peste
+        // tot"). Rivalii au ieșit; „cursa" rămâne drumul rapid fără unelte pe
+        // Gemini. Dacă Gemini nu e sănătos, tura merge pe calea secvențială de
+        // mai jos (tot Gemini), iar la eșec total omul aude mesajul neutru —
+        // nu se mai aleargă pe ascuns la OpenRouter.
+        const concurenti =
+          geminiDirectAvailable() && eSanatos(geminiLightRace) ? [geminiLightRace] : []
         for (const id of concurenti) triedModels.add(id)
         interface Castigator { id: string; rez: Awaited<ReturnType<typeof runBrainOnce>>; curat: string }
         const curse = concurenti.map(async (id): Promise<Castigator | null> => {
