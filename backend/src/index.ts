@@ -117,6 +117,7 @@ await app.register(rateLimit, {
       // cannot be throttled.
       u === '/api/asr-stream' ||
       u === '/health' ||
+      u === '/api/health' || // connectivity-recovery poll (ChatPanel) — never throttled
       u === '/api/version' || // polled every 45s by every client for the update routine
       u === '/api/visit/ping'
     )
@@ -231,6 +232,12 @@ app.addHook('onSend', async (req, reply) => {
 
 // Health — must return exactly 200 (200-only rule + the host's healthcheck)
 app.get('/health', async () => ({ status: 'ok' }))
+// ALIAS `/api/health` (bug găsit 3 aug): ChatPanel, când un tur pică cu
+// `server_down`, pinguie `/api/health` ca să afle CÂND revine serverul și să
+// reia mesajul singur. Backend-ul servea doar `/health` → `/api/health` da 404,
+// deci reveniirea nu se detecta NICIODATĂ, iar bannerul „Serverul nu răspunde"
+// rămânea agățat pe un server VIU. Aceeași rută, sub ambele căi.
+app.get('/api/health', async () => ({ status: 'ok' }))
 
 // THE DEPLOY VERSION (Adrian, 10 Jul: "on every new deploy the watermark
 // updates, the browser restarts clean"). The host can inject the published
