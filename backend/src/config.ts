@@ -32,6 +32,7 @@ export const ENV_ALIASES: Record<string, string[]> = {
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
   googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
+  julesKey: ['JULES_API_KEY', 'JULES_KEY'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
   sessionSecret: ['SESSION_SECRET'],
@@ -72,6 +73,8 @@ export const config = {
   serperKey: env(...ENV_ALIASES.serperKey),
   googleMapsKey: env(...ENV_ALIASES.googleMapsKey),
   geminiKey: env(...ENV_ALIASES.geminiKey),
+  // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
+  julesKey: env(...ENV_ALIASES.julesKey),
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
