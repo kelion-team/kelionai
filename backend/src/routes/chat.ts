@@ -2603,7 +2603,10 @@ async function runTool(
     }
     case 'constructor_status': {
       if (!isAdmin) return JSON.stringify({ error: 'admin_only' })
+      // null = coada necitibilă (auditul admin, 3 aug): unealta o SPUNE, nu
+      // raportează o coadă goală pe care n-a citit-o (regula #1).
       const jobs = await listBuildJobs(12)
+      if (!jobs) return JSON.stringify({ error: 'coada_necitibila', message: 'Nu pot citi coada ordinelor — citirea din baza de date a picat.' })
       return JSON.stringify({
         // `progress` = the constructor's current step (Stage 4) — Kelion can
         // speak it ("now compiling", "opening the PR") instead of "working…".

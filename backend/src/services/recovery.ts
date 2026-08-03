@@ -33,15 +33,20 @@ function dateFromTagName(tag: string): string {
   return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00Z`
 }
 
-export async function listRecoveryPoints(): Promise<RecoveryPoint[]> {
+// AUDIT ADMIN (3 aug, Recuperare): token lipsă / GitHub ne-ok / timeout —
+// toate colapsau în [] și panoul afișa „Nicio versiune salvată încă", în
+// tabul de siguranță unde ownerul decide dacă are la ce să se întoarcă
+// (tiparul „Cardul: necreat"). null = citirea a picat; [] = GitHub chiar a
+// răspuns cu zero taguri.
+export async function listRecoveryPoints(): Promise<RecoveryPoint[] | null> {
   const token = (process.env.GITHUB_TOKEN ?? '').trim()
-  if (!token) return []
+  if (!token) return null
   try {
     const r = await fetch(`${API}/git/matching-refs/tags/backup-`, {
       headers: ghHeaders(),
       signal: AbortSignal.timeout(15_000),
     })
-    if (!r.ok) return []
+    if (!r.ok) return null
     const refs = (await r.json()) as { ref: string; object: { sha: string; type: string } }[]
     const points = await Promise.all(
       refs.map(async (ref) => {
@@ -71,7 +76,7 @@ export async function listRecoveryPoints(): Promise<RecoveryPoint[]> {
     )
     return points.sort((a, b) => (a.date < b.date ? 1 : -1))
   } catch {
-    return []
+    return null
   }
 }
 

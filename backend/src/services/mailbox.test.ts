@@ -2,10 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { fetchRecentInbox, isAutomated, htmlToText } from './mailbox.js'
 
 describe('Mailbox service', () => {
-  it('returns empty live inbox when mail is not configured', async () => {
-    // MAIL_PASS is unset in the test environment, so mailEnabled() is false
-    const emails = await fetchRecentInbox(10)
-    expect(emails).toEqual([])
+  it('spune DE CE nu poate citi când mailul nu e configurat (nu „cutie goală")', async () => {
+    // MAIL_PASS is unset in the test environment, so mailEnabled() is false.
+    // ACTUALIZAT (auditul admin, 3 aug): vechiul [] strivea „goală" / „IMAP
+    // picat" / „neconfigurat" într-o singură stare — acum răspunsul poartă
+    // ok/motiv, iar UI-ul desenează trei texte diferite.
+    const r = await fetchRecentInbox(10)
+    expect(r.ok).toBe(false)
+    expect(r.motiv).toBe('mail_neconfigurat')
+    expect(r.emails).toEqual([])
   })
 
   it('does not treat X-Auto-Response-Suppress as automated mail', () => {

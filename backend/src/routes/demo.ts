@@ -192,7 +192,11 @@ export async function demoRoutes(app: FastifyInstance): Promise<void> {
     const text = typeof req.body?.text === 'string' ? req.body.text : ''
     if (!conv || !text.trim()) return reply.code(400).send({ error: 'bad_request' })
     const id = await addVisitorMessage(conv, 'visitor', text)
-    return reply.send({ ok: id > 0, id })
+    if (id > 0) return reply.send({ ok: true, id })
+    // AUDIT ADMIN (3 aug): INSERT-ul picat răspundea 200 cu {ok:false} —
+    // widgetul verifica doar statusul HTTP și desena bula ca „trimisă", deși
+    // mesajul nu exista nicăieri și adminul nu l-ar fi văzut niciodată. 502.
+    return reply.code(502).send({ ok: false, error: 'save_failed', id: 0 })
   })
 
   app.get<{ Querystring: { conv?: string; after?: string } }>(
