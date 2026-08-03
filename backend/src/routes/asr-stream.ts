@@ -53,6 +53,7 @@ import {
 // never drift apart.
 import { GOOGLE_STT_REGION as REGION, GOOGLE_STT_MODEL as ASR_MODEL } from '../services/asr.js'
 import { googleServiceAccount } from '../services/googleCreds.js'
+import { pcm16InWav, transcrieGemini } from '../services/urecheGemini.js'
 
 let client: v2.SpeechClient | null = null
 let projectId = ''
@@ -170,6 +171,42 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     let reconectari = 0 // transparent reconnects inside the current window
     let fereastraStart = Date.now()
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    // URECHEA GEMINI (Adrian, 3 aug seara: „auzul trebuie să fie pe Gemini")
+    // — la eroare PERSISTENTĂ Chirp (ex: rol IAM pierdut), auzul nu mai moare:
+    // comutăm pe transcriere în RAFALE prin Gemini (bucăți de ~3s, doar finale,
+    // fără parțiale — degradat, dar viu). Chirp rămâne calea întâi.
+    let urecheGemini = false
+    let bufferGemini: Buffer[] = []
+    let octetiGemini = 0
+    let geminiTimer: ReturnType<typeof setInterval> | null = null
+    let geminiInLucru = false
+
+    const pornesteUrecheaGemini = (): void => {
+      if (urecheGemini || closed) return
+      urecheGemini = true
+      geminiTimer = setInterval(() => {
+        // sub 0,6s de vorbă nu chemăm modelul (zgomot/atingeri de buton)
+        if (closed || geminiInLucru || octetiGemini < 19_200) return
+        const pcm = Buffer.concat(bufferGemini)
+        bufferGemini = []
+        octetiGemini = 0
+        geminiInLucru = true
+        const wav = pcm16InWav(pcm, 16_000)
+        void transcrieGemini(wav.toString('base64'), 'audio/wav', langHint || undefined)
+          .then((r) => {
+            if (closed) return
+            if (r.ok && r.transcript) {
+              send({ type: 'final', transcript: r.transcript, lang: langHint || null })
+              void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
+            } else if (!r.ok) {
+              app.log.warn('asr-stream: urechea Gemini a refuzat o rafală: ' + r.error)
+            }
+          })
+          .finally(() => {
+            geminiInLucru = false
+          })
+      }, 3_000)
+    }
 
     const send = (obj: unknown): void => {
       try {
@@ -274,11 +311,14 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         }
         if (closed) return
         if (trebuieFallbackDupaEroare(cauza, reconectari, RECONECTARI_MAX)) {
-          // Text corectat (audit 3 aug): fără rezervă OpenAI — auzul e JOS.
-          app.log.error(`asr-stream: eroare PERSISTENTĂ (${cauza}) — fără ureche de rezervă (OpenAI extirpat), auzul e JOS până la reparare: ` + detail)
+          // Chirp e JOS persistent — dar auzul NU mai moare (Adrian, 3 aug:
+          // „auzul trebuie să fie pe Gemini"): comutăm pe urechea Gemini în
+          // rafale. Adminul tot e anunțat (Chirp rămâne de reparat), însă
+          // clientul nu mai primește 'error' — microfonul curge mai departe.
+          app.log.error(`asr-stream: eroare PERSISTENTĂ Chirp (${cauza}) — comut auzul pe urechea Gemini (rafale, fără parțiale): ` + detail)
           noteazaFallbackChirp(detail)
-          send({ type: 'error', error: 'asr_failed', detail })
-          void alertaAdminUrechiChirp(cauza, detail)
+          pornesteUrecheaGemini()
+          void alertaAdminUrechiChirp(cauza, detail + ' — auzul a comutat pe urechea Gemini (degradat, dar viu)')
           return
         }
         reconectari++
@@ -370,6 +410,13 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         primulCadruLa = Date.now()
         app.log.info(`asr-stream: primul cadru audio de la client (${data.length} bytes) — urechea primește semnal`)
       }
+      // Pe urechea Gemini audio-ul se ADUNĂ pentru rafala următoare — nu mai
+      // trece prin Google (care tocmai a refuzat persistent).
+      if (urecheGemini) {
+        bufferGemini.push(Buffer.from(data))
+        octetiGemini += data.length
+        return
+      }
       if (!started) startGoogle()
       if (gStream) {
         try {
@@ -387,6 +434,10 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
+      }
+      if (geminiTimer) {
+        clearInterval(geminiTimer)
+        geminiTimer = null
       }
       // THE VERDICT LINE (Aug 2): 0 cadre = the browser leg never spoke (VAD /
       // mic / muted client-side); N cadre = the audio DID arrive — the break

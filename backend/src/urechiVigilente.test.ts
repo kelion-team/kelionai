@@ -187,14 +187,21 @@ describe('alerta admin: instant, pe ambele canale, anti-spam', () => {
   })
 })
 
-describe('ruta: clientul aude de eroare DOAR la cădere persistentă', () => {
-  it('eroarea spre client e ÎN spatele porții trebuieFallbackDupaEroare', () => {
+describe('ruta: la cădere persistentă auzul COMUTĂ pe Gemini, nu moare', () => {
+  // Pin rescris 3 aug seara (ordinul „auzul trebuie să fie pe Gemini", după
+  // căderea Chirp cu PERMISSION_DENIED): în spatele porții nu se mai trimite
+  // 'error' clientului — se pornește urechea Gemini, iar microfonul curge.
+  it('în spatele porții trebuieFallbackDupaEroare pornește urechea Gemini (nu error)', () => {
     expect(ruta).toMatch(
-      /trebuieFallbackDupaEroare\(cauza, reconectari, RECONECTARI_MAX\)\) \{[\s\S]{0,300}send\(\{ type: 'error', error: 'asr_failed', detail \}\)/,
+      /trebuieFallbackDupaEroare\(cauza, reconectari, RECONECTARI_MAX\)\) \{[\s\S]{0,500}pornesteUrecheaGemini\(\)/,
+    )
+    // clientul NU mai primește 'error' pe această cale
+    expect(ruta).not.toMatch(
+      /trebuieFallbackDupaEroare\(cauza, reconectari, RECONECTARI_MAX\)\) \{[\s\S]{0,500}send\(\{ type: 'error'/,
     )
   })
-  it('căderea persistentă anunță adminul imediat (fire-and-forget, fără await pe calea critică)', () => {
-    expect(ruta).toMatch(/void alertaAdminUrechiChirp\(cauza, detail\)/)
+  it('căderea persistentă tot anunță adminul imediat (fire-and-forget), cu mențiunea comutării', () => {
+    expect(ruta).toMatch(/void alertaAdminUrechiChirp\(cauza, detail \+ '[^']*Gemini[^']*'\)/)
   })
   it('eroarea tranzitorie reconectează transparent și se contorizează', () => {
     expect(ruta).toMatch(/noteazaReconectareChirp\(\)/)
