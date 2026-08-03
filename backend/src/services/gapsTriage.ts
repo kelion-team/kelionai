@@ -6,7 +6,7 @@ import { CAPABILITIES } from './brainCapabilities.js'
 // Adrian (24 Jul): "Kelion must analyse the uncovered requests and be able to
 // decide BY HIMSELF whether they are good and bring value to the app, to
 // implement them, and if not, to close them automatically."
-// Kelion (the work model, through OpenRouter) reads the open gaps and decides:
+// Kelion (the work model — Gemini direct) reads the open gaps and decides:
 //   VALUABLE → stays open, marked "DE IMPLEMENTAT: <reason>" (the owner sees
 //              a short, clean list, only with what is worth building);
 //   CLOSE    → closed automatically with "ÎNCHIS AUTONOM: <reason>"

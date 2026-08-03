@@ -42,9 +42,8 @@ export interface EnvVarState {
  *  hand-written on purpose: "everything in env" would also include things
  *  that have nothing to do with us. */
 const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] }[] = [
-  { alias: ENV_ALIASES.openaiKey, name: 'OPENAI_API_KEY', what: 'vocea live + TTS + STT de rezervă', breaks: 'vocea nu pornește deloc' },
-  { name: 'OPENAI_USAGE_KEY', what: 'citirea cheltuielii reale OpenAI (pastila din bară + Bani)', breaks: 'pastila OpenAI arată „⚠" în loc de cifra reală' },
-  { alias: ENV_ALIASES.openrouterKey, name: 'OPENROUTER_API_KEY', what: 'creierul (chat, gândire, traduceri)', breaks: 'nu răspunde nimic' },
+  // (OPENAI_* și OPENROUTER_* SCOASE, 3 aug — extirparea totală: creierul e
+  // Gemini, vocea e Google Chirp. Cheile alea nu mai sunt citite de nimeni.)
   { alias: ENV_ALIASES.databaseUrl, name: 'DATABASE_URL', what: 'baza de date', breaks: 'conturi, credite, istoric — toate' },
   { alias: ENV_ALIASES.sessionSecret, name: 'SESSION_SECRET', what: 'sesiunile de login', breaks: 'nimeni nu poate rămâne logat' },
   { name: 'REVOLUT_PAY_LINK', what: 'linkul de plată Revolut (cumpărarea de credite)', breaks: 'butonul de plată nu duce nicăieri' },
@@ -52,12 +51,12 @@ const ASTEPTATE: { name: string; what: string; breaks: string; alias?: string[] 
   { name: 'ENABLE_BANKING_PRIVATE_KEY_B64', what: 'semnătura pentru Enable Banking', breaks: 'plățile nu se creditează singure' },
   { name: 'GOOGLE_CLIENT_ID', what: 'login cu Google', breaks: 'butonul Google nu merge' },
   { name: 'GOOGLE_CLIENT_SECRET', what: 'login cu Google', breaks: 'butonul Google nu merge' },
-  { alias: ENV_ALIASES.geminiKey, name: 'GEMINI_API_KEY', what: 'creier de rezervă + vedere', breaks: 'cade pe modele mai slabe' },
+  { alias: ENV_ALIASES.geminiKey, name: 'GEMINI_API_KEY', what: 'CREIERUL (unic — Gemini direct) + vedere + traduceri', breaks: 'nu răspunde nimic' },
   { alias: ENV_ALIASES.serperKey, name: 'SERPER_API_KEY', what: 'căutarea pe web', breaks: 'nu poate căuta nimic pe internet' },
   { alias: ENV_ALIASES.googleMapsKey, name: 'GOOGLE_MAPS_KEY', what: 'hărți, locuri, trasee bune', breaks: 'rămâne doar harta gratuită (OSM)' },
-  { alias: ENV_ALIASES.googleTtsKey, name: 'GOOGLE_TTS_API_KEY', what: 'vocea sintetizată Google', breaks: 'TTS-ul cade pe OpenAI' },
+  { alias: ENV_ALIASES.googleTtsKey, name: 'GOOGLE_TTS_API_KEY', what: 'vocea sintetizată Google', breaks: 'gura tace (nu există altă voce — OpenAI extirpat)' },
   { name: 'GOOGLE_API_KEY', what: 'alternativă pentru TTS/Gemini', breaks: '—' },
-  { alias: ENV_ALIASES.googleServiceAccountJson, name: 'GOOGLE_SERVICE_ACCOUNT_JSON', what: 'Chirp 3 HD (auz/voce de calitate)', breaks: 'STT/TTS cad pe OpenAI' },
+  { alias: ENV_ALIASES.googleServiceAccountJson, name: 'GOOGLE_SERVICE_ACCOUNT_JSON', what: 'Chirp 3 HD (auz/voce de calitate)', breaks: 'auzul și gura mor (nu există rezervă — OpenAI extirpat)' },
   { name: 'MAIL_USER', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
   { alias: ENV_ALIASES.mailPass, name: 'MAIL_PASS', what: 'cutia contact@', breaks: 'nu se citesc/trimit emailuri' },
   { alias: ENV_ALIASES.githubToken, name: 'GITHUB_TOKEN', what: 'mâinile lui Kelion pe runbook-uri', breaks: 'nu poate publica singur' },
@@ -98,7 +97,10 @@ export function envCheck(): EnvVarState[] {
 // "something you have under another name" — it's a corpse. Listing it as an
 // orphan made the Tokens tab show three dead rows (STRIPE_CURRENCY,
 // STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET) that looked like something to fix.
-const CUVINTE = /(OPENAI|OPENROUTER|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|SERPER|MAPS?|MAIL|SMTP|IMAP|TTS|STT|VOICE|DATABASE|POSTGRES|SESSION|BRIDGE|GITHUB|KELION)/i
+// OPENAI/OPENROUTER, LA FEL (3 aug — extirparea totală): furnizorii nu mai
+// există în cod, deci o cheie OPENAI_*/OPENROUTER_* rămasă pe VPS e un cadavru,
+// nu „ceva scris sub alt nume" — n-o listăm ca orfană.
+const CUVINTE = /(ANTHROPIC|CLAUDE|GEMINI|GOOGLE|SERPER|MAPS?|MAIL|SMTP|IMAP|TTS|STT|VOICE|DATABASE|POSTGRES|SESSION|BRIDGE|GITHUB|KELION)/i
 
 export function envOrphans(): string[] {
   const stiute = new Set<string>()
@@ -107,7 +109,7 @@ export function envOrphans(): string[] {
     'GEMINI_MODEL', 'ADMIN_EMAIL', 'ALLOWLIST', 'MAIL_USER', 'MAIL_FORWARD_TO', 'MAIL_IMAP_HOST',
     'MAIL_IMAP_PORT', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'BILLING_CURRENCY', 'ENABLE_BANKING_ACCOUNT_UID', 'NODE_ENV']) stiute.add(n)
   return Object.keys(process.env)
-    .filter((n) => CUVINTE.test(n) && !stiute.has(n) && !/^(OPENAI|OPENROUTER)_(REALTIME|TTS|TRANSCRIBE|CHAT|WORK|TOP|IMAGE|SEARCH)/.test(n))
+    .filter((n) => CUVINTE.test(n) && !stiute.has(n) && !/^(OPENAI|OPENROUTER)_/.test(n))
     .sort()
 }
 

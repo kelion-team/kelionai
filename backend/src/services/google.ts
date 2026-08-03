@@ -1,6 +1,5 @@
 import type { Tool } from './brain-types.js'
 import { config } from '../config.js'
-import { openrouterComplete } from './openrouter.js'
 
 // Google skills exposed to the brain as tools. The brain decides when to call them;
 // the backend executes the Google REST API with the user's OAuth access token
@@ -587,7 +586,8 @@ async function readEmail(query: string, token: string): Promise<string> {
 // → the user always got search_unavailable while a paid Serper key sat unused.
 // Serper gives REAL Google results: answerBox + knowledgeGraph + peopleAlsoAsk +
 // organic links + fresh news + relatedSearches. On ANY failure (missing/invalid
-// key, quota, network) we fall back to OpenRouter — never a hard error.
+// key, quota, network) we answer an honest `search_unavailable` — Serper is the
+// ONLY engine (OpenRouter extirpat, 3 aug).
 interface SerperHit {
   title?: string
   link?: string
@@ -652,7 +652,7 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
       },
       15_000,
     )
-    // 401/403/429 = bad key / no credits → null, the OpenRouter fallback takes it.
+    // 401/403/429 = bad key / no credits → null → `search_unavailable` (onest).
     if (!res.ok) return null
     return composeSerperResult((await res.json()) as SerperJson, n)
   } catch {
@@ -686,33 +686,9 @@ async function serperVideos(query: string, n: number): Promise<{ title: string; 
   }
 }
 
-// Exported so the shape/marking rules are testable without network (the same
-// pattern as composeSerperResult / composePlace): the OpenRouter FALLBACK
-// answer, CLEARLY marked as degraded — the brain must never present it as the
-// full Serper search, and an answer without any cited source must be flagged
-// as unverified (it may be model memory, not the live web).
-export function composeOpenrouterFallback(
-  text: string,
-  sources: { title: string; url: string }[],
-  n: number,
-): string | null {
-  if (!text && sources.length === 0) return null // nothing at all → honest error
-  const notes = [
-    'FALLBACK: the primary engine (Serper) was unavailable. This carries ONLY an answer and bare links — no knowledge graph, no people-also-ask, no news, no related searches. Say so; do not present it as the full search.',
-  ]
-  const uncited = Boolean(text) && sources.length === 0
-  if (uncited) {
-    notes.push('The answer has NO cited sources — it may come from model memory, not the live web. Tell the user it is unverified.')
-  }
-  return JSON.stringify({
-    answer: text,
-    results: sources.slice(0, n).map((s) => ({ title: s.title, link: s.url, snippet: '' })),
-    source: 'openrouter',
-    fallback: true,
-    uncited_sources: uncited || undefined,
-    note: notes.join(' '),
-  })
-}
+// (composeOpenrouterFallback a fost ȘTERS aici, 3 aug — extirparea totală
+// OpenRouter: nu mai există niciun fallback de căutare pe alt furnizor.
+// Serper e SINGURUL motor; dacă pică, spunem cinstit `search_unavailable`.)
 
 async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
@@ -1267,23 +1243,10 @@ export async function youtubeSearch(query: string, max: number): Promise<string>
 }
 async function translateText(text: string, target: string): Promise<string> {
   if (!text || !target) return JSON.stringify({ error: 'missing_text_or_target' })
-  // Without a Gemini key: we translate through OpenRouter (the same key as
-  // the brain), so the admin "Translate into Romanian" button always works.
-  // Gemini stays the first path when it has a key.
-  if (!config.geminiKey) {
-    try {
-      const r = await openrouterComplete(
-        config.openrouter.searchModel,
-        [{ role: 'user', content: `Translate to ${target}. Reply ONLY with the translation:\n${text}` }],
-        { temperature: 0 },
-      )
-      const out = r.text.trim()
-      if (!out) return JSON.stringify({ error: 'translate_not_configured' })
-      return JSON.stringify({ translation: out, target })
-    } catch {
-      return JSON.stringify({ error: 'translate_failed' })
-    }
-  }
+  // GEMINI-ONLY (3 aug — ramura de rezervă OpenRouter a fost extirpată): fără
+  // cheie Gemini nu există traducător, și o spunem cinstit (regula #1 — nu
+  // simulăm un serviciu care nu e configurat).
+  if (!config.geminiKey) return JSON.stringify({ error: 'translate_not_configured' })
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`
   const res = await tfetch(url, {
     method: 'POST',
@@ -1304,7 +1267,6 @@ async function translateText(text: string, target: string): Promise<string> {
   const out = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
   // An EMPTY answer is NOT a translation — the old code returned
   // { translation: "" }, which the caller could not tell apart from success.
-  // Say it failed, like the OpenRouter path above already does.
   if (!out) return JSON.stringify({ error: 'translate_empty' })
   return JSON.stringify({ translation: out, target })
 }

@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto'
 import { config } from '../config.js'
 import { loadKv, saveKv } from '../db.js'
-import { openrouterComplete } from './openrouter.js'
+import { geminiDirectChat, geminiDirectAvailable } from './geminiDirect.js'
 
 const inLucru = new Map<string, Promise<Record<string, string>>>()
 
@@ -70,9 +70,13 @@ export function normalizeLang(v: string): string {
  *  SAME length comes out — better full English than a shifted translation
  *  where every line lands under the wrong heading. */
 async function traduceLot(valori: string[], lang: string): Promise<(string | null)[] | null> {
+  // GEMINI DIRECT (3 aug — OpenRouter extirpat): traducerea manualului merge pe
+  // aceeași cheie Gemini ca tot creierul. Fără cheie → null → engleza rămâne
+  // (onest: nu simulăm o traducere care nu s-a putut face).
+  if (!geminiDirectAvailable()) return null
   const numerotat = valori.map((v, i) => `${i + 1}. ${v.replace(/\s*\n+\s*/g, ' ')}`).join('\n')
-  const r = await openrouterComplete(
-    config.openrouter.searchModel,
+  const r = await geminiDirectChat(
+    config.geminiModel,
     [
       {
         role: 'user',
@@ -86,6 +90,7 @@ async function traduceLot(valori: string[], lang: string): Promise<(string | nul
           numerotat,
       },
     ],
+    [],
     { temperature: 0, maxTokens: 8000 },
   ).catch(() => null)
   if (!r?.text) return null

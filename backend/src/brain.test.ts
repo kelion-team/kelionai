@@ -9,16 +9,17 @@ vi.stubEnv('SESSION_SECRET', 'test-session-secret')
 import { isTransientBrainError, expertModelLadder, runBrainLadder } from './services/brain.js'
 
 describe('Expertul fiabil — clasificarea erorilor', () => {
-  it('recunoaște 429 / rate-limit / DEGRADED ca trecătoare (merită alt model)', () => {
-    expect(isTransientBrainError(new Error('openrouter 429: rate limited'))).toBe(true)
-    expect(isTransientBrainError('Rate limit exceeded: free-models-per-min')).toBe(true)
-    expect(isTransientBrainError(new Error('DEGRADED function cannot be invoked'))).toBe(true)
-    expect(isTransientBrainError(new Error('openrouter 503: upstream'))).toBe(true)
+  // (3 aug — extirparea OpenRouter: mesajele de eroare sunt acum ale lui
+  // Gemini, „gemini <status>: …" — vezi geminiDirectChat.)
+  it('recunoaște 429 / rate-limit / RESOURCE_EXHAUSTED ca trecătoare (merită alt model)', () => {
+    expect(isTransientBrainError(new Error('gemini 429: rate limited'))).toBe(true)
+    expect(isTransientBrainError('Rate limit exceeded: RESOURCE_EXHAUSTED')).toBe(true)
+    expect(isTransientBrainError(new Error('gemini 503: upstream'))).toBe(true)
     expect(isTransientBrainError(new Error('fetch failed'))).toBe(true)
   })
   it('NU marchează ca trecătoare o cerere greșită (400/401) — dar tot se sare la următorul model', () => {
-    expect(isTransientBrainError(new Error('openrouter 400: bad request'))).toBe(false)
-    expect(isTransientBrainError(new Error('openrouter 401: invalid key'))).toBe(false)
+    expect(isTransientBrainError(new Error('gemini 400: bad request'))).toBe(false)
+    expect(isTransientBrainError(new Error('gemini 401: invalid key'))).toBe(false)
   })
 })
 
@@ -39,7 +40,7 @@ describe('Expertul fiabil — runBrainLadder', () => {
       ['m1', 'm2', 'm3'],
       async (m) => {
         tried.push(m)
-        if (m === 'm1') throw new Error('openrouter 429: rate limit')
+        if (m === 'm1') throw new Error('gemini 429: rate limit')
         return `raspuns de la ${m}`
       },
       { sleep: noSleep },
@@ -55,7 +56,7 @@ describe('Expertul fiabil — runBrainLadder', () => {
         ['a', 'b', 'c'],
         async (m) => {
           tried.push(m)
-          throw new Error('openrouter 429: saturat')
+          throw new Error('gemini 429: saturat')
         },
         { sleep: noSleep },
       ),

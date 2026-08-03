@@ -16,24 +16,11 @@ export interface HistoryRow {
   created_at: string
 }
 
-// The owner's REAL money picture (admin only): live OpenRouter balance, real
-// cost consumed, real profit, and per-AI cost. No hand-typed figures.
-// (Stripe is fully out — 31 Jul.)
+// The owner's REAL money picture (admin only): real cost consumed, real
+// profit, and per-AI cost. No hand-typed figures.
+// (Stripe is fully out — 31 Jul. „Punga" — soldul OpenRouter — și cheltuiala
+// OpenAI au fost EXTIRPATE pe 3 aug, împreună cu furnizorii.)
 export interface Finance {
-  // SINGLE POUCH, USD ONLY: the OpenRouter balance is MEASURED in USD, and a
-  // £ conversion (hand-written rate) produced the "header $9.99 vs Punga
-  // £7.99" contradiction — the same wallet, two figures. The pocket is now
-  // exactly what the provider says, identical to the header pill.
-  // `complete: false` means a source did not answer — then the total is
-  // incomplete, not "zero".
-  punga: {
-    total: number
-    complete: boolean
-    currency: 'usd'
-    parti: {
-      openrouter: number | null
-    }
-  }
   spent: number
   /** The SAME cost journal as `spent`, but unconverted (USD end to end) —
    *  the Money tab shows ONLY this, so "total" and "azi" can't be in two
@@ -49,20 +36,6 @@ export interface Finance {
   masurat: number
   estimat: number
   felul: Record<string, 'masurat' | 'estimat'>
-  // "Kelion's pouch" — the REAL balance, straight from the OpenRouter account (USD).
-  openrouter?: {
-    balance: number
-    low: boolean
-    threshold: number
-    live: boolean
-    topup: string
-  }
-  /** The REAL OpenAI month-to-date spend (the provider's costs API).
-   *  `live: false` = unreadable — the tab says so, never shows a zero. */
-  openai?: {
-    live: boolean
-    monthUsd?: number
-  }
 }
 
 

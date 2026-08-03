@@ -43,7 +43,7 @@ describe('composeSerperResult — the Serper page → the brain JSON', () => {
     expect(j.results).toHaveLength(3)
   })
 
-  it('returns null on an EMPTY page so the OpenRouter fallback takes over', () => {
+  it('returns null on an EMPTY page so webSearch answers an honest search_unavailable', () => {
     expect(composeSerperResult({}, 8)).toBeNull()
     expect(composeSerperResult({ organic: [] }, 8)).toBeNull()
     // An organic hit WITHOUT a link is useless — still empty.

@@ -1737,9 +1737,9 @@ export async function getDemoStats(): Promise<DemoStats> {
 //   • `profit` — the sum of margins from the payments ledger (billing_events),
 //                which comes from real verified payments, not estimates.
 // The actual pocket (how much you have left) is NO LONGER kept here: it's read
-// LIVE from the Revolut account (through Enable Banking) and from OpenRouter —
-// see services/openrouter.ts getOpenRouterBalance. The source of truth is with
-// them.
+// LIVE from the Revolut account (through Enable Banking). (Soldul OpenRouter a
+// dispărut odată cu furnizorul — extirpat, 3 aug; starea creierului Gemini se
+// vede prin pingul live geminiLive().) The source of truth is with the bank.
 export async function getAdminAccount(): Promise<{ spent: number; profit: number }> {
   const empty = { spent: 0, profit: 0 }
   if (!dbEnabled()) return empty

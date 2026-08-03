@@ -38,19 +38,22 @@ function sursa(rel: string): string {
 }
 
 describe('LACĂT — creier (regula Gemini, fără plătit din greșeală)', () => {
+  // (3 aug — extirparea totală OpenRouter: treptele s-au mutat în config.brain;
+  // searchModel a dispărut odată cu pluginul de căutare OpenRouter — căutarea
+  // e Serper-only.)
   it('workDefault (creierul de LUCRU) e gratuit și e Gemini — regula lui Adrian', () => {
-    const m = config.openrouter.workDefault
+    const m = config.brain.workDefault
     expect(eGratuit(m)).toBe(true)
     expect(SEMNE_PLATIT.test(m)).toBe(false)
     // Regula EXPLICITĂ de Gemini pe care Adrian a dat-o și a explicat-o.
     expect(/gemini/i.test(m) || m.startsWith('google-direct/')).toBe(true)
   })
 
-  it('topDefault și searchModel rămân gratuite (nicio treaptă de escaladare plătită)', () => {
-    expect(eGratuit(config.openrouter.topDefault)).toBe(true)
-    expect(SEMNE_PLATIT.test(config.openrouter.topDefault)).toBe(false)
-    expect(eGratuit(config.openrouter.searchModel)).toBe(true)
-    expect(SEMNE_PLATIT.test(config.openrouter.searchModel)).toBe(false)
+  it('chatDefault și topDefault rămân Gemini (nicio treaptă pe alt furnizor)', () => {
+    expect(eGratuit(config.brain.chatDefault)).toBe(true)
+    expect(SEMNE_PLATIT.test(config.brain.chatDefault)).toBe(false)
+    expect(eGratuit(config.brain.topDefault)).toBe(true)
+    expect(SEMNE_PLATIT.test(config.brain.topDefault)).toBe(false)
   })
 
   it('DEFAULT-ul din COD (nu din env) e Gemini free — dacă env se golește, nu revine la plătit', () => {
@@ -65,18 +68,21 @@ describe('LACĂT — creier (regula Gemini, fără plătit din greșeală)', () 
   })
 })
 
-describe('LACĂT — constructor (refuz structural de model plătit)', () => {
-  it('garda „REFUZ dacă nu e :free și nu e ALLOW_PAID" e prezentă în cod', () => {
+describe('LACĂT — constructor (Gemini-only, fără scară OpenRouter)', () => {
+  // (Vechiul zid „REFUZ dacă nu e :free și nu e ALLOW_PAID" păzea scara de
+  // modele OpenRouter — extirpată pe 3 aug cu tot cu furnizorul. Noul zid:
+  // constructorul are UN singur creier, Gemini pe cheia ownerului, și nu mai
+  // există nicio cale de rețea spre OpenRouter/OpenAI în agent.)
+  it('agentul e Gemini-only: fără apeluri OpenRouter, fără scara plătită', () => {
     const s = sursa('../../deploy/constructor-agent.mjs')
-    // Cele trei piese ale gardei — dacă vreuna dispare, arderea de bani redevine
-    // posibilă din greșeală, exact incidentul din 27 iul.
-    expect(/endsWith\(':free'\)/.test(s)).toBe(true)
-    expect(/CONSTRUCTOR_ALLOW_PAID/.test(s)).toBe(true)
-    expect(/process\.exit\(0\)/.test(s)).toBe(true)
-    // Iar default-ul de pornire e el însuși gratuit.
-    const def = /CONSTRUCTOR_MODEL\s*\|\|\s*'([^']+)'/.exec(s)
-    expect(def, 'nu am găsit default-ul CONSTRUCTOR_MODEL').toBeTruthy()
-    expect(/:free$/.test(def![1])).toBe(true)
+    expect(/openrouter\.ai/.test(s)).toBe(false)
+    expect(/OPENROUTER_API_KEY/.test(s)).toBe(false)
+    expect(/anthropic\/claude-fable-5/.test(s)).toBe(false)
+    expect(/function llmGemini/.test(s)).toBe(true)
+    // Iar default-ul de model e Gemini.
+    const def = /CONSTRUCTOR_GEMINI_MODEL\s*\|\|\s*'([^']+)'/.exec(s)
+    expect(def, 'nu am găsit default-ul CONSTRUCTOR_GEMINI_MODEL').toBeTruthy()
+    expect(/gemini/.test(def![1])).toBe(true)
   })
 })
 
@@ -149,27 +155,27 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
   })
 })
 
-describe('LACĂT — Gemini pică → răspunde pe rezerva reală (nu „Try again")', () => {
+describe('LACĂT — Gemini-only: la eșec, mesaj ONEST, nu alt furnizor (3 aug)', () => {
+  // (Vechiul lacăt „Gemini pică → rezerva nemotron :free" a MURIT odată cu
+  // extirparea totală OpenRouter — ordinul repetat al ownerului: „openrouter
+  // și open ai scos din toată aplicația". Noul zid: NU mai există NICIUN
+  // fallback pe alt furnizor; tura reîncearcă pe Gemini și apoi se încheie
+  // cinstit cu mesajul neutru.)
   const chat = sursa('./routes/chat.ts')
 
-  it('la eșec de Gemini, cade pe REZERVA free (topDefault), nu re-selectează Gemini', () => {
-    // Bug reparat 3 aug: după lacătul de creier, `resolveModel('work', null)`
-    // întorcea TOT Gemini → 6 reîncercări → „Try again". Acum: rezerva = topDefault.
-    expect(/GEMINI_DIRECT_PREFIX\) && !textFlowed\)[\s\S]{0,800}config\.openrouter\.topDefault/.test(chat)).toBe(true)
-    // Și marchează Gemini bolnav (cooldown) în aceeași ramură.
-    expect(/gemini a picat[\s\S]{0,80}rezervă/.test(chat) || /noteazaEsuare\(orchestratorModel\)[\s\S]{0,200}topDefault/.test(chat)).toBe(true)
+  it('la eșec de Gemini se reîncearcă pe ACELAȘI creier, apoi eroare onestă', () => {
+    expect(chat.includes('MAX_INCERCARI_GEMINI')).toBe(true)
+    expect(chat.includes('brain_gemini_exhausted')).toBe(true)
+    expect(chat.includes('Încearcă din nou în câteva secunde.')).toBe(true)
   })
 
   it('marcaj [CHAT-IN]: se vede că tura a ajuns la /api/chat (recepția a mers)', () => {
     expect(chat.includes('[CHAT-IN]')).toBe(true)
   })
 
-  it('rezerva rapidă = nemotron (topDefault) în cursa ușoară, nu gemma lent', () => {
-    // Adrian, 3 aug: „fă cota de rezervă nemotron rapid". Când Gemini e jos, chatul
-    // simplu cade pe nemotron (~6s), nu pe gemma (~25s → cei 27s).
-    expect(/rezervaRapida = config\.openrouter\.topDefault/.test(chat)).toBe(true)
-    // Rezerva rapidă intră în concurenții cursei, dedus cu Set.
-    expect(/new Set\(\[[\s\S]{0,400}rezervaRapida/.test(chat)).toBe(true)
+  it('nu mai există nicio cale spre OpenRouter în creierul chatului', () => {
+    // (simboluri FUNCȚIONALE, nu mențiuni istorice din comentarii)
+    expect(/openrouterChat|getCatalog|listaCandidati|rezervaRapida/.test(chat)).toBe(false)
   })
 })
 

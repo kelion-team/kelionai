@@ -28,13 +28,12 @@ let calls: CapturedCall[] = []
 function googleOk(): Response {
   return new Response(JSON.stringify({ audioContent: Buffer.from('google-audio').toString('base64') }))
 }
-function openaiOk(): Response {
-  return new Response(Buffer.from('openai-audio'))
-}
 function googleDown(): Response {
   return new Response('boom', { status: 500 })
 }
 const GOOGLE_URL = 'texttospeech.googleapis.com'
+// (config.openai a fost EXTIRPAT din config, 3 aug — nu mai există nicio cheie
+// OpenAI de pinuit; garanția rămasă e că sinteza atinge DOAR Google.)
 const OPENAI_URL = 'api.openai.com/v1/audio/speech'
 
 // The config object is read at import time from env — we pin the fields we
@@ -45,19 +44,16 @@ beforeEach(() => {
   calls = []
   saved.serviceAccount = config.googleServiceAccountJson
   saved.googleKey = config.googleTtsKey
-  saved.openaiKey = config.openai.key
   saved.style = config.ttsVoiceStyle
   // Never touch the service-account path here (it would JSON.parse + OAuth):
   // the API-key path exercises the same Google branch.
   config.googleServiceAccountJson = ''
   config.googleTtsKey = 'test-google-key'
-  config.openai.key = 'test-openai-key'
   config.ttsVoiceStyle = 'Charon'
 })
 afterEach(() => {
   config.googleServiceAccountJson = saved.serviceAccount as string
   config.googleTtsKey = saved.googleKey as string
-  config.openai.key = saved.openaiKey as string
   config.ttsVoiceStyle = saved.style as string
   vi.unstubAllGlobals()
 })
@@ -72,9 +68,7 @@ function mockFetch(handler: (url: string) => Response): void {
 
 describe('GOOGLE-ONLY: Chirp 3 HD e singura voce, OpenAI SCOS complet (Adrian, 3 aug)', () => {
   it('cu Google configurat, sintetizează pe Google și OpenAI NU e atins NICIODATĂ', async () => {
-    // Cheia OpenAI e prezentă în config, dar sinteza nu trebuie s-o atingă:
-    // OpenAI e scos din toată aplicația.
-    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : openaiOk()))
+    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : googleDown()))
     const r = await synthesize('Bună ziua', 'ro')
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.engine).toBe('google')
@@ -83,7 +77,7 @@ describe('GOOGLE-ONLY: Chirp 3 HD e singura voce, OpenAI SCOS complet (Adrian, 3
   })
 
   it('la eșec Google → EROARE onestă, FĂRĂ rezervă OpenAI (OpenAI nu se mai atinge)', async () => {
-    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleDown() : openaiOk()))
+    mockFetch(() => googleDown())
     const r = await synthesize('Bună ziua', 'ro')
     expect(r.ok).toBe(false)
     // Doar apelul Google a fost făcut; OpenAI nu e chemat deloc.
@@ -92,31 +86,22 @@ describe('GOOGLE-ONLY: Chirp 3 HD e singura voce, OpenAI SCOS complet (Adrian, 3
     expect(calls.map((c) => c.url).join()).not.toContain(OPENAI_URL)
   })
 
-  it('fără Google configurat → 503 tts_not_configured, NICIUN apel (nici la OpenAI)', async () => {
+  it('fără Google configurat → 503 tts_not_configured, NICIUN apel', async () => {
     config.googleTtsKey = ''
     config.googleServiceAccountJson = ''
-    // Cheia OpenAI rămâne setată — dar nu mai e o cale de sinteză.
     expect(googleTtsAvailable()).toBe(false)
     expect(ttsConfigured()).toBe(false)
-    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : openaiOk()))
+    mockFetch(() => googleOk())
     const r = await synthesize('Bună ziua', 'ro')
     expect(r).toEqual({ ok: false, status: 503, error: 'tts_not_configured' })
     expect(calls).toHaveLength(0)
-  })
-
-  it('fără niciun motor → 503 tts_not_configured', async () => {
-    config.googleTtsKey = ''
-    config.openai.key = ''
-    expect(ttsConfigured()).toBe(false)
-    const r = await synthesize('Bună ziua', 'ro')
-    expect(r).toEqual({ ok: false, status: 503, error: 'tts_not_configured' })
   })
 })
 
 describe('voce masculină în orice limbă: stilul feminin NU ajunge NICIODATĂ la API', () => {
   async function voiceNameSent(style: string, lang: string): Promise<string> {
     config.ttsVoiceStyle = style
-    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : openaiOk()))
+    mockFetch((u) => (u.includes(GOOGLE_URL) ? googleOk() : googleDown()))
     const r = await synthesize('Bună ziua', lang)
     expect(r.ok).toBe(true)
     const voice = (calls[0].body as { voice: { name: string; languageCode: string } }).voice
@@ -186,30 +171,23 @@ describe('GET /api/tts/status — booleeni, niciodată chei', () => {
     await app.close()
   })
 
-  it('cu sesiune: google/openai reflectă EXACT configurarea, fără chei în răspuns', async () => {
+  it('cu sesiune: google reflectă EXACT configurarea, fără chei și FĂRĂ câmp openai', async () => {
     const app = await buildApp()
-    // Both configured.
+    // Google configured.
     // `maxChars` rides along since Aug 2: the promo narrator chunks against
     // THE SERVER'S cap instead of a second hardcoded copy in the client.
     let res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ google: true, openai: true, maxChars: 5000 })
-    // Only Google configured.
-    config.openai.key = ''
-    res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: true, openai: false, maxChars: 5000 })
-    // Only OpenAI configured.
-    config.openai.key = 'test-openai-key'
+    expect(res.json()).toEqual({ google: true, maxChars: 5000 })
+    // Nothing configured.
     config.googleTtsKey = ''
     res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: false, openai: true, maxChars: 5000 })
-    // Nothing configured.
-    config.openai.key = ''
-    res = await app.inject({ method: 'GET', url: '/api/tts/status', headers: { cookie: sessionCookie() } })
-    expect(res.json()).toEqual({ google: false, openai: false, maxChars: 5000 })
+    expect(res.json()).toEqual({ google: false, maxChars: 5000 })
+    // Câmpul `openai` a fost SCOS (3 aug — extirparea totală): nu există motor
+    // de rezervă, deci nici booleanul care să pretindă că există.
+    expect(res.body).not.toContain('openai')
     // No secret leaks: the body never contains a configured key value.
     expect(res.body).not.toContain('test-google-key')
-    expect(res.body).not.toContain('test-openai-key')
     await app.close()
   })
 })

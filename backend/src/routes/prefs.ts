@@ -13,7 +13,6 @@ import {
   getVoicePref,
   setVoicePref,
 } from '../db.js'
-import { config } from '../config.js'
 import { getMeserie } from '../services/meserii.js'
 
 // THE AVATAR'S LAYOUT (Adrian, 11 Jul: "save Kelion's current size"): the
@@ -85,14 +84,12 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       speechLang: await getSpeechLang(user.email),
       meserieActiva: await getMeserieActiva(user.email),
       avatarBox,
-      // HIS VOICE, REMEMBERED ONLY FOR HIM (Adrian, 30 Jul: "he can set the
-      // app to whatever voice he wants… it is remembered per user. Must not
-      // get mixed up with another user or affect another account").
-      // `null` = the app's default voice.
+      // HIS VOICE, REMEMBERED ONLY FOR HIM (Adrian, 30 Jul). `null` = the
+      // app's default voice.
       voice: await getVoicePref(user.email),
-      // The list he can choose from — it comes from the server, so the UI
-      // doesn't keep a parallel list that goes stale when the env changes.
-      voices: config.openai.realtimeVoices,
+      // VOCE UNICĂ CHIRP (3 aug — vocile OpenAI realtime extirpate): nu mai
+      // există listă de ales; lista goală ascunde picker-ul din UI.
+      voices: [] as string[],
     })
   })
 
@@ -124,10 +121,10 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
 
     if (req.body?.voice !== undefined) {
       const v = req.body.voice
-      // Only from the known list, or null ("the app's default"). A free-form
-      // name would reach the OpenAI session and return 400 — meaning the
-      // person's voice would die because of a text field.
-      if (v !== null && !config.openai.realtimeVoices.includes(v)) {
+      // VOCE UNICĂ CHIRP (3 aug — lista de voci OpenAI extirpată): singura
+      // valoare acceptată e null („vocea aplicației"). Un client vechi care
+      // trimite un nume de voce OpenAI primește 400, nu o preferință moartă.
+      if (v !== null) {
         return reply.code(400).send({ error: 'bad_request' })
       }
       await setVoicePref(user.email, v)

@@ -10,6 +10,15 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (branch, PR în lucru,
+> NEVERIFICAT LIVE):** furnizorii au fost scoși din tot codul (creier =
+> Gemini-only, căutare = Serper, voce = Chirp; detalii în AI-HANDOFF §3 + §13).
+> Efect asupra listei: rândurile care pomenesc soldul/cheile OpenRouter/OpenAI
+> (ex. D2 „punga OpenRouter", K7 „OPENAI_USAGE_KEY", B9 „openrouter.searchModel",
+> M6 partea OpenRouter/Anthropic/OpenAI) NU se mai pot rezolva — sistemele pe
+> care le descriau au fost extirpate. Se taie DOAR după merge + verificare live,
+> conform regulii; până atunci rămân, cu nota asta drept context.
+
 ---
 
 ## A. CODAT, DAR MORT PE LIVE — cheia nu ajunge în procesul care rulează

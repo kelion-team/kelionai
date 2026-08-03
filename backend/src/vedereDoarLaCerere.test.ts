@@ -2,20 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── DESCRIEREA IMAGINII RULEAZĂ DOAR CÂND CHIAR E O IMAGINE (Adrian, 3 aug) ──
+// ── VEDEREA E NATIVĂ — PASUL DE DESCRIERE A MURIT DE TOT (3 aug) ─────────────
 //
-// Latența „ULTRA enorm": pasul de descriere a imaginii se declanșa pe „camera
-// pornită" (`image || camFrames.length > 0`), deci rula ~11s DEGEABA pe FIECARE
-// tură (măsurat: total 12356ms, creierul real 1077ms). Poarta corectă e
-// `turnHasImage` — adevărată doar când chiar s-a atașat o imagine (poză încărcată
-// SAU cameră + intenție vizuală VISION_INTENT).
+// Istoric: pasul de „descriere a imaginii pentru creierul ORB" (describeScene
+// pe un model străin) rula ~11s degeaba pe fiecare tură cu camera pornită
+// (Adrian, 3 aug: latența „ULTRA enorm"); a fost întâi îngrădit pe
+// `turnHasImage`, apoi — odată cu EXTIRPAREA totală OpenRouter — a dispărut cu
+// tot cu creierele oarbe care îl cereau: creierul e Gemini-only și VEDE nativ
+// (toGeminiPayload → inline_data). Testul păzește să nu se întoarcă.
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
-describe('descrierea imaginii: doar la cerere reală, nu pe fiecare tură', () => {
-  it('poarta pasului de vedere e `if (turnHasImage)`', () => {
-    expect(chat).toMatch(/if \(turnHasImage\) \{/)
+describe('vederea e nativă — fără pas de descriere pe alt model', () => {
+  it('nu mai există describeScene pe calea chatului', () => {
+    expect(chat).not.toMatch(/describeScene\(/)
   })
-  it('nu mai declanșează pe simpla prezență a cadrelor camerei', () => {
+  it('nu mai declanșează nimic pe simpla prezență a cadrelor camerei', () => {
     expect(chat).not.toMatch(/if \(image \|\| camFrames\.length > 0\) \{/)
   })
 })

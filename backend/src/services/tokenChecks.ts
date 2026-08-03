@@ -31,22 +31,24 @@ async function fetchStatus(url: string, init: RequestInit): Promise<{ ok: boolea
   }
 }
 
-// 1. The brain — OpenRouter (a single key for GPT/Gemini/Claude). Kimi/GLM removed.
+// 1. The brain — Gemini direct, unic (OpenRouter/OpenAI extirpate, 3 aug).
+// Un ping REAL prin exact drumul creierului (verifyKeys → geminiDirectChat),
+// nu doar prezența cheii — aia o verifică separat checkGemini.
 async function checkBrainKeys(): Promise<TokenCheck[]> {
   try {
     const v = await timed(20_000, () => verifyKeys())
     return [
       {
-        name: 'OpenRouter API key',
+        name: 'Creierul Gemini (chat direct)',
         status: v.primary === 'ok' ? 'ok' : (v.primary === 'not_configured' ? 'not_configured' : (v.primary.startsWith('fail_') ? (v.primary as `fail_${number}`) : 'fail')),
-        detail: v.primary === 'ok' ? 'autentificare + credit OK' : v.primary,
-        requiredScope: 'Chat Completions (GPT/Gemini/Claude)',
+        detail: v.primary === 'ok' ? 'ping prin drumul creierului OK' : v.primary,
+        requiredScope: 'Generative Language API (cheia GEMINI_API_KEY)',
       },
     ]
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return [
-      { name: 'OpenRouter API key', status: 'fail', detail: msg, requiredScope: 'Chat Completions (GPT/Gemini/Claude)' },
+      { name: 'Creierul Gemini (chat direct)', status: 'fail', detail: msg, requiredScope: 'Generative Language API (cheia GEMINI_API_KEY)' },
     ]
   }
 }
@@ -103,19 +105,8 @@ async function checkGoogleTtsKey(): Promise<TokenCheck> {
   return { name: 'Google TTS API key', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Cloud Text-to-Speech API' }
 }
 
-// 5. OpenAI — the live voice (Realtime), backup STT and TTS go on this key
-async function checkOpenAI(): Promise<TokenCheck> {
-  if (!config.openai.key) {
-    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'not_configured', requiredScope: 'Realtime + Audio API' }
-  }
-  const r = await fetchStatus('https://api.openai.com/v1/models', {
-    headers: { Authorization: `Bearer ${config.openai.key}` },
-  })
-  if (r.ok) {
-    return { name: 'OpenAI API key (voce/STT/TTS)', status: 'ok', detail: 'models list OK', requiredScope: 'Realtime + Audio API' }
-  }
-  return { name: 'OpenAI API key (voce/STT/TTS)', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Realtime + Audio API' }
-}
+// (Verificarea cheii OpenAI a fost ȘTEARSĂ, 3 aug — OpenAI extirpat complet:
+// vocea e Google Chirp 3, creierul e Gemini. Nu mai există nicio cheie OpenAI.)
 
 // 5b. Google OAuth — the app's login. Only the presence of client id +
 // secret (no external call: Google offers no cheap verification of the pair
@@ -212,11 +203,10 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, googleSa, googleTts, openai, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
+  const [brain, googleSa, googleTts, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
     checkGoogleServiceAccount(),
     checkGoogleTtsKey(),
-    checkOpenAI(),
     checkGemini(),
     checkMailSmtp(),
     checkMailImap(),
@@ -229,7 +219,6 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     ...checkPlati(),
     googleSa,
     googleTts,
-    openai,
     gemini,
     smtp,
     imap,

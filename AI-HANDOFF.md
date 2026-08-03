@@ -116,6 +116,19 @@ generare imagini, corectare transcriere. Proprietar unic + singurul admin:
 Servicii systemd pe VPS: `kelion-bridge`, `kelion-paznic`, `kelion-builder`, `kelion-deployer`.
 
 ## 3. RUTAREA CREIERULUI (cine răspunde cui) — chat.ts
+> **ACTUALIZAT 3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (ordinul repetat
+> al lui Adrian: „openrouter și open ai scos din toată aplicația"):** creierul e
+> **Gemini direct, UNIC** (`services/geminiDirect.ts`, cheia `GEMINI_API_KEY`),
+> pe trei trepte din `config.brain` (`chat`/`work` = gemini-2.5-flash,
+> `top` = gemini-2.5-pro; lacăt: `scripts/verifica-gemini.mjs` + `lacat.test.ts`).
+> Contractul comun (OrMessage/AnthropicTool/OrChatResult, resolveModel,
+> taskDifficulty/hasActionIntent) e în `services/brainContract.ts`.
+> `services/openrouter.ts` a fost ȘTERS; rotația pe pool-ul :free, cursa pe 3
+> modele, rezerva plătită, vederea delegată (describeScene) și punga (sold
+> OpenRouter) au dispărut. **La eșec Gemini: reîncercări pe ACELAȘI creier, apoi
+> mesajul neutru** („Încearcă din nou în câteva secunde.") — niciodată alt
+> furnizor. Căutare = Serper-only; voce = Google Chirp-only (fără rezervă
+> OpenAI). Descrierea Kimi→GLM de mai jos e ISTORIE (pre-24 iul).
 > **CORECTAT 22 iul 2026 (după citirea codului real):** descrierea veche de mai jos
 > era GREȘITĂ. Codul (`chat.ts:1426-1430`) arată clar: **puntea/Builder-CLI au fost
 > SCOASE din calea de chat.** ACUM **toți** — inclusiv adminul — primesc răspunsul pe
@@ -254,6 +267,12 @@ node --check bridge/kelion-bridge-linux.mjs
 ```
 
 ## 13. STAREA LA 27 IULIE 2026 + CE URMEAZĂ
+- 🗓️ **3 AUG — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (ordinul repetat al lui Adrian):**
+  1. **Șterse din cod**: `services/openrouter.ts` (tot clientul + catalogul + soldul), `services/openaiCosts.ts`, `services/openaiAlert.ts`, `services/openrouterAlert.ts`, `services/punga.ts`, `services/cursa.ts`, `deploy/proba-modele.sh`, plus testele care le pinuiau (openrouter/openaiCosts/soldOpenrouter/punga/vedereaDelegata/constructorFable/cursa).
+  2. **Creier Gemini-ONLY**: tipurile comune s-au mutat în `services/brainContract.ts`; `config.openrouter.*`/`config.openai.*` au dispărut — treptele sunt `config.brain.{chatDefault,workDefault,topDefault}` (env: `BRAIN_*_MODEL`; lacătul verifica-gemini rămâne verde). `chat.ts`: fără rotație/cursă/rezervă — la eșec Gemini, până la 3 reîncercări pe același creier + mesajul neutru. Orchestrator/brain/agents/manualLang/lucratori/panou/constructor-agent: toate pe Gemini (muncitorii OpenHands/aider/cline pe `gemini/...` LiteLLM).
+  3. **API-uri schimbate**: `/api/admin/brain-credit` fără câmpurile `openrouter`/`openai` (active:'gemini'); `/api/admin/finance` fără `punga`/`openrouter`/`openai`; `/api/admin/openai-costs` ȘTEARSĂ; `/api/tts/status` fără câmpul `openai`; `/api/prefs` cu `voices: []` (voce unică Chirp — picker-ul a dispărut); `/api/models/catalog` = lista fixă a treptelor Gemini.
+  4. **Frontend**: pastilele/afișajele OpenRouter+OpenAI scoase de tot (Stage/AdminPanel/adminText), toggle-ul „Use Fable 5 brain (paid)" scos (marcajul `fable-5` rămâne DOAR acceptat în API-ul workerului), `brainNotActive` zice acum „cheia Gemini" în toate limbile; pagina legală listează sub-procesatorii reali (Google Gemini/Cloud, Serper, VPS).
+  5. **Rămase (în afara sursei aplicației)**: workflow-urile `.github/workflows/vps-keys.yml` (opțiunea `openai_usage` scrie o cheie pe care n-o mai citește nimeni) și `vps-diag.yml` (un comentariu istoric) — curățare separată, nu blochează nimic; cheile `OPENROUTER_*`/`OPENAI_*` rămase în env-ul VPS-ului sunt cadavre (envCheck nu le mai listează).
 - 🗓️ **29 IUL — CREIER UNIC (ordinul lui Adrian: „un ai viu, un singur creier, fără dispecer, fără dublare"):**
   1. **GPS „pune-mă pe hartă" (PR #514, LIVE `deb12e8`, dovedit):** pe voce, `get_location` citea coordonatele reale dar NU deschidea harta → „nu a preluat GPS-ul". Acum, la coordonate reale, deschide pe monitor harta OSM cu marker (`ChatPanel` onToolCall). Dovadă: marker `openstreetmap.org/?mlat=` absent în bundle-ul `c8c0925`, prezent în `deb12e8`; hash bundle schimbat (nu phantom). Testul FINAL rămâne al ownerului (GPS-ul dispozitivului lui).
   2. **§6 vocea = același creier (branch, CI verde, NEVERIFICAT LIVE):** escaladarea `ask_brain` din voce rulează acum pe ACELAȘI orchestrator ca scrisul (`runOrchestrator` prin `services/voiceBrainTurn.ts`) — vezi valul 19 §3 (UPDATE 29 iul). Motor unic, personă unică, model unic, poarta faptei; nu mai există creier-expert separat pe voce. Rămâne „dispecer" doar modelul Realtime (urechile/gura) care decide CÂND escaladează — inerent vocii speech-to-speech; cât de mult trece prin creier e o decizie de reglaj a ownerului (viu vs. latență). Verificarea reală = testul live al ownerului pe voce.

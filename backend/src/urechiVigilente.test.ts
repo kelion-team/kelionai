@@ -153,7 +153,9 @@ describe('alerta admin: instant, pe ambele canale, anti-spam', () => {
     expect(inbox.from_name).toContain('monitor urechi Chirp')
     expect(inbox.subject).toContain('Chirp')
     expect(inbox.body).toContain('16 UNAUTHENTICATED')
-    expect(inbox.body).toContain('PLĂTITE') // the admin sees WHY it matters
+    // (3 aug — OpenAI extirpat: nu mai există ureche de rezervă plătită; alerta
+    // spune cinstit că auzul e JOS.)
+    expect(inbox.body).toContain('auzul vocal e JOS')
     expect(sendMail).toHaveBeenCalledTimes(1)
     expect(vi.mocked(sendMail).mock.calls[0][0].to).toContain('@')
   })

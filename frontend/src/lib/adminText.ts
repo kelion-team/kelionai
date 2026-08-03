@@ -56,11 +56,6 @@ export interface AdminStrings {
   payAssign: string
   payIgnore: string
   payAssignPrompt: string
-  orPillLive: string
-  orPillLow: string
-  orPillDead: string
-  oaPillLive: string
-  oaPillDead: string
   serperPillLive: string
   serperPillDead: string
   gemPillLive: string
@@ -139,11 +134,8 @@ const en: AdminStrings = {
   payAssign: 'Assign',
   payIgnore: 'Ignore',
   payAssignPrompt: 'The email of the user this payment of {amount} belongs to:',
-  orPillLive: 'OpenRouter (the central brain): ${n} real{low} · click to top up',
-  orPillLow: ' — deposit money!',
-  orPillDead: 'Cannot read the OpenRouter balance (key missing or account unreachable)',
-  oaPillLive: 'OpenAI (the voice): ${n} spent this month — measured from OpenAI’s API · click for details',
-  oaPillDead: 'Cannot read the OpenAI spend (OPENAI_USAGE_KEY missing or the read failed)',
+  // (orPill*/oaPill* removed 3 Aug — the OpenRouter/OpenAI pills died with the
+  // providers; the brain's state lives on the Gemini pill.)
   serperPillLive: 'Serper (web search): {n} real credits · click for the dashboard',
   serperPillDead: 'Cannot read the Serper credit (SERPER_API_KEY missing or the read failed)',
   gemPillLive: 'Gemini Tier 2 is live — the key is serving, so you have credit and it works. ${n} spent this month (measured). Click to see the real balance on Google’s billing page.',
@@ -212,11 +204,8 @@ const ro: AdminStrings = {
   payAssign: 'Atribuie',
   payIgnore: 'Ignoră',
   payAssignPrompt: 'Emailul userului căruia îi aparține plata de {amount}:',
-  orPillLive: 'OpenRouter (creierul central): ${n} real{low} · click pentru alimentare',
-  orPillLow: ' — depune bani!',
-  orPillDead: 'Nu pot citi soldul OpenRouter (cheie lipsă sau cont inaccesibil)',
-  oaPillLive: 'OpenAI (vocea): ${n} cheltuiți luna asta — măsurat din API-ul OpenAI · click pentru detalii',
-  oaPillDead: 'Nu pot citi cheltuiala OpenAI (OPENAI_USAGE_KEY lipsește sau citirea a picat)',
+  // (orPill*/oaPill* scoase, 3 aug — pastilele OpenRouter/OpenAI au murit odată
+  // cu furnizorii; starea creierului trăiește pe pastila Gemini.)
   serperPillLive: 'Serper (căutarea web): {n} credite reale · click pentru dashboard',
   serperPillDead: 'Nu pot citi creditul Serper (SERPER_API_KEY lipsește sau citirea a picat)',
   gemPillLive: 'Gemini Tier 2 activ — cheia servește, deci ai credit și merge. ${n} cheltuiți luna asta (măsurat). Click pentru creditul real pe pagina de facturare Google.',

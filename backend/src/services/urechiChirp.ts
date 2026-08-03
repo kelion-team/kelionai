@@ -26,9 +26,11 @@ import { sendMail } from './mail.js'
 //   2. TRANSPARENT RECONNECT — if Google still drops the stream (network,
 //      max stream lifetime), we reopen it WITHOUT telling the client. The
 //      browser never declares the ear dead for a transient cause.
-//   3. The OpenAI-ear fallback stays ONLY for real persistent errors (auth /
-//      bad key / bad config, or a storm of reconnects that exhausts the
-//      budget) — and THAT is exactly when the admin gets paged instantly.
+//   3. Doar erorile PERSISTENTE (auth / cheie / config, sau o furtună de
+//      reconectări care epuizează bugetul) închid sesiunea — și EXACT atunci
+//      adminul e anunțat instant. (Nu mai există ureche de rezervă OpenAI —
+//      extirpat, 3 aug: clientul cade pe dictarea locală / sesiunea se
+//      închide cinstit.)
 
 // 100 ms of LINEAR16 16 kHz mono digital silence = 1600 samples × 2 bytes.
 export const CADRU_LINISTE: Buffer = Buffer.alloc(3200)
@@ -76,9 +78,10 @@ export function clasificaEroareGoogle(e: unknown): CauzaChirp {
   return 'tranzitorie'
 }
 
-// Should THIS error push the client onto the paid OpenAI ears? True ONLY for
-// persistent causes (auth/config) or when the reconnect budget is exhausted.
-// An idle timeout or a transient drop must NEVER reach this — it reconnects.
+// Should THIS error close the client's Chirp session (persistent drop)? True
+// ONLY for persistent causes (auth/config) or when the reconnect budget is
+// exhausted. An idle timeout or a transient drop must NEVER reach this — it
+// reconnects. (Fără ureche de rezervă — OpenAI extirpat.)
 export function trebuieFallbackDupaEroare(
   cauza: CauzaChirp,
   reconectariInFereastra: number,
@@ -106,7 +109,7 @@ interface PulsUrechi {
   eroriTranzitorii: number
   eroriAuth: number
   eroriConfig: number
-  fallbackuri: number // how many times we pushed a client onto the PAID OpenAI ears
+  fallbackuri: number // how many times a client's Chirp session dropped persistently
   ultimaEroare: string | null
   ultimaEroareLa: number // ms epoch, 0 = never
   ultimaCaderePersistLa: number // ms epoch of the last fallback/auth/config event
@@ -186,7 +189,7 @@ export function stareUrechiChirp(acum = Date.now()): StareUrechi {
   const cadereRecenta = puls.ultimaCaderePersistLa > 0 && acum - puls.ultimaCaderePersistLa < FEREASTRA_SANATATE_MS
   const sumar =
     `${puls.streamuriDeschise} streamuri, ${puls.reconectari} reconectări transparente, ` +
-    `${puls.eroriIdle} idle-timeouturi vindecate, ${puls.fallbackuri} fallback-uri pe OpenAI` +
+    `${puls.eroriIdle} idle-timeouturi vindecate, ${puls.fallbackuri} căderi persistente` +
     (puls.ultimaEroare ? ` — ultima eroare: ${puls.ultimaEroare}` : '')
   if (!cadereRecenta) {
     return { sanatoase: true, motiv: '', sumar, ...puls, ultimaEroare: puls.ultimaEroare }
@@ -194,7 +197,7 @@ export function stareUrechiChirp(acum = Date.now()): StareUrechi {
   const motiv =
     puls.ultimaCadereCauza === 'auth' || puls.ultimaCadereCauza === 'config'
       ? `eroare persistentă de tip ${puls.ultimaCadereCauza} la Google (${puls.ultimaEroare ?? 'necunoscută'})`
-      : `furtună de erori tranzitorii nevindecabile → ${puls.fallbackuri} fallback-uri pe urechile OpenAI (plătite) — ultima: ${puls.ultimaEroare ?? 'necunoscută'}`
+      : `furtună de erori tranzitorii nevindecabile → ${puls.fallbackuri} căderi persistente (auzul vocal s-a închis) — ultima: ${puls.ultimaEroare ?? 'necunoscută'}`
   return { sanatoase: false, motiv, sumar, ...puls, ultimaEroare: puls.ultimaEroare }
 }
 
@@ -203,8 +206,8 @@ export function stareUrechiChirp(acum = Date.now()): StareUrechi {
 //   1. The Admin → Inbox tab (/api/admin/inbound reads inbound_emails): we
 //      insert the alert as a message from "Kelion — monitor urechi Chirp" →
 //      the admin SEES it the next time the tab refreshes, no email needed.
-//   2. Email to config.adminEmail — the exact pattern of alertAdminLoop /
-//      openrouterAlert, so the page reaches him even away from the panel.
+//   2. Email to config.adminEmail — the house's alerting pattern (alertAdminLoop),
+//      so the page reaches him even away from the panel.
 // ANTI-SPAM: at most one alert per cause per ALERTA_COOLDOWN_MS.
 const ultimeleAlerte = new Map<string, number>()
 
@@ -219,13 +222,13 @@ export async function alertaAdminUrechiChirp(
   ultimeleAlerte.set(cauza, acum)
 
   const stare = stareUrechiChirp(acum)
-  const subject = `⚠️ Urechile Chirp au căzut (${cauza}) — vocea e pe urechile OpenAI`
+  const subject = `⚠️ Urechile Chirp au căzut (${cauza}) — auzul vocal e JOS`
   const body =
     `Monitorul urechilor Chirp (Google STT streaming) semnalează o cădere PERSISTENTĂ.\n\n` +
     `Cauza: ${cauza}\n` +
     `Detaliu: ${detalii.slice(0, 400)}\n\n` +
     `Pulsul urechilor: ${stare.sumar}\n\n` +
-    `Până la reparare, sesiunile de voce folosesc urechile OpenAI Realtime (PLĂTITE).\n` +
+    `Până la reparare, auzul vocal e JOS (nu există ureche de rezervă — OpenAI extirpat).\n` +
     `Verifică GOOGLE_SERVICE_ACCOUNT_JSON pe VPS și jurnalul «asr-stream».\n\n` +
     `— Kelion (alertă automată, max una la ${Math.round(cooldownMs / 60000)} min pe aceeași cauză)`
 

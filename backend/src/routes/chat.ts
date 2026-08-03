@@ -42,25 +42,20 @@ import {
   cancelBuildJob,
   attachGuestPhoto,
   userKey,
-  saveKv,
 } from '../db.js'
 import { getMeserie } from '../services/meserii.js'
-import { resolveModel, resolveModelChecked, getCatalog, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, blendedPerM, classifyCost, type OrMessage, type AnthropicTool } from '../services/openrouter.js'
+import { resolveModel, taskDifficulty, ESCALATE_AT, ESCALATE_TOP_AT, hasActionIntent, type OrMessage, type AnthropicTool } from '../services/brainContract.js'
 import { stripToolMarkup, makeToolMarkupStripper } from '../services/toolMarkup.js'
 import {
   iaSlotDacaLiber,
   elibereazaSlot,
   asteaptaLaCoada,
-  poateFolosiRezerva,
   noteazaEsuare,
-  eSanatos,
-  REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from '../services/dispecer.js'
 import { runOrchestrator } from '../services/orchestrator.js'
-import { primulCastigator } from '../services/cursa.js'
-import { needsToolForAnswer, autoPreviewFrame } from '../services/monitorAutoPreview.js'
+import { autoPreviewFrame } from '../services/monitorAutoPreview.js'
 import { GEMINI_DIRECT_PREFIX, geminiDirectAvailable } from '../services/geminiDirect.js'
-import { brainComplete, describeScene } from '../services/brain.js'
+import { brainComplete } from '../services/brain.js'
 import { ruleazaPanou } from '../services/panouLucratori.js'
 import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/dynamicTools.js'
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
@@ -99,7 +94,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
-import { formatDeviceTime, utcDay } from '../services/timeContext.js'
+import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL } from '../services/brainToolDefs.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
@@ -108,22 +103,18 @@ export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
 export { CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL }
 import { latestUpdateSummary } from '../services/updates.js'
 
-// THE BRAIN — Gemini direct primar (migrarea din 3 aug), OpenRouter doar rezervă.
+// THE BRAIN — Gemini direct, UNIC (extirparea totală OpenRouter + OpenAI, 3 aug).
 // The selectable chat model is read from KV (same source as /api/models/selection):
 // the model CHOSEN by the user, otherwise the tier default. Returns NULL only if
-// NO brain exists at all (no Gemini key AND no OpenRouter key) → honest message.
+// NO brain exists at all (no Gemini key) → honest message.
 async function selectedBrainModel(
   email: string,
   text: string,
   kvRaw?: string | null,
   needsVision = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
-  // DEZLEGAT DE CHEIA OPENROUTER (agenții de debug, 3 aug: „tot chatul atârnă de
-  // config.openrouter.key deși creierul e Gemini — scoaterea cheii omoară fiecare
-  // tură"). workDefault e `google-direct/…` și resolveModel îl întoarce FĂRĂ să
-  // atingă catalogul OpenRouter, deci creierul Gemini nu are nevoie de cheia aia.
-  // Null rămâne doar pentru „chiar n-am niciun creier".
-  if (!config.openrouter.key && !geminiDirectAvailable()) return null
+  // Null doar pentru „chiar n-am niciun creier" — creierul e Gemini-only.
+  if (!geminiDirectAvailable()) return null
   let sel: { chat?: string; work?: string } = {}
   try {
     // FLUENCY (A5): the kv comes pre-read from the turn's Promise.all (no extra
@@ -1097,32 +1088,9 @@ function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   return out
 }
 
-// ── THE RESERVE PURSE (accounting) ──────────────────────────────────────────
-// Daily spend on PAID FALLBACK models (the reserve — the pool that keeps the
-// app alive when every free model is down) lives in kv_state, one counter per
-// UTC day; the owner's daily cap in rezerva:cap_zilnic (default $3). Over the
-// cap the reserve closes: turns stay on the free pool + the dispatcher's
-// queue, and systemHealth flags rezerva_plina to the owner.
-async function rezervaCheltuitaAzi(): Promise<number> {
-  const zi = utcDay()
-  const raw = await loadKv(`rezerva:zi:${zi}`).catch(() => null)
-  const n = raw ? Number(raw) : 0
-  return Number.isFinite(n) && n > 0 ? n : 0
-}
-
-async function rezervaDeschisa(): Promise<boolean> {
-  const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
-  const n = rawCap ? Number(rawCap) : NaN
-  const cap = Number.isFinite(n) && n > 0 ? n : REZERVA_CAP_ZILNIC_DEFAULT_USD
-  return poateFolosiRezerva(await rezervaCheltuitaAzi(), cap)
-}
-
-async function adaugaLaRezerva(usd: number): Promise<void> {
-  if (!(usd > 0)) return
-  const zi = utcDay()
-  const cheltuit = await rezervaCheltuitaAzi()
-  await saveKv(`rezerva:zi:${zi}`, String(cheltuit + usd)).catch(() => {})
-}
+// (PUNGA DE REZERVĂ a fost EXTIRPATĂ, 3 aug: exista doar pentru fallback-ul
+// PLĂTIT pe modele OpenRouter din rotație — rotația și furnizorul au dispărut,
+// creierul e Gemini-only. Nicio cheltuială „de rezervă" nu mai există.)
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resume a dropped reply from where it left off (mobile 3G/5G handoff). The
   // client reconnects with the Last-Event-ID it last saw and we replay the
@@ -1249,10 +1217,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const user = getSessionUser(req)
     if (!user) return reply.code(401).send({ error: 'unauthorized' })
 
-    // THE BRAIN is 100% OpenRouter (one key, GPT/Gemini/Claude — Kimi and GLM
-    // removed permanently, Jul 23-24). If the key is missing, the streaming
-    // safety net returns a clear error in the user's language — which is why
-    // there is no longer a 503 "brain_not_configured" guard here.
+    // THE BRAIN is 100% Gemini direct (extirparea OpenRouter/OpenAI, 3 aug).
+    // If the key is missing, the streaming safety net returns a clear error in
+    // the user's language — which is why there is no longer a 503
+    // "brain_not_configured" guard here.
     const rawMessages = req.body?.messages
     const image = req.body?.image
     // Multiple frames (max 4, real images only) — fall back to the singular
@@ -1316,9 +1284,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // "instant live chat"): the independent reads leave TOGETHER — every
     // separate await added another DB round trip before the first word.
     // BYOK-PROVIDER REMOVED COMPLETELY (Adrian, Jul 12: "remove the old provider
-    // completely, no patches"): the brain is 100% OpenRouter (a single key) and
-    // there is no client key anymore. All users go through the normal paywall
-    // (wallet credit).
+    // completely, no patches"): the brain is 100% Gemini direct (a single key,
+    // the owner's) and there is no client key anymore. All users go through the
+    // normal paywall (wallet credit).
     const lastForRecall = messages.at(-1)
     // FLUENCY (Jul 24 audit, A1): semantic recall could wait up to 8s for the
     // Google embedding — on the FIRST word's path. A hard 400ms deadline:
@@ -2008,8 +1976,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     const heavyTurn = brainSel?.heavy ?? false
 
     // ── SINGLE PATH: DIRECT BRAIN FOR EVERYONE ───────────────────────────────
-    // The OpenRouter orchestrator (chat/brain, with automatic escalation) answers
-
+    // The Gemini orchestrator (chat/brain, with automatic escalation) answers
     // for EVERYONE — admin, free users and paying clients (paywall guaranteed
     // above) — instantly, with all tools. The real cost is debited from paying
     // clients' credits (debitWallet at the end of the turn); the admin is exempt.
@@ -2115,18 +2082,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // provider (usage.cost).
     const usage = { usd: 0 }
 
-    // ── THE BRAIN — 100% OpenRouter (0 Kimi, 0 GLM — Adrian) ───────────────────
-    // One single brain: the model CHOSEN by the user (chat), otherwise the
-    // default GPT. All tools + persona + memory identical regardless of model;
-    // streaming → instant first word. No OpenRouter key = no brain (no Kimi/GLM
-    // safety net, removed permanently) → honest message in catch.
+    // ── THE BRAIN — 100% Gemini direct (extirparea OpenRouter/OpenAI, 3 aug) ──
+    // One single brain: the Gemini tier chosen by selectedBrainModel. All tools
+    // + persona + memory identical; streaming → instant first word. No Gemini
+    // key = no brain → honest message in catch.
     // THE TURN CLOCK (Aug 2 — the latency mission): one line at the end of the
     // turn says how long the WHOLE brain section took, on which model, in how
     // many rounds. Together with the per-round [TIMP] lines in the
     // orchestrator, a slow turn is decomposed, not guessed.
     const tCreier = Date.now()
     try {
-      if (!orChatModel) throw new Error('brain_not_configured: OPENROUTER_API_KEY missing')
+      if (!orChatModel) throw new Error('brain_not_configured: GEMINI_API_KEY missing')
       const orMsgs: OrMessage[] = [{ role: 'system', content: systemPrompt }]
       for (const p of params) {
         const role = p.role === 'assistant' ? 'assistant' : 'user'
@@ -2251,124 +2217,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         voice.feed(ackText)
         assistantText += ackText
       }
-      // GEMINI PRIMARY → NEMOTRON SECONDARY (Adrian, Jul 27): if the gemini core
-      // fails on quota/service (429/503/RESOURCE_EXHAUSTED), we do NOT kill the
-      // turn — we retry ONCE on the free secondary from OpenRouter. The retry is
-      // safe only if no text has flowed to the user yet (otherwise it would
-      // duplicate).
-      let orchestratorModel = orChatModel
-      // GEMINI PRIMARY ON THE LIGHT PATH — MEASURED, NOT GUESSED (Aug 2 probe,
-      // the REAL weather-turn payload: 16.7k-char system + 63 tools):
-      //   google-direct/gemini-2.5-flash   1.2s round 1 (correct tool call) + 1.0s round 2
-      //   nvidia/nemotron-3-ultra :free    6.0s + 3.2s (correct tool call)
-      //   google/gemma-4-26b-a4b :free    22.2s (NO tool call) + 36.9s — and
-      //   live, the same day: 70s then EMPTY → [CHAT MUTE] → silent rotation.
-      // The light-turn race below has elected gemini-direct EVERY single time
-      // for chit-chat; but turns that need a tool (weather, maps, search —
-      // needsToolForAnswer) SKIP the race and were starting on the free
-      // OpenRouter pool: that is where the 38 seconds went. Now the sequential
-      // path starts where the race already finishes. The safety chain is
-      // unchanged: gemini failure → the free-pool rotation below (with the
-      // dispatcher, the failure memory and the paid reserve).
-      // NOT a demotion (iron rule §14): gemini-2.5-flash is the owner's own
-      // "primary" (Jul 27) and strictly stronger than the :free pool; heavy
-      // turns keep escalating to the work/top brain as before.
-      if (!heavyTurn && geminiDirectAvailable()) {
-        const geminiLight = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-        if (eSanatos(geminiLight)) orchestratorModel = geminiLight
-        // GEMINI JOS → REZERVA RAPIDĂ nemotron (Adrian, 3 aug), nu gemma lent:
-        // și calea secvențială (turele cu unelte) pornește pe rezerva rapidă.
-        else if (config.openrouter.topDefault.endsWith(':free') && eSanatos(config.openrouter.topDefault))
-          orchestratorModel = config.openrouter.topDefault
-      }
-      // ── WHEN THE BRAIN IS BLIND, SIGHT IS DELEGATED (Adrian, Jul 31) ───────
-      //
-      // Him: "Nemotron 3 Ultra 550B remains, who does the seeing?"
-      //
-      // Ultra is the most capable free brain measured (550B, 1M context, tools)
-      // and it is BLIND. Until today, that removed it completely from the list —
-      // one single model had to do both thinking and seeing.
-      //
-      // Now: if THIS turn has an image (pasted photo or camera frame) and the
-      // chosen brain cannot see, the turn goes to a model that sees. Only the
-      // turn with a photo. The rest stay on the chosen brain, with all its power.
-      //
-      // It is done ONLY when there really is an image — otherwise we would
-      // silently lower every turn to a smaller model, exactly "shortchanging the
-      // owner without telling him" (iron rule §14).
-      // ── SIGHT PASSES THROUGH THE BRAIN, NOT INSTEAD OF IT (Adrian, Jul 31) ─
-      //
-      // Him: "route both voice and sight through the brain".
-      //
-      // The first variant (an hour ago) moved the WHOLE turn with a photo to the
-      // model that sees. Meaning on every photo, the chosen brain — 550B — was
-      // BYPASSED, and a 26B model carried the turn. The eyes ended up deciding
-      // too.
-      //
-      // Now: the eyes DESCRIBE, the brain DECIDES. The sighted model looks at
-      // the image and writes what is there; the description enters the
-      // conversation as text, and the turn stays on the chosen brain, with all
-      // its tools. A single brain, exactly like §6 in AI-HANDOFF ("single brain")
-      // — sight becomes one of its senses, not a replacement.
-      //
-      // The image blocks are removed from what is sent onward: a blind model
-      // either ignores them or fails on them. The description replaces them.
-      //
-      // GATE PE `turnHasImage`, NU pe „camera pornită" (Adrian, 3 aug — latența
-      // „ULTRA enorm"): înainte, condiția era `image || camFrames.length > 0`, care
-      // e ADEVĂRATĂ pe ORICE tură cu camera pornită, chiar dacă userul n-a cerut
-      // nimic vizual → pasul de descriere (pe un model lent) rula ~11s DEGEABA pe
-      // fiecare tură (măsurat: total 12356ms cu creierul real doar 1077ms).
-      // `turnHasImage` (setat sus, la 1756) e ADEVĂRAT doar când chiar s-a atașat
-      // o imagine (poză încărcată SAU cameră + intenție vizuală VISION_INTENT) —
-      // deci descrierea rulează exact când e nevoie, nu pe fiecare tură.
-      if (turnHasImage) {
-        // VEDEREA NATIVĂ GEMINI (agenții de debug, 3 aug — 2 agenți independent):
-        // `google-direct/…` NU e în catalogul OpenRouter, deci vechiul test îl
-        // declara ORB pe fiecare tură → poza era descrisă de un model străin
-        // (lent) în loc să ajungă nativ la creier. Gemini 2.5 vede nativ:
-        // toGeminiPayload duce blocurile image_url (data-URI) ca inline_data.
-        const cat = await getCatalog().catch(() => null)
-        const vedeAcum =
-          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ||
-          (cat?.chat.some((m) => m.id === orchestratorModel && m.vision !== false) ?? false)
-        if (!vedeAcum) {
-          const poza = image ?? camFrames[camFrames.length - 1]
-          const descriere = poza
-            ? await describeScene(poza, lastUserText || undefined, (usd) => { usage.usd += usd }).catch(() => '')
-            : ''
-          // Remove the images from the conversation and leave the description
-          // in their place.
-          for (const m of orMsgs) {
-            if (!Array.isArray(m.content)) continue
-            const doarText = (m.content as Array<Record<string, unknown>>)
-              .filter((p) => p.type === 'text')
-              .map((p) => String(p.text ?? ''))
-              .join('\n')
-            m.content = doarText || '(imagine)'
-          }
-          if (descriere.trim()) {
-            orMsgs.push({
-              role: 'user',
-              content: `[VEDEREA TA — te-ai uitat chiar acum prin cameră/la poza trimisă și ai văzut asta:]\n${descriere.trim()}\n[Răspunde ca și cum ai văzut tu; nu spune că ți-a descris altcineva.]`,
-            })
-            console.log(`[brain] ${orchestratorModel} cannot see → described the image and handed it to the brain (${descriere.length} chars)`)
-          } else {
-            // Rule 1: absence is declared, not hidden. The brain must know there
-            // is an image it COULD NOT see, not stay silent about it.
-            orMsgs.push({
-              role: 'user',
-              content: '[VEDEREA TA a eșuat: există o imagine, dar n-am putut s-o citesc. Spune-i omului sincer că nu poți vedea imaginea acum — nu inventa ce e în ea.]',
-            })
-            console.error('[brain] the turn has an image, the brain is blind, and the description failed')
-          }
-        }
-      }
+      // GEMINI-ONLY (3 aug — extirparea totală OpenRouter): nu mai există niciun
+      // „secundar" pe alt furnizor. Modelul turei e treapta Gemini aleasă de
+      // selectedBrainModel; pe tura ușoară e deja gemini-2.5-flash (măsurat pe
+      // payload-ul real: 1.2s runda 1 + 1.0s runda 2).
+      const orchestratorModel = orChatModel
+      // ── VEDEREA E NATIVĂ (3 aug — extirparea OpenRouter a îngropat și
+      // „vederea delegată") ────────────────────────────────────────────────────
+      // Orice creier al aplicației e Gemini (google-direct/*), care VEDE nativ:
+      // toGeminiPayload duce blocurile image_url (data-URI) ca inline_data.
+      // Pasul de „descriere pentru creierul orb" (describeScene pe un model
+      // străin, lent) a dispărut odată cu modelele oarbe din pool-ul OpenRouter.
       // AUDIO NATIV → CREIER (Adrian, 3 aug): atașăm vocea BRUTĂ a frazei la
-      // ultimul mesaj user, ca bloc `audio_url`, DUPĂ pasul de vedere (ca să nu
-      // fie scoasă odată cu imaginile). Gemini o aude nativ (toGeminiPayload →
-      // inline_data audio); pe OpenRouter e scoasă (faraAudioParts) și rămâne
-      // textul (transcriptul Chirp) ca rezervă — același orMsgs, creier unic.
+      // ultimul mesaj user, ca bloc `audio_url`. Gemini o aude nativ
+      // (toGeminiPayload → inline_data audio); transcriptul Chirp rămâne în
+      // mesaj ca text — același orMsgs, creier unic.
       if (audio) {
         for (let i = orMsgs.length - 1; i >= 0; i--) {
           if (orMsgs[i].role !== 'user') continue
@@ -2443,215 +2306,59 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           },
         },
       )
-      // THE SILENT FREE ROTATION (Adrian, Aug 1): every user pays credits; the
-      // app serves turns on free models for margin — but a rate-limited or
-      // EMPTY free model must NEVER surface as a user message. The turn
-      // silently walks the LIVE catalog's free pool until one answers; only if
-      // the whole pool fails does the human hear a neutral "try again".
-      // THE RESERVE PURSE (Adrian, Aug 1 — „ce se întâmplă când vor fi zeci
-      // sau sute?": approved „da"): when EVERY free model is down in the same
-      // minute, the turn falls through to the CHEAPEST paid models in the
-      // catalog (class „cheap" — pennies per turn, paid from the common
-      // purse). The user never sees a model name; the app simply never stops.
-      // THE ORDERED CANDIDATE LIST — one single ordering used by the rotation
-      // AND by the dispatcher's queue: the free pool in catalog order, then
-      // the cheapest paid (the reserve), gated by the purse threshold: over
-      // the daily cap the reserve closes and turns stay on the free pool.
-      const listaCandidati = async (tried: Set<string>): Promise<string[]> => {
-        const cat = await getCatalog().catch(() => null)
-        const chat = cat?.chat ?? []
-        const ids: string[] = []
-        for (const m of chat) if (m.id.endsWith(':free') && !tried.has(m.id)) ids.push(m.id)
-        if (await rezervaDeschisa()) {
-          const cheapPaid = chat
-            .filter((m) => !m.id.endsWith(':free') && !tried.has(m.id) && classifyCost(m.promptPerM, m.completionPerM) === 'cheap')
-            .sort((a, b) => blendedPerM(a.promptPerM, a.completionPerM) - blendedPerM(b.promptPerM, b.completionPerM))
-          for (const m of cheapPaid) ids.push(m.id)
-        }
-        // FAILURE MEMORY (Adrian, Aug 1 — „timpi sunt exceptionali de mari"):
-        // healthy models first, the recently-failed at the BACK of the line —
-        // a dead model stops eating everyone's seconds, turn after turn.
-        const sanatosi = ids.filter((id) => eSanatos(id))
-        const bolnavi = ids.filter((id) => !eSanatos(id))
-        return [...sanatosi, ...bolnavi]
-      }
-      const nextCandidate = async (tried: Set<string>): Promise<string | null> =>
-        (await listaCandidati(tried))[0] ?? null
-      const triedModels = new Set<string>()
+      // ── GEMINI-ONLY, FĂRĂ ROTAȚIE PE ALȚI FURNIZORI (3 aug — extirparea
+      // totală OpenRouter, ordinul repetat al ownerului) ────────────────────────
+      // Vechea plasă (rotația tăcută pe pool-ul :free din catalogul OpenRouter +
+      // rezerva plătită + cursa pe 3 modele) A DISPĂRUT cu totul: nu mai există
+      // alt furnizor pe care să cadă tura. Ce rămâne: până la 3 încercări pe
+      // ACELAȘI creier Gemini (slotul + coada dispecerului absorb aglomerația;
+      // eșecurile se notează pentru telemetrie), iar dacă toate pică, tura se
+      // încheie CINSTIT cu mesajul neutru din catch — niciodată pe alt creier.
       let r: Awaited<ReturnType<typeof runBrainOnce>> | null = null
       let lastBrainErr: unknown = null
-      // THE INITIAL MODEL — the reserve is counted only when the turn was
-      // SERVED by a paid fallback it reached through rotation (not the user's
-      // own tier/quality choice).
-      const modelInitial = orchestratorModel
-      // THE LIGHT-TURN RACE (Adrian, Aug 1 — „timpi sunt exceptionali de mari
-      // pentru a atrage useri"): chit-chat turns (no image, no action) RACE
-      // the first 3 healthy FREE models in PARALLEL and the first good answer
-      // wins — the 40-second one-by-one walk through dead models dies here.
-      // Racers get NO tools: chit-chat needs none, and parallel tool calls
-      // could double-execute deeds. A racer that fails or answers empty is
-      // marked sick (failure memory) so the NEXT user doesn't pay its seconds
-      // again. If nobody wins, the classic sequential path below takes over
-      // (with tools, the reserve and the queue).
-      // TOTUL PE MONITOR (Adrian, Aug 2, 10:13 — his weather question at 10:04
-      // showed ONLY the avatar): the race offers NO tools, so a turn that
-      // needs live data (weather/map/video/search/a pasted URL) answered from
-      // stale model memory AND the monitor could never light up — get_weather
-      // was never callable, no screen_url, no {monitor} frame. Those turns now
-      // SKIP the race and take the sequential path WITH tools below. Chit-chat
-      // keeps the race's speed; questions keep the truth and the visual.
-      // ADMINUL NU TRECE PRIN CURSA FĂRĂ UNELTE (Adrian, 3 aug: „preia sarcina și
-      // crapă" + „nu folosește căutările Serper"). Cauza: detectorul de unelte
-      // (needsToolForAnswer) rata fraze („starea vremii") → turele TALE intrau pe
-      // cursă FĂRĂ unelte → Kelion zicea că face, dar nu putea chema get_weather/
-      // căutarea. Regula #14 (creierul ownerului = agent COMPLET, cu toate uneltele):
-      // pe drumul adminului mergem MEREU pe calea cu unelte + poarta faptei. Cu
-      // Gemini Tier 2 (~1,5s/rundă) nu se pierde viteză. Cursa rămâne pentru userii
-      // publici pe chit-chat.
-      if (!isAdminUser && !heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
-        const geminiLightRace = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
-        // REZERVA RAPIDĂ (Adrian, 3 aug: „fă cota de rezervă nemotron rapid"):
-        // când Gemini e JOS (cotă gratuită epuizată — 429 „exceeded your quota"),
-        // cursa să prindă ÎNTÂI nemotron (măsurat 6s), NU gemma (măsurat 22-37s pe
-        // payload real → exact cei 27s ai tăi). Pus imediat după Gemini, înaintea
-        // restului pool-ului free; dedus cu Set ca să nu curgă de două ori.
-        const rezervaRapida = config.openrouter.topDefault
-        const candidatiFree = (await listaCandidati(triedModels)).filter(
-          (id) => id.endsWith(':free') && eSanatos(id),
-        )
-        const concurenti = [
-          ...new Set([
-            // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step): Google's own API on
-            // the free key — real Romanian, 1-3s. When healthy it wins every time.
-            ...(geminiDirectAvailable() && eSanatos(geminiLightRace) ? [geminiLightRace] : []),
-            // Rezerva rapidă: nemotron free, înaintea pool-ului lent.
-            ...(rezervaRapida.endsWith(':free') && eSanatos(rezervaRapida) ? [rezervaRapida] : []),
-            ...candidatiFree,
-          ]),
-        ].slice(0, 3)
-        for (const id of concurenti) triedModels.add(id)
-        interface Castigator { id: string; rez: Awaited<ReturnType<typeof runBrainOnce>>; curat: string }
-        const curse = concurenti.map(async (id): Promise<Castigator | null> => {
-          if (!iaSlotDacaLiber(id)) return null // busy — racing is about speed, no queue here
-          try {
-            const rez = await runOrchestrator(id, orMsgs, [], execTool, { maxTokens: 800 })
-            const curat = stripToolMarkup(rez.text, undefined, toolNamesThisTurn).trim()
-            if (!curat) {
-              noteazaEsuare(id)
-              console.error(`[CURSA] ${id} a răspuns gol — marcat bolnav`)
-              return null
-            }
-            return { id, rez, curat }
-          } catch (e) {
-            noteazaEsuare(id)
-            console.error(`[CURSA] ${id} a picat (${String(e).slice(0, 80)}) — marcat bolnav`)
-            return null
-          } finally {
-            elibereazaSlot(id)
-          }
-        })
-        const tCursa = Date.now()
-        // FIRST WINNER WINS (Aug 2 — measured live: Promise.all made the user
-        // wait for the SLOWEST racer, 18.6s for a chit-chat turn, even though
-        // gemini-direct had answered in 2-4s). primulCastigator resolves on
-        // the first GOOD answer; the losers keep running in the background
-        // (their slots release in `finally`, their failures still get marked).
-        const castigator = await primulCastigator(curse)
-        if (castigator) {
-          orchestratorModel = castigator.id
-          // The winner's text flows whole — chit-chat is short, and the
-          // seconds the race saved beat the word-by-word drip.
-          textFlowed = true
-          noteFirstWord()
-          reply.raw.write(castigator.curat)
-          voice.feed(castigator.curat)
-          r = castigator.rez
-          console.log(`[CURSA] câștigător: ${castigator.id} din ${concurenti.length} concurenți, ${Date.now() - tCursa}ms`)
-        }
-      }
-      // THE DISPATCHER (Adrian, Aug 1 — „să scaleze pe o pungă comună"): a
-      // model never gets more simultaneous calls / starts-per-minute than it
-      // can serve. When every candidate is busy, the turn WAITS in line
-      // instead of dying — the user only sees „composing" a few seconds
-      // longer. Slot release is guaranteed on every path.
+      const MAX_INCERCARI_GEMINI = 3
       let slotTinut: string | null = null
       try {
-        for (let attempt = 0; attempt < 6 && !r; attempt++) {
-          // Take a slot on the chosen model; if it's busy, queue for ANY
-          // untried candidate and switch to whichever frees up first.
+        for (let attempt = 0; attempt < MAX_INCERCARI_GEMINI && !r; attempt++) {
+          // Take a slot on the Gemini model; if it's busy, wait in the
+          // dispatcher's queue for a slot on the SAME model.
           if (!iaSlotDacaLiber(orchestratorModel)) {
-            const tinut = await asteaptaLaCoada(() => listaCandidati(triedModels), triedModels)
+            const tinut = await asteaptaLaCoada(async () => [orchestratorModel], new Set<string>())
             if (!tinut) break // queue full or waited too long — the honest error below
-            orchestratorModel = tinut
           }
           slotTinut = orchestratorModel
-          triedModels.add(orchestratorModel)
           try {
             const cand = await runBrainOnce()
-            // A reply made ONLY of fake tool markup counts as EMPTY — rotate to
-            // the next free model instead of showing/saying garbage or nothing.
-            // `sawVisible` here = a SURFACE a tool already pushed this turn
-            // (map/doc/build frame) — the instant ack no longer flips it
-            // (conteazaCaVizibil), so "Am preluat sarcina" + an EMPTY brain
-            // answer can never again close the turn on the spot.
+            // A reply made ONLY of fake tool markup counts as EMPTY — retry
+            // instead of showing/saying garbage or nothing. `sawVisible` here =
+            // a SURFACE a tool already pushed this turn (map/doc/build frame) —
+            // the instant ack no longer flips it (conteazaCaVizibil).
             if (stripToolMarkup(cand.text, undefined, toolNamesThisTurn).trim() || textFlowed || sawVisible) { r = cand; break }
-            // A brain that "succeeds" but says nothing must not close the turn
-            // mute — rotate silently to the next free model.
-            console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — silent rotation`)
+            console.error(`[CHAT MUTE] ${orchestratorModel} returned empty — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
             noteazaEsuare(orchestratorModel)
           } catch (ge) {
             lastBrainErr = ge
-            // Gemini direct: ANY failure (not only quota) falls to the free pool
-            // if no text has flowed yet (widened safety net, Jul 28 audit #1).
-            if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
-              // GEMINI A PICAT (Adrian, 3 aug: „gemini pică"). BUG reparat: după
-              // lacătul din 3 aug, `resolveModel('work', null)` întorcea TOT Gemini
-              // (workDefault=Gemini), deci „rezerva" reeșua pe același model → 6
-              // reîncercări → „Try again", fără răspuns. Acum: marcăm Gemini bolnav
-              // (cooldown) și cădem pe REZERVA FREE REALĂ (nemotron), ca userul să
-              // primească răspuns pe loc, iar Gemini revine automat după cooldown.
-              noteazaEsuare(orchestratorModel)
-              const rezerva = config.openrouter.topDefault
-              orchestratorModel = rezerva.startsWith(GEMINI_DIRECT_PREFIX)
-                ? 'nvidia/nemotron-3-ultra-550b-a55b:free'
-                : rezerva
-              console.log(`[brain] gemini a picat (${String(ge).slice(0, 80)}) → rezervă ${orchestratorModel}`)
-              continue
-            }
-            if (textFlowed) throw ge // partial text already at the user — no rotation
-            console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 80)}) — silent rotation`)
+            if (textFlowed) throw ge // partial text already at the user — no retry
+            console.error(`[brain] ${orchestratorModel} failed (${String(ge).slice(0, 120)}) — reîncercare ${attempt + 1}/${MAX_INCERCARI_GEMINI}`)
             noteazaEsuare(orchestratorModel)
           } finally {
             elibereazaSlot(slotTinut)
             slotTinut = null
           }
-          const next = await nextCandidate(triedModels)
-          if (!next) break
-          orchestratorModel = next
         }
       } finally {
         if (slotTinut) elibereazaSlot(slotTinut)
       }
-      if (!r) throw (lastBrainErr ?? new Error('brain_rotation_exhausted'))
+      if (!r) throw (lastBrainErr ?? new Error('brain_gemini_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
       assistantText += stripToolMarkup(r.text, undefined, toolNamesThisTurn)
       usage.usd += r.costUsd
-      // THE PURSE LEDGER: a turn served by a PAID FALLBACK (reached through
-      // rotation, not by choice) spends from the reserve — count it against
-      // the daily cap.
-      if (orchestratorModel !== modelInitial && !orchestratorModel.endsWith(':free'))
-        void adaugaLaRezerva(r.costUsd)
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
       // because recordCost was not called anywhere on the chat path.
-      // PASTILA GEMINI (Adrian, 3 aug): apelurile google-direct (creierul de lucru,
-      // Gemini Tier 2) se contabilizează separat, sub 'gemini', ca să alimenteze
-      // pastila din bară. Restul creierului (OpenRouter) rămâne 'chat'.
-      void recordCost(
-        user.email,
-        orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ? 'gemini' : 'chat',
-        r.costUsd,
-      )
+      // PASTILA GEMINI (Adrian, 3 aug): tot creierul e google-direct → totul se
+      // contabilizează sub 'gemini' și alimentează pastila din bară.
+      void recordCost(user.email, 'gemini', r.costUsd)
       const totalMs = Date.now() - tCreier
       console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
       // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.

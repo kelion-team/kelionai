@@ -14,7 +14,7 @@ import { uneltele } from '../services/autonomie.js'
 // deploy/constructor-worker.sh (cron every 2 min, flock, short jobs with
 // timeouts — NOT permanent daemons, the lesson of the old ecosystem that
 // burned the subscription) calls deploy/constructor-agent.mjs — the agentic
-// loop on the OpenRouter API (pay-per-use, hard caps), which works in a
+// loop on the Gemini API (the owner's key, hard caps), which works in a
 // separate clone (the workshop), runs build + tests and opens the PR. THE
 // MERGE STAYS WITH ADRIAN (his rule, Jul 27: "me doing the merge is ok").
 export async function constructorRoutes(app: FastifyInstance): Promise<void> {
@@ -101,9 +101,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // THE BRAIN USED (Adrian, Aug 2: "Everything FREE. The admin can EXPRESSLY
     // request the paid Fable 5 brain for the CONSTRUCTOR only"): only two
     // honest labels are accepted — 'fable-5' (paid, expressly marked in the
-    // order) or 'free'. The cost is the one MEASURED by the worker from
-    // OpenRouter's usage.cost; anything non-numeric/negative is dropped, so
-    // the Money views never show a fabricated figure.
+    // order — istoric; agentul e Gemini-only din 3 aug) or 'free'. The cost is
+    // the one MEASURED by the worker from the provider's usage; anything
+    // non-numeric/negative is dropped, so the Money views never show a
+    // fabricated figure. Marcajul 'fable-5' rămâne ACCEPTAT în API (un worker
+    // vechi nu trebuie să pice pe raport), dar UI-ul nu-l mai oferă.
     const brain = ['fable-5', 'free'].includes(String(req.body?.brain)) ? String(req.body?.brain) : undefined
     const costRaw = Number(req.body?.costUsd)
     const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
@@ -133,7 +135,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     // cost — measured, or honestly "not reported by the provider".
     const linieCreier =
       brain === 'fable-5'
-        ? `Creier: Fable 5 (PLĂTIT, cerut expres în ordin) — ${costUsd != null ? `cost măsurat OpenRouter: $${costUsd.toFixed(4)}` : 'cost neraportat de OpenRouter'}.\n\n`
+        ? `Creier: Fable 5 (marcaj istoric — agentul e Gemini-only) — ${costUsd != null ? `cost măsurat: $${costUsd.toFixed(4)}` : 'cost neraportat de furnizor'}.\n\n`
         : brain === 'free'
           ? `Creier: gratuit (:free).\n\n`
           : ''

@@ -57,12 +57,12 @@ export function realtimeInstructions(lang: string, hardLock = false): string {
   return persona + guard + limba
 }
 
-/** VOCEA ALEASĂ DE ACEST OM, cu plasă de siguranță.
+/** VOCEA — UNICĂ, CHIRP (3 aug: vocile OpenAI realtime au fost extirpate).
  *
- *  Un nume necunoscut — dintr-o bază veche, dintr-o listă schimbată, sau pur și
- *  simplu gol — cade pe vocea implicită și NU e trimis nicăieri. Pură și
- *  exportată ca să fie testabilă fără rețea. (Nu mai pleacă nimic spre OpenAI;
- *  păstrată pentru voce.test.ts / voice.test.ts / realtime.test.ts.) */
-export function resolveVoice(cerut?: string | null): string {
-  return cerut && config.openai.realtimeVoices.includes(cerut) ? cerut : config.openai.realtimeVoice
+ *  Nu mai există listă de voci din care să alegi: orice cerere — nume vechi de
+ *  voce OpenAI dintr-o bază veche, gol, null — cade pe STILUL Chirp unic al
+ *  aplicației (config.ttsVoiceStyle, implicit Charon — masculin). Pură și
+ *  exportată ca să fie testabilă fără rețea. */
+export function resolveVoice(_cerut?: string | null): string {
+  return config.ttsVoiceStyle
 }
