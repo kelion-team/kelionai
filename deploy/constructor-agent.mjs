@@ -46,6 +46,14 @@ try {
 const BRIDGE = env.BRIDGE_SECRET ?? ''
 const ORKEY = env.OPENROUTER_API_KEY ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
+// GEMINI DIRECT — the constructor's PRIMARY brain (owner's paid Tier 2 key from
+// AI Studio, already present in kelionai.env). When the key is set, `llm()` calls
+// Gemini FIRST; the free OpenRouter ladder below stays UNTOUCHED as the automatic
+// fallback (Gemini fails → free ladder), so the constructor is never worse than
+// before. Empty key ⇒ behavior is exactly as it was (free ladder only). Request/
+// response shaping mirrors backend/src/services/geminiDirect.ts. See llmGemini().
+const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
+const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
 // DOAR GRATUIT, STRUCTURAL (Adrian, 27 iul: „doar gratuit... să nu mai poată
 // reveni vreodată" arderea de bani). Implicitul e un model :free; iar dacă
 // cineva pune totuși un model PLĂTIT în env, constructorul REFUZĂ să pornească
@@ -546,7 +554,160 @@ function clasificaEroare(status, text) {
 
 const LLM_ATTEMPTS = Math.max(6, MODEL_LADDER.length * 2)
 
+// ── GEMINI DIRECT — THE PRIMARY CODING BRAIN ────────────────────────────────
+// The owner's paid Gemini (Tier 2) key is the strongest model the constructor
+// can reach — above any :free OpenRouter model. So it becomes the PRIMARY: llm()
+// tries Gemini first and only drops to the free ladder if Gemini fails. The
+// request/response shaping MIRRORS backend/src/services/geminiDirect.ts
+// (toGeminiPayload / partsToResult) — same Google API, same schema cleaning —
+// but the value it returns is the SAME OpenAI-shaped object the loop in main()
+// already consumes: choices[0].message.{content,tool_calls}, usage.total_tokens,
+// modelServit.
+
+// TOOLS' JSON schema → the schema Gemini accepts: keep only the supported keys,
+// silently drop the rest (mirrors cleanSchema in geminiDirect.ts). Recurses into
+// properties/items so nested object/array parameters stay valid.
+function geminiCleanSchema(s) {
+  if (Array.isArray(s)) return s.map(geminiCleanSchema)
+  if (!s || typeof s !== 'object') return s
+  const keep = ['type', 'description', 'properties', 'required', 'items', 'enum']
+  const out = {}
+  for (const [k, v] of Object.entries(s)) {
+    if (!keep.includes(k)) continue
+    out[k] =
+      k === 'properties' && v && typeof v === 'object'
+        ? Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, geminiCleanSchema(pv)]))
+        : geminiCleanSchema(v)
+  }
+  return out
+}
+
+// OpenAI-format TOOLS → Gemini functionDeclarations: strip the `type:'function'`
+// wrapper, use the `.function` object, clean its parameters' schema.
+function geminiToolDeclarations() {
+  return [
+    {
+      functionDeclarations: TOOLS.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        parameters: geminiCleanSchema(t.function.parameters),
+      })),
+    },
+  ]
+}
+
+// The house message list (OpenAI roles) → the Gemini request body. system →
+// systemInstruction; user/assistant text → {text} parts; assistant tool_calls →
+// {functionCall:{name,args}} parts (args = the parsed JSON arguments object);
+// role:'tool' → a role:'user' content carrying {functionResponse:{name,response}}.
+// functionResponse needs the tool NAME, but a tool message only carries the id —
+// we rebuild the id→name map from the assistant's earlier tool_calls, exactly
+// like toGeminiPayload does.
+function toGeminiBody(messages) {
+  const sys = []
+  const contents = []
+  const idToName = new Map()
+  for (const m of messages) for (const c of m.tool_calls ?? []) idToName.set(c.id, c.function?.name)
+  for (const m of messages) {
+    if (m.role === 'system') {
+      sys.push(typeof m.content === 'string' ? m.content : JSON.stringify(m.content))
+      continue
+    }
+    if (m.role === 'tool') {
+      const name = idToName.get(m.tool_call_id ?? '') ?? 'tool'
+      contents.push({ role: 'user', parts: [{ functionResponse: { name, response: { result: String(m.content ?? '') } } }] })
+      continue
+    }
+    const role = m.role === 'assistant' ? 'model' : 'user'
+    const parts = []
+    if (typeof m.content === 'string' && m.content) parts.push({ text: m.content })
+    for (const c of m.tool_calls ?? []) {
+      let args = {}
+      try {
+        args = JSON.parse(c.function?.arguments || '{}')
+      } catch {
+        /* corrupted arguments — we go with {} (mirrors geminiDirect) */
+      }
+      parts.push({ functionCall: { name: c.function?.name, args } })
+    }
+    if (!parts.length) continue // Gemini rejects a content with no parts
+    contents.push({ role, parts })
+  }
+  const body = { contents, tools: geminiToolDeclarations(), toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }
+  if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
+  return body
+}
+
+// The Gemini call itself. Returns the OpenAI-shaped object main() expects. On ANY
+// failure — non-2xx, network, broken JSON, empty/blocked 200 — it THROWS an error
+// tagged {clasa:'furnizor'}, so llm() treats it like a transient provider outage
+// and falls through to the free OpenRouter ladder below. That is the whole safety
+// net: Gemini is a pure upgrade — when it works we get the best brain, when it
+// doesn't we are exactly where we were before.
+async function llmGemini(messages) {
+  let r
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
+      body: JSON.stringify(toGeminiBody(messages)),
+      // Bounded by the run budget, like the OpenRouter path — a hung endpoint
+      // must never keep the job past constructor-worker.sh's hard timeout.
+      signal: AbortSignal.timeout(Math.max(30_000, Math.min(120_000, ramase()))),
+    })
+  } catch (e) {
+    throw Object.assign(new Error(`Gemini rețea: ${String(e?.message ?? e).slice(0, 200)}`), { clasa: 'furnizor' })
+  }
+  const text = await r.text().catch(() => '')
+  if (!r.ok) throw Object.assign(new Error(`Gemini ${r.status}: ${text.slice(0, 300)}`), { clasa: 'furnizor' })
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw Object.assign(new Error(`Gemini JSON rupt (${text.length} caractere)`), { clasa: 'furnizor' })
+  }
+  // candidates[0].content.parts → OpenAI message shape. No candidate at all
+  // (safety block / empty 200) is treated as a provider hiccup → fall back.
+  const parts = parsed?.candidates?.[0]?.content?.parts
+  if (!Array.isArray(parts)) throw Object.assign(new Error('Gemini fără candidați (200 gol/blocat)'), { clasa: 'furnizor' })
+  let content = ''
+  const toolCalls = []
+  for (const p of parts) {
+    if (typeof p?.text === 'string') content += p.text
+    if (p?.functionCall)
+      toolCalls.push({
+        id: `call_${toolCalls.length}`,
+        type: 'function',
+        function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+      })
+  }
+  // Empty 200 (no text, no tool call) — Gemini can do this under load; mirror the
+  // OpenRouter empty-response handling below and fall back instead of burning a
+  // sterile turn on nothing.
+  if (!content.trim() && !toolCalls.length)
+    throw Object.assign(new Error('Gemini: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
+  const message = { role: 'assistant', content }
+  if (toolCalls.length) message.tool_calls = toolCalls
+  const total = Number(parsed?.usageMetadata?.totalTokenCount)
+  return {
+    choices: [{ message }],
+    usage: { total_tokens: Number.isFinite(total) ? total : 0 },
+    modelServit: `google-direct/${GEMINI_MODEL}`,
+  }
+}
+
 async function llm(messages) {
+  // GEMINI FIRST (the owner's Tier 2 key) — the primary brain. On ANY failure
+  // llmGemini throws (tagged {clasa:'furnizor'}) and we fall straight through to
+  // the free OpenRouter ladder below, which is left UNCHANGED. With no key, this
+  // whole block is skipped and behavior is byte-for-byte what it was before.
+  if (GEMINI_KEY) {
+    try {
+      return await llmGemini(messages)
+    } catch (e) {
+      log(`Gemini (primar) a picat [${e?.clasa ?? 'furnizor'}]: ${String(e?.message ?? e).slice(0, 120)} — cad pe scara gratuită OpenRouter`)
+    }
+  }
   let lastErr = ''
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     const model = modelCurent()

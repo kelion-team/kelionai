@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 
-// The image cost must travel WITH the image: openrouterImage already returns
-// the REAL usage.cost — the test pins down that generateImage no longer drops
-// it on the floor (it used to, and the chat route charged a hand-typed $0.04
-// flat rate instead of the measured figure).
-const openrouterImage = vi.fn()
-vi.mock('./openrouter.js', () => ({ openrouterImage }))
+// Image generation runs on the owner's Gemini key now (services/geminiDirect.ts
+// geminiImage), OpenRouter removed. The cost must still travel WITH the image:
+// these tests pin down that generateImage forwards the generator's result
+// faithfully — the bytes get stored, the mime and costUsd are passed through,
+// and an error propagates as-is without an invented cost.
+const geminiImage = vi.fn()
+vi.mock('./geminiDirect.js', () => ({ geminiImage }))
 vi.mock('../db.js', () => ({
   saveGeneratedImage: vi.fn(async () => {}),
   loadGeneratedImage: vi.fn(async () => null),
@@ -13,9 +14,11 @@ vi.mock('../db.js', () => ({
 
 const { generateImage } = await import('./image.js')
 
-describe('image.ts — costul REAL al generării ajunge la apelant', () => {
-  it('costUsd din răspunsul OpenRouter NU se mai pierde', async () => {
-    openrouterImage.mockResolvedValue({
+describe('image.ts — rezultatul generării ajunge la apelant', () => {
+  it('costUsd din răspunsul generatorului NU se mai pierde', async () => {
+    // Non-zero on purpose: proves generateImage forwards whatever cost the
+    // generator reports (it used to drop it, and the route charged a flat rate).
+    geminiImage.mockResolvedValue({
       mime: 'image/png',
       buf: Buffer.from('fakepng'),
       costUsd: 0.0123,
@@ -29,16 +32,16 @@ describe('image.ts — costul REAL al generării ajunge la apelant', () => {
     }
   })
 
-  it('providerul NU detaliază costul → costUsd 0, iar apelantul cade pe estimare etichetată', async () => {
-    openrouterImage.mockResolvedValue({ mime: 'image/png', buf: Buffer.from('x'), costUsd: 0 })
+  it('generatorul NU raportează cost → costUsd 0, iar apelantul cade pe estimare etichetată', async () => {
+    geminiImage.mockResolvedValue({ mime: 'image/png', buf: Buffer.from('x'), costUsd: 0 })
     const r = await generateImage('o pisică')
     expect('error' in r).toBe(false)
     if (!('error' in r)) expect(r.costUsd).toBe(0)
   })
 
-  it('eroarea providerului se propagă ca atare, fără cost inventat', async () => {
-    openrouterImage.mockResolvedValue({ error: 'image_http_429' })
+  it('eroarea generatorului se propagă ca atare, fără cost inventat', async () => {
+    geminiImage.mockResolvedValue({ error: 'image_not_configured' })
     const r = await generateImage('ceva')
-    expect(r).toEqual({ error: 'image_http_429' })
+    expect(r).toEqual({ error: 'image_not_configured' })
   })
 })

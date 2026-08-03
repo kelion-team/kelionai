@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import type { AnthropicTool, BrainCallOpts, OrChatResult, OrMessage, OrToolCall } from './openrouter.js'
+import type { AnthropicTool, BrainCallOpts, OrChatResult, OrImage, OrMessage, OrToolCall } from './openrouter.js'
 import { readSSE } from './sse.js'
 
 // ── THE MAIN BRAIN: GEMINI DIRECT FROM GOOGLE (Adrian, 27 Jul: "switch to
@@ -301,4 +301,86 @@ export async function geminiDirectChatStream(
  *  the SECONDARY (nemotron :free through OpenRouter). */
 export function isGeminiQuotaError(e: unknown): boolean {
   return /gemini (429|500|503)|RESOURCE_EXHAUSTED|quota/i.test(String(e))
+}
+
+// ── IMAGE through GEMINI DIRECT (the owner's Gemini key; OpenRouter removed) ──
+// Adrian, 3 aug: image generation moves off OpenRouter onto the SAME Google key
+// that powers the brain (config.geminiKey) — total OpenRouter removal. Two
+// endpoints are tried in order and the FIRST that returns real image bytes wins:
+//   1) Imagen predict     — bytes at predictions[0].bytesBase64Encoded
+//   2) Gemini image model — bytes inline at candidates[0].content.parts[].inlineData.data
+// Same return shape as openrouterImage (OrImage): mime + bytes, so image.ts's
+// storage/URL logic is unchanged. costUsd is 0 — these endpoints report no
+// per-call cost, and an unmeasured number would be a fabrication (rule no. 1).
+const IMAGEN_MODEL = 'imagen-3.0-generate-002'
+const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image'
+
+/** Imagen's predict endpoint. Bytes on success, null on any miss (missing key
+ *  is handled by the caller). */
+async function imagenPredict(prompt: string): Promise<{ mime: string; buf: Buffer } | null> {
+  let r: Response
+  try {
+    r = await fetch(`${G_BASE}/models/${IMAGEN_MODEL}:predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
+      signal: AbortSignal.timeout(120_000),
+    })
+  } catch {
+    return null
+  }
+  if (!r.ok) return null
+  const j = (await r.json().catch(() => ({}))) as {
+    predictions?: { bytesBase64Encoded?: string; mimeType?: string }[]
+  }
+  const p = j.predictions?.[0]
+  if (!p?.bytesBase64Encoded) return null
+  return { mime: p.mimeType || 'image/png', buf: Buffer.from(p.bytesBase64Encoded, 'base64') }
+}
+
+/** The Gemini image model (generateContent, IMAGE modality). The bytes arrive
+ *  inline in a part; REST responses use camelCase `inlineData`, but we accept
+ *  the snake_case form too so a shape change can't silently blank us out. */
+async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: Buffer } | null> {
+  let r: Response
+  try {
+    r = await fetch(`${G_BASE}/models/${GEMINI_IMAGE_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    })
+  } catch {
+    return null
+  }
+  if (!r.ok) return null
+  const j = (await r.json().catch(() => ({}))) as {
+    candidates?: { content?: { parts?: {
+      inlineData?: { data?: string; mimeType?: string }
+      inline_data?: { data?: string; mime_type?: string }
+    }[] } }[]
+  }
+  for (const part of j.candidates?.[0]?.content?.parts ?? []) {
+    const data = part.inlineData?.data ?? part.inline_data?.data
+    if (data) {
+      const mime = part.inlineData?.mimeType ?? part.inline_data?.mime_type ?? 'image/png'
+      return { mime, buf: Buffer.from(data, 'base64') }
+    }
+  }
+  return null
+}
+
+/** Image generation on the owner's Gemini key. Tries Imagen, then the Gemini
+ *  image model, and returns the FIRST that yields bytes — in the SAME shape as
+ *  openrouterImage (OrImage) so image.ts is unchanged. costUsd is always 0
+ *  (these endpoints report no measured cost). All-fail → the OrImage error
+ *  shape, never an invented success. */
+export async function geminiImage(prompt: string): Promise<OrImage> {
+  if (!config.geminiKey) return { error: 'image_not_configured' }
+  const hit = (await imagenPredict(prompt)) ?? (await geminiImageContent(prompt))
+  if (!hit) return { error: 'image_not_configured' }
+  return { mime: hit.mime, buf: hit.buf, costUsd: 0 }
 }

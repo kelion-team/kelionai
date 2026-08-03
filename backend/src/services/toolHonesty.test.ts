@@ -15,13 +15,14 @@
 //     mistaken for a complete one.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// No keys, no network: translateText must take the OpenRouter path, which we
-// mock below. google.ts only reads config inside functions, so a minimal
-// shape is enough.
+// No network: google.ts only reads config inside functions, so a minimal shape
+// is enough. serperKey is SET so youtube_search takes the Serper path (its
+// /videos call is mocked below); geminiKey is empty so translateText takes the
+// OpenRouter path (also mocked).
 vi.mock('../config.js', () => ({
   config: {
     google: { clientId: '', clientSecret: '' },
-    serperKey: '',
+    serperKey: 'test-serper-key',
     geminiKey: '',
     geminiModel: 'test-model',
     openrouter: { key: 'test-key', searchModel: 'test-search-model' },
@@ -108,28 +109,42 @@ describe('extractYoutubeCandidates — only real YouTube links, deduplicated', (
 })
 
 describe('youtubeSearch — backend-down is NOT "no videos found"', () => {
-  beforeEach(() => {
-    openrouterWebSearch.mockReset()
-  })
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('answers search_unavailable when the search backend returns nothing at all', async () => {
-    openrouterWebSearch.mockResolvedValue({ text: '', sources: [], costUsd: 0 })
+  // youtube_search makes two kinds of network call: Serper's /videos search and
+  // YouTube's oEmbed playability probe. Route them by URL so each test drives
+  // the whole Serper path without touching the real network.
+  const stubNetwork = (opts: {
+    serper: { ok: boolean; videos?: { title?: string; link?: string }[] }
+    oembedOk?: boolean
+  }): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        if (String(url).includes('google.serper.dev/videos')) {
+          return { ok: opts.serper.ok, json: async () => ({ videos: opts.serper.videos ?? [] }) } as Response
+        }
+        // youtube.com/oembed — the live playability probe.
+        return { ok: Boolean(opts.oembedOk) } as Response
+      }),
+    )
+  }
+
+  it('answers search_unavailable when the Serper videos search returns nothing / non-ok', async () => {
+    stubNetwork({ serper: { ok: false } })
     const out = JSON.parse(await youtubeSearch('relaxing music', 5)) as { error?: string; not_found?: boolean }
     expect(out.error).toBe('search_unavailable')
     expect(out.not_found).toBeUndefined()
   })
 
-  it('answers not_found when the search ran but no clip survives the live playability check', async () => {
-    openrouterWebSearch.mockResolvedValue({
-      text: 'Song — https://www.youtube.com/watch?v=eeeeeeeeeee',
-      sources: [],
-      costUsd: 0,
+  it('answers not_found when Serper returns a clip but no clip survives the live playability check', async () => {
+    // Serper gives one YouTube link, but oEmbed says it does not exist / is not embeddable.
+    stubNetwork({
+      serper: { ok: true, videos: [{ title: 'Song', link: 'https://www.youtube.com/watch?v=eeeeeeeeeee' }] },
+      oembedOk: false,
     })
-    // oEmbed says the clip does not exist / is not embeddable.
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false }) as Response))
     const out = JSON.parse(await youtubeSearch('relaxing music', 5)) as { videos: unknown[]; not_found?: boolean; error?: string }
     expect(out.error).toBeUndefined()
     expect(out.not_found).toBe(true)
@@ -137,12 +152,10 @@ describe('youtubeSearch — backend-down is NOT "no videos found"', () => {
   })
 
   it('returns only clips the live oEmbed check proves playable', async () => {
-    openrouterWebSearch.mockResolvedValue({
-      text: 'Song — https://www.youtube.com/watch?v=fffffffffff',
-      sources: [],
-      costUsd: 0,
+    stubNetwork({
+      serper: { ok: true, videos: [{ title: 'Song', link: 'https://www.youtube.com/watch?v=fffffffffff' }] },
+      oembedOk: true,
     })
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true }) as Response))
     const out = JSON.parse(await youtubeSearch('relaxing music', 5)) as {
       videos: { title: string; link: string }[]
       screen_url?: string

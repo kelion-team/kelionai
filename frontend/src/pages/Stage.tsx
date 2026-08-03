@@ -1103,48 +1103,6 @@ export default function Stage({ user }: { user: User }) {
             work console closed). */}
         {user.role === 'admin' && (
           <>
-            {/* KELION'S WALLET in the bar (Adrian, Jul 24: „show the admin the
-            reality”): the REAL BALANCE, exactly from the OpenRouter account (USD) —
-            the central brain. Red when below threshold. Click → top-up. */}
-            {brainCredit && (
-              <button
-                type="button"
-                className={`ghost ${brainCredit.openrouter.low ? 'blink-red' : ''}`}
-                onClick={() => window.open(brainCredit.openrouter.topup, '_blank', 'noopener')}
-                title={
-                  brainCredit.openrouter.live
-                    ? adminStrings()
-                        .orPillLive.replace('{n}', (brainCredit.openrouter.balance ?? 0).toFixed(2))
-                        .replace('{low}', brainCredit.openrouter.low ? adminStrings().orPillLow : '')
-                    : adminStrings().orPillDead
-                }
-              >
-                {brainCredit.openrouter.live
-                  ? `OpenRouter $${(brainCredit.openrouter.balance ?? 0).toFixed(2)}`
-                  : '⚠ OpenRouter'}
-              </button>
-            )}
-            {/* THE OPENAI PILL (Adrian: "REAL everywhere, zero fabrications"),
-            IMMEDIATELY to the right of the OpenRouter one: the REAL month-to-date
-            spend read from OpenAI's own costs API — the figure the "voice_minutes"
-            estimate in the Money tab can be checked against. Key missing or read
-            failed → "⚠ OpenAI", never "$0.00". */}
-            {brainCredit && (
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => window.open('https://platform.openai.com/usage', '_blank', 'noopener')}
-                title={
-                  brainCredit.openai?.live
-                    ? adminStrings().oaPillLive.replace('{n}', (brainCredit.openai.monthUsd ?? 0).toFixed(2))
-                    : adminStrings().oaPillDead
-                }
-              >
-                {brainCredit.openai?.live
-                  ? `OpenAI $${(brainCredit.openai.monthUsd ?? 0).toFixed(2)}`
-                  : '⚠ OpenAI'}
-              </button>
-            )}
             {/* THE SERPER PILL (same "REAL everywhere" rule), IMMEDIATELY to
             the right of the OpenAI one: the REAL remaining search credit read
             from Serper's own /account endpoint — the wallet the web search

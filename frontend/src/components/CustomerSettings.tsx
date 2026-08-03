@@ -91,6 +91,13 @@ const EN: L = {
 // the user never sees pounds anywhere on their screen, only the resulting credits.
 const CREDITE_PE_LIRA = 7.5
 
+// MODEL SELECTOR ASCUNS (Adrian, 3 aug: „migrăm complet pe Gemini"). Secțiunea 3
+// de mai jos era un <select> cu catalogul de modele rutate prin OpenRouter
+// (Claude, ByteDance, Gemma etc.). UI-ul e ascuns; starea (catalog/sel) și
+// handler-ul de salvare (onModel) rămân conectate ca să nu se strice nimic.
+// Pune pe false ca să reapară selectorul.
+const MODEL_SELECTOR_HIDDEN: boolean = true
+
 interface CatModel {
   id: string
   name: string
@@ -333,8 +340,10 @@ export default function CustomerSettings({
           )}
         </section>
 
-        {/* 3 — Model AI (chat + creier), selectabil prin OpenRouter */}
-        {(catalog.chat.length > 0 || catalog.work.length > 0) && (
+        {/* 3 — Model AI (chat + creier) — selectorul de modele OpenRouter, ASCUNS
+        (migrare completă pe Gemini). Rămâne montat în cod, dar nu se randează;
+        catalog/sel și handler-ul onModel stau conectate ca să nu se strice nimic. */}
+        {!MODEL_SELECTOR_HIDDEN && (catalog.chat.length > 0 || catalog.work.length > 0) && (
           <section className="settings-sec">
             <h4>{ro ? 'Model AI' : 'AI model'}</h4>
             <label className="contact-label">{ro ? 'Chat (conversație)' : 'Chat'}</label>
