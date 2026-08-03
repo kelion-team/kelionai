@@ -209,6 +209,11 @@ export async function ruleazaLucrator(
       LLM_MODEL: model.includes('/') ? model : `gemini/${model}`,
       LLM_API_KEY: config.geminiKey,
       GEMINI_API_KEY: config.geminiKey,
+      // Gemini CLI (agentul oficial) refuză directoarele „neîncredere" în mod
+      // headless — probat pe VPS, 3 aug: „not running in a trusted directory".
+      // Clona de lucru e a NOASTRĂ, creată de noi per sarcină → e de încredere
+      // prin construcție; fără asta, al 4-lea lucrător ar pica la fiecare rulare.
+      GEMINI_CLI_TRUST_WORKSPACE: 'true',
     }
     await ruleaza('git', ['checkout', '-b', branch], { cwd: lucru, env, limitaMs: 30_000 })
     const inainte = await ruleaza('git', ['rev-parse', 'HEAD'], { cwd: lucru, env, limitaMs: 20_000 })
