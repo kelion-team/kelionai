@@ -328,6 +328,13 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   const flushPreRoll = (): void => {
     for (const { frame } of preRoll) {
       const ds = downsample(frame, ctx.sampleRate)
+      // AUDIO NATIV — și pre-roll-ul intră în fraza pentru creier (agenții de
+      // debug, 3 aug: prima silabă ajungea la Chirp dar LIPSEA din WAV-ul trimis
+      // la Gemini — vocea brută pornea ciuntită exact cu ce repară pre-roll-ul).
+      if (phrasePcmLen < MAX_PHRASE_SAMPLES) {
+        phrasePcm.push(new Float32Array(ds))
+        phrasePcmLen += ds.length
+      }
       try {
         ws?.send(floatToPcm16(ds))
         framesSent++

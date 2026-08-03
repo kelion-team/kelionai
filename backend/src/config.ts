@@ -156,7 +156,12 @@ export const config = {
     // Escalation to the work tier (paid) stays ONLY on heavy/real-action
     // requests (taskDifficulty / hasActionIntent) — see selectedBrainModel in
     // chat.ts. Editable from env if you want a different free model.
-    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google/gemma-4-26b-a4b-it:free').trim(),
+    // ── GEMINI PESTE TOT (Adrian, 3 aug, ordin repetat de 7+ ori: „openrouter
+    // si open ai scos din toata aplicatia"): TOATE treptele creierului pornesc
+    // pe Gemini direct (cheia Tier 2 a ownerului). Rotația OpenRouter :free
+    // rămâne DOAR plasă de ultimă urgență dacă Gemini însuși pică — nu mai e
+    // niciodată primul drum. Lacătul (verifica-gemini.mjs) pinuiește toate trei.
+    chatDefault: (process.env.OPENROUTER_CHAT_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
     // ── FULL FREE BRAIN (Adrian, 27 Jul: "yes" to the $0 plan — the whole
     // brain on free models; paid remains ONLY the OpenAI voice, which has no
     // free alternative anywhere, proven across all 345 models in the
@@ -218,10 +223,10 @@ export const config = {
     // env (care se poate reseta). Env-ul poate suprascrie punctual, dar dacă lipsește
     // sau se golește, NU se mai întoarce la plătit din greșeală: default sigur = free.
     workDefault: (process.env.OPENROUTER_WORK_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
-    // The FINAL 'top' tier — same model. There's nothing left to escalate
-    // above it: it's the most capable free brain that exists. Escalation
-    // stays in the code for the day the top tier becomes a paid model.
-    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free').trim(),
+    // Treapta 'top' (escaladarea grea) — Gemini 2.5 PRO pe aceeași cheie
+    // (dovedit pe cheia ta: constructorul rulează deja pe gemini-2.5-pro).
+    // Nemotron :free (OpenRouter) SCOS din drum — ordinul „Gemini peste tot".
+    topDefault: (process.env.OPENROUTER_TOP_MODEL ?? 'google-direct/gemini-2.5-pro').trim(),
     // Images through OpenRouter (same key) — a model that returns an image in
     // the response (`message.images[].image_url.url`). No separate Gemini
     // key.

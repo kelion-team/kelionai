@@ -61,6 +61,12 @@ const TOOL_QUESTION_RE = new RegExp(
     // the time elsewhere ("cât e ceasul în Tokyo")
     'c[âa]t\\s+e\\s+ceasul|or(?:a|ul)\\s+(?:actual|local)|fus\\s+orar',
     'what\\s+time\\s+is\\s+it|time\\s+in\\s+\\w+|time\\s*zone',
+    // IMAGE GENERATION (agenții de debug, 3 aug: „deseneaza/genereaza o imagine"
+    // nu trecea de poarta asta → cursa fără unelte → generate_image nu era
+    // chemat NICIODATĂ pe calea publică — exact „zice că n-a chemat unealta").
+    'desen[ea]\\w*|genereaz[ăa]\\s+(?:o\\s+)?(?:imagin|poz|pictur)\\w*|creeaz[ăa]\\s+(?:o\\s+)?(?:imagin|poz|logo|sigl)\\w*',
+    '(?:o\\s+)?imagine\\s+cu\\b|f[ăa]\\s*-?\\s*(?:mi|ne)?\\s+(?:o\\s+)?(?:poz[ăa]|imagine|desen|logo|sigl[ăa])',
+    '\\bdraw\\b|generate\\s+(?:an?\\s+)?(?:image|picture|photo|logo)|create\\s+(?:an?\\s+)?(?:image|picture|logo)|make\\s+(?:me\\s+)?(?:an?\\s+)?(?:image|picture|logo)',
   ].join('|'),
   'i',
 )
