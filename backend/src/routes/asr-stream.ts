@@ -322,7 +322,18 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
           const m = JSON.parse(data.toString('utf8')) as { type?: string; lang?: string }
           if (m.type === 'start') {
             const raw = String(m.lang ?? '').trim()
-            langHint = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(raw) ? normalizeLang(raw) : ''
+            const clientLang = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(raw) ? normalizeLang(raw) : ''
+            // ADMINUL → limba lui pe SERVER, niciodată 'auto' (Adrian, 3 aug:
+            // chirp_3 pe 'auto' stâlcea româna — „E surt hanspuskelion"). Dacă
+            // hint-ul clientului lipsește sau e greșit, adminul primește 'ro-RO',
+            // nu 'auto' (consistent cu calea realtime, realtime.ts:57-62).
+            // Ceilalți useri își păstrează hint-ul (sau 'auto' dacă nu trimit).
+            langHint = user.role === 'admin' ? clientLang || normalizeLang('ro') : clientLang
+            // Log de diagnostic: ce limbă folosește Chirp de fapt (măsurabil pe
+            // următoarea încercare reală — 'auto' vs 'ro-RO' — fără a ghici).
+            app.log.info(
+              `asr-stream: limbă = ${langHint || 'auto'} (rol=${user.role}, hint client='${raw}')`,
+            )
             startGoogle()
           } else if (m.type === 'stop') {
             stopGoogle()
