@@ -101,6 +101,10 @@ export interface MoneyCircuit {
    *  account — something other than "nobody paid", which is why it is
    *  reported separately, not as a soothing zero. */
   citirePlati?: { la: string; ok: boolean; detaliu: string } | null
+  /** The Revolut-email payment reader (Pro path, Aug 3): reads "Ai primit …"
+   *  mails from the owner's Gmail and credits by code. `ok:false` = couldn't
+   *  read the inbox (Google not connected), NOT "nobody paid". */
+  citirePlatiEmail?: { la: string; ok: boolean; detaliu: string } | null
   /** The last pass of the loop that makes Kelion get to work BY HIMSELF
    *  (Adrian, 30 Jul: "make him autonomous"). `ok:true` = something really
    *  started at that moment. Shown so you don't have to take it on faith

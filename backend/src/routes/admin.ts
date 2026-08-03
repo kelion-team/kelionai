@@ -39,6 +39,7 @@ import { systemHealth } from '../services/health.js'
 import { recentLogs } from '../services/logbuffer.js'
 import { verifyKeys, verifyModels } from '../services/brain.js'
 import { stareCitirePlati, incepeLegaturaPlati, finalizeazaLegaturaPlati } from '../services/openBanking.js'
+import { starePlatiEmail } from '../services/platiEmail.js'
 import { stareAutonomie } from '../services/autonomie.js'
 import { cheltuieliAplicatiei } from '../services/cardFurnizor.js'
 import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
@@ -578,6 +579,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Rebuilt in cardFurnizor.ts, from config keys + what card_gata measured.
       expenses: await cheltuieliAplicatiei().catch(() => []),
       citirePlati: stareCitirePlati(),
+      // `citirePlatiEmail` = the Revolut-email reader (Pro path, Aug 3): reads
+      // "Ai primit …" mails from the owner's Gmail and credits. Shown next to
+      // `citirePlati` so the panel says whether THIS path is working — a read,
+      // not a claim.
+      citirePlatiEmail: starePlatiEmail(),
       // `autonomie` = the last pass of the loop that gives Kelion work WITHOUT
       // anyone asking (Adrian, 30 Jul: "make it autonomous"). Shown for the
       // same reason as the rest: so that "the loop is working" is a reading,
