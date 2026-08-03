@@ -29,6 +29,28 @@ export interface PlataEmail {
   referinta: string
 }
 
+// ── SECURITATE: creditul se activează DOAR pe un email dovedit de la Revolut ──
+// Adrian, 3 aug: „dacă în email scrie Revolut că a fost plătit ȘI regăsești
+// TOATE elementele de securitate, ABIA atunci se activează consumul de credite."
+// Un „From: no-reply@revolut.com" se poate FALSIFICA — de aceea nu ne bazăm pe
+// el, ci pe DKIM: Gmail pune în „Authentication-Results" verdictul criptografic
+// (dkim=pass, header.d=revolut.com) pe care un atacator nu-l poate contraface.
+// Fără dkim=pass semnat de revolut.com, emailul NU creditează, oricât ar părea
+// de real. (crediteazaDupaCod cere oricum un cod KLN PENDING real — asta e a
+// doua plasă; DKIM e prima.)
+export function verificatDeLaRevolut(headers: { name: string; value: string }[]): boolean {
+  const h = (n: string): string =>
+    headers.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value ?? ''
+  const from = h('From').toLowerCase()
+  if (!/@revolut\.com(>|\s|$)/.test(from)) return false
+  const auth = h('Authentication-Results').toLowerCase()
+  // dkim=pass ȘI domeniul semnatar să fie revolut.com (nu doar dkim=pass de la
+  // oricine). Acceptăm și dkim aliniat pe un subdomeniu (…​.revolut.com).
+  const dkimPass = /dkim=pass/.test(auth)
+  const dkimRevolut = /header\.d=(?:[a-z0-9-]+\.)?revolut\.com/.test(auth)
+  return dkimPass && dkimRevolut
+}
+
 // „Ai primit" = intrare; „Ai trimis" = ieșire (o ignorăm). Verificăm ambele, ca
 // un email de trimitere să nu fie luat vreodată drept încasare.
 export function esteIncasare(subject: string): boolean {
@@ -145,7 +167,16 @@ export async function verificaPlatiEmail(): Promise<number> {
     }
     return 0
   }
-  const q = encodeURIComponent('from:no-reply@revolut.com newer_than:3d')
+  // NU depindem de un filtru pe care owner-ul trebuie să-l facă: căutăm direct
+  // emailurile de la revolut.com (merge și dacă folderul e gol), DAR includem și
+  // eticheta lui, dacă le-a filat acolo (Adrian, 3 aug: „acolo să ajungă"). Așa
+  // le prindem oricum. Dovada că e chiar Revolut o dă DKIM-ul, per-mesaj, mai jos.
+  // `in:anywhere` = INCLUSIV spam și trash (Adrian, 3 aug) — un email de plată
+  // ajuns din greșeală în spam nu are voie să piardă un credit. Gmail exclude
+  // implicit spam/trash; îl forțăm.
+  const q = encodeURIComponent(
+    `(from:revolut.com OR label:${config.revolut.mailLabel}) newer_than:7d in:anywhere`,
+  )
   const listRes = await fetch(`${GMAIL}?maxResults=25&q=${q}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(20_000),
@@ -159,6 +190,7 @@ export async function verificaPlatiEmail(): Promise<number> {
 
   let creditati = 0
   let incasari = 0
+  let respinse = 0
   for (const id of ids) {
     const mRes = await fetch(`${GMAIL}/${id}?format=full`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -168,16 +200,29 @@ export async function verificaPlatiEmail(): Promise<number> {
     const m = (await mRes.json().catch(() => ({}))) as {
       payload?: { headers?: { name: string; value: string }[] }
     }
-    const subject = m.payload?.headers?.find((h) => h.name.toLowerCase() === 'subject')?.value ?? ''
+    const headers = m.payload?.headers ?? []
+    // POARTA DE SECURITATE: dovadă criptografică (DKIM) că e chiar de la Revolut.
+    // Fără ea, sărim mesajul — nu creditează un email nesemnat/falsificat.
+    if (!verificatDeLaRevolut(headers)) {
+      respinse++
+      continue
+    }
+    const subject = headers.find((h) => h.name.toLowerCase() === 'subject')?.value ?? ''
     if (!esteIncasare(subject)) continue
-    const plata = extragePlata(subject, corpDinPayload(m.payload))
+    const corp = corpDinPayload(m.payload)
+    const plata = extragePlata(subject, corp)
     if (!plata) continue
     incasari++
+    // CODUL POATE FI ORIUNDE ÎN EMAIL (referință, corp, subiect) — îl căutăm în
+    // TOT textul, ca o plată corectă să nu fie ratată dintr-un singur câmp.
+    // crediteazaDupaCod extrage tiparul strict KLN-XXXX-XXXX de oriunde și
+    // creditează EXACT clientul acelui cod (fără ghicit după sumă/nume).
+    const refComplet = [plata.referinta, subject, corp].join('\n')
     // id-ul stabil al plății = id-ul mesajului Gmail → creditarea e idempotentă
     // (refCreditatDeja împiedică dublul credit la fiecare trecere).
     const r = await proceseazaIntrare({
       id: `gmail:${id}`,
-      referinta: plata.referinta,
+      referinta: refComplet,
       amount: plata.amount,
       currency: plata.currency,
     }).catch(() => ({ fel: 'vechi' as const }))
@@ -186,7 +231,9 @@ export async function verificaPlatiEmail(): Promise<number> {
   ultima = {
     la: new Date().toISOString(),
     ok: true,
-    detaliu: `${ids.length} emailuri Revolut citite · ${incasari} încasări · ${creditati} creditate`,
+    detaliu:
+      `${ids.length} emailuri în „${config.revolut.mailLabel}" · ${incasari} încasări · ` +
+      `${creditati} creditate${respinse ? ` · ${respinse} respinse (securitate/DKIM)` : ''}`,
   }
   await saveKv('plati:email:ultima', JSON.stringify(ultima)).catch(() => {})
   return creditati

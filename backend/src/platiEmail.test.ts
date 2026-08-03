@@ -3,7 +3,9 @@
 import { describe, it, expect, vi } from 'vitest'
 
 // Izolăm parserul pur — nu vrem să pornim IMAP/DB/Google la import.
-vi.mock('../config.js', () => ({ config: { adminEmail: 'adrianenc11@gmail.com' } }))
+vi.mock('../config.js', () => ({
+  config: { adminEmail: 'adrianenc11@gmail.com', revolut: { mailLabel: 'Revolut_kelionai_plati' } },
+}))
 vi.mock('../db.js', () => ({
   getGoogleRefreshToken: async () => '',
   loadKv: async () => null,
@@ -13,7 +15,43 @@ vi.mock('./google.js', () => ({ refreshGoogleAccessToken: async () => null }))
 vi.mock('./mailbox.js', () => ({ htmlToText: (h: string) => h }))
 vi.mock('./openBanking.js', () => ({ proceseazaIntrare: async () => ({ fel: 'vechi' }) }))
 
-const { esteIncasare, numarDinText, extragePlata } = await import('./services/platiEmail.js')
+const { esteIncasare, numarDinText, extragePlata, verificatDeLaRevolut } = await import(
+  './services/platiEmail.js'
+)
+
+describe('securitate: creditul se activează DOAR pe email dovedit de la Revolut', () => {
+  const dkimOk = [
+    { name: 'From', value: 'Revolut <no-reply@revolut.com>' },
+    { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=revolut.com; spf=pass' },
+  ]
+  it('DKIM pass semnat de revolut.com → acceptat', () => {
+    expect(verificatDeLaRevolut(dkimOk)).toBe(true)
+  })
+  it('From falsificat, fără DKIM pass → respins', () => {
+    expect(
+      verificatDeLaRevolut([
+        { name: 'From', value: 'no-reply@revolut.com' },
+        { name: 'Authentication-Results', value: 'mx.google.com; dkim=fail; spf=softfail' },
+      ]),
+    ).toBe(false)
+  })
+  it('DKIM pass dar semnat de ALT domeniu (spoof) → respins', () => {
+    expect(
+      verificatDeLaRevolut([
+        { name: 'From', value: 'no-reply@revolut.com' },
+        { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.d=atacator.com' },
+      ]),
+    ).toBe(false)
+  })
+  it('expeditor care nu e @revolut.com → respins', () => {
+    expect(
+      verificatDeLaRevolut([
+        { name: 'From', value: 'no-reply@revolut-fake.com' },
+        { name: 'Authentication-Results', value: 'dkim=pass header.d=revolut-fake.com' },
+      ]),
+    ).toBe(false)
+  })
+})
 
 describe('emailul Revolut: încasare vs trimitere', () => {
   it('„Ai primit" e încasare', () => {
