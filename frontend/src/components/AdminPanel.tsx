@@ -92,16 +92,19 @@ function Flag({ code }: { readonly code: string }) {
 }
 
 const AI_LABELS: Record<string, string> = {
-  chat: 'Creier (OpenRouter)',
+  // PROVIDER NAMES SCOASE din etichete (Adrian, 3 aug: „migrăm complet pe Gemini").
+  // Rândurile de cost rămân (cheile vin din jurnal); doar numele „OpenRouter"/
+  // „OpenAI" din text au dispărut — nu mai vrem referințe la vechii furnizori.
+  chat: 'Creier',
   correct: 'Gemini (correct)',
   image: 'Images (Gemini)',
   tts: 'Voice (TTS)',
   asr: 'Hearing (STT)',
-  search: 'Căutare (OpenRouter web)',
+  search: 'Căutare web',
   memory: 'Memorie',
   // The live-voice minutes — an INTERNAL ESTIMATE (mic-on seconds × a fixed
-  // rate), never the OpenAI invoice. Labeled as such wherever it shows.
-  voice_minutes: 'Minute voce (OpenAI Realtime)',
+  // rate), never the provider's invoice. Labeled as such wherever it shows.
+  voice_minutes: 'Minute voce',
 }
 
 // Group the history newest-first, with a date header per day (Today / Yesterday /
@@ -816,35 +819,12 @@ export default function AdminPanel({
                     Punga: ${finance.punga.total.toFixed(2)}
                     {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
                   </div>
-                  <div className="pool-parts">
-                    {/* THE WALLET = ONLY WHAT CAN BE READ (Adrian, Jul 30: „Stripe goes
-                    out completely and Pro comes in”). The three Stripe rows — available,
-                    in transit, the virtual card — described money that no longer passes
-                    through here: users pay on the Revolut link, straight into his
-                    account, and the providers are paid with his card. The Revolut Pro
-                    balance CANNOT be read (the accounts API is Business-only), so we
-                    don't show it: either a measured figure or none. What remains is the
-                    only balance we actually read. */}
-                    {([
-                      ['Credit la creier (OpenRouter)', finance.punga.parti.openrouter],
-                    ] as [string, number | null][]).map(([eticheta, val]) => (
-                      <div className="fin-row" key={eticheta}>
-                        <span>{eticheta}</span>
-                        <span>{val === null ? 'nu răspunde' : `$${val.toFixed(2)}`}</span>
-                      </div>
-                    ))}
-                    {/* THE REAL OPENAI MONTH (the provider's costs API) — the
-                    anchor against which the internal voice estimate below can
-                    be checked. Unreadable → we say so, never a zero. */}
-                    <div className="fin-row">
-                      <span>OpenAI, luna asta (măsurat la furnizor)</span>
-                      <span>
-                        {finance.openai?.live
-                          ? `$${(finance.openai.monthUsd ?? 0).toFixed(2)}`
-                          : 'nu pot citi (cheie OPENAI_USAGE_KEY lipsă sau citire picată)'}
-                      </span>
-                    </div>
-                  </div>
+                  {/* RÂNDURILE OpenRouter + OpenAI SCOASE (Adrian, 3 aug: „migrăm
+                  complet pe Gemini"). Aici stăteau „Credit la creier (OpenRouter)"
+                  și „OpenAI, luna asta (măsurat la furnizor)" — două afișaje de sold/
+                  cheltuială la vechii furnizori. Punga totală de sus rămâne; câmpurile
+                  finance.punga.parti.openrouter / finance.openai rămân în date, doar
+                  nu se mai desenează, ca să nu se strice nimic. */}
                   {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
                   through Stripe — Checkout for the deposit, `/v1/payouts` for the
                   withdrawal. With Stripe out they have nothing to move: the users'
@@ -852,26 +832,10 @@ export default function AdminPanel({
                   profit no longer passes through us. A button that does nothing
                   anymore is worse than its absence — it looks like it works. */}
                 </div>
-                {/* THE BRAIN'S BALANCE shows in the wallet („Credit la creier”), so
-                we don't repeat it here in dollars. It stays ONLY when there is
-                something to do: below threshold or unreadable. */}
-                {finance.openrouter && (!finance.openrouter.live || finance.openrouter.low) && (
-                  <div className="or-wallet low">
-                    {!finance.openrouter.live ? (
-                      <span className="or-wallet-sub">
-                        Nu pot citi soldul creierului (cheia OpenRouter lipsește sau contul e inaccesibil).
-                      </span>
-                    ) : (
-                      <span className="or-wallet-sub">
-                        ⚠️ Creierul are sub ${finance.openrouter.threshold} — depune ca să nu pice.{' '}
-                        <a href={finance.openrouter.topup} target="_blank" rel="noreferrer">
-                          Alimentează OpenRouter
-                        </a>{' '}
-                        · pornește „Auto Top-Up" acolo ca să se reîncarce singur.
-                      </span>
-                    )}
-                  </div>
-                )}
+                {/* AVERTIZAREA DE SOLD OpenRouter SCOASĂ (Adrian, 3 aug: „migrăm
+                complet pe Gemini"). Aici stătea alerta „Creierul are sub $X —
+                Alimentează OpenRouter" / „Nu pot citi soldul creierului". Câmpul
+                finance.openrouter rămâne în date; doar afișajul a dispărut. */}
                 {/* HERE STOOD „The money circuit: users → Stripe → AI” — the four
                 links, the „What I can read from Stripe” block, the Issuing state,
                 the virtual card creation and its number reveal. Removed on Jul 30:
@@ -941,8 +905,8 @@ export default function AdminPanel({
                       </span>
                       <span className="or-wallet-sub" style={{ opacity: 0.7 }}>
                         Minutele de voce se socotesc cât a fost microfonul PORNIT × $
-                        {(circuit.voiceUsdPerMin ?? 0.35).toFixed(2)}/min — nu cât ți-a luat OpenAI. Suma exactă e doar în
-                        contul tău OpenAI.
+                        {(circuit.voiceUsdPerMin ?? 0.35).toFixed(2)}/min — estimare internă, nu factura
+                        furnizorului de voce. Suma exactă e doar în contul furnizorului.
                       </span>
                       </>
                     )}
