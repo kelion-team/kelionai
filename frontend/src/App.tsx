@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Credits from './pages/Credits'
 import Manual from './pages/Manual'
 import Stage from './pages/Stage'
+import DynamicBackground from './components/DynamicBackground'
 import {
   watchForUpdate,
   hardResetToLatest,
@@ -118,6 +119,15 @@ export default function App() {
 
   return (
     <>
+      <DynamicBackground
+        image="https://images.unsplash.com/photo-1593642532400-2682810df593?q=80&w=2069&auto=format&fit=crop"
+        monitor={{
+          x: 450,
+          y: 200,
+          width: 1100,
+          height: 650,
+        }}
+      />
       {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
       before, a LOGGED-IN user could not reach it even by typing the address:
