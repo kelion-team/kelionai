@@ -185,7 +185,7 @@ function floatToPcm16(input: Float32Array): ArrayBuffer {
 // ale frazei într-un WAV mono 16-bit, ca data-URI base64 — exact formatul dovedit
 // că Gemini îl „aude" nativ (feasibilitate confirmată pe server). Returnează ''
 // dacă nu e destul audio; orice eroare cade grațios (fraza pleacă doar cu text).
-const MAX_PHRASE_SAMPLES = TARGET_RATE * 30 // cap la ~30s de voce (memorie/upload)
+const MAX_PHRASE_SAMPLES = TARGET_RATE * 20 // cap la ~20s de voce (memorie/upload mărginite)
 function wavDataUri16k(chunks: Float32Array[]): string {
   let total = 0
   for (const c of chunks) total += c.length
@@ -218,7 +218,9 @@ function wavDataUri16k(chunks: Float32Array[]): string {
   dv.setUint32(40, pcm.byteLength, true)
   bytes.set(new Uint8Array(pcm.buffer), 44)
   let bin = ''
-  const CH = 0x8000 // base64 în bucăți (evită „Maximum call stack" pe buffere mari)
+  // Bucăți MICI (8192) la fromCharCode: spread-ul cu zeci de mii de argumente
+  // poate arunca „Maximum call stack" pe unele motoare — 8192 e sigur peste tot.
+  const CH = 0x2000
   for (let i = 0; i < bytes.length; i += CH) {
     bin += String.fromCharCode(...bytes.subarray(i, i + CH))
   }
