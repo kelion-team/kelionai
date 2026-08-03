@@ -1812,12 +1812,25 @@ export default function ChatPanel({
     if (cameraSupported()) setCameraOn(true)
   }, [])
 
-  // GPS ONLY WHEN NEEDED (Adrian, Jul 26: "only when GPS apps are used
-  // or location detection is needed" — he explicitly rejected the permanent flow).
-  // We NO longer keep watchPosition running non-stop: the position is read ON THE SPOT, with
-  // a single query, at the moment the turn/tool really needs
-  // it (weather, maps, "where am I"). `coordsRef` keeps only the last legitimate
-  // reading, as a memory — it never refreshes itself.
+  // GPS PERMANENT IN THE BRAIN (Adrian, Aug 3: „să aibă permanent în creier să
+  // citească coordonatele GPS și să știe cât e ceasul" — this NEW order reverses
+  // his Jul 26 decision of on-demand-only reads). A cheap permanent watcher
+  // (network precision, 2-min cache) keeps `coordsRef` always fresh, and EVERY
+  // turn already ships it to the brain; the clock (now/tz) ships every turn too.
+  // The ON-THE-SPOT read below stays, for precision on explicit location turns.
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        coordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+      },
+      // Refusal/failure → the last known position stays (may be null); the
+      // server DECLARES the void instead of inventing a place (LOCATION_NONE).
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 15_000 },
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [])
   const getFreshCoords = (): Promise<Coords | null> =>
     new Promise((resolve) => {
       if (!navigator.geolocation) return resolve(coordsRef.current)
