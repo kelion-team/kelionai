@@ -506,6 +506,28 @@ function orFetch(body: unknown, timeoutMs = 120_000): Promise<Response> {
   })
 }
 
+// AUDIO NATIV DOAR PENTRU GEMINI (Adrian, 3 aug — „deep learning legat de creier
+// direct"): partea `audio_url` (vocea brută) e înțeleasă NATIV doar de Gemini
+// (toGeminiPayload → inline_data audio). Modelele de pe OpenRouter (nemotron etc.)
+// NU acceptă audio → dacă am trimite blocul, ar crăpa. Aici îl scoatem, lăsând
+// textul (transcriptul Chirp) ca rezervă. Astfel același `orMsgs` merge la ambele
+// căi: Gemini AUDE, restul citesc textul.
+export function faraAudioParts(messages: OrMessage[]): OrMessage[] {
+  let aScos = false
+  const out = messages.map((m) => {
+    if (!Array.isArray(m.content)) return m
+    const blocuri = m.content as { type: string }[]
+    const filtrate = blocuri.filter((b) => b.type !== 'audio_url')
+    if (filtrate.length === blocuri.length) return m
+    aScos = true
+    // Dacă turul era DOAR audio (fără text), punem un marcaj scurt ca modelul
+    // să știe că a fost o intrare vocală, nu un mesaj gol.
+    const content = (filtrate.length ? filtrate : '(voce)') as OrMessage['content']
+    return { ...m, content }
+  })
+  return aScos ? out : messages
+}
+
 function orBody(
   model: string,
   messages: OrMessage[],
@@ -515,7 +537,7 @@ function orBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
-    messages,
+    messages: faraAudioParts(messages),
     max_tokens: opts.maxTokens ?? 1024,
     temperature: opts.temperature ?? 0.7,
     usage: { include: true },

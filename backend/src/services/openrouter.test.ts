@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog, classifyCost, priceFromCatalog } from './openrouter.js'
+import { toModel, resolveModel, resolveModelChecked, toolsToOpenAI, hasActionIntent, groupCatalog, classifyCost, priceFromCatalog, faraAudioParts } from './openrouter.js'
 import type { Catalog, CatalogModel } from './openrouter.js'
 import { runOrchestrator } from './orchestrator.js'
 
@@ -186,5 +186,40 @@ describe('priceFromCatalog — prețul unui model, DOAR din catalogul live', () 
   it('model lipsă din catalog → null (NICIODATĂ 0 tăcut, care ar arăta a „gratis")', () => {
     expect(priceFromCatalog(cat, 'openai/model-inexistent')).toBeNull()
     expect(priceFromCatalog(cat, '')).toBeNull()
+  })
+})
+
+describe('audio nativ: OpenRouter NU primește blocul audio (doar Gemini îl aude)', () => {
+  it('scoate audio_url, păstrează textul (transcriptul rămâne rezervă)', () => {
+    const out = faraAudioParts([
+      { role: 'user', content: [
+        { type: 'audio_url', audio_url: { url: 'data:audio/wav;base64,AAA' } },
+        { type: 'text', text: 'salut' },
+      ] },
+    ] as unknown as Parameters<typeof faraAudioParts>[0])
+    const c = out[0].content as { type: string }[]
+    expect(c.some((b) => b.type === 'audio_url')).toBe(false)
+    expect(c.some((b) => b.type === 'text')).toBe(true)
+  })
+  it('păstrează imaginile (image_url) — doar audio se scoate', () => {
+    const out = faraAudioParts([
+      { role: 'user', content: [
+        { type: 'audio_url', audio_url: { url: 'data:audio/wav;base64,AAA' } },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,BBB' } },
+      ] },
+    ] as unknown as Parameters<typeof faraAudioParts>[0])
+    const c = out[0].content as { type: string }[]
+    expect(c.some((b) => b.type === 'image_url')).toBe(true)
+    expect(c.some((b) => b.type === 'audio_url')).toBe(false)
+  })
+  it('tură DOAR audio → marcaj „(voce)", nu conținut gol', () => {
+    const out = faraAudioParts([
+      { role: 'user', content: [ { type: 'audio_url', audio_url: { url: 'data:audio/wav;base64,AAA' } } ] },
+    ] as unknown as Parameters<typeof faraAudioParts>[0])
+    expect(out[0].content).toBe('(voce)')
+  })
+  it('mesaje fără audio rămân neatinse (aceeași referință)', () => {
+    const inp = [{ role: 'user', content: 'text simplu' }] as unknown as Parameters<typeof faraAudioParts>[0]
+    expect(faraAudioParts(inp)).toBe(inp)
   })
 })

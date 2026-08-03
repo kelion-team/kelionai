@@ -36,7 +36,13 @@ import {
 } from './audioIO.js'
 
 const TARGET_RATE = 16000
-const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza (ordinul lui Adrian)
+const PHRASE_PAUSE_MS = 3000 // pauză care închide fraza pe CEAS (rezervă, dacă serverul nu dă speech_end)
+// ÎNCHIDEREA FRAZEI PE SEMNAL, NU PE CEAS (Adrian, 3 aug — latența „nu mă aude"):
+// serverul trimite `speech_end` când VAD-ul Google detectează sfârșitul vorbirii
+// (asr-stream.ts:240). Când vine, închidem fraza după o grație SCURTĂ (prinde un
+// ultim 'final'), nu după 3000ms — ~2.2s mai repede până pleacă la creier.
+// Ceasul de 3000ms rămâne plasa pentru cazul în care speech_end nu vine.
+const PHRASE_PAUSE_AFTER_END_MS = 800
 // Prag ABSOLUT de voce — readus la 0.012 (valoarea din #35, cu care dictarea
 // a mers live): ridicarea la 0.02 din #36 tăia complet microfoanele mai
 // liniștite (urechea „nu auzea nimic" — nu trecea NIMIC de VAD), iar
@@ -461,6 +467,14 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
       } else if (m.type === 'speech_begin') {
         opts.onSpeechBegin?.()
         if (muted) opts.onBargeIn?.()
+      } else if (m.type === 'speech_end') {
+        // Google a detectat sfârșitul vorbirii → închide fraza REPEDE (grație
+        // scurtă ca să prindem un ultim 'final'), nu aștepta ceasul de 3000ms.
+        // Doar dacă avem ceva transcris; altfel lăsăm plasa de timp să lucreze.
+        if (!closed && (phraseFinal || lastPartial).trim()) {
+          if (phraseTimer) clearTimeout(phraseTimer)
+          phraseTimer = setTimeout(closePhrase, PHRASE_PAUSE_AFTER_END_MS)
+        }
       } else if (m.type === 'error' && !closed) {
         // The SERVER declared the Google stream persistently dead (its own
         // reconnect budget is already spent — see routes/asr-stream.ts):

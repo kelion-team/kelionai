@@ -1173,6 +1173,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Realtime voice. The brain answers the same way (same tools, same
       // ladder) — only the STYLE changes: short, natural, speakable sentences.
       spoken?: boolean
+      // AUDIO NATIV → CREIER (Adrian, 3 aug: „deep learning legat de creier
+      // direct"): vocea BRUTĂ a frazei (data-URI `data:audio/...;base64,...`).
+      // Gemini 2.5 o „aude" nativ (ton, accent, pauze), fără să depindă de un STT
+      // care poate stâlci. Trece prin același /api/chat — creier unic.
+      audio?: string
       // GUEST SPEAKER (Adrian, Aug 1): the voice gate (realtime.ts) recognised
       // the speaker as a GUEST of this account — "guest:<id>:<name> (<relation>)"
       // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
@@ -1207,6 +1212,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       .filter((s): s is string => typeof s === 'string' && s.startsWith('data:image'))
       .slice(-4)
     const imageIsAttachment = req.body?.imageIsAttachment === true
+    // Vocea brută a acestei ture (dacă e o tură vocală cu audio nativ activat).
+    const audio =
+      typeof req.body?.audio === 'string' && req.body.audio.startsWith('data:audio')
+        ? req.body.audio
+        : ''
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
@@ -2214,6 +2224,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             })
             console.error('[brain] the turn has an image, the brain is blind, and the description failed')
           }
+        }
+      }
+      // AUDIO NATIV → CREIER (Adrian, 3 aug): atașăm vocea BRUTĂ a frazei la
+      // ultimul mesaj user, ca bloc `audio_url`, DUPĂ pasul de vedere (ca să nu
+      // fie scoasă odată cu imaginile). Gemini o aude nativ (toGeminiPayload →
+      // inline_data audio); pe OpenRouter e scoasă (faraAudioParts) și rămâne
+      // textul (transcriptul Chirp) ca rezervă — același orMsgs, creier unic.
+      if (audio) {
+        for (let i = orMsgs.length - 1; i >= 0; i--) {
+          if (orMsgs[i].role !== 'user') continue
+          const audioBloc = { type: 'audio_url', audio_url: { url: audio } }
+          const c = orMsgs[i].content
+          const nou =
+            typeof c === 'string'
+              ? c
+                ? [audioBloc, { type: 'text', text: c }]
+                : [audioBloc]
+              : [audioBloc, ...(c as { type: string; [k: string]: unknown }[])]
+          orMsgs[i] = { ...orMsgs[i], content: nou as OrMessage['content'] }
+          break
         }
       }
       let textFlowed = false
