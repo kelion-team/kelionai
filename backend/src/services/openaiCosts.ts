@@ -38,7 +38,7 @@ export function monthStartUtc(now: number = Date.now()): number {
   return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000)
 }
 
-// The shape we expect from GET /v1/organization/costs (bucket_width=1mo):
+// The shape we expect from GET /v1/organization/costs (bucket_width=1d):
 // { data: [ { results: [ { amount: { value, currency } } ] } ], has_more }
 interface CostsPage {
   data?: { results?: { amount?: { value?: number | string; currency?: string } }[] }[]
@@ -54,8 +54,14 @@ export async function getOpenAiMonthCost(force = false): Promise<OpenAiMonthCost
   if (!key) return { ...base, error: 'not_configured' }
   if (!force && costsCache && Date.now() - costsCache.at < COSTS_TTL_MS) return costsCache.val
   try {
+    // BUCKET_WIDTH = 1d, NU 1mo (Adrian, 3 aug — dovadă pe serverul lui:
+    // `bucket_width=1mo` → HTTP 400 „Invalid value: '1mo'. Supported values are:
+    // '1d'.", deci pastila arăta ⚠ deși cheia Admin funcționează). Cerem zilnic
+    // și ADUNĂM zilele lunii (bucla de mai jos sumează toate bucket-urile).
+    // `limit=31` acoperă o lună întreagă într-o singură pagină (o lună are ≤31 de
+    // zile), așa că nu subestimăm și nu e nevoie de paginare.
     const r = await fetch(
-      `https://api.openai.com/v1/organization/costs?start_time=${startTime}&bucket_width=1mo`,
+      `https://api.openai.com/v1/organization/costs?start_time=${startTime}&bucket_width=1d&limit=31`,
       { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(12_000) },
     )
     if (!r.ok) return { ...base, error: `http_${r.status}` }

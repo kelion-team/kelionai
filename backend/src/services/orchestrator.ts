@@ -46,8 +46,20 @@ export interface OrchestratorOpts {
 
 // Detects an ACTION claim ("am trimis/salvat/deschis/reparat...") — things
 // that should be done through a tool, not just said.
+//
+// THE HOLE THAT LET "Deschid Gmail…" THROUGH (Adrian, 3 aug — "el zice că preia
+// sarcina audio sau în scris dar nu o dă creierului spre rezolvare"): a weak free
+// brain NARRATES the action in bare present tense at the START of a sentence
+// ("Deschid Gmail.", "Caut ultimul email.", "Trimit mesajul.") with NO tool call.
+// The old pattern caught only past deeds ("am deschis") and a narrow set of
+// present forms ("îți deschid", "o să deschid", "deschid acum") — so a
+// sentence-initial "Deschid Gmail" slipped past BOTH gates and was accepted as
+// the finished turn. The last two branches now also catch a first-person present
+// ACTION verb at the start of a line/sentence (RO) or "I'm opening/searching…"
+// (EN) → the deed gate fires and forces execute-or-retract. `m` flag so the
+// anchor matches later lines too, not just the very first character.
 const DEED_CLAIM_RE =
-  /\b(?:am|l-?am|le-?am|ți-?am|ti-?am)\s+(?:trimis|salvat|deschis|reparat|publicat|cre[ia]at|pornit|activat|afi[șs]at|ad[ăa]ugat|[șs]ters|configurat|instalat|rulat|executat|setat|actualizat|modificat|[îi]nchis)\b|\bi['’]?ve\s+(?:sent|saved|opened|created|fixed|published|started|deleted|done|updated|set)\b|\bhave\s+(?:sent|saved|opened|created|fixed|published)\b|(?:\b(?:m[ăa]\s+ocup|m[ăa]\s+apuc|[îi][țt]i\s+(?:deschid|ar[ăa]t|trimit|salvez|caut|pornesc|pun)|o\s+s[ăa]\s+(?:deschid|caut|trimit|salvez|pornesc|rulez|verific)|imediat\s+(?:deschid|caut|pornesc)|deschid\s+acum|pornesc\s+acum|caut\s+acum)\b)/i
+  /\b(?:am|l-?am|le-?am|ți-?am|ti-?am)\s+(?:trimis|salvat|deschis|reparat|publicat|cre[ia]at|pornit|activat|afi[șs]at|ad[ăa]ugat|[șs]ters|configurat|instalat|rulat|executat|setat|actualizat|modificat|[îi]nchis)\b|\bi['’]?ve\s+(?:sent|saved|opened|created|fixed|published|started|deleted|done|updated|set)\b|\bhave\s+(?:sent|saved|opened|created|fixed|published)\b|(?:\b(?:m[ăa]\s+ocup|m[ăa]\s+apuc|[îi][țt]i\s+(?:deschid|ar[ăa]t|trimit|salvez|caut|pornesc|pun)|o\s+s[ăa]\s+(?:deschid|caut|trimit|salvez|pornesc|rulez|verific)|imediat\s+(?:deschid|caut|pornesc)|deschid\s+acum|pornesc\s+acum|caut\s+acum)\b)|(?:^|[.!?…\n]\s*)(?:deschid|caut|trimit|salvez|pornesc|rulez|execut|activez|instalez|configurez|adaug|[șs]terg|creez|repar|preiau|descarc|[îi]ncarc|generez|construiesc|afi[șs]ez|actualizez)\s+\S|\bi(?:'|’)?m\s+(?:opening|searching|sending|saving|starting|running|creating|generating|building)\b/im
 
 // ── "O SĂ ANALIZEZ" (Adrian, Jul 31) ─────────────────────────────────────────
 // "when he says he's going to analyse, he must ACTUALLY open the monitor and
@@ -220,10 +232,11 @@ export async function runOrchestrator(
         convo.push({
           role: 'user',
           content:
-            'POARTA FAPTEI: ai afirmat că ai făcut o acțiune, dar nu ai chemat ' +
-            'NICIO unealtă — deci acțiunea NU s-a întâmplat. Ori cheamă ACUM ' +
-            'unealta care execută cu adevărat, ori retrage sincer afirmația și ' +
-            'spune clar ce anume nu poți face și de ce.',
+            'POARTA FAPTEI: ai spus că faci sau că ai făcut o acțiune (ex. ' +
+            '„Deschid Gmail", „am trimis"), dar nu ai chemat NICIO unealtă — ' +
+            'deci acțiunea NU s-a întâmplat. Ori cheamă ACUM unealta care ' +
+            'execută cu adevărat, ori retrage sincer afirmația și spune clar ' +
+            'ce anume nu poți face și de ce.',
         })
         continue
       }
