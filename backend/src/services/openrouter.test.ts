@@ -114,23 +114,16 @@ describe('openrouter catalog', () => {
     // any request falls onto the tier's default, never onto an unverified model.
     // The chat default = a REAL free model, tested live (clean tool-call +
     // real vision) — see config.ts for the test's proof.
-    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('google/gemma-4-26b-a4b-it:free')
-    // THE BRAIN, SET BY ADRIAN ON JUL 31: "make nemotron-3-ultra the brain".
-    // It was `nano-omni-30b-a3b` — 30B total, 3B ACTIVE. His work went through
-    // a third-tier model, while the most capable free brain in the world (550B,
-    // 1M context) sat unused on the 'top' tier, reachable only through
-    // escalation. Now it is on both.
-    // It has no vision — no longer matters: vision gets DELEGATED (see
-    // vedereaDelegata).
-    // AUG 2, MEASURED: on the real payload gemma-4-26b took 22s+37s and called
-    // no tool, while Ultra took 6s+3.2s with the correct tool call (the full
-    // table is in config.ts). The work default is Ultra — the fastest free
-    // model THAT THINKS, measured, not picked from a spec sheet.
-    // ADRIAN, 3 AUG: creierul de LUCRU e Gemini free PERMANENT. Turele grele
-    // trec prin orchestrator → prefixul google-direct/ → geminiDirect CU unelte
-    // (măsurat 1,2s + 1,0s cu apel corect). nemotron rămâne pe treapta „top".
+    // GEMINI PESTE TOT (Adrian, 3 aug, ordin repetat: „openrouter și open ai
+    // scos din toată aplicația"): TOATE treptele pornesc pe Gemini direct —
+    // chat/work = flash, top = pro (dovedit pe cheia lui: constructorul rulează
+    // deja pe gemini-2.5-pro). Gemma și Nemotron (OpenRouter :free) scoase din
+    // drum; rotația :free rămâne doar plasă de ultimă urgență. Lacătul
+    // (scripts/verifica-gemini.mjs) pinuiește toate trei — testul ăsta e
+    // oglinda lui în suită.
+    expect(await resolveModel('chat', 'ceva/inexistent')).toBe('google-direct/gemini-2.5-flash')
     expect(await resolveModel('work', null)).toBe('google-direct/gemini-2.5-flash')
-    expect(await resolveModel('top', null)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(await resolveModel('top', null)).toBe('google-direct/gemini-2.5-pro')
   })
 
   // ── REPLACING THE BRAIN IS NO LONGER SILENT ─────────────────────────────

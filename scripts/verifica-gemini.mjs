@@ -23,20 +23,29 @@ function citeste(p) {
   }
 }
 
-// Fiecare regulă: unde caută, ce trebuie să fie Gemini, și mesajul dacă nu e.
-const REGULI = [
-  {
-    nume: 'Creierul de lucru (workDefault) = Gemini',
+// O regulă per treaptă de creier — TOATE pe Gemini (Adrian, 3 aug, repetat:
+// „openrouter și open ai scos din toată aplicația" → chat, work și top pornesc
+// toate pe Gemini direct; nu doar work).
+function regulaTreapta(camp) {
+  return {
+    nume: `Creierul (${camp}) = Gemini`,
     fisier: 'backend/src/config.ts',
     verifica(src) {
-      const m = /workDefault:\s*\(process\.env\.\w+\s*\?\?\s*'([^']+)'/.exec(src)
-      if (!m) return 'nu am găsit linia workDefault — structura config.ts s-a schimbat'
+      const m = new RegExp(`${camp}:\\s*\\(process\\.env\\.\\w+\\s*\\?\\?\\s*'([^']+)'`).exec(src)
+      if (!m) return `nu am găsit linia ${camp} — structura config.ts s-a schimbat`
       const model = m[1]
       const eGemini = model.startsWith('google-direct/') || /gemini/i.test(model)
-      if (!eGemini) return `workDefault NU mai e Gemini: „${model}"`
+      if (!eGemini) return `${camp} NU mai e Gemini: „${model}"`
       return null // OK
     },
-  },
+  }
+}
+
+// Fiecare regulă: unde caută, ce trebuie să fie Gemini, și mesajul dacă nu e.
+const REGULI = [
+  regulaTreapta('workDefault'),
+  regulaTreapta('chatDefault'),
+  regulaTreapta('topDefault'),
 ]
 
 const erori = []

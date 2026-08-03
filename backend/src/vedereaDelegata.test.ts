@@ -79,8 +79,14 @@ describe('vederea trece PRIN creier, nu în locul lui', () => {
     expect(chat).not.toMatch(/if \(image \|\| camFrames\.length > 0\) \{/)
   })
 
-  it('nu face nimic dacă modelul ales vede deja', () => {
-    expect(chat).toMatch(/const vedeAcum = cat\?\.chat\.some\(\(m\) => m\.id === orchestratorModel\)/)
+  it('nu face nimic dacă modelul ales vede deja — iar Gemini direct VEDE NATIV', () => {
+    // Agenții de debug, 3 aug (2 independent): `google-direct/…` nu e în
+    // catalogul OpenRouter, deci vechiul test de catalog îl declara ORB pe
+    // fiecare tură → poza era descrisă de un model străin în loc să ajungă
+    // nativ la creier (toGeminiPayload: image_url data-URI → inline_data).
+    // Regula pinată: creierul Gemini e văzător ca un șoim, fără ocol.
+    expect(chat).toMatch(/orchestratorModel\.startsWith\(GEMINI_DIRECT_PREFIX\) \|\|/)
+    expect(chat).toMatch(/cat\?\.chat\.some\(\(m\) => m\.id === orchestratorModel && m\.vision !== false\)/)
     expect(chat).toMatch(/if \(!vedeAcum\)/)
   })
 

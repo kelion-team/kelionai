@@ -165,6 +165,21 @@ export async function runOrchestrator(
     const rundaGoala = flux.rundaAFostGoala()
     allText = flux.emis()
 
+    // AUDIO-UL SE AUDE O SINGURĂ DATĂ (agenții de debug, 3 aug): blocul
+    // `audio_url` (sute de KB base64) rămânea în convo și se RE-URCA la Gemini
+    // la FIECARE rundă de unelte (până la 8) — lățime de bandă și latență
+    // arse degeaba. După prima rundă modelul l-a auzit deja; rundele următoare
+    // păstrează doar textul (transcriptul e oricum în mesaj).
+    if (round === 1) {
+      for (const m of convo) {
+        if (!Array.isArray(m.content)) continue
+        const blocuri = m.content as { type: string; text?: string }[]
+        if (!blocuri.some((b) => b.type === 'audio_url')) continue
+        const faraAudio = blocuri.filter((b) => b.type !== 'audio_url')
+        m.content = faraAudio.length ? faraAudio : '(mesaj vocal — audio deja ascultat)'
+      }
+    }
+
     if (res.toolCalls.length === 0) {
       // ── THE FAKE-CALL INTERPRETER (Adrian, Aug 2) ──────────────────────────
       //

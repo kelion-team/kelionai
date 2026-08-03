@@ -108,18 +108,22 @@ export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
 export { CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL }
 import { latestUpdateSummary } from '../services/updates.js'
 
-// THE BRAIN — 100% OpenRouter (0 Kimi, 0 GLM — Adrian, final). The selectable
-// chat model is read from KV (same source as /api/models/selection): the model
-// CHOSEN by the user, otherwise the chat tier default (GPT). Returns NULL only
-// if the OpenRouter key is missing → the brain cannot start (honest message, no
-// Kimi/GLM net).
+// THE BRAIN — Gemini direct primar (migrarea din 3 aug), OpenRouter doar rezervă.
+// The selectable chat model is read from KV (same source as /api/models/selection):
+// the model CHOSEN by the user, otherwise the tier default. Returns NULL only if
+// NO brain exists at all (no Gemini key AND no OpenRouter key) → honest message.
 async function selectedBrainModel(
   email: string,
   text: string,
   kvRaw?: string | null,
   needsVision = false,
 ): Promise<{ model: string; heavy: boolean } | null> {
-  if (!config.openrouter.key) return null
+  // DEZLEGAT DE CHEIA OPENROUTER (agenții de debug, 3 aug: „tot chatul atârnă de
+  // config.openrouter.key deși creierul e Gemini — scoaterea cheii omoară fiecare
+  // tură"). workDefault e `google-direct/…` și resolveModel îl întoarce FĂRĂ să
+  // atingă catalogul OpenRouter, deci creierul Gemini nu are nevoie de cheia aia.
+  // Null rămâne doar pentru „chiar n-am niciun creier".
+  if (!config.openrouter.key && !geminiDirectAvailable()) return null
   let sel: { chat?: string; work?: string } = {}
   try {
     // FLUENCY (A5): the kv comes pre-read from the turn's Promise.all (no extra
@@ -1146,11 +1150,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
       })
+      // HEARTBEAT ȘI PE RESUME (agenții de debug, 3 aug): calea principală are
+      // pingTimer (': keep-alive' la fiecare ≤15s de tăcere), dar resume-ul nu
+      // avea NIMIC → dacă tura originală tace >50s (unealtă lentă), watchdog-ul
+      // clientului (READ_SILENCE_MS=50s) omora exact conexiunea de resume care
+      // trebuia s-o salveze. Același ping, același interval, oprit la close.
+      let ultimaScriere = Date.now()
+      const pingResume = setInterval(() => {
+        if (Date.now() - ultimaScriere >= 15_000) {
+          try {
+            reply.raw.write(': keep-alive\n\n')
+          } catch {
+            /* conexiune deja închisă — timer-ul moare la end/close */
+          }
+          ultimaScriere = Date.now()
+        }
+      }, 5_000)
+      reply.raw.on('close', () => clearInterval(pingResume))
       try {
-        for await (const chunk of readTurnFrom(user.email, turn, lastSeq)) reply.raw.write(chunk)
+        for await (const chunk of readTurnFrom(user.email, turn, lastSeq)) {
+          reply.raw.write(chunk)
+          ultimaScriere = Date.now()
+        }
       } catch {
         /* buffer vanished mid-replay — just end cleanly */
       }
+      clearInterval(pingResume)
       reply.raw.end()
     },
   )
@@ -2133,12 +2158,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         } catch {
           input = {}
         }
-        if (name === 'web_search' || name === 'youtube_search' || name === 'image_search') {
-          usage.usd += SERPER_USD_PER_CALL
-          // REAL ACCOUNTING (QA audit Jul 24, A1): without recordCost, the Money
-          // tab never saw the cost of search/images/brain.
-          void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
-        }
+        // CĂUTAREA SE TAXEAZĂ DOAR LA SUCCES (agenții de debug, 3 aug: costul se
+        // adăuga NECONDIȚIONAT, înainte de rulare — o căutare picată
+        // (search_unavailable) tot îl costa pe user). Serper nu taxează un apel
+        // eșuat, deci nici noi: contorizăm DUPĂ, doar dacă rezultatul nu e eroare.
+        const eCautare = name === 'web_search' || name === 'youtube_search' || name === 'image_search'
         // NOTE: generate_image is NO LONGER charged a hand-typed flat rate here
         // — its REAL cost (OpenRouter usage.cost) is booked inside runTool,
         // where the generation's own response is known. Charging it here too
@@ -2171,6 +2195,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           return answer || JSON.stringify({ error: 'brain_unavailable' })
         }
         const block = { type: 'tool_use', id: `call_${++callN}`, name, input } as unknown as ToolUseBlock
+        if (eCautare) {
+          const out = await runTool(
+            block, isAdmin, token, reply, baseUrl, user.email,
+            req.headers.cookie ?? '', usage,
+            (speechPref || isAdminUser) && langName ? langName : '',
+            deviceLoc,
+          )
+          // Eroare declarată de unealtă → nu s-a căutat nimic → $0 (regula #1:
+          // nu inventăm nici măcar un cost). Orice altceva = căutare reală, taxată.
+          const aEsuat = /"error"\s*:/.test(out.slice(0, 200))
+          if (!aEsuat) {
+            usage.usd += SERPER_USD_PER_CALL
+            // REAL ACCOUNTING (QA audit Jul 24, A1): without recordCost, the
+            // Money tab never saw the cost of search/images/brain.
+            void recordCost(user.email, 'search', SERPER_USD_PER_CALL)
+          }
+          return out
+        }
         return runTool(
           block, isAdmin, token, reply, baseUrl, user.email,
           req.headers.cookie ?? '', usage,
@@ -2275,8 +2317,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // o imagine (poză încărcată SAU cameră + intenție vizuală VISION_INTENT) —
       // deci descrierea rulează exact când e nevoie, nu pe fiecare tură.
       if (turnHasImage) {
+        // VEDEREA NATIVĂ GEMINI (agenții de debug, 3 aug — 2 agenți independent):
+        // `google-direct/…` NU e în catalogul OpenRouter, deci vechiul test îl
+        // declara ORB pe fiecare tură → poza era descrisă de un model străin
+        // (lent) în loc să ajungă nativ la creier. Gemini 2.5 vede nativ:
+        // toGeminiPayload duce blocurile image_url (data-URI) ca inline_data.
         const cat = await getCatalog().catch(() => null)
-        const vedeAcum = cat?.chat.some((m) => m.id === orchestratorModel) ?? false
+        const vedeAcum =
+          orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) ||
+          (cat?.chat.some((m) => m.id === orchestratorModel && m.vision !== false) ?? false)
         if (!vedeAcum) {
           const poza = image ?? camFrames[camFrames.length - 1]
           const descriere = poza

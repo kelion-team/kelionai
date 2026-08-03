@@ -255,7 +255,12 @@ export async function geminiDirectChat(
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key', inputTokens: 0, outputTokens: 0 }
   const r = await geminiFetch(model, 'generateContent', messages, tools, opts)
   if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
-  const j = (await r.json()) as GResp
+  // Corp 200 dar ne-JSON (proxy/gateway stricat) → eroare NUMITĂ, nu SyntaxError
+  // scăpat prin rotație ca „model mort" (agenții de debug, 3 aug — restul
+  // clientului avea .catch, doar calea asta nu).
+  const j = (await r.json().catch(() => {
+    throw new Error('gemini_body_not_json')
+  })) as GResp
   const cand = j.candidates?.[0]
   return partsToResult(cand?.content?.parts ?? [], model, cand?.finishReason ?? 'stop', j.usageMetadata)
 }
