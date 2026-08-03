@@ -79,15 +79,17 @@ describe('the fair queue', () => {
 
 describe('the purse threshold', () => {
   it('the reserve is open under the cap and closed at/over it', () => {
-    expect(poateFolosiRezerva(0, REZERVA_CAP_ZILNIC_DEFAULT_USD)).toBe(true)
+    // Funcția pură (cap explicit) rămâne neschimbată.
     expect(poateFolosiRezerva(2.99, 3)).toBe(true)
     expect(poateFolosiRezerva(3, 3)).toBe(false)
     expect(poateFolosiRezerva(5, 3)).toBe(false)
   })
 
-  it('the default cap exists and is sane (a few dollars a day)', () => {
-    expect(REZERVA_CAP_ZILNIC_DEFAULT_USD).toBeGreaterThan(0)
-    expect(REZERVA_CAP_ZILNIC_DEFAULT_USD).toBeLessThanOrEqual(10)
+  it('ZERO AUTO-PLĂTIT: default 0 → rezerva plătită e ÎNCHISĂ (Adrian, 3 aug)', () => {
+    // Regula lui Adrian: niciun model plătit automat (leak-ul nex-n2-mini oprit).
+    // Adminul poate deschide explicit rezerva (kv rezerva:cap_zilnic > 0).
+    expect(REZERVA_CAP_ZILNIC_DEFAULT_USD).toBe(0)
+    expect(poateFolosiRezerva(0, REZERVA_CAP_ZILNIC_DEFAULT_USD)).toBe(false)
   })
 })
 
