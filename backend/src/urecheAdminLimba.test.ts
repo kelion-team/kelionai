@@ -2,34 +2,39 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// ── URECHEA ADMINULUI NU CADE PE 'auto' (Adrian, 3 aug) ─────────────────────
+// ── URECHEA NU MAI CADE PE 'auto' — PENTRU NICIUN USER CU LIMBA CUNOSCUTĂ ────
 //
-// Dovadă live: chirp_3 pe 'auto' stâlcea româna adminului („E surt
+// Dovadă live (Adrian, 3 aug): chirp_3 pe 'auto' stâlcea româna („E surt
 // hanspuskelion?"). Modelul e corect (chirp_3, cel mai avansat STT); cauza era
-// LIMBA — când clientul nu trimite un hint valid, streamingul cădea pe 'auto'.
-// Fix: pe calea de streaming (asr-stream), adminul primește limba lui pe SERVER
-// (ro-RO), niciodată 'auto' — consistent cu calea realtime (realtime.ts:57-62).
-// Plus un log al limbii efective, ca următoarea încercare să fie MĂSURABILĂ.
+// LIMBA. Pe calea de streaming (asr-stream), când clientul nu trimite un hint
+// valid, folosim limba CUNOSCUTĂ a userului: adminul → 'ro'; ceilalți → limba
+// lor STOCATĂ (getSpeechLang, aceeași sursă ca i18n/realtime). Doar un user NOU,
+// fără limbă stabilită, rămâne pe 'auto'. Plus un log al limbii efective, ca
+// următoarea încercare reală să fie MĂSURABILĂ.
 const src = readFileSync(
   fileURLToPath(new URL('./routes/asr-stream.ts', import.meta.url)),
   'utf8',
 )
 
-describe('asr-stream: adminul nu primește niciodată limba „auto"', () => {
-  it('forțează limba adminului server-side (fallback pe ro), nu pe hint-ul clientului', () => {
-    expect(src).toMatch(/user\.role === 'admin'\s*\?\s*clientLang \|\| normalizeLang\('ro'\)/)
+describe('asr-stream: limba urechii nu mai cade pe „auto" pentru useri cunoscuți', () => {
+  it('rezerva de limbă: admin → „ro", ceilalți → limba stocată (getSpeechLang)', () => {
+    expect(src).toMatch(/userLangFallback = user\.role === 'admin' \? 'ro' : ''/)
+    expect(src).toMatch(/getSpeechLang\(user\.email\)/)
   })
 
-  it('păstrează hint-ul clientului pentru ceilalți useri (fără forțare)', () => {
-    expect(src).toMatch(/user\.role === 'admin' \? clientLang \|\| normalizeLang\('ro'\) : clientLang/)
+  it('la „start": hint client, altfel rezerva userului; niciun „auto" dacă îi știm limba', () => {
+    expect(src).toMatch(
+      /langHint = clientLang \|\| \(userLangFallback \? normalizeLang\(userLangFallback\) : ''\)/,
+    )
   })
 
-  it('loghează limba efectivă (măsurabil: „auto" vs „ro-RO") + rolul', () => {
+  it('loghează limba efectivă (măsurabil: „auto" vs „ro-RO") + rolul + limba stocată', () => {
     expect(src).toMatch(/asr-stream: limbă = /)
     expect(src).toMatch(/rol=\$\{user\.role\}/)
+    expect(src).toMatch(/stocat=/)
   })
 
-  it('modelul rămâne cel avansat, nu se schimbă odată cu limba', () => {
+  it('modelul rămâne cel avansat (chirp_3), nu se schimbă odată cu limba', () => {
     expect(src).toMatch(/model:\s*ASR_MODEL/)
   })
 })
