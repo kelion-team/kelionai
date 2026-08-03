@@ -55,7 +55,7 @@ export const googleTools: Tool[] = [
   {
     name: 'web_search',
     description:
-      'Search the live web for current, real information (news, facts, prices, anything recent). Use it whenever the answer depends on up-to-date or external information you do not already know. The PRIMARY engine (source:"serper") returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches. When the primary engine is unavailable you get the FALLBACK instead — clearly marked source:"openrouter" + fallback:true — which carries ONLY an answer and bare links (no knowledge graph, no news, no related searches); say that honestly, do not present it as the full search. On error:"search_unavailable" BOTH engines failed — admit you could not search, never invent results.',
+      'Search the live web for current, real information (news, facts, prices, anything recent). Use it whenever the answer depends on up-to-date or external information you do not already know. The engine (source:"serper") returns not just result snippets but also a direct answer, a knowledge-graph fact box, "people also ask" questions, fresh news, and related searches. On error:"search_unavailable" the search engine failed — admit you could not search, never invent results.',
     input_schema: {
       type: 'object',
       properties: {

@@ -217,13 +217,24 @@ function partsToResult(
       })
     }
   }
-  // Really free: Google doesn't charge the free-tier key → the cost is 0, and that's how we report it.
-  // The token counts are the provider's own usageMetadata when it sent them —
-  // never hand-filled.
+  // COSTUL PE CHEIA PLĂTITĂ (agenții de debug, 3 aug, verdict REAL: „costUsd: 0
+  // hardcodat" era o cifră FALSĂ după trecerea pe Tier 2 — cheia nu mai e
+  // gratuită, iar 0 se înregistra ca „măsurat" în jurnal). Google nu întoarce
+  // dolari în răspuns; ce e MĂSURAT sunt tokenii (usageMetadata). Prețul e
+  // tariful publicat, scris aici de mână → produsul e o ESTIMARE și e
+  // etichetat așa în jurnal (db.ts a scos 'gemini' din COSTURI_MASURATE).
+  // Tarife USD / 1M tokeni (Google, publicate): flash 0.30 in / 2.50 out;
+  // pro 1.25 in / 10.00 out. Audio-ul la intrare costă mai mult (1.00 flash) —
+  // numărăm tot promptul la tariful de text, deci turele cu voce sunt ușor
+  // SUBestimate; e o estimare declarată, nu o factură.
+  const inTok = Number(usage?.promptTokenCount ?? 0) || 0
+  const outTok = Number(usage?.candidatesTokenCount ?? 0) || 0
+  const ePro = /pro/i.test(model)
+  const costUsd = (inTok * (ePro ? 1.25 : 0.3) + outTok * (ePro ? 10 : 2.5)) / 1_000_000
   return {
-    text, toolCalls, costUsd: 0, model, stop,
-    inputTokens: Number(usage?.promptTokenCount ?? 0) || 0,
-    outputTokens: Number(usage?.candidatesTokenCount ?? 0) || 0,
+    text, toolCalls, costUsd, model, stop,
+    inputTokens: inTok,
+    outputTokens: outTok,
   }
 }
 
@@ -255,7 +266,12 @@ export async function geminiDirectChat(
   if (!config.geminiKey) return { text: '', toolCalls: [], costUsd: 0, model, stop: 'no_key', inputTokens: 0, outputTokens: 0 }
   const r = await geminiFetch(model, 'generateContent', messages, tools, opts)
   if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`)
-  const j = (await r.json()) as GResp
+  // Corp 200 dar ne-JSON (proxy/gateway stricat) → eroare NUMITĂ, nu SyntaxError
+  // scăpat prin rotație ca „model mort" (agenții de debug, 3 aug — restul
+  // clientului avea .catch, doar calea asta nu).
+  const j = (await r.json().catch(() => {
+    throw new Error('gemini_body_not_json')
+  })) as GResp
   const cand = j.candidates?.[0]
   return partsToResult(cand?.content?.parts ?? [], model, cand?.finishReason ?? 'stop', j.usageMetadata)
 }
@@ -326,10 +342,16 @@ async function imagenPredict(prompt: string): Promise<{ mime: string; buf: Buffe
       body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
       signal: AbortSignal.timeout(120_000),
     })
-  } catch {
+  } catch (e) {
+    // Eșecul se NUMEȘTE în jurnal (agenții de debug, 3 aug: null la orice —
+    // rețea, 403, 429 — făcea cauza de negăsit; „image_not_configured" mințea).
+    console.error(`[imagine] Imagen predict a picat: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
-  if (!r.ok) return null
+  if (!r.ok) {
+    console.error(`[imagine] Imagen predict HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
+    return null
+  }
   const j = (await r.json().catch(() => ({}))) as {
     predictions?: { bytesBase64Encoded?: string; mimeType?: string }[]
   }
@@ -353,10 +375,14 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
       }),
       signal: AbortSignal.timeout(120_000),
     })
-  } catch {
+  } catch (e) {
+    console.error(`[imagine] Gemini image a picat: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
-  if (!r.ok) return null
+  if (!r.ok) {
+    console.error(`[imagine] Gemini image HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`)
+    return null
+  }
   const j = (await r.json().catch(() => ({}))) as {
     candidates?: { content?: { parts?: {
       inlineData?: { data?: string; mimeType?: string }
@@ -375,12 +401,18 @@ async function geminiImageContent(prompt: string): Promise<{ mime: string; buf: 
 
 /** Image generation on the owner's Gemini key. Tries Imagen, then the Gemini
  *  image model, and returns the FIRST that yields bytes — in the SAME shape as
- *  openrouterImage (OrImage) so image.ts is unchanged. costUsd is always 0
- *  (these endpoints report no measured cost). All-fail → the OrImage error
- *  shape, never an invented success. */
+ *  openrouterImage (OrImage) so image.ts is unchanged.
+ *  COSTUL (agenții de debug, 3 aug, verdict REAL: 0 hardcodat ținea imaginile
+ *  în afara jurnalului — `if (costUsd > 0)` nu înregistra nimic pe cheia
+ *  PLĂTITĂ): Google nu întoarce dolari; punem tariful PUBLICAT per imagine
+ *  (Imagen 3: $0.03; jurnalul îl etichetează „estimare internă" — 'image' a
+ *  ieșit din COSTURI_MASURATE în db.ts). All-fail → eroarea spune că
+ *  GENERAREA a picat (cauzele exacte sunt în log, numite), nu că „nu e
+ *  configurat" când cheia există. */
+const IMAGE_USD_ESTIMAT = 0.03
 export async function geminiImage(prompt: string): Promise<OrImage> {
   if (!config.geminiKey) return { error: 'image_not_configured' }
   const hit = (await imagenPredict(prompt)) ?? (await geminiImageContent(prompt))
-  if (!hit) return { error: 'image_not_configured' }
-  return { mime: hit.mime, buf: hit.buf, costUsd: 0 }
+  if (!hit) return { error: 'image_generation_failed' }
+  return { mime: hit.mime, buf: hit.buf, costUsd: IMAGE_USD_ESTIMAT }
 }

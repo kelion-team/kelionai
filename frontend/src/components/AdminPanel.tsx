@@ -189,8 +189,67 @@ export default function AdminPanel({
   const [inbound, setInbound] = useState<InboundEmail[]>([])
   const [mailboxLive, setMailboxLive] = useState<MailboxLiveItem[]>([])
   const [mailboxLoading, setMailboxLoading] = useState(false)
+  // ȘTERGEREA DIN INBOX (Adrian, 3 aug: „să șterg de aici câte una sau prin
+  // selecție toate"): selecția pe UID + ștergerea (una sau grupul selectat).
+  // Serverul mută în coșul REAL al căsuței când există; mesajul de confirmare
+  // spune ce s-a întâmplat DE FAPT (câte, și unde au ajuns).
+  const [mailSel, setMailSel] = useState<Set<number>>(new Set())
+  const [mailDelMsg, setMailDelMsg] = useState('')
+  const [mailDelBusy, setMailDelBusy] = useState(false)
+  const toggleMailSel = (uid: number): void =>
+    setMailSel((prev) => {
+      const n = new Set(prev)
+      if (n.has(uid)) n.delete(uid)
+      else n.add(uid)
+      return n
+    })
+  const stergeMailuri = (uids: number[]): void => {
+    if (!uids.length || mailDelBusy) return
+    if (!window.confirm(`Ștergi ${uids.length === 1 ? 'mesajul selectat' : uids.length + ' mesaje'} din inbox?`)) return
+    setMailDelBusy(true)
+    void fetch('/api/admin/mailbox-delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ uids }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { sterse?: number; detaliu?: string } | null) => {
+        setMailDelMsg(j ? `Șterse: ${j.sterse ?? 0} — ${j.detaliu ?? ''}` : 'Nu s-a putut șterge.')
+        setMailSel(new Set())
+        // Reîncarcă lista REALĂ de pe server — nu scoatem optimist rânduri
+        // pe care poate nu le-am șters (cifra vine din ce s-a întâmplat).
+        setMailboxLoading(true)
+        void fetchMailboxLive().then((m) => {
+          setMailboxLive(m)
+          setMailboxLoading(false)
+        })
+      })
+      .catch(() => setMailDelMsg('Nu s-a putut șterge — reîncearcă.'))
+      .finally(() => setMailDelBusy(false))
+  }
   const [contactMsgs, setContactMsgs] = useState<ContactMessage[]>([])
   const [copied, setCopied] = useState(false)
+  // TEXTUL DE DISTRIBUIRE, AL OWNERULUI (Adrian, 3 aug: „rescrie corect tot
+  // tabul"): mesajul nu mai e bătut în cuie în cod — îl scrii/ajustezi aici și
+  // rămâne salvat local (localStorage), iar toate butoanele îl folosesc pe AL TĂU.
+  const SHARE_TEXT_IMPLICIT =
+    'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Contul e gratuit și îl faci în 30 de secunde:'
+  const [shareText, setShareText] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem('kelionai:share-text') || SHARE_TEXT_IMPLICIT
+    } catch {
+      return SHARE_TEXT_IMPLICIT
+    }
+  })
+  const salveazaShareText = (t: string): void => {
+    setShareText(t)
+    try {
+      window.localStorage.setItem('kelionai:share-text', t)
+    } catch {
+      /* privat/incognito — rămâne doar în sesiune */
+    }
+  }
   const [users, setUsers] = useState<UserSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryRow[]>([])
@@ -1224,11 +1283,41 @@ export default function AdminPanel({
         {tab === 'inbox' && (
           <section className="admin-finance">
             <div className="fin-breakdown">
-              <div className="fin-breakdown-head">
-                📬 Cutia REALĂ contact@kelionai.app — citită direct din server (toate
-                mesajele, citite sau nu). Aici vezi tot ce e în inbox, nu doar mailul
-                nou. Ultimele 40.
+              <div className="fin-breakdown-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <span>
+                  📬 Cutia REALĂ contact@kelionai.app — citită direct din server (toate
+                  mesajele, citite sau nu). Ultimele 40. Bifează și șterge — una sau mai
+                  multe odată; serverul le mută în coșul căsuței când acesta există.
+                </span>
+                <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  {mailboxLive.length > 0 && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 12 }}
+                      onClick={() =>
+                        setMailSel((prev) =>
+                          prev.size === mailboxLive.length ? new Set() : new Set(mailboxLive.map((m) => m.uid)),
+                        )
+                      }
+                    >
+                      {mailSel.size === mailboxLive.length && mailboxLive.length > 0 ? 'Deselectează tot' : 'Selectează tot'}
+                    </button>
+                  )}
+                  {mailSel.size > 0 && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 12, color: '#ff7a7a' }}
+                      disabled={mailDelBusy}
+                      onClick={() => stergeMailuri([...mailSel])}
+                    >
+                      {mailDelBusy ? '…' : `Șterge selectate (${mailSel.size})`}
+                    </button>
+                  )}
+                </span>
               </div>
+              {mailDelMsg && <div className="chat-hint">{mailDelMsg}</div>}
               {mailboxLoading && <p className="chat-hint">{A.readingMailbox}</p>}
               {!mailboxLoading && mailboxLive.length === 0 && (
                 <p className="chat-hint">{A.mailboxEmpty}</p>
@@ -1236,11 +1325,29 @@ export default function AdminPanel({
               {mailboxLive.map((m) => (
                 <div className="inbox-item" key={m.uid}>
                   <div className="inbox-top">
-                    <span className="inbox-from">
+                    <span className="inbox-from" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={mailSel.has(m.uid)}
+                        onChange={() => toggleMailSel(m.uid)}
+                        title="Selectează pentru ștergere"
+                      />
                       {m.fromName ? `${m.fromName} <${m.from}>` : m.from || '(expeditor necunoscut)'}
                     </span>
-                    <span className={`inbox-flag ${m.seen ? 'ok' : 'wait'}`}>
-                      {m.seen ? 'citit' : '● necitit'}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span className={`inbox-flag ${m.seen ? 'ok' : 'wait'}`}>
+                        {m.seen ? 'citit' : '● necitit'}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, color: '#ff7a7a' }}
+                        disabled={mailDelBusy}
+                        onClick={() => stergeMailuri([m.uid])}
+                        title="Șterge acest mesaj"
+                      >
+                        ✕
+                      </button>
                     </span>
                   </div>
                   <div className="inbox-subj">{m.subject || '(fără subiect)'}</div>
@@ -2114,21 +2221,23 @@ export default function AdminPanel({
           <section className="admin-finance">
             {(() => {
               const url = 'https://kelionai.app'
-              // TRUTHFUL TEXT (Adrian, Aug 1 — button audit): it USED to promise
-              // „3 minute free, no account” — the demo is dead (nothing writes
-              // demo_uses, no trial endpoint exists). The truth: the account is
-              // free, made in half a minute; credits are bought inside.
-              const text =
-                'Ți-l prezint pe Kelion — asistentul meu AI cu avatar și voce: vede, aude și vorbește, în orice limbă. Contul e gratuit și îl faci în 30 de secunde:'
+              // TABUL RESCRIS CORECT (Adrian, 3 aug: „rescrie corect tot tabul"):
+              // (1) mesajul e AL LUI, editabil, salvat local — nu bătut în cod;
+              // (2) fiecare rețea spune ce preia REAL (LinkedIn ignoră textul —
+              //     doar linkul; nu promitem ce platforma nu face);
+              // (3) clipul promo: fluxul REAL, pas cu pas (se generează din chat
+              //     cu `prepare_promo_clip`, se salvează în Downloads, se urcă
+              //     în studioul platformei) — nu o afirmație despre un folder.
+              const text = shareText.trim() || SHARE_TEXT_IMPLICIT
               const enc = encodeURIComponent
-              // Text/link networks accept a prefilled share URL; video platforms
-              // require uploading IN their studio — the clips are in Downloads.
               const links: { name: string; href: string }[] = [
                 { name: 'X (Twitter)', href: `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(url)}` },
                 { name: 'Facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${enc(url)}&quote=${enc(text)}` },
                 { name: 'WhatsApp', href: `https://wa.me/?text=${enc(`${text} ${url}`)}` },
                 { name: 'Telegram', href: `https://t.me/share/url?url=${enc(url)}&text=${enc(text)}` },
-                { name: 'LinkedIn', href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}` },
+                // LinkedIn NU acceptă text pre-completat pe share-offsite — doar
+                // linkul. Scris pe buton, ca să nu pară stricat când textul „dispare".
+                { name: 'LinkedIn (doar linkul)', href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}` },
                 { name: 'Reddit', href: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(text)}` },
               ]
               const uploads: { name: string; href: string }[] = [
@@ -2166,7 +2275,39 @@ export default function AdminPanel({
                       )}
                     </div>
                   </div>
+                  <div className="fin-breakdown">
+                    <div className="fin-breakdown-head">
+                      Mesajul tău de prezentare — îl scrii o dată, îl folosesc toate
+                      butoanele de mai jos. Se salvează în browserul ăsta.
+                    </div>
+                    <textarea
+                      className="admin-input"
+                      style={{ width: '100%', minHeight: 64, resize: 'vertical' }}
+                      value={shareText}
+                      onChange={(e) => salveazaShareText(e.target.value)}
+                      placeholder={SHARE_TEXT_IMPLICIT}
+                    />
+                    {shareText !== SHARE_TEXT_IMPLICIT && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ fontSize: 12, marginTop: 6 }}
+                        onClick={() => salveazaShareText(SHARE_TEXT_IMPLICIT)}
+                      >
+                        Revino la mesajul standard
+                      </button>
+                    )}
+                  </div>
                   <ShareGrid title={A.shareOnSocial} items={links} />
+                  <div className="fin-breakdown">
+                    <div className="fin-breakdown-head">
+                      Clipul promo — fluxul real, pas cu pas: (1) îi ceri lui Kelion în
+                      chat „pregătește clipul promo" — îl compune și ți-l salvează în
+                      Downloads; (2) deschizi studioul platformei de mai jos; (3) urci
+                      clipul din Downloads acolo. Butoanele DOAR deschid studiourile —
+                      nicio platformă nu permite încărcare automată din afară.
+                    </div>
+                  </div>
                   <ShareGrid
                     title={A.videoPlatforms}
                     items={uploads}
@@ -2219,8 +2360,28 @@ export default function AdminPanel({
                   </span>
                 </div>
                 <div className="admin-gap-actions">
+                  {/* Rezolvat = ARHIVARE (iese din lista implicită, rămâne în istoric);
+                      ✕ = ștergere DEFINITIVĂ, pentru zgomot/duplicate (Adrian, 3 aug:
+                      „butoane de ștergere, sau rezolvate și arhivate"). */}
                   <button type="button" className="ghost" onClick={() => void markResolved(g.id)}>
-                    Rezolvat (curăță)
+                    Rezolvat (arhivează)
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ color: '#ff7a7a' }}
+                    title="Șterge definitiv cererea (pentru zgomot/duplicate)"
+                    onClick={() => {
+                      if (!window.confirm('Ștergi DEFINITIV cererea? (nu rămâne nici în istoric)')) return
+                      void fetch(`/api/admin/gaps/${g.id}`, { method: 'DELETE', credentials: 'include' })
+                        .then((r) => (r.ok ? r.json() : null))
+                        .then((j: { ok?: boolean } | null) => {
+                          if (j?.ok) setGaps((cur) => cur.filter((x) => x.id !== g.id))
+                        })
+                        .catch(() => {})
+                    }}
+                  >
+                    ✕ șterge
                   </button>
                 </div>
               </div>
