@@ -1210,9 +1210,28 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   return { pornit: imb.propuneri > 0, motiv: `nimic de dus → reanaliză: ${imb.detaliu}` }
 }
 
-/** The loop. Every hour it checks whether it has something to do — and gets to it. */
+// ── THE PACE OF THE LOOP ─────────────────────────────────────────────────────
+// Measured live (3 aug, 00:34→01:34): the analysis of requirement #1 finished
+// at 00:34 and its ORDER could only be written at the NEXT pass — a fixed hour
+// later. One action per pass is right (analysis → order → verification, each
+// on its own turn); the FIXED hour after a SUCCESSFUL action is a brake nobody
+// asked for (Adrian, Jul 30: "I pay, I ask, you execute"). The hour stays only
+// where the pass costs nothing and there is nothing to continue.
+export const PAUZA_A_LUCRAT_MS = 2 * 60 * 1000 // did something → carry on
+export const PAUZA_ORDIN_IN_LUCRU_MS = 5 * 60 * 1000 // waiting on an order → cheap DB check
+export const PAUZA_NIMIC_MS = 60 * 60 * 1000 // wall / nothing to do → the old hour
+
+/** How long until the next pass, from what THIS pass did. Pure — the tests hold it. */
+export function urmatoareaPauzaMs(r: { pornit: boolean; motiv: string }): number {
+  if (r.pornit) return PAUZA_A_LUCRAT_MS
+  if (r.motiv.startsWith('are deja un ordin în lucru')) return PAUZA_ORDIN_IN_LUCRU_MS
+  return PAUZA_NIMIC_MS
+}
+
+/** The loop. After each pass it decides WHEN the next one runs — it keeps
+ *  working while there is work, and sleeps the hour only when idle. */
 export function startAutonomie(): void {
-  const ruleaza = async (): Promise<void> => {
+  const ruleaza = async (): Promise<{ pornit: boolean; motiv: string }> => {
     const r = await poateSaLucreze().catch((e) => ({ pornit: false, motiv: String(e).slice(0, 120) }))
     ultima = {
       la: new Date().toISOString(),
@@ -1224,6 +1243,7 @@ export function startAutonomie(): void {
     // couldn't tell "the loop hasn't gotten to it yet" from "the loop doesn't
     // work at all" — exactly the confusion rule #1 forbids.
     await saveKv('autonomie:ultima', JSON.stringify(ultima)).catch(() => {})
+    return r
   }
   // THE ROW SURVIVES THE DEPLOY (audit Aug 2): the kv copy was written but
   // NOTHING read it back at boot — after every publish, „Kelion, de capul
@@ -1237,10 +1257,16 @@ export function startAutonomie(): void {
         ultima = { la: j.la, ok: !!j.ok, detaliu: `${j.detaliu} (dinainte de repornire)` }
     })
     .catch(() => {})
-  // First pass 3 minutes after startup (the container must be ready), then
-  // every hour.
-  setTimeout(() => {
-    void ruleaza()
-    setInterval(() => void ruleaza(), 60 * 60 * 1000)
-  }, 3 * 60 * 1000)
+  // First pass 3 minutes after startup (the container must be ready). From
+  // then on each pass schedules the next one AFTER it finishes — passes can
+  // take minutes (hands turns hold a browser), so a fixed interval could pile
+  // one on top of another; chaining makes overlap impossible.
+  const lant = (ms: number): void => {
+    setTimeout(() => {
+      void ruleaza()
+        .catch(() => ({ pornit: false, motiv: 'trecerea a crăpat' }))
+        .then((r) => lant(urmatoareaPauzaMs(r)))
+    }, ms)
+  }
+  lant(3 * 60 * 1000)
 }

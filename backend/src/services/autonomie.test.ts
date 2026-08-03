@@ -162,7 +162,14 @@ vi.mock('./browser.js', () => ({
 // The owner's list is not read from disk: here we care about the MISSION.
 vi.mock('node:fs/promises', () => ({ readFile: async () => '' }))
 
-const { poateSaLucreze, uneltele } = await import('./autonomie.js')
+const {
+  poateSaLucreze,
+  uneltele,
+  urmatoareaPauzaMs,
+  PAUZA_A_LUCRAT_MS,
+  PAUZA_ORDIN_IN_LUCRU_MS,
+  PAUZA_NIMIC_MS,
+} = await import('./autonomie.js')
 // The voice window is REAL here (adminLock is not mocked): that way the very
 // gate the owner asked for is proven, not an imitation of it.
 const { marcheazaVoce, uitaVocea } = await import('./adminLock.js')
@@ -616,6 +623,30 @@ describe('Kelion se apucă singur de treabă', () => {
     // Doar cele 3 de după graniță se numără — zid nou, cu cifra lor.
     expect(r.motiv).toContain('ZID')
     expect(r.motiv).toContain('3 ordine picate la rând')
+  })
+
+  // RITMUL (măsurat 3 aug, 00:34→01:34): analiza cerinței #1 s-a terminat la
+  // 00:34, iar ordinul ei nu putea fi scris decât la trecerea următoare — fixă,
+  // peste O ORĂ. Ora de somn după o acțiune REUȘITĂ e o barieră nepusă de
+  // owner (30 iul: „eu plătesc, tu execuți"); ea rămâne doar unde trecerea nu
+  // costă nimic și n-are ce continua.
+  it('ritmul: a lucrat → continuă în minute, nu peste o oră', async () => {
+    expect(urmatoareaPauzaMs({ pornit: true, motiv: 'cerința #1: analizată' })).toBe(PAUZA_A_LUCRAT_MS)
+    expect(PAUZA_A_LUCRAT_MS).toBeLessThanOrEqual(5 * 60 * 1000)
+  })
+
+  it('ritmul: ordin în lucru → verifică des și ieftin (doar DB), nu o dată pe oră', async () => {
+    expect(urmatoareaPauzaMs({ pornit: false, motiv: 'are deja un ordin în lucru' })).toBe(
+      PAUZA_ORDIN_IN_LUCRU_MS,
+    )
+    expect(PAUZA_ORDIN_IN_LUCRU_MS).toBeLessThan(PAUZA_NIMIC_MS)
+  })
+
+  it('ritmul: zid sau nimic de făcut → ora rămâne (trecerea aia nu consumă nimic)', async () => {
+    expect(urmatoareaPauzaMs({ pornit: false, motiv: '⏸ OPRIT pe zid, nu consum nimic: …' })).toBe(
+      PAUZA_NIMIC_MS,
+    )
+    expect(urmatoareaPauzaMs({ pornit: false, motiv: 'baza de date n-a răspuns' })).toBe(PAUZA_NIMIC_MS)
   })
 
   it('eșecurile cerute de OM nu opresc bucla — numai ale ei', async () => {
