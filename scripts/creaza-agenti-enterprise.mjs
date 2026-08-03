@@ -124,19 +124,22 @@ if (loc === null) {
 }
 if (!engine) {
   const col = `projects/${proiect}/locations/${loc}/collections/default_collection`
-  // 1a) Motorul CHAT cere cel puțin un data store („At least one data store id
-  // must be present", măsurat 3 aug 21:35). Refolosim unul existent sau creăm
-  // unul gol (NO_CONTENT) — agenții pe instrucțiuni n-au nevoie de documente.
+  // 1a) Motorul cere cel puțin un data store („At least one data store id must
+  // be present", măsurat 3 aug 21:35). Tipul CHAT a fost o fundătură (403 —
+  // cerea permisiuni Dialogflow, măsurat 21:43): agenții Agentspace trăiesc
+  // sub motoare de tip SEARCH, care nu ating Dialogflow deloc. Refolosim un
+  // data store de SEARCH sau creăm unul gol (NO_CONTENT) — agenții pe
+  // instrucțiuni n-au nevoie de documente.
   let dataStoreId = ''
   const rds = await api(token, loc, `${col}/dataStores`)
-  const existente = rds.j.dataStores ?? []
-  if (existente.length > 0) {
-    dataStoreId = (existente[0].name ?? '').split('/').pop() ?? ''
-    console.log('data store existent refolosit:', dataStoreId)
+  const potrivit = (rds.j.dataStores ?? []).find((d) => (d.solutionTypes ?? []).includes('SOLUTION_TYPE_SEARCH'))
+  if (potrivit) {
+    dataStoreId = (potrivit.name ?? '').split('/').pop() ?? ''
+    console.log('data store SEARCH existent refolosit:', dataStoreId)
   } else {
-    const rc = await api(token, loc, `${col}/dataStores?dataStoreId=kelion-cunostinte`, {
+    const rc = await api(token, loc, `${col}/dataStores?dataStoreId=kelion-cautare`, {
       method: 'POST',
-      body: JSON.stringify({ displayName: 'Kelion — cunoștințe', industryVertical: 'GENERIC', solutionTypes: ['SOLUTION_TYPE_CHAT'], contentConfig: 'NO_CONTENT' }),
+      body: JSON.stringify({ displayName: 'Kelion — căutare', industryVertical: 'GENERIC', solutionTypes: ['SOLUTION_TYPE_SEARCH'], contentConfig: 'NO_CONTENT' }),
     })
     console.log('creare data store: HTTP', rc.status, rc.ok ? (rc.j.name ?? 'OK') : scurt(rc.j.error?.message, 200))
     if (!rc.ok) process.exit(2)
@@ -148,11 +151,11 @@ if (!engine) {
         if (ro.j.done) { console.log('data store: operație încheiată', ro.j.error ? scurt(JSON.stringify(ro.j.error), 160) : 'OK'); break }
       }
     }
-    dataStoreId = 'kelion-cunostinte'
+    dataStoreId = 'kelion-cautare'
   }
   const r = await api(token, loc, `${col}/engines?engineId=kelion-agenti`, {
     method: 'POST',
-    body: JSON.stringify({ displayName: 'Kelion — agenți', solutionType: 'SOLUTION_TYPE_CHAT', industryVertical: 'GENERIC', dataStoreIds: [dataStoreId], chatEngineConfig: { agentCreationConfig: { business: 'Kelion AI — asistent live', defaultLanguageCode: 'ro', timeZone: 'Europe/London' } } }),
+    body: JSON.stringify({ displayName: 'Kelion — agenți', solutionType: 'SOLUTION_TYPE_SEARCH', industryVertical: 'GENERIC', dataStoreIds: [dataStoreId], searchEngineConfig: {} }),
   })
   console.log('creare motor: HTTP', r.status, r.ok ? 'OK' : scurt(r.j.error?.message, 200))
   if (!r.ok) process.exit(2)
