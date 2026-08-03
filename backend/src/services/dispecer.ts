@@ -144,11 +144,16 @@ export function eSanatos(modelId: string): boolean {
 }
 
 // ── THE PURSE THRESHOLD (pragul rezervei) ────────────────────────────────────
-// The paid reserve exists so the app never stops — but a bad traffic day must
-// not empty the purse. The owner sets a DAILY cap; over it, turns stay on the
-// free pool (with the queue absorbing the peaks) and the health check flags
-// it to the owner. This is the pure decision; the accounting lives in chat.ts.
-export const REZERVA_CAP_ZILNIC_DEFAULT_USD = 3
+// ZERO AUTO-PLĂTIT (Adrian, 3 aug: „creiere free, iar când nu pot, întreabă
+// adminul înainte de plătit; NICIODATĂ plătit din greșeală"). Implicitul era $3/zi
+// de modele PLĂTITE ieftine (ex. nex-agi/nex-n2-mini) care porneau singure când
+// free-ul pica — de aici scurgerea de ~$10/zi pe OpenRouter, fără să te întrebe
+// nimeni. Acum default = 0: NU se mai folosește niciun model plătit automat.
+// Adminul poate deschide EXPLICIT rezerva (kv `rezerva:cap_zilnic` > 0) când
+// alege conștient să permită plătit — asta e „întreabă/decizi înainte de plătit".
+// Creierul plătit deliberat (Gemini Tier 2 pe cheia adminului) e altă poveste,
+// ales de owner, nu o scurgere.
+export const REZERVA_CAP_ZILNIC_DEFAULT_USD = 0
 
 export function poateFolosiRezerva(cheltuitAziUsd: number, capZilnicUsd: number): boolean {
   return cheltuitAziUsd < capZilnicUsd
