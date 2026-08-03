@@ -53,6 +53,13 @@ const DOMINANCE = 2.2 // vocea apropiată trebuie să domine podeaua de zgomot d
 const VOICED_FRAMES_TO_OPEN = 2 // câte cadre de voce consecutive ca să pornim (un poc = 1 cadru, se ignoră)
 const TAIL_MS = 3200 // cât mai trimitem după ultima voce (prinde coada frazei)
 const PRE_ROLL_MS = 400 // buffer înainte de declanșare — primele cadre vocale nu mai sunt pierdute
+// BARGE-IN cât Kelion vorbește (Adrian, 3 aug: „să pot vorbi peste el"). Praguri
+// mai stricte decât VOX-ul normal: echoCancellation scoate vocea lui Kelion din
+// microfon, dar un reziduu prin difuzor poate rămâne — cerem semnal clar,
+// susținut, după o gardă de onset, ca să nu se taie singur.
+const BARGE_RMS = 0.024 // dublul pragului normal: doar voce apropiată, clară
+const BARGE_HOLD_MS = 180 // vocea trebuie să țină atât ca să taie (nu un poc)
+const BARGE_GUARD_MS = 300 // fereastră de gardă după ce începe muțenia (onset redare)
 
 // THE SELF-HEALING BUDGET (Aug 2): how many WS reconnects the ear attempts
 // inside any sliding 60s window before it gives up and escalates. A stable
@@ -178,7 +185,7 @@ function floatToPcm16(input: Float32Array): ArrayBuffer {
 // ale frazei într-un WAV mono 16-bit, ca data-URI base64 — exact formatul dovedit
 // că Gemini îl „aude" nativ (feasibilitate confirmată pe server). Returnează ''
 // dacă nu e destul audio; orice eroare cade grațios (fraza pleacă doar cu text).
-const MAX_PHRASE_SAMPLES = TARGET_RATE * 30 // cap la ~30s de voce (memorie/upload)
+const MAX_PHRASE_SAMPLES = TARGET_RATE * 20 // cap la ~20s de voce (memorie/upload mărginite)
 function wavDataUri16k(chunks: Float32Array[]): string {
   let total = 0
   for (const c of chunks) total += c.length
@@ -211,7 +218,9 @@ function wavDataUri16k(chunks: Float32Array[]): string {
   dv.setUint32(40, pcm.byteLength, true)
   bytes.set(new Uint8Array(pcm.buffer), 44)
   let bin = ''
-  const CH = 0x8000 // base64 în bucăți (evită „Maximum call stack" pe buffere mari)
+  // Bucăți MICI (8192) la fromCharCode: spread-ul cu zeci de mii de argumente
+  // poate arunca „Maximum call stack" pe unele motoare — 8192 e sigur peste tot.
+  const CH = 0x2000
   for (let i = 0; i < bytes.length; i += CH) {
     bin += String.fromCharCode(...bytes.subarray(i, i + CH))
   }
@@ -269,6 +278,9 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   let ws: WebSocket | null = null
   let wsReady = false
   let lastVoiceAt = 0
+  // BARGE-IN: de când e mut (gardă de onset) și de când ține vocea de întrerupere.
+  let mutedSince = 0
+  let bargeSince = 0
   let noiseFloor = 0.006 // podeaua de zgomot adaptivă (pentru dominanță)
   let voicedRun = 0 // câte cadre de voce consecutive (anti-poc)
   let phraseFinal = '' // finalurile validate din fraza curentă
@@ -565,7 +577,31 @@ export async function startMicStream(opts: MicStreamOpts): Promise<MicStreamHand
   }
 
   const onAudioProcess = (e: AudioProcessingEvent): void => {
-    if (closed || muted || !ws || !wsReady || ws.readyState !== WebSocket.OPEN) return
+    if (closed || !ws || !wsReady || ws.readyState !== WebSocket.OPEN) return
+    // BARGE-IN cât Kelion vorbește (Adrian, 3 aug: „să pot vorbi peste el"): cât e
+    // MUT (anti-ecou) NU trimitem și NU acumulăm audio (ar fi ecoul lui), dar
+    // calculăm local volumul și, la voce clară SUSȚINUTĂ (peste garda de onset),
+    // îl întrerupem prin onBargeIn. Calea normală (dezmuțit) rămâne neatinsă.
+    if (muted) {
+      const inp = e.inputBuffer.getChannelData(0)
+      let s2 = 0
+      for (let i = 0; i < inp.length; i++) s2 += inp[i] * inp[i]
+      const rmsMut = Math.sqrt(s2 / inp.length)
+      const tNow = performance.now()
+      if (mutedSince === 0) mutedSince = tNow
+      if (tNow - mutedSince > BARGE_GUARD_MS && rmsMut > BARGE_RMS) {
+        if (bargeSince === 0) bargeSince = tNow
+        else if (tNow - bargeSince >= BARGE_HOLD_MS) {
+          bargeSince = 0
+          opts.onBargeIn?.()
+        }
+      } else {
+        bargeSince = 0
+      }
+      return
+    }
+    mutedSince = 0
+    bargeSince = 0
     const input = e.inputBuffer.getChannelData(0)
     let sum = 0
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i]
