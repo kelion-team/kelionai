@@ -163,6 +163,14 @@ describe('LACĂT — Gemini pică → răspunde pe rezerva reală (nu „Try aga
   it('marcaj [CHAT-IN]: se vede că tura a ajuns la /api/chat (recepția a mers)', () => {
     expect(chat.includes('[CHAT-IN]')).toBe(true)
   })
+
+  it('rezerva rapidă = nemotron (topDefault) în cursa ușoară, nu gemma lent', () => {
+    // Adrian, 3 aug: „fă cota de rezervă nemotron rapid". Când Gemini e jos, chatul
+    // simplu cade pe nemotron (~6s), nu pe gemma (~25s → cei 27s).
+    expect(/rezervaRapida = config\.openrouter\.topDefault/.test(chat)).toBe(true)
+    // Rezerva rapidă intră în concurenții cursei, dedus cu Set.
+    expect(/new Set\(\[[\s\S]{0,400}rezervaRapida/.test(chat)).toBe(true)
+  })
 })
 
 describe('LACĂT — vocea unește frazele într-o singură tură (nu se auto-anulează)', () => {
