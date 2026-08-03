@@ -156,12 +156,9 @@ export interface MicStreamOpts {
   preWarmedStream?: MediaStream
 }
 
-// THE CHIRP EARS PROBE (Aug 1 — the big step): the full-duplex voice session
-// asks this BEFORE choosing its ears. true → ears are Chirp 3 streaming (this
-// module); false → the session keeps the OpenAI Realtime transcription.
-export function urechiChirpDisponibile(): Promise<boolean> {
-  return canStreamAsr()
-}
+// (urechiChirpDisponibile ȘTERS — 3 aug: proba era pentru alegerea între Chirp
+// și OpenAI Realtime; OpenAI e scos, urechea e DOAR Chirp — startMicStream își
+// face singur proba prin canStreamAsr la pornire.)
 
 // If a started Chirp ear DIES mid-session (Google outage, WS drop), the
 // caller marks it here and the NEXT voice session starts on the proven

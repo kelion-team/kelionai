@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { getSessionUser } from '../session.js'
+import { getSessionUser, adminSiId } from '../session.js'
 import { createBuildJob, claimNextBuildJob, reportBuildJob, listBuildJobs, updateBuildJobProgress, listMonitorBuildJobs, deleteBuildJob, deleteBuildJobsByScope, retryBuildJob } from '../db.js'
 import { isOpsPaused } from '../services/runbooks.js'
 import { sendMail } from '../services/mail.js'
@@ -43,10 +43,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   // aici, admin-only ca restul panoului. Ștergerea nu atinge un ordin 'running'
   // decât la scope='all' — un ordin viu nu piere din greșeală.
   app.delete<{ Params: { id: string } }>('/api/admin/constructor/:id', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.params.id)
-    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'id_invalid' })
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
     const sters = await deleteBuildJob(id)
     return reply.send({ ok: sters })
   })
@@ -65,10 +63,8 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
 
   // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat.
   app.post<{ Params: { id: string }; Body: { order?: string } }>('/api/admin/constructor/:id/reia', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.params.id)
-    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'id_invalid' })
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
     const job = await retryBuildJob(id, req.body?.order)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
     return reply.send({ ok: true, job })

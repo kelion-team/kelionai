@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { config } from '../config.js'
-import { getSessionUser } from '../session.js'
+import { getSessionUser, adminSiId } from '../session.js'
 import { pollVisitorChat } from './demo.js' // visitor chat polling from the common source
 import {
   listAllTransactions,
@@ -308,10 +308,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // aibă butoane de ștergere, sau rezolvate și arhivate"). Rezolvarea de mai
   // sus e arhivarea; asta e pentru zgomot/duplicate — rândul dispare de tot.
   app.delete<{ Params: { id: string } }>('/api/admin/gaps/:id', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const id = Number(req.params.id)
-    if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'bad_request' })
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
     return reply.send({ ok: await deleteCapabilityGap(id) })
   })
 

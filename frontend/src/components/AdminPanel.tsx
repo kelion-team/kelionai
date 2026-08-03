@@ -551,20 +551,23 @@ export default function AdminPanel({
     return () => window.clearInterval(id)
   }, [tab])
 
+  // Reîncarcă coada ordinelor — UN SINGUR loc (jscpd, 3 aug): efectul de tab și
+  // butoanele de ștergere/reia foloseau două copii identice ale aceluiași fetch.
+  const refreshBuildJobs = (): void => {
+    fetch('/api/admin/constructor', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { jobs?: BuildJobRow[] } | null) => {
+        if (j?.jobs) setBuildJobs(j.jobs)
+      })
+      .catch(() => {})
+  }
   // Tab „Constructor” open → the orders queue, refreshed every 10s.
   useEffect(() => {
     if (tab !== 'constructor') return
-    const load = (): void => {
-      fetch('/api/admin/constructor', { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j: { jobs?: BuildJobRow[] } | null) => {
-          if (j?.jobs) setBuildJobs(j.jobs)
-        })
-        .catch(() => {})
-    }
-    load()
-    const id = window.setInterval(load, 10_000)
+    refreshBuildJobs()
+    const id = window.setInterval(refreshBuildJobs, 10_000)
     return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshBuildJobs e stabil funcțional (doar fetch+set)
   }, [tab])
 
   const sendBuildOrder = (): void => {
@@ -596,14 +599,7 @@ export default function AdminPanel({
   // ── ȘTERGE / CURĂȚĂ / REIA un ordin din coadă (Adrian, 3 aug: „scoate 30/31
   //    dacă nu le poate face … aici nu apar butoane de ștergere"). Rutele existau
   //    (db.ts → constructor.ts); aici sunt butoanele care le cheamă.
-  const refreshBuildJobs = (): void => {
-    fetch('/api/admin/constructor', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { jobs?: BuildJobRow[] } | null) => {
-        if (j?.jobs) setBuildJobs(j.jobs)
-      })
-      .catch(() => {})
-  }
+  //    Reîncărcarea = refreshBuildJobs, definit sus lângă efectul de tab.
   const deleteBuildOrder = (id: number): void => {
     if (!window.confirm(`Ștergi definitiv ordinul #${id}?`)) return
     void fetch(`/api/admin/constructor/${id}`, { method: 'DELETE', credentials: 'include' })
