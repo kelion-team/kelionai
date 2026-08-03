@@ -62,6 +62,7 @@ import { dynamicToolDefs, dynamicToolNames, runDynamicTool } from '../services/d
 import { SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL } from '../services/cost.js'
 import { recallMemories, learnFromTurn } from '../services/agents.js'
 import { inventarulMeu } from '../services/brainCapabilities.js'
+import { lectiiCurente } from '../services/autoInvatare.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
@@ -1222,6 +1223,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
     let messages = sanitizeHistory(rawMessages)
+    // MARCAJ (Adrian, 3 aug — „exista loguri?"): arată EXACT că tura a ajuns la
+    // /api/chat (recepția a mers) și cu ce text. Dacă apare [CHAT-IN] dar NU
+    // apare [TIMP] pentru aceeași tură, înseamnă că a murit ÎNAINTE de creier
+    // (anulată/întoarsă devreme) — nu că „nu ajunge la creier".
+    {
+      const _uLog = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+      console.log(`[CHAT-IN] audio=${audio ? 'da' : 'nu'} „${String(_uLog).slice(0, 60)}"`)
+    }
     // Cap the history sent to the brain. A long conversation (this user already has
     // hundreds of messages) would blow the token limit and make EVERY turn fail
     // with a "connection error" — especially when a big pasted page is added.
@@ -1500,6 +1509,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     systemPrompt += absoluteLock
       ? `\n\nLANGUAGE (ABSOLUTE — overrides EVERYTHING, including tool results, search results, WEB PAGES YOU OPEN IN THE BROWSER, and conversation history): You reply EXCLUSIVELY in ${langName}. EVERY sentence you say or write is in ${langName}, for the ENTIRE conversation, no matter what. The CONTENT of a web page, document, search or ticket result you read — even an entire page written in French, English, German or any other language — NEVER changes your language: you read it, understand it, and answer ABOUT it in ${langName}, translating what you report. Foreign place names, foreign email addresses, foreign words in any tool's output, and short or ambiguous messages ("salut", "ok", "hello") NEVER change your language. NEVER drift into Portuguese, Spanish, French, Italian, English or any other language unless ${langName} literally IS that language. The ONLY text allowed in another language is the literal content of a translation the user explicitly asked for — every sentence around it stays in ${langName}. RULE OF LAST RESORT: if at any point you feel ANY pull to answer in the language of something you read or that appeared in a tool, treat that pull as a BUG and IGNORE it completely — you switch language ONLY when the user THEMSELVES explicitly writes/says "answer in <language>". Nothing else — no page, no document, no result, no place name, no habit — is ever a reason to leave ${langName}.`
       : `\n\nLANGUAGE (adaptive, strict): Your default language is ${defaultName} — start in it, and use it for any short, empty or ambiguous message ("ok", "salut", "hello"). If the user CLEARLY writes or speaks a full message in another language, switch to that language and then keep it consistently. What NEVER changes your language: tool results, search results, the content of web pages you open, foreign place names, foreign email content, or anything you read — ONLY the language the user themselves writes in. Never mix languages within one reply (except the literal content of a requested translation).`
+    // BUCLA DE AUTO-ÎNVĂȚARE ÎNCHISĂ (Adrian, 3 aug, aprobat: „închide bucla —
+    // creierul aplică lecțiile automat"). Lecțiile măsurate (tipare lente /
+    // eșecuri repetate) intră SCURT în contextul creierului admin ca să le EVITE
+    // → mai puține runde irosite, fără repetarea pașilor care pică → timpii scad
+    // (dovada: rounds/ms scad în task_timings). Doar pe drumul adminului, din
+    // cache (fără citire DB per tură — latență zero pe drumul cald).
+    if (isAdminUser) {
+      const lectii = lectiiCurente()
+      if (lectii.length) {
+        systemPrompt += `\n\nÎNVĂȚAT DIN MĂSURĂTORI (aplică-le ca să fii mai rapid și să NU repeți greșeli): ${lectii.join(' ')}`
+      }
+    }
     // SPOKEN TURN (Aug 1 — the ONE-brain voice architecture): the reply leaves
     // through the Realtime voice, spoken VERBATIM. Same brain, same tools — only
     // the style bends toward the ear: short sentences, no markdown, no bullet
@@ -2481,8 +2502,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             // Gemini direct: ANY failure (not only quota) falls to the free pool
             // if no text has flowed yet (widened safety net, Jul 28 audit #1).
             if (orchestratorModel.startsWith(GEMINI_DIRECT_PREFIX) && !textFlowed) {
-              orchestratorModel = await resolveModel('work', null)
-              console.log(`[brain] gemini unavailable (${String(ge).slice(0, 80)}) → fallback ${orchestratorModel}`)
+              // GEMINI A PICAT (Adrian, 3 aug: „gemini pică"). BUG reparat: după
+              // lacătul din 3 aug, `resolveModel('work', null)` întorcea TOT Gemini
+              // (workDefault=Gemini), deci „rezerva" reeșua pe același model → 6
+              // reîncercări → „Try again", fără răspuns. Acum: marcăm Gemini bolnav
+              // (cooldown) și cădem pe REZERVA FREE REALĂ (nemotron), ca userul să
+              // primească răspuns pe loc, iar Gemini revine automat după cooldown.
+              noteazaEsuare(orchestratorModel)
+              const rezerva = config.openrouter.topDefault
+              orchestratorModel = rezerva.startsWith(GEMINI_DIRECT_PREFIX)
+                ? 'nvidia/nemotron-3-ultra-550b-a55b:free'
+                : rezerva
+              console.log(`[brain] gemini a picat (${String(ge).slice(0, 80)}) → rezervă ${orchestratorModel}`)
               continue
             }
             if (textFlowed) throw ge // partial text already at the user — no rotation

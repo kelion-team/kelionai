@@ -148,3 +148,28 @@ describe('LACĂT — recepție → creier (vocea proprietarului ajunge la creier
     expect(/if \(verdict\?\.foreignVoice && !guest\)/.test(voce)).toBe(true)
   })
 })
+
+describe('LACĂT — Gemini pică → răspunde pe rezerva reală (nu „Try again")', () => {
+  const chat = sursa('./routes/chat.ts')
+
+  it('la eșec de Gemini, cade pe REZERVA free (topDefault), nu re-selectează Gemini', () => {
+    // Bug reparat 3 aug: după lacătul de creier, `resolveModel('work', null)`
+    // întorcea TOT Gemini → 6 reîncercări → „Try again". Acum: rezerva = topDefault.
+    expect(/GEMINI_DIRECT_PREFIX\) && !textFlowed\)[\s\S]{0,800}config\.openrouter\.topDefault/.test(chat)).toBe(true)
+    // Și marchează Gemini bolnav (cooldown) în aceeași ramură.
+    expect(/gemini a picat[\s\S]{0,80}rezervă/.test(chat) || /noteazaEsuare\(orchestratorModel\)[\s\S]{0,200}topDefault/.test(chat)).toBe(true)
+  })
+
+  it('marcaj [CHAT-IN]: se vede că tura a ajuns la /api/chat (recepția a mers)', () => {
+    expect(chat.includes('[CHAT-IN]')).toBe(true)
+  })
+})
+
+describe('LACĂT — vocea unește frazele într-o singură tură (nu se auto-anulează)', () => {
+  it('coalescer de voce: frazele apropiate → o singură tură spre creier', () => {
+    const panel = sursa('../../frontend/src/components/ChatPanel.tsx')
+    expect(panel.includes('voceMergeRef')).toBe(true)
+    // onAddressed NU mai trimite direct fiecare frază; le unește apoi trimite o dată.
+    expect(/onAddressed: \(text, vf, speaker, audio\)[\s\S]{0,2400}sendRef\.current\(merged, true\)/.test(panel)).toBe(true)
+  })
+})
