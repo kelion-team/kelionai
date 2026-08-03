@@ -302,7 +302,10 @@ export default function AdminPanel({
   // EXPRESSLY request the paid Fable 5 brain for the CONSTRUCTOR only"). Off by
   // default; when on, the order text carries the "Fable 5" marker that the VPS
   // constructor parses.
-  const [buildFable, setBuildFable] = useState(false)
+  // (Toggle-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug — extirparea
+  // OpenRouter: creierul plătit Fable 5 mergea prin OpenRouter, care nu mai
+  // există. Constructorul e Gemini-only; marcajul 'fable-5' rămâne acceptat
+  // doar în API-ul workerului, pentru compatibilitate cu rapoartele vechi.)
   // RECOVERY (Adrian, Jul 27): saved versions + saving the current version.
   interface RecoveryRow {
     tag: string
@@ -581,9 +584,7 @@ export default function AdminPanel({
       setBuildMsg('Scrie ordinul complet (ce construiește, unde, cum verifici).')
       return
     }
-    // The Fable toggle prepends the marker the VPS constructor parses — the
-    // order itself is the conscious paid choice, no magic words to remember.
-    const order = buildFable ? `Fable 5 — ${text}` : text
+    const order = text
     void fetch('/api/admin/constructor', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -594,7 +595,6 @@ export default function AdminPanel({
       .then((j: { id?: number } | null) => {
         if (j?.id) {
           setBuildOrder('')
-          setBuildFable(false)
           setBuildMsg(`Ordin #${j.id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`)
         } else setBuildMsg('Nu s-a putut trimite — reîncearcă.')
       })
@@ -921,32 +921,18 @@ export default function AdminPanel({
                 places. And „Consumat la AI (real)” was exactly the sum of the
                 „Cost per AI” table below. From 4 cards + 2 blocks, ONE single place
                 remains, saying how much you have, each figure exactly once. */}
-                <div className="pool-manage">
-                  <div className="pool-manage-head">
-                    {/* USD ONLY (Adrian: „Punga £7.99 vs header $9.99" — the
-                    SAME wallet converted with a hand-written rate). The pocket
-                    is now exactly what the provider measures, identical to the
-                    pill in the bar. */}
-                    Punga: ${finance.punga.total.toFixed(2)}
-                    {!finance.punga.complete && ' — incomplet, o sursă nu răspunde'}
-                  </div>
-                  {/* RÂNDURILE OpenRouter + OpenAI SCOASE (Adrian, 3 aug: „migrăm
-                  complet pe Gemini"). Aici stăteau „Credit la creier (OpenRouter)"
-                  și „OpenAI, luna asta (măsurat la furnizor)" — două afișaje de sold/
-                  cheltuială la vechii furnizori. Punga totală de sus rămâne; câmpurile
-                  finance.punga.parti.openrouter / finance.openai rămân în date, doar
-                  nu se mai desenează, ca să nu se strice nimic. */}
-                  {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
-                  through Stripe — Checkout for the deposit, `/v1/payouts` for the
-                  withdrawal. With Stripe out they have nothing to move: the users'
-                  money comes on the Revolut link, straight into his account, and the
-                  profit no longer passes through us. A button that does nothing
-                  anymore is worse than its absence — it looks like it works. */}
-                </div>
-                {/* AVERTIZAREA DE SOLD OpenRouter SCOASĂ (Adrian, 3 aug: „migrăm
-                complet pe Gemini"). Aici stătea alerta „Creierul are sub $X —
-                Alimentează OpenRouter" / „Nu pot citi soldul creierului". Câmpul
-                finance.openrouter rămâne în date; doar afișajul a dispărut. */}
+                {/* „PUNGA" A MURIT DE TOT (3 aug — extirparea totală): punga ERA
+                soldul contului OpenRouter, iar furnizorul a fost scos din
+                aplicație cu totul. Nu mai există un sold de citit, deci nici o
+                cifră de desenat — o pastilă cu un „$0.00" fabricat ar fi exact
+                minciuna interzisă de regula #1. Starea creierului (Gemini) se
+                vede pe pastila Gemini din bară. */}
+                {/* HERE STOOD „Depune în pungă” and „Trage profitul”. Both went
+                through Stripe — Checkout for the deposit, `/v1/payouts` for the
+                withdrawal. With Stripe out they have nothing to move: the users'
+                money comes on the Revolut link, straight into his account, and the
+                profit no longer passes through us. A button that does nothing
+                anymore is worse than its absence — it looks like it works. */}
                 {/* HERE STOOD „The money circuit: users → Stripe → AI” — the four
                 links, the „What I can read from Stripe” block, the Issuing state,
                 the virtual card creation and its number reveal. Removed on Jul 30:
@@ -1638,23 +1624,9 @@ export default function AdminPanel({
                   Trimite ordinul
                 </button>
               </form>
-              {/* THE PAID BRAIN, OFF BY DEFAULT (Adrian, Aug 2: "Everything
-                  FREE. The admin can EXPRESSLY request the paid Fable 5 brain
-                  for the CONSTRUCTOR only"). Ticking it marks THIS order for
-                  Anthropic's claude-fable-5 via OpenRouter; everything else in
-                  the app stays on free models. The hint says plainly that real
-                  money is spent. */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={buildFable} onChange={(e) => setBuildFable(e.target.checked)} />
-                <span>Use Fable 5 brain (paid)</span>
-              </label>
-              {buildFable && (
-                <div className="chat-hint">
-                  This order runs on Anthropic's Fable 5 via OpenRouter and spends real money from the OpenRouter
-                  balance. Only this order — everything else stays free. The measured cost appears on the order and
-                  in the report email.
-                </div>
-              )}
+              {/* (Checkbox-ul „Use Fable 5 brain (paid)" a fost SCOS, 3 aug —
+                  extirparea OpenRouter: Fable 5 mergea prin OpenRouter, care nu
+                  mai există. Constructorul rulează pe Gemini, cheia ownerului.) */}
               {buildMsg && <div className="chat-hint">{buildMsg}</div>}
             </div>
             <div className="fin-breakdown" style={{ marginTop: 12 }}>
@@ -1687,7 +1659,7 @@ export default function AdminPanel({
                       <span
                         className="vis-badge"
                         style={{ background: '#7c3aed', color: '#fff' }}
-                        title="Paid brain (OpenRouter) — expressly requested for this order"
+                        title="Fable 5 — marcaj istoric (creierul plătit de dinainte de extirparea OpenRouter, 3 aug)"
                       >
                         Fable 5
                       </span>

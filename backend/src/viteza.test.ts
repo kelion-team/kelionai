@@ -8,34 +8,33 @@ import { readFileSync } from 'node:fs'
 //   • tura cu unelte (vremea) pornea pe gemma-4-26b:free → 22s + 37s pe
 //     payload-ul real, uneori gol după 70s → cei ~38s ai ownerului;
 //   • gemini-direct: 1,2s + 1,0s cu apelul de unealtă CORECT, pe același payload.
-// Testele de comportament real sunt în services/cursa.test.ts (primul
-// câștigător) și services/openrouter.test.ts (default-ul de work măsurat).
-// Aici stă garda de sursă: cele trei reparații să nu dispară la un refactor.
+// Aici stă garda de sursă: reparațiile măsurate să nu dispară la un refactor.
+// (3 aug: cursa și pool-ul OpenRouter au fost extirpate — vezi mai jos.)
 
 const chat = readFileSync(new URL('./routes/chat.ts', import.meta.url), 'utf8')
 const orchestrator = readFileSync(new URL('./services/orchestrator.ts', import.meta.url), 'utf8')
 const config = readFileSync(new URL('./config.ts', import.meta.url), 'utf8')
 
 describe('viteza — reparațiile măsurate rămân în sursă', () => {
-  it('cursa se închide la PRIMUL câștigător, nu după cel mai lent concurent', () => {
-    expect(chat).toContain('primulCastigator(curse)')
-    // Interzis înapoi: așteptarea tuturor concurenților era chiar defectul.
+  // (3 aug — extirparea OpenRouter: cursa pe 3 modele a dispărut cu tot cu
+  // pool-ul de concurenți; garanția de viteză e acum creierul Gemini unic pe
+  // TOATE turele — 1,2s + 1,0s măsurat pe payload-ul real.)
+  it('cursa pe mai mulți concurenți nu mai există (nu are pe cine să alerge)', () => {
+    expect(chat).not.toContain('primulCastigator')
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
 
-  it('calea ușoară CU unelte pornește pe gemini-direct (măsurat 1,2s + 1,0s)', () => {
-    expect(chat).toContain('GEMINI_DIRECT_PREFIX}${config.geminiModel}')
-    expect(chat).toMatch(/!heavyTurn && geminiDirectAvailable\(\)/)
+  it('toate turele merg pe creierul Gemini (google-direct), cu unelte', () => {
+    expect(chat).toMatch(/const orchestratorModel = orChatModel/)
+    expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel/)
   })
 
-  it('creierul de LUCRU = Gemini direct free (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
-    // Adrian, 3 aug: „creierul de LUCRU e Gemini free PERMANENT". Turele grele
-    // trec prin orchestrator, care detectează prefixul google-direct/ și le duce
-    // la geminiDirect CU unelte (orchestrator.ts) — măsurat mai rapid și cu apel
-    // de unealtă corect față de nemotron (6s + 3,2s). nemotron rămâne pe treapta
-    // „top" (topDefault), ca rezervă de escaladare.
+  it('creierul de LUCRU = Gemini direct (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
+    // Adrian, 3 aug: „creierul de LUCRU e Gemini PERMANENT". Turele trec prin
+    // orchestrator, care acceptă DOAR prefixul google-direct/ și le duce la
+    // geminiDirect CU unelte (orchestrator.ts).
     expect(config).toContain(
-      "OPENROUTER_WORK_MODEL ?? 'google-direct/gemini-2.5-flash'",
+      "BRAIN_WORK_MODEL ?? 'google-direct/gemini-2.5-flash'",
     )
   })
 

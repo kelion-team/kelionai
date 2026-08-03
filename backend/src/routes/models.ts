@@ -1,19 +1,36 @@
 import type { FastifyInstance } from 'fastify'
 import { getSessionUser } from '../session.js'
 import { saveKv, loadKv, userKey } from '../db.js'
-import { getCatalog, resolveModel, type ModelTier } from '../services/openrouter.js'
+import { config } from '../config.js'
+import { resolveModel, type ModelTier } from '../services/brainContract.js'
 
-// ── SELECTABLE MODELS — live catalog + the per-user selection ───────────────
-// GET  /api/models/catalog   → the selectable models, grouped by tier (auto-update)
+// ── SELECTABLE MODELS — GEMINI-ONLY (extirparea OpenRouter, 3 aug) ──────────
+// Catalogul viu OpenRouter a dispărut odată cu furnizorul. Ce rămâne e lista
+// FIXĂ a treptelor Gemini (config.brain) — adevărată, nu simulată — plus
+// selecția per-user (KV), validată acum doar pe google-direct/*.
+// GET  /api/models/catalog   → treptele Gemini (chat + work)
 // GET  /api/models/selection → which models the user has chosen now (chat + work)
-// PUT  /api/models/selection → saves the user's choice (validated on the catalog)
-// The selection is persisted in KV (no new schema), like the avatar layout.
+// PUT  /api/models/selection → saves the user's choice (validated: google-direct/* only)
 
 const KEY = (email: string): string => `model_choice:${userKey(email)}`
 
 interface Selection {
   chat: string
   work: string
+}
+
+// Forma pe care frontend-ul (CustomerSettings, selector ascuns) o știe deja:
+// id/name/provider/vision. Toate treptele Gemini văd nativ.
+function geminiCatalog(): { chat: { id: string; name: string; provider: string; vision: boolean }[]; work: { id: string; name: string; provider: string; vision: boolean }[] } {
+  const intrare = (id: string): { id: string; name: string; provider: string; vision: boolean } => ({
+    id,
+    name: id.replace('google-direct/', ''),
+    provider: 'google',
+    vision: true,
+  })
+  const chat = [...new Set([config.brain.chatDefault])].map(intrare)
+  const work = [...new Set([config.brain.workDefault, config.brain.topDefault])].map(intrare)
+  return { chat, work }
 }
 
 async function readSelection(email: string): Promise<Selection> {
@@ -29,7 +46,8 @@ async function readSelection(email: string): Promise<Selection> {
   } catch {
     /* fall back to the default */
   }
-  // We validate on the catalog: if the saved model no longer exists, it falls back to the default.
+  // Validare Gemini-only: o alegere veche (id OpenRouter rămas în KV) cade pe
+  // defaultul treptei — nu mai există alt furnizor care s-o servească.
   return {
     chat: await resolveModel('chat', chat),
     work: await resolveModel('work', work),
@@ -38,8 +56,7 @@ async function readSelection(email: string): Promise<Selection> {
 
 export async function modelRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/models/catalog', async (_req, reply) => {
-    const cat = await getCatalog()
-    return reply.send({ chat: cat.chat, work: cat.work })
+    return reply.send(geminiCatalog())
   })
 
   app.get('/api/models/selection', async (req, reply) => {

@@ -80,16 +80,16 @@ describe('cardFurnizor — poarta e vocea, nu sesiunea', () => {
 describe('cardFurnizor — „gata" e o măsurătoare, nu o declarație', () => {
   it('pagina arată card + reîncărcare automată → notat, plăți automate DOVEDITE', async () => {
     browserRead.mockResolvedValueOnce({ url: 'u', title: 't', text: 'Visa •••• 4242 · Auto-recharge is on', elements: [], shotUrl: '' })
-    const r = await terminaCard(EU, 'https://kelionai.app', 'OpenRouter')
+    const r = await terminaCard(EU, 'https://kelionai.app', 'Gemini')
     expect(r.card).toBe(true)
     expect(r.automat).toBe(true)
-    expect((await stareFurnizori())[0]?.furnizor).toBe('openrouter')
+    expect((await stareFurnizori())[0]?.furnizor).toBe('gemini')
     expect(await platiAutomatePornite()).toBe(true)
   })
 
   it('card pus, dar FĂRĂ plată automată → nu se declară gata; îi spune ce mai are de făcut', async () => {
     browserRead.mockResolvedValueOnce({ url: 'u', title: 't', text: 'Card ending in 4242', elements: [], shotUrl: '' })
-    const r = await terminaCard(EU, 'https://kelionai.app', 'anthropic')
+    const r = await terminaCard(EU, 'https://kelionai.app', 'serper')
     expect(r.card).toBe(true)
     expect(r.automat).toBe(false)
     expect(r.detaliu).toContain('Pornește')
@@ -98,7 +98,7 @@ describe('cardFurnizor — „gata" e o măsurătoare, nu o declarație', () => 
 
   it('pagină fără nicio urmă → nu notează NIMIC (regula #1: nu declar ce n-am măsurat)', async () => {
     browserRead.mockResolvedValueOnce({ url: 'u', title: 't', text: 'Bine ai venit', elements: [], shotUrl: '' })
-    const r = await terminaCard(EU, 'https://kelionai.app', 'openai')
+    const r = await terminaCard(EU, 'https://kelionai.app', 'google')
     expect(r.card).toBe(false)
     expect(r.automat).toBe(false)
     expect(await stareFurnizori()).toEqual([])

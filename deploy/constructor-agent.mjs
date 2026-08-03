@@ -4,17 +4,20 @@
 // orice modificare, orice îmbunătățire".)
 //
 // CE FACE: ia UN ordin din coadă (API-ul aplicației, auth x-bridge-secret),
-// clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă un model
-// de codare (API OpenRouter — plată per-folosire, NU CLI pe abonament) să
+// clonează repo-ul proaspăt în ATELIER (/root/kelion/atelier), lasă creierul
+// GEMINI (cheia ownerului — API direct Google, NU CLI pe abonament) să
 // exploreze/scrie/verifice prin unelte, impune BUILD + TESTE verzi, apoi
 // împinge ramura și deschide PR-ul. Merge-ul rămâne la Adrian.
+// (3 aug — extirparea totală OpenRouter: scara de modele :free a dispărut cu
+// tot cu furnizorul; la eșec Gemini ordinul se AMÂNĂ onest, nu cade pe alt
+// creier.)
 //
 // DE CE E JOB, NU DEMON: ecosistemul vechi (bridge/builder, procese claude
 // permanente) ardea abonamentul și a produs phantom-deploy-uri — vezi
 // AI-HANDOFF §6. Aici: pornit de cron, flock (unul singur), timeout dur din
 // constructor-worker.sh, plafoane de pași și tokeni. Se termină și moare.
 //
-// PLAFOANE (env, cu valori implicite): CONSTRUCTOR_MODEL,
+// PLAFOANE (env, cu valori implicite): CONSTRUCTOR_GEMINI_MODEL,
 // CONSTRUCTOR_MAX_STEPS (24 — pași CU UNELTE, nu ture), CONSTRUCTOR_MAX_TOKENS
 // (900000), CONSTRUCTOR_MAX_STERILE (8 — ture în care modelul doar povestește),
 // CONSTRUCTOR_MAX_REPAIR (2 — runde de reparație după un build picat),
@@ -44,40 +47,18 @@ try {
   /* fișier absent/necitibil — env gol, main() raportează lipsurile */
 }
 const BRIDGE = env.BRIDGE_SECRET ?? ''
-const ORKEY = env.OPENROUTER_API_KEY ?? ''
 const GHTOKEN = env.GITHUB_TOKEN ?? ''
-// GEMINI DIRECT — the constructor's PRIMARY brain (owner's paid Tier 2 key from
-// AI Studio, already present in kelionai.env). When the key is set, `llm()` calls
-// Gemini FIRST; the free OpenRouter ladder below stays UNTOUCHED as the automatic
-// fallback (Gemini fails → free ladder), so the constructor is never worse than
-// before. Empty key ⇒ behavior is exactly as it was (free ladder only). Request/
-// response shaping mirrors backend/src/services/geminiDirect.ts. See llmGemini().
+// GEMINI DIRECT — the constructor's ONLY brain (owner's paid Tier 2 key from
+// AI Studio, already present in kelionai.env). Extirparea totală OpenRouter
+// (3 aug, ordinul repetat al ownerului): scara de modele :free, garda
+// CONSTRUCTOR_ALLOW_PAID și creierul plătit „Fable 5" prin OpenRouter au
+// DISPĂRUT împreună cu furnizorul. Cheia Gemini e o alegere conștientă a
+// ownerului (aceeași care servește tot creierul aplicației); dacă Gemini pică,
+// ordinul se AMÂNĂ onest (rămâne în coadă, se reia automat) — nu cade pe alt
+// creier și nu inventează succes. Request/response shaping mirrors
+// backend/src/services/geminiDirect.ts. See llmGemini().
 const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
 const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
-// DOAR GRATUIT, STRUCTURAL (Adrian, 27 iul: „doar gratuit... să nu mai poată
-// reveni vreodată" arderea de bani). Implicitul e un model :free; iar dacă
-// cineva pune totuși un model PLĂTIT în env, constructorul REFUZĂ să pornească
-// (decât cu CONSTRUCTOR_ALLOW_PAID=1, ales conștient). Așa, incidentul din 27
-// iul (constructor pe model plătit care ardea bani la fiecare rulare) NU se
-// mai poate întâmpla din greșeală — e imposibil, nu doar nerecomandat.
-const MODEL = env.CONSTRUCTOR_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b:free'
-const ALLOW_PAID = env.CONSTRUCTOR_ALLOW_PAID === '1'
-if (!MODEL.endsWith(':free') && !ALLOW_PAID) {
-  console.log(
-    `[constructor] REFUZ: modelul „${MODEL}" NU e gratuit (:free) și CONSTRUCTOR_ALLOW_PAID nu e 1. ` +
-      `Arderea de bani e blocată structural. Pune un model :free sau, conștient, CONSTRUCTOR_ALLOW_PAID=1.`,
-  )
-  process.exit(0)
-}
-// GARDA DE MAI SUS PRIVEȘTE DOAR MODELUL DE PORNIRE DIN ENV — și rămâne
-// neatinsă. SINGURA excepție plătită din tot constructorul nu vine din env,
-// ci din ORDINUL ÎNSUȘI: marcajul „Fable 5" scris expres de admin (vezi
-// `cereCreierFable` / `modelePentruOrdin`, mai jos). Adrian, 2 aug: „Peste tot
-// GRATUIT. Adminul poate cere EXPRES creierul plătit Fable 5, DOAR pentru
-// CONSTRUCTOR. Nimic altceva plătit, niciodată." — vechea escaladare plătită
-// pe neputință (CONSTRUCTOR_MODEL_CAPABIL / CONSTRUCTOR_ESCALADARE) și vechea
-// alegere plătită pe nivel de dificultate (CONSTRUCTOR_MODEL_GREU/MEDIU) au
-// fost DESFIINȚATE de regula asta: fără marcaj Fable, scara e 100% :free.
 const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
@@ -392,177 +373,21 @@ function compactHistory(messages) {
   }
 }
 
-// SCARA DE MODELE GRATUITE (dovadă live 28 iul, ordinul #9: modelul configurat
-// a primit 429 la FIECARE pas — „poolside/laguna-m.1:free is rate-limited" — și
-// agentul a reîncercat același model până la plafonul de pași, fără să scrie o
-// linie de cod; jobul a picat cu „plafon de pași atins fără finish"). Reîncercarea
-// pe ACELAȘI model nu ajută când modelul e saturat: la a doua încercare eșuată
-// TRECEM LA URMĂTORUL model gratuit. Toate au tools confirmat în catalog.
-// SCARA, REFĂCUTĂ PE MĂSURĂTORI (28 iul, catalogul live OpenRouter + uptime pe
-// 24h raportat de /models/{id}/endpoints). Trei lucruri au reieșit:
-//   • `poolside/laguna-m.1:free` (modelul din env) are cel mai PROST uptime din
-//     familia lui: 95,43% pe 24h, față de 99,9% la frații lui. De-aia primea
-//     429 la fiecare pas. NU-l mai punem primul.
-//   • Cele două trepte NVIDIA de dinainte NU erau două plase, ci UNA: ambele
-//     rulează pe platforma NVIDIA (NVCF), deci `400 DEGRADED` le doboară
-//     împreună. Ținem UNA singură pe scară, restul la alți furnizori.
-//   • Modelele Poolside gratuite spun explicit că POT FOLOSI ce le trimiți ca
-//     să se antreneze — iar constructorul le-ar trimite codul sursă al lui
-//     Adrian. Fără acordul lui explicit, NU le folosim, oricât ar fi de bune la
-//     cod. Decizia îi aparține; până atunci scara ocolește Poolside.
-// Rezultat: patru furnizori DIFERIȚI (NVIDIA, Cohere, Novita, Google), ca o
-// pană la unul să nu însemne pană la toți.
-const MODEL_LADDER = [
-  'cohere/north-mini-code:free', // agent de cod dedicat, alt furnizor, 96,79%
-  'inclusionai/ling-3.0-flash:free', // Novita, cel mai bun uptime măsurat: 99,97%
-  'google/gemma-4-31b-it:free', // Google AI Studio, 99,77% — plasă de final
-].filter((m, i, a) => m && a.indexOf(m) === i)
-// Modelul din env intră pe scară DOAR dacă nu e unul dovedit prost. Așa, o
-// setare veche în kelionai.env nu mai poate readuce boala pe treapta întâi.
-const MODELE_DOVEDIT_PROASTE = new Set([
-  'poolside/laguna-m.1:free', // 95,43% uptime, 429 la fiecare pas (dovadă live)
-  'nvidia/nemotron-nano-12b-v2-vl:free', // status -2 în catalog: degradat ACUM
-  // Diagnostic pus de KELION însuși, 31 iul, și e corect: 200 fără `content` și
-  // fără `tool_calls` la TOATE cele 11 ordine din ultimele 24h (jurnalele
-  // build_jobs #16-27). Era primul pe scară și nemarcat, deci fiecare ordin
-  // începea prin a-l încerca, primea gol, se rotea — și timpul se termina
-  // înainte să ajungă la un model care lucrează.
-  'nvidia/nemotron-3-super-120b-a12b:free',
-])
-if (MODEL && !MODEL_LADDER.includes(MODEL) && !MODELE_DOVEDIT_PROASTE.has(MODEL)) MODEL_LADDER.unshift(MODEL)
+// ── SCARA DE MODELE OPENROUTER — EXTIRPATĂ (3 aug) ──────────────────────────
+// Aici stăteau: MODEL_LADDER (pool-ul :free), MODELE_DOVEDIT_PROASTE, creierul
+// plătit „Fable 5" (FABLE_MODEL / cereCreierFable / modelePentruOrdin), rotația
+// circulară pe trepte și clasificarea erorilor OpenRouter. Toate au murit odată
+// cu furnizorul — ordinul repetat al ownerului: „openrouter și open ai scos din
+// toată aplicația". Creierul e Gemini-only; la eșec, ordinul se AMÂNĂ onest
+// (rămâne în coadă, se reia automat) — nu cade pe alt creier.
+const LLM_ATTEMPTS = 6
 
-// ── CREIERUL PLĂTIT „FABLE 5" — DOAR LA CERERE EXPRESĂ, PER ORDIN ────────────
-// Adrian, 2 aug: „Peste tot GRATUIT. Adminul poate cere EXPRES creierul plătit
-// Fable 5, DOAR pentru CONSTRUCTOR. Nimic altceva plătit, niciodată."
-//
-// Până azi existau două căi care urcau pe bani FĂRĂ ca ordinul să ceară asta:
-// escaladarea pe neputință (CONSTRUCTOR_MODEL_CAPABIL, default un model plătit)
-// și alegerea mâinii după „NIVEL DE DIFICULTATE" (CONSTRUCTOR_MODEL_GREU/MEDIU,
-// tot plătite). Ambele sunt DESFIINȚATE de regula de mai sus. Singura mână
-// plătită rămasă e Fable 5, iar ea pornește EXCLUSIV din marcajul scris de
-// admin în textul ordinului („fable 5" / „fable5" / „creier fable") — ordinul
-// însuși e alegerea conștientă, nu-i trebuie CONSTRUCTOR_ALLOW_PAID în env.
-// Id-ul OpenRouter e același folosit în restul aplicației (vezi brain.ts).
-export const FABLE_MODEL = 'anthropic/claude-fable-5'
-
-/** MARCAJUL FABLE, în textul ordinului. PUR (fără stare) — probat din teste.
- *  Acceptă: „fable 5", „fable5", „fable-5" (orice caz) și „creier fable". */
-export function cereCreierFable(orderText) {
-  const t = String(orderText ?? '')
-  return /fable[\s\-_]?5/i.test(t) || /creier\s+fable/i.test(t)
-}
-
-/** SCARA COMPLETĂ pentru un ordin, în ordinea încercării. PUR — probat din
- *  teste. REGULA STRUCTURALĂ: fără marcaj Fable, scara e 100% :free (orice
- *  model plătit din lista de bază — ex. rămas dintr-un env vechi — e scos).
- *  Cu marcaj: Fable 5 în cap, gratuitele dedesubt ca plasă (dacă Fable pică
- *  pe furnizor, ordinul degradează pe gratuit — nu se blochează, dar nici nu
- *  urcă pe ALTI bani). */
-export function modelePentruOrdin(orderText, baza = MODEL_LADDER, envModel = MODEL, allowPaid = ALLOW_PAID) {
-  const gratuite = baza.filter((m) => typeof m === 'string' && m.endsWith(':free'))
-  // ORDINUL NOU (Adrian, 2 aug seara: „trebuie fable 5 peste tot") înlocuiește
-  // regula „fără marcaj, scara e 100% :free": un model PLĂTIT pus conștient în
-  // env (CONSTRUCTOR_MODEL + CONSTRUCTOR_ALLOW_PAID=1 — ambele, alegerea lui,
-  // nu un accident) urcă în capul scării pentru FIECARE ordin, cu gratuitele
-  // dedesubt ca plasă. Marcajul „fable 5" din text rămâne valabil pentru
-  // cazul în care env-ul e pe gratuit dar UN ordin anume merită creierul mare.
-  const platitDinEnv = allowPaid && typeof envModel === 'string' && envModel && !envModel.endsWith(':free') ? [envModel] : []
-  const cap = cereCreierFable(orderText) ? [FABLE_MODEL, ...platitDinEnv.filter((m) => m !== FABLE_MODEL)] : platitDinEnv
-  return [...cap, ...gratuite]
-}
-
-let modelIdx = 0
-
-/** Pune în fața scării mâna cerută de ORDIN (Fable 5 doar dacă e marcat expres)
- *  și scrie alegerea în jurnal + pe monitor — creierul folosit trebuie să fie
- *  VIZIBIL (regula din 2 aug), nu dedus după. */
-function pregatesteScaraPentruOrdin(orderText) {
-  const scara = modelePentruOrdin(orderText)
-  MODEL_LADDER.length = 0
-  MODEL_LADDER.push(...scara)
-  modelIdx = 0
-  const capPlatit = MODEL_LADDER[0] && !MODEL_LADDER[0].endsWith(':free') ? MODEL_LADDER[0] : ''
-  if (capPlatit) {
-    log(
-      `🧠 CREIER PLĂTIT: ${capPlatit} în capul scării — ` +
-        (cereCreierFable(orderText)
-          ? 'cerut EXPRES în ordin. '
-          : 'ales conștient în env (CONSTRUCTOR_MODEL + ALLOW_PAID; ordinul lui Adrian, 2 aug: „fable 5 peste tot"). ') +
-        `Gratuitele rămân plasă. Tokenii și costul se măsoară din răspunsurile OpenRouter și se raportează.`,
-    )
-  } else {
-    log(`scara gratuită: ${MODEL_LADDER.join(' → ')} — nimic plătit pentru ordinul ăsta`)
-  }
-}
-// Modele scoase din joc pentru rularea asta (nu există, n-au unelte, au context
-// prea mic) — nu le mai atingem, ca rotația să nu ne întoarcă la ele.
-const modeleMoarte = new Set()
-const modelCurent = () => MODEL_LADDER[modelIdx % MODEL_LADDER.length]
-// ROTAȚIE, nu coborâre într-un sens. Vechiul cod făcea „if (modelIdx < len-1)
-// modelIdx++": ajuns pe ULTIMA treaptă rămânea acolo pentru tot restul rulării
-// și reîncerca la infinit exact modelul care tocmai picase — adică fix boala pe
-// care scara trebuia s-o vindece. Acum ne rotim circular și sărim peste cele
-// moarte; primul model are timp să-și revină din rate-limit până revenim la el.
-function treciLaUrmatorulModel() {
-  for (let i = 1; i <= MODEL_LADDER.length; i++) {
-    const idx = (modelIdx + i) % MODEL_LADDER.length
-    if (!modeleMoarte.has(MODEL_LADDER[idx])) {
-      modelIdx = idx
-      return true
-    }
-  }
-  return false // toată scara e moartă
-}
-
-// NOTĂ (2 aug): vechea funcție `escaladeazaPeNeputinta` — care urca pe un
-// model capabil PLĂTIT când gratuitul dovedea că nu poate — a fost DESFIINȚATĂ
-// de regula „nimic altceva plătit, niciodată". Un ordin fără marcaj Fable care
-// epuizează turele sterile / rundele de reparație EȘUEAZĂ onest, cu diagnostic
-// — nu mai „se salvează" singur pe banii ownerului.
-
-// CLASIFICAREA ERORILOR OPENROUTER (dovadă live 28 iul, ordinul #13: a murit
-// INSTANT cu „OpenRouter 400: Provider returned error … DEGRADED function
-// cannot be invoked", provider_name „Nvidia"). Regula veche — „429/5xx =
-// tranzitoriu, ORICE 4xx = fatal" — a omorât ordinul deși aveam încă 3 modele
-// neîncercate pe scară: ăla NU era un request greșit de-al nostru, era
-// FURNIZORUL lor picat. Dar nici invers nu e bine (a reîncerca orb orice 400
-// ne-ar arde scara pe o cerere stricată). Deci despărțim clar trei familii:
-//   'furnizor' — e stricat la ei ACUM (Provider returned error, DEGRADED,
-//                supraîncărcat, 429, 5xx) → alt model de pe scară, ordinul trăiește;
-//   'model'    — cererea noastră e bună, dar MODELUL ăsta n-o poate duce (nu
-//                există, n-are endpoint, n-are unelte, context prea mic) → alt
-//                model ȘI îl marcăm mort pentru rularea asta;
-//   'fatal'    — e vina NOASTRĂ sau a contului (401/403 cheie, 402 fără credit,
-//                corp malformat) → niciun model nu ajută, ne oprim pe loc.
-const RE_FURNIZOR =
-  /provider returned error|degraded|upstream|overload|capacity|temporarily|unavailable|rate.?limit|try again|timed? ?out|bad gateway|service unavailable|internal server error/i
-const RE_MODEL =
-  /not a valid model|invalid model|model not found|no endpoints|no allowed providers|no providers|does not support|not supported|tool.?call|maximum context|context.?length|max_tokens|too many tokens|prompt is too long/i
-function clasificaEroare(status, text) {
-  const t = String(text ?? '')
-  if (status === 401 || status === 402 || status === 403) return 'fatal' // cheie/credit — scara nu ajută
-  if (status === 429 || status === 408 || status === 409) return 'furnizor'
-  if (status >= 500) return 'furnizor'
-  if (status === 404) return 'model' // ruta/modelul nu există la ei
-  if (status === 400 || status === 422) {
-    if (RE_FURNIZOR.test(t)) return 'furnizor'
-    if (RE_MODEL.test(t)) return 'model'
-    return 'fatal' // 400 neclasificat = presupunem că e cererea noastră; nu ardem scara
-  }
-  return 'furnizor'
-}
-
-const LLM_ATTEMPTS = Math.max(6, MODEL_LADDER.length * 2)
-
-// ── GEMINI DIRECT — THE PRIMARY CODING BRAIN ────────────────────────────────
-// The owner's paid Gemini (Tier 2) key is the strongest model the constructor
-// can reach — above any :free OpenRouter model. So it becomes the PRIMARY: llm()
-// tries Gemini first and only drops to the free ladder if Gemini fails. The
-// request/response shaping MIRRORS backend/src/services/geminiDirect.ts
-// (toGeminiPayload / partsToResult) — same Google API, same schema cleaning —
-// but the value it returns is the SAME OpenAI-shaped object the loop in main()
-// already consumes: choices[0].message.{content,tool_calls}, usage.total_tokens,
-// modelServit.
+// ── GEMINI DIRECT — THE ONLY CODING BRAIN (extirparea OpenRouter, 3 aug) ─────
+// The owner's paid Gemini (Tier 2) key. The request/response shaping MIRRORS
+// backend/src/services/geminiDirect.ts (toGeminiPayload / partsToResult) —
+// same Google API, same schema cleaning — but the value it returns is the SAME
+// OpenAI-shaped object the loop in main() already consumes:
+// choices[0].message.{content,tool_calls}, usage.total_tokens, modelServit.
 
 // TOOLS' JSON schema → the schema Gemini accepts: keep only the supported keys,
 // silently drop the rest (mirrors cleanSchema in geminiDirect.ts). Recurses into
@@ -640,10 +465,9 @@ function toGeminiBody(messages) {
 
 // The Gemini call itself. Returns the OpenAI-shaped object main() expects. On ANY
 // failure — non-2xx, network, broken JSON, empty/blocked 200 — it THROWS an error
-// tagged {clasa:'furnizor'}, so llm() treats it like a transient provider outage
-// and falls through to the free OpenRouter ladder below. That is the whole safety
-// net: Gemini is a pure upgrade — when it works we get the best brain, when it
-// doesn't we are exactly where we were before.
+// tagged {clasa:'furnizor'}; llm() retries with backoff on the SAME Gemini brain
+// (no other provider exists — extirparea OpenRouter, 3 aug) and, when all
+// attempts are spent, marks the order postponable so the queue retries it later.
 async function llmGemini(messages) {
   let r
   try {
@@ -681,9 +505,8 @@ async function llmGemini(messages) {
         function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
       })
   }
-  // Empty 200 (no text, no tool call) — Gemini can do this under load; mirror the
-  // OpenRouter empty-response handling below and fall back instead of burning a
-  // sterile turn on nothing.
+  // Empty 200 (no text, no tool call) — Gemini can do this under load; throw so
+  // llm() retries instead of burning a sterile turn on nothing.
   if (!content.trim() && !toolCalls.length)
     throw Object.assign(new Error('Gemini: răspuns gol (200 fără text/tool)'), { clasa: 'furnizor' })
   const message = { role: 'assistant', content }
@@ -697,103 +520,34 @@ async function llmGemini(messages) {
 }
 
 async function llm(messages) {
-  // GEMINI FIRST (the owner's Tier 2 key) — the primary brain. On ANY failure
-  // llmGemini throws (tagged {clasa:'furnizor'}) and we fall straight through to
-  // the free OpenRouter ladder below, which is left UNCHANGED. With no key, this
-  // whole block is skipped and behavior is byte-for-byte what it was before.
-  if (GEMINI_KEY) {
+  // GEMINI-ONLY (3 aug — extirparea OpenRouter): nu mai există nicio scară de
+  // rezervă. Reîncercăm pe ACELAȘI creier Gemini cu pauze crescătoare; o
+  // eroare de cheie/cont (401/403) e FATALĂ pe loc (nicio reîncercare nu
+  // ajută); la epuizarea încercărilor, sugrumarea (429/cotă/5xx) marchează
+  // ordinul AMÂNABIL — rămâne în coadă și se reia singur, nu moare.
+  if (!GEMINI_KEY) throw Object.assign(new Error('lipsește GEMINI_API_KEY — constructorul nu are creier'), { fatal: true })
+  let lastErr = ''
+  for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
+    if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
     try {
       return await llmGemini(messages)
     } catch (e) {
-      log(`Gemini (primar) a picat [${e?.clasa ?? 'furnizor'}]: ${String(e?.message ?? e).slice(0, 120)} — cad pe scara gratuită OpenRouter`)
-    }
-  }
-  let lastErr = ''
-  for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
-    const model = modelCurent()
-    if (ramase() <= 0) throw Object.assign(new Error('bugetul de timp al rulării s-a terminat'), { fatal: true })
-    try {
-      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${ORKEY}`, 'content-type': 'application/json' },
-        // `usage.include` = cerem OpenRouter și COSTUL real al apelului în
-        // `usage.cost` (0 la modelele :free) — costul ordinului pe Fable 5 se
-        // MĂSOARĂ din răspuns, nu se estimează (regula de onestitate din 2 aug).
-        body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_tokens: 16_000, usage: { include: true } }),
-        // Fără plafon, un endpoint :free care atârnă ținea agentul blocat până
-        // la `timeout 1800` din worker — adică moarte fără raport.
-        signal: AbortSignal.timeout(Math.max(30_000, Math.min(180_000, ramase()))),
-      })
-      const text = await r.text()
-      if (!r.ok) {
-        lastErr = `OpenRouter ${r.status}: ${text.slice(0, 300)}`
-        const clasa = clasificaEroare(r.status, text)
-        // Familia intră ÎN JURNAL (deci în emailul de eșec): la următoarea
-        // cădere se vede din prima dacă a fost vina lor, a treptei sau a
-        // noastră — fără să mai reconstituim cauza din text brut.
-        if (clasa === 'fatal') {
-          log(`llm [fatal, ${model}] — e cererea/contul nostru, scara nu ajută: ${lastErr.slice(0, 200)}`)
-          throw Object.assign(new Error(lastErr), { fatal: true })
-        }
-        throw Object.assign(new Error(lastErr), { clasa })
-      }
-      if (!text.trim()) throw new Error('corp gol de la OpenRouter')
-      let parsed
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        throw new Error(`JSON rupt de la OpenRouter (${text.length} caractere)`)
-      }
-      // RĂSPUNS GOL VALID (jobul #2, 27 iul, a doua cauză reală din log:
-      // „EȘEC: răspuns gol de la model" — 200 cu JSON corect dar mesaj FĂRĂ
-      // content și FĂRĂ tool_calls; modelele free fac asta sub sarcină). E tot
-      // tranzitoriu → intră în aceeași scară de reîncercări, nu pică jobul.
-      const m0 = parsed?.choices?.[0]?.message
-      if (!m0 || (!String(m0.content ?? '').trim() && !m0.tool_calls?.length)) {
-        throw new Error(
-          parsed?.error
-            ? `eroare în corp: ${JSON.stringify(parsed.error).slice(0, 180)}`
-            : 'răspuns gol de la model (200 fără mesaj)',
-        )
-      }
-      // Modelul care a SERVIT apelul, atașat răspunsului: contabilitatea de
-      // cost din main() trebuie să știe sigur ce treaptă a lucrat (rotirea pe
-      // scară schimbă modelul între apeluri, iar `resp.model` poate lipsi la
-      // unii furnizori — atunci rămâne modelul cerut).
-      parsed.modelServit = String(parsed.model ?? model)
-      return parsed
-    } catch (e) {
-      if (e?.fatal) throw e
       lastErr = String(e?.message ?? e)
-      const clasa = e?.clasa ?? 'furnizor'
-      // 'model' = treapta asta nu poate duce cererea noastră niciodată în
-      // rularea asta (nu există / n-are unelte / context prea mic) → o scoatem
-      // definitiv din rotație, ca să nu ne întoarcem la ea peste două ture.
-      if (clasa === 'model') modeleMoarte.add(model)
+      // Cheia/contul nostru — nicio reîncercare nu ajută; ne oprim pe loc.
+      if (/gemini (401|403)/i.test(lastErr)) {
+        log(`llm [fatal] — cheia/contul Gemini: ${lastErr.slice(0, 200)}`)
+        throw Object.assign(new Error(lastErr), { fatal: true })
+      }
       if (attempt === LLM_ATTEMPTS) break
-      const maiAvem = treciLaUrmatorulModel()
-      if (!maiAvem)
-        throw Object.assign(new Error(`toate modelele gratuite de pe scară sunt inutilizabile — ultima eroare: ${lastErr}`), {
-          fatal: true,
-          // Nu e vina ordinului: furnizorii gratuiți sunt sugrumați ACUM.
-          // main() amână ordinul (rămâne în coadă) în loc să-l declare mort.
-          amanabil: true,
-        })
-      // Când chiar SCHIMBĂM modelul, pauza n-are rost (nu el e saturat) — 2s.
-      // Când scara are o singură treaptă bună, revenim la pauze crescătoare.
-      const schimbat = modelCurent() !== model
-      const wait = schimbat ? 2_000 : Math.min(attempt * 8_000, 30_000)
-      log(
-        `llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe ${model} [${clasa}] (${lastErr.slice(0, 100)}) — ` +
-          `trec pe ${modelCurent()} în ${wait / 1000}s`,
-      )
+      const wait = Math.min(attempt * 8_000, 30_000)
+      log(`llm încercarea ${attempt}/${LLM_ATTEMPTS} a picat pe Gemini (${lastErr.slice(0, 100)}) — reîncerc în ${wait / 1000}s`)
       await dormi(wait)
     }
   }
   // La capătul tuturor încercărilor: dacă ultima eroare e sugrumare de furnizor
-  // (429/rate-limit/DEGRADED), marcăm amânabil — ordinul nu moare, se reia.
-  throw Object.assign(new Error(lastErr || `OpenRouter indisponibil după ${LLM_ATTEMPTS} încercări`), {
-    amanabil: /429|rate.?limit|ResourceExhausted|DEGRADED function|Provider returned error/i.test(lastErr),
+  // (429/cotă/5xx/gol), marcăm amânabil — ordinul nu moare, se reia.
+  throw Object.assign(new Error(lastErr || `Gemini indisponibil după ${LLM_ATTEMPTS} încercări`), {
+    amanabil: /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|gemini 5\d\d|răspuns gol|rețea/i.test(lastErr),
   })
 }
 
@@ -930,8 +684,8 @@ for (const semnal of ['SIGTERM', 'SIGINT']) {
 }
 
 async function main() {
-  if (!BRIDGE || !ORKEY || !GHTOKEN) {
-    log('lipsesc BRIDGE_SECRET/OPENROUTER_API_KEY/GITHUB_TOKEN din kelionai.env — ies')
+  if (!BRIDGE || !GEMINI_KEY || !GHTOKEN) {
+    log('lipsesc BRIDGE_SECRET/GEMINI_API_KEY/GITHUB_TOKEN din kelionai.env — ies')
     return
   }
   const claim = await api('/api/constructor/next')
@@ -939,36 +693,32 @@ async function main() {
   beatJobId = Number(claim.job.id) || 0 // de-acum log() trimite pasul pe monitor
   const job = claim.job
   log(`ordin #${job.id} (încercarea ${job.attempts}): ${job.orderText.slice(0, 160)}`)
-  // CREIERUL ORDINULUI (Adrian, 2 aug): GRATUIT mereu, cu O SINGURĂ excepție —
-  // marcajul „Fable 5" scris expres de admin în textul ordinului. Se face AICI,
-  // nu la încărcarea modulului, fiindcă marcajul vine din ordinul proaspăt luat.
-  const peFable = cereCreierFable(job.orderText)
-  pregatesteScaraPentruOrdin(job.orderText)
+  // CREIERUL ORDINULUI (3 aug — extirparea OpenRouter): Gemini, unic, pe cheia
+  // ownerului. Marcajul „Fable 5" din text nu mai pornește nimic (creierul
+  // plătit prin OpenRouter a dispărut) — alegerea e scrisă în jurnal.
+  log(`creier: google-direct/${GEMINI_MODEL} (cheia Gemini a ownerului) — unic, fără scară de rezervă`)
 
   // `tries` mai mic la închiderea forțată: handlerul de SIGTERM are doar ~20s
   // până ne omorâm singuri, deci acolo nu ne permitem cele 8 reîncercări.
-  // CONTABILITATEA DE COST — DECLARATĂ AICI, în scope-ul lui `report`, NU în
-  // try (bug dovedit live, 3 aug, ordinele #32/#34: `let` în try + `report`
-  // definit în afara lui → „ReferenceError: tokensPaid is not defined" FIX în
-  // report(), DUPĂ ce PR-ul fusese deschis — jobul rămânea „running" deși
-  // munca era gata, se relua de 3 ori și părea eșuat cu PR-ul deschis).
-  let tokensPaid = 0
-  let costUsd = 0
-  let costMasurat = false
+  // (CONTABILITATEA DE COST a fost EXTIRPATĂ cu totul, 3 aug — Gemini nu
+  // itemizează cost per apel. Invariantul din bug-ul ordinelor #32/#34 —
+  // „report() nu moare pe variabile din alt scope" („ReferenceError:
+  // tokensPaid is not defined" DUPĂ ce PR-ul fusese deschis) — e ținut prin
+  // ELIMINARE: report() nu mai citește nicio variabilă de cost.)
   const report = (status, extra = {}, tries = 8) =>
     api(
       '/api/constructor/report',
       {
         method: 'POST',
-        // Creierul și costul merg în FIECARE raport (succes sau eșec): rândul
-        // din build_jobs e dovada cheltuielii — „fable-5" vs „free", cu costul
-        // măsurat din răspunsurile OpenRouter când e disponibil.
+        // Creierul merge în FIECARE raport (succes sau eșec). 'free' = „nu e
+        // ordinul plătit expres Fable 5" (marcaj istoric ținut de API); Gemini
+        // nu itemizează un cost per apel, deci costUsd nu se trimite — o cifră
+        // neraportată de furnizor NU se inventează (regula #1).
         body: JSON.stringify({
           id: job.id,
           status,
           log: logLines.join('\n'),
-          brain: tokensPaid > 0 ? 'fable-5' : 'free',
-          costUsd: costMasurat ? Number(costUsd.toFixed(6)) : undefined,
+          brain: 'free',
           ...extra,
         }),
       },
@@ -988,8 +738,12 @@ async function main() {
       { role: 'user', content: `ORDINUL DE CONSTRUCȚIE (de la owner):\n\n${job.orderText}` },
     ]
     let tokens = 0
-    // (tokensPaid / costUsd / costMasurat sunt declarate SUS, lângă `report` —
-    // vezi comentariul de acolo; aici doar se incrementează.)
+    // (Contabilitatea „tokensPaid/costUsd/costMasurat" pe scara plătită
+    // OpenRouter a fost EXTIRPATĂ, 3 aug: Gemini nu itemizează cost per apel;
+    // tokenii se numără din usageMetadata și se raportează ca atare.
+    // Invariantul din bug-ul ordinelor #32/#34 — `report()` nu are voie să
+    // moară pe variabile din alt scope — e ținut prin ELIMINARE: report() nu
+    // mai citește nicio variabilă de cost.)
     let finish = null
     // CONTABILITATEA PAȘILOR (dovadă live 28 iul, ordinul #9: „EȘEC: plafon de
     // pași atins fără finish" după ~30 de ture în care nu s-a produs nicio
@@ -1017,7 +771,7 @@ async function main() {
         // plătit, niciodată"): ordinul eșuează onest, cu diagnostic.
         if (pasiSterili >= MAX_STERILE) {
           throw new Error(
-            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (ultimul model: ${modelCurent()})`,
+            `modelul nu folosește uneltele: ${pasiSterili} ture fără nicio unealtă validă (creier: google-direct/${GEMINI_MODEL})`,
           )
         }
         // Ne oprim ÎNAINTE de `timeout 1800` din constructor-worker.sh, ca să mai
@@ -1029,18 +783,6 @@ async function main() {
         const resp = await llm(messages)
         const tokPas = Number(resp.usage?.total_tokens ?? 0)
         tokens += tokPas
-        // Apel PLĂTIT? Treapta care a servit nu e :free (pe o scară fără marcaj
-        // Fable asta nu se poate întâmpla — dar contabilizăm pe DOVADĂ, nu pe
-        // presupunere). Costul: doar ce a raportat OpenRouter în usage.cost.
-        if (resp.modelServit && !resp.modelServit.endsWith(':free')) {
-          tokensPaid += tokPas
-          const c = Number(resp.usage?.cost ?? NaN)
-          if (Number.isFinite(c)) {
-            costUsd += c
-            costMasurat = true
-          }
-          log(`⚠ apel PLĂTIT pe ${resp.modelServit}: ${tokPas} tokeni${Number.isFinite(c) ? `, $${c.toFixed(4)}` : ''}`)
-        }
         if (tokens > MAX_TOKENS) throw new Error(`plafon de tokeni depășit (${tokens})`)
         const msg = resp.choices?.[0]?.message
         if (!msg) throw new Error('răspuns gol de la model')
@@ -1171,18 +913,15 @@ async function main() {
     const headSha = sh('git rev-parse HEAD').trim()
     log(`ramura ${branch} împinsă`)
 
-    // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ):
-    // pe Fable — ce a costat, măsurat; pe gratuit — spune clar „free".
-    const linieCreier = peFable
-      ? `Creier folosit: Fable 5 (${FABLE_MODEL}) — PLĂTIT, cerut expres în ordin · tokeni: ${tokens} (plătiți: ${tokensPaid})` +
-        (costMasurat ? ` · cost măsurat OpenRouter: $${costUsd.toFixed(4)}` : ' · costul nu a fost raportat de OpenRouter')
-      : `Creier folosit: gratuit (:free) · tokeni: ${tokens}`
+    // CREIERUL, SCRIS ÎN PR (regula din 2 aug: alegerea modelului e VIZIBILĂ).
+    // Gemini nu itemizează cost per apel — se raportează DOAR tokenii măsurați.
+    const linieCreier = `Creier folosit: Gemini (google-direct/${GEMINI_MODEL}, cheia ownerului) · tokeni: ${tokens}`
     const prUrl = await deschidePR(
       titlu,
       `${finish.body}\n\n---\n${linieCreier}\nOrdin #${job.id} · construit automat de Constructorul lui Kelion (bază ${baseSha}, verificare build/teste în atelier). Merge-ul îl dă ownerul.`,
       branch,
     )
-    log(`PR deschis: ${prUrl} (tokeni: ${tokens}${tokensPaid ? `, plătiți: ${tokensPaid}` : ''})`)
+    log(`PR deschis: ${prUrl} (tokeni: ${tokens})`)
 
     // VERIFICARE INDEPENDENTĂ (Etapa 6): aștept CI-ul pe PR, mărginit de bugetul
     // rămas (las 60s tampon ca să apuc să raportez înainte de timeout-ul dur).
@@ -1204,24 +943,23 @@ async function main() {
       await report('done', { branch, prUrl, tokens, ci })
     }
   } catch (e) {
-    // AMÂNARE, NU MOARTE (dovadă live 28 iul, ordinele #9-#13: toate au picat pe
-    // sugrumarea furnizorilor gratuiți — 429 „free-models-per-min", Nvidia
-    // „DEGRADED" — iar #14, IDENTIC ca natură, a reușit o oră mai târziu când
-    // cotele s-au eliberat). Când vina e a furnizorilor, NU raportăm eșec:
+    // AMÂNARE, NU MOARTE (regula din 28 iul, adaptată la Gemini-only): când
+    // vina e a FURNIZORULUI (429/cotă/5xx la Gemini), NU raportăm eșec:
     // ordinul rămâne „running" iar coada îl reia singură după 40 min (până la 3
     // încercări — mecanismul existent din claimNextBuildJob). Fără email de
-    // eșec fals, fără ordin îngropat degeaba.
+    // eșec fals, fără ordin îngropat degeaba. Nu există alt creier pe care să
+    // cadă — extirparea OpenRouter, 3 aug.
     const amanabil =
-      e?.amanabil || /429|rate.?limit|ResourceExhausted|DEGRADED function|Provider returned error/i.test(String(e?.message ?? ''))
+      e?.amanabil || /429|rate.?limit|RESOURCE_?EXHAUSTED|quota|gemini 5\d\d/i.test(String(e?.message ?? ''))
     if (amanabil && Number(job.attempts) < 3) {
       log(
-        `AMÂNAT (nu eșuat): furnizorii gratuiți sunt sugrumați (${String(e.message).slice(0, 120)}) — ` +
+        `AMÂNAT (nu eșuat): Gemini e sugrumat acum (${String(e.message).slice(0, 120)}) — ` +
           'ordinul rămâne în coadă și se reia automat în ~40 min',
       )
       // PAUZA SE VEDE (D6). Fără rândul ăsta, panoul rămânea pe „Lucrează" cu
       // ultimul pas înghețat pe ecran 40 de minute — imposibil de deosebit de
       // un ordin blocat. Marcajul „⏳" îl citește interfața și schimbă insigna.
-      beat('⏳ Furnizorii gratuiți sunt sugrumați acum. Ordinul NU e pierdut — se reia automat în ~40 min.', true)
+      beat('⏳ Gemini e sugrumat acum. Ordinul NU e pierdut — se reia automat în ~40 min.', true)
       return
     }
     log(`EȘEC: ${e.message}`)

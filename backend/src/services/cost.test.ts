@@ -1,46 +1,30 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
-// The live-price lookup is the ONLY external dependency of cost.ts — mocked
-// here so the source-labeling rules are tested without network. Per-test
-// `…Once` implementations (no mockReset): each test states exactly the one
-// behavior the unit under test will see.
-const getLiveModelPricePerM = vi.fn()
-vi.mock('./openrouter.js', () => ({ getLiveModelPricePerM }))
-
+// (3 aug — extirparea totală OpenRouter: catalogul viu de prețuri a dispărut
+// cu tot cu furnizorul. Singura sursă rămasă e tabelul static ETICHETAT
+// `static_estimate` — testele pinuiează exact eticheta, ca o estimare să nu
+// poată fi prezentată vreodată drept măsurătoare.)
 const { brainCostUsd, costFromPrice, TTS_USD_PER_CHAR, ASR_USD_PER_CALL, SERPER_USD_PER_CALL, IMAGE_USD_PER_CALL, VOICE_USD_PER_MINUTE } =
   await import('./cost.js')
 
-describe('cost.ts — prețul modelului vine LIVE, nu dintr-un tabel scris de mână', () => {
-  it('cu preț live din catalogul OpenRouter: sursa e live_openrouter și matematica e exactă', async () => {
-    getLiveModelPricePerM.mockResolvedValueOnce({ promptPerM: 0.3, completionPerM: 2.5 })
-    const r = await brainCostUsd('google/gemini-2.5-flash', 1_000_000, 100_000)
-    expect(r.source).toBe('live_openrouter')
-    // 1M input × $0.3/1M + 100k output × $2.5/1M = $0.30 + $0.25
-    expect(r.usd).toBeCloseTo(0.55, 9)
-    expect(getLiveModelPricePerM).toHaveBeenCalledWith('google/gemini-2.5-flash')
-  })
-
-  it('fără catalog: cade pe tabelul static ETICHETAT static_estimate, niciodată „real"', async () => {
-    getLiveModelPricePerM.mockResolvedValueOnce(null)
+describe('cost.ts — prețul modelului e o estimare ETICHETATĂ, niciodată „real"', () => {
+  it('model din tabelul static: sursa e static_estimate și matematica e exactă', async () => {
     const r = await brainCostUsd('gemini-2.5-flash', 2_000_000, 0)
     expect(r.source).toBe('static_estimate')
     expect(r.usd).toBeCloseTo(0.6, 9) // 2M × $0.30/1M
   })
 
+  it('și cu prefix de furnizor, tot tabelul static răspunde (bare name match)', async () => {
+    const r = await brainCostUsd('google-direct/gemini-2.5-flash', 1_000_000, 100_000)
+    expect(r.source).toBe('static_estimate')
+    // 1M input × $0.3/1M + 100k output × $2.5/1M = $0.30 + $0.25
+    expect(r.usd).toBeCloseTo(0.55, 9)
+  })
+
   it('model complet necunoscut: onest „unknown" cu $0, nu o cifră inventată', async () => {
-    getLiveModelPricePerM.mockResolvedValueOnce(null)
     const r = await brainCostUsd('some/model-nobody-knows', 500_000, 500_000)
     expect(r.source).toBe('unknown')
     expect(r.usd).toBe(0)
-  })
-
-  it('catalogul pică (throw): tot fallback etichetat, nu crash', async () => {
-    getLiveModelPricePerM.mockImplementationOnce(() => {
-      throw new Error('network down')
-    })
-    const r = await brainCostUsd('gemini-2.5-flash', 1_000_000, 0)
-    expect(r.source).toBe('static_estimate')
-    expect(r.usd).toBeCloseTo(0.3, 9)
   })
 })
 

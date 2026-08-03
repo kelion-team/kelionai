@@ -16,8 +16,8 @@ import { saveGeneratedImage, loadGeneratedImage } from '../db.js'
 // niciodată; plata e o alegere conștientă a ownerului, scrisă în env.
 //
 // Ce E gratuit la Google (aceeași pagină): generarea de IMAGINI pe modelele
-// Gemini Flash (free tier). Imaginile noastre merg deja prin OpenRouter cu
-// costul măsurat per apel (services/image.ts) — rămân acolo.
+// Gemini Flash (free tier). Imaginile noastre merg pe cheia Gemini
+// (services/image.ts → geminiImage) — rămân acolo.
 
 /** USD pe secunda de video, la 720p — copiat din pagina oficială de prețuri
  *  (2 aug 2026). Modele necunoscute NU primesc un preț inventat: cost null →

@@ -143,21 +143,10 @@ export function eSanatos(modelId: string): boolean {
   return false
 }
 
-// ── THE PURSE THRESHOLD (pragul rezervei) ────────────────────────────────────
-// ZERO AUTO-PLĂTIT (Adrian, 3 aug: „creiere free, iar când nu pot, întreabă
-// adminul înainte de plătit; NICIODATĂ plătit din greșeală"). Implicitul era $3/zi
-// de modele PLĂTITE ieftine (ex. nex-agi/nex-n2-mini) care porneau singure când
-// free-ul pica — de aici scurgerea de ~$10/zi pe OpenRouter, fără să te întrebe
-// nimeni. Acum default = 0: NU se mai folosește niciun model plătit automat.
-// Adminul poate deschide EXPLICIT rezerva (kv `rezerva:cap_zilnic` > 0) când
-// alege conștient să permită plătit — asta e „întreabă/decizi înainte de plătit".
-// Creierul plătit deliberat (Gemini Tier 2 pe cheia adminului) e altă poveste,
-// ales de owner, nu o scurgere.
-export const REZERVA_CAP_ZILNIC_DEFAULT_USD = 0
-
-export function poateFolosiRezerva(cheltuitAziUsd: number, capZilnicUsd: number): boolean {
-  return cheltuitAziUsd < capZilnicUsd
-}
+// (PRAGUL PUNGII DE REZERVĂ — poateFolosiRezerva / REZERVA_CAP_ZILNIC — a fost
+// EXTIRPAT, 3 aug: exista doar pentru fallback-ul PLĂTIT pe modele OpenRouter,
+// întâi închis la 0 („ZERO AUTO-PLĂTIT"), apoi șters cu tot cu furnizorul.
+// Creierul e Gemini-only, pe cheia aleasă conștient de owner.)
 
 // ── TELEMETRY for system_health / the owner's eyes ──────────────────────────
 export function stareDispecer(): {

@@ -28,12 +28,16 @@ const chatPanel = sursa('../../frontend/src/components/ChatPanel.tsx')
 const workspace = sursa('../../frontend/src/lib/workspace.ts')
 const orch = sursa('./services/orchestrator.ts')
 
-describe('cursa fără unelte NU mai înghite întrebările care cer date live', () => {
-  it('gardul cursei exclude întrebările cu nevoie de unealtă', () => {
-    expect(chat).toMatch(/!heavyTurn && !turnHasImage && !needsToolForAnswer\(lastUserText\)/)
+describe('turele NU mai pot pierde uneltele (cursa fără unelte a fost extirpată)', () => {
+  // (3 aug — extirparea OpenRouter a îngropat și cursa pe 3 modele fără
+  // unelte: acum ORICE tură merge pe calea secvențială CU unelte, pe creierul
+  // Gemini. Riscul „get_weather necallable → monitor întunecat" nu mai are
+  // codul care îl producea.)
+  it('nu mai există cursă fără unelte în chat.ts', () => {
+    expect(chat).not.toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool/)
   })
-  it('concurenții rămân fără unelte (fără dublă execuție) — doar chit-chat-ul aleargă', () => {
-    expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)
+  it('calea unică a creierului oferă uneltele turei', () => {
+    expect(chat).toMatch(/runOrchestrator\(\s*orchestratorModel,\s*orMsgs,\s*tools as unknown as AnthropicTool\[\]/)
   })
 })
 

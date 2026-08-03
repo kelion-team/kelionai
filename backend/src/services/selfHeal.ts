@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { recurringClientErrors, createBuildJob, loadKv, saveKv, requeueMoneyFailedBuildJobs } from '../db.js'
 import { isOpsPaused } from './runbooks.js'
-import { getOpenRouterBalance } from './openrouter.js'
+import { geminiLive } from './geminiDirect.js'
 
 // ── KELION'S SELF-HEALING (Adrian, 27 Jul: "Kelion must be able to gather
 // errors appearing under each user automatically and remedy them, delivering
@@ -38,17 +38,18 @@ export async function runSelfHeal(): Promise<{ filed: number }> {
   if (await isOpsPaused()) return { filed: 0 }
 
   // HEALING THE ORDERS THAT FELL ON MONEY (Adrian, 27 Jul: "why doesn't the
-  // healing system see, repair? — automatically?"): if the brain's pouch is
-  // positive again, the constructor orders failed on 402/credit are put BACK
-  // in the queue BY THEMSELVES (only once per order — a mark in the log).
+  // healing system see, repair? — automatically?"): if the brain (Gemini)
+  // SERVES again — the honest live signal, since Google exposes no readable
+  // balance — the constructor orders failed on 402/credit are put BACK in the
+  // queue BY THEMSELVES (only once per order — a mark in the log).
   try {
-    const bal = await getOpenRouterBalance()
-    if (bal.ok && bal.balance > 0) {
+    const g = await geminiLive()
+    if (g.ok && g.serving) {
       const requeued = await requeueMoneyFailedBuildJobs()
-      if (requeued) console.log(`[self-heal] ${requeued} ordin(e) eșuat(e) pe lipsă de credit, repus(e) în coadă — punga e iar plină`)
+      if (requeued) console.log(`[self-heal] ${requeued} ordin(e) eșuat(e) pe lipsă de credit, repus(e) în coadă — Gemini servește din nou`)
     }
   } catch {
-    /* pouch unavailable — we try again on the next run */
+    /* live signal unavailable — we try again on the next run */
   }
 
   const errors = await recurringClientErrors(24, 5, 2)

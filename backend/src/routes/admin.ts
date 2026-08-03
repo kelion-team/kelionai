@@ -50,11 +50,8 @@ import { isOpsPaused, setOpsPaused } from '../services/runbooks.js'
 import { dovezileAutonomiei } from '../services/dovezi.js'
 import { isArmed as isLockArmed, hasUnlock, grantUnlock, verifyLockSecret, setLockSecret } from '../services/adminLock.js'
 import { listRecoveryPoints, createRecoveryPoint, restoreToPoint } from '../services/recovery.js'
-import { getOpenRouterBalance } from '../services/openrouter.js'
 import { geminiLive } from '../services/geminiDirect.js'
-import { getOpenAiMonthCost } from '../services/openaiCosts.js'
 import { getSerperBalance } from '../services/serperBalance.js'
-import { calcPunga } from '../services/punga.js'
 import { VOICE_USD_PER_MINUTE } from '../services/cost.js'
 import { resurseGazda } from '../services/resurse.js'
 import { triageGaps } from '../services/gapsTriage.js'
@@ -321,26 +318,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(await getAdminAccount())
   })
 
-  // The brain is 100% OpenRouter (0 Kimi, 0 GLM). The fund button in the admin
-  // bar: shows the REAL, EXACT balance from the OpenRouter account — "Kelion's
-  // pocket" that feeds the CENTRAL brain (Adrian, 24 Jul: "OpenRouter = the
-  // exact value from OpenRouter"). Plus the admin's internal fund (loaded −
-  // real cost) and a `low` signal when money needs to be deposited. STRICTLY
+  // The brain is 100% Gemini direct (OpenRouter/OpenAI extirpate, 3 aug). The
+  // bar polls this route: the Gemini live state + real month spend, the Serper
+  // search credit, the VPS resources and the admin's internal fund. STRICTLY
   // admin (users don't see it).
   app.get('/api/admin/brain-credit', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [pool, orBalance, vps, openaiCost, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
+    const [pool, vps, serperBalance, geminiCost, geminiState, geminiCreditRaw] = await Promise.all([
       getAdminAccount(),
-      getOpenRouterBalance(),
       resurseGazda(),
-      // THE OPENAI PILL (Adrian: "REAL everywhere, zero fabrications"): the
-      // voice spend read from the provider's own costs API, next to the
-      // OpenRouter balance. Cached 5 min in the service, so this 15s poll
-      // costs one upstream call per 5 minutes at most.
-      getOpenAiMonthCost(),
-      // THE SERPER PILL (same rule): the REAL remaining search credit read
-      // from Serper's /account endpoint. Also cached 5 min in the service.
+      // THE SERPER PILL: the REAL remaining search credit read from Serper's
+      // /account endpoint. Cached 5 min in the service.
       getSerperBalance(),
       // THE GEMINI PILL (Adrian, 3 aug: „vreau să văd că am bani la gemini").
       // Creditul promoțional (£10.88) NU e expus de niciun API Google (nici
@@ -369,7 +358,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       /* kv stricat → „nu știu", niciodată un zero fals */
     }
     return reply.send({
-      active: 'openrouter',
+      // (Câmpurile `openrouter` și `openai` au fost SCOASE din răspuns, 3 aug —
+      // furnizorii au fost extirpați; pastilele lor au dispărut din bară.)
+      active: 'gemini',
       // ── THE VPS, PERMANENTLY IN THE BAR (Adrian, 31 Jul: "permanently show
       // VPS on the interface in the top bar") ───────────────────────────────
       // It rides on this route, not a new one: the bar polls it every 15s
@@ -380,30 +371,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // exactly the error he keeps complaining about: a failed reading
       // presented as real state.
       vps,
-      openrouter: {
-        ok: Boolean(config.openrouter.key),
-        topup: 'https://openrouter.ai/credits',
-        // The REAL OpenRouter balance (USD), exactly as on their page.
-        balance: orBalance.balance,
-        totalCredits: orBalance.totalCredits,
-        totalUsage: orBalance.totalUsage,
-        currency: orBalance.currency,
-        low: orBalance.low,
-        threshold: orBalance.threshold,
-        live: orBalance.ok,
-        error: orBalance.error,
-      },
-      // The REAL OpenAI month-to-date spend (USD). `live: false` means
-      // UNREADABLE (key missing or read failed) — the bar writes "⚠ OpenAI",
-      // NEVER "$0.00" (the getOpenRouterBalance honesty rule, applied here).
-      openai: {
-        live: openaiCost.ok,
-        monthUsd: openaiCost.ok ? openaiCost.monthUsd : undefined,
-        error: openaiCost.error,
-      },
       // The REAL Serper search credit (searches left). `live: false` means
       // UNREADABLE (key missing or read failed) — the bar writes "Serper ⚠",
-      // NEVER "Serper 0" (the same honesty rule as the OpenAI pill).
+      // NEVER "Serper 0" (regula de onestitate #1).
       serper: {
         live: serperBalance.ok,
         balance: serperBalance.ok ? serperBalance.balance : undefined,
@@ -452,37 +422,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, gbp: n, at })
   })
 
-  // The REAL OpenAI spend, month-to-date (admin only) — the provider's own
-  // costs API, the same reading the "OpenAI $x.xx" pill in the bar shows.
-  app.get('/api/admin/openai-costs', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    return reply.send(await getOpenAiMonthCost())
-  })
+  // (Ruta /api/admin/openai-costs a fost ȘTEARSĂ, 3 aug — OpenAI extirpat:
+  // nu mai există nicio cheltuială OpenAI de citit.)
 
-  // The REAL picture of the owner's money (admin only): the real balance from
-  // the brain provider, the real cost consumed at providers and the real
-  // profit. No hand-written figure. (Stripe is fully out — 31 Jul.)
+  // The REAL picture of the owner's money (admin only): the real cost consumed
+  // at providers and the real profit. No hand-written figure. (Stripe is fully
+  // out — 31 Jul; OpenRouter/OpenAI extirpate — 3 aug, împreună cu „punga"
+  // care era soldul OpenRouter.)
   app.get('/api/admin/finance', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
-    const [account, costs, orBalance, openaiCost] = await Promise.all([
+    const [account, costs] = await Promise.all([
       getAdminAccount(),
       getCostSummary(),
-      getOpenRouterBalance(),
-      getOpenAiMonthCost(),
     ])
-    // ── THE SINGLE POCKET, IN ONE CURRENCY (USD) ────────────────────────────
-    // Adrian, with live evidence: the header said "OpenRouter $9.99" while the
-    // Money tab said "Punga: £7.99" — the SAME wallet converted with the
-    // hand-written USD_TO_CURRENCY rate. A converted figure is not a measured
-    // one. The pocket is now USD only (see services/punga.ts), identical to
-    // what the header pill shows.
-    const punga = calcPunga(orBalance.ok ? orBalance.balance : null)
     return reply.send({
-      // The pocket: how much you have, with the breakdown it was added from
-      // and where it's missing.
-      punga,
       // USD, unconverted (getAdminAccount no longer multiplies by a hand rate).
       spent: account.spent,
       // The cost journal is kept in USD end to end (cost_events.cost_usd):
@@ -496,30 +450,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Money tab.
       today: costs.today,
       // ── REAL vs ESTIMATE, WRITTEN ON EVERY ROW ────────────────────────────
-      // Only brain calls carry the provider's own figure (OpenRouter
-      // usage.cost). Everything else — the voice minutes especially — is a
-      // fixed rate × a quantity, OUR estimate. The tab labels each row from
-      // `felul`; an unlabeled estimate presented as cost is exactly the
-      // "voice_minutes $204.52" fabrication this change removes.
+      // Only brain calls carry the provider's own figure. Everything else —
+      // the voice minutes especially — is a fixed rate × a quantity, OUR
+      // estimate. The tab labels each row from `felul`; an unlabeled estimate
+      // presented as cost is exactly the "voice_minutes $204.52" fabrication
+      // this change removes.
       masurat: costs.masurat,
       estimat: costs.estimat,
       felul: costs.felul,
-      // "Kelion's pocket" = the REAL, EXACT balance from the OpenRouter
-      // account (USD) that feeds the CENTRAL brain (Adrian: "the exact value
-      // from OpenRouter"). Only the admin sees this tab; users never get here.
-      openrouter: {
-        balance: orBalance.balance,
-        low: orBalance.low,
-        threshold: orBalance.threshold,
-        live: orBalance.ok,
-        topup: orBalance.topup,
-      },
-      // The REAL OpenAI month-to-date spend (USD, the provider's costs API) —
-      // the anchor against which the internal voice estimate can be checked.
-      openai: {
-        live: openaiCost.ok,
-        monthUsd: openaiCost.ok ? openaiCost.monthUsd : undefined,
-      },
+      // (Câmpurile `punga`, `openrouter` și `openai` au fost SCOASE, 3 aug —
+      // furnizorii au fost extirpați; nu mai există sold OpenRouter de citit.)
     })
   })
 
@@ -547,16 +487,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Which brain models actually serve right now (admin only): a real 1-token
-  // ping of the default chat + work models through OpenRouter (services/brain.ts).
+  // ping of the default chat + work models through Gemini direct (services/brain.ts).
   app.get('/api/admin/models', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send(await verifyModels())
   })
 
-  // Verify the brain key live (admin only): pings the OpenRouter chat default
-  // (primary) and the work model (reserve) with a 1-token call; reports
-  // ok/fail without ever exposing the key value.
+  // Verify the brain key live (admin only): pings the Gemini chat default
+  // with a 1-token call; reports ok/fail without ever exposing the key value.
   app.get('/api/admin/keys', async (req, reply) => {
     const user = getSessionUser(req)
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
@@ -565,8 +504,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // VERIFY ALL PRIVILEGED TOKENS (Adrian, 14 Jul): verifies LIVE all the
   // keys/tokens with access to external services and reports status without
-  // exposing secret values. Includes OpenRouter, OpenAI, Google
-  // (service account/TTS/OAuth), Gemini, Mail (SMTP+IMAP), PostgreSQL
+  // exposing secret values. Includes the Gemini brain, Google
+  // (service account/TTS/OAuth), Mail (SMTP+IMAP), PostgreSQL
   // and SESSION_SECRET.
   app.get('/api/admin/token-checks', async (req, reply) => {
     const user = getSessionUser(req)
@@ -651,7 +590,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // The /api/admin/pool route was DELETED (Adrian, 30 Jul): it hand-wrote how
   // much the man thought he had in his pocket, and the panel displayed that
   // figure as fact. How much money you have is read from the bank account
-  // (Enable Banking) and from OpenRouter.
+  // (Enable Banking).
 
   // THE MONEY CIRCUIT from the Kelionai admin (Adrian, 24 Jul): the live state
   // of each payment→AI link. STRICTLY admin.

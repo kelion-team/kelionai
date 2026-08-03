@@ -7,7 +7,7 @@
 // the admin approved.
 
 import { listKelionTools, type KelionTool } from '../db.js'
-import type { AnthropicTool } from './openrouter.js'
+import type { AnthropicTool } from './brainContract.js'
 
 // A short cache (10s) so we don't hit the DB on every turn.
 let cache: { at: number; tools: KelionTool[] } = { at: 0, tools: [] }

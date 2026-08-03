@@ -5,12 +5,10 @@ import {
   iaSlotDacaLiber,
   elibereazaSlot,
   asteaptaLaCoada,
-  poateFolosiRezerva,
   noteazaEsuare,
   eSanatos,
   stareDispecer,
   _resetDispecer,
-  REZERVA_CAP_ZILNIC_DEFAULT_USD,
 } from './services/dispecer.js'
 
 // ── THE DISPATCHER (Adrian, Aug 1: „ce se întâmplă când vor fi zeci sau
@@ -77,21 +75,9 @@ describe('the fair queue', () => {
   })
 })
 
-describe('the purse threshold', () => {
-  it('the reserve is open under the cap and closed at/over it', () => {
-    // Funcția pură (cap explicit) rămâne neschimbată.
-    expect(poateFolosiRezerva(2.99, 3)).toBe(true)
-    expect(poateFolosiRezerva(3, 3)).toBe(false)
-    expect(poateFolosiRezerva(5, 3)).toBe(false)
-  })
-
-  it('ZERO AUTO-PLĂTIT: default 0 → rezerva plătită e ÎNCHISĂ (Adrian, 3 aug)', () => {
-    // Regula lui Adrian: niciun model plătit automat (leak-ul nex-n2-mini oprit).
-    // Adminul poate deschide explicit rezerva (kv rezerva:cap_zilnic > 0).
-    expect(REZERVA_CAP_ZILNIC_DEFAULT_USD).toBe(0)
-    expect(poateFolosiRezerva(0, REZERVA_CAP_ZILNIC_DEFAULT_USD)).toBe(false)
-  })
-})
+// (Testele „the purse threshold" au fost ȘTERSE, 3 aug — punga de rezervă pe
+// modele plătite a fost extirpată împreună cu OpenRouter: nu mai există niciun
+// fallback plătit, deci nici prag de pungă.)
 
 describe('failure memory (Adrian: timpii sunt exceptionali de mari)', () => {
   it('a model without failures is healthy', () => {
@@ -127,50 +113,35 @@ describe('telemetry', () => {
 // ── THE WIRING GUARD ─────────────────────────────────────────────────────────
 // The dispatcher must be called from the brain loop in chat.ts — slots taken
 // before every brain attempt, released on EVERY path, the queue consulted
-// when a model is busy, and the reserve counted only on paid fallbacks.
+// when the model is busy.
+// (3 aug — extirparea OpenRouter: rotația/cursa pe alți furnizori și punga de
+// rezervă au dispărut; creierul e Gemini-only. Gardurile de mai jos pinuiează
+// EXACT noua formă: reîncercări pe ACELAȘI creier Gemini, apoi mesajul neutru.)
 const chat = readFileSync(fileURLToPath(new URL('./routes/chat.ts', import.meta.url)), 'utf8')
 
-describe('chat.ts chiar folosește dispecerul', () => {
+describe('chat.ts chiar folosește dispecerul (Gemini-only)', () => {
   it('ia slot înainte de încercarea creierului', () => {
     expect(chat).toMatch(/iaSlotDacaLiber\(orchestratorModel\)/)
   })
   it('eliberează slotul pe orice drum (finally)', () => {
     expect(chat).toMatch(/finally \{\s*elibereazaSlot\(slotTinut\)/)
   })
-  it('coada e consultată când modelul e ocupat', () => {
-    expect(chat).toMatch(/asteaptaLaCoada\(\(\) => listaCandidati\(triedModels\)/)
+  it('coada e consultată când creierul Gemini e ocupat — pe ACELAȘI model, nu pe alt furnizor', () => {
+    expect(chat).toMatch(/asteaptaLaCoada\(async \(\) => \[orchestratorModel\]/)
   })
-  it('rezerva e plătită doar la fallback plătit, nu la alegerea userului', () => {
-    expect(chat).toMatch(/orchestratorModel !== modelInitial && !orchestratorModel\.endsWith\(':free'\)/)
+  it('NICIO rotație pe alt furnizor: pool-ul de candidați și rezerva plătită au dispărut din cod', () => {
+    expect(chat).not.toMatch(/listaCandidati|rezervaDeschisa|adaugaLaRezerva|getCatalog|openrouterChat/)
   })
-  it('pool-ul plătit e oprit de pragul pungii', () => {
-    expect(chat).toMatch(/if \(await rezervaDeschisa\(\)\)/)
+  // (Blocurile „pool-ul plătit e oprit de pragul pungii" și „latența/cursa doar
+  // Gemini" au fost absorbite de extirparea totală, 3 aug seara: cursa, pool-ul
+  // de candidați și punga de rezervă NU MAI EXISTĂ în cod — gardul de mai sus
+  // le pinuiează absența, iar reîncercările de mai jos pinuiează noua formă.)
+  it('un răspuns gol sau o eroare se notează (telemetrie) și se reîncearcă pe Gemini', () => {
+    expect(chat).toMatch(/returned empty — reîncercare/)
+    expect(chat).toMatch(/noteazaEsuare\(orchestratorModel\)/)
   })
-})
-
-describe('latența (Adrian: timpi exceptionali de mari)', () => {
-  it('tururile ușoare rămân pe drumul rapid — primul răspuns bun câștigă', () => {
-    expect(chat).toMatch(/!heavyTurn && !turnHasImage/)
-    // Aug 2, măsurat live: Promise.all aștepta și concurentul MORT (18,6s la
-    // chit-chat). Cursa se închide la primul răspuns bun — vezi services/cursa.ts.
-    expect(chat).toMatch(/primulCastigator\(curse\)/)
-    expect(chat).not.toMatch(/Promise\.all\(curse\)/)
-  })
-  it('cursa e DOAR Gemini — rivalii :free OpenRouter au ieșit (3 aug seara)', () => {
-    // Auditul multi-agent a prins cursa lansând până la 2 rivali :free din
-    // catalogul OpenRouter la fiecare tură ușoară publică — furnizorul scos.
-    // Acum: un singur drum rapid, Gemini; restul cade pe calea secvențială.
-    expect(chat).toMatch(/const concurenti =\s*\n?\s*geminiDirectAvailable\(\) && eSanatos\(geminiLightRace\) \? \[geminiLightRace\] : \[\]/)
-    expect(chat).not.toMatch(/candidatiFree/)
-  })
-  it('concurenții NU primesc unelte (fără dublă execuție)', () => {
-    expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)
-  })
-  it('modelele moarte se notează bolnav în bucla secvențială', () => {
-    expect(chat).toMatch(/returned empty — silent rotation`\)\s*\n\s*noteazaEsuare/)
-    expect(chat).toMatch(/silent rotation`\)\s*\n\s*noteazaEsuare/)
-  })
-  it('candidații sănătoși trec în fața bolnavilor', () => {
-    expect(chat).toMatch(/sanatosi[\s\S]{0,120}bolnavi/)
+  it('la epuizarea încercărilor tura se încheie ONEST (mesajul neutru din catch), nu pe alt creier', () => {
+    expect(chat).toMatch(/brain_gemini_exhausted/)
+    expect(chat).toMatch(/Încearcă din nou în câteva secunde\./)
   })
 })

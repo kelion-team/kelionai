@@ -127,7 +127,7 @@ const MARCA_AUTOMAT =
   /(?:auto[-\s]?(?:recharge|reload|top[-\s]?up|renew(?:al)?|pay(?:ment)?s?)|automatic\s+(?:payments?|billing|recharge)|recurring\s+(?:payment|billing)|reîncărcare\s+automată|plăți\s+automate)/i
 
 export interface StareFurnizor {
-  /** The provider's name, said by it: "openrouter", "anthropic"… */
+  /** The provider's name, said by it: "gemini", "serper", "google"… */
   furnizor: string
   /** The page text showed a card on file, at session close. */
   card: boolean

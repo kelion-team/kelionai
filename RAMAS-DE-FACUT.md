@@ -10,6 +10,15 @@
 > Ultima verificare: **30 iul 2026, 09:10**, live `e66e84c` = master, health 200.
 > Sesiunea din 30 iul a publicat 10 lucrări (PR #565–#576) și a tăiat 7 rânduri.
 
+> **3 aug 2026 — EXTIRPAREA TOTALĂ OpenRouter + OpenAI (branch, PR în lucru,
+> NEVERIFICAT LIVE):** furnizorii au fost scoși din tot codul (creier =
+> Gemini-only, căutare = Serper, voce = Chirp; detalii în AI-HANDOFF §3 + §13).
+> Efect asupra listei: rândurile care pomenesc soldul/cheile OpenRouter/OpenAI
+> (ex. D2 „punga OpenRouter", K7 „OPENAI_USAGE_KEY", B9 „openrouter.searchModel",
+> M6 partea OpenRouter/Anthropic/OpenAI) NU se mai pot rezolva — sistemele pe
+> care le descriau au fost extirpate. Se taie DOAR după merge + verificare live,
+> conform regulii; până atunci rămân, cu nota asta drept context.
+
 ---
 
 ## A. CODAT, DAR MORT PE LIVE — cheia nu ajunge în procesul care rulează
@@ -372,3 +381,4 @@ Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 
 | L3c | Control desktop-ul tău (deschide aplicații locale) | rulez pe server; pe Windows-ul tău ar trebui un agent instalat de tine local — de discutat separat, e software nou pe mașina ta |
 | L3d | Recunoaștere facială persoane | interzisă pe față umană de politicile mari de API și de AI Act pe identificare biometrică fără temei; obiecte+text DA (L1g) |
 | L1j | Descoperire și integrare de API-uri noi: `propose_tool` + uneltele dinamice EXISTĂ deja (Kelion propune, tu aprobi cu un clic, unealta e activă instant); de adăugat pasul de căutare autonomă a API-ului potrivit | parțial există |
+| L1k | GAMA COMPLETĂ de agenți Gemini (Adrian, 3 aug: „trebuie să aibă toată gama"): legat DEJA — Flash (chat/lucru), Pro (greu+constructor), Flash-Image+Imagen (imagini), Veo (video), text-embedding-004 (memorie), audio nativ (ureche); în curs — muncitorii pe gemini/ (rebazarea extirpării); de făcut — Gemini Live API (full-duplex real, probat de owner înainte de comutare) + Flash-Lite (treapta ieftină publică, probată întâi pe cheie) | parțial există |

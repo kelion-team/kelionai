@@ -4,8 +4,8 @@ import { getMemories, searchMemories, semanticMemories, addMemory, recordCost } 
 import { brainCostUsd } from './cost.js'
 import { brain } from './brain.js'
 
-// Memory runs on the default chat model (OpenRouter). Kimi/GLM removed.
-const MEMORY_MODEL = config.openrouter.chatDefault
+// Memory runs on the default chat model (Gemini direct — OpenRouter extirpat, 3 aug).
+const MEMORY_MODEL = config.brain.chatDefault
 
 export async function recallMemories(email: string, agent = 'kelion', hint = ''): Promise<string> {
   const recent = await getMemories(email, 40, agent)
@@ -41,7 +41,7 @@ export async function learnFromTurn(
   assistantMsg: string,
   agent = 'kelion',
 ): Promise<void> {
-  if (!config.openrouter.key || (!userMsg.trim() && !assistantMsg.trim())) return
+  if (!config.geminiKey || (!userMsg.trim() && !assistantMsg.trim())) return
   const explicit = userMsg.match(
     /(?:re[țt]ine(?:\s+pentru\s+viitor)?|[țt]ine\s+minte|nu\s+uita|memoreaz[ăa]|remember(?:\s+this|\s+that)?|keep\s+in\s+mind)[:,]?\s+(.{6,300})/i,
   )

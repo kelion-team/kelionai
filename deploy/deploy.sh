@@ -8,8 +8,8 @@
 # Cerințe ÎNAINTE de rulare:
 #   1. /root/kelion/kelionai.env completat (vezi deploy/kelionai.env.example).
 #      OBLIGATORII care NU sunt încă pe VPS: GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI,
-#      SESSION_SECRET, DATABASE_URL. Cheile OpenRouter/OpenAI/Stripe le pune
-#      scriptul de bootstrap (deploy/set-keys.sh) sau se adaugă manual în env.
+#      SESSION_SECRET, DATABASE_URL, GEMINI_API_KEY (creierul unic — OpenRouter/
+#      OpenAI/Stripe au fost extirpate; cheile lor nu mai sunt citite de nimeni).
 #   2. Adrian repointează Cloudflare (A/AAAA kelionai.app) pe 164.68.120.87.
 #
 # Idempotent: rerulabil oricând (reconstruiește + repornește curat).
@@ -93,7 +93,7 @@ if [ "${KELION_DEPLOY_FORCE:-0}" != 1 ] && [ "$LIVE_NOW" = "$TARGET" ]; then
 fi
 
 echo "== 2. Verific env-ul =="
-for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL OPENROUTER_API_KEY OPENAI_API_KEY; do
+for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET SESSION_SECRET DATABASE_URL GEMINI_API_KEY; do
   if ! grep -q "^$v=" "$ENVFILE" 2>/dev/null; then
     echo "❌ LIPSEȘTE $v din $ENVFILE — completează-l înainte de deploy."; MISS=1
   fi
@@ -201,17 +201,9 @@ echo "== 6f. Porțile pe VPS (cron la 10 min — verdictul PR-urilor, zero cost)
 install -m 700 "$REPO/deploy/porti-pr.sh" /root/kelion/porti-pr.sh
 ( crontab -l 2>/dev/null | grep -v '/root/kelion/porti-pr.sh' ; echo '*/10 * * * * /root/kelion/porti-pr.sh >> /root/kelion/porti-pr.log 2>&1' ) | crontab -
 
-echo "== 6g. Proba modelelor free: cine GÂNDEȘTE, cine nu (email cu tabelul) =="
-# Adrian, 31 iul: „ești convins că întoarce goale? poți face proba în afara
-# Kelion și să demonstrezi asta?" · „nu simulate, eu vreau model să raționeze"
-# · „dă-i ceva extrem de greu și vezi cum abordează".
-# Cheia OpenRouter e AICI, pe VPS — deci proba se face aici, nu din altă parte.
-# Patru probleme cu răspuns exact (ceas+fus, capcană de logică, citit de cod,
-# și una grea cu trei constrângeri legate), curl direct la OpenRouter, fără
-# backendul Kelion pe traseu. Rezultatul pleacă pe email.
-# Rulează în fundal: sunt zeci de apeluri de model, iar publicarea nu are voie
-# să aștepte după ele. Eșecul probei NU strică deploy-ul.
-( bash "$REPO/deploy/proba-modele.sh" --email >> /root/kelion/proba-modele.log 2>&1 & ) || true
+# (Pasul 6g — „proba modelelor free" prin curl direct la OpenRouter — a fost
+# EXTIRPAT pe 3 aug împreună cu furnizorul: creierul e Gemini-only, nu mai
+# există pool de modele free de probat.)
 
 echo "== 7. Verific LIVE (anti-fantomă: versiunea trebuie să fie chiar sha-ul publicat) =="
 SHA=$(git -C "$REPO" rev-parse HEAD | cut -c1-7)   # exact ca .slice(0,7) din backend
