@@ -1,0 +1,33 @@
+# ── LACĂTUL GEMINI — ZIDUL CARE BLOCHEAZĂ (Adrian, 3 aug 2026) ──────────────
+#
+# „trebuie sa blochezi schimbarea gemini de aici in colo."
+#
+# Spre deosebire de pr-verify (INFORMATIV — nu oprea nimic, de-aia s-a putut
+# strica Gemini), ăsta e menit să BLOCHEZE: pasul de mai jos NU are
+# continue-on-error, deci checkul „gemini-lock" se face ROȘU dacă cineva —
+# inclusiv Claude — schimbă ce e bătut în cuie pe Gemini.
+#
+# DEVINE cu adevărat blocant când Adrian îl pune „required" (o singură dată):
+#   GitHub → repo → Settings → Branches → Branch protection rules → master
+#   → bifează „Require status checks to pass before merging"
+#   → caută și adaugă checkul: gemini-lock
+#   → Save.
+# De atunci, NICIUN merge în master nu trece dacă gemini-lock e roșu — nici măcar
+# al lui Claude. Cheia zidului e la Adrian (branch protection), nu în cod, tocmai
+# ca să apere de oricine ar vrea să calce lacătul din cod.
+name: gemini-lock
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  gemini-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # NICIUN continue-on-error: dacă scriptul iese cu 1, jobul PICĂ → checkul e roșu.
+      - name: Verifică lacătul Gemini (BLOCANT)
+        run: node scripts/verifica-gemini.mjs
