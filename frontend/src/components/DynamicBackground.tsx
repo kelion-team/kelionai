@@ -1,46 +1,77 @@
-import { useWindowSize } from '../lib/hooks'
+import { useState, useEffect, useRef } from 'react';
+import './DynamicBackground.css';
 
-type Props = {
-  // URL or base64
-  image: string
+// Imaginea de fundal originală
+// Măsurată manual: monitorul din imagine este la 18.5% de la stânga, 16.2% de la top,
+// și are 63% din lățimea imaginii și 58.1% din înălțimea ei.
+import backgroundImage from '../assets/background-image.png';
 
-  // The "monitor" area in the image, in pixels, from top-left.
-  monitor: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-}
+const DynamicBackground = () => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
-// Renders the image as a dynamic background, scaled and positioned so that
-// the "monitor" area of the image fits the real monitor exactly.
-export default function DynamicBackground({ image, monitor }: Props) {
-  const [width, height] = useWindowSize()
+  useEffect(() => {
+    const handleResize = () => {
+      if (!containerRef.current) return;
 
-  if (!width || !height || !image) {
-    return null
-  }
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
 
-  // Calculate the scale factor
-  const scaleX = width / monitor.width
-  const scaleY = height / monitor.height
-  const scale = Math.max(scaleX, scaleY) // Use 'max' to cover the whole screen without distortion
+      // Dimensiunile imaginii de fundal (intrinseci)
+      const imageWidth = 3840;
+      const imageHeight = 2160;
 
-  // Calculate the scaled dimensions of the image
-  const scaledImageWidth = (image ? monitor.width * scale : 0)
-  const scaledImageHeight = (image ? monitor.height * scale : 0)
+      // Coordonatele și dimensiunile "monitorului" din imagine, ca procente
+      const monitorXPercent = 18.5 / 100;
+      const monitorYPercent = 16.2 / 100;
+      const monitorWidthPercent = 63 / 100;
+      const monitorHeightPercent = 58.1 / 100;
 
-  // Calculate the top-left position of the image
-  const x = (width - scaledImageWidth) / 2 - (monitor.x * scale)
-  const y = (height - scaledImageHeight) / 2 - (monitor.y * scale)
+      // Calculează lățimea și înălțimea imaginii scalate
+      // pentru ca monitorul din imagine să umple ecranul
+      const newImageWidth = screenWidth / monitorWidthPercent;
+      const newImageHeight = screenHeight / monitorHeightPercent;
 
+      // Alege cea mai mare scală pentru a acoperi tot, păstrând aspect ratio
+      const scaleX = newImageWidth / imageWidth;
+      const scaleY = newImageHeight / imageHeight;
+      const newScale = Math.max(scaleX, scaleY);
+      setScale(newScale);
 
-  const style = {
-    backgroundImage: `url(${image})`,
-    backgroundSize: `${scaledImageWidth}px ${scaledImageHeight}px`,
-    backgroundPosition: `${x}px ${y}px`,
-  }
+      // Calculează offset-ul pentru a centra monitorul din imagine
+      const finalImageWidth = imageWidth * newScale;
+      const finalImageHeight = imageHeight * newScale;
 
-  return <div className="dynamic-bg" style={style} />
-}
+      const monitorX = finalImageWidth * monitorXPercent;
+      const monitorY = finalImageHeight * monitorYPercent;
+
+      const newOffsetX = -(monitorX);
+      const newOffsetY = -(monitorY);
+
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="dynamic-background-container">
+      <div
+        className="background-image"
+        style={{
+          backgroundImage: `url(${backgroundImage})`,
+          transform: `scale(${scale}) translate(${offset.x}px, ${offset.y}px)`,
+        }}
+      >
+        <div className="animated-element light-pulse" style={{ top: '30%', left: '10%' }}></div>
+        <div className="animated-element data-stream" style={{ top: '50%', left: '80%' }}></div>
+        <div className="animated-element radar-sweep" style={{ bottom: '20%', left: '15%' }}></div>
+      </div>
+    </div>
+  );
+};
+
+export default DynamicBackground;
