@@ -20,9 +20,11 @@ const panou = sursa('./services/panouLucratori.ts')
 const chat = sursa('./routes/chat.ts')
 const docker = sursa('../../Dockerfile')
 
-describe('sunt trei, și chiar sunt independenți', () => {
-  it('exact trei lucrători, cu nume distincte', () => {
-    expect(LUCRATORI.map((l) => l.nume).sort()).toEqual(['aider', 'cline', 'openhands'])
+describe('sunt patru, și chiar sunt independenți', () => {
+  it('exact patru lucrători, cu nume distincte — inclusiv agentul OFICIAL Google', () => {
+    // Adrian, 3 aug: „dă-mi... și suita oficială de la Google" → Gemini CLI
+    // intră ca al 4-lea lucrător, nativ pe cheia Gemini a ownerului.
+    expect(LUCRATORI.map((l) => l.nume).sort()).toEqual(['aider', 'cline', 'gemini-cli', 'openhands'])
   })
 
   it('fiecare are comandă proprie de lucru și de verificare', () => {
@@ -42,6 +44,9 @@ describe('sunt trei, și chiar sunt independenți', () => {
     expect(cmd('aider')).toContain('--yes-always')
     expect(cmd('cline')).toContain('--auto-approve')
     expect(cmd('openhands')).toContain('--headless')
+    // Gemini CLI: -p = prompt non-interactiv, --yolo = uneltele rulează singure.
+    expect(cmd('gemini-cli')).toContain('--yolo')
+    expect(cmd('gemini-cli')).toContain('-p')
   })
 
   // Independence is literal: own clone, own branch, own process.
