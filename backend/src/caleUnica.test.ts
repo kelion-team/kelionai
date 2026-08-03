@@ -46,10 +46,10 @@ describe('același text, același traseu — dovada de paritate', () => {
   it('transcriptul final ajunge NEMODIFICAT la aceeași funcție send() ca textul tastat', () => {
     // The voice gate forwards the transcript verbatim (t, not a copy, not a
     // transformation) to the panel's single send().
-    expect(feVoice).toMatch(/onAddressed\?\.\(t, vf, speaker\)/)
+    expect(feVoice).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
     // The panel wires onAddressed into the SAME send() the input box uses.
     expect(fePanel).toMatch(/async function send\(text: string, spoken = false\)/)
-    const idxAddressed = fePanel.indexOf('onAddressed: (text, vf, speaker)')
+    const idxAddressed = fePanel.indexOf('onAddressed: (text, vf, speaker, audio)')
     expect(idxAddressed).toBeGreaterThanOrEqual(0)
     expect(fePanel.slice(idxAddressed, idxAddressed + 600)).toMatch(/sendRef\.current\(text, true/)
   })

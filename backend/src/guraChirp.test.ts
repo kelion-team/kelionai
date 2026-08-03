@@ -84,7 +84,7 @@ describe('modul gură-Chirp: ZERO OpenAI', () => {
     const idxStarter = voce.indexOf('const pornesteUrecheaChirp')
     const idxBranch = voce.indexOf('if (guraChirp) {')
     const starter = voce.slice(idxStarter, idxBranch)
-    expect(starter).toMatch(/onPhrase: \(t, vf\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf\)/)
+    expect(starter).toMatch(/onPhrase: \(t, vf, audio\) => \{[\s\S]{0,120}poartaDupaTranscript\(t, vf, audio\)/)
     const branch = voce.slice(idxBranch, voce.indexOf('new RTCPeerConnection()'))
     expect(branch).toContain("pornesteUrecheaChirp('rezerva OpenAI'")
   })

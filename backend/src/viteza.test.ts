@@ -28,9 +28,14 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     expect(chat).toMatch(/!heavyTurn && geminiDirectAvailable\(\)/)
   })
 
-  it('tură grea = nemotron-3-ultra (cel mai rapid model free CARE GÂNDEȘTE, măsurat)', () => {
+  it('creierul de LUCRU = Gemini direct free (regula lui Adrian, 3 aug; măsurat 1,2s + 1,0s cu apel de unealtă corect)', () => {
+    // Adrian, 3 aug: „creierul de LUCRU e Gemini free PERMANENT". Turele grele
+    // trec prin orchestrator, care detectează prefixul google-direct/ și le duce
+    // la geminiDirect CU unelte (orchestrator.ts) — măsurat mai rapid și cu apel
+    // de unealtă corect față de nemotron (6s + 3,2s). nemotron rămâne pe treapta
+    // „top" (topDefault), ca rezervă de escaladare.
     expect(config).toContain(
-      "OPENROUTER_WORK_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b:free'",
+      "OPENROUTER_WORK_MODEL ?? 'google-direct/gemini-2.5-flash'",
     )
   })
 

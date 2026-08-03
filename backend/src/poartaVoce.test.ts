@@ -29,7 +29,7 @@ describe('verdictul de timbru se așteaptă înainte de creier', () => {
   })
 
   it('onAddressed primește și eticheta de vorbitor (oaspete)', () => {
-    expect(voce).toMatch(/onAddressed\?\.\(t, vf, speaker\)/)
+    expect(voce).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
   })
 
   it('serverul calculează guest / guestPending înainte de răspuns', () => {
