@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { dbEnabled, getPool } from '../db.js'
 import { verifyKeys } from './brain.js'
 import { mailEnabled, smtpTransport } from './mail.js'
+import { getSerperBalance } from './serperBalance.js'
 import { ImapFlow } from 'imapflow'
 
 export interface TokenCheck {
@@ -91,18 +92,53 @@ async function checkGoogleServiceAccount(): Promise<TokenCheck> {
 
 // 4. Google TTS API key (fallback when there is no service account)
 async function checkGoogleTtsKey(): Promise<TokenCheck> {
-  if (config.googleServiceAccountJson) {
-    return { name: 'Google TTS API key', status: 'not_configured', detail: 'folosit service account', requiredScope: 'Cloud Text-to-Speech API' }
-  }
+  // AUDIT ADMIN (3 aug): cu SA prezent, o cheie SETATĂ era raportată „⚪
+  // neconfigurat" fără nicio măsurătoare — pe același ecran cu „✅
+  // GOOGLE_TTS_API_KEY, N caractere" din tabelul de sus. Acum: dacă cheia
+  // există o testăm ORICUM (e rezerva reală a gurii) și spunem că nu e cea
+  // folosită; „neconfigurat" rămâne doar când chiar lipsește.
   if (!config.googleTtsKey) {
-    return { name: 'Google TTS API key', status: 'not_configured', requiredScope: 'Cloud Text-to-Speech API' }
+    return {
+      name: 'Google TTS API key',
+      status: 'not_configured',
+      detail: config.googleServiceAccountJson ? 'lipsește (gura merge pe service account)' : undefined,
+      requiredScope: 'Cloud Text-to-Speech API',
+    }
   }
   const url = `https://texttospeech.googleapis.com/v1/voices?key=${config.googleTtsKey}`
   const r = await fetchStatus(url, {})
   if (r.ok) {
-    return { name: 'Google TTS API key', status: 'ok', detail: 'voices list OK', requiredScope: 'Cloud Text-to-Speech API' }
+    return {
+      name: 'Google TTS API key',
+      status: 'ok',
+      detail: config.googleServiceAccountJson
+        ? 'validă, dar nefolosită — service account are prioritate'
+        : 'voices list OK',
+      requiredScope: 'Cloud Text-to-Speech API',
+    }
   }
   return { name: 'Google TTS API key', status: `fail_${r.status}` as `fail_${number}`, detail: r.text.slice(0, 200), requiredScope: 'Cloud Text-to-Speech API' }
+}
+
+// 4b. Serper — SINGURUL motor de căutare al aplicației (post-extirpare, 3 aug),
+// cheie plătită cu credit propriu. AUDIT ADMIN (3 aug): lipsea complet din
+// „verificarea LIVE", deși comentariul rutei promite „TOATE cheile cu drepturi"
+// — ownerul n-avea unde să vadă dacă SERPER_API_KEY servește sau a rămas fără
+// credit. Refolosim serviciul serperBalance (citirea reală /account, cache 5m).
+async function checkSerper(): Promise<TokenCheck> {
+  const scope = 'google.serper.dev/account (SERPER_API_KEY)'
+  try {
+    const b = await timed(20_000, () => getSerperBalance())
+    if (b.ok) {
+      return { name: 'Serper (căutarea web)', status: 'ok', detail: `${b.balance} căutări rămase`, requiredScope: scope }
+    }
+    if (b.error === 'not_configured') {
+      return { name: 'Serper (căutarea web)', status: 'not_configured', requiredScope: scope }
+    }
+    return { name: 'Serper (căutarea web)', status: 'fail', detail: b.error, requiredScope: scope }
+  } catch (e) {
+    return { name: 'Serper (căutarea web)', status: 'fail', detail: e instanceof Error ? e.message : String(e), requiredScope: scope }
+  }
 }
 
 // (Verificarea cheii OpenAI a fost ȘTEARSĂ, 3 aug — OpenAI extirpat complet:
@@ -203,10 +239,11 @@ function checkSessionSecret(): TokenCheck {
 }
 
 export async function runAllTokenChecks(): Promise<TokenCheck[]> {
-  const [brain, googleSa, googleTts, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
+  const [brain, googleSa, googleTts, serper, gemini, smtp, imap, db, googleOauth, session] = await Promise.all([
     checkBrainKeys(),
     checkGoogleServiceAccount(),
     checkGoogleTtsKey(),
+    checkSerper(),
     checkGemini(),
     checkMailSmtp(),
     checkMailImap(),
@@ -219,6 +256,7 @@ export async function runAllTokenChecks(): Promise<TokenCheck[]> {
     ...checkPlati(),
     googleSa,
     googleTts,
+    serper,
     gemini,
     smtp,
     imap,

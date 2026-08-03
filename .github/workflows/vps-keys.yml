@@ -14,13 +14,16 @@
 #   KIMI_KEY           — cheia Kimi for Coding (dacă vrei s-o scrii/rotești)
 #   GLM_KEY            — cheia GLM Coding Plan
 #   VPS_GITHUB_TOKEN   — token GitHub fin-granulat pentru VPS
-#   OPENAI_USAGE_KEY   — cheia Admin OpenAI (sk-admin-…) pentru /v1/organization/costs
+#   GEMINI_API_KEY     — cheia Gemini (AI Studio) — creierul aplicației
+#
+# (Opțiunea `openai_usage` a fost ȘTEARSĂ — auditul admin, 3 aug: cititorul ei,
+# openaiCosts.ts, nu mai există (OpenAI extirpat). Rularea planta un cadavru în
+# env-ul live; pasul de stare de la final curăță acum linia rămasă pe VPS.)
 #
 # Scrie pe VPS exact în fișierele pe care le citește workerul:
 #   /root/kelion/kimi-key.txt · /root/kelion/glm-key.txt ·
 #   /root/kelion/github-token.txt
-# iar OPENAI_USAGE_KEY în env-file-ul aplicației (/root/kelion/kelionai.env),
-# fiindcă openaiCosts.ts o citește din process.env.OPENAI_USAGE_KEY.
+# iar GEMINI_API_KEY în env-file-ul aplicației (/root/kelion/kelionai.env).
 name: vps-keys
 
 on:
@@ -30,7 +33,7 @@ on:
         description: 'Ce cheie scrii pe VPS acum (valoarea vine din Repo Secrets, NU se tastează)'
         required: true
         type: choice
-        options: [kimi, glm, github, openai_usage, gemini, all]
+        options: [kimi, glm, github, gemini, all]
 
 jobs:
   put:
@@ -44,7 +47,6 @@ jobs:
           KIMI_KEY: ${{ secrets.KIMI_KEY }}
           GLM_KEY: ${{ secrets.GLM_KEY }}
           GH_KEY: ${{ secrets.VPS_GITHUB_TOKEN }}
-          OPENAI_USAGE_KEY: ${{ secrets.OPENAI_USAGE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WHICH: ${{ inputs.which }}
         run: |
@@ -78,18 +80,9 @@ jobs:
               'cat > /root/kelion/github-token.txt && chmod 600 /root/kelion/github-token.txt && echo "github-token.txt scris: $(wc -c < /root/kelion/github-token.txt) octeti"'
           fi
 
-          if want openai_usage; then
-            # Cheia Admin OpenAI (sk-admin-…) merge în ENV-FILE, nu într-un .txt,
-            # fiindcă openaiCosts.ts o citește din process.env.OPENAI_USAGE_KEY.
-            # Dedup: ștergem orice linie veche OPENAI_USAGE_KEY= și adăugăm una singură.
-            [ -n "$OPENAI_USAGE_KEY" ] || { echo "::error::secretul OPENAI_USAGE_KEY lipsește"; exit 1; }
-            printf '%s' "$OPENAI_USAGE_KEY" | ssh $SSHOPTS root@"$VPS_HOST" \
-              'K=$(cat); F=/root/kelion/kelionai.env; touch "$F";
-               grep -v "^OPENAI_USAGE_KEY=" "$F" > "$F.tmp" 2>/dev/null || true; mv "$F.tmp" "$F";
-               printf "OPENAI_USAGE_KEY=%s\n" "$K" >> "$F"; chmod 600 "$F";
-               echo "OPENAI_USAGE_KEY scris in kelionai.env: ${#K} octeti (linii OPENAI_USAGE_KEY: $(grep -c "^OPENAI_USAGE_KEY=" "$F"))"'
-          fi
-
+          # (Pasul `openai_usage` a fost ȘTERS — auditul admin, 3 aug: cheia
+          # nu mai are niciun cititor în cod; curățenia liniei rămase pe VPS
+          # se face în blocul de stare de la final.)
 
           if want gemini; then
             # Cheia Gemini (AI Studio) în ENV-FILE — config.ts o citește din
@@ -114,8 +107,15 @@ jobs:
                if [ -f "$f" ]; then echo "$f: $(wc -c < "$f") octeti, permisiuni $(stat -c %a "$f")"; else echo "$f: LIPSĂ"; fi
              done
              F=/root/kelion/kelionai.env
+             # CURĂȚENIE (auditul admin, 3 aug): OPENAI_USAGE_KEY nu mai are
+             # niciun cititor (openaiCosts.ts șters, OpenAI extirpat) — dacă
+             # linia-cadavru mai există în env-ul live, o ștergem aici.
              if [ -f "$F" ] && grep -q "^OPENAI_USAGE_KEY=" "$F"; then
-               echo "kelionai.env: OPENAI_USAGE_KEY prezent ($(awk -F= "/^OPENAI_USAGE_KEY=/{print length(\$2)}" "$F") octeti valoare)"
+               grep -v "^OPENAI_USAGE_KEY=" "$F" > "$F.tmp" && mv "$F.tmp" "$F" && chmod 600 "$F"
+               echo "kelionai.env: linia moartă OPENAI_USAGE_KEY a fost ȘTEARSĂ (cheia nu mai are cititor)"
+             fi
+             if [ -f "$F" ] && grep -q "^GEMINI_API_KEY=" "$F"; then
+               echo "kelionai.env: GEMINI_API_KEY prezent ($(awk -F= "/^GEMINI_API_KEY=/{print length(\$2)}" "$F") octeti valoare)"
              else
-               echo "kelionai.env: OPENAI_USAGE_KEY LIPSĂ"
+               echo "kelionai.env: GEMINI_API_KEY LIPSĂ"
              fi'

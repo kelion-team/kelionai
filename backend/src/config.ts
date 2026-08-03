@@ -30,7 +30,8 @@ export const ENV_ALIASES: Record<string, string[]> = {
   googleServiceAccountJson: ['GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_SERVICE_ACCOUNT', 'GCP_SERVICE_ACCOUNT_JSON'],
   googleTtsKey: ['GOOGLE_TTS_API_KEY', 'GOOGLE_TTS_KEY', 'GOOGLE_API_KEY'],
   serperKey: ['SERPER_API_KEY', 'SERPER_KEY'],
-  googleMapsKey: ['GOOGLE_MAPS_KEY', 'GOOGLE_MAPS_API_KEY', 'MAPS_API_KEY', 'GOOGLE_MAP_KEY'],
+  // (googleMapsKey scos, 3 aug — cheia nu avea niciun consumator; vezi nota
+  // de la fostul câmp config.googleMapsKey de mai jos.)
   geminiKey: ['GEMINI_API_KEY', 'GEMINI_KEY', 'GOOGLE_GEMINI_API_KEY'],
   mailPass: ['MAIL_PASS', 'MAIL_PASSWORD'],
   bridgeSecret: ['BRIDGE_SECRET'],
@@ -70,7 +71,10 @@ export const config = {
   // hard guard: any known FEMALE style is rewritten to Charon before the API.
   ttsVoiceStyle: process.env.GOOGLE_TTS_VOICE ?? process.env.KELION_GOOGLE_CHIRP_TTS_STYLE ?? 'Charon',
   serperKey: env(...ENV_ALIASES.serperKey),
-  googleMapsKey: env(...ENV_ALIASES.googleMapsKey),
+  // (Câmpul `googleMapsKey` a fost ȘTERS — auditul admin, 3 aug: nu-l citea
+  // NIMENI. mapsSearch/mapsDirections/geocode merg exclusiv pe Nominatim OSM
+  // + OSRM, cu sau fără cheie; rândul lui din env-check împingea ownerul să
+  // configureze o cheie fără niciun efect — încălcarea regulii #4.)
   geminiKey: env(...ENV_ALIASES.geminiKey),
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
