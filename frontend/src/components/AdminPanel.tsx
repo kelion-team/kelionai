@@ -289,6 +289,11 @@ export default function AdminPanel({
     // brain, 'free' otherwise (null until the worker reports).
     brain: string | null
     updatedAt: string
+    // BARA 0–100% (Adrian, 3 aug): etapa REALĂ raportată de lucrător + harta
+    // ei în procent (serverul o calculează din progres — progresOrdin.ts).
+    // null = eșuat (eticheta spune adevărul, fără procent inventat).
+    progress?: string | null
+    pct?: number | null
   }
   const [buildJobs, setBuildJobs] = useState<BuildJobRow[]>([])
   const [buildOrder, setBuildOrder] = useState('')
@@ -1669,7 +1674,7 @@ export default function AdminPanel({
               </div>
               {buildJobs.length === 0 && <div className="chat-hint">{A.noOrdersYet}</div>}
               {buildJobs.map((j) => (
-                <div className="fin-row" key={j.id}>
+                <div className="fin-row" key={j.id} style={{ flexWrap: 'wrap' }}>
                   <span>
                     <strong>#{j.id}</strong>{' '}
                     <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
@@ -1725,6 +1730,42 @@ export default function AdminPanel({
                       </button>
                     )}
                   </span>
+                  {/* BARA 0–100% (Adrian, 3 aug: „fiecare job trebuie să afișeze
+                      starea reală printr-o bară 0–100%, actualizată dinamic").
+                      Procentul e harta etapei REALE raportate de lucrător
+                      (serverul o calculează din progres); textul etapei stă
+                      lângă cifră, ca s-o poți confrunta oricând cu sursa.
+                      Se actualizează cu polling-ul de 10s al cozii. */}
+                  {j.pct != null && (
+                    <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          height: 6,
+                          borderRadius: 999,
+                          background: 'color-mix(in srgb, currentColor 12%, transparent)',
+                          overflow: 'hidden',
+                        }}
+                        title={j.progress || (j.status === 'queued' ? 'în coadă' : '')}
+                      >
+                        <div
+                          style={{
+                            width: `${j.pct}%`,
+                            height: '100%',
+                            borderRadius: 999,
+                            background: j.status === 'done' ? '#38b26e' : '#4a8df0',
+                            transition: 'width 0.6s ease',
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: 11, opacity: 0.8, minWidth: 34, textAlign: 'right' }}>{j.pct}%</span>
+                      {j.status === 'running' && j.progress && (
+                        <span className="chat-hint" style={{ fontSize: 11, maxWidth: '46%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {j.progress}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
