@@ -441,6 +441,16 @@ Romanian characters (â/ț/ș) or splitting words into individual letters. */
   white-space: nowrap;
   word-break: normal;
   overflow-wrap: normal;
+  /* NEON FOSFORESCENT (Adrian, 3 aug: „scrisul e negru pe negru, nu se vede").
+     Verde neon + glow fosforescent, PLUS un contur închis, ca să se citească pe
+     ORICE fundal — bandă întunecată, avatar, temă deschisă sau închisă. */
+  color: #4dff88;
+  font-weight: 600;
+  text-shadow:
+    0 0 6px rgba(77, 255, 136, 0.8),
+    0 0 12px rgba(77, 255, 136, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 -1px 2px rgba(0, 0, 0, 0.85);
 }
 /* QR click-to-enlarge: the code opens big enough for any phone to scan. */
 .qr-btn {
