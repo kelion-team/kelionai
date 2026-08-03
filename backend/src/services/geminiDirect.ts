@@ -20,6 +20,60 @@ export function geminiDirectAvailable(): boolean {
   return Boolean(config.geminiKey)
 }
 
+// ── PASTILA GEMINI: STARE LIVE (Adrian, 3 aug: „vreau să văd că am bani la
+// gemini") ──────────────────────────────────────────────────────────────────
+// Creditul prepay real (£11.58) NU e expus de niciun API Google — se vede DOAR
+// pe pagina de facturare (verificat 3 aug: Cloud Billing dă doar numele/starea
+// contului, nu soldul; nu există endpoint pentru soldul prepay). Semnalul ONEST
+// măsurabil e un ping mic la generateContent cu cheia: 200 = cheia Tier 2
+// servește (deci ai credit și merge). Un cont prepay GOL răspunde „prepayment
+// credits are depleted" → roșu. Deci verde ✓ = bani+merge, roșu ⚠ = epuizat/
+// stricat. Cache 5 min: pastila se cere la 15s, dar pingul real pleacă cel mult
+// o dată la 5 min (cost neglijabil, ~1 token in/out).
+export interface GeminiLive {
+  /** verificarea s-a putut face (cheie prezentă + rețea a răspuns) */
+  ok: boolean
+  /** Gemini a răspuns 200 — Tier 2 activ, credit prezent */
+  serving: boolean
+  reason?: 'depleted' | 'quota' | 'error' | 'no_key'
+}
+let geminiLiveCache: { at: number; val: GeminiLive } | null = null
+const GEMINI_LIVE_TTL_MS = 5 * 60_000
+export async function geminiLive(): Promise<GeminiLive> {
+  if (!config.geminiKey) return { ok: false, serving: false, reason: 'no_key' }
+  const now = Date.now()
+  if (geminiLiveCache && now - geminiLiveCache.at < GEMINI_LIVE_TTL_MS) return geminiLiveCache.val
+  let val: GeminiLive
+  try {
+    const r = await fetch(`${G_BASE}/models/${config.geminiModel}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        generationConfig: { maxOutputTokens: 1 },
+      }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (r.ok) {
+      val = { ok: true, serving: true }
+    } else {
+      const body = (await r.text().catch(() => '')).toLowerCase()
+      const reason: GeminiLive['reason'] = /prepay|deplet/.test(body)
+        ? 'depleted'
+        : r.status === 429 || /resource_exhausted|free_tier|quota/.test(body)
+          ? 'quota'
+          : 'error'
+      val = { ok: true, serving: false, reason }
+    }
+  } catch {
+    // rețea/timeout — NECITIBIL (nu „nu merge"): pastila scrie „Gemini ⚠",
+    // niciodată o stare inventată.
+    val = { ok: false, serving: false, reason: 'error' }
+  }
+  geminiLiveCache = { at: now, val }
+  return val
+}
+
 /** The internal prefix that routes the orchestrator to Google instead of OpenRouter. */
 export const GEMINI_DIRECT_PREFIX = 'google-direct/'
 

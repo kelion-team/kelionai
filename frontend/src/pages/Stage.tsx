@@ -416,13 +416,17 @@ interface BrainCredit {
       rateLimit?: number
       error?: string
     }
-    /** The REAL Gemini month-to-date spend (USD), from our own cost journal
-     *  (cost_events kind='gemini'). The work brain is Gemini Tier 2 (paid on the
-     *  owner's Google account), so there is no prepaid balance — month spend is
-     *  the honest figure. `live: false` (DB down) → "Gemini ⚠", never "$0.00";
-     *  `live: true` with 0 is a REAL zero (nothing spent this month yet). */
+    /** The Gemini pill. The prepaid credit (£11.58) is NOT exposed by any Google
+     *  API (verified 3 aug) — so we show the honest signal that reflects it:
+     *  `serving` = a live ping returned 200 → the Tier 2 key is working AND has
+     *  credit (a depleted prepay account errors), shown GREEN "Gemini ✓"; false →
+     *  RED "Gemini ⚠" with `reason` ('depleted' / 'quota' / 'error'). `checked:
+     *  false` = the ping itself couldn't run (no key / network) — also "⚠", never
+     *  a fake OK. `monthUsd` = REAL month-to-date Gemini spend (tooltip detail). */
     gemini?: {
-      live: boolean
+      checked: boolean
+      serving: boolean
+      reason?: 'depleted' | 'quota' | 'error' | 'no_key'
       monthUsd?: number
     }
     /** The VPS resources (Adrian, Jul 31: "permanently show VPS on the interface
@@ -1172,17 +1176,15 @@ export default function Stage({ user }: { user: User }) {
             {brainCredit && (
               <button
                 type="button"
-                className="ghost"
-                onClick={() => window.open('https://aistudio.google.com/usage', '_blank', 'noopener')}
+                className={`ghost ${brainCredit.gemini && !brainCredit.gemini.serving ? 'blink-red' : ''}`}
+                onClick={() => window.open('https://aistudio.google.com/billing', '_blank', 'noopener')}
                 title={
-                  brainCredit.gemini?.live
+                  brainCredit.gemini?.serving
                     ? adminStrings().gemPillLive.replace('{n}', (brainCredit.gemini.monthUsd ?? 0).toFixed(2))
-                    : adminStrings().gemPillDead
+                    : adminStrings().gemPillDead.replace('{why}', brainCredit.gemini?.reason ?? 'necunoscut')
                 }
               >
-                {brainCredit.gemini?.live
-                  ? `Gemini $${(brainCredit.gemini.monthUsd ?? 0).toFixed(2)}`
-                  : 'Gemini ⚠'}
+                {brainCredit.gemini?.serving ? 'Gemini ✓' : 'Gemini ⚠'}
               </button>
             )}
             {/* THE VPS, PERMANENT IN THE BAR (Adrian, Jul 31: „show the VPS
