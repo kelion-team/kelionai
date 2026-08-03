@@ -2,6 +2,7 @@ import { GoogleAuth } from 'google-auth-library'
 import { config } from '../config.js'
 import { academicPronounce } from './pronounce.js'
 import { googleServiceAccount } from './googleCreds.js'
+import { localSynthesize, localVoskAvailable } from './localVosk.js'
 
 // TTS — GOOGLE CHIRP 3 HD, SINGURA VOCE (OpenAI scos complet, Adrian 3 aug:
 // „OpenAI scos din toată aplicația").
@@ -50,10 +51,13 @@ export function googleTtsAvailable(): boolean {
 
 /** True when a synthesis path EXISTS: Google Chirp 3 HD (singura sursă acum). */
 export function ttsConfigured(): boolean {
+  if (config.useLocalVosk) {
+    return localVoskAvailable()
+  }
   return googleTtsAvailable()
 }
 
-export type TtsEngine = 'google'
+export type TtsEngine = 'google' | 'local'
 
 export type TtsResult =
   | { ok: true; audio: Buffer; engine: TtsEngine }
@@ -90,6 +94,15 @@ export async function synthesize(
   // ACADEMIC MODE: we respell technical acronyms letter-by-letter in the
   // target language so they are pronounced correctly. Pure text layer.
   const spoken = academicPronounce(clean, lang.split('-')[0])
+
+  if (config.useLocalVosk) {
+    const result = await localSynthesize(spoken, lang)
+    if (result.ok) {
+      return { ok: true, audio: result.audio, engine: 'local' }
+    } else {
+      return { ok: false, status: 502, error: result.error }
+    }
+  }
 
   // GOOGLE-ONLY (Adrian, 3 aug): Chirp 3 HD e singura voce — voce masculină în
   // orice limbă, 1M caractere/lună gratis. Fără rezervă OpenAI. Dacă pică,
@@ -135,7 +148,12 @@ export const MALE_CHIRP_DEFAULT = 'Charon' // warm male voice, valid in every Ch
 /**
  * VOCE MASCULINĂ PESTE TOT (Adrian, 2 aug: „voce masculină în orice limbă").
  * Din stilul configurat — un stil simplu („Charon") SAU un nume complet
- * („ro-RO-Chirp3-HD-Charon") — păstrăm DOAR stilul; orice stil FEMININ, sau
+ * („ro-RO-Chirp3-HD-Charon") — păstrăm DOAR stilul (partea finală), fiindcă
+ * limba vine din `lang`, nu din numele vocii. Orice stil FEMININ cunoscut e
+ * rescris în `MALE_CHIRP_DEFAULT` (Charon), ca să nu ajungă la Google o voce
+ * feminină. Un stil necunoscut (care nu e în lista feminină) trece direct,
+ * fiindcă poate fi un stil masculin nou adăugat de Google, și nu trebuie să
+lul; orice stil FEMININ, sau
  * necunoscut, sau gol → devine Charon (masculin). Pură și EXPORTATĂ dinadins ca
  * regula să fie bătută în cuie cu test (lacat.test.ts): dacă cineva o schimbă,
  * testul din CI cade și schimbarea nu se poate face merge. Nu se mai distruge.
