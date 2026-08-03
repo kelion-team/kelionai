@@ -660,6 +660,32 @@ async function serperSearch(query: string, n: number): Promise<string | null> {
   }
 }
 
+// YouTube videos through Serper's dedicated /videos endpoint — REAL Google video
+// results (title + link), no OpenRouter dependency. Same failure contract as
+// serperSearch: missing/invalid key, quota, non-ok or network → [] so
+// youtube_search can honestly report "search_unavailable" instead of "no videos".
+async function serperVideos(query: string, n: number): Promise<{ title: string; url: string }[]> {
+  if (!config.serperKey) return []
+  try {
+    const res = await tfetch(
+      'https://google.serper.dev/videos',
+      {
+        method: 'POST',
+        headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: Math.min(Math.max(n, 1), 12) }),
+      },
+      15_000,
+    )
+    if (!res.ok) return []
+    const j = (await res.json()) as { videos?: { title?: string; link?: string }[] }
+    return (j.videos ?? [])
+      .filter((v): v is { title?: string; link: string } => Boolean(v.link))
+      .map((v) => ({ title: v.title ?? '', url: v.link }))
+  } catch {
+    return []
+  }
+}
+
 // Exported so the shape/marking rules are testable without network (the same
 // pattern as composeSerperResult / composePlace): the OpenRouter FALLBACK
 // answer, CLEARLY marked as degraded — the brain must never present it as the
@@ -1220,17 +1246,14 @@ export function extractYoutubeCandidates(
 export async function youtubeSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 10)
-  // Through OpenRouter (web plugin) — we ask for REAL watch links. No Serper.
-  const r = await openrouterWebSearch(
-    `${query} — best YouTube videos`,
-    'Search YouTube. Reply ONLY as a list, one per line: Title — https://www.youtube.com/watch?v=ID , using real, currently-available videos.',
-  )
-  // The search backend itself failed (no text AND no citations). "I could not
-  // search" and "no videos exist" are different truths — the old code merged
-  // them into not_found, and the brain would tell the user there are no
-  // videos when in fact the search never ran.
-  if (!r.text && r.sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
-  const videos = extractYoutubeCandidates(r.text, r.sources)
+  // Through Serper's /videos endpoint — REAL Google video results, no OpenRouter.
+  const sources = await serperVideos(query, 10)
+  // The search backend itself failed (missing key, quota, non-ok or network →
+  // no sources). "I could not search" and "no videos exist" are different truths
+  // — the old code merged them into not_found, and the brain would tell the user
+  // there are no videos when in fact the search never ran.
+  if (sources.length === 0) return JSON.stringify({ error: 'search_unavailable' })
+  const videos = extractYoutubeCandidates('', sources)
   if (videos.length > 0) {
     // Only clips that can ACTUALLY play on the monitor (checked in parallel,
     // a single network round) — a dead player never gets displayed again.
