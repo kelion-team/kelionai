@@ -475,21 +475,49 @@ export default function Stage({ user }: { user: User }) {
   // the document enters PERMANENT STORAGE (notes, DB — Kelion finds it again
   // with his tools) + local download + visible confirmation on the button.
   const [docSaved, setDocSaved] = useState(false)
+  // BUTOANE CARE RĂSPUND LA APĂSARE (Adrian, 3 aug: „butoanele salvează sau
+  // copiază nu sunt active"). Nu erau moarte — erau MUTE: „Copiază" nu confirma
+  // nimic (și pica tăcut când browserul refuza clipboard-ul), iar „Salvează"
+  // arăta „Salvat ✓" doar dacă reușea POST-ul de rețea. Acum: eticheta se
+  // schimbă LA CLIC (fapta locală — descărcarea/copierea — chiar s-a întâmplat),
+  // iar copierea are plasă (textarea + execCommand) când clipboard-ul modern e
+  // refuzat. POST-ul spre notițe rămâne best-effort, nu condiționează feedback-ul.
+  const [docCopied, setDocCopied] = useState(false)
+  const copyDocText = (text: string): void => {
+    const arata = (): void => {
+      setDocCopied(true)
+      window.setTimeout(() => setDocCopied(false), 2000)
+    }
+    const fallback = (): void => {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+        arata()
+      } catch {
+        /* nici plasa n-a mers — eticheta rămâne, omul vede că nu s-a confirmat */
+      }
+    }
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(arata).catch(fallback)
+    else fallback()
+  }
   const saveDocToKelion = (title: string, content: string, fileName: string, mime: string): void => {
     downloadContent(fileName, content, mime)
+    // Descărcarea e fapta vizibilă și LOCALĂ → confirmarea vine imediat, nu
+    // după rețea. Nota în Kelion rămâne best-effort, în fundal.
+    setDocSaved(true)
+    window.setTimeout(() => setDocSaved(false), 3000)
     void fetch('/api/notes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ title, content }),
-    })
-      .then((r) => {
-        if (r.ok) {
-          setDocSaved(true)
-          window.setTimeout(() => setDocSaved(false), 3000)
-        }
-      })
-      .catch(() => {})
+    }).catch(() => {})
   }
   const [contactOpen, setContactOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -929,10 +957,10 @@ export default function Stage({ user }: { user: User }) {
                     <button
                       type="button"
                       className="doc-copy"
-                      onClick={() => void navigator.clipboard?.writeText(task.text ?? '')}
+                      onClick={() => copyDocText(task.text ?? '')}
                       title={t.wsCopy}
                     >
-                      {t.wsCopy}
+                      {docCopied ? '✓' : t.wsCopy}
                     </button>
                     <button
                       type="button"

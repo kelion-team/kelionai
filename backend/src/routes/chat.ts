@@ -1111,10 +1111,14 @@ async function rezervaCheltuitaAzi(): Promise<number> {
 }
 
 async function rezervaDeschisa(): Promise<boolean> {
-  const rawCap = await loadKv('rezerva:cap_zilnic').catch(() => null)
-  const n = rawCap ? Number(rawCap) : NaN
-  const cap = Number.isFinite(n) && n > 0 ? n : REZERVA_CAP_ZILNIC_DEFAULT_USD
-  return poateFolosiRezerva(await rezervaCheltuitaAzi(), cap)
+  // PUNGA DE REZERVĂ ÎNCHISĂ DEFINITIV (Adrian, 3 aug, cu dovada în mână —
+  // mailurile „sold scăzut ($-0.20)": modelele :free OpenRouter au atins
+  // plafonul zilnic (429 pe toate, dovedit în jurnalul constructorului), deci
+  // FIECARE tură căzută în rotație aluneca pe modele OpenRouter PLĂTITE și
+  // soldul cobora, până pe minus, pe furnizorul pe care el l-a scos. De azi
+  // creierul e Gemini pe toate treptele; dacă și Gemini pică, tura spune
+  // cinstit „încearcă din nou" — nu mai cumpără pe ascuns de la OpenRouter.
+  return false
 }
 
 async function adaugaLaRezerva(usd: number): Promise<void> {
@@ -2061,7 +2065,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // the whole conversation again; (3) if the BASE alone ever reaches the
     // ceiling, we trim from the tail (the rarest tools) and log it loudly,
     // so the chat degrades instead of dying.
-    const MAX_PROVIDER_TOOLS = 64
+    // UNELTE COMPLETE PE GEMINI (Adrian, 3 aug: „nu are unelte complete" /
+    // „leagă-i toate uneltele nativ de Gemini, tot ce are nevoie"). Plafonul 64
+    // era al API-ului VECHI (OpenRouter, 400 „at most 64 tools", 1 aug) și tăia
+    // ~16 unelte din coada adminului LA FIECARE TURĂ. Gemini acceptă 128 de
+    // declarații de funcții — pe creierul google-direct intră TOT inventarul,
+    // netăiat. Plafonul 64 rămâne doar pentru drumul OpenRouter (rezerva).
+    const MAX_PROVIDER_TOOLS = orChatModel?.startsWith(GEMINI_DIRECT_PREFIX) ? 128 : 64
     const seenNames = new Set<string>()
     const baseTools: Tool[] = []
     for (const t of rawTools) {
