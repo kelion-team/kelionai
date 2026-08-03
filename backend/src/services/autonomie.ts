@@ -1075,9 +1075,19 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
     return { pornit: r.ok, motiv: `cerința #${noi[0].id}: ${r.detaliu}` }
   }
 
+  // THE OWNER'S REQUIREMENTS DON'T WAIT FOR THE MISSION TO CLOSE. Measured
+  // live (3 aug): C1 was 'analizata' at 00:34 and structurally could NEVER
+  // receive its order — this list was mission-only until every step closed,
+  // while the analysis (a paid turn) had already been spent. Analysis with
+  // money, delivery never. The mission keeps precedence at EQUAL attempts
+  // (it's listed first and the sort below is stable); a thrice-failed step
+  // yields its turn to fresh work and is still retried — the same
+  // anti-starvation rule the mission already applies to itself. Only the
+  // GENERAL list (gaps + RAMAS-DE-FACUT rows) stays behind the mission, as
+  // designed on Jul 30.
   const brute = misiuneGata
     ? [...(await cerinteDeDus()), ...(await golurileLui()), ...(await randuriDeFacut())]
-    : pasii.filter((e) => e.poate).map((e) => e.p)
+    : [...pasii.filter((e) => e.poate).map((e) => e.p), ...(await cerinteDeDus())]
   if (!brute.length) return { pornit: false, motiv: 'n-am ce lua: nici goluri, nici rânduri de listă' }
 
   // NOTHING GETS ABANDONED. Before, after 3 attempts the step was marked

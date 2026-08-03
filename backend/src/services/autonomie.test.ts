@@ -306,6 +306,37 @@ describe('cerințele: analiză înainte de cod', () => {
     expect(cerinteAtinse).toContainEqual({ id: 9, stare: 'in_lucru' })
   })
 
+  // MĂSURAT LIVE (3 aug): C1 era „analizata" de la 00:34 și structural nu
+  // putea primi ordin NICIODATĂ — lista de dus era doar-misiune până se
+  // închidea tot; analiza (tură plătită) fusese deja cheltuită. Analiză cu
+  // bani, livrare nicicând.
+  it('cerința ANALIZATĂ primește ordin și când misiunea NU e gata — nu așteaptă închiderea ei', async () => {
+    // misiunea deschisă, cu pași încercați deja (ca pe viu: M0/M1 la 3 încercări)
+    for (const c of ['M0', 'M1', 'M2', 'M3', 'M4', 'M5'])
+      kv.set(`autonomie:pas:${c}`, JSON.stringify({ job: 0, incercari: 3 }))
+    cerinte = [{
+      id: 1, text: 'uneltele constructorului active direct în chat', stare: 'analizata',
+      criteriu: 'build_software apare în registrul capabilităților de chat',
+      aleasa: 'flag în registru — DE CE: fără cale nouă de cod', optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(r.motiv).toContain('C1')
+    expect(jobs[0].orderText).toContain('build_software apare în registrul')
+  })
+
+  it('la încercări EGALE, pasul de misiune are întâietate față de cerință — prioritatea rămâne a misiunii', async () => {
+    // toți pașii și cerința pe 0 încercări → sortarea stabilă ține misiunea prima
+    cerinte = [{
+      id: 1, text: 'orice', stare: 'analizata',
+      criteriu: 'x', aleasa: 'y', optiuni: null,
+    }]
+
+    const r = await poateSaLucreze()
+    expect(r.motiv).not.toContain('C1')
+    expect(r.motiv).toMatch(/M\d/)
+  })
+
   it('ce e livrat se PROBEAZĂ pe live, înaintea oricărei munci noi', async () => {
     misiuneaInchisa()
     cerinte = [{ id: 9, text: 'x', stare: 'livrata', criteriu: 'userul primește creditele', aleasa: null, optiuni: null }]
