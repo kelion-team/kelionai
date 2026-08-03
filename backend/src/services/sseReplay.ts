@@ -151,7 +151,13 @@ export async function* readTurnFrom(
   // marked finished (finishTurn) or the TTL expires — only then does the
   // stream close.
   let cursor = startSeq
-  const deadline = Date.now() + TTL_MS
+  // TERMEN PE INACTIVITATE, nu pe vârsta conexiunii (agenții de debug, 3 aug,
+  // verdict REAL: termenul fix „Date.now()+TTL la deschidere" închidea NORMAL
+  // conexiunea la fix 120s deși tura ÎNCĂ curgea — jumătate de răspuns servit
+  // ca întreg, fără nicio eroare). Cât timp sosesc evenimente, termenul se
+  // împinge; doar o tăcere de TTL_MS întreagă închide plasa de siguranță —
+  // și atunci se SPUNE (desync), nu se tace.
+  let deadline = Date.now() + TTL_MS
   for (;;) {
     let emitted = false
     for (const ev of buf.events) {
@@ -162,8 +168,14 @@ export async function* readTurnFrom(
       emitted = true
       yield formatSSE(ev.seq, ev.payload)
     }
+    if (emitted) deadline = Date.now() + TTL_MS // activitate → termenul se împinge
     if (buf.finished.has(turnId)) return // the turn is done — everything has been given
-    if (Date.now() > deadline) return // safety net: we don't hold the connection forever
+    if (Date.now() > deadline) {
+      // Plasa de siguranță a expirat cu tura NEDECLARATĂ terminată — clientul
+      // trebuie să ȘTIE că poate lipsi coada răspunsului, nu să creadă că e tot.
+      yield formatSSE(++buf.seq, desyncSSE())
+      return
+    }
     // The turn is still running — wait a bit and check again (no busy-loop).
     if (!emitted) await new Promise((r) => setTimeout(r, 150))
   }

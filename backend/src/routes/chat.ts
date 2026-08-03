@@ -2096,6 +2096,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         ? { feed: (_t: string): void => {}, fed: (): boolean => false, finish: async (): Promise<void> => {} }
         : createVoiceStream(reply, userLang, await getVoicePref(user.email).catch(() => null))
     let assistantText = ''
+    // CE A VĂZUT DEJA OMUL PE ECRAN (agenții de debug, 3 aug, verdict REAL):
+    // când un model pică DUPĂ ce a curs text, catch-ul lipea „Încearcă din nou"
+    // direct peste jumătatea de răspuns și salva în istoric DOAR sufixul —
+    // ecranul și istoricul divergeau. Acumulatorul ăsta ține exact ce a curs,
+    // ca la eșec să (1) separăm sufixul de text și (2) istoricul = ecranul.
+    let ecranPartial = ''
     // THE BRAIN CLOCK (admin): the first real word measures speed; the bar moves
     // to "Composing the reply". Once per turn, only for the admin (his telemetry).
     let firstWordMarked = false
@@ -2430,6 +2436,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
             const clean = markupStrip.push(txt)
             if (!clean) return
             textFlowed = true
+            ecranPartial += clean // oglinda exactă a ecranului, pentru catch
             noteFirstWord()
             reply.raw.write(clean)
             voice.feed(clean)
@@ -2665,12 +2672,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // above absorbs single-model failures; if we land here the whole pool
       // failed — the human hears only a neutral "try again". Details stay in
       // the server log (console.error below).
-      const spoken = ro
-        ? 'Încearcă din nou în câteva secunde.'
-        : 'Try again in a few seconds.'
+      // RĂSPUNS PARȚIAL ≠ RĂSPUNS MORT (agenții de debug, 3 aug, verdict REAL):
+      // dacă textul deja a curs, sufixul se SEPARĂ de el (nu se lipește în
+      // aceeași propoziție) și spune cinstit că s-a întrerupt — iar istoricul
+      // salvează ecranul ÎNTREG (parțial + notă), nu doar sufixul.
+      const spoken = ecranPartial.trim()
+        ? (ro
+            ? '\n\n[Răspunsul s-a întrerupt aici — cere-mi să continui.]'
+            : '\n\n[The reply was cut off here — ask me to continue.]')
+        : ro
+          ? 'Încearcă din nou în câteva secunde.'
+          : 'Try again in a few seconds.'
       reply.raw.write(spoken)
       reply.raw.end()
-      void saveMessage(user.email, 'assistant', spoken)
+      void saveMessage(user.email, 'assistant', ecranPartial.trim() ? ecranPartial + spoken : spoken)
       console.error('[CHAT ERROR]', errMsg, { isRateLimit, isQuota, isRefusal })
       // EVIDENȚA TIMPILOR — și eșecul se măsoară (bucla din spate învață din el).
       // `orchestratorModel` e local blocului try; aici, pe eșec, notăm doar durata.
