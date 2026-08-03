@@ -2204,6 +2204,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       if (!heavyTurn && geminiDirectAvailable()) {
         const geminiLight = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
         if (eSanatos(geminiLight)) orchestratorModel = geminiLight
+        // GEMINI JOS → REZERVA RAPIDĂ nemotron (Adrian, 3 aug), nu gemma lent:
+        // și calea secvențială (turele cu unelte) pornește pe rezerva rapidă.
+        else if (config.openrouter.topDefault.endsWith(':free') && eSanatos(config.openrouter.topDefault))
+          orchestratorModel = config.openrouter.topDefault
       }
       // ── WHEN THE BRAIN IS BLIND, SIGHT IS DELEGATED (Adrian, Jul 31) ───────
       //
@@ -2417,15 +2421,25 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // SKIP the race and take the sequential path WITH tools below. Chit-chat
       // keeps the race's speed; questions keep the truth and the visual.
       if (!heavyTurn && !turnHasImage && !needsToolForAnswer(lastUserText)) {
+        const geminiLightRace = `${GEMINI_DIRECT_PREFIX}${config.geminiModel}`
+        // REZERVA RAPIDĂ (Adrian, 3 aug: „fă cota de rezervă nemotron rapid"):
+        // când Gemini e JOS (cotă gratuită epuizată — 429 „exceeded your quota"),
+        // cursa să prindă ÎNTÂI nemotron (măsurat 6s), NU gemma (măsurat 22-37s pe
+        // payload real → exact cei 27s ai tăi). Pus imediat după Gemini, înaintea
+        // restului pool-ului free; dedus cu Set ca să nu curgă de două ori.
+        const rezervaRapida = config.openrouter.topDefault
+        const candidatiFree = (await listaCandidati(triedModels)).filter(
+          (id) => id.endsWith(':free') && eSanatos(id),
+        )
         const concurenti = [
-          // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step, after the race cut
-          // latency 40s → 4.7s but the free pool kept answering broken
-          // Romanian, „îmi radegând protocolul"): Google's own API on the free
-          // key — real Romanian, 1-3s. The OpenRouter free pool races behind.
-          ...(geminiDirectAvailable() && eSanatos(`${GEMINI_DIRECT_PREFIX}${config.geminiModel}`)
-            ? [`${GEMINI_DIRECT_PREFIX}${config.geminiModel}`]
-            : []),
-          ...(await listaCandidati(triedModels)).filter((id) => id.endsWith(':free') && eSanatos(id)),
+          ...new Set([
+            // GEMINI DIRECT FIRST (Aug 1 — the QUALITY step): Google's own API on
+            // the free key — real Romanian, 1-3s. When healthy it wins every time.
+            ...(geminiDirectAvailable() && eSanatos(geminiLightRace) ? [geminiLightRace] : []),
+            // Rezerva rapidă: nemotron free, înaintea pool-ului lent.
+            ...(rezervaRapida.endsWith(':free') && eSanatos(rezervaRapida) ? [rezervaRapida] : []),
+            ...candidatiFree,
+          ]),
         ].slice(0, 3)
         for (const id of concurenti) triedModels.add(id)
         interface Castigator { id: string; rez: Awaited<ReturnType<typeof runBrainOnce>>; curat: string }

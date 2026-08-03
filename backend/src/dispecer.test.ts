@@ -155,8 +155,10 @@ describe('latența (Adrian: timpi exceptionali de mari)', () => {
     expect(chat).toMatch(/primulCastigator\(curse\)/)
     expect(chat).not.toMatch(/Promise\.all\(curse\)/)
   })
-  it('Gemini direct e PRIMUL concurent (calitatea românei, 1-3s)', () => {
-    expect(chat).toMatch(/geminiDirectAvailable\(\) && eSanatos\(`\$\{GEMINI_DIRECT_PREFIX\}\$\{config\.geminiModel\}`\)/)
+  it('Gemini direct e PRIMUL concurent, apoi rezerva rapidă nemotron (3 aug)', () => {
+    // Gemini întâi (calitatea românei, 1-3s); imediat după, rezerva rapidă
+    // (nemotron, config.openrouter.topDefault) înaintea pool-ului free lent.
+    expect(chat).toMatch(/new Set\(\[[\s\S]{0,240}geminiDirectAvailable\(\) && eSanatos\(geminiLightRace\)[\s\S]{0,300}rezervaRapida/)
   })
   it('concurenții NU primesc unelte (fără dublă execuție)', () => {
     expect(chat).toMatch(/runOrchestrator\(id, orMsgs, \[\], execTool, \{ maxTokens: 800 \}\)/)
