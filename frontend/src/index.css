@@ -3369,3 +3369,28 @@ rearrange by themselves on the phone. */
 .manual-page .back-link { color: #6b7280; }
 .manual-page .back-link:hover { color: #2f6df6; }
 
+.clock-container {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  background: rgba(0,0,0,0.5);
+  color: white;
+  padding: 10px 15px;
+  border-radius: 10px;
+  font-family: sans-serif;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.clock-greeting {
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+
+.clock-time {
+  font-size: 18px;
+  font-weight: bold;
+}
+

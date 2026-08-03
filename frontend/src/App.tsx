@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, type User } from './lib/api'
+import Clock from './components/Clock'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Credits from './pages/Credits'
@@ -119,6 +120,7 @@ export default function App() {
 
   return (
     <>
+      {user && user.email === import.meta.env.VITE_OWNER_EMAIL && <Clock />}
       <DynamicBackground />
       {/* Dedicated /login page (Adrian, Jul 26) — an already logged-in user is
       sent back into the app. /credite is PUBLIC for everyone (fix Jul 27 —
