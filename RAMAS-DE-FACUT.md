@@ -329,3 +329,46 @@ Constructorul rulează structural pe `:free`; pe VPS e pus **conștient** `CONST
 3. **Analiza cerințelor pe model ieftin** (deja e pe `:free`), doar construirea pe plătit.
 
 Recomandarea mea: **1 + 2** (plafon + free-cu-escaladare) — păstrează Fable 5 unde contează, dar taie falimentul.
+
+---
+
+## L. LISTA DE CAPABILITĂȚI CERUTĂ PE 3 AUG SEARA („implementezi obligatoriu tot")
+
+> Adrian, 3 aug: Kelion și-a autoanalizat golurile, Adrian a ordonat „implementezi
+> obligatoriu tot". Împărțirea de mai jos e CINSTITĂ (regula #1): ce pot construi
+> singur, ce cere conturile/cheile TALE, ce nu se poate azi — cu dovada. Rândurile
+> se taie doar cu PR + verificare live.
+
+### L1. Pot construi singur (în ordinea valorii)
+| # | Ce | Stare |
+|---|---|---|
+| L1a | Bara de progres 0–100% pe fiecare ordin din Constructor (real, din pașii raportați de agent) | în lucru — imediat după extirparea OpenRouter |
+| L1b | Gestionare automată a ordinelor eșuate („dili"): la eșec definitiv → analiză automată a jurnalului + repunere cu enunț corectat sau închidere motivată | de făcut |
+| L1c | Diagnoză/reparare automată deploy (dispatch_failed_204 etc.): santinela deja verifică live==master; de adăugat auto-rerun la eșec de rețea | parțial există (anti-fantomă) |
+| L1d | Telegram: trimitere/primire mesaje prin Bot API (îți faci un bot cu @BotFather în 2 min, cheia intră în GitHub Secrets) | de făcut — cere UN token de la tine |
+| L1e | Procesare CSV/JSON complexe ca unelte de chat (parse + agregări + afișare pe monitor) | de făcut |
+| L1f | Scripturi ad-hoc în sandbox pe server (constructorul deja scrie+rulează cod; de expus ca unealtă de chat cu limite dure) | parțial există (constructor) |
+| L1g | Analiză imagine în timp real (obiecte/text): Gemini vede nativ DEJA (fix 3 aug); de adăugat fluxul continuu pe cameră | parțial există |
+| L1h | Învățare din feedback implicit: autoInvatare + memoria există; de legat semnalele („nu asta am cerut") de registru | parțial există |
+| L1i | Drive avansat: editare documente/foi prin API-urile Google existente (scope-uri noi la consimțământ) | de făcut |
+
+### L2. Cer conturile/aprobările TALE (nu pot fără ele — nu e refuz, e fapt)
+| # | Ce | Ce-mi trebuie de la tine |
+|---|---|---|
+| L2a | WhatsApp | cont WhatsApp Business API (aprobare Meta, proces de zile) |
+| L2b | Slack/Teams | app înregistrată în workspace-ul tău + token |
+| L2c | Apeluri telefonice | cont Twilio/Vonage (număr + credit) |
+| L2d | Smart home | cont Google Home/SmartThings + dispozitivele legate pe el |
+| L2e | Bancar (extrase/plăți) | GoCardless există DEJA în secrete (citire); plăți = licență PSD2 — doar prin furnizor autorizat |
+| L2f | Investiții | cont broker cu API (ex. Alpaca) + acceptul tău scris per tranzacție |
+| L2g | Uber/Bolt/Glovo/Booking | API-uri partener — acces doar pe cont de business aprobat de ei |
+| L2h | IFTTT/Zapier | cont + webhook-uri create de tine |
+
+### L3. Nu se poate azi — cu dovada
+| # | Ce | De ce |
+|---|---|---|
+| L3a | „Sold Gemini prin API" | Google NU expune creditul promoțional prin niciun API (verificat 3 aug pe Cloud Billing + AI Studio). Soluția onestă e LIVE: cifra spusă de tine pe pastilă, cu dată |
+| L3b | Control Waze real (rute prin comenzi) | Waze nu are API public de control — doar deep-links de deschidere |
+| L3c | Control desktop-ul tău (deschide aplicații locale) | rulez pe server; pe Windows-ul tău ar trebui un agent instalat de tine local — de discutat separat, e software nou pe mașina ta |
+| L3d | Recunoaștere facială persoane | interzisă pe față umană de politicile mari de API și de AI Act pe identificare biometrică fără temei; obiecte+text DA (L1g) |
+| L1j | Descoperire și integrare de API-uri noi: `propose_tool` + uneltele dinamice EXISTĂ deja (Kelion propune, tu aprobi cu un clic, unealta e activă instant); de adăugat pasul de căutare autonomă a API-ului potrivit | parțial există |

@@ -15,9 +15,12 @@ const chat = readFileSync(
   'utf8',
 )
 
-describe('plafonul de 64 de unelte al furnizorului e garantat structural', () => {
-  it('există o constantă de plafon și e folosită la trimitere', () => {
-    expect(chat).toMatch(/MAX_PROVIDER_TOOLS = 64/)
+describe('plafonul de unelte al furnizorului e garantat structural', () => {
+  it('plafonul e AL FURNIZORULUI: 128 pe Gemini (unelte complete), 64 pe restul', () => {
+    // Adrian, 3 aug: „nu are unelte complete". 64 era limita API-ului vechi
+    // (OpenRouter); Gemini acceptă 128 de declarații → pe google-direct intră
+    // TOT inventarul adminului. Testul pinuiește AMBELE cifre și condiția.
+    expect(chat).toMatch(/MAX_PROVIDER_TOOLS = orChatModel\?\.startsWith\(GEMINI_DIRECT_PREFIX\) \? 128 : 64/)
     expect(chat).toMatch(/baseTools\.slice\(0, MAX_PROVIDER_TOOLS\)/)
   })
 
