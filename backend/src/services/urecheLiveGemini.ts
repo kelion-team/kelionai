@@ -19,7 +19,7 @@ import { config } from '../config.js'
 
 // Modelul Live (jumătatea-flash e cea rapidă). Suprascriibil prin env fără
 // deploy de cod — numele modelelor Live se mai schimbă.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash'
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest'
 
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
