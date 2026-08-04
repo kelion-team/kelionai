@@ -107,6 +107,7 @@ export function toGeminiPayload(
   messages: OrMessage[],
   tools: AnthropicTool[],
   opts: BrainCallOpts = {},
+  model = '',
 ): Record<string, unknown> {
   const sys: string[] = []
   const contents: GContent[] = []
@@ -170,18 +171,22 @@ export function toGeminiPayload(
     contents.push({ role, parts })
   }
 
-  const body: Record<string, unknown> = {
-    contents,
-    generationConfig: {
-      maxOutputTokens: opts.maxTokens ?? 1024,
-      temperature: opts.temperature ?? 0.7,
-      // gemini-2.5's internal thinking: small budget by default so the
-      // first word comes FAST (the latency rule); more only on heavy turns.
-      thinkingConfig: {
-        thinkingBudget: opts.reasoning === 'high' ? 4096 : opts.reasoning === 'medium' ? 1024 : opts.reasoning === 'low' ? 512 : 0,
-      },
-    },
+  const generationConfig: Record<string, unknown> = {
+    maxOutputTokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature ?? 0.7,
   }
+  // gemini-2.5's internal thinking: small budget by default so the first word
+  // comes FAST (the latency rule); more only on heavy turns.
+  // ONLY for the 2.5 family: gemini-3.x REJECTS thinkingConfig.thinkingBudget
+  // with HTTP 400 — measured live on 4 Aug ("[brain] gemini-3.6-flash failed
+  // (gemini 400)" on EVERY chat turn, the app looked completely dead). Without
+  // the field, 3.x answers 200 (also measured). Callers pass the model in.
+  if (/gemini-2\.5/.test(model)) {
+    generationConfig.thinkingConfig = {
+      thinkingBudget: opts.reasoning === 'high' ? 4096 : opts.reasoning === 'medium' ? 1024 : opts.reasoning === 'low' ? 512 : 0,
+    }
+  }
+  const body: Record<string, unknown> = { contents, generationConfig }
   if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
   if (tools.length) {
     body.tools = [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: cleanSchema(t.input_schema) })) }]
@@ -250,7 +255,7 @@ function geminiFetch(
   return fetch(`${G_BASE}/models/${model}:${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.geminiKey },
-    body: JSON.stringify(toGeminiPayload(messages, tools, opts)),
+    body: JSON.stringify(toGeminiPayload(messages, tools, opts, model)),
     signal: AbortSignal.timeout(120_000),
   })
 }
