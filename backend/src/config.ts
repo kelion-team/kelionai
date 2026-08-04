@@ -107,12 +107,11 @@ export const config = {
     // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
     chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
     workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
-    // Treapta 'top' (escaladarea grea) — cel mai nou PRO, 'gemini-3.1-pro-preview'
-    // (măsurat viu pe cheia ta: 200 + apel de unealtă ok). Distinctă de work
-    // (3.6-flash) ca scara de escaladare să aibă două trepte reale; vederea/vocea
-    // normală trec oricum prin chat/work (3.6-flash, multimodal confirmat), iar la
-    // eroare pe 'top' scara cade curat înapoi.
-    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.1-pro-preview').trim(),
+    // Treapta 'top' — TOT 'gemini-3.6-flash'. Ownerul (4 aug): „dacă e bun, ieftin
+    // și face tot, de ce 2 trepte?". Corect: un singur model multimodal, rapid și
+    // ieftin acoperă toate treptele; nu inventăm o treaptă „pro" mai scumpă degeaba.
+    // Rămâne suprascriibil din env dacă vreodată vrei o escaladare pe alt model.
+    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────
