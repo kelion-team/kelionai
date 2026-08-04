@@ -190,16 +190,26 @@ console.log('agenți existenți: HTTP', rl.status, '→', existenti.size)
 let creati = 0, sariti = 0, esuati = 0
 for (const a of ROSTER) {
   if (existenti.has(a.nume)) { sariti++; continue }
+  // FORMA REALĂ (schema din discovery, 3 aug 21:53): resursa Agent NU are câmp
+  // de instrucțiuni — formele vii sunt Dialogflow/ADK/A2A/managed. Folosim A2A:
+  // fiecare agent e o CARTE care arată spre creierul lui Kelion
+  // (/api/a2a/<id>) — legătura neuronală cerută. Rolul întreg stă în carte.
+  const card = {
+    protocolVersion: '0.2.6',
+    name: a.nume,
+    description: `Ești „${a.nume}" în echipa lui Kelion (kelionai.app). ${a.rol} Vorbește română. Regula de aur: o valoare pe care nu ai măsurat-o e „nu pot verifica", nu o cifră. Model preferat: gemini-2.5-${a.model}.`,
+    url: `https://kelionai.app/api/a2a/${a.id}`,
+    version: '1.0.0',
+    capabilities: {},
+    defaultInputModes: ['text/plain'],
+    defaultOutputModes: ['text/plain'],
+    skills: [{ id: a.id, name: a.nume, description: a.rol.slice(0, 180), tags: ['kelion'] }],
+  }
   const corp = {
     displayName: a.nume,
     description: a.rol.split('.')[0] + '.',
-    adkAgentDefinition: {
-      provisionedReasoningEngine: undefined, // gol — agent „no-code" pe instrucțiuni
-    },
-    // Câmpul de instrucțiuni „no-code" (Agentspace): promptul e rolul întreg.
-    // Dacă serverul respinge forma, eroarea EXACTĂ se vede mai jos, per agent.
     starterPrompts: [{ text: 'Prezintă-te în două fraze: cine ești și cu ce mă ajuți.' }],
-    instruction: { prompt: `Ești „${a.nume}" în echipa lui Kelion (kelionai.app). ${a.rol} Vorbește română. Regula de aur: o valoare pe care nu ai măsurat-o e „nu pot verifica", nu o cifră. Model preferat: gemini-2.5-${a.model}.` },
+    a2aAgentDefinition: { jsonAgentCard: JSON.stringify(card) },
   }
   const r = await api(token, loc, `${asistent}/agents`, { method: 'POST', body: JSON.stringify(corp) })
   if (r.ok) { creati++; console.log(`  ✓ ${a.nume}`) }
