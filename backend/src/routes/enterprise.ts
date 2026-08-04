@@ -1,6 +1,6 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ROSTER, carteAgent } from '../services/agentiKelion.js'
-import { creeazaAgentiEnterprise, creeazaAgentiVertex } from '../services/enterpriseCreate.js'
+import { pornesteCrearea, stareCreare } from '../services/enterpriseCreate.js'
 import { getSessionUser } from '../session.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
@@ -152,26 +152,50 @@ function paginaAdmin(): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în consolă cu contul tău licențiat.</p>
+Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în fundal, cu ritm (Google are quota de creare pe minut) — pagina se actualizează singură; poate dura câteva minute.</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
 <button id="b">🚀 Creează cei 33 în Enterprise</button>
 <pre id="out">—</pre>
 <script>
  const b=document.getElementById('b'), out=document.getElementById('out');
+ let ceas=null;
+ function opreste(){ if(ceas){clearInterval(ceas); ceas=null;} b.disabled=false; }
+ function final(j){
+   let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
+   if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
+   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — cei 33 sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — apasă din nou: continui de unde am rămas.</span>\\n')+s;
+ }
+ function arata(st, prima){
+   if(st.error){ if(!prima) out.innerHTML='<span class=rau>Refuz: '+st.error+'</span>'; opreste(); return; }
+   if(st.raport){ final(st.raport); opreste(); return; }
+   if(st.ruleaza){ b.disabled=true; out.textContent='⏳ '+st.pas; if(!ceas) ceas=setInterval(stare,3000); return; }
+   if(prima) return; /* nepornit la deschiderea paginii — nimic de arătat */
+   out.innerHTML='<span class=rau>Crearea nu (mai) rulează — apasă din nou; continui de unde am rămas.</span>'; opreste();
+ }
+ async function stare(prima){
+   try{ const r=await fetch('/api/enterprise/creeaza/stare'); arata(await r.json(), prima===true); }
+   catch(e){ out.textContent='Rețea (reîncerc): '+e; }
+ }
  b.onclick=async()=>{
-   b.disabled=true; out.textContent='Creez agenții în consolă… (poate dura ~20s)';
+   b.disabled=true; out.textContent='Pornesc crearea în fundal…';
    try{
-     const r=await fetch('/api/enterprise/creeaza',{method:'POST',headers:{'content-type':'application/json'}});
+     const r=await fetch('/api/enterprise/creeaza',{method:'POST'});
      const txt=await r.text();
-     let j; try{ j=JSON.parse(txt); }catch(_){ out.innerHTML='<span class=rau>Serverul a raspuns non-JSON (HTTP '+r.status+'). Reincearca peste cateva secunde. Inceput: '+txt.slice(0,120).replace(/</g,'&lt;')+'</span>'; b.disabled=false; return; }
-     if(j.error){out.innerHTML='<span class=rau>Refuz: '+j.error+'</span>'; b.disabled=false; return;}
-     let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
-     if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
-     out.innerHTML=(j.ok?'<span class=ok>✅ GATA — cei 33 sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat — vezi mai jos.</span>\\n')+s;
-   }catch(e){out.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
-   b.disabled=false;
+     let st; try{ st=JSON.parse(txt); }catch(_){ out.innerHTML='<span class=rau>Serverul a răspuns non-JSON (HTTP '+r.status+') — probabil repornea. Reîncearcă în câteva secunde.</span>'; b.disabled=false; return; }
+     arata(st, false);
+   }catch(e){ out.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>'; b.disabled=false; }
  };
+ /* Pagină (re)deschisă în timp ce fundalul lucrează → arată-l din prima. */
+ void stare(true);
 </script></body></html>`
+}
+
+/** Gardul comun al rutelor de admin: întoarce userul sau null (după 403). */
+function adminSau403(req: FastifyRequest, reply: FastifyReply): { email: string } | null {
+  const user = getSessionUser(req)
+  if (user && user.role === 'admin') return user
+  reply.code(403)
+  return null
 }
 
 export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
@@ -185,40 +209,27 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
   // Pagina de admin (butonul cerut de owner: „pui în admin buton, eu loghez și
   // continui"). DOAR admin — folosește tokenul Google al ownerului.
   app.get('/api/enterprise/creeaza', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') {
-      reply.code(403)
-      return { error: 'forbidden' }
-    }
+    if (!adminSau403(req, reply)) return { error: 'forbidden' }
     reply.header('Content-Type', 'text/html; charset=utf-8')
     reply.header('Cache-Control', 'no-store')
     return paginaAdmin()
   })
 
-  // Execuția: creează cei 33 în consolă cu tokenul Google al ownerului. DOAR admin.
+  // Execuția: PORNEȘTE crearea în FUNDAL cu tokenul Google al ownerului și
+  // întoarce imediat starea; pagina citește /stare până la raportul final.
+  // De ce fundal (măsurat 4 aug): quota Google (429) cere pauze de zeci de
+  // secunde, iar gateway-ul taie cererile la ~60s (504) — nu încape într-o
+  // singură cerere HTTP. DOAR admin.
   app.post('/api/enterprise/creeaza', async (req, reply) => {
-    const user = getSessionUser(req)
-    if (!user || user.role !== 'admin') {
-      reply.code(403)
-      return { error: 'forbidden' }
-    }
-    // ÎNTÂI Vertex AI (Agent Platform, FĂRĂ abonament). Dacă acolo creează cei
-    // 33, gata. Doar dacă Vertex nici măcar nu pornește (ne-conectat) SAU nu
-    // creează niciunul, mai încercăm calea Enterprise (ca să vadă și diagnosticul
-    // de licență/abonament). Așa ownerul primește ce merge, nu ce e blocat.
-    const vertex = await creeazaAgentiVertex(user.email)
-    if (vertex.creati > 0 || (vertex.lista.length >= 1 && !vertex.motiv)) {
-      return vertex
-    }
-    const ent = await creeazaAgentiEnterprise(user.email)
-    if (ent.creati > 0) return ent
-    // Niciuna n-a creat — întoarce raportul cel mai informativ (Vertex are eroarea
-    // verbatim a căii noi; dacă Vertex nici n-a pornit, dăm Enterprise).
-    const raport = vertex.motiv && !vertex.primaEroare ? ent : vertex
-    if (raport.motiv && raport.creati === 0 && raport.lista.length === 0) {
-      reply.code(409)
-      return { error: raport.motiv, licenta: raport.licenta, primaEroare: raport.primaEroare }
-    }
-    return raport
+    const user = adminSau403(req, reply)
+    if (!user) return { error: 'forbidden' }
+    reply.code(202)
+    return pornesteCrearea(user.email)
+  })
+
+  // Starea creării din fundal (pagina o întreabă la câteva secunde). DOAR admin.
+  app.get('/api/enterprise/creeaza/stare', async (req, reply) => {
+    if (!adminSau403(req, reply)) return { error: 'forbidden' }
+    return stareCreare()
   })
 }
