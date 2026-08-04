@@ -22,7 +22,7 @@ intrat — nu poate muta, plăti sau scoate niciun ban.
 
 ## 1. CE E DEJA FĂCUT (nu ai ce face aici)
 
-Scris, testat și publicat pe 30 iul:
+Scris, testat și publicat pe 3 aug:
 
 | Bucata | Unde stă | Ce face |
 |---|---|---|
@@ -30,7 +30,7 @@ Scris, testat și publicat pe 30 iul:
 | Istoricul | tabela `payment_codes` | cod, user, sumă, stare, referință bancară, data plății |
 | Potrivirea | `db.ts` → `crediteazaDupaCod` | găsește codul în referință, chiar cu text în jur sau litere mici |
 | Creditarea | `topUpUser` | idempotentă — aceeași plată **nu poate** credita de două ori |
-| Cititorul | `services/openBanking.ts` | citește tranzacțiile din cont, din 5 în 5 minute |
+| Cititorul | `services/platiEmail.ts` | citește emailurile de la Revolut, din 5 în 5 minute |
 | Starea | Admin → Bani | scrie dacă citirea merge; **nu tace** când nu poate citi |
 
 **Nu trebuie să atingi niciun fișier.** Tot ce urmează sunt doar chei și clicuri.
@@ -51,51 +51,47 @@ Revolut, cu numele tău.
 
 ---
 
-## 3. CHEILE DE CITIRE A CONTULUI — 5 minute
+## 3. UN CONT GMAIL DEDICAT PENTRU PLĂȚI — 10 minute
 
-**Cine:** tu (cere identitatea și acordul tău — nimeni altcineva nu poate).
+**Cine:** tu.
 
-Portalul e **bankaccountdata.gocardless.com**. Atenție la capcană: `manage.` și
-`developer.` sunt ALTE produse (plăți prin Direct Debit, respectiv documentație).
-Ce ne trebuie e portalul de **Bank Account Data**, gratuit, care doar citește.
+Aplicația citește plățile din notificările pe care le trimite Revolut pe email. Ca să nu se amestece cu emailurile tale și pentru securitate, cel mai curat e să ai un cont de email **dedicat doar pentru asta**.
 
-1. Intri pe **https://bankaccountdata.gocardless.com/**
-2. La login: **pornește întâi comutatorul** „I agree to … Terms & Conditions" —
-   până nu-l pornești, butoanele (inclusiv „Log in with Google") rămân moarte.
-3. După login: **Developers → User Secrets → Create new**.
-4. Copiază `Secret ID` și `Secret Key`.
+1. Creează un cont nou Google (ex: `kelion.plati@gmail.com`).
+2. În contul tău **Revolut Pro**, la setări, schimbă adresa de email pentru notificări cu cea nouă, pe care tocmai ai creat-o.
 
-**Cum știi că ești unde trebuie:** în bara de adresă scrie
-`bankaccountdata.gocardless.com`, nu `manage.` și nu `developer.`.
+De acum, toate notificările de plată de la Revolut vor veni în acest inbox nou, izolat, unde aplicația le poate citi în siguranță.
 
 ---
 
-## 4. LEGAREA CONTULUI REVOLUT — 3 minute
+## 4. CHEILE GOOGLE PENTRU CITIREA EMAILURILOR — 10 minute
 
-**Cine:** tu (consimțământul bancar e al tău, prin lege).
+**Cine:** tu (e contul tău Google).
 
-În același portal:
+Aplicația are nevoie de permisiunea ta ca să citească inboxul de plăți. Asta se face prin API-ul Gmail, cu chei pe care le generezi tu.
 
-1. **Bank connections** (sau „Requisitions") → **Add / Connect a bank**.
-2. Alegi **Revolut** din listă (id-ul lui e `REVOLUT_REVOGB21`).
-3. Te duce pe pagina Revolut, unde **aprobi accesul de CITIRE**. Confirmi în
-   aplicația de pe telefon.
-4. La final îți dă un **Account ID** — un șir lung. Copiază-l.
+1. Mergi la [Google Cloud Console](https://console.cloud.google.com/).
+2. Creează un proiect nou (ex: "KelionAI Payments").
+3. Din meniu, mergi la **APIs & Services → Library**. Caută și activează **Gmail API**.
+4. Mergi la **APIs & Services → OAuth consent screen**. Alege **External** și completează datele obligatorii (nume aplicație, email suport). La "Authorized domains", adaugă domeniul unde rulează aplicația (ex: `kelion.ro`). Nu trebuie să trimiți aplicația spre verificare, pentru că va fi folosită doar de tine, în regim de test.
+5. Mergi la **APIs & Services → Credentials**.
+6. Apasă **Create Credentials → OAuth client ID**.
+7. Alege **Web application**.
+8. La **Authorized redirect URIs**, adaugă `https://developers.google.com/oauthplayground`. Asta ne va ajuta să generăm o cheie de lungă durată.
+9. Apasă **Create**. Copiază **Client ID** și **Client Secret**.
+10. Acum, mergi la [OAuth 2.0 Playground](https://developers.google.com/oauthplayground).
+11. În dreapta sus, la setări (iconița cu rotiță), bifează **Use your own OAuth credentials** și introdu Client ID-ul și Client Secret-ul copiate mai devreme.
+12. În partea stângă, la pasul 1, caută și selectează **Gmail API v1**, și apoi scope-ul `https://www.googleapis.com/auth/gmail.readonly`. Apasă **Authorize APIs**.
+13. Fă login cu contul de Gmail nou, cel pentru plăți, și acordă permisiunile.
+14. La pasul 3, apasă **Exchange authorization code for tokens**. Copiază **Refresh token**.
 
-**Cum știi că a mers:** contul apare în listă cu starea `LINKED`, iar Account
-ID-ul e vizibil.
-
-> **De reținut, ca să nu te ia prin surprindere:** consimțământul ăsta **expiră**
-> (regula europeană PSD2 — între 30 și 90 de zile) și trebuie reînnoit de tine,
-> cu aceiași pași. Aplicația **te anunță** când nu mai poate citi — vezi §6.
+Acum ai cele trei chei necesare.
 
 ---
 
 ## 5. CHEILE ÎN GITHUB — 2 minute
 
-**Cine:** de pe 30 iul, **Kelion** — vezi §9. Îi spui cheia, o pune el, criptat,
-și ți-o confirmă cu numele și lungimea, niciodată cu valoarea. Ce urmează aici e
-calea manuală, dacă vrei s-o faci tu.
+**Cine:** de pe 30 iul, **Kelion** — vezi §9. Îi spui cheia, o pune el, criptat, și ți-o confirmă cu numele și lungimea, niciodată cu valoarea. Ce urmează aici e calea manuală, dacă vrei s-o faci tu.
 
 Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
 → **New repository secret**, de patru ori, cu numele **exact** de mai jos:
@@ -103,17 +99,11 @@ Intri pe **https://github.com/kelion-team/kelionai/settings/secrets/actions**
 | Numele secretului | Ce pui în el |
 |---|---|
 | `REVOLUT_PAY_LINK` | linkul de la §2 |
-| `GOCARDLESS_SECRET_ID` | de la §3 |
-| `GOCARDLESS_SECRET_KEY` | de la §3 |
-| `GOCARDLESS_ACCOUNT_ID` | de la §4 |
+| `GOOGLE_CLIENT_ID` | de la §4 |
+| `GOOGLE_CLIENT_SECRET` | de la §4 |
+| `GOOGLE_REFRESH_TOKEN_PLATI` | refresh token-ul de la §4 |
 
 **Numele trebuie scrise identic** — codul caută cheia sub numele ăla.
-
-**Capcana listei fixe a dispărut de tot (30 iul).** `vps-set-env` avea o listă de
-nume scrisă de mână; o cheie care nu era în ea se scria în GitHub și **nu ajungea
-niciodată pe server**, fără niciun semn — exact ce a pățit `REVOLUT_PAY_LINK`.
-Acum workflow-ul ia **toate** secretele de la GitHub, deci o cheie nouă nu mai
-poate cădea în gol.
 
 ---
 
@@ -135,9 +125,9 @@ listă, n-ai pus-o în GitHub sau ai greșit numele.
 ## 7. PROBA CĂ FUNCȚIONEAZĂ — 5 minute
 
 1. Deschizi **Admin → Bani**. La „Citirea plăților Revolut" trebuie să scrie
-   ✅ cu câte intrări a citit. Dacă e ⚠ galben, îți spune exact ce lipsește.
+   ✅ cu câte emailuri de plată a citit. Dacă e ⚠ galben, îți spune exact ce lipsește.
 2. Intri cu un cont obișnuit (nu al tău de admin), apeși **adaugă credit**,
-   alegi o sumă mică (£10).
+   alegi o sumă mică (€10).
 3. Primești un cod, gen `KLN-AB23-CD45`.
 4. Plătești pe linkul Revolut, **cu codul scris la referință/notă**.
 5. În maximum **5 minute**, creditele apar singure în contul acelui user.
