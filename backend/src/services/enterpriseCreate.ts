@@ -146,9 +146,15 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     return { ...gol, motiv: `assistant_get HTTP ${a.status}: ${mesajEroare(a.j)}` }
   }
 
-  // 2) Cine există deja (idempotență pe displayName).
+  // 2) Cine există deja (idempotență pe displayName). REGULA #3 (4 aug,
+  //    întrebarea ownerului „o ia iar de la 0?"): dacă citirea listei PICĂ,
+  //    NU creăm orbește — am face dubluri pentru toți cei deja intrați.
+  //    Ne oprim cinstit și spunem de ce; o apăsare nouă reia cu lista citită.
   anunta('citesc agenții existenți din consolă')
   const ex = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
+  if (ex.status !== 200) {
+    return { ...gol, motiv: `nu pot citi lista agenților existenți (HTTP ${ex.status}: ${mesajEroare(ex.j)}) — nu creez orbește, ca să nu fac dubluri; apasă din nou`, licenta }
+  }
   const cunoscuti = new Set(((ex.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => x.displayName))
 
   // 3) Creează-i CU RITM, unul după altul. MĂSURAT (4 aug, seara): în paralel,
