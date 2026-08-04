@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { listaAgentiCustom } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
 import type { OrMessage } from './brainContract.js'
 
@@ -149,6 +150,21 @@ export const ROSTER: AgentKelion[] = [
 
 export function gasesteAgent(id: string): AgentKelion | undefined {
   return ROSTER.find((a) => a.id === id)
+}
+
+// ── ROSTERUL VIU = codul + agenții puși de owner din admin (4 aug: „când mai
+// vreau un model de agent să pot pune și să fie creat automat"). Cei custom
+// stau în DB (agenti_custom); aici se lipesc la listă, cu codul câștigător la
+// id egal (rosterul din cod e sursa de adevăr pentru meseriile casei).
+
+export async function rosterViu(): Promise<AgentKelion[]> {
+  const custom = await listaAgentiCustom()
+  const idsCod = new Set(ROSTER.map((a) => a.id))
+  return [...ROSTER, ...custom.filter((c) => !idsCod.has(c.id))]
+}
+
+export async function gasesteAgentViu(id: string): Promise<AgentKelion | undefined> {
+  return (await rosterViu()).find((a) => a.id === id)
 }
 
 const BAZA_PUBLICA = 'https://kelionai.app'

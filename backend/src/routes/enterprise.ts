@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { ROSTER, carteAgent } from '../services/agentiKelion.js'
+import { ROSTER, rosterViu, carteAgent } from '../services/agentiKelion.js'
 import { pornesteCrearea, stareCreare } from '../services/enterpriseCreate.js'
+import { adaugaAgentCustom } from '../db.js'
 import { getSessionUser } from '../session.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
@@ -137,7 +138,7 @@ for n in L:
 // fluxul OAuth existent (acum cu scope cloud-platform, auth.ts) ca serverul să
 // primească permisiunea pe contul ownerului; „Creează cei 33" cheamă serverul,
 // care-i creează în consolă cu tokenul lui. Fără Cloud Shell, fără secrete.
-function paginaAdmin(): string {
+function paginaAdmin(total: number): string {
   return `<!doctype html><html lang="ro"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agenții Kelion → Google Enterprise</title>
@@ -152,10 +153,18 @@ function paginaAdmin(): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei ${ROSTER.length}</b> O SINGURĂ DATĂ. Serverul lucrează în fundal cu ritm (quota Google) și <b>continuă singur</b> — reîncearcă la 15 minute și reia și după un restart de server; cine e confirmat iese din listă. Pagina arată viu „instalați X | rămași Y"; poți s-o și închizi.</p>
+Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ. Serverul lucrează în fundal cu ritm (quota Google) și <b>continuă singur</b> — reîncearcă la 15 minute și reia și după un restart de server; cine e confirmat iese din listă. Pagina arată viu „instalați X | rămași Y"; poți s-o și închizi.</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
-<button id="b">🚀 Creează cei ${ROSTER.length} în Enterprise</button>
+<button id="b">🚀 Creează cei ${total} în Enterprise</button>
 <pre id="out">—</pre>
+<h1 style="font-size:1.05rem;margin-top:2rem">➕ Pune un agent nou (creat automat)</h1>
+<p>Scrii numele și meseria — serverul îl salvează, îl servește pe loc la /api/a2a și îl bagă automat și în consola Google (la ocolul următor de creare).</p>
+<input id="an" placeholder="Numele agentului (ex: Agent Gradinar)" style="width:100%;padding:.6rem;border-radius:.5rem;border:1px solid #2a3550;background:#111830;color:#e8ecf6;margin:.2rem 0">
+<textarea id="ar" placeholder="Meseria lui, pe scurt (ex: Gradina: ce plantezi, cand uzi, boli ale plantelor...)" rows="3" style="width:100%;padding:.6rem;border-radius:.5rem;border:1px solid #2a3550;background:#111830;color:#e8ecf6;margin:.2rem 0"></textarea>
+<label style="display:block;margin:.2rem 0"><input type="checkbox" id="ah"> gândire profundă (mai scump, pentru meserii grele)</label>
+<label style="display:block;margin:.2rem 0"><input type="checkbox" id="aa"> doar eu îl pot folosi (doar admin)</label>
+<button id="ab">➕ Pune agentul</button>
+<pre id="aout">—</pre>
 <script>
  const b=document.getElementById('b'), out=document.getElementById('out');
  let ceas=null;
@@ -163,7 +172,7 @@ Pas 2: apasă <b>Creează cei ${ROSTER.length}</b> O SINGURĂ DATĂ. Serverul lu
  function final(j){
    let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
    if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
-   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${ROSTER.length} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n')+s;
+   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${total} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n')+s;
  }
  function arata(st, prima){
    if(st.error){ if(!prima) out.innerHTML='<span class=rau>Refuz: '+st.error+'</span>'; opreste(); return; }
@@ -187,6 +196,21 @@ Pas 2: apasă <b>Creează cei ${ROSTER.length}</b> O SINGURĂ DATĂ. Serverul lu
  };
  /* Pagină (re)deschisă în timp ce fundalul lucrează → arată-l din prima. */
  void stare(true);
+ const ab=document.getElementById('ab'), aout=document.getElementById('aout');
+ ab.onclick=async()=>{
+   ab.disabled=true; aout.textContent='Îl pun…';
+   try{
+     const r=await fetch('/api/enterprise/agent-nou',{method:'POST',headers:{'content-type':'application/json'},
+       body:JSON.stringify({nume:document.getElementById('an').value,rol:document.getElementById('ar').value,
+         efort:document.getElementById('ah').checked?'high':undefined,doarAdmin:document.getElementById('aa').checked||undefined})});
+     const j=await r.json();
+     if(j.error){aout.innerHTML='<span class=rau>Refuz: '+j.error+'</span>';}
+     else{aout.innerHTML='<span class=ok>✅ Pus: '+j.id+' — e viu la /api/a2a/'+j.id+' și intră automat în consolă (crearea a pornit).</span>';
+       document.getElementById('an').value='';document.getElementById('ar').value='';
+       if(!ceas) ceas=setInterval(stare,3000);}
+   }catch(e){aout.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
+   ab.disabled=false;
+ };
 </script></body></html>`
 }
 
@@ -212,7 +236,7 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
     if (!adminSau403(req, reply)) return { error: 'forbidden' }
     reply.header('Content-Type', 'text/html; charset=utf-8')
     reply.header('Cache-Control', 'no-store')
-    return paginaAdmin()
+    return paginaAdmin((await rosterViu()).length)
   })
 
   // Execuția: PORNEȘTE crearea în FUNDAL cu tokenul Google al ownerului și
@@ -231,5 +255,40 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/enterprise/creeaza/stare', async (req, reply) => {
     if (!adminSau403(req, reply)) return { error: 'forbidden' }
     return stareCreare()
+  })
+
+  // AGENT NOU pus de owner (4 aug: „când mai vreau un model de agent să pot
+  // pune și să fie creat automat"): salvează în DB → intră PE LOC în rosterul
+  // viu (/api/a2a) → pornește crearea în fundal ca să apară și în consolă,
+  // cu ritmul și reluarea știute. DOAR admin.
+  app.post('/api/enterprise/agent-nou', async (req, reply) => {
+    const user = adminSau403(req, reply)
+    if (!user) return { error: 'forbidden' }
+    const b = (req.body ?? {}) as { nume?: string; rol?: string; efort?: string; doarAdmin?: boolean }
+    const nume = (b.nume ?? '').trim().slice(0, 80)
+    const rol = (b.rol ?? '').trim()
+    if (nume.length < 3 || rol.length < 10) {
+      reply.code(400)
+      return { error: 'numele (min 3 caractere) și meseria (min 10 caractere) sunt obligatorii' }
+    }
+    const id = nume
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/^agent\s+/i, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40)
+    if (!id) {
+      reply.code(400)
+      return { error: 'din numele ăsta nu iese un id valid (folosește litere/cifre)' }
+    }
+    const err = await adaugaAgentCustom({ id, nume, rol, efort: b.efort === 'high' ? 'high' : undefined, doarAdmin: b.doarAdmin === true })
+    if (err) {
+      reply.code(409)
+      return { error: err }
+    }
+    pornesteCrearea(user.email)
+    return { ok: true, id }
   })
 }

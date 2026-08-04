@@ -1,6 +1,6 @@
 import { getGoogleRefreshToken, memoriePune, memorieIa } from '../db.js'
 import { refreshGoogleAccessToken } from './google.js'
-import { ROSTER, carteAgent } from './agentiKelion.js'
+import { rosterViu, carteAgent, type AgentKelion } from './agentiKelion.js'
 
 // ── CREAREA AGENȚILOR ÎN CONSOLA GEMINI ENTERPRISE, CU TOKENUL OWNERULUI ─────
 //
@@ -94,7 +94,7 @@ const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, m
 
 /** Creează UN agent, cu răbdare la quota de ritm: la 429 așteaptă și reîncearcă;
  *  orice alt răspuns se întoarce imediat (verbatim la eroare). */
-async function creeazaUnAgent(T: string, ag: (typeof ROSTER)[number], anunta: (pas: string) => void): Promise<RezCreare> {
+async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) => void): Promise<RezCreare> {
   const corp = {
     displayName: ag.nume,
     description: ag.rol,
@@ -163,8 +163,10 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   //    măsurat tot azi). De-asta funcția rulează în FUNDAL (pornesteCrearea) și
   //    își permite pauze. Idempotent: sar peste cei existenți; un termen total
   //    oprește politicos dacă quota nu se mai deschide (restul: „apasă din nou").
-  const deCreat = ROSTER.filter((ag) => !cunoscuti.has(ag.nume))
-  const existau = ROSTER.length - deCreat.length
+  // Rosterul VIU: codul + agenții puși de owner din admin (ei intră automat).
+  const roster = await rosterViu()
+  const deCreat = roster.filter((ag) => !cunoscuti.has(ag.nume))
+  const existau = roster.length - deCreat.length
   const rezultate: RezCreare[] = []
   const start = Date.now()
   for (const [i, ag] of deCreat.entries()) {
@@ -175,7 +177,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
     // Raportul cerut de owner (4 aug): „instalați X, rămași Y" — viu, la
     // fiecare pas, nu doar la final.
     const instalati = existau + rezultate.filter((x) => x.ok).length
-    anunta(`instalați: ${instalati}/${ROSTER.length} | rămași: ${ROSTER.length - instalati} | acum îl pun pe: ${ag.nume}`)
+    anunta(`instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, anunta)
     rezultate.push(rez)
     if (rez.ok) await zabava(PAUZA_INTRE_MS)
@@ -187,7 +189,7 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
   const fin = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
   const lista = ((fin.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => String(x.displayName ?? ''))
 
-  return { ok: esuati === 0 && lista.length >= ROSTER.length, creati, existau, esuati, lista, primaEroare, licenta }
+  return { ok: esuati === 0 && lista.length >= roster.length, creati, existau, esuati, lista, primaEroare, licenta }
 }
 
 /** Asigură ownerului un LOC de licență Gemini Enterprise: listează abonamentele
