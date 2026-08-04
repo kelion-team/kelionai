@@ -24,6 +24,10 @@ export interface AgentKelion {
   id: string
   nume: string
   rol: string
+  /** Bugetul de gândire al specialistului: 'high' = superputerea de raționament
+   *  (Adrian, 4 aug: „super putere pentru gindire rationament... wow").
+   *  Nespecificat = 'low' (rapid și ieftin, destul pentru meserii). */
+  efort?: 'low' | 'high'
 }
 
 export const ROSTER: AgentKelion[] = [
@@ -68,6 +72,25 @@ export const ROSTER: AgentKelion[] = [
   { id: 'vps', nume: 'Agent VPS Infrastructura', rol: 'VPS: docker, env-file, nginx, certificate, disc. Nimic pe ghicite - doar din masuratori.' },
   { id: 'clienti', nume: 'Agent Clienti', rol: 'Clienti: onboarding, abonamente, credite, reclamatii. Ton uman, cifre doar masurate.' },
   { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare: SEO, lansari, texte de marketing, clipuri de prezentare.' },
+  // A doua completare din 4 aug (Adrian: „mai cauta pentru functii google
+  // agenti") — serviciile Google fara specialist pana acum:
+  { id: 'youtube', nume: 'Agent YouTube', rol: 'YouTube: cautare, transcripturi, rezumate, publicare clipuri cu confirmare.' },
+  { id: 'docs-sheets', nume: 'Agent Docs Sheets', rol: 'Google Docs/Sheets/Slides: creeaza, citeste, rezuma documente, tabele si prezentari.' },
+  { id: 'foto', nume: 'Agent Foto Google', rol: 'Google Photos: cauta in poze si albume, descrie ce vede; nimic inventat.' },
+  { id: 'contacte', nume: 'Agent Contacte', rol: 'Google Contacts: gaseste persoane, emailuri, telefoane. Datele raman private.' },
+  { id: 'sarcini', nume: 'Agent Sarcini Notite', rol: 'Google Tasks si Keep: liste, notite, remindere; bifeaza doar cu confirmare.' },
+  { id: 'meet', nume: 'Agent Meet', rol: 'Google Meet: programeaza intalniri cu link, invita participanti, cu confirmare.' },
+  { id: 'google-cloud', nume: 'Agent Google Cloud', rol: 'Google Cloud: proiecte, facturare, API-uri aprinse, IAM. Pasi masurati, erori verbatim.' },
+  // A treia completare din 4 aug (Adrian: „agenti de prelucrari documente,
+  // fisiere mari, grafica, office, hai vino"):
+  { id: 'conversii', nume: 'Agent Conversii Fisiere', rol: 'Prelucrari de documente: conversii PDF/Word/Markdown, OCR pe scanuri, extrageri de tabele si text.' },
+  { id: 'fisiere-mari', nume: 'Agent Fisiere Mari', rol: 'Fisiere mari: arhive, impartire in bucati, procesare pe loturi, deduplicare, curatare de spatiu.' },
+  { id: 'grafica', nume: 'Agent Grafica', rol: 'Prelucrare grafica: retus, decupare, redimensionare, conversii PNG/JPG/SVG/WebP, palete de culori.' },
+  { id: 'office', nume: 'Agent Office', rol: 'Microsoft Office: Word, Excel (formule, tabele), PowerPoint. Citeste, creeaza, corecteaza.' },
+  // Superputerea (Adrian, 4 aug: „hai vino cu super putere pentru gindire
+  // rationament, orice face kelion wow"): singurul agent cu buget de gandire
+  // 'high' si plafon dublu — cheamaAgent ii da REAL mai mult creier.
+  { id: 'gandire', nume: 'Agent Gandire Profunda', rol: 'Superputerea de rationament: probleme grele desfacute pas cu pas, ipoteze puse la incercare, concluzie verificata. Gandeste mult inainte sa raspunda.', efort: 'high' },
 ]
 
 export function gasesteAgent(id: string): AgentKelion | undefined {
@@ -126,6 +149,12 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string): Promise<Rasp
     { role: 'system', content: instructiune(a) },
     { role: 'user', content: sarcina },
   ]
-  const r = await geminiDirectChat(model, messages, [], { maxTokens: 2048, temperature: 0.6, reasoning: 'low' })
+  // Superputerea de raționament (4 aug): agentul cu efort 'high' primește buget
+  // de gândire mare + plafon dublu (la gemini-2.5 maxOutputTokens INCLUDE
+  // tokenii de gândire — vezi măsurătoarea din antet — deci plafonul crește
+  // odată cu gândirea, altfel textul util s-ar sugruma).
+  const efort = a.efort ?? 'low'
+  const plafon = efort === 'high' ? 8192 : 2048
+  const r = await geminiDirectChat(model, messages, [], { maxTokens: plafon, temperature: 0.6, reasoning: efort })
   return { agent: a.id, text: r.text, costUsd: r.costUsd, model: r.model }
 }
