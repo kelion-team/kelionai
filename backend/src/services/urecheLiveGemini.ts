@@ -25,7 +25,16 @@ import { config } from '../config.js'
 // bidiGenerateContent). Modelele Live de pe cheie: 2.5-native-audio și 3.1.
 // Owner (4 aug): „fără 3.1" → urechea rămâne pe 2.5-native-audio (dec. 2025),
 // singurul non-3.1. Cere responseModalities:['AUDIO']; citim doar transcrierea.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
+// URECHEA CEA MAI BUNĂ LA AUZ (Adrian, 4 aug: „care Gemini e cel mai performant
+// la auz? pune-l doar pentru auz"). MĂSURAT pe cheia lui — 6 modele cu bidi;
+// alesul: `native-audio-latest` = familia native-audio (cea mai bună la
+// transcriere, confirmat în docs Google) MEREU la ultima versiune. Pe celelalte
+// le-am exclus cu dovadă: 3.1-flash-live = MUT (zero transcriere, măsurat);
+// 3.5-live-translate = TRADUCE (schimbă limba — exact ce nu vrem); robotics =
+// pentru roboți. Fixul de rezervă rămâne prin env (dacă „latest" regresează
+// vreodată, GEMINI_LIVE_MODEL=...-preview-12-2025). DOAR urechea — creierul
+// (BRAIN_*/GEMINI_MODEL) nu se atinge.
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest'
 
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
