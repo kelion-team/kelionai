@@ -186,7 +186,18 @@ interface StarePas {
   incercari: number
   /** Finished successfully — we do not touch it again. */
   gata?: boolean
+  /** PARCAT (Adrian, 4 aug: „tot ce pică și nu mai e de actualitate să nu mai
+   *  rămână"): după LIMITA_INCERCARI eșecuri, oprim reluarea la nesfârșit —
+   *  nu mai umplem auditul cu același ordin căzut de 18 ori. Se poate relua
+   *  DOAR dacă owner-ul reformulează (reset explicit). */
+  blocat?: boolean
 }
+
+// Câte reîncercări dăm unei sarcini înainte s-o PARCĂM (nu abandonăm de tot —
+// o parcăm, ca să nu curgă la infinit în audit). Owner-ul a inversat regula
+// veche „never abandon" pe 4 aug: ce pică de zeci de ori și nu mai e de
+// actualitate nu trebuie să rămână.
+const LIMITA_INCERCARI = 6
 
 // ── THE MISSION: THE REVOLUT PART, END TO END ────────────────────────────────
 //
@@ -604,7 +615,7 @@ async function citesteStare(cod: string): Promise<StarePas> {
   if (!raw) return { job: 0, incercari: 0 }
   try {
     const v = JSON.parse(raw) as Partial<StarePas>
-    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata }
+    return { job: Number(v.job ?? 0) || 0, incercari: Number(v.incercari ?? 0) || 0, gata: v.gata, blocat: v.blocat }
   } catch {
     return { job: 0, incercari: 0 }
   }
@@ -1097,7 +1108,9 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
   // forever; and so a heavy step doesn't starve the rest, tasks are taken in
   // "who was tried the fewest times" order. So it both insists and advances.
   const cuStare = await Promise.all(brute.map(async (x) => ({ x, st: await citesteStare(x.cod) })))
-  const sarcini = cuStare.filter((e) => !e.st.gata).sort((a, b) => a.st.incercari - b.st.incercari)
+  // Sar peste cele GATA și peste cele PARCATE (4 aug) — parcatele nu mai intră
+  // în rotație, deci nu mai nasc ordine căzute la infinit.
+  const sarcini = cuStare.filter((e) => !e.st.gata && !e.st.blocat).sort((a, b) => a.st.incercari - b.st.incercari)
 
   for (const { x: s, st } of sarcini) {
 
@@ -1146,6 +1159,18 @@ export async function poateSaLucreze(): Promise<{ pornit: boolean; motiv: string
       // FAILED → "must repair itself": we hand it BACK, with what it wrote
       // itself in the log when it fell. No maximum number of attempts — we
       // don't give up.
+    }
+
+    // PLAFONUL (4 aug): dacă sarcina asta a picat deja de LIMITA_INCERCARI ori,
+    // n-o mai relansăm — o PARCĂM. Altfel același ordin cade la infinit (owner:
+    // #78-#89, încercarea 15-18) și umple auditul. Se relansează doar dacă
+    // owner-ul o reformulează (cod nou / reset).
+    if (st.incercari >= LIMITA_INCERCARI) {
+      await scrieStare(s.cod, { ...st, job: 0, blocat: true })
+      console.log(
+        `[AUTONOM] ${s.cod} PARCAT după ${st.incercari} încercări eșuate — nu mai reia (owner o reformulează dacă mai e de actualitate)`,
+      )
+      continue
     }
 
     const picat = st.job ? dupaId.get(st.job) : undefined

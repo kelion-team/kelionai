@@ -99,8 +99,12 @@ export async function systemHealth(): Promise<string> {
   // 3. Failed build orders (the constructor).
   try {
     // null = coada nu s-a putut citi (semnalat separat de db_moarta, mai jos).
+    // Fereastră SCURTĂ (Adrian, 4 aug: „ce pică și nu mai e de actualitate să
+    // nu mai rămână"): doar eșecurile din ultimele 3h — cele vechi, deja
+    // parcate de autonomie, se sting singure din audit, nu se adună toată
+    // noaptea.
     const jobs = (await listBuildJobs(10)) ?? []
-    const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 48 * 3600_000)
+    const failed = jobs.filter((j) => j.status === 'failed' && Date.parse(j.updatedAt) > Date.now() - 3 * 3600_000)
     if (failed.length)
       problems.push({
         id: 'constructor_esuat',

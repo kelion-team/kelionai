@@ -1456,7 +1456,6 @@ export default function Stage({ user }: { user: User }) {
         <AdminPanel
           initialTab={adminTab}
           onClose={() => setAdminOpen(false)}
-          onOpenSettings={() => setSettingsOpen(true)}
         />
       )}
 

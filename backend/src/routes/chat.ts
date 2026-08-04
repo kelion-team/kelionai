@@ -94,7 +94,7 @@ import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
 import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
-import { formatDeviceTime } from '../services/timeContext.js'
+import { formatNowContext } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL } from '../services/brainToolDefs.js'
 import { gasesteAgentViu, cheamaAgent, rosterViu } from '../services/agentiKelion.js'
@@ -1549,6 +1549,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     if (req.body?.spoken === true) {
       systemPrompt +=
         `\n\nSPOKEN REPLY: this answer will be SPOKEN ALOUD, word for word, by the voice. ` +
+        // LIMBA SE MENȚINE ȘI CÂND AUDE (Adrian, 4 aug: „nu menține limba când o
+        // aude"): pe drumul vocal, reîntărim EXACT limba, ca stilul „pentru
+        // ureche" să nu tragă răspunsul spre engleză.
+        (langName ? `You speak EXCLUSIVELY in ${langName} — the same language throughout, never drifting to English or any other language just because this is a spoken turn. ` : '') +
         `Write it for the ear: short natural sentences (1–3 per thought), no markdown, no lists, ` +
         `no tables, no emoji, no headings. Numbers and dates in spoken form. If you show something ` +
         `on the monitor, say so in one short sentence — don't read URLs or code aloud. ` +
@@ -1609,11 +1613,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // always knows today's date and the current time without being asked.
     // The time anchor — shared formatting (services/timeContext.ts), no
     // duplication.
-    const nowCtx = formatDeviceTime(req.body?.now, req.body?.tz)
-    if (nowCtx) {
-      systemPrompt +=
-        `\n\nCURRENT DATE & TIME: right now it is ${nowCtx.human} (timezone ${nowCtx.tzName}). You ALWAYS know the current date and time — when the user directly asks what time or date it is, or if you know it, ANSWER with this exact value, confidently, never deny knowing it. Otherwise use it silently only when relevant (scheduling, "today", "tomorrow"). When you state a clock time, ALWAYS write it numerically (e.g. "15:04"), never spelled out in words. Just don't volunteer or narrate it unprompted (e.g. in greetings) when the user hasn't asked.`
-    }
+    // Ancora de timp e MEREU prezentă acum (4 aug): dacă browserul n-a trimis
+    // ora, cade pe ceasul serverului — Kelion nu mai rămâne fără „acum".
+    const nowCtx = formatNowContext(req.body?.now, req.body?.tz)
+    systemPrompt +=
+      `\n\nCURRENT DATE & TIME: right now it is ${nowCtx.human} (timezone ${nowCtx.tzName}). You ALWAYS know the current date and time — when the user directly asks what time or date it is, or if you know it, ANSWER with this exact value, confidently, never deny knowing it. Otherwise use it silently only when relevant (scheduling, "today", "tomorrow"). When you state a clock time, ALWAYS write it numerically (e.g. "15:04"), never spelled out in words. Just don't volunteer or narrate it unprompted (e.g. in greetings) when the user hasn't asked.`
 
     // Owner-only (REWRITTEN Jul 25 — real incident: Adrian asked for a repair
     // and Kelion only TALKED about "taking care of it" without executing
