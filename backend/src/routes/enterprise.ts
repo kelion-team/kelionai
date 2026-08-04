@@ -152,7 +152,7 @@ function paginaAdmin(): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei ${ROSTER.length}</b>. Serverul îi creează în fundal, cu ritm (Google are quota de creare pe minut) — pagina se actualizează singură; poate dura câteva minute.</p>
+Pas 2: apasă <b>Creează cei ${ROSTER.length}</b> O SINGURĂ DATĂ. Serverul lucrează în fundal cu ritm (quota Google) și <b>continuă singur</b> — reîncearcă la 15 minute și reia și după un restart de server; cine e confirmat iese din listă. Pagina arată viu „instalați X | rămași Y"; poți s-o și închizi.</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
 <button id="b">🚀 Creează cei ${ROSTER.length} în Enterprise</button>
 <pre id="out">—</pre>
@@ -163,14 +163,14 @@ Pas 2: apasă <b>Creează cei ${ROSTER.length}</b>. Serverul îi creează în fu
  function final(j){
    let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
    if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
-   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${ROSTER.length} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — apasă din nou: continui de unde am rămas.</span>\\n')+s;
+   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${ROSTER.length} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n')+s;
  }
  function arata(st, prima){
    if(st.error){ if(!prima) out.innerHTML='<span class=rau>Refuz: '+st.error+'</span>'; opreste(); return; }
    if(st.raport){ final(st.raport); opreste(); return; }
    if(st.ruleaza){ b.disabled=true; out.textContent='⏳ '+st.pas; if(!ceas) ceas=setInterval(stare,3000); return; }
    if(prima) return; /* nepornit la deschiderea paginii — nimic de arătat */
-   out.innerHTML='<span class=rau>Crearea nu (mai) rulează — apasă din nou; continui de unde am rămas.</span>'; opreste();
+   out.innerHTML='<span class=rau>Crearea nu (mai) rulează în clipa asta — serverul o reia singur (la 15 min sau după restart). Poți și apăsa din nou, nu strică: cei intrați se sar.</span>'; opreste();
  }
  async function stare(prima){
    try{ const r=await fetch('/api/enterprise/creeaza/stare'); arata(await r.json(), prima===true); }

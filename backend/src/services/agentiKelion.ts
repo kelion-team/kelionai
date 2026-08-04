@@ -53,6 +53,8 @@ export const ROSTER: AgentKelion[] = [
   { id: 'stiri', nume: 'Agent Stiri', rol: 'Stiri din surse multiple, cu link si data.' },
   { id: 'traduceri', nume: 'Agent Traduceri', rol: 'Traduceri naturale RO/EN si alte limbi, cu tonul pastrat.' },
   { id: 'muzica', nume: 'Agent Muzica Tempo', rol: 'Tempo/ritm, sincronizarea avatarului pe beat, recomandari.' },
+  { id: 'dansator', nume: 'Agent Dansator', rol: 'Simte ritmul (tempo, accente) si compune coregrafia: ce gesturi de dans cheama avatarul si cand, pe beat. Mana in mana cu Agent Muzica Tempo.' },
+  { id: 'gym', nume: 'Agent Gym', rol: 'Antrenamente pe zile si serii; avatarul ARATA exercitiile cu gesturile de gym din aplicatie, iar prin camera iti spune ce vede la pozitie. Informativ, nu medical.' },
   { id: 'viziune', nume: 'Agent Viziune', rol: 'Analizeaza imagini si capturi ca un soim; spune si ce NU distinge.' },
   { id: 'voce', nume: 'Agent Voce', rol: 'STT/TTS, dictie, emotie. Prima vorba sub o secunda.' },
   { id: 'bani', nume: 'Agent Bani', rol: 'Solduri, tranzactii, costuri masurate. Nu inventeaza cifre.' },
