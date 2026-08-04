@@ -1,7 +1,8 @@
 import { config } from '../config.js'
 import { listaAgentiCustom } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
-import type { OrMessage } from './brainContract.js'
+import { webSearch } from './google.js'
+import type { OrMessage, AnthropicTool } from './brainContract.js'
 
 // ── AGENȚII LUI KELION: SURSA UNICĂ ─────────────────────────────────────────
 //
@@ -195,6 +196,7 @@ function instructiune(a: AgentKelion): string {
     `Reguli, mereu:\n` +
     `- Răspunzi scurt, concret, în limba în care ți se scrie (implicit română).\n` +
     `- Ce nu poți proba spui „nu pot verifica" — nu inventezi cifre, verdicte sau surse.\n` +
+    `- Ai unealta cauta_web (Google real): folosește-o pentru fapte proaspete și citează linkurile.\n` +
     `- Rămâi strict în specialitatea ta; dacă cererea e pentru alt specialist, spune care.`
   )
 }
@@ -206,9 +208,24 @@ export interface RaspunsAgent {
   model: string
 }
 
+// UNELTELE SPECIALIȘTILOR (4 aug, noaptea, owner: „e doar un chat bot, nu
+// știe sau nu are unelte" — avea dreptate: lista de unelte era GOALĂ).
+// Prima unealtă, cea care schimbă totul: căutarea REALĂ pe net (Serper).
+const UNEALTA_CAUTARE: AnthropicTool = {
+  name: 'cauta_web',
+  description:
+    'Caută pe internet (Google real) și primești rezultate cu titlu, link și fragment. ' +
+    'Folosește-o când ai nevoie de fapte proaspete, cifre sau surse — apoi citează linkurile.',
+  input_schema: {
+    type: 'object',
+    properties: { intrebare: { type: 'string', description: 'ce cauți, formulat scurt' } },
+    required: ['intrebare'],
+  },
+}
+
 /** Rulează o sarcină prin specialist — creierul Gemini real al lui Kelion cu
- *  pălăria agentului. Asta face din fiecare carte A2A un agent CARE LUCREAZĂ, nu
- *  un link mort.
+ *  pălăria agentului ȘI cu unelte (căutarea pe net; buclă de max 3 runde de
+ *  unelte, ca un ocol de căutare să nu poată ține endpointul captiv).
  *  Plafonul de ieșire: 2048 (măsurat 4 aug, prima probă live pe `solutii` — la
  *  1024 răspunsul se tăia în mijlocul propoziției înainte de „alege una", pentru
  *  că la gemini-2.5 maxOutputTokens INCLUDE și tokenii de gândire (~512 la
@@ -225,6 +242,26 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string): Promise<Rasp
   // odată cu gândirea, altfel textul util s-ar sugruma).
   const efort = a.efort ?? 'low'
   const plafon = efort === 'high' ? 8192 : 2048
-  const r = await geminiDirectChat(model, messages, [], { maxTokens: plafon, temperature: 0.6, reasoning: efort })
-  return { agent: a.id, text: r.text, costUsd: r.costUsd, model: r.model }
+  let cost = 0
+  for (let runda = 0; ; runda++) {
+    const r = await geminiDirectChat(model, messages, [UNEALTA_CAUTARE], { maxTokens: plafon, temperature: 0.6, reasoning: efort })
+    cost += r.costUsd
+    if (r.toolCalls.length === 0 || runda >= 3) {
+      return { agent: a.id, text: r.text, costUsd: cost, model: r.model }
+    }
+    messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
+    for (const tc of r.toolCalls) {
+      let intrebare = ''
+      try {
+        intrebare = String((JSON.parse(tc.function.arguments || '{}') as { intrebare?: string }).intrebare ?? '')
+      } catch {
+        /* argumente stricate → căutare goală → răspuns onest mai jos */
+      }
+      const rezultat =
+        tc.function.name === 'cauta_web' && intrebare
+          ? await webSearch(intrebare, 6)
+          : JSON.stringify({ error: 'unealta_necunoscuta_sau_intrebare_goala' })
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: rezultat.slice(0, 8000) })
+    }
+  }
 }
