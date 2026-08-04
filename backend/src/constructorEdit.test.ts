@@ -116,4 +116,21 @@ describe('edit_lines — înlocuire pe interval de linii', () => {
     expect(r.text).toBeNull()
     expect(r.err).toContain('interval invalid')
   })
+  // ADĂUGARE la sfârșit (append) — cauza reală a lui #67 (4 aug): modelul cerea
+  // from=to=length+1 și pica „interval invalid". Acum un rând peste ultima linie
+  // e permis și adaugă la coadă.
+  it('from=to=length+1 adaugă la sfârșit', () => {
+    const r = probaLinii('a\nb\nc', 4, 4, 'X')
+    expect(r.err).toBeNull()
+    expect(r.text).toBe('a\nb\nc\nX')
+  })
+  it('append cu mai multe linii noi', () => {
+    const r = probaLinii('a\nb', 3, 3, 'c\nd')
+    expect(r.text).toBe('a\nb\nc\nd')
+  })
+  it('from peste length+1 tot e invalid', () => {
+    const r = probaLinii('a\nb\nc', 5, 5, 'X')
+    expect(r.text).toBeNull()
+    expect(r.err).toContain('interval invalid')
+  })
 })
