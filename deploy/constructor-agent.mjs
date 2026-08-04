@@ -251,7 +251,22 @@ function toolEditLines(p, from, to, nou) {
   const r = inlocuiesteLinii(fs.readFileSync(full, 'utf8'), from, to, nou)
   if (r.err) return `REFUZAT: ${r.err} (vezi numerele din 'read').`
   fs.writeFileSync(full, r.text)
-  return `editat pe linii: ${p} (liniile ${r.a}–${r.bb}, ${r.bb - r.a + 1} → ${r.n} linii)`
+  const inlocuite = Math.max(0, r.bb - r.a + 1)
+  return inlocuite === 0
+    ? `adăugat la sfârșit: ${p} (+${r.n} linii)`
+    : `editat pe linii: ${p} (liniile ${r.a}–${r.bb}, ${inlocuite} → ${r.n} linii)`
+}
+// ȘTERGERE de fișier — plasă pentru un fișier creat din GREȘEALĂ (măsurat pe #45,
+// 3 aug: modelul a vrut `run rm <migrație greșită>` → „comandă nepermisă" și a
+// ars pași fără să poată curăța). `run` nu execută `rm` (shell liber interzis),
+// dar aici e o unealtă sandbox: `safePath` o ține STRICT în atelier (clona de
+// unică folosință) și ștergerea apare în diff-ul PR-ului, pe care owner-ul îl vede.
+function toolDelete(p) {
+  const full = safePath(p)
+  if (!fs.existsSync(full)) return `REFUZAT: ${p} nu există.`
+  if (!fs.statSync(full).isFile()) return `REFUZAT: ${p} nu e fișier (directoarele nu se șterg de aici).`
+  fs.unlinkSync(full)
+  return `șters: ${p}`
 }
 // Nucleul PUR (fără disc) al lui edit_lines, exportat ca să fie probat: taie
 // liniile from..to și pune „nou" în loc. Întoarce {text,a,bb,n} sau {err}.
@@ -259,8 +274,12 @@ export function inlocuiesteLinii(src, from, to, nou) {
   const lines = String(src).split('\n')
   const a = Math.floor(Number(from))
   const b = Math.floor(Number(to))
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || a > lines.length)
-    return { err: `interval invalid (from=${from}, to=${to}); fișierul are ${lines.length} linii, dă 1 ≤ from ≤ to ≤ ${lines.length}` }
+  // `from === lines.length + 1` = ADĂUGARE la sfârșit (append pur). Măsurat pe
+  // #67 (4 aug): modelul cerea exact asta — `from=317` pe un fișier de 316 linii
+  // — și pica „interval invalid", ardea pași sterili → EȘEC. Permitem un singur
+  // rând peste ultima linie, ca adăugarea la coadă să funcționeze.
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || a > lines.length + 1)
+    return { err: `interval invalid (from=${from}, to=${to}); fișierul are ${lines.length} linii, dă 1 ≤ from ≤ to ≤ ${lines.length} (sau from=to=${lines.length + 1} ca să adaugi la sfârșit)` }
   const bb = Math.min(b, lines.length)
   const nouLinii = String(nou ?? '').split('\n')
   return { text: [...lines.slice(0, a - 1), ...nouLinii, ...lines.slice(bb)].join('\n'), a, bb, n: nouLinii.length }
@@ -390,6 +409,7 @@ const TOOLS = [
   { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
   { type: 'function', function: { name: 'edit_lines', description: 'CEA MAI SIGURĂ pe fișiere MARI: înlocuiește liniile from..to (numerele din „read") cu textul „new". Fără potrivire de text, fără să retrimiți tot fișierul — imună la plafonul de ieșire. Ca să ȘTERGI, dă „new" gol. Ca să INSEREZI după linia N, dă from=to=N+1 doar dacă acele linii nu-ți trebuie — altfel include-le în „new".', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' }, new: { type: 'string' } }, required: ['path', 'from', 'to', 'new'] } } },
+  { type: 'function', function: { name: 'delete_file', description: 'Șterge un fișier din atelier — de folosit când ai creat unul din greșeală (ex. o migrație inutilă). Doar în atelier; ștergerea apare în diff-ul PR-ului pe care owner-ul îl vede.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Close the work: PR title + body (body in Romanian, for the owner: what was done, how it was verified, what remains unverified). Call it ONLY after the self-check against the order — the change must actually fulfil what was asked. The system runs build+tests itself right after.', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
   // ── UNELTELE GRELE (Adrian, 30 iul: „am cerut agenți full echipați și tu i-ai
@@ -428,7 +448,7 @@ const TOOLS = [
 // secrete criptate, baza de date, operațiile de pe server). Lista se DERIVĂ din
 // TOOLS, ca să nu poată rămâne în urmă: uneltele locale sunt cele 7 de fișiere,
 // tot restul trece prin `/api/constructor/tool`.
-const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'edit_lines', 'run', 'finish'])
+const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'edit_lines', 'delete_file', 'run', 'finish'])
 const UNELTE_PRIN_APLICATIE = new Set(
   TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
 )
@@ -443,7 +463,12 @@ THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step
 4. EXECUTE. On existing files use 'edit' (EXACT old text → new text) or, on LARGE files, 'edit_lines' (give the from/to line numbers from 'read' + the new text — no text matching, immune to the output cap). NEVER 'write' a large existing file — your output has a cap and gets cut in half, corrupting it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
 5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
    EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
-6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.`
+6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.
+
+PROJECT CONVENTIONS — know them; each one saves whole wasted steps (measured on real failed orders):
+- DATABASE: the ENTIRE schema lives in backend/src/db.ts as "CREATE TABLE IF NOT EXISTS ..." inside the init SQL. This repo has NO knex, NO knexfile.ts, NO migrations/ folder — do NOT create migration files (they are dead weight here). To add a table or column, EDIT that SQL block in db.ts.
+- LARGE existing files (backend/src/db.ts, backend/src/routes/admin.ts, frontend/src/components/AdminPanel.tsx): change them with 'edit' or 'edit_lines', NEVER 'write' — your output is capped and a whole-file rewrite gets cut, which corrupts the file and the order fails. After any edit that inserts or deletes lines the numbers SHIFT — 'read' the file again before the next 'edit_lines', or its from/to will point at the wrong place.
+- To remove a file you created by mistake, use 'delete_file' (there is no shell 'rm').`
 
 // REZISTENT LA MODELELE GRATUITE (jobul #2, 27 iul, cauza reală din log:
 // „Unexpected end of JSON input" — endpointul :free a întors corp gol/trunchiat
@@ -935,6 +960,7 @@ async function main() {
             else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
             else if (c.function.name === 'edit') result = toolEdit(String(args.path ?? ''), String(args.old ?? ''), String(args.new ?? ''))
             else if (c.function.name === 'edit_lines') result = toolEditLines(String(args.path ?? ''), Number(args.from), Number(args.to), String(args.new ?? ''))
+            else if (c.function.name === 'delete_file') result = toolDelete(String(args.path ?? ''))
             else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
             else if (c.function.name === 'finish') {
               finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
