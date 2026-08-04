@@ -535,14 +535,21 @@ function geminiCleanSchema(s) {
 
 // OpenAI-format TOOLS → Gemini functionDeclarations: strip the `type:'function'`
 // wrapper, use the `.function` object, clean its parameters' schema.
+// EMPTY-SCHEMA GUARD (wo-msex5yey, 4 Aug): tools with no arguments used to send
+// `parameters:{type:'object',properties:{}}`. gemini-2.5 tolerated it, but
+// newer models REJECT it with HTTP 400 ("properties: should be non-empty for
+// OBJECT type") — orders #72/#73 died on every llm() call. A function with no
+// arguments is valid WITHOUT a `parameters` field at all, on every generation —
+// so when the cleaned schema has no properties, we omit the field entirely.
 function geminiToolDeclarations() {
   return [
     {
-      functionDeclarations: TOOLS.map((t) => ({
-        name: t.function.name,
-        description: t.function.description,
-        parameters: geminiCleanSchema(t.function.parameters),
-      })),
+      functionDeclarations: TOOLS.map((t) => {
+        const d = { name: t.function.name, description: t.function.description }
+        const p = geminiCleanSchema(t.function.parameters)
+        if (p && p.properties && Object.keys(p.properties).length) d.parameters = p
+        return d
+      }),
     },
   ]
 }
@@ -579,7 +586,11 @@ function toGeminiBody(messages) {
       } catch {
         /* corrupted arguments — we go with {} (mirrors geminiDirect) */
       }
-      parts.push({ functionCall: { name: c.function?.name, args } })
+      // Echo the thought signature back (wo-msex5yey) — newer models reject the
+      // replayed history without it.
+      const part = { functionCall: { name: c.function?.name, args } }
+      if (c.thoughtSignature) part.thoughtSignature = c.thoughtSignature
+      parts.push(part)
     }
     if (!parts.length) continue // Gemini rejects a content with no parts
     contents.push({ role, parts })
@@ -624,12 +635,20 @@ async function llmGemini(messages) {
   const toolCalls = []
   for (const p of parts) {
     if (typeof p?.text === 'string') content += p.text
-    if (p?.functionCall)
-      toolCalls.push({
+    if (p?.functionCall) {
+      const tc = {
         id: `call_${toolCalls.length}`,
         type: 'function',
         function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
-      })
+      }
+      // THOUGHT SIGNATURE (wo-msex5yey, 4 Aug — the REAL 400 on newer models):
+      // Gemini 3.x attaches a `thoughtSignature` to its functionCall parts and
+      // REQUIRES it echoed back on replay ("Function call is missing a
+      // thought_signature in functionCall parts" — orders #72/#73 died on every
+      // second turn). We keep it on the tool_call and toGeminiBody sends it back.
+      if (p.thoughtSignature) tc.thoughtSignature = p.thoughtSignature
+      toolCalls.push(tc)
+    }
   }
   // Empty 200 (no text, no tool call) — Gemini can do this under load; throw so
   // llm() retries instead of burning a sterile turn on nothing.
