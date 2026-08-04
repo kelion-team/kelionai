@@ -83,13 +83,18 @@ function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; pr
   return { creati, esuati, primaEroare }
 }
 
-// MĂSURAT (4 aug, seara, apăsarea ownerului): 33 de POST-uri deodată → 2 create,
-// 31 refuzate cu „HTTP 429: Agent creation quota exceeded". Google limitează
-// RITMUL creării de agenți. Deci: unul câte unul, pauză între reușite, iar la
-// 429 așteptăm (Retry-After dacă vine, altfel scara de mai jos) și reîncercăm.
-const PAUZA_INTRE_MS = 1_500
-const ASTEPTARI_429_S = [15, 30, 45, 60, 60]
-const TERMEN_TOTAL_MS = 20 * 60_000
+// MĂSURAT (4 aug, seara): rafala de 33 → 2 creați; scara deasă de reîncercări
+// (15/30/45/60s) → ORE fără niciun 200, dar cei 3 care AU intrat au intrat
+// fix după perioade de LINIȘTE (paharul plin la prima apăsare; al 3-lea la
+// 19:45, imediat după ~10 min de pauză forțată de deploy). Concluzia + ideea
+// ownerului („poate trebuie pus câte unul la 5 minute"): și cererile refuzate
+// countează la contor — rafala noastră ținea paharul gol. RITM NOU: o
+// încercare, apoi 5 minute de liniște (CREARE_ASTEPTARE_MIN), maxim 2
+// reîncercări pe agent pe ocol, un minut de respiro după fiecare reușită.
+const PAUZA_INTRE_MS = 60_000
+const ASTEPTARE_429_S = Math.max(60, (Number(process.env.CREARE_ASTEPTARE_MIN) || 5) * 60)
+const ASTEPTARI_429_S = [ASTEPTARE_429_S, ASTEPTARE_429_S]
+const TERMEN_TOTAL_MS = 60 * 60_000
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Creează UN agent, cu răbdare la quota de ritm: la 429 așteaptă și reîncearcă;
