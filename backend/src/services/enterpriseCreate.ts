@@ -104,7 +104,7 @@ async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) 
     const res = await api(T, 'POST', `${ASST}/agents`, corp)
     if (res.status !== 429 || i >= ASTEPTARI_429_S.length) return rezultatCreare(res)
     const s = res.retryAfter ?? ASTEPTARI_429_S[i] ?? 60
-    anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length}); restul listei așteaptă la rând`)
+    anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length})`)
     await zabava(s * 1000)
   }
 }
@@ -174,11 +174,13 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
       rezultate.push({ ok: false, err: `neîncercat: termenul total (${TERMEN_TOTAL_MS / 60_000} min) s-a epuizat — apasă din nou, continui de unde am rămas` })
       continue
     }
-    // Raportul cerut de owner (4 aug): „instalați X, rămași Y" — viu, la
-    // fiecare pas, nu doar la final.
+    // Raportul cerut de owner (4 aug, de două ori: „trebuie să văd"): cifrele
+    // stau PERMANENT în față — și pe mesajele de așteptare la quota, nu doar
+    // când trecem la următorul (altfel, într-o seară cu 429 lung, nu se vedeau).
     const instalati = existau + rezultate.filter((x) => x.ok).length
-    anunta(`instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati} | acum îl pun pe: ${ag.nume}`)
-    const rez = await creeazaUnAgent(T, ag, anunta)
+    const eticheta = `instalați: ${instalati}/${roster.length} | rămași: ${roster.length - instalati}`
+    anunta(`${eticheta} | acum îl pun pe: ${ag.nume}`)
+    const rez = await creeazaUnAgent(T, ag, (pas) => anunta(`${eticheta} | ${pas}`))
     rezultate.push(rez)
     if (rez.ok) await zabava(PAUZA_INTRE_MS)
   }

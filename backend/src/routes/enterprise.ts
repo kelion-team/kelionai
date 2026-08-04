@@ -175,6 +175,7 @@ Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ. Serverul lucrează 
    out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${total} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — serverul continuă SINGUR (reîncearcă la 15 min, cei intrați ies din listă). Poți închide pagina.</span>\\n')+s;
  }
  function arata(st, prima){
+   if(typeof st.total==='number' && st.total>0) b.textContent='🚀 Creează cei '+st.total+' în Enterprise';
    if(st.error){ if(!prima) out.innerHTML='<span class=rau>Refuz: '+st.error+'</span>'; opreste(); return; }
    if(st.raport){ final(st.raport); opreste(); return; }
    if(st.ruleaza){ b.disabled=true; out.textContent='⏳ '+st.pas; if(!ceas) ceas=setInterval(stare,3000); return; }
@@ -252,9 +253,12 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
   })
 
   // Starea creării din fundal (pagina o întreabă la câteva secunde). DOAR admin.
+  // `total` = rosterul viu (cod + agenții custom) — pagina își actualizează din
+  // el și numărul de pe buton, fără reîncărcare (Adrian, 4 aug: „contorul
+  // «creează cei 86» nu se actualizează").
   app.get('/api/enterprise/creeaza/stare', async (req, reply) => {
     if (!adminSau403(req, reply)) return { error: 'forbidden' }
-    return stareCreare()
+    return { ...stareCreare(), total: (await rosterViu()).length }
   })
 
   // AGENT NOU pus de owner (4 aug: „când mai vreau un model de agent să pot
