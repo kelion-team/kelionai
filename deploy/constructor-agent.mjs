@@ -208,8 +208,8 @@ function toolWrite(p, content) {
   if (vechi !== null && vechi.length > 2_000 && content.length < vechi.length * 0.5)
     return (
       `REFUZAT: ai trimis ${content.length} caractere peste un fișier de ${vechi.length} — ` +
-      `pare tăiat de plafonul de ieșire. Folosește 'edit' (înlocuiești DOAR bucata care se schimbă) ` +
-      `sau retrimite fișierul ÎNTREG.`
+      `pare tăiat de plafonul de ieșire. Pe fișiere MARI folosește 'edit_lines' (dai numerele ` +
+      `de linie din 'read' + textul nou — imun la plafon) sau 'edit'; NU retrimite tot fișierul.`
     )
   fs.mkdirSync(path.dirname(full), { recursive: true })
   fs.writeFileSync(full, content)
@@ -239,6 +239,31 @@ function toolEdit(p, vechi, nou) {
   // din jurul primei linii recognoscibile din „old", ca modelul să copieze exact
   // dintr-o dată, fără să ardă pașii ghicind sau pe un 'read' în plus.
   return `REFUZAT: textul „old" nu apare în ${p}. ${contextReancorare(src, vechi)}`
+}
+// EDIT PE LINII — plasa DEFINITIVĂ pentru fișiere MARI (măsurat pe #65, 4 aug:
+// pe admin.ts de 45KB, 'write' refuza corect (răspuns tăiat de plafon) iar 'edit'
+// nu potrivea „old" → 8 ture sterile → EȘEC). Aici modelul dă doar NUMERELE de
+// linie (le vede din 'read' numerotat) + textul nou. Zero potrivire de text,
+// zero rescriere a fișierului întreg — deci imună la plafonul de ieșire și la
+// nepotrivirea lui „old". Așa Kelion editează orice fișier, oricât de mare.
+function toolEditLines(p, from, to, nou) {
+  const full = safePath(p)
+  const r = inlocuiesteLinii(fs.readFileSync(full, 'utf8'), from, to, nou)
+  if (r.err) return `REFUZAT: ${r.err} (vezi numerele din 'read').`
+  fs.writeFileSync(full, r.text)
+  return `editat pe linii: ${p} (liniile ${r.a}–${r.bb}, ${r.bb - r.a + 1} → ${r.n} linii)`
+}
+// Nucleul PUR (fără disc) al lui edit_lines, exportat ca să fie probat: taie
+// liniile from..to și pune „nou" în loc. Întoarce {text,a,bb,n} sau {err}.
+export function inlocuiesteLinii(src, from, to, nou) {
+  const lines = String(src).split('\n')
+  const a = Math.floor(Number(from))
+  const b = Math.floor(Number(to))
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || a > lines.length)
+    return { err: `interval invalid (from=${from}, to=${to}); fișierul are ${lines.length} linii, dă 1 ≤ from ≤ to ≤ ${lines.length}` }
+  const bb = Math.min(b, lines.length)
+  const nouLinii = String(nou ?? '').split('\n')
+  return { text: [...lines.slice(0, a - 1), ...nouLinii, ...lines.slice(bb)].join('\n'), a, bb, n: nouLinii.length }
 }
 // POTRIVIRE ROBUSTĂ pentru 'edit'. Întoarce {start,end,mod} pentru o singură
 // potrivire (exactă SAU tolerantă la spații), 'exacta_multipla'/'toleranta_multipla'
@@ -364,6 +389,7 @@ const TOOLS = [
   { type: 'function', function: { name: 'read', description: 'Citește un fișier (numerotat). Dă from/to ca să iei DOAR intervalul de linii care te interesează — nu tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'write', description: 'Scrie CONȚINUTUL COMPLET al unui fișier (rescriere integrală, nu diff). Pentru un fișier EXISTENT mare folosește mai bine „edit" — răspunsul tău are plafon și se taie.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'edit', description: 'Înlocuiește o bucată de text într-un fișier existent: „old" (textul EXACT de acum, unic în fișier) → „new". Preferă asta la fișiere mari — nu retrimiți tot fișierul.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
+  { type: 'function', function: { name: 'edit_lines', description: 'CEA MAI SIGURĂ pe fișiere MARI: înlocuiește liniile from..to (numerele din „read") cu textul „new". Fără potrivire de text, fără să retrimiți tot fișierul — imună la plafonul de ieșire. Ca să ȘTERGI, dă „new" gol. Ca să INSEREZI după linia N, dă from=to=N+1 doar dacă acele linii nu-ți trebuie — altfel include-le în „new".', parameters: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number' }, to: { type: 'number' }, new: { type: 'string' } }, required: ['path', 'from', 'to', 'new'] } } },
   { type: 'function', function: { name: 'run', description: 'Rulează o comandă permisă: verificări (npm ci/build/test pe backend/frontend, git status/diff) SAU instalare de dependențe — `npm --prefix backend install <pachet>` / `npm --prefix frontend install <pachet>` — când ordinul cere o bibliotecă nouă (adaugă pachetul în package.json + lock).', parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } },
   { type: 'function', function: { name: 'finish', description: 'Close the work: PR title + body (body in Romanian, for the owner: what was done, how it was verified, what remains unverified). Call it ONLY after the self-check against the order — the change must actually fulfil what was asked. The system runs build+tests itself right after.', parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] } } },
   // ── UNELTELE GRELE (Adrian, 30 iul: „am cerut agenți full echipați și tu i-ai
@@ -402,7 +428,7 @@ const TOOLS = [
 // secrete criptate, baza de date, operațiile de pe server). Lista se DERIVĂ din
 // TOOLS, ca să nu poată rămâne în urmă: uneltele locale sunt cele 7 de fișiere,
 // tot restul trece prin `/api/constructor/tool`.
-const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'run', 'finish'])
+const UNELTE_LOCALE = new Set(['ls', 'grep', 'read', 'write', 'edit', 'edit_lines', 'run', 'finish'])
 const UNELTE_PRIN_APLICATIE = new Set(
   TOOLS.map((t) => t.function.name).filter((n) => !UNELTE_LOCALE.has(n)),
 )
@@ -414,7 +440,7 @@ THE WORK METHOD — follow it 100%, in this order, on EVERY order (the tool-step
 1. UNDERSTAND. First message: restate the order in ONE line and name what proves it done. No tool call yet.
 2. CHECK REALITY. Find the file with 'grep' (a pattern from the order) — do NOT explore with ls/read step by step. NEVER assume what the code says: read the actual lines ('read' with from/to, only the relevant range). Never read the same file twice. Do NOT read AI-HANDOFF.md (it is huge) unless the order explicitly asks about architecture.
 3. PLAN. One line: which file(s) change and how the change will be verified.
-4. EXECUTE. 'edit' on existing files (EXACT old text → new text) — the safe path, because your output has a cap and a 'write' on a large file gets cut in half and corrupts it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
+4. EXECUTE. On existing files use 'edit' (EXACT old text → new text) or, on LARGE files, 'edit_lines' (give the from/to line numbers from 'read' + the new text — no text matching, immune to the output cap). NEVER 'write' a large existing file — your output has a cap and gets cut in half, corrupting it. Use 'write' only for NEW or small files. Fix the CAUSE, not the symptom; cleanly rewrite the responsible module — no band-aid patches; match the surrounding style. All code comments in ENGLISH. Changes STRICTLY inside the order's perimeter — nothing "on the fly"; never touch financial counters, never delete data.
 5. PROVE. "Done" is never a claim — it is evidence. Before calling 'finish', re-read the order and check that your change actually FULFILS it (not merely that it compiles). Then call 'finish' IMMEDIATELY — do NOT run 'npm ci/build/test' yourself; the system verifies on its own after finish. Target: finish within ≤3 tool calls after finding the file.
    EXCEPTION — NEW dependency: if the order needs a package that does not exist yet, run 'run' with "npm --prefix backend install <package>" (or frontend) BEFORE finish — so package.json + lock stay in sync and verification passes.
 6. REPORT HONESTLY. The PR body (in Romanian, for the owner) states three things: what was done, how it was verified, and what remains unverified. An honest "this could not be verified" is worth more than a confident guess. If the system tells you the build failed, repair the CAUSE and re-finish (you have a small number of repair rounds). Never hide a failure.`
@@ -908,6 +934,7 @@ async function main() {
             else if (c.function.name === 'read') result = toolRead(String(args.path ?? ''), Number(args.from), Number(args.to))
             else if (c.function.name === 'write') result = toolWrite(String(args.path ?? ''), String(args.content ?? ''))
             else if (c.function.name === 'edit') result = toolEdit(String(args.path ?? ''), String(args.old ?? ''), String(args.new ?? ''))
+            else if (c.function.name === 'edit_lines') result = toolEditLines(String(args.path ?? ''), Number(args.from), Number(args.to), String(args.new ?? ''))
             else if (c.function.name === 'run') result = toolRun(String(args.cmd ?? ''))
             else if (c.function.name === 'finish') {
               finish = { title: String(args.title ?? '').slice(0, 120), body: String(args.body ?? '') }
