@@ -80,6 +80,9 @@ interface GPart {
   functionCall?: { name: string; args?: Record<string, unknown> }
   functionResponse?: { name: string; response: Record<string, unknown> }
   inline_data?: { mime_type: string; data: string }
+  /** Gemini 3.x: semnătura de gândire de pe apelurile de unelte — se păstrează
+   *  și se retrimite la replay (wo-msex5yey). */
+  thoughtSignature?: string
 }
 interface GContent {
   role: 'user' | 'model'
@@ -189,7 +192,19 @@ export function toGeminiPayload(
   const body: Record<string, unknown> = { contents, generationConfig }
   if (sys.length) body.systemInstruction = { parts: [{ text: sys.join('\n\n') }] }
   if (tools.length) {
-    body.tools = [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: cleanSchema(t.input_schema) })) }]
+    // EMPTY-SCHEMA GUARD (wo-msex5yey, 4 Aug — mirrors constructor-agent.mjs):
+    // a no-argument tool used to send `parameters:{type:'object',properties:{}}`;
+    // gemini-2.5 tolerates it, newer models reject it with 400 ("properties:
+    // should be non-empty for OBJECT type"). A function with no arguments is
+    // valid WITHOUT the `parameters` field — so omit it when properties is empty.
+    body.tools = [{
+      functionDeclarations: tools.map((t) => {
+        const d: Record<string, unknown> = { name: t.name, description: t.description }
+        const p = cleanSchema(t.input_schema) as { properties?: Record<string, unknown> }
+        if (p?.properties && Object.keys(p.properties).length) d.parameters = p
+        return d
+      }),
+    }]
     body.toolConfig = { functionCallingConfig: { mode: opts.toolChoice === 'required' ? 'ANY' : 'AUTO' } }
   }
   return body
@@ -213,11 +228,14 @@ function partsToResult(
   for (const p of parts) {
     if (p.text) text += p.text
     if (p.functionCall) {
-      toolCalls.push({
+      const tc: OrToolCall = {
         id: `g_${toolCalls.length}_${Math.random().toString(36).slice(2, 8)}`,
         type: 'function',
         function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) },
-      })
+      }
+      // Gemini 3.x cere semnătura înapoi la replay (wo-msex5yey) — o păstrăm.
+      if (p.thoughtSignature) tc.thoughtSignature = p.thoughtSignature
+      toolCalls.push(tc)
     }
   }
   // COSTUL PE CHEIA PLĂTITĂ (agenții de debug, 3 aug, verdict REAL: „costUsd: 0

@@ -56,6 +56,10 @@ export interface OrToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string }
+  /** Semnătura de gândire Gemini 3.x (wo-msex5yey): modelul o atașează apelului
+   *  de unealtă și CERE s-o primească înapoi la replay — altfel HTTP 400
+   *  („Function call is missing a thought_signature"). Opțională: 2.5 n-o are. */
+  thoughtSignature?: string
 }
 
 export interface OrChatResult {
