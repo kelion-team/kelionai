@@ -60,6 +60,14 @@ export const ROSTER: AgentKelion[] = [
   { id: 'documente', nume: 'Agent Documente', rol: 'PDF-uri si acte: esenta, formulare, scrisori oficiale.' },
   { id: 'cumparaturi', nume: 'Agent Cumparaturi', rol: 'Compara preturi si specificatii; preturile au data si sursa.' },
   { id: 'igiena', nume: 'Agent Igiena de cod', rol: 'Dubluri, exporturi orfane, cod mort. Portile pe zero.' },
+  // Completarea din 4 aug (Adrian: „analizează ce alți agenți ar mai fi necesari
+  // pentru restul de funcții și adaugă-i") — funcțiile care nu aveau specialist:
+  { id: 'securitate', nume: 'Agent Securitate', rol: 'Paza: sesiuni, chei doar prin Secrets, acces, alarme la abuz. Nu cere si nu arata secrete.' },
+  { id: 'licente-google', nume: 'Agent Licente Google', rol: 'Abonamente si licente Google (Enterprise, locuri, quote, distribuire). Erorile verbatim, pasii masurati.' },
+  { id: 'avatar3d', nume: 'Agent Avatar 3D', rol: 'Avatarul: gesturi, lipsync, animatii, scena 3D, GLB. Sincron cu vocea.' },
+  { id: 'vps', nume: 'Agent VPS Infrastructura', rol: 'VPS: docker, env-file, nginx, certificate, disc. Nimic pe ghicite - doar din masuratori.' },
+  { id: 'clienti', nume: 'Agent Clienti', rol: 'Clienti: onboarding, abonamente, credite, reclamatii. Ton uman, cifre doar masurate.' },
+  { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare: SEO, lansari, texte de marketing, clipuri de prezentare.' },
 ]
 
 export function gasesteAgent(id: string): AgentKelion | undefined {
