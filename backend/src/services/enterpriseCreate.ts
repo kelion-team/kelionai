@@ -101,7 +101,9 @@ async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) 
     a2aAgentDefinition: { jsonAgentCard: JSON.stringify(carteAgent(ag)) },
   }
   for (let i = 0; ; i++) {
+    cereriTrimise += 1
     const res = await api(T, 'POST', `${ASST}/agents`, corp)
+    if (res.status === 200) ultimaReusita = `${ag.nume} (${new Date().toISOString().slice(11, 19)} UTC)`
     if (res.status !== 429 || i >= ASTEPTARI_429_S.length) return rezultatCreare(res)
     const s = res.retryAfter ?? ASTEPTARI_429_S[i] ?? 60
     anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length})`)
@@ -278,8 +280,15 @@ interface StareEnterprise {
   ruleaza: boolean
   pas: string
   raport?: RaportEnterprise
+  /** CONTROLUL ownerului (4 aug: „deci nu am control că merge") — cifre care
+   *  se mișcă mereu: câte cereri de creare am trimis de la boot și ultima
+   *  reușită cu ora ei. Chiar și când Google refuză, `cereri` crește. */
+  cereri?: number
+  ultimaReusita?: string
 }
 const stare: StareEnterprise = { ruleaza: false, pas: 'nepornit' }
+let cereriTrimise = 0
+let ultimaReusita = ''
 
 // „REMEDIAZĂ ERR ASTA CU RELUAREA DE LA 0" (Adrian, 4 aug seara): crearea nu
 // mai depinde de apăsări repetate și nu mai moare la restart. Steagul din
@@ -294,7 +303,7 @@ let ceasReluare: NodeJS.Timeout | null = null
 
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
 export function stareCreare(): StareEnterprise {
-  return stare
+  return { ...stare, cereri: cereriTrimise, ultimaReusita: ultimaReusita || undefined }
 }
 
 /** Pornește crearea în fundal (dacă nu rulează deja) și întoarce starea.

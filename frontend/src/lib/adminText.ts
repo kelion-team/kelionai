@@ -20,6 +20,7 @@ import { loadLocalLang } from './prefs'
 export interface AdminStrings {
   // Taburile
   tabEnterprise: string
+  tabTrading: string
   tabMoney: string
   tabUsers: string
   tabVisitors: string
@@ -127,6 +128,7 @@ export interface AdminStrings {
 
 const en: AdminStrings = {
   tabEnterprise: '🚀 Enterprise agents',
+  tabTrading: '📈 Trading',
   tabMoney: 'Money',
   tabUsers: 'Users',
   tabVisitors: 'Visitors',
@@ -221,6 +223,7 @@ const en: AdminStrings = {
 
 const ro: AdminStrings = {
   tabEnterprise: '🚀 Agenți Enterprise',
+  tabTrading: '📈 Tranzacționare',
   tabMoney: 'Bani',
   tabUsers: 'Utilizatori',
   tabVisitors: 'Vizitatori',

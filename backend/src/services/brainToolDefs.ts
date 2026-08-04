@@ -706,17 +706,22 @@ export const REQUEST_REPAIR_TOOL: Tool = {
 // prin care CREIERUL îi pune la lucru: când o cerere se potrivește unei
 // specialități, cheamă agentul respectiv și folosește răspunsul lui. Lista (id —
 // specialitate) vine din ROSTER — sursa unică; enum-ul o ține validă la apel.
+// FĂRĂ enum pe „agent" (4 aug, seara): enumerarea statică bloca agenții pe
+// care ownerul îi adaugă din admin (agenti_custom) — schema e bătută la
+// pornirea procesului, dar rosterul e VIU. Validarea reală o face executorul
+// (gasesteAgentViu): id necunoscut → răspunde cu lista valizilor, nu inventează.
 export const CHEAMA_AGENT_TOOL: Tool = {
   name: 'cheama_agent',
   description:
     'Deleagă o sarcină unui AGENT SPECIALIST al lui Kelion și primești răspunsul lui. ' +
     'Folosește-l când cererea se potrivește clar unei specialități — specialistul o rezolvă mai ' +
-    'bine decât un răspuns general. Alege „agent" din lista (id — specialitate):\n' +
+    'bine decât un răspuns general. Pe lângă lista de mai jos există și agenții adăugați de owner ' +
+    'din admin (id necunoscut → unealta îți întoarce lista completă). Alege „agent" din (id — specialitate):\n' +
     ROSTER.map((a) => `${a.id} — ${a.rol}`).join('\n'),
   input_schema: {
     type: 'object',
     properties: {
-      agent: { type: 'string', enum: ROSTER.map((a) => a.id), description: 'id-ul agentului specialist din listă' },
+      agent: { type: 'string', description: 'id-ul agentului specialist (din listă sau un agent adăugat de owner)' },
       sarcina: { type: 'string', description: 'sarcina completă și clară pentru agent (context + ce anume trebuie făcut)' },
     },
     required: ['agent', 'sarcina'],
