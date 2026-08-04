@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ROSTER, gasesteAgent, carteAgent } from './services/agentiKelion.js'
 import { extrageText } from './routes/a2a.js'
+import { CHEAMA_AGENT_TOOL } from './services/brainToolDefs.js'
 
 // ── AGENȚII A2A (4 aug 2026) ────────────────────────────────────────────────
 // Cei 33 de agenți trebuie să fie sursă unică (agentiKelion.ts) și să fie
@@ -43,6 +44,22 @@ describe('cartea A2A arată spre agentul viu', () => {
       expect(card.name).toBe(a.nume)
       expect(card.skills[0].id).toBe(a.id)
     }
+  })
+})
+
+describe('unealta de delegare a creierului (cheama_agent)', () => {
+  it('e bine formată și acoperă exact rosterul', () => {
+    expect(CHEAMA_AGENT_TOOL.name).toBe('cheama_agent')
+    const props = CHEAMA_AGENT_TOOL.input_schema.properties as {
+      agent: { enum: string[] }
+      sarcina: unknown
+    }
+    // enum-ul agentului = fix id-urile din roster (sursă unică, nimic în plus/minus)
+    expect([...props.agent.enum].sort()).toEqual(ROSTER.map((a) => a.id).sort())
+    expect(CHEAMA_AGENT_TOOL.input_schema.required).toEqual(['agent', 'sarcina'])
+  })
+  it('descrierea listează fiecare agent (id — specialitate)', () => {
+    for (const a of ROSTER) expect(CHEAMA_AGENT_TOOL.description).toContain(a.id)
   })
 })
 

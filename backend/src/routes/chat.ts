@@ -96,7 +96,8 @@ import { recentClientErrors } from './clientErrors.js'
 import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPED_TOOLS } from '../services/adminTools.js'
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
-import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL } from '../services/brainToolDefs.js'
+import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL } from '../services/brainToolDefs.js'
+import { gasesteAgent, cheamaAgent, ROSTER } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -2007,6 +2008,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // Memorie + mâini (browser) — NU se mai taie
           ...NOTE_TOOLS,
           ...BROWSER_TOOLS,
+          // Delegarea către cei 33 de agenți specialiști — creierul pune agentul
+          // la lucru direct (Adrian, 4 aug). În zona care NU se taie la plafon.
+          CHEAMA_AGENT_TOOL,
           // Sursă + putere de dezvoltator + DB/sănătate + operațiuni („de aur")
           LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL,
           REPO_WRITE_TOOL, REPO_OPEN_PR_TOOL, REPO_MERGE_PR_TOOL,
@@ -2548,6 +2552,24 @@ async function runTool(
   }
 
   switch (block.name) {
+    // ── DELEGAREA: creierul pune agentul specialist la lucru (Adrian, 4 aug) ──
+    // Când creierul alege să delege, chemăm agentul respectiv (creierul Gemini
+    // cu pălăria specialistului, services/agentiKelion.ts) și întoarcem răspunsul
+    // lui. Costul sub-apelului intră în usage.usd (cost REAL al turei, ca la
+    // imagini). Un id necunoscut nu inventează — spune care sunt valizi.
+    case 'cheama_agent': {
+      const a = gasesteAgent(String(args.agent ?? '').trim())
+      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: ROSTER.map((x) => x.id) })
+      const sarcina = String(args.sarcina ?? '').trim()
+      if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
+      try {
+        const r = await cheamaAgent(a, sarcina)
+        usage.usd += r.costUsd
+        return JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text })
+      } catch (e) {
+        return JSON.stringify({ error: 'agent_a_esuat', detaliu: e instanceof Error ? e.message.slice(0, 200) : String(e) })
+      }
+    }
     // ── THE PANEL: THREE PROPOSE, THE BRAIN CHOOSES (Adrian, Jul 31) ─────────
     // Steps are written ON THE MONITOR as they happen, not at the end: they
     // take minutes, and the analysis gate says clearly that the work must be
