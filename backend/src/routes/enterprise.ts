@@ -4,12 +4,16 @@ import { ROSTER, carteAgent } from '../services/agentiKelion.js'
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
 //
 // De ce există (Adrian, 4 aug): crearea agenților în CONSOLA Gemini Enterprise
-// cere un cont cu LICENȚĂ ACTIVĂ, iar licența se activează doar la login
-// interactiv de om — contul de serviciu al aplicației nu poate (măsurat de trei
-// ori: FAILED_PRECONDITION „license not available", 403 pe
-// billingAccountLicenseConfigs.list, activare doar la primul login în
-// interfață). Deci ACEST script rulează cu contul OWNERULUI, din Cloud Shell-ul
-// lui (unde e deja logat și licențiat) și înscrie agenții în consolă.
+// cere un cont cu LICENȚĂ ACTIVĂ, iar contul de serviciu al aplicației nu o are
+// (măsurat de trei ori: FAILED_PRECONDITION „license not available", 403 pe
+// billingAccountLicenseConfigs.list, activare doar la primul login de om). Deci
+// ACEST script rulează cu contul OWNERULUI, din Cloud Shell-ul lui — care ARE
+// licența (măsurat 4 aug: contul lui trece de zid și citește API-ul).
+//
+// Al doilea zid, deja rezolvat aici: agenții stau sub un ASSISTANT sub ENGINE.
+// Motorul kelion-agenti există, dar îi lipsea „default_assistant" (404
+// ASSISTANT_NOT_FOUND). Lanțul corect, citit din documentul de discovery al
+// Google: assistants.create → assistants.agents.create (vezi scriptul jos).
 //
 // IMPORTANT: chiar și fără acest pas, agenții TRĂIESC ȘI LUCREAZĂ deja — sunt
 // serviți viu la /api/a2a/<id> (services/agentiKelion.ts, routes/a2a.ts). Zidul
@@ -44,11 +48,18 @@ function pythonScript(): string {
   return `#!/usr/bin/env python3
 # Creeaza agentii lui Kelion in Gemini Enterprise, cu contul TAU (Cloud Shell).
 # Tokenul vine din gcloud (contul tau logat, licentiat). Zero secrete aici.
+#
+# Lantul CORECT (citit din documentul de discovery al Google, 4 aug): agentii
+# stau sub un ASSISTANT, care sta sub ENGINE. Motorul kelion-agenti exista, dar
+# ii lipsea assistantul 'default_assistant' (de aici 404 ASSISTANT_NOT_FOUND la
+# contul tau). Deci: intai cream assistantul (assistants.create), apoi agentii
+# (assistants.agents.create). Ambele metode confirmate in API-ul v1alpha.
 import json, subprocess, urllib.request, urllib.error
 P = ${JSON.stringify(PROIECT)}
 AGENTI = json.loads(${JSON.stringify(data)})
 B = 'https://discoveryengine.googleapis.com/v1alpha'
-A = f'projects/{P}/locations/global/collections/default_collection/engines/kelion-agenti/assistants/default_assistant'
+ENG = f'projects/{P}/locations/global/collections/default_collection/engines/kelion-agenti'
+ASST = ENG + '/assistants/default_assistant'
 try:
     T = subprocess.check_output(['gcloud', 'auth', 'print-access-token']).decode().strip()
 except Exception as e:
@@ -56,7 +67,7 @@ except Exception as e:
 
 def api(m, path, body=None):
     r = urllib.request.Request(B + '/' + path, method=m,
-        data=json.dumps(body).encode() if body else None,
+        data=json.dumps(body).encode() if body is not None else None,
         headers={'Authorization': 'Bearer ' + T, 'Content-Type': 'application/json'})
     try:
         return 200, json.loads(urllib.request.urlopen(r).read() or b'{}')
@@ -64,34 +75,55 @@ def api(m, path, body=None):
         try: return e.code, json.loads(e.read() or b'{}')
         except Exception: return e.code, {}
 
-print('== Creez agentii lui Kelion in Gemini Enterprise ==')
-st, j = api('GET', A + '/agents?pageSize=200')
+def err(j):
+    return str(j.get('error', {}).get('message', json.dumps(j)))[:300]
+
+print('== Agentii lui Kelion in Gemini Enterprise ==')
+
+# 1. Asigura ASSISTANTUL (cutia in care stau agentii).
+st, j = api('GET', ASST)
+if st == 404:
+    print('default_assistant lipseste -> il creez...')
+    st, j = api('POST', ENG + '/assistants?assistantId=default_assistant', {'displayName': 'Kelion'})
+    if st == 200:
+        print('  assistant creat.')
+    elif st == 409:
+        print('  assistant exista deja (ok).')
+    else:
+        print('  NU pot crea assistantul: HTTP', st, err(j)); raise SystemExit(1)
+elif st != 200:
+    print('Nu pot verifica assistantul: HTTP', st, err(j)); raise SystemExit(1)
+else:
+    print('default_assistant exista deja.')
+
+# 2. Citeste agentii existenti (idempotenta pe displayName).
+st, j = api('GET', ASST + '/agents?pageSize=200')
 if st != 200:
-    print('Nu pot citi agentii existenti: HTTP', st, json.dumps(j)[:400])
-    if st == 400 or st == 403:
-        print('\\nProbabil contul tau nu are licenta ACTIVA pe proiectul', P)
-    raise SystemExit(1)
+    print('Nu pot citi agentii: HTTP', st, err(j)); raise SystemExit(1)
 ex = {a.get('displayName') for a in j.get('agents', [])}
+
+# 3. Creeaza cei 33.
 c = s = f = 0
 for a in AGENTI:
     nume = a['nume']; rol = a['rol']; card = a['card']
     if nume in ex:
         s += 1; continue
-    st, res = api('POST', A + '/agents',
+    st, res = api('POST', ASST + '/agents',
         {'displayName': nume, 'description': rol,
          'a2aAgentDefinition': {'jsonAgentCard': json.dumps(card, ensure_ascii=False)}})
     if st == 200:
         c += 1; print('  OK', nume)
     else:
         f += 1
-        msg = res.get('error', {}).get('message', json.dumps(res))
-        print('  X', nume, st, str(msg)[:200])
-        if f == 1 and ('license' in str(msg).lower()):
-            print('\\n>>> Contul tau NU are licenta Gemini Enterprise activa pe proiectul', P)
+        print('  X', nume, 'HTTP', st, err(res))
+        if f == 1 and 'license' in err(res).lower():
+            print('\\n>>> Contul tau nu are licenta Gemini Enterprise activa pe', P)
             print('>>> Aloca-ti o licenta pe ACEST proiect, apoi ruleaza din nou.')
             raise SystemExit(1)
-print(f'bilant: creati {c}, existau deja {s}, esuati {f} (din {len(AGENTI)})')
-st, j = api('GET', A + '/agents?pageSize=200')
+print(f'bilant: creati {c}, existau {s}, esuati {f} (din {len(AGENTI)})')
+
+# 4. Dovada: lista finala citita din API.
+st, j = api('GET', ASST + '/agents?pageSize=200')
 L = [a.get('displayName') for a in j.get('agents', [])]
 print('LISTA DIN API (' + str(len(L)) + '):')
 for n in L:
