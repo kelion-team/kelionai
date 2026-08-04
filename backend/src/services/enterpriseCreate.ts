@@ -97,8 +97,20 @@ const ASTEPTARI_429_S = [ASTEPTARE_429_S, ASTEPTARE_429_S]
 const TERMEN_TOTAL_MS = 60 * 60_000
 const zabava = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/** CONDIȚIA DE UNICAT (ownerul, 4 aug: „să compare permanent lista și să ia
+ *  doar care nu e"): citește lista din consolă ACUM și spune dacă numele
+ *  există deja. Citirile nu stau sub quota de creare — sunt ieftine și dese. */
+async function existaInConsola(T: string, nume: string): Promise<boolean> {
+  const r = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
+  if (r.status !== 200) return false // necitibil ACUM → decizia o ia POST-ul (Google e ultimul arbitru)
+  return (((r.j.agents as { displayName?: string }[] | undefined) ?? []).some((x) => x.displayName === nume))
+}
+
 /** Creează UN agent, cu răbdare la quota de ritm: la 429 așteaptă și reîncearcă;
- *  orice alt răspuns se întoarce imediat (verbatim la eroare). */
+ *  orice alt răspuns se întoarce imediat (verbatim la eroare). ÎNAINTE de
+ *  fiecare încercare (prima și fiecare reîncercare de după așteptare) compară
+ *  lista din consolă — dacă agentul a apărut între timp, NU-l mai pune
+ *  (unicatul ownerului: zero dubluri, orice s-ar fi întâmplat pe drum). */
 async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) => void): Promise<RezCreare> {
   const corp = {
     displayName: ag.nume,
@@ -106,6 +118,10 @@ async function creeazaUnAgent(T: string, ag: AgentKelion, anunta: (pas: string) 
     a2aAgentDefinition: { jsonAgentCard: JSON.stringify(carteAgent(ag)) },
   }
   for (let i = 0; ; i++) {
+    if (await existaInConsola(T, ag.nume)) {
+      anunta(`„${ag.nume}" e DEJA în consolă — îl sar (condiția de unicat)`)
+      return { ok: true }
+    }
     cereriTrimise += 1
     const res = await api(T, 'POST', `${ASST}/agents`, corp)
     if (res.status === 200) ultimaReusita = `${ag.nume} (${new Date().toISOString().slice(11, 19)} UTC)`
