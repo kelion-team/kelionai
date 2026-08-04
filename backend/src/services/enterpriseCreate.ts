@@ -85,29 +85,25 @@ export async function creeazaAgentiEnterprise(email: string): Promise<RaportEnte
   const ex = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
   const cunoscuti = new Set(((ex.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => x.displayName))
 
-  // 3) Creează cei 33.
-  let creati = 0
-  let existau = 0
-  let esuati = 0
-  let primaEroare: string | undefined
-  for (const ag of ROSTER) {
-    if (cunoscuti.has(ag.nume)) {
-      existau++
-      continue
-    }
-    const card = carteAgent(ag)
-    const res = await api(T, 'POST', `${ASST}/agents`, {
-      displayName: ag.nume,
-      description: ag.rol,
-      a2aAgentDefinition: { jsonAgentCard: JSON.stringify(card) },
-    })
-    if (res.status === 200) {
-      creati++
-    } else {
-      esuati++
-      if (!primaEroare) primaEroare = `HTTP ${res.status}: ${mesajEroare(res.j)}`
-    }
-  }
+  // 3) Creează cei 33 — ÎN PARALEL. Secvențial (33 × ~1-2s) depășea timeout-ul
+  //    gateway-ului și pagina primea un 504 HTML („Unexpected token '<'", 4 aug).
+  //    În paralel durează ~2-5s. Idempotent: sar peste cei existenți.
+  const deCreat = ROSTER.filter((ag) => !cunoscuti.has(ag.nume))
+  const existau = ROSTER.length - deCreat.length
+  const rezultate = await Promise.all(
+    deCreat.map(async (ag) => {
+      const card = carteAgent(ag)
+      const res = await api(T, 'POST', `${ASST}/agents`, {
+        displayName: ag.nume,
+        description: ag.rol,
+        a2aAgentDefinition: { jsonAgentCard: JSON.stringify(card) },
+      })
+      return res.status === 200 ? { ok: true as const } : { ok: false as const, err: `HTTP ${res.status}: ${mesajEroare(res.j)}` }
+    }),
+  )
+  const creati = rezultate.filter((r) => r.ok).length
+  const esuati = rezultate.length - creati
+  const primaEroare = rezultate.find((r): r is { ok: false; err: string } => !r.ok)?.err
 
   // 4) Lista finală, citită din API (dovada).
   const fin = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
