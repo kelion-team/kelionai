@@ -3,6 +3,7 @@ import { normalizeLang } from './tts.js'
 import { googleServiceAccount } from './googleCreds.js'
 import { config } from '../config.js'
 import { localTranscribe, localVoskAvailable } from './localVosk.js'
+import { pcm16InWav, transcrieGemini } from './urecheGemini.js'
 
 // Shared Google Cloud Speech-to-Text v2 (chirp_3) transcription. ONE
 // implementation used by BOTH the session-gated /api/asr route (browser sends a
@@ -56,15 +57,30 @@ export interface TranscribeOpts {
 
 // ── GOOGLE-ONLY (OpenAI scos complet, Adrian 3 aug: „OpenAI scos din toată
 // aplicația") ────────────────────────────────────────────────────────────────
-// Rezerva OpenAI de STT (batch /v1/audio/transcriptions) a fost scoasă: dacă
-// serviciul Google nu e configurat sau apelul pică, întoarcem eroare (nu mai
-// cădem pe OpenAI). Serviciul Google (GOOGLE_SERVICE_ACCOUNT_JSON) e dovedit
-// live, deci calea normală rămâne Google chirp_3.
+// Rezerva OpenAI de STT a fost scoasă. În locul ei (Adrian, 3 aug seara:
+// „auzul trebuie să fie pe Gemini", după căderea Chirp cu PERMISSION_DENIED):
+// când Chirp refuză sau nu e configurat, auzul cade pe URECHEA GEMINI
+// (services/urecheGemini.ts — cheia GEMINI_API_KEY, fără cont de serviciu).
+
+/** Rezerva Gemini a căii batch: PCM se îmbracă în WAV, blobul de browser merge
+ *  cu mime-ul lui real. Eroarea Gemini se raportează NUMITĂ, nu mascată. */
+async function transcribeFallbackGemini(audio: string, opts: TranscribeOpts): Promise<TranscribeResult> {
+  const wav = opts.pcm
+    ? pcm16InWav(Buffer.from(audio, 'base64'), opts.pcm.sampleRateHertz, opts.pcm.channels ?? 1)
+    : null
+  const r = await transcrieGemini(
+    wav ? wav.toString('base64') : audio,
+    wav ? 'audio/wav' : (opts.mime ?? 'audio/webm'),
+    opts.langHint,
+  )
+  if (!r.ok) return { ok: false, status: 502, error: `asr_failed (gemini: ${r.error})` }
+  return { ok: true, lang: opts.langHint ?? null, transcript: r.transcript }
+}
 
 /**
- * Transcribe base64 audio cu Google STT v2 chirp_3 — SINGURA cale (OpenAI scos).
- * Fără service account → 503 asr_not_configured; dacă Google pică → 502
- * asr_failed. Typed result; no auth-gate/cost here (they stay with the caller).
+ * Transcribe base64 audio: întâi Google STT v2 chirp_3; dacă lipsește contul
+ * de serviciu sau Google refuză → urechea Gemini (fără IAM). Typed result;
+ * no auth-gate/cost here (they stay with the caller).
  */
 export async function transcribe(audioBase64: string, opts: TranscribeOpts = {}): Promise<TranscribeResult> {
   const audio = audioBase64.trim()
@@ -83,7 +99,7 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
   }
 
   const a = getAuth()
-  if (!a || !projectId) return { ok: false, status: 503, error: 'asr_not_configured' }
+  if (!a || !projectId) return transcribeFallbackGemini(audio, opts)
 
   const rawLang = (opts.langHint ?? '').trim()
   const langHint = /^[a-z]{2}(-[A-Za-z]{2})?$/.test(rawLang) ? normalizeLang(rawLang) : ''
@@ -119,8 +135,8 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
       }),
     })
     if (!res.ok) {
-      // Google a refuzat — fără rezervă OpenAI (scos): raportăm eroarea onest.
-      return { ok: false, status: 502, error: 'asr_failed' }
+      // Google a refuzat (ex: rol IAM pierdut) → urechea Gemini preia.
+      return transcribeFallbackGemini(audio, opts)
     }
     const j = (await res.json()) as {
       results?: { languageCode?: string; alternatives?: { transcript?: string }[] }[]
@@ -128,6 +144,6 @@ export async function transcribe(audioBase64: string, opts: TranscribeOpts = {})
     const r0 = j.results?.find((r) => r.alternatives?.[0]?.transcript)
     return { ok: true, lang: r0?.languageCode ?? null, transcript: r0?.alternatives?.[0]?.transcript ?? '' }
   } catch {
-    return { ok: false, status: 502, error: 'asr_failed' }
+    return transcribeFallbackGemini(audio, opts)
   }
 }
