@@ -19,7 +19,9 @@ import { config } from '../config.js'
 
 // Modelul Live (jumătatea-flash e cea rapidă). Suprascriibil prin env fără
 // deploy de cod — numele modelelor Live se mai schimbă.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest'
+// NOTĂ (4 aug 2026): Modelul 'gemini-1.5-flash-latest' a început să pice cu
+// eroare "not found". Schimbat la 'gemini-1.5-pro-latest' care pare mai stabil.
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-pro-latest'
 
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
