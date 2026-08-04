@@ -301,6 +301,18 @@ export async function initDb(): Promise<void> {
       continut TEXT NOT NULL,
       actualizat TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- AGENȚII ADĂUGAȚI DE OWNER din pagina de admin (Adrian, 4 aug: „când mai
+    -- vreau un model de agent să pot pune și să fie creat automat"). Se lipesc
+    -- la rosterul din cod (rosterViu) și intră automat pe /api/a2a și în
+    -- consola Enterprise la următorul ocol de creare.
+    CREATE TABLE IF NOT EXISTS agenti_custom (
+      id TEXT PRIMARY KEY,
+      nume TEXT NOT NULL,
+      rol TEXT NOT NULL,
+      efort TEXT,
+      doar_admin BOOLEAN NOT NULL DEFAULT false,
+      creat TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     -- The ledger of top-ups (+) and consumptions (−). The "ref" column makes
     -- top-ups idempotent: the same payment is never credited twice, no matter
     -- how many reads or retries overlap.
@@ -3889,6 +3901,46 @@ export async function rezumatPlati(): Promise<RezumatPlati | null> {
 // Structured, keyed, persistent — the working context he asked for. The tools
 // (memorie_pune / memorie_ia / memorie_lista) go through here. Content only;
 // no secrets (the secrets tools have their own guarded path).
+
+// ── AGENȚII CUSTOM AI OWNERULUI (4 aug: „să pot pune și să fie creat automat") ─
+
+/** Lista agenților adăugați din admin — formă identică cu rosterul din cod. */
+export async function listaAgentiCustom(): Promise<
+  { id: string; nume: string; rol: string; efort?: 'low' | 'high'; doarAdmin?: boolean }[]
+> {
+  if (!dbEnabled()) return []
+  const r = await getPool()
+    .query(`SELECT id, nume, rol, efort, doar_admin FROM agenti_custom ORDER BY creat`)
+    .catch(() => null)
+  return ((r?.rows ?? []) as { id: string; nume: string; rol: string; efort?: string; doar_admin?: boolean }[]).map((x) => ({
+    id: x.id,
+    nume: x.nume,
+    rol: x.rol,
+    efort: x.efort === 'high' ? 'high' : undefined,
+    doarAdmin: x.doar_admin === true ? true : undefined,
+  }))
+}
+
+/** Adaugă un agent custom. Întoarce null la succes sau motivul refuzului. */
+export async function adaugaAgentCustom(a: {
+  id: string
+  nume: string
+  rol: string
+  efort?: 'low' | 'high'
+  doarAdmin?: boolean
+}): Promise<string | null> {
+  if (!dbEnabled()) return 'baza de date nu e configurată'
+  const r = await getPool()
+    .query(
+      `INSERT INTO agenti_custom (id, nume, rol, efort, doar_admin) VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (id) DO NOTHING`,
+      [a.id, a.nume.slice(0, 80), a.rol.slice(0, 500), a.efort === 'high' ? 'high' : null, a.doarAdmin === true],
+    )
+    .catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
+  if (typeof r === 'string') return `scrierea a picat: ${r.slice(0, 150)}`
+  if (r && r.rowCount === 0) return `există deja un agent cu id-ul „${a.id}"`
+  return null
+}
 
 /** Write (upsert) a memory entry. Empty content DELETES the key — one verb,
  *  no separate delete tool for the model to fumble. */

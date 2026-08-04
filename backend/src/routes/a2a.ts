@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { ROSTER, gasesteAgent, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
+import { rosterViu, gasesteAgentViu, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
 import { getSessionUser } from '../session.js'
 
 // ── ENDPOINTUL AGENȚILOR A2A ────────────────────────────────────────────────
@@ -48,14 +48,18 @@ export function extrageText(body: Record<string, unknown>): string {
 
 export async function a2aRoutes(app: FastifyInstance): Promise<void> {
   // Registrul: dovada că agenții există și sunt accesibili (verificare live).
-  app.get('/api/a2a', async () => ({
-    count: ROSTER.length,
-    agents: ROSTER.map((a) => ({ id: a.id, nume: a.nume, rol: a.rol, url: `/api/a2a/${a.id}` })),
-  }))
+  // Rosterul VIU = codul + agenții puși de owner din admin (4 aug).
+  app.get('/api/a2a', async () => {
+    const roster = await rosterViu()
+    return {
+      count: roster.length,
+      agents: roster.map((a) => ({ id: a.id, nume: a.nume, rol: a.rol, url: `/api/a2a/${a.id}` })),
+    }
+  })
 
   // Cartea de descoperire A2A — și pe calea simplă, și pe calea .well-known.
   const cartea = async (req: FastifyRequest, reply: FastifyReply) => {
-    const a = gasesteAgent((req.params as { id: string }).id)
+    const a = await gasesteAgentViu((req.params as { id: string }).id)
     if (!a) {
       reply.code(404)
       return { error: 'agent necunoscut' }
@@ -67,7 +71,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
 
   // Endpointul care LUCREAZĂ.
   app.post('/api/a2a/:id', async (req, reply) => {
-    const a = gasesteAgent((req.params as { id: string }).id)
+    const a = await gasesteAgentViu((req.params as { id: string }).id)
     const body = (req.body ?? {}) as Record<string, unknown>
     const esteRpc = body.jsonrpc === '2.0' && typeof body.method === 'string'
 
