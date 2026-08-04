@@ -165,7 +165,7 @@ Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în consolă cu cont
      const txt=await r.text();
      let j; try{ j=JSON.parse(txt); }catch(_){ out.innerHTML='<span class=rau>Serverul a raspuns non-JSON (HTTP '+r.status+'). Reincearca peste cateva secunde. Inceput: '+txt.slice(0,120).replace(/</g,'&lt;')+'</span>'; b.disabled=false; return; }
      if(j.error){out.innerHTML='<span class=rau>Refuz: '+j.error+'</span>'; b.disabled=false; return;}
-     let s='Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
+     let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
      if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
      out.innerHTML=(j.ok?'<span class=ok>✅ GATA — cei 33 sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat — vezi mai jos.</span>\\n')+s;
    }catch(e){out.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
