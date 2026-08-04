@@ -1235,6 +1235,26 @@ export default function ChatPanel({
   const micStartingRef = useRef(false)
   const micRetryRef = useRef<number | null>(null)
   const micBackoffRef = useRef(1000)
+  // THE EAR COMES BACK BY ITSELF (4 Aug — the day of 4 server restarts): once the
+  // voice session degraded to batch dictation, the 90s unlatch in ensureMic was
+  // DEAD CODE — ensureMic returns at its first line while the batch mic handle
+  // exists, so full-duplex never returned without a manual page refresh (the
+  // chat message even promised it would). This timer breaks that guard: after
+  // the cooldowns expire it stops the batch mic, re-arms streaming candidacy
+  // and calls ensureMic — if the server is back, full-duplex resumes; if not,
+  // the failure cascade re-arms the timer and we retry every ~100s forever.
+  const upgradeTimerRef = useRef<number | null>(null)
+  const armVoiceUpgrade = (): void => {
+    if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
+    upgradeTimerRef.current = window.setTimeout(() => {
+      upgradeTimerRef.current = null
+      if (micManualOffRef.current || micStartingRef.current) return
+      streamModeRef.current = true // streaming dictation becomes a candidate again
+      micRef.current?.stop() // release the batch ear so ensureMic's guard opens
+      micRef.current = null
+      void ensureMicRef.current()
+    }, REALTIME_RECOVER_MS + 10_000) // 100s > ear cooldown (60s) and > latch (90s)
+  }
   // "VOICE PER SENTENCE" — TRIED AND ROLLED BACK (Jul 25): it closed the paid session
   // after every exchange + reopened it by itself on local speech detection
   // (`speechWake.ts`). Two real regressions on the same day (it cut the sentence after 2
@@ -1572,6 +1592,9 @@ export default function ChatPanel({
             if (reason === 'ws' || reason === 'failed' || reason === 'silent' || reason === 'unsupported') {
               // streaming doesn't work → switch to batch for the rest of the session
               streamModeRef.current = false
+              // …but NOT forever (4 Aug): after the cooldowns pass, try to come
+              // back to the full voice by itself — see armVoiceUpgrade above.
+              armVoiceUpgrade()
               micRef.current?.stop()
               micRef.current = null
               setListening(false)
@@ -1732,6 +1755,7 @@ export default function ChatPanel({
       window.clearTimeout(armFallback)
       document.removeEventListener('visibilitychange', onVisible)
       if (micRetryRef.current) window.clearTimeout(micRetryRef.current)
+      if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
       micRef.current?.stop()
       micRef.current = null
       coalescerRef.current?.cancel()
