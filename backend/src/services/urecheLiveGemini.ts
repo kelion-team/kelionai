@@ -19,13 +19,13 @@ import { config } from '../config.js'
 
 // Modelul Live (bidiGenerateContent). Suprascriibil prin env fără deploy —
 // numele modelelor Live se schimbă des.
-// NOTĂ (4 aug 2026): 'gemini-1.5-*' au fost SCOASE de Google (măsurat: 404 pe
-// cheia ownerului, iar sesiunea Live se închidea cu cod 1008 „not supported for
-// bidiGenerateContent"), deci full-duplex era PICAT. Am întrebat API-ul ce
-// modele suportă bidiGenerateContent și am probat pe viu sesiunea Live: singurul
-// model Live general care deschide sesiunea e 'gemini-3.1-flash-live-preview'
-// (cel mai nou), DAR cere responseModalities:['AUDIO'] (cu TEXT dă cod 1007).
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview'
+// NOTĂ (4 aug 2026): 'gemini-1.5-*' au fost SCOASE de Google (măsurat: 404, cod
+// 1008 „not supported for bidiGenerateContent") → full-duplex era PICAT.
+// NU EXISTĂ model „3.6 Live" — Google n-a scos unul (măsurat: 3.6 e refuzat pe
+// bidiGenerateContent). Modelele Live de pe cheie: 2.5-native-audio și 3.1.
+// Owner (4 aug): „fără 3.1" → urechea rămâne pe 2.5-native-audio (dec. 2025),
+// singurul non-3.1. Cere responseModalities:['AUDIO']; citim doar transcrierea.
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
 
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */

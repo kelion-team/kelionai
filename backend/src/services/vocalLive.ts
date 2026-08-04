@@ -18,11 +18,11 @@
 import WebSocket from 'ws'
 import { config } from '../config.js'
 
-// MODELUL Live. Implicit = native-audio (dec. 2025): voce NATURALĂ (emoție/ton)
-// și, la sursa oficială, permite apel de unealtă NON_BLOCKING (Kelion vorbește
-// în timp ce unealta rulează — fără tăcere). Alternativa: 'gemini-3.1-flash-
-// live-preview' (generație mai nouă ca număr, DAR unealta blochează — tăcere
-// până vine rezultatul). Ambele pe variabilă → se aleg CU URECHEA, fără cod.
+// MODELUL Live. NU există „3.6 Live" (Google n-a scos unul — măsurat: 3.6 e
+// refuzat pe bidiGenerateContent). Owner (4 aug): „fără 3.1" → folosim
+// native-audio (dec. 2025): voce NATURALĂ (emoție/ton) + apel de unealtă
+// NON_BLOCKING (Kelion vorbește în timp ce unealta rulează). Pe variabilă
+// (VOCAL_LIVE_MODEL) → o linie de schimbat când Google scoate un Live mai nou.
 export const VOCAL_LIVE_MODEL = process.env.VOCAL_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
 // Voce MASCULINĂ implicită (măsurat: acceptată). Owner o poate schimba din env
 // (Puck / Charon / Fenrir / Orus sunt toate acceptate) după ce o ascultă.
