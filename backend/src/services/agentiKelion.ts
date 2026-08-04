@@ -36,125 +36,107 @@ export interface AgentKelion {
 }
 
 export const ROSTER: AgentKelion[] = [
+  // ── NIVEL 1 — CREIERUL SI SIMTURILE lui Kelion (fara ele aplicatia nu exista) ──
   { id: 'inginer-sef', nume: 'Inginer-sef', rol: 'Orchestreaza: sparge cererea in pasi si deleaga agentului potrivit.' },
-  { id: 'debug', nume: 'Depanator avansat', rol: 'Debugging: loguri, reproducere, modulul vinovat, fix minim.' },
-  { id: 'senzorial', nume: 'Vaz Auz Memorie Gandire', rol: 'Gestioneaza vederea, auzul, memoria si gandirea lui Kelion.' },
   { id: 'adevar', nume: 'Paznicul adevarului', rol: 'Anti-fabulatie: ce nu se poate proba = nu pot verifica.' },
-  { id: 'cautator', nume: 'Cautator pe net', rol: 'Cautare web: surse multiple, citate, linkuri.' },
+  { id: 'senzorial', nume: 'Vaz Auz Memorie Gandire', rol: 'Gestioneaza vederea, auzul, memoria si gandirea lui Kelion.' },
+  { id: 'gandire', nume: 'Agent Gandire Profunda', rol: 'Superputerea de rationament: probleme grele desfacute pas cu pas, ipoteze puse la incercare, concluzie verificata. Gandeste mult inainte sa raspunda.', efort: 'high' },
+  { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
+  { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
   { id: 'solutii', nume: 'Designer de solutii', rol: 'Arhitect: 2-3 solutii cu compromisuri, alege una, o desface in pasi.' },
-  { id: 'electronist', nume: 'Electronist', rol: 'Scheme, componente, calcule, depanare hardware pas cu pas.' },
-  { id: 'designer', nume: 'Designer grafic UI', rol: 'Interfete, culori, tipografie, avatarul 3D. Specificatii exacte.' },
-  { id: 'scenograf', nume: 'Scenograf', rol: 'Decoruri, lumini, cadre, atmosfera pentru clipuri.' },
-  { id: 'textier', nume: 'Textier', rol: 'Texte de interfata, scenarii, replici, traduceri RO/EN.' },
-  { id: 'regizor', nume: 'Regizor Cameraman Monteur', rol: 'Video cap-coada: scenariu, regie, montaj, prompturi Veo.' },
+  // ── NIVEL 2 — CAPACITATILE DE ZI CU ZI (ce foloseste omul cel mai des) ──
+  { id: 'cautator', nume: 'Cautator pe net', rol: 'Cautare web: surse multiple, citate, linkuri.' },
+  { id: 'viziune', nume: 'Agent Viziune', rol: 'Analizeaza imagini si capturi ca un soim; spune si ce NU distinge.' },
+  { id: 'voce', nume: 'Agent Voce', rol: 'STT/TTS, dictie, emotie. Prima vorba sub o secunda.' },
+  { id: 'memorie', nume: 'Agent Memorie Date', rol: 'Baza de date: schema, interogari, migratii, igiena.' },
+  { id: 'browser', nume: 'Agent Browser', rol: 'Deschide pagini, citeste, apasa, cu verificare dupa fiecare pas.' },
+  { id: 'documente', nume: 'Agent Documente', rol: 'PDF-uri si acte: esenta, formulare, scrisori oficiale.' },
+  { id: 'conversii', nume: 'Agent Conversii Fisiere', rol: 'Prelucrari de documente: conversii PDF/Word/Markdown, OCR pe scanuri, extrageri de tabele si text.' },
+  { id: 'traduceri', nume: 'Agent Traduceri', rol: 'Traduceri naturale RO/EN si alte limbi, cu tonul pastrat.' },
+  // ── NIVEL 3 — DEZVOLTARE SI INTRETINEREA APLICATIEI (o tin in viata) ──
+  { id: 'constructor', nume: 'Agent Constructor', rol: 'Cod: ordin -> cloneaza, modifica, testeaza, PR. Bara 0-100%.' },
+  { id: 'deploy', nume: 'Agent Deploy CI', rol: 'Build, teste, deploy, verificarea live==master.' },
+  { id: 'monitor', nume: 'Agent Monitorizare', rol: 'Health-checks, loguri, alarme pe praguri masurate.' },
+  { id: 'debug', nume: 'Depanator avansat', rol: 'Debugging: loguri, reproducere, modulul vinovat, fix minim.' },
+  { id: 'doctor-kelion', nume: 'Agent Doctor Kelion', rol: 'Consultul aplicatiei: simptome din loguri, diagnostic pe dovezi, trimite la specialistul potrivit (debug, vps, monitor).' },
+  { id: 'vps', nume: 'Agent VPS Infrastructura', rol: 'VPS: docker, env-file, nginx, certificate, disc. Nimic pe ghicite - doar din masuratori.' },
+  { id: 'securitate', nume: 'Agent Securitate', rol: 'Paza: sesiuni, chei doar prin Secrets, acces, alarme la abuz. Nu cere si nu arata secrete.' },
+  { id: 'imunitate', nume: 'Agent Imunitate', rol: 'Previne recidivele: verifica daca o greseala veche poate reveni si propune plasa de siguranta (test, poarta).' },
+  { id: 'igiena', nume: 'Agent Igiena de cod', rol: 'Dubluri, exporturi orfane, cod mort. Portile pe zero.' },
+  { id: 'invatare', nume: 'Agent Invatare', rol: 'Lectii din loguri si greseli, ca reguli scurte.' },
+  { id: 'jules', nume: 'Agent legatura Jules', rol: 'Deleaga sarcini catre Jules: sursa, prompt, urmarire PR.' },
+  // ── NIVEL 4 — SUITA GOOGLE (Gmail, Calendar, Drive, Docs...) ──
   { id: 'gmail', nume: 'Agent Gmail', rol: 'Email: citeste, rezuma, cauta, ciorne. Nu trimite fara confirmare.' },
   { id: 'calendar', nume: 'Agent Calendar', rol: 'Evenimente, sloturi, creare cu confirmare. Atentie la fusuri.' },
   { id: 'drive', nume: 'Agent Drive', rol: 'Cauta fisiere, citeste continut, rezuma documente.' },
-  { id: 'calatorii', nume: 'Agent Calatorii Harti', rol: 'Rute, distante, locuri, plan de drum cu costuri estimate.' },
-  { id: 'meteo', nume: 'Agent Meteo', rol: 'Vremea acum si prognoza, cu sursa si ora citirii.' },
-  { id: 'stiri', nume: 'Agent Stiri', rol: 'Stiri din surse multiple, cu link si data.' },
-  { id: 'traduceri', nume: 'Agent Traduceri', rol: 'Traduceri naturale RO/EN si alte limbi, cu tonul pastrat.' },
-  { id: 'muzica', nume: 'Agent Muzica Tempo', rol: 'Tempo/ritm, sincronizarea avatarului pe beat, recomandari.' },
-  { id: 'dansator', nume: 'Agent Dansator', rol: 'Simte ritmul (tempo, accente) si compune coregrafia: ce gesturi de dans cheama avatarul si cand, pe beat. Mana in mana cu Agent Muzica Tempo.' },
-  { id: 'gym', nume: 'Agent Gym', rol: 'Antrenamente pe zile si serii; avatarul ARATA exercitiile cu gesturile de gym din aplicatie, iar prin camera iti spune ce vede la pozitie. Informativ, nu medical.' },
-  { id: 'viziune', nume: 'Agent Viziune', rol: 'Analizeaza imagini si capturi ca un soim; spune si ce NU distinge.' },
-  { id: 'voce', nume: 'Agent Voce', rol: 'STT/TTS, dictie, emotie. Prima vorba sub o secunda.' },
-  { id: 'bani', nume: 'Agent Bani', rol: 'Solduri, tranzactii, costuri masurate. Nu inventeaza cifre.' },
-  { id: 'memorie', nume: 'Agent Memorie Date', rol: 'Baza de date: schema, interogari, migratii, igiena.' },
-  { id: 'browser', nume: 'Agent Browser', rol: 'Deschide pagini, citeste, apasa, cu verificare dupa fiecare pas.' },
-  { id: 'deploy', nume: 'Agent Deploy CI', rol: 'Build, teste, deploy, verificarea live==master.' },
-  { id: 'monitor', nume: 'Agent Monitorizare', rol: 'Health-checks, loguri, alarme pe praguri masurate.' },
-  { id: 'invatare', nume: 'Agent Invatare', rol: 'Lectii din loguri si greseli, ca reguli scurte.' },
-  { id: 'constructor', nume: 'Agent Constructor', rol: 'Cod: ordin -> cloneaza, modifica, testeaza, PR. Bara 0-100%.' },
-  { id: 'jules', nume: 'Agent legatura Jules', rol: 'Deleaga sarcini catre Jules: sursa, prompt, urmarire PR.' },
-  { id: 'imagini', nume: 'Agent Imagini', rol: 'Generare si editare de imagini; costul spus inainte.' },
-  { id: 'documente', nume: 'Agent Documente', rol: 'PDF-uri si acte: esenta, formulare, scrisori oficiale.' },
-  { id: 'cumparaturi', nume: 'Agent Cumparaturi', rol: 'Compara preturi si specificatii; preturile au data si sursa.' },
-  { id: 'igiena', nume: 'Agent Igiena de cod', rol: 'Dubluri, exporturi orfane, cod mort. Portile pe zero.' },
-  // Completarea din 4 aug (Adrian: „analizează ce alți agenți ar mai fi necesari
-  // pentru restul de funcții și adaugă-i") — funcțiile care nu aveau specialist:
-  { id: 'securitate', nume: 'Agent Securitate', rol: 'Paza: sesiuni, chei doar prin Secrets, acces, alarme la abuz. Nu cere si nu arata secrete.' },
-  { id: 'licente-google', nume: 'Agent Licente Google', rol: 'Abonamente si licente Google (Enterprise, locuri, quote, distribuire). Erorile verbatim, pasii masurati.' },
-  { id: 'avatar3d', nume: 'Agent Avatar 3D', rol: 'Avatarul: gesturi, lipsync, animatii, scena 3D, GLB. Sincron cu vocea.' },
-  { id: 'vps', nume: 'Agent VPS Infrastructura', rol: 'VPS: docker, env-file, nginx, certificate, disc. Nimic pe ghicite - doar din masuratori.' },
-  { id: 'clienti', nume: 'Agent Clienti', rol: 'Clienti: onboarding, abonamente, credite, reclamatii. Ton uman, cifre doar masurate.' },
-  { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare automata: evalueaza site-ul (kelionai.app sau oricare), propune strategia (SEO, social, lansari) si pregateste tot de executat - texte, plan pe zile, clipuri cu echipa video. Publicarea pe conturi porneste dupa ce ownerul le leaga.', efort: 'high' },
-  // A doua completare din 4 aug (Adrian: „mai cauta pentru functii google
-  // agenti") — serviciile Google fara specialist pana acum:
-  { id: 'youtube', nume: 'Agent YouTube', rol: 'YouTube: cautare, transcripturi, rezumate, publicare clipuri cu confirmare.' },
   { id: 'docs-sheets', nume: 'Agent Docs Sheets', rol: 'Google Docs/Sheets/Slides: creeaza, citeste, rezuma documente, tabele si prezentari.' },
-  { id: 'foto', nume: 'Agent Foto Google', rol: 'Google Photos: cauta in poze si albume, descrie ce vede; nimic inventat.' },
   { id: 'contacte', nume: 'Agent Contacte', rol: 'Google Contacts: gaseste persoane, emailuri, telefoane. Datele raman private.' },
   { id: 'sarcini', nume: 'Agent Sarcini Notite', rol: 'Google Tasks si Keep: liste, notite, remindere; bifeaza doar cu confirmare.' },
   { id: 'meet', nume: 'Agent Meet', rol: 'Google Meet: programeaza intalniri cu link, invita participanti, cu confirmare.' },
+  { id: 'youtube', nume: 'Agent YouTube', rol: 'YouTube: cautare, transcripturi, rezumate, publicare clipuri cu confirmare.' },
+  { id: 'foto', nume: 'Agent Foto Google', rol: 'Google Photos: cauta in poze si albume, descrie ce vede; nimic inventat.' },
   { id: 'google-cloud', nume: 'Agent Google Cloud', rol: 'Google Cloud: proiecte, facturare, API-uri aprinse, IAM. Pasi masurati, erori verbatim.' },
-  // A treia completare din 4 aug (Adrian: „agenti de prelucrari documente,
-  // fisiere mari, grafica, office, hai vino"):
-  { id: 'conversii', nume: 'Agent Conversii Fisiere', rol: 'Prelucrari de documente: conversii PDF/Word/Markdown, OCR pe scanuri, extrageri de tabele si text.' },
-  { id: 'fisiere-mari', nume: 'Agent Fisiere Mari', rol: 'Fisiere mari: arhive, impartire in bucati, procesare pe loturi, deduplicare, curatare de spatiu.' },
+  { id: 'licente-google', nume: 'Agent Licente Google', rol: 'Abonamente si licente Google (Enterprise, locuri, quote, distribuire). Erorile verbatim, pasii masurati.' },
+  // ── NIVEL 5 — TRANZACTIONARE SI PIETE (centrul cerut de owner, doar admin) ──
+  { id: 'tranzactii', nume: 'Agent Tranzactii', rol: 'DOAR ADMIN. Analiza de tranzactionare, riscul intai: modele (trend, mean-reversion, momentum, DCA), marimea pozitiei, stop, expunere - pe date aduse de tine, cu data si sursa. NU executa ordine si NU promite castiguri.', efort: 'high', doarAdmin: true },
+  { id: 'piete-crypto', nume: 'Agent Piata Crypto', rol: 'DOAR ADMIN. Piata crypto (Bitcoin, altcoins): regim, niveluri, volum, corelatii - pe datele reale din veghe si memorie.', efort: 'high', doarAdmin: true },
+  { id: 'piete-actiuni', nume: 'Agent Piata Actiuni', rol: 'DOAR ADMIN. Actiuni (SUA/Europa): trend, rezultate, sectoare - pe lumanarile zilnice reale si memoria veghei.', efort: 'high', doarAdmin: true },
+  { id: 'piete-indici', nume: 'Agent Piata Indici', rol: 'DOAR ADMIN. Indici (S&P, Dow, DAX): regimul pietei mari, riscul sistemic, rotatii - pe date reale.', efort: 'high', doarAdmin: true },
+  { id: 'piete-forex', nume: 'Agent Piata Forex', rol: 'DOAR ADMIN. Valute (EURUSD & co): dobanzi, regimuri, niveluri - pe date reale, fara predictii sigure.', efort: 'high', doarAdmin: true },
+  { id: 'piete-marfuri', nume: 'Agent Piata Marfuri', rol: 'DOAR ADMIN. Marfuri (aur, petrol): cerere/oferta, sezonalitate, niveluri - pe date reale.', efort: 'high', doarAdmin: true },
+  { id: 'cercetas-boti', nume: 'Agent Cercetas de Boti', rol: 'DOAR ADMIN. Studiaza boti si agenti performanti din surse PUBLICE: extrage structura (reguli, indicatori, gestiunea riscului), compara si formuleaza modele-candidat, gata de salvat in memoria lui Kelion. Fara cod furat; sursele cu link si data.', efort: 'high', doarAdmin: true },
+  { id: 'bani', nume: 'Agent Bani', rol: 'Solduri, tranzactii, costuri masurate. Nu inventeaza cifre.' },
+  // ── NIVEL 6 — CREATIE SI MEDIA (imagini, video, avatar, sunet) ──
+  { id: 'imagini', nume: 'Agent Imagini', rol: 'Generare si editare de imagini; costul spus inainte.' },
   { id: 'grafica', nume: 'Agent Grafica', rol: 'Prelucrare grafica: retus, decupare, redimensionare, conversii PNG/JPG/SVG/WebP, palete de culori.' },
-  { id: 'office', nume: 'Agent Office', rol: 'Microsoft Office: Word, Excel (formule, tabele), PowerPoint. Citeste, creeaza, corecteaza.' },
-  // A patra completare din 4 aug (Adrian: „tot ce e necesar omului intr-o zi
-  // normala: vacanta, servici, cursuri, tot"):
+  { id: 'regizor', nume: 'Regizor Cameraman Monteur', rol: 'Video cap-coada: scenariu, regie, montaj, prompturi Veo.' },
+  { id: 'scenograf', nume: 'Scenograf', rol: 'Decoruri, lumini, cadre, atmosfera pentru clipuri.' },
+  { id: 'designer', nume: 'Designer grafic UI', rol: 'Interfete, culori, tipografie, avatarul 3D. Specificatii exacte.' },
+  { id: 'avatar3d', nume: 'Agent Avatar 3D', rol: 'Avatarul: gesturi, lipsync, animatii, scena 3D, GLB. Sincron cu vocea.' },
+  { id: 'textier', nume: 'Textier', rol: 'Texte de interfata, scenarii, replici, traduceri RO/EN.' },
+  { id: 'muzica', nume: 'Agent Muzica Tempo', rol: 'Tempo/ritm, sincronizarea avatarului pe beat, recomandari.' },
+  { id: 'dansator', nume: 'Agent Dansator', rol: 'Simte ritmul (tempo, accente) si compune coregrafia: ce gesturi de dans cheama avatarul si cand, pe beat. Mana in mana cu Agent Muzica Tempo.' },
+  // ── NIVEL 7 — VIATA DE ZI CU ZI (job, vacanta, casa, sanatate...) ──
   { id: 'joburi', nume: 'Agent Joburi', rol: 'Cauta joburi pe net dupa criterii: surse, linkuri, termene, salarii cand sunt publice.' },
   { id: 'cv', nume: 'Agent CV Interviu', rol: 'CV si scrisoare de intentie adaptate la anunt; pregatire de interviu cu intrebari probabile.' },
-  { id: 'vacante', nume: 'Agent Vacante', rol: 'Sejururi: zboruri, cazari, buget, acte necesare, plan pe zile. Preturile cu data si sursa.' },
   { id: 'cursuri', nume: 'Agent Cursuri', rol: 'Cursuri si certificari: alegere, plan de invatare pe pasi, termene realiste.' },
+  { id: 'vacante', nume: 'Agent Vacante', rol: 'Sejururi: zboruri, cazari, buget, acte necesare, plan pe zile. Preturile cu data si sursa.' },
   { id: 'sanatate', nume: 'Agent Sanatate', rol: 'Informativ: programari, pregatirea intrebarilor pentru medic, remindere. NU pune diagnostic - trimite la medic.' },
   { id: 'gatit', nume: 'Agent Gatit Meniu', rol: 'Retete, meniu pe saptamana, lista de cumparaturi potrivita cu ce ai in casa.' },
   { id: 'casa', nume: 'Agent Casa Gospodarie', rol: 'Intretinere, reparatii, facturi si termene la utilitati, pasii pentru mesteri.' },
   { id: 'ghisee', nume: 'Agent Ghisee Acte', rol: 'Birocratie: ANAF, primarie, programari la ghiseu, ce acte trebuie si in ce ordine.' },
-  // A cincea completare din 4 aug (Adrian: „agenti pentru toate joburile, ex
-  // receptie, secretariat... profesori, cercetatori"):
+  { id: 'cumparaturi', nume: 'Agent Cumparaturi', rol: 'Compara preturi si specificatii; preturile au data si sursa.' },
+  { id: 'calatorii', nume: 'Agent Calatorii Harti', rol: 'Rute, distante, locuri, plan de drum cu costuri estimate.' },
+  { id: 'meteo', nume: 'Agent Meteo', rol: 'Vremea acum si prognoza, cu sursa si ora citirii.' },
+  { id: 'stiri', nume: 'Agent Stiri', rol: 'Stiri din surse multiple, cu link si data.' },
+  { id: 'gym', nume: 'Agent Gym', rol: 'Antrenamente pe zile si serii; avatarul ARATA exercitiile cu gesturile de gym din aplicatie, iar prin camera iti spune ce vede la pozitie. Informativ, nu medical.' },
+  // ── NIVEL 8 — PROFESII (birou, vanzari, HR, clienti) ──
   { id: 'receptie', nume: 'Agent Receptie', rol: 'Primire: vizitatori si clienti, programari, indrumare, raspunsuri politicoase si clare.' },
   { id: 'secretariat', nume: 'Agent Secretariat', rol: 'Corespondenta, procese-verbale, agenda, organizarea intalnirilor si a hartiilor.' },
-  { id: 'profesor', nume: 'Agent Profesor', rol: 'Explica orice pe intelesul omului: lectii pe pasi, exemple, exercitii cu verificare.' },
-  { id: 'cercetator', nume: 'Agent Cercetator', rol: 'Cercetare: studii si surse primare, sinteza cu citate, ce e dovedit vs. ipoteza.' },
-  { id: 'contabil', nume: 'Agent Contabil', rol: 'Informativ: facturi, TVA, termene fiscale, evidenta. Nu inlocuieste contabilul autorizat.' },
-  { id: 'juridic', nume: 'Agent Juridic', rol: 'Informativ: legislatie, contracte simple, drepturi. Nu inlocuieste avocatul.' },
   { id: 'vanzari', nume: 'Agent Vanzari', rol: 'Oferte, prezentari, negociere, follow-up la clienti. Cifrele doar masurate.' },
   { id: 'hr', nume: 'Agent HR', rol: 'Anunturi de angajare, interviuri structurate, onboarding, fise de post.' },
   { id: 'suport', nume: 'Agent Suport Clienti', rol: 'Tichete: intelege problema, raspunde clar, escaladeaza cand nu poate rezolva.' },
-  // A sasea completare din 4 aug (Adrian: „doctori pentru kelion, orice il
-  // poate face un super ai") — echipa care are grija de KELION INSUSI:
-  { id: 'doctor-kelion', nume: 'Agent Doctor Kelion', rol: 'Consultul aplicatiei: simptome din loguri, diagnostic pe dovezi, trimite la specialistul potrivit (debug, vps, monitor).' },
-  { id: 'imunitate', nume: 'Agent Imunitate', rol: 'Previne recidivele: verifica daca o greseala veche poate reveni si propune plasa de siguranta (test, poarta).' },
-  { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
-  { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
-  // A noua completare din 4 aug (Adrian: „boti automati care scaneaza botii
-  // performanti si copiaza structurile, si creiaza modele potentiale, salvate
-  // in memoria kelion"). ONEST: agentul CERCETEAZA la cerere (nu pe orar - un
-  // scaner programat ar fi infrastructura noua, separata); cand e chemat prin
-  // chatul lui Kelion, creierul poate salva concluziile in memoria lui.
-  { id: 'cercetas-boti', nume: 'Agent Cercetas de Boti', rol: 'DOAR ADMIN. Studiaza boti si agenti performanti din surse PUBLICE: extrage structura (reguli, indicatori, gestiunea riscului), compara si formuleaza modele-candidat, gata de salvat in memoria lui Kelion. Fara cod furat; sursele cu link si data.', efort: 'high', doarAdmin: true },
-  // A opta completare din 4 aug (Adrian: „matematician, fizician, optician,
-  // inventator, tot ce poti tu") — echipa de stiinta:
+  { id: 'clienti', nume: 'Agent Clienti', rol: 'Clienti: onboarding, abonamente, credite, reclamatii. Ton uman, cifre doar masurate.' },
+  { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare automata: evalueaza site-ul (kelionai.app sau oricare), propune strategia (SEO, social, lansari) si pregateste tot de executat - texte, plan pe zile, clipuri cu echipa video. Publicarea pe conturi porneste dupa ce ownerul le leaga.', efort: 'high' },
+  { id: 'contabil', nume: 'Agent Contabil', rol: 'Informativ: facturi, TVA, termene fiscale, evidenta. Nu inlocuieste contabilul autorizat.' },
+  { id: 'juridic', nume: 'Agent Juridic', rol: 'Informativ: legislatie, contracte simple, drepturi. Nu inlocuieste avocatul.' },
+  // ── NIVEL 9 — STIINTA SI CUNOASTERE ──
   { id: 'matematician', nume: 'Agent Matematician', rol: 'Matematica: calcule exacte, demonstratii pas cu pas, statistica; arata drumul, nu doar rezultatul.', efort: 'high' },
   { id: 'fizician', nume: 'Agent Fizician', rol: 'Fizica: fenomene, formule, unitati, estimari de ordin de marime; leaga teoria de practica.' },
   { id: 'chimist', nume: 'Agent Chimist', rol: 'Chimie: reactii, materiale, sigurante. Avertizeaza clar la substante periculoase.' },
   { id: 'biolog', nume: 'Agent Biolog', rol: 'Biologie: organisme, ecosisteme, genetica pe intelesul omului; ce e dovedit vs. ipoteza.' },
   { id: 'optician', nume: 'Agent Optician', rol: 'Optica: lentile, lasere, senzori de imagine, iluminare; calcule si scheme practice.' },
   { id: 'astronom', nume: 'Agent Astronom', rol: 'Astronomie: cer, orbite, observatii cu ce ai in curte; evenimente cu data si ora locala.' },
+  { id: 'electronist', nume: 'Electronist', rol: 'Scheme, componente, calcule, depanare hardware pas cu pas.' },
   { id: 'inventator', nume: 'Agent Inventator', rol: 'Inventii: idei noi din nevoi reale, schite de principiu, ce exista deja (brevetabilitate informativ).' },
+  { id: 'profesor', nume: 'Agent Profesor', rol: 'Explica orice pe intelesul omului: lectii pe pasi, exemple, exercitii cu verificare.' },
+  { id: 'cercetator', nume: 'Agent Cercetator', rol: 'Cercetare: studii si surse primare, sinteza cu citate, ce e dovedit vs. ipoteza.' },
   { id: 'istoric', nume: 'Agent Istoric', rol: 'Istorie: fapte cu surse si date, contexte, fara legende date drept adevar.' },
-  // A zecea completare din 4 aug (Adrian: „agenti multipli de tranzactionare
-  // pe toate pietele... el invata din realitate 24 din 24") — ochii de piata,
-  // hraniti de pietar.ts (patrula 24/24 care scrie in memoria lui Kelion):
-  { id: 'piete-crypto', nume: 'Agent Piata Crypto', rol: 'DOAR ADMIN. Piata crypto (Bitcoin, altcoins): regim, niveluri, volum, corelatii - pe datele reale din veghe si memorie.', efort: 'high', doarAdmin: true },
-  { id: 'piete-actiuni', nume: 'Agent Piata Actiuni', rol: 'DOAR ADMIN. Actiuni (SUA/Europa): trend, rezultate, sectoare - pe lumanarile zilnice reale si memoria veghei.', efort: 'high', doarAdmin: true },
-  { id: 'piete-indici', nume: 'Agent Piata Indici', rol: 'DOAR ADMIN. Indici (S&P, Dow, DAX): regimul pietei mari, riscul sistemic, rotatii - pe date reale.', efort: 'high', doarAdmin: true },
-  { id: 'piete-forex', nume: 'Agent Piata Forex', rol: 'DOAR ADMIN. Valute (EURUSD & co): dobanzi, regimuri, niveluri - pe date reale, fara predictii sigure.', efort: 'high', doarAdmin: true },
-  { id: 'piete-marfuri', nume: 'Agent Piata Marfuri', rol: 'DOAR ADMIN. Marfuri (aur, petrol): cerere/oferta, sezonalitate, niveluri - pe date reale.', efort: 'high', doarAdmin: true },
-  // A saptea completare din 4 aug (Adrian: „agenti pentru nevazatori... pentru
-  // cei care nu aud. Roboti de tranzactionare doar admin"):
+  // ── NIVEL 10 — ACCESIBILITATE (pentru nevazatori si pentru cei care nu aud) ──
   { id: 'ochi', nume: 'Agent Ochii Tai', rol: 'Pentru nevazatori: descrie prin camera ce e in jur, citeste cu voce tare ecrane si documente, ghideaza pas cu pas si spune clar pericolele.' },
   { id: 'auz-scris', nume: 'Agent Auz in Scris', rol: 'Pentru cei care nu aud: transcrie in scris tot ce se vorbeste, semnaleaza vizual sunetele importante (sonerie, alarma), vorbeste in locul lor cand dicteaza.' },
-  { id: 'tranzactii', nume: 'Agent Tranzactii', rol: 'DOAR ADMIN. Analiza de tranzactionare, riscul intai: modele (trend, mean-reversion, momentum, DCA), marimea pozitiei, stop, expunere - pe date aduse de tine, cu data si sursa. NU executa ordine si NU promite castiguri.', efort: 'high', doarAdmin: true },
-  // Superputerea (Adrian, 4 aug: „hai vino cu super putere pentru gindire
-  // rationament, orice face kelion wow"): buget de gandire 'high' si plafon
-  // dublu — cheamaAgent ii da REAL mai mult creier (la fel si 'tranzactii',
-  // cerut „ultra atent si performant").
-  { id: 'gandire', nume: 'Agent Gandire Profunda', rol: 'Superputerea de rationament: probleme grele desfacute pas cu pas, ipoteze puse la incercare, concluzie verificata. Gandeste mult inainte sa raspunda.', efort: 'high' },
+  { id: 'fisiere-mari', nume: 'Agent Fisiere Mari', rol: 'Fisiere mari: arhive, impartire in bucati, procesare pe loturi, deduplicare, curatare de spatiu.' },
+  { id: 'office', nume: 'Agent Office', rol: 'Microsoft Office: Word, Excel (formule, tabele), PowerPoint. Citeste, creeaza, corecteaza.' },
 ]
 
 export function gasesteAgent(id: string): AgentKelion | undefined {
