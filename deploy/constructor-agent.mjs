@@ -216,26 +216,78 @@ function toolWrite(p, content) {
   return `scris: ${p} (${content.length} caractere)`
 }
 // EDIT PUNCTUAL — plasa reală împotriva truncherii de mai sus: modelul dă doar
-// textul vechi (exact) și textul nou. Cerem potrivire UNICĂ, ca să nu schimbe
-// din greșeală altă apariție (fără diff-uri fuzzy, fără petice oarbe).
+// textul vechi și textul nou. Cerem potrivire UNICĂ, ca să nu schimbe din
+// greșeală altă apariție (fără petice oarbe). DAR cauza #1 a ordinelor picate
+// (ex. #53, 4 aug: 4 refuzuri „old nu apare" pe api-types.ts → plafon de pași)
+// era că modelul dă „old" cu spații/indentare puțin diferite, iar potrivirea
+// STRICT exactă refuza — și el ardea pașii reîncercând. Acum: exact → tolerant
+// la spații (unic) → iar dacă tot nu, îi dăm CONTEXTUL real ca să se descurce
+// singur dintr-o singură mișcare. Astfel Kelion rezolvă ordinul, nu se blochează.
 function toolEdit(p, vechi, nou) {
   const full = safePath(p)
   if (!vechi) return 'REFUZAT: „old" gol — dă textul EXACT care trebuie înlocuit.'
   const src = fs.readFileSync(full, 'utf8')
-  const prima = src.indexOf(vechi)
-  // RE-ANCORARE DIN REFUZ (măsurat pe ordinul #43, 3 aug 21:25: după un refuz,
-  // modelul a repetat edit-uri fără țintă până a murit de ture sterile).
-  // Refuzul poartă acum ÎNCEPUTUL REAL al fișierului — modelul se re-ancorează
-  // pe conținutul adevărat fără să mai ardă un pas pe 'read'.
-  if (prima < 0)
-    return (
-      `REFUZAT: textul „old" nu apare în ${p} — copiază-l EXACT din 'read' (cu tot cu spații/indentare). ` +
-      `Începutul REAL al fișierului (primele 400 caractere):\n${src.slice(0, 400)}`
-    )
-  if (src.indexOf(vechi, prima + vechi.length) >= 0)
-    return `REFUZAT: textul „old" apare de mai multe ori în ${p} — dă un fragment mai lung, unic.`
-  fs.writeFileSync(full, src.slice(0, prima) + nou + src.slice(prima + vechi.length))
-  return `editat: ${p} (${vechi.length} → ${nou.length} caractere)`
+  const r = potrivesteEdit(src, vechi)
+  if (r === 'exacta_multipla' || r === 'toleranta_multipla')
+    return `REFUZAT: textul „old" apare în mai multe locuri în ${p} — dă un fragment mai lung, unic.`
+  if (r && typeof r === 'object') {
+    fs.writeFileSync(full, src.slice(0, r.start) + nou + src.slice(r.end))
+    const et = r.mod === 'toleranta' ? ' (potrivit tolerant la spații)' : ''
+    return `editat${et}: ${p} (${r.end - r.start} → ${nou.length} caractere)`
+  }
+  // Nici tolerant — RE-ANCORARE (măsurat pe #43/#53): dăm liniile REALE din fișier
+  // din jurul primei linii recognoscibile din „old", ca modelul să copieze exact
+  // dintr-o dată, fără să ardă pașii ghicind sau pe un 'read' în plus.
+  return `REFUZAT: textul „old" nu apare în ${p}. ${contextReancorare(src, vechi)}`
+}
+// POTRIVIRE ROBUSTĂ pentru 'edit'. Întoarce {start,end,mod} pentru o singură
+// potrivire (exactă SAU tolerantă la spații), 'exacta_multipla'/'toleranta_multipla'
+// când e ambiguu, sau null când nu se găsește. Pură (fără disc), EXPORTATĂ ca să
+// fie probată — garda de unicitate e prea importantă ca s-o verific „pe încredere".
+export function potrivesteEdit(src, vechi) {
+  if (typeof src !== 'string' || typeof vechi !== 'string' || vechi === '') return null
+  // 1) EXACT, unic.
+  const i = src.indexOf(vechi)
+  if (i >= 0) {
+    if (src.indexOf(vechi, i + vechi.length) >= 0) return 'exacta_multipla'
+    return { start: i, end: i + vechi.length, mod: 'exacta' }
+  }
+  // 2) TOLERANT LA SPAȚII: fiecare run de whitespace din „old" ↔ orice alt run
+  //    (\s+), restul literal. Prinde diferențe de indentare / spații la capăt /
+  //    CRLF — cauza reală a refuzurilor. Tot UNIC (mapat înapoi prin index-ul
+  //    potrivirii), ca să nu atingem din greșeală altă bucată.
+  if (vechi.length > 8000) return null // gardă anti-backtracking pe „old" uriaș
+  const pat = vechi
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // escape metacaractere (spațiile rămân literale)
+    .replace(/\s+/g, '\\s+') // orice run de spații/linii noi ↔ orice alt run
+  let re
+  try {
+    re = new RegExp(pat, 'g')
+  } catch {
+    return null
+  }
+  const gasite = [...src.matchAll(re)]
+  if (gasite.length === 0) return null
+  if (gasite.length > 1) return 'toleranta_multipla'
+  const m = gasite[0]
+  return { start: m.index, end: m.index + m[0].length, mod: 'toleranta' }
+}
+// Când „old" nu se potrivește nici tolerant, arătăm liniile REALE din fișier în
+// jurul primei linii recognoscibile din „old", ca modelul să copieze exact și să
+// se descurce SINGUR. Cade pe începutul fișierului dacă nicio linie nu se prinde.
+function contextReancorare(src, vechi) {
+  const linii = src.split('\n')
+  const candidate = String(vechi).split('\n').map((l) => l.trim()).filter((l) => l.length > 4)
+  for (const cheie of candidate) {
+    const idx = linii.findIndex((l) => l.includes(cheie))
+    if (idx >= 0) {
+      const de = Math.max(0, idx - 2)
+      const pana = Math.min(linii.length, idx + 4)
+      const bloc = linii.slice(de, pana).map((l, k) => `${de + k + 1}: ${l}`).join('\n')
+      return `Textul REAL din fișier (copiază-l EXACT ca „old"):\n${bloc}`
+    }
+  }
+  return `Copiază „old" EXACT din fișier. Începutul lui (primele 400 caractere):\n${src.slice(0, 400)}`
 }
 // Comenzi PERMISE explicit — nimic altceva nu se execută prin shell (atelierul
 // nu e un shell liber; buildul și testele sunt verificările de care e nevoie).
