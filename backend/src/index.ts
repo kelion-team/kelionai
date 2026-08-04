@@ -43,6 +43,7 @@ import { clientErrorRoutes } from './routes/clientErrors.js'
 import { manualRoutes } from './routes/manual.js'
 import { enterpriseRoutes } from './routes/enterprise.js'
 import { a2aRoutes } from './routes/a2a.js'
+import { tranzactiiRoutes } from './routes/tranzactii.js'
 import { realtimeRoutes } from './routes/realtime.js'
 import { modelRoutes } from './routes/models.js'
 import { pingRoutes } from './routes/ping.js'
@@ -289,6 +290,7 @@ await app.register(pingRoutes)
 await app.register(manualRoutes)
 await app.register(enterpriseRoutes)
 await app.register(a2aRoutes)
+await app.register(tranzactiiRoutes)
 
 // Where the built frontend + baked-in download defaults live.
 const distPath = path.resolve(__dirname, '..', config.frontendDist)

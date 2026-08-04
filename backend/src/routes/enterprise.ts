@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ROSTER, rosterViu, carteAgent } from '../services/agentiKelion.js'
 import { pornesteCrearea, stareCreare } from '../services/enterpriseCreate.js'
-import { adaugaAgentCustom } from '../db.js'
+import { adaugaAgentCustom, memoriePune } from '../db.js'
+import { temeIscoada } from '../services/iscoada.js'
 import { getSessionUser } from '../session.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
@@ -165,6 +166,11 @@ Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ. Serverul lucrează 
 <label style="display:block;margin:.2rem 0"><input type="checkbox" id="aa"> doar eu îl pot folosi (doar admin)</label>
 <button id="ab">➕ Pune agentul</button>
 <pre id="aout">—</pre>
+<h1 style="font-size:1.05rem;margin-top:2rem">🔭 Temele iscoadelor (patrula 24/24)</h1>
+<p>Ce caută iscoadele pe net, despărțite prin virgulă — noutățile intră singure în memoria lui Kelion. Gol = temele casei.</p>
+<input id="ti" placeholder="ex: preturi componente PCB, noutati tranzactionare, stiri AI" style="width:100%;padding:.6rem;border-radius:.5rem;border:1px solid #2a3550;background:#111830;color:#e8ecf6;margin:.2rem 0">
+<button id="tb">🔭 Salvează temele</button>
+<pre id="tout">—</pre>
 <script>
  const b=document.getElementById('b'), out=document.getElementById('out');
  let ceas=null;
@@ -211,6 +217,17 @@ Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ. Serverul lucrează 
        if(!ceas) ceas=setInterval(stare,3000);}
    }catch(e){aout.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
    ab.disabled=false;
+ };
+ const tb=document.getElementById('tb'), ti=document.getElementById('ti'), tout=document.getElementById('tout');
+ void fetch('/api/enterprise/teme-iscoade').then(r=>r.json()).then(j=>{ if(j.teme){ ti.value=j.teme.join(', '); tout.textContent='Active: '+j.teme.join(' · '); } }).catch(()=>{});
+ tb.onclick=async()=>{
+   tb.disabled=true;
+   try{
+     const r=await fetch('/api/enterprise/teme-iscoade',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({teme:ti.value})});
+     const j=await r.json();
+     tout.innerHTML=j.error?'<span class=rau>Refuz: '+j.error+'</span>':'<span class=ok>✅ Salvate. Active: '+j.teme.join(' · ')+'</span>';
+   }catch(e){tout.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
+   tb.disabled=false;
  };
 </script></body></html>`
 }
@@ -294,5 +311,23 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
     }
     pornesteCrearea(user.email)
     return { ok: true, id }
+  })
+
+  // TEMELE ISCOADELOR (4 aug: „iscoadele pe temele tale"): ownerul le scrie
+  // aici, patrula le citește la fiecare ocol. GET = cele active; POST = salvează
+  // (gol = înapoi la temele casei). DOAR admin.
+  app.get('/api/enterprise/teme-iscoade', async (req, reply) => {
+    if (!adminSau403(req, reply)) return { error: 'forbidden' }
+    return { teme: await temeIscoada() }
+  })
+  app.post('/api/enterprise/teme-iscoade', async (req, reply) => {
+    if (!adminSau403(req, reply)) return { error: 'forbidden' }
+    const teme = String((req.body as { teme?: string } | null)?.teme ?? '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+    await memoriePune('iscoada-teme', teme.join(', '))
+    return { ok: true, teme: teme.length > 0 ? teme : await temeIscoada() }
   })
 }

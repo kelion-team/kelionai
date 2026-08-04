@@ -48,14 +48,15 @@ describe('cartea A2A arată spre agentul viu', () => {
 })
 
 describe('unealta de delegare a creierului (cheama_agent)', () => {
-  it('e bine formată și acoperă exact rosterul', () => {
+  it('e bine formată și NU are enum static pe agent (rosterul e viu — 4 aug)', () => {
     expect(CHEAMA_AGENT_TOOL.name).toBe('cheama_agent')
     const props = CHEAMA_AGENT_TOOL.input_schema.properties as {
-      agent: { enum: string[] }
+      agent: { enum?: string[] }
       sarcina: unknown
     }
-    // enum-ul agentului = fix id-urile din roster (sursă unică, nimic în plus/minus)
-    expect([...props.agent.enum].sort()).toEqual(ROSTER.map((a) => a.id).sort())
+    // FĂRĂ enum: schema statică bloca agenții adăugați de owner din admin
+    // (agenti_custom); validarea o face executorul, cu gasesteAgentViu.
+    expect(props.agent.enum).toBeUndefined()
     expect(CHEAMA_AGENT_TOOL.input_schema.required).toEqual(['agent', 'sarcina'])
   })
   it('descrierea listează fiecare agent (id — specialitate)', () => {

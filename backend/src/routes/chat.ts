@@ -97,7 +97,7 @@ import { execSharedAdminTool, SHARED_ADMIN_TOOLS, execUserScopedTool, USER_SCOPE
 import { formatDeviceTime } from '../services/timeContext.js'
 import { buildPromo } from '../services/promo.js'
 import { LIST_SOURCE_TOOL, READ_SOURCE_TOOL, SEARCH_SOURCE_TOOL, DB_TABLES_TOOL, DB_QUERY_TOOL, SYSTEM_HEALTH_TOOL, BROWSER_TOOLS, OPEN_APP_VIEW_TOOL, COST_TOOL, LIST_UPDATES_TOOL, SERVER_LOGS_TOOL, READ_INBOX_TOOL, LOG_GAP_TOOL, LIST_MEMORIES_TOOL, FORGET_MEMORY_TOOL, SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL, CERINTA_NOUA_TOOL, CERINTE_LISTA_TOOL, CERINTA_PRIORITATE_TOOL, CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL, PANOU_COD_TOOL, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL, JULES_REPOS_TOOL, JULES_TASK_TOOL, JULES_STATUS_TOOL, CHEAMA_AGENT_TOOL } from '../services/brainToolDefs.js'
-import { gasesteAgent, cheamaAgent, ROSTER } from '../services/agentiKelion.js'
+import { gasesteAgentViu, cheamaAgent, rosterViu } from '../services/agentiKelion.js'
 // Re-exported for the voice route, which takes its tool definitions from chat.js
 // (single source — SINGLE BRAIN §1, no duplication).
 export { SECRET_PUNE_TOOL, SECRET_LISTA_TOOL, SECRET_PUBLICA_TOOL }
@@ -2558,8 +2558,9 @@ async function runTool(
     // lui. Costul sub-apelului intră în usage.usd (cost REAL al turei, ca la
     // imagini). Un id necunoscut nu inventează — spune care sunt valizi.
     case 'cheama_agent': {
-      const a = gasesteAgent(String(args.agent ?? '').trim())
-      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: ROSTER.map((x) => x.id) })
+      // Rosterul VIU (4 aug): și agenții puși de owner din admin sunt chemabili.
+      const a = await gasesteAgentViu(String(args.agent ?? '').trim())
+      if (!a) return JSON.stringify({ error: 'agent_necunoscut', valizi: (await rosterViu()).map((x) => x.id) })
       const sarcina = String(args.sarcina ?? '').trim()
       if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
       try {

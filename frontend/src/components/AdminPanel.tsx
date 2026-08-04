@@ -1057,6 +1057,15 @@ export default function AdminPanel({
             >
               {A.tabEnterprise}
             </button>
+            {/* Panoul de tranzacționare (Adrian, 4 aug: „buton separat în
+                admin"): date reale + analiza agentului Tranzacții, doar owner. */}
+            <button
+              type="button"
+              className="admin-tab"
+              onClick={() => window.open('/api/tranzactii', '_blank', 'noopener')}
+            >
+              {A.tabTrading}
+            </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}

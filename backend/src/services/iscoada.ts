@@ -1,5 +1,5 @@
 import { config } from '../config.js'
-import { addMemory } from '../db.js'
+import { addMemory, memorieIa } from '../db.js'
 import { webSearch } from './google.js'
 import { geminiDirectChat } from './geminiDirect.js'
 import type { OrMessage } from './brainContract.js'
@@ -27,15 +27,24 @@ const TEME_IMPLICITE = [
   'stiri importante tehnologie azi',
 ]
 
+/** Temele patrulei, în ordinea de încredere: (1) ce a scris OWNERUL în admin
+ *  (memorie_proiect, cheia 'iscoada-teme' — formular pe pagina agenților,
+ *  4 aug: „iscoadele pe temele tale"), (2) env ISCOADA_TEME, (3) temele casei. */
+export async function temeIscoada(): Promise<string[]> {
+  const dinAdmin = await memorieIa('iscoada-teme')
+  const continut = dinAdmin.startsWith('[') ? dinAdmin.replace(/^\[[^\]]*\]\s*/, '') : ''
+  const alese = (continut || process.env.ISCOADA_TEME || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+  return alese.length > 0 ? alese.slice(0, 10) : TEME_IMPLICITE
+}
+
 /** Un singur ocol: caută temele, cerne noutățile, le pune în memorie.
  *  Exportat pentru teste și pentru o chemare manuală la nevoie. */
 export async function unOcolIscoada(): Promise<{ teme: number; salvate: number }> {
   if (!config.serperKey || !config.geminiKey) return { teme: 0, salvate: 0 }
-  const dinEnv = (process.env.ISCOADA_TEME ?? '')
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean)
-  const teme = dinEnv.length > 0 ? dinEnv : TEME_IMPLICITE
+  const teme = await temeIscoada()
   let salvate = 0
   for (const tema of teme) {
     const brut = await webSearch(tema, 5)
