@@ -33,6 +33,12 @@ const PROIECT = 'gen-lang-client-0460348646'
 function pythonScript(): string {
   // Sursa unică: fiecare agent cu cartea lui A2A construită în TS (agentiKelion),
   // ca Python doar s-o POST-eze — o singură formă de carte în toată casa.
+  // ATENȚIE (bug 4 aug, „NameError: false" la Adrian în Cloud Shell): datele NU
+  // se lipesc ca literal Python — cartea conține `false` (din JSON), pe care
+  // Python nu-l cunoaște (el scrie `False`). Le trecem ca ȘIR JSON parsat cu
+  // `json.loads`, care înțelege nativ false/true/null. `JSON.stringify(data)`
+  // produce un literal-șir valid și în Python (aceleași escape-uri: \\", \\\\,
+  // \\n, \\uXXXX) — deci `json.loads("...")` e sintaxă corectă în ambele limbi.
   const agenti = ROSTER.map((a) => ({ nume: a.nume, rol: a.rol, card: carteAgent(a) }))
   const data = JSON.stringify(agenti)
   return `#!/usr/bin/env python3
@@ -40,7 +46,7 @@ function pythonScript(): string {
 # Tokenul vine din gcloud (contul tau logat, licentiat). Zero secrete aici.
 import json, subprocess, urllib.request, urllib.error
 P = ${JSON.stringify(PROIECT)}
-AGENTI = ${data}
+AGENTI = json.loads(${JSON.stringify(data)})
 B = 'https://discoveryengine.googleapis.com/v1alpha'
 A = f'projects/{P}/locations/global/collections/default_collection/engines/kelion-agenti/assistants/default_assistant'
 try:
