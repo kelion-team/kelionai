@@ -1,12 +1,20 @@
 import type { FastifyInstance } from 'fastify'
+import { ROSTER, carteAgent } from '../services/agentiKelion.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
 //
-// De ce există (Adrian, 4 aug): crearea agenților în Gemini Enterprise cere un
-// cont cu LICENȚĂ ACTIVĂ, iar licența se activează doar la login interactiv de
-// om — contul de serviciu al aplicației nu poate (măsurat: FAILED_PRECONDITION,
-// „active Gemini Enterprise license is not available"). Deci creaza contul
-// OWNERULUI, din Cloud Shell-ul lui (unde e deja logat și licențiat).
+// De ce există (Adrian, 4 aug): crearea agenților în CONSOLA Gemini Enterprise
+// cere un cont cu LICENȚĂ ACTIVĂ, iar licența se activează doar la login
+// interactiv de om — contul de serviciu al aplicației nu poate (măsurat de trei
+// ori: FAILED_PRECONDITION „license not available", 403 pe
+// billingAccountLicenseConfigs.list, activare doar la primul login în
+// interfață). Deci ACEST script rulează cu contul OWNERULUI, din Cloud Shell-ul
+// lui (unde e deja logat și licențiat) și înscrie agenții în consolă.
+//
+// IMPORTANT: chiar și fără acest pas, agenții TRĂIESC ȘI LUCREAZĂ deja — sunt
+// serviți viu la /api/a2a/<id> (services/agentiKelion.ts, routes/a2a.ts). Zidul
+// licenței îl OCOLIM acolo; scriptul de aici doar îi mai LISTEAZĂ și în consola
+// Google, cosmetic, când ownerul se loghează.
 //
 // Problema mecanică a fost că paste-ul scriptului lung rupea terminalul. Soluția:
 // aplicația SERVEȘTE scriptul la un link, iar ownerul rulează O SINGURĂ linie
@@ -16,56 +24,23 @@ import type { FastifyInstance } from 'fastify'
 //
 // Scriptul NU conține niciun secret: tokenul vine din `gcloud auth
 // print-access-token` (rulează în shell-ul ownerului, nu aici), deci e sigur să
-// fie public. La final afișează LISTA agenților citită din API — dovada.
+// fie public. Rosterul ȘI cărțile A2A vin din SURSA UNICĂ (agentiKelion.ts), ca
+// listarea din consolă să fie identică cu endpointul viu. La final afișează
+// LISTA agenților citită din API — dovada.
 
 const PROIECT = 'gen-lang-client-0460348646'
 
-// Rosterul: id · nume · rol. Fiecare devine o carte A2A ce arată spre creierul
-// lui Kelion (/api/a2a/<id>) — legătura neuronală cerută.
-const ROSTER: [string, string, string][] = [
-  ['inginer-sef', 'Inginer-sef', 'Orchestreaza: sparge cererea in pasi si deleaga agentului potrivit.'],
-  ['debug', 'Depanator avansat', 'Debugging: loguri, reproducere, modulul vinovat, fix minim.'],
-  ['senzorial', 'Vaz Auz Memorie Gandire', 'Gestioneaza vederea, auzul, memoria si gandirea lui Kelion.'],
-  ['adevar', 'Paznicul adevarului', 'Anti-fabulatie: ce nu se poate proba = nu pot verifica.'],
-  ['cautator', 'Cautator pe net', 'Cautare web: surse multiple, citate, linkuri.'],
-  ['solutii', 'Designer de solutii', 'Arhitect: 2-3 solutii cu compromisuri, alege una, o desface in pasi.'],
-  ['electronist', 'Electronist', 'Scheme, componente, calcule, depanare hardware pas cu pas.'],
-  ['designer', 'Designer grafic UI', 'Interfete, culori, tipografie, avatarul 3D. Specificatii exacte.'],
-  ['scenograf', 'Scenograf', 'Decoruri, lumini, cadre, atmosfera pentru clipuri.'],
-  ['textier', 'Textier', 'Texte de interfata, scenarii, replici, traduceri RO/EN.'],
-  ['regizor', 'Regizor Cameraman Monteur', 'Video cap-coada: scenariu, regie, montaj, prompturi Veo.'],
-  ['gmail', 'Agent Gmail', 'Email: citeste, rezuma, cauta, ciorne. Nu trimite fara confirmare.'],
-  ['calendar', 'Agent Calendar', 'Evenimente, sloturi, creare cu confirmare. Atentie la fusuri.'],
-  ['drive', 'Agent Drive', 'Cauta fisiere, citeste continut, rezuma documente.'],
-  ['calatorii', 'Agent Calatorii Harti', 'Rute, distante, locuri, plan de drum cu costuri estimate.'],
-  ['meteo', 'Agent Meteo', 'Vremea acum si prognoza, cu sursa si ora citirii.'],
-  ['stiri', 'Agent Stiri', 'Stiri din surse multiple, cu link si data.'],
-  ['traduceri', 'Agent Traduceri', 'Traduceri naturale RO/EN si alte limbi, cu tonul pastrat.'],
-  ['muzica', 'Agent Muzica Tempo', 'Tempo/ritm, sincronizarea avatarului pe beat, recomandari.'],
-  ['viziune', 'Agent Viziune', 'Analizeaza imagini si capturi ca un soim; spune si ce NU distinge.'],
-  ['voce', 'Agent Voce', 'STT/TTS, dictie, emotie. Prima vorba sub o secunda.'],
-  ['bani', 'Agent Bani', 'Solduri, tranzactii, costuri masurate. Nu inventeaza cifre.'],
-  ['memorie', 'Agent Memorie Date', 'Baza de date: schema, interogari, migratii, igiena.'],
-  ['browser', 'Agent Browser', 'Deschide pagini, citeste, apasa, cu verificare dupa fiecare pas.'],
-  ['deploy', 'Agent Deploy CI', 'Build, teste, deploy, verificarea live==master.'],
-  ['monitor', 'Agent Monitorizare', 'Health-checks, loguri, alarme pe praguri masurate.'],
-  ['invatare', 'Agent Invatare', 'Lectii din loguri si greseli, ca reguli scurte.'],
-  ['constructor', 'Agent Constructor', 'Cod: ordin -> cloneaza, modifica, testeaza, PR. Bara 0-100%.'],
-  ['jules', 'Agent legatura Jules', 'Deleaga sarcini catre Jules: sursa, prompt, urmarire PR.'],
-  ['imagini', 'Agent Imagini', 'Generare si editare de imagini; costul spus inainte.'],
-  ['documente', 'Agent Documente', 'PDF-uri si acte: esenta, formulare, scrisori oficiale.'],
-  ['cumparaturi', 'Agent Cumparaturi', 'Compara preturi si specificatii; preturile au data si sursa.'],
-  ['igiena', 'Agent Igiena de cod', 'Dubluri, exporturi orfane, cod mort. Portile pe zero.'],
-]
-
 function pythonScript(): string {
-  const roster = JSON.stringify(ROSTER)
+  // Sursa unică: fiecare agent cu cartea lui A2A construită în TS (agentiKelion),
+  // ca Python doar s-o POST-eze — o singură formă de carte în toată casa.
+  const agenti = ROSTER.map((a) => ({ nume: a.nume, rol: a.rol, card: carteAgent(a) }))
+  const data = JSON.stringify(agenti)
   return `#!/usr/bin/env python3
 # Creeaza agentii lui Kelion in Gemini Enterprise, cu contul TAU (Cloud Shell).
 # Tokenul vine din gcloud (contul tau logat, licentiat). Zero secrete aici.
 import json, subprocess, urllib.request, urllib.error
 P = ${JSON.stringify(PROIECT)}
-ROSTER = ${roster}
+AGENTI = ${data}
 B = 'https://discoveryengine.googleapis.com/v1alpha'
 A = f'projects/{P}/locations/global/collections/default_collection/engines/kelion-agenti/assistants/default_assistant'
 try:
@@ -83,7 +58,6 @@ def api(m, path, body=None):
         try: return e.code, json.loads(e.read() or b'{}')
         except Exception: return e.code, {}
 
-st, who = api('GET', 'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + T) if False else (0, {})
 print('== Creez agentii lui Kelion in Gemini Enterprise ==')
 st, j = api('GET', A + '/agents?pageSize=200')
 if st != 200:
@@ -93,14 +67,10 @@ if st != 200:
     raise SystemExit(1)
 ex = {a.get('displayName') for a in j.get('agents', [])}
 c = s = f = 0
-for aid, nume, rol in ROSTER:
+for a in AGENTI:
+    nume = a['nume']; rol = a['rol']; card = a['card']
     if nume in ex:
         s += 1; continue
-    card = {'protocolVersion': '0.2.6', 'name': nume, 'description': rol,
-            'url': f'https://kelionai.app/api/a2a/{aid}', 'version': '1.0.0',
-            'capabilities': {}, 'defaultInputModes': ['text/plain'],
-            'defaultOutputModes': ['text/plain'],
-            'skills': [{'id': aid, 'name': nume, 'description': rol, 'tags': ['kelion']}]}
     st, res = api('POST', A + '/agents',
         {'displayName': nume, 'description': rol,
          'a2aAgentDefinition': {'jsonAgentCard': json.dumps(card, ensure_ascii=False)}})
@@ -114,7 +84,7 @@ for aid, nume, rol in ROSTER:
             print('\\n>>> Contul tau NU are licenta Gemini Enterprise activa pe proiectul', P)
             print('>>> Aloca-ti o licenta pe ACEST proiect, apoi ruleaza din nou.')
             raise SystemExit(1)
-print(f'bilant: creati {c}, existau deja {s}, esuati {f} (din {len(ROSTER)})')
+print(f'bilant: creati {c}, existau deja {s}, esuati {f} (din {len(AGENTI)})')
 st, j = api('GET', A + '/agents?pageSize=200')
 L = [a.get('displayName') for a in j.get('agents', [])]
 print('LISTA DIN API (' + str(len(L)) + '):')
