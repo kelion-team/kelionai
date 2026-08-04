@@ -87,6 +87,33 @@ export const ROSTER: AgentKelion[] = [
   { id: 'fisiere-mari', nume: 'Agent Fisiere Mari', rol: 'Fisiere mari: arhive, impartire in bucati, procesare pe loturi, deduplicare, curatare de spatiu.' },
   { id: 'grafica', nume: 'Agent Grafica', rol: 'Prelucrare grafica: retus, decupare, redimensionare, conversii PNG/JPG/SVG/WebP, palete de culori.' },
   { id: 'office', nume: 'Agent Office', rol: 'Microsoft Office: Word, Excel (formule, tabele), PowerPoint. Citeste, creeaza, corecteaza.' },
+  // A patra completare din 4 aug (Adrian: „tot ce e necesar omului intr-o zi
+  // normala: vacanta, servici, cursuri, tot"):
+  { id: 'joburi', nume: 'Agent Joburi', rol: 'Cauta joburi pe net dupa criterii: surse, linkuri, termene, salarii cand sunt publice.' },
+  { id: 'cv', nume: 'Agent CV Interviu', rol: 'CV si scrisoare de intentie adaptate la anunt; pregatire de interviu cu intrebari probabile.' },
+  { id: 'vacante', nume: 'Agent Vacante', rol: 'Sejururi: zboruri, cazari, buget, acte necesare, plan pe zile. Preturile cu data si sursa.' },
+  { id: 'cursuri', nume: 'Agent Cursuri', rol: 'Cursuri si certificari: alegere, plan de invatare pe pasi, termene realiste.' },
+  { id: 'sanatate', nume: 'Agent Sanatate', rol: 'Informativ: programari, pregatirea intrebarilor pentru medic, remindere. NU pune diagnostic - trimite la medic.' },
+  { id: 'gatit', nume: 'Agent Gatit Meniu', rol: 'Retete, meniu pe saptamana, lista de cumparaturi potrivita cu ce ai in casa.' },
+  { id: 'casa', nume: 'Agent Casa Gospodarie', rol: 'Intretinere, reparatii, facturi si termene la utilitati, pasii pentru mesteri.' },
+  { id: 'ghisee', nume: 'Agent Ghisee Acte', rol: 'Birocratie: ANAF, primarie, programari la ghiseu, ce acte trebuie si in ce ordine.' },
+  // A cincea completare din 4 aug (Adrian: „agenti pentru toate joburile, ex
+  // receptie, secretariat... profesori, cercetatori"):
+  { id: 'receptie', nume: 'Agent Receptie', rol: 'Primire: vizitatori si clienti, programari, indrumare, raspunsuri politicoase si clare.' },
+  { id: 'secretariat', nume: 'Agent Secretariat', rol: 'Corespondenta, procese-verbale, agenda, organizarea intalnirilor si a hartiilor.' },
+  { id: 'profesor', nume: 'Agent Profesor', rol: 'Explica orice pe intelesul omului: lectii pe pasi, exemple, exercitii cu verificare.' },
+  { id: 'cercetator', nume: 'Agent Cercetator', rol: 'Cercetare: studii si surse primare, sinteza cu citate, ce e dovedit vs. ipoteza.' },
+  { id: 'contabil', nume: 'Agent Contabil', rol: 'Informativ: facturi, TVA, termene fiscale, evidenta. Nu inlocuieste contabilul autorizat.' },
+  { id: 'juridic', nume: 'Agent Juridic', rol: 'Informativ: legislatie, contracte simple, drepturi. Nu inlocuieste avocatul.' },
+  { id: 'vanzari', nume: 'Agent Vanzari', rol: 'Oferte, prezentari, negociere, follow-up la clienti. Cifrele doar masurate.' },
+  { id: 'hr', nume: 'Agent HR', rol: 'Anunturi de angajare, interviuri structurate, onboarding, fise de post.' },
+  { id: 'suport', nume: 'Agent Suport Clienti', rol: 'Tichete: intelege problema, raspunde clar, escaladeaza cand nu poate rezolva.' },
+  // A sasea completare din 4 aug (Adrian: „doctori pentru kelion, orice il
+  // poate face un super ai") — echipa care are grija de KELION INSUSI:
+  { id: 'doctor-kelion', nume: 'Agent Doctor Kelion', rol: 'Consultul aplicatiei: simptome din loguri, diagnostic pe dovezi, trimite la specialistul potrivit (debug, vps, monitor).' },
+  { id: 'imunitate', nume: 'Agent Imunitate', rol: 'Previne recidivele: verifica daca o greseala veche poate reveni si propune plasa de siguranta (test, poarta).' },
+  { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
+  { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
   // Superputerea (Adrian, 4 aug: „hai vino cu super putere pentru gindire
   // rationament, orice face kelion wow"): singurul agent cu buget de gandire
   // 'high' si plafon dublu — cheamaAgent ii da REAL mai mult creier.
