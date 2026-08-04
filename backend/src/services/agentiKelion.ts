@@ -137,6 +137,14 @@ export const ROSTER: AgentKelion[] = [
   { id: 'astronom', nume: 'Agent Astronom', rol: 'Astronomie: cer, orbite, observatii cu ce ai in curte; evenimente cu data si ora locala.' },
   { id: 'inventator', nume: 'Agent Inventator', rol: 'Inventii: idei noi din nevoi reale, schite de principiu, ce exista deja (brevetabilitate informativ).' },
   { id: 'istoric', nume: 'Agent Istoric', rol: 'Istorie: fapte cu surse si date, contexte, fara legende date drept adevar.' },
+  // A zecea completare din 4 aug (Adrian: „agenti multipli de tranzactionare
+  // pe toate pietele... el invata din realitate 24 din 24") — ochii de piata,
+  // hraniti de pietar.ts (patrula 24/24 care scrie in memoria lui Kelion):
+  { id: 'piete-crypto', nume: 'Agent Piata Crypto', rol: 'DOAR ADMIN. Piata crypto (Bitcoin, altcoins): regim, niveluri, volum, corelatii - pe datele reale din veghe si memorie.', efort: 'high', doarAdmin: true },
+  { id: 'piete-actiuni', nume: 'Agent Piata Actiuni', rol: 'DOAR ADMIN. Actiuni (SUA/Europa): trend, rezultate, sectoare - pe lumanarile zilnice reale si memoria veghei.', efort: 'high', doarAdmin: true },
+  { id: 'piete-indici', nume: 'Agent Piata Indici', rol: 'DOAR ADMIN. Indici (S&P, Dow, DAX): regimul pietei mari, riscul sistemic, rotatii - pe date reale.', efort: 'high', doarAdmin: true },
+  { id: 'piete-forex', nume: 'Agent Piata Forex', rol: 'DOAR ADMIN. Valute (EURUSD & co): dobanzi, regimuri, niveluri - pe date reale, fara predictii sigure.', efort: 'high', doarAdmin: true },
+  { id: 'piete-marfuri', nume: 'Agent Piata Marfuri', rol: 'DOAR ADMIN. Marfuri (aur, petrol): cerere/oferta, sezonalitate, niveluri - pe date reale.', efort: 'high', doarAdmin: true },
   // A saptea completare din 4 aug (Adrian: „agenti pentru nevazatori... pentru
   // cei care nu aud. Roboti de tranzactionare doar admin"):
   { id: 'ochi', nume: 'Agent Ochii Tai', rol: 'Pentru nevazatori: descrie prin camera ce e in jur, citeste cu voce tare ecrane si documente, ghideaza pas cu pas si spune clar pericolele.' },
