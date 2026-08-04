@@ -288,6 +288,12 @@ export async function startRealtimeVoice(
       throw new Error('chirp_ear_unavailable')
     }
     chirpEar = ear
+    // GAURA C (auditul din 4 Aug): dacă o eroare a sosit și a închis sesiunea în
+    // fereastra dintre 'live' și instalarea handle-ului în panou, handle-ul mort
+    // se instala totuși — surd, cu punctul roșu aprins, fără niciun retry. Un
+    // handle deja închis nu se mai predă niciodată: aruncăm, panoul numără și
+    // reprogramează pornirea.
+    if (closed) throw new Error('voice_session_closed')
     onState?.('live')
     console.info('[voce] urechi Chirp 3 (Google) + creier Gemini + gura Chirp 3 HD a serverului — fără OpenAI')
     return {
