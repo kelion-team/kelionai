@@ -47,6 +47,20 @@ export function urecheLiveDisponibila(): boolean {
 
 /** Deschide o sesiune Live cu transcrierea intrării. Întoarce null doar fără
  *  cheie — orice altă problemă vine prin onEroare, numită. */
+// GARDUL DE ALFABET (Adrian, 4 aug: urechea scria românește în greacă/arabă/
+// chirilic — „Και όλοι", „Чекався"). Urechea native-audio ghicește limba pe
+// audio scurt și scoate alt alfabet. Dacă limba așteptată e LATINĂ și
+// transcrierea vine majoritar în alt alfabet, e o greșeală de ureche — o
+// aruncăm, nu o arătăm și nu o trimitem la creier.
+const LIMBI_NELATINE = /^(ru|uk|bg|sr|mk|be|el|ar|he|fa|ur|hi|bn|ta|th|zh|ja|ko|ka|hy|am)/i
+export function alfabetStrain(text: string, langHint: string): boolean {
+  if (!langHint || LIMBI_NELATINE.test(langHint)) return false // limba chiar e ne-latină → nu filtrăm
+  const litere = text.replace(/[^\p{L}]/gu, '')
+  if (litere.length < 2) return false
+  const neLatine = litere.replace(/\p{Script=Latin}/gu, '')
+  return neLatine.length / litere.length > 0.5
+}
+
 export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente): UrecheLive | null {
   if (!config.geminiKey) return null
   const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${config.geminiKey}`
@@ -73,7 +87,9 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
               {
                 text:
                   'You are a transcription-only listener. NEVER reply, NEVER comment. Stay silent.' +
-                  (langHint ? ` The speaker uses language: ${langHint}.` : ''),
+                  (langHint
+                    ? ` The speaker speaks ${langHint}. Transcribe STRICTLY in ${langHint}, using its native alphabet (for Romanian: the Latin alphabet with ă â î ș ț). NEVER transliterate or output Greek, Cyrillic, Arabic, Hebrew, or Han characters.`
+                    : ''),
               },
             ],
           },
@@ -107,14 +123,18 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
     if (bucata) {
       if (!transcrierePartiala) ev.onVorbireIncepe()
       transcrierePartiala += bucata
-      ev.onPartial(transcrierePartiala)
+      // Nu arătăm în bandă transcrierea în alfabet străin (greacă/chirilic/arabă
+      // pe limbă latină) — e ghiceala greșită a urechii, nu ce a spus omul.
+      if (!alfabetStrain(transcrierePartiala, langHint)) ev.onPartial(transcrierePartiala)
     }
     // Sfârșitul turei de vorbire (VAD-ul modelului): ce s-a strâns devine FINAL.
     if (sc.turnComplete || sc.interrupted) {
       const text = transcrierePartiala.trim()
       transcrierePartiala = ''
       ev.onVorbireSeTermina()
-      if (text) ev.onFinal(text)
+      // Alfabet străin = mis-transcriere → NU pleacă la creier (altfel ajunge
+      // „Чекався" ca mesajul userului). O aruncăm cinstit.
+      if (text && !alfabetStrain(text, langHint)) ev.onFinal(text)
     }
   })
 

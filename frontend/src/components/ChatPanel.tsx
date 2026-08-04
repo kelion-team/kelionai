@@ -52,6 +52,7 @@ import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
 import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
+import { pornesteDansPeMuzica } from '../lib/dansMuzica'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
@@ -1035,6 +1036,8 @@ export default function ChatPanel({
         .trim()
     const feedSpeech = (chunk: string): void => {
       if (!mouth) return
+      // NU vorbi peste muzică (Adrian, 4 aug): cât e muzică în cameră, gura tace.
+      if (muzicaActivaRef.current) return
       speechBuf += chunk
       for (;;) {
         const mm = SENT_RE.exec(speechBuf)
@@ -1250,6 +1253,12 @@ export default function ChatPanel({
   const voceAiureaRef = useRef(false) // vocea trăiește în ALT tab → aici tăcem
   const ultimaInimaRef = useRef(0)
   const canalVoceRef = useRef<BroadcastChannel | null>(null)
+  // ── DANS PE MUZICA DIN CAMERĂ (Adrian, 4 aug: „motor de sincronizare bitrate
+  // pe dans") — refs: dacă e muzică acum (gura tace) și dacă avatarul e liber
+  // pentru următoarea mișcare (o pornim pe un BIT, ca să fie sincron).
+  const muzicaActivaRef = useRef(false)
+  const dansLiberRef = useRef(true)
+  const dansIdxRef = useRef(0)
   const upgradeTimerRef = useRef<number | null>(null)
   const armVoiceUpgrade = (): void => {
     if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
@@ -1790,6 +1799,69 @@ export default function ChatPanel({
   // VOX + barge-in, fast first word), started default-on by the "Permanent hearing"
   // above — proven to work (the real voiceprints are created on it). Zero separate
   // admin channel, zero dependency on the LiveKit agent.
+
+  // ── DANS PE MUZICA DIN CAMERĂ (Adrian, 4 aug): cât microfonul ascultă,
+  // deschidem un tap de analiză pe microfon (motorBit) și, când e MUZICĂ, gura
+  // tace (nu vorbi peste ea) iar avatarul dansează — fiecare mișcare PORNEȘTE
+  // pe un bit, ca să fie sincron. Permisiunea de microfon e deja dată (mic-ul
+  // ascultă), deci al doilea getUserMedia nu mai întreabă.
+  const DANSURI = ['dans', 'dans-2', 'dans-3', 'dans-4', 'dans-5', 'dans-6', 'dans-7', 'dans-8', 'dans-9', 'dans-10']
+  useEffect(() => {
+    if (!listening || !navigator.mediaDevices?.getUserMedia) return
+    let opreste = (): void => {}
+    let anulat = false
+    let stream: MediaStream | null = null
+    const peDansGata = (): void => {
+      dansLiberRef.current = true
+    }
+    window.addEventListener('kelion-gesture-done', peDansGata)
+    void navigator.mediaDevices
+      .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then((s) => {
+        if (anulat) {
+          s.getTracks().forEach((t) => t.stop())
+          return
+        }
+        stream = s
+        opreste = pornesteDansPeMuzica(s, {
+          peBit: () => {
+            // O mișcare nouă pornește DOAR pe un bit și doar dacă avatarul e
+            // liber (mișcarea precedentă s-a terminat) — așa dansul e sincron
+            // pe ritm, nu un vârtej de clipuri suprapuse.
+            if (!muzicaActivaRef.current || !dansLiberRef.current) return
+            dansLiberRef.current = false
+            dansIdxRef.current = (dansIdxRef.current + 1) % DANSURI.length
+            window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: DANSURI[dansIdxRef.current] }))
+          },
+          muzicaOn: () => {
+            muzicaActivaRef.current = true
+            // Taci peste muzică: oprește vocea live și redarea în curs.
+            rvLiveRef.current?.stopSpeaking()
+            stopVoice()
+            // Prima mișcare pornește imediat; următoarele vin pe bit.
+            if (dansLiberRef.current) {
+              dansLiberRef.current = false
+              window.dispatchEvent(new CustomEvent('kelion-gesture', { detail: DANSURI[dansIdxRef.current] }))
+            }
+          },
+          muzicaOff: () => {
+            muzicaActivaRef.current = false
+            dansLiberRef.current = true
+          },
+        })
+      })
+      .catch(() => {
+        /* fără al doilea microfon → fără dans pe muzică; nimic stricat */
+      })
+    return () => {
+      anulat = true
+      window.removeEventListener('kelion-gesture-done', peDansGata)
+      opreste()
+      stream?.getTracks().forEach((t) => t.stop())
+      muzicaActivaRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening])
 
   // ── O VOCE ÎN TOATE TABURILE (Adrian, 4 aug: două taburi deschise = două
   // voci, una live + una robotică din dictarea de rezervă — măsurat din captura

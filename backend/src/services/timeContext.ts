@@ -26,6 +26,19 @@ export function formatDeviceTime(nowIso: unknown, tz: unknown): { human: string;
   return { human, tzName }
 }
 
+/** ANCORA DE TIMP CARE NU LIPSEȘTE NICIODATĂ (Adrian, 4 aug: „Kelion nu e
+ *  înfipt în realitatea spațio-temporală"). Dacă browserul trimite ora reală
+ *  a dispozitivului, o folosim (cea mai exactă — ora LUI). Dacă NU (drum vocal,
+ *  cerere fără `now`), cădem pe ceasul REAL al serverului, cu fusul primit dacă
+ *  există, altfel UTC — ca creierul să știe MEREU în ce clipă trăiește, nu să
+ *  rămână fără niciun „acum". */
+export function formatNowContext(nowIso: unknown, tz: unknown): { human: string; tzName: string } {
+  const alClientului = formatDeviceTime(nowIso, tz)
+  if (alClientului) return alClientului
+  const tzName = typeof tz === 'string' && tz ? tz : 'UTC'
+  return formatDeviceTime(new Date().toISOString(), tzName) ?? { human: new Date().toUTCString(), tzName: 'UTC' }
+}
+
 /** The UTC calendar day as YYYY-MM-DD — the single "today" formatting (it
  *  used to be `new Date().toISOString().slice(0, 10)` copied in 7 spots
  *  across chat/autonomie/health/openBanking). offsetDays shifts the day

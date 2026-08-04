@@ -168,13 +168,9 @@ function ShareGrid({ title, items }: { title: string; items: { name: string; hre
 export default function AdminPanel({
   onClose,
   initialTab,
-  onOpenSettings,
 }: {
   readonly onClose: () => void
   readonly initialTab?: 'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
-  // „⚙ Setări" moved OUT of the top bar into the panel (Adrian's order): the
-  // bar keeps only measurements; the owner's settings open from here.
-  readonly onOpenSettings?: () => void
 }) {
   const [tab, setTab] = useState<
     'finance' | 'users' | 'visitors' | 'vchat' | 'history' | 'gaps' | 'share' | 'stores' | 'inbox' | 'voiceprints' | 'gesturi' | 'tokenuri' | 'constructor' | 'recuperare'
@@ -1169,14 +1165,9 @@ export default function AdminPanel({
               {A.tabRecovery}
             </button>
           </div>
-          {/* „⚙ Setări" — moved here from the top bar (Adrian's order): for
-          the owner, the bar shows only measurements; his settings live in the
-          panel. */}
-          {onOpenSettings && (
-            <button type="button" className="ghost" onClick={onOpenSettings} title="Setările tale (voce, limbă, auto-alimentare)">
-              ⚙ Setări
-            </button>
-          )}
+          {/* „⚙ Setări" SCOS din panou (Adrian, 4 aug: „asta nu mai îl afișa").
+          onOpenSettings rămâne în props (fereastra CustomerSettings poate fi
+          redeschisă de altundeva la nevoie), dar butonul nu se mai arată. */}
           <BackLink onBack={onClose} />
         </header>
         {tab === 'finance' && (
