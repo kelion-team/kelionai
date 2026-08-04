@@ -2564,7 +2564,9 @@ async function runTool(
       const sarcina = String(args.sarcina ?? '').trim()
       if (!sarcina) return JSON.stringify({ error: 'sarcina_goala' })
       try {
-        const r = await cheamaAgent(a, sarcina)
+        // Blindat (4 aug): pe calea creierului, specialistul primește și memoria
+        // lui Kelion când vorbește ownerul (isAdmin) — nu și pentru vizitatori.
+        const r = await cheamaAgent(a, sarcina, isAdmin)
         usage.usd += r.costUsd
         return JSON.stringify({ agent: a.id, nume: a.nume, raspuns: r.text })
       } catch (e) {

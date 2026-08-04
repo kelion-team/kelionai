@@ -160,6 +160,8 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
     const agent = gasesteAgent('tranzactii')
     if (!agent) return { error: 'agentul tranzactii lipsește din roster' }
     try {
+      // Panoul e doar-admin → specialistul pleacă blindat complet (true =
+      // și memoria lui Kelion, pe lângă căutare + citit pagini).
       const r = await cheamaAgent(
         agent,
         `Analizează piața pe datele de mai jos, ca un trader avansat, cu riscul întâi.\n` +
@@ -167,6 +169,7 @@ export async function tranzactiiRoutes(app: FastifyInstance): Promise<void> {
           `(suport/rezistență din minime/maxime reale); 3) Scenarii (dacă… atunci…, cu invalidare clară); ` +
           `4) Riscul (mărimea poziției ca % din capital, unde stă stopul, raport risc/câștig); 5) Ce NU se vede în date. ` +
           `Fără promisiuni, fără „sigur". Datele:\n${rezumatPentruAgent(d)}`,
+        true,
       )
       return { analiza: r.text, simbol: d.simbol, pret: d.pret, sursa: 'Binance (public), lumânări 1h × 72' }
     } catch (e) {
