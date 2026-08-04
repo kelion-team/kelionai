@@ -102,7 +102,10 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
 
     let r
     try {
-      r = await cheamaAgent(a, sarcina)
+      // Blindat (4 aug): sesiunea ownerului aprinde și memoria lui Kelion;
+      // un apel public primește specialistul cu căutare + citit pagini.
+      const esteOwner = getSessionUser(req)?.role === 'admin'
+      r = await cheamaAgent(a, sarcina, esteOwner)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (esteRpc) return rpcEroare(body.id, -32000, msg)

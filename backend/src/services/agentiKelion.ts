@@ -1,7 +1,8 @@
 import { config } from '../config.js'
-import { listaAgentiCustom } from '../db.js'
+import { listaAgentiCustom, searchMemories } from '../db.js'
 import { geminiDirectChat } from './geminiDirect.js'
-import type { OrMessage } from './brainContract.js'
+import { webSearch } from './google.js'
+import type { OrMessage, AnthropicTool } from './brainContract.js'
 
 // ── AGENȚII LUI KELION: SURSA UNICĂ ─────────────────────────────────────────
 //
@@ -195,6 +196,7 @@ function instructiune(a: AgentKelion): string {
     `Reguli, mereu:\n` +
     `- Răspunzi scurt, concret, în limba în care ți se scrie (implicit română).\n` +
     `- Ce nu poți proba spui „nu pot verifica" — nu inventezi cifre, verdicte sau surse.\n` +
+    `- Ai unealta cauta_web (Google real): folosește-o pentru fapte proaspete și citează linkurile.\n` +
     `- Rămâi strict în specialitatea ta; dacă cererea e pentru alt specialist, spune care.`
   )
 }
@@ -206,25 +208,119 @@ export interface RaspunsAgent {
   model: string
 }
 
+// UNELTELE SPECIALIȘTILOR (4 aug, noaptea, owner: „e doar un chat bot, nu
+// știe sau nu are unelte" — avea dreptate: lista de unelte era GOALĂ).
+// Prima unealtă, cea care schimbă totul: căutarea REALĂ pe net (Serper).
+const UNEALTA_CAUTARE: AnthropicTool = {
+  name: 'cauta_web',
+  description:
+    'Caută pe internet (Google real) și primești rezultate cu titlu, link și fragment. ' +
+    'Folosește-o când ai nevoie de fapte proaspete, cifre sau surse — apoi citează linkurile.',
+  input_schema: {
+    type: 'object',
+    properties: { intrebare: { type: 'string', description: 'ce cauți, formulat scurt' } },
+    required: ['intrebare'],
+  },
+}
+
+const UNEALTA_PAGINA: AnthropicTool = {
+  name: 'citeste_pagina',
+  description:
+    'Citește o pagină web (textul ei, fără HTML) — folosește-o după cauta_web ca să intri în sursa care contează.',
+  input_schema: {
+    type: 'object',
+    properties: { url: { type: 'string', description: 'adresa completă (https://...)' } },
+    required: ['url'],
+  },
+}
+
+// Memoria lui Kelion — DOAR pe căile ownerului (chat-ul lui, panourile lui):
+// endpointul A2A e public, iar amintirile sunt personale. Un apel străin nu
+// primește unealta asta deloc (nici măcar ca să refuze).
+const UNEALTA_AMINTIRI: AnthropicTool = {
+  name: 'amintiri_kelion',
+  description:
+    'Caută în memoria lui Kelion (ce știe despre owner, proiect, iscoade). Folosește-o când sarcina cere context personal sau istoric.',
+  input_schema: {
+    type: 'object',
+    properties: { cauta: { type: 'string', description: 'ce cauți în memorie' } },
+    required: ['cauta'],
+  },
+}
+
+/** Textul unei pagini web, fără taguri — mâna a doua a căutării. */
+async function citestePagina(url: string): Promise<string> {
+  if (!/^https?:\/\//i.test(url)) return JSON.stringify({ error: 'url invalid (doar http/https)' })
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: 'follow' })
+    if (!r.ok) return JSON.stringify({ error: `HTTP ${r.status}` })
+    const html = await r.text()
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&amp;|&lt;|&gt;|&quot;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return text ? text.slice(0, 8000) : JSON.stringify({ error: 'pagina fara text' })
+  } catch (e) {
+    return JSON.stringify({ error: `pagina necitibila: ${e instanceof Error ? e.message.slice(0, 100) : String(e)}` })
+  }
+}
+
 /** Rulează o sarcină prin specialist — creierul Gemini real al lui Kelion cu
- *  pălăria agentului. Asta face din fiecare carte A2A un agent CARE LUCREAZĂ, nu
- *  un link mort.
+ *  pălăria agentului ȘI cu unelte (căutarea pe net; buclă de max 3 runde de
+ *  unelte, ca un ocol de căutare să nu poată ține endpointul captiv).
  *  Plafonul de ieșire: 2048 (măsurat 4 aug, prima probă live pe `solutii` — la
  *  1024 răspunsul se tăia în mijlocul propoziției înainte de „alege una", pentru
  *  că la gemini-2.5 maxOutputTokens INCLUDE și tokenii de gândire (~512 la
  *  reasoning 'low'), deci textul util rămânea sub ~500 de tokeni). */
-export async function cheamaAgent(a: AgentKelion, sarcina: string): Promise<RaspunsAgent> {
+export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = false): Promise<RaspunsAgent> {
   const model = config.geminiModel
   const messages: OrMessage[] = [
     { role: 'system', content: instructiune(a) },
     { role: 'user', content: sarcina },
   ]
+  // BLINDAJUL (4 aug, owner: „când pornește un agent pleacă blindat cu unelte"):
+  // toți primesc căutarea + cititul paginilor; memoria lui Kelion se aprinde
+  // DOAR pe căile ownerului (caAdmin) — endpointul A2A e public, amintirile nu.
+  const unelte = caAdmin ? [UNEALTA_CAUTARE, UNEALTA_PAGINA, UNEALTA_AMINTIRI] : [UNEALTA_CAUTARE, UNEALTA_PAGINA]
   // Superputerea de raționament (4 aug): agentul cu efort 'high' primește buget
   // de gândire mare + plafon dublu (la gemini-2.5 maxOutputTokens INCLUDE
   // tokenii de gândire — vezi măsurătoarea din antet — deci plafonul crește
   // odată cu gândirea, altfel textul util s-ar sugruma).
   const efort = a.efort ?? 'low'
   const plafon = efort === 'high' ? 8192 : 2048
-  const r = await geminiDirectChat(model, messages, [], { maxTokens: plafon, temperature: 0.6, reasoning: efort })
-  return { agent: a.id, text: r.text, costUsd: r.costUsd, model: r.model }
+  let cost = 0
+  for (let runda = 0; ; runda++) {
+    const r = await geminiDirectChat(model, messages, unelte, { maxTokens: plafon, temperature: 0.6, reasoning: efort })
+    cost += r.costUsd
+    if (r.toolCalls.length === 0 || runda >= 3) {
+      return { agent: a.id, text: r.text, costUsd: cost, model: r.model }
+    }
+    messages.push({ role: 'assistant', content: r.text || '', tool_calls: r.toolCalls })
+    for (const tc of r.toolCalls) {
+      let arg: Record<string, unknown> = {}
+      try {
+        arg = JSON.parse(tc.function.arguments || '{}') as Record<string, unknown>
+      } catch {
+        /* argumente stricate → cad pe răspunsul onest de mai jos */
+      }
+      let rezultat: string
+      if (tc.function.name === 'cauta_web' && typeof arg.intrebare === 'string' && arg.intrebare) {
+        rezultat = await webSearch(arg.intrebare, 6)
+      } else if (tc.function.name === 'citeste_pagina' && typeof arg.url === 'string' && arg.url) {
+        rezultat = await citestePagina(arg.url)
+      } else if (tc.function.name === 'amintiri_kelion' && caAdmin && typeof arg.cauta === 'string' && arg.cauta) {
+        const cuvinte = arg.cauta.split(/\s+/).filter(Boolean).slice(0, 8)
+        const gasite = await searchMemories(config.adminEmail, 'kelion', cuvinte)
+        rezultat = gasite.length
+          ? gasite.map((m) => m.content).join('\n')
+          : JSON.stringify({ info: 'nimic in memorie pe cautarea asta' })
+      } else {
+        rezultat = JSON.stringify({ error: 'unealta_necunoscuta_sau_argumente_goale' })
+      }
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: rezultat.slice(0, 8000) })
+    }
+  }
 }
