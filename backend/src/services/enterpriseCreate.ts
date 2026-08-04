@@ -356,12 +356,16 @@ export function pornesteCrearea(email: string): StareEnterprise {
         // Toți în consolă — steagul jos, nimic de reluat.
         void memoriePune(CHEIA_CREARE, '').catch(() => {})
       } else if (!r.motiv) {
-        // Ocol parțial (quota/termen) — următorul pornește singur; cei intrați
-        // ies din listă la re-citire.
+        // Ocol parțial — următorul pornește singur. ADEVĂRUL GĂSIT în doc
+        // (4 aug, noaptea): ediția Standard permite ~1 agent NOU/ZI în consolă
+        // (Plus: 10/zi) — deci când un ocol n-a putut crea NIMIC (ziua e
+        // consumată), următorul vine peste 6 ORE, nu peste 15 minute; când a
+        // creat măcar unul, mai încercăm curând (poate ziua mai lasă).
+        const pauzaMin = r.creati === 0 ? 360 : REIA_MIN
         ceasReluare = setTimeout(() => {
           ceasReluare = null
           pornesteCrearea(email)
-        }, REIA_MIN * 60_000)
+        }, pauzaMin * 60_000)
       }
       // r.motiv (ne-conectat, listă necitibilă...) = nu reluăm orbește pe timer;
       // steagul rămâne, deci un restart sau o apăsare reiau când e cazul.

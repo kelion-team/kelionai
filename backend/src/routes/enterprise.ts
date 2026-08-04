@@ -154,7 +154,7 @@ function paginaAdmin(total: number): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ. Serverul lucrează în fundal cu ritm (quota Google) și <b>continuă singur</b> — reîncearcă la 15 minute și reia și după un restart de server; cine e confirmat iese din listă. Pagina arată viu „instalați X | rămași Y"; poți s-o și închizi.</p>
+Pas 2: apasă <b>Creează cei ${total}</b> O SINGURĂ DATĂ — apoi serverul duce TOT, singur, oricât ar dura. ADEVĂRUL măsurat în documentația Google: ediția <b>Standard permite ~1 agent NOU pe zi</b> în consolă (Plus: 10/zi) — deci oglinda din consolă se umple zilnic, automat. <b>TOȚI agenții lucrează DEJA în aplicație</b> (/api/a2a, chat, piețe); consola e doar vitrina. Cine e confirmat iese din listă; pagina arată viu „instalați X | rămași Y".</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
 <button id="b">🚀 Creează cei ${total} în Enterprise</button>
 <pre id="out">—</pre>
