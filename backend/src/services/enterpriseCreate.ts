@@ -228,7 +228,8 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
   // ca raportul să spună adevărul, nu o eroare care sperie degeaba.
   const ul = await api(token, 'GET', `${COL}/userStores/default/userLicenses?pageSize=200`)
   const ale = (ul.j.userLicenses as { userPrincipal?: string }[] | undefined) ?? []
-  if (ale.some((l) => l.userPrincipal === email)) {
+  // Tolerant la forma principalului (poate veni „user:email@..."), nu doar egal.
+  if (ale.some((l) => (l.userPrincipal ?? '').toLowerCase().includes(email.toLowerCase()))) {
     return `locul e deja alocat contului ${email} (verificat în userLicenses)`
   }
 
@@ -240,6 +241,12 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
   })
   if (up.status === 200) {
     return `loc alocat pe abonamentul ${activ.subscriptionTier ?? activ.name.split('/').pop()} (poate dura câteva secunde să se propage)`
+  }
+  // MĂSURAT (4 aug, de mai multe ori): 400 „Subscription reaches the limit of
+  // 1 licenses" = unicul loc al abonamentului e DEJA dat (chiar ownerului —
+  // dovada: agenții se creează). Nu-l mai raportăm ca eșec care sperie.
+  if (up.status === 400 && /reaches the limit/i.test(mesajEroare(up.j))) {
+    return 'locul e deja alocat (unicul loc al abonamentului e ocupat — al tău; agenții se creează cu el)'
   }
   return `abonament găsit dar alocarea locului a picat: HTTP ${up.status}: ${mesajEroare(up.j)}`
 }
