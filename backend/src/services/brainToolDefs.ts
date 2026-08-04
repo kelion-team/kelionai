@@ -9,6 +9,7 @@
 // sourceCode.ts). The rest are brought here a few at a time, verified.
 
 import type { Tool } from './brain-types.js'
+import { ROSTER } from './agentiKelion.js'
 
 export const LIST_SOURCE_TOOL: Tool = {
   name: 'list_source',
@@ -696,5 +697,28 @@ export const REQUEST_REPAIR_TOOL: Tool = {
       details: { type: 'string', description: 'Everything a coder needs: symptom, evidence, suspected file:line, reproduction.' },
     },
     required: ['title', 'details'],
+  },
+}
+
+// ── DELEGAREA CĂTRE AGENȚII SPECIALIȘTI (Adrian, 4 aug: „când se cere o funcție,
+// creierul alocă direct agentului respectiv jobul") ──────────────────────────
+// Cei 33 de agenți (services/agentiKelion.ts) sunt vii la /api/a2a; ASTA e veriga
+// prin care CREIERUL îi pune la lucru: când o cerere se potrivește unei
+// specialități, cheamă agentul respectiv și folosește răspunsul lui. Lista (id —
+// specialitate) vine din ROSTER — sursa unică; enum-ul o ține validă la apel.
+export const CHEAMA_AGENT_TOOL: Tool = {
+  name: 'cheama_agent',
+  description:
+    'Deleagă o sarcină unui AGENT SPECIALIST al lui Kelion și primești răspunsul lui. ' +
+    'Folosește-l când cererea se potrivește clar unei specialități — specialistul o rezolvă mai ' +
+    'bine decât un răspuns general. Alege „agent" din lista (id — specialitate):\n' +
+    ROSTER.map((a) => `${a.id} — ${a.rol}`).join('\n'),
+  input_schema: {
+    type: 'object',
+    properties: {
+      agent: { type: 'string', enum: ROSTER.map((a) => a.id), description: 'id-ul agentului specialist din listă' },
+      sarcina: { type: 'string', description: 'sarcina completă și clară pentru agent (context + ce anume trebuie făcut)' },
+    },
+    required: ['agent', 'sarcina'],
   },
 }
