@@ -36,13 +36,18 @@ interface RespApi {
   j: Record<string, unknown>
 }
 
+/** Rezultatul unei creări de agent: reușit sau eroarea verbatim (măsurat). */
+type RezCreare = { ok: true } | { ok: false; err: string }
+
 function mesajEroare(j: Record<string, unknown>): string {
   const err = j.error as { message?: string } | undefined
   return String(err?.message ?? JSON.stringify(j)).slice(0, 300)
 }
 
-async function api(token: string, method: string, path: string, body?: unknown): Promise<RespApi> {
-  const r = await fetch(`${B}/${path}`, {
+/** Nucleul comun de HTTP+JSON (folosit și de Discovery Engine și de Vertex AI):
+ *  fetch cu bearer, corp JSON opțional, parsare tolerantă la corp gol. */
+async function fetchJson(token: string, method: string, url: string, body?: unknown): Promise<RespApi> {
+  const r = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -55,6 +60,24 @@ async function api(token: string, method: string, path: string, body?: unknown):
     /* corp gol/ne-JSON — j rămâne {} */
   }
   return { status: r.status, j }
+}
+
+/** Discovery Engine (Gemini Enterprise): scurtătură peste `fetchJson` cu baza `B`. */
+async function api(token: string, method: string, path: string, body?: unknown): Promise<RespApi> {
+  return fetchJson(token, method, `${B}/${path}`, body)
+}
+
+/** Traduce răspunsul unui POST de creare într-un rezultat (200 = ok, altfel eroarea verbatim). */
+function rezultatCreare(res: RespApi): RezCreare {
+  return res.status === 200 ? { ok: true } : { ok: false, err: `HTTP ${res.status}: ${mesajEroare(res.j)}` }
+}
+
+/** Adună rezultatele creărilor paralele: câți creați, câți eșuați, prima eroare. */
+function socoteste(rezultate: RezCreare[]): { creati: number; esuati: number; primaEroare?: string } {
+  const creati = rezultate.filter((r) => r.ok).length
+  const esuati = rezultate.length - creati
+  const primaEroare = rezultate.find((r): r is { ok: false; err: string } => !r.ok)?.err
+  return { creati, esuati, primaEroare }
 }
 
 /** Creează assistant-ul (dacă lipsește) + cei 33 de agenți, cu tokenul Google al
@@ -108,12 +131,10 @@ export async function creeazaAgentiEnterprise(email: string): Promise<RaportEnte
         description: ag.rol,
         a2aAgentDefinition: { jsonAgentCard: JSON.stringify(card) },
       })
-      return res.status === 200 ? { ok: true as const } : { ok: false as const, err: `HTTP ${res.status}: ${mesajEroare(res.j)}` }
+      return rezultatCreare(res)
     }),
   )
-  const creati = rezultate.filter((r) => r.ok).length
-  const esuati = rezultate.length - creati
-  const primaEroare = rezultate.find((r): r is { ok: false; err: string } => !r.ok)?.err
+  const { creati, esuati, primaEroare } = socoteste(rezultate)
 
   // 4) Lista finală, citită din API (dovada).
   const fin = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
@@ -193,22 +214,6 @@ function vertexBaza(loc: string): string {
   return loc === 'global' ? 'https://aiplatform.googleapis.com' : `https://${loc}-aiplatform.googleapis.com`
 }
 
-async function apiVertex(token: string, method: string, url: string, body?: unknown): Promise<RespApi> {
-  const r = await fetch(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(30_000),
-  })
-  let j: Record<string, unknown> = {}
-  try {
-    j = (await r.json()) as Record<string, unknown>
-  } catch {
-    /* corp gol/ne-JSON */
-  }
-  return { status: r.status, j }
-}
-
 /** Creează cei 33 de agenți în Vertex AI (Agent Platform Studio), cu tokenul
  *  ownerului. Fără abonament. Alege singur o locație care răspunde (global →
  *  us-central1). Raport MĂSURAT: câți creați, verbatim la primul eșec. */
@@ -224,9 +229,9 @@ export async function creeazaAgentiVertex(email: string): Promise<RaportEnterpri
   // 1) Găsește o locație unde API-ul răspunde (LIST = 200).
   let loc = ''
   let probaEroare = ''
-  for (const cand of ['global', 'us-central1', 'us-central1']) {
+  for (const cand of ['global', 'us-central1', 'us-east4']) {
     const url = `${vertexBaza(cand)}/v1/projects/${PROIECT}/locations/${cand}/agents?pageSize=1`
-    const r = await apiVertex(T, 'GET', url)
+    const r = await fetchJson(T, 'GET', url)
     if (r.status === 200) {
       loc = cand
       break
@@ -239,7 +244,7 @@ export async function creeazaAgentiVertex(email: string): Promise<RaportEnterpri
   const listUrl = `${vertexBaza(loc)}/v1/${parent}?pageSize=200`
 
   // 2) Cine există deja (idempotență pe id).
-  const ex = await apiVertex(T, 'GET', listUrl)
+  const ex = await fetchJson(T, 'GET', listUrl)
   const cunoscuti = new Set(
     ((ex.j.agents as { name?: string; id?: string }[] | undefined) ?? []).map((a) => a.id ?? String(a.name ?? '').split('/').pop()),
   )
@@ -250,21 +255,19 @@ export async function creeazaAgentiVertex(email: string): Promise<RaportEnterpri
   const createUrl = `${vertexBaza(loc)}/v1/${parent}`
   const rezultate = await Promise.all(
     deCreat.map(async (a) => {
-      const res = await apiVertex(T, 'POST', createUrl, {
+      const res = await fetchJson(T, 'POST', createUrl, {
         id: a.id,
         base_agent: 'antigravity-preview-05-2026',
         description: a.rol,
         system_instruction: `Ești „${a.nume}", un agent specialist al lui Kelion. Specialitatea ta: ${a.rol} Răspunzi scurt, la obiect; ce nu poți proba spui „nu pot verifica".`,
       })
-      return res.status === 200 ? { ok: true as const } : { ok: false as const, err: `HTTP ${res.status}: ${mesajEroare(res.j)}` }
+      return rezultatCreare(res)
     }),
   )
-  const creati = rezultate.filter((r) => r.ok).length
-  const esuati = rezultate.length - creati
-  const primaEroare = rezultate.find((r): r is { ok: false; err: string } => !r.ok)?.err
+  const { creati, esuati, primaEroare } = socoteste(rezultate)
 
   // 4) Lista finală din API (dovada).
-  const fin = await apiVertex(T, 'GET', listUrl)
+  const fin = await fetchJson(T, 'GET', listUrl)
   const lista = ((fin.j.agents as { name?: string; id?: string; description?: string }[] | undefined) ?? []).map(
     (a) => a.id ?? String(a.name ?? '').split('/').pop() ?? '',
   )
