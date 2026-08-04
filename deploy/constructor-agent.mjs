@@ -223,7 +223,15 @@ function toolEdit(p, vechi, nou) {
   if (!vechi) return 'REFUZAT: „old" gol — dă textul EXACT care trebuie înlocuit.'
   const src = fs.readFileSync(full, 'utf8')
   const prima = src.indexOf(vechi)
-  if (prima < 0) return `REFUZAT: textul „old" nu apare în ${p} — copiază-l EXACT din 'read' (cu tot cu spații/indentare).`
+  // RE-ANCORARE DIN REFUZ (măsurat pe ordinul #43, 3 aug 21:25: după un refuz,
+  // modelul a repetat edit-uri fără țintă până a murit de ture sterile).
+  // Refuzul poartă acum ÎNCEPUTUL REAL al fișierului — modelul se re-ancorează
+  // pe conținutul adevărat fără să mai ardă un pas pe 'read'.
+  if (prima < 0)
+    return (
+      `REFUZAT: textul „old" nu apare în ${p} — copiază-l EXACT din 'read' (cu tot cu spații/indentare). ` +
+      `Începutul REAL al fișierului (primele 400 caractere):\n${src.slice(0, 400)}`
+    )
   if (src.indexOf(vechi, prima + vechi.length) >= 0)
     return `REFUZAT: textul „old" apare de mai multe ori în ${p} — dă un fragment mai lung, unic.`
   fs.writeFileSync(full, src.slice(0, prima) + nou + src.slice(prima + vechi.length))
@@ -234,11 +242,21 @@ function toolEdit(p, vechi, nou) {
 const RUN_ALLOWED = new Set([
   'npm --prefix backend ci',
   'npm --prefix backend run build',
+  'npm --prefix backend run typecheck',
   'npm --prefix backend test',
   'npm --prefix frontend ci',
   'npm --prefix frontend run build',
   'git status --porcelain',
   'git diff --stat',
+  // Porțile CASEI (măsurat pe ordinul #44, 3 aug 21:33: lucrătorul a vrut să
+  // ruleze typecheck + verifica-exporturi — refuzat „comandă nepermisă" — și a
+  // ars pașii pe reîncercări până la plafon, fără finish. Sunt exact porțile
+  // pe care CI le rulează oricum pe PR; toate read-only, fără rețea, fără shell
+  // metacaractere). Un lucrător care poate RULA porțile local nu mai împinge
+  // PR-uri care pică pe ele.
+  'node scripts/verifica-sintaxa.mjs',
+  'node scripts/verifica-exporturi.mjs',
+  'node scripts/verifica-gemini.mjs',
 ])
 // INSTALAREA DE DEPENDENȚE (Etapa 5 autonomie): un ordin poate cere o bibliotecă
 // NOUĂ, iar până acum `npm install` era „comandă nepermisă" — deci constructorul
