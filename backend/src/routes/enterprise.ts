@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { ROSTER, carteAgent } from '../services/agentiKelion.js'
+import { creeazaAgentiEnterprise } from '../services/enterpriseCreate.js'
+import { getSessionUser } from '../session.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
 //
@@ -131,11 +133,79 @@ for n in L:
 `
 }
 
+// Pagina de admin: DOUĂ butoane. „Conectează Google (Enterprise)" trece prin
+// fluxul OAuth existent (acum cu scope cloud-platform, auth.ts) ca serverul să
+// primească permisiunea pe contul ownerului; „Creează cei 33" cheamă serverul,
+// care-i creează în consolă cu tokenul lui. Fără Cloud Shell, fără secrete.
+function paginaAdmin(): string {
+  return `<!doctype html><html lang="ro"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenții Kelion → Google Enterprise</title>
+<style>
+ body{font-family:system-ui,Segoe UI,Roboto,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;background:#0b1020;color:#e8ecf6}
+ h1{font-size:1.3rem} p{line-height:1.5;color:#b9c2da}
+ a.btn,button{display:inline-block;margin:.4rem .4rem .4rem 0;padding:.7rem 1.1rem;border-radius:.6rem;border:0;font-size:1rem;cursor:pointer;text-decoration:none}
+ a.btn{background:#2a3550;color:#fff} button{background:#3b82f6;color:#fff}
+ button:disabled{opacity:.5;cursor:default}
+ pre{background:#111830;padding:1rem;border-radius:.6rem;white-space:pre-wrap;word-break:break-word}
+ .ok{color:#4ade80}.rau{color:#f87171}
+</style></head><body>
+<h1>Agenții lui Kelion → consola Google Enterprise</h1>
+<p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
+Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în consolă cu contul tău licențiat.</p>
+<a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
+<button id="b">🚀 Creează cei 33 în Enterprise</button>
+<pre id="out">—</pre>
+<script>
+ const b=document.getElementById('b'), out=document.getElementById('out');
+ b.onclick=async()=>{
+   b.disabled=true; out.textContent='Creez agenții în consolă… (poate dura ~20s)';
+   try{
+     const r=await fetch('/api/enterprise/creeaza',{method:'POST',headers:{'content-type':'application/json'}});
+     const j=await r.json();
+     if(j.error){out.innerHTML='<span class=rau>Refuz: '+j.error+'</span>'; b.disabled=false; return;}
+     let s='Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
+     if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
+     out.innerHTML=(j.ok?'<span class=ok>✅ GATA — cei 33 sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat — vezi mai jos.</span>\\n')+s;
+   }catch(e){out.innerHTML='<span class=rau>Eroare rețea: '+e+'</span>';}
+   b.disabled=false;
+ };
+</script></body></html>`
+}
+
 export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
   // Public, fără secrete — doar sursa scriptului (tokenul e al ownerului, la runtime).
   app.get('/api/enterprise/agenti.py', async (_req, reply) => {
     reply.header('Content-Type', 'text/plain; charset=utf-8')
     reply.header('Cache-Control', 'no-store')
     return pythonScript()
+  })
+
+  // Pagina de admin (butonul cerut de owner: „pui în admin buton, eu loghez și
+  // continui"). DOAR admin — folosește tokenul Google al ownerului.
+  app.get('/api/enterprise/creeaza', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') {
+      reply.code(403)
+      return { error: 'forbidden' }
+    }
+    reply.header('Content-Type', 'text/html; charset=utf-8')
+    reply.header('Cache-Control', 'no-store')
+    return paginaAdmin()
+  })
+
+  // Execuția: creează cei 33 în consolă cu tokenul Google al ownerului. DOAR admin.
+  app.post('/api/enterprise/creeaza', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') {
+      reply.code(403)
+      return { error: 'forbidden' }
+    }
+    const raport = await creeazaAgentiEnterprise(user.email)
+    if (raport.motiv && raport.creati === 0 && raport.lista.length === 0) {
+      reply.code(409)
+      return { error: raport.motiv }
+    }
+    return raport
   })
 }
