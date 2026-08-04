@@ -88,3 +88,32 @@ describe('potrivesteEdit — negative', () => {
     expect(r.literal).toBeNull()
   })
 })
+
+// ── EDIT PE LINII (edit_lines) — plasa pentru fișiere MARI (#65, 4 aug) ───────
+// Pe admin.ts de 45KB, 'write' se tăia și 'edit' nu potrivea „old" → ordin picat.
+// inlocuiesteLinii înlocuiește un interval de linii fără potrivire de text.
+import { execFileSync as ef2 } from 'node:child_process'
+function probaLinii(src: string, from: number, to: number, nou: string): { text: string | null; err: string | null } {
+  const script = `
+    const m = await import(${JSON.stringify('file:///' + MJS.replace(/\\/g, '/'))});
+    const r = m.inlocuiesteLinii(${JSON.stringify(src)}, ${from}, ${to}, ${JSON.stringify(nou)});
+    console.log(JSON.stringify({ text: r.text ?? null, err: r.err ?? null }));
+  `
+  return JSON.parse(ef2(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 30000 }).trim())
+}
+
+describe('edit_lines — înlocuire pe interval de linii', () => {
+  it('înlocuiește liniile 2-3 cu o linie', () => {
+    const r = probaLinii('a\nb\nc\nd', 2, 3, 'X')
+    expect(r.text).toBe('a\nX\nd')
+  })
+  it('șterge liniile 2-3 (new gol înseamnă o linie goală în loc)', () => {
+    const r = probaLinii('a\nb\nc\nd', 2, 2, 'B2')
+    expect(r.text).toBe('a\nB2\nc\nd')
+  })
+  it('interval invalid → err, fără text', () => {
+    const r = probaLinii('a\nb', 5, 6, 'x')
+    expect(r.text).toBeNull()
+    expect(r.err).toContain('interval invalid')
+  })
+})
