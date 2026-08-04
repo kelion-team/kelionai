@@ -54,6 +54,7 @@ import {
 import { GOOGLE_STT_REGION as REGION, GOOGLE_STT_MODEL as ASR_MODEL } from '../services/asr.js'
 import { googleServiceAccount } from '../services/googleCreds.js'
 import { pcm16InWav, transcrieGemini } from '../services/urecheGemini.js'
+import { deschideUrecheaLive, urecheLiveDisponibila, type UrecheLive } from '../services/urecheLiveGemini.js'
 
 let client: v2.SpeechClient | null = null
 let projectId = ''
@@ -85,7 +86,10 @@ function getClient(): v2.SpeechClient | null {
 // Google client just to answer a public probe. It mirrors exactly the guard
 // in the WS handler (`!c || !projectId`).
 function streamingAsrConfigured(): boolean {
-  return Boolean(googleServiceAccount()?.project_id)
+  // URECHEA PRINCIPALĂ E GEMINI (Adrian, 4 aug: „am cerut auzul pe Gemini …
+  // full duplex ultra rapid"): streamingul există dacă avem cheia Gemini SAU
+  // (doar ca ultimă treaptă, fără cheie) contul de serviciu pentru Chirp.
+  return urecheLiveDisponibila() || Boolean(googleServiceAccount()?.project_id)
 }
 
 type GStream = ReturnType<v2.SpeechClient['_streamingRecognize']>
@@ -115,14 +119,17 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
-    const c = getClient()
-    if (!c || !projectId) {
+    // URECHEA PRINCIPALĂ = GEMINI LIVE (full-duplex). Chirp rămâne DOAR pentru
+    // cazul fără cheie Gemini; garda veche se aplică doar pe treapta aia.
+    const geminiPrimar = urecheLiveDisponibila()
+    const c = geminiPrimar ? null : getClient()
+    if (!geminiPrimar && (!c || !projectId)) {
       // SAFETY NET for clients that didn't get to ask the probe above (old
       // cached page, failed probe). The pair (1011, 'asr_not_configured') is a
       // CONTRACT with frontend/src/lib/micStream.ts: on receiving it, the
       // client remembers for the whole session that streaming doesn't exist
       // and falls back to batch silently — no error, no retries.
-      app.log.warn('asr-stream: WS refuzat — Google STT neconfigurat (fără service account)')
+      app.log.warn('asr-stream: WS refuzat — nici cheie Gemini, nici service account')
       try {
         socket.close(1011, 'asr_not_configured')
       } catch {
@@ -130,7 +137,7 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       }
       return
     }
-    app.log.info('asr-stream: WS conectat (sesiune OK) — aștept audio')
+    app.log.info(`asr-stream: WS conectat (sesiune OK, ureche=${geminiPrimar ? 'gemini-live' : 'chirp'}) — aștept audio`)
 
     // DIAGNOSTIC (Adrian, Aug 2 — „urechea NU PORNEȘTE deloc", live): the
     // browser's watchdog fired «silent» (audio left the browser) while the
@@ -180,6 +187,30 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     let octetiGemini = 0
     let geminiTimer: ReturnType<typeof setInterval> | null = null
     let geminiInLucru = false
+    // URECHEA LIVE (principală): sesiunea full-duplex Gemini. Dacă Live pică,
+    // plasa e urechea în rafale (pornesteUrecheaGemini) — tot Gemini.
+    let urecheLive: UrecheLive | null = null
+
+    const pornesteUrecheaLive = (): void => {
+      if (urecheLive || urecheGemini || closed) return
+      urecheLive = deschideUrecheaLive(langHint, {
+        onPartial: (text) => send({ type: 'partial', transcript: text }),
+        onFinal: (text) => {
+          send({ type: 'final', transcript: text, lang: langHint || null })
+          void recordCost(user.email, 'asr', ASR_USD_PER_CALL)
+        },
+        onVorbireIncepe: () => send({ type: 'speech_begin' }),
+        onVorbireSeTermina: () => send({ type: 'speech_end' }),
+        onEroare: (motiv) => {
+          if (closed) return
+          app.log.warn('asr-stream: urechea Live Gemini a picat (' + motiv + ') — comut pe rafale Gemini')
+          urecheLive?.inchide()
+          urecheLive = null
+          pornesteUrecheaGemini()
+        },
+      })
+      if (urecheLive) app.log.info('asr-stream: urechea Live Gemini deschisă (model din GEMINI_LIVE_MODEL sau implicit)')
+    }
 
     const pornesteUrecheaGemini = (): void => {
       if (urecheGemini || closed) return
@@ -257,6 +288,13 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
     const startGoogle = (): void => {
       if (started || closed) return
       started = true
+      // startGoogle rulează DOAR pe treapta Chirp (fără cheie Gemini), unde
+      // garda de la conectare a garantat deja clientul — dar tipul rămâne
+      // nullabil din cauza ramurii Gemini, deci verificăm onest.
+      if (!c) {
+        send({ type: 'error', error: 'asr_not_configured' })
+        return
+      }
       const recognizer = `projects/${projectId}/locations/${REGION}/recognizers/_`
       let stream: GStream
       try {
@@ -393,8 +431,13 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
             app.log.info(
               `asr-stream: limbă = ${langHint || 'auto'} (rol=${user.role}, hint client='${raw}', stocat='${userLangFallback}')`,
             )
-            startGoogle()
+            if (geminiPrimar) pornesteUrecheaLive()
+            else startGoogle()
           } else if (m.type === 'stop') {
+            if (urecheLive) {
+              urecheLive.inchide()
+              urecheLive = null
+            }
             stopGoogle()
             started = false // allows a new phrase on the same WS
           }
@@ -410,12 +453,24 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
         primulCadruLa = Date.now()
         app.log.info(`asr-stream: primul cadru audio de la client (${data.length} bytes) — urechea primește semnal`)
       }
-      // Pe urechea Gemini audio-ul se ADUNĂ pentru rafala următoare — nu mai
-      // trece prin Google (care tocmai a refuzat persistent).
+      // Urechea LIVE (principala): audio-ul curge direct în sesiunea Gemini.
+      if (urecheLive) {
+        urecheLive.scrieAudio(Buffer.from(data))
+        return
+      }
+      // Pe urechea în rafale audio-ul se ADUNĂ pentru rafala următoare.
       if (urecheGemini) {
         bufferGemini.push(Buffer.from(data))
         octetiGemini += data.length
         return
+      }
+      if (geminiPrimar) {
+        // clientul a sărit peste 'start' — pornim leneș urechea Live
+        pornesteUrecheaLive()
+        if (urecheLive) {
+          ;(urecheLive as UrecheLive).scrieAudio(Buffer.from(data))
+          return
+        }
       }
       if (!started) startGoogle()
       if (gStream) {
@@ -438,6 +493,10 @@ export async function asrStreamRoutes(app: FastifyInstance): Promise<void> {
       if (geminiTimer) {
         clearInterval(geminiTimer)
         geminiTimer = null
+      }
+      if (urecheLive) {
+        urecheLive.inchide()
+        urecheLive = null
       }
       // THE VERDICT LINE (Aug 2): 0 cadre = the browser leg never spoke (VAD /
       // mic / muted client-side); N cadre = the audio DID arrive — the break
