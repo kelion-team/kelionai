@@ -1047,6 +1047,16 @@ export default function AdminPanel({
       <div className="admin-panel">
         <header className="admin-head">
           <div className="admin-tabs">
+            {/* Butonul cerut de owner („pui în admin buton, eu loghez și
+                continui"): deschide pagina care creează cei 33 de agenți în
+                consola Google Enterprise, cu tokenul lui (services/enterpriseCreate). */}
+            <button
+              type="button"
+              className="admin-tab"
+              onClick={() => window.open('/api/enterprise/creeaza', '_blank', 'noopener')}
+            >
+              {A.tabEnterprise}
+            </button>
             <button
               type="button"
               className={`admin-tab ${tab === 'finance' ? 'sel' : ''}`}
