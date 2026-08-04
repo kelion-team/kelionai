@@ -15,7 +15,8 @@ import { ROSTER, carteAgent } from './agentiKelion.js'
 
 const PROIECT = 'gen-lang-client-0460348646'
 const B = 'https://discoveryengine.googleapis.com/v1alpha'
-const ENG = `projects/${PROIECT}/locations/global/collections/default_collection/engines/kelion-agenti`
+const COL = `projects/${PROIECT}/locations/global`
+const ENG = `${COL}/collections/default_collection/engines/kelion-agenti`
 const ASST = `${ENG}/assistants/default_assistant`
 
 export interface RaportEnterprise {
@@ -26,6 +27,8 @@ export interface RaportEnterprise {
   esuati: number
   lista: string[]
   primaEroare?: string
+  /** Ce s-a întâmplat cu LICENȚA (măsurat): abonament găsit? loc alocat? */
+  licenta?: string
 }
 
 interface RespApi {
@@ -70,6 +73,13 @@ export async function creeazaAgentiEnterprise(email: string): Promise<RaportEnte
   }
   const T = tok.accessToken
 
+  // 0) LICENȚA — cauza reală (măsurat: chiar contul ownerului primește „active
+  //    Gemini Enterprise license is not available"). Încercăm să-i alocăm un loc
+  //    dintr-un abonament al proiectului. Dacă NU există niciun abonament, o
+  //    spunem clar — un loc nu se poate aloca dintr-un abonament inexistent
+  //    (acela e o cumpărare/activare, nu cod).
+  const licenta = await asiguraLicenta(T, email)
+
   // 1) Assistant (cutia). Idempotent: GET; dacă 404 îl creăm; 409 = există.
   let a = await api(T, 'GET', ASST)
   if (a.status === 404) {
@@ -109,5 +119,33 @@ export async function creeazaAgentiEnterprise(email: string): Promise<RaportEnte
   const fin = await api(T, 'GET', `${ASST}/agents?pageSize=200`)
   const lista = ((fin.j.agents as { displayName?: string }[] | undefined) ?? []).map((x) => String(x.displayName ?? ''))
 
-  return { ok: esuati === 0 && lista.length >= ROSTER.length, creati, existau, esuati, lista, primaEroare }
+  return { ok: esuati === 0 && lista.length >= ROSTER.length, creati, existau, esuati, lista, primaEroare, licenta }
+}
+
+/** Asigură ownerului un LOC de licență Gemini Enterprise: listează abonamentele
+ *  (licenseConfigs) proiectului și, dacă există unul, îi alocă un loc
+ *  (batchUpdateUserLicenses). Întoarce un rezumat MĂSURAT pentru raport. Dacă nu
+ *  există niciun abonament, spune clar — un loc nu se alocă din nimic. */
+async function asiguraLicenta(token: string, email: string): Promise<string> {
+  const lc = await api(token, 'GET', `${COL}/licenseConfigs`)
+  if (lc.status !== 200) {
+    return `nu pot citi abonamentele: HTTP ${lc.status}: ${mesajEroare(lc.j)}`
+  }
+  const configs = (lc.j.licenseConfigs as { name?: string; state?: string; subscriptionTier?: string }[] | undefined) ?? []
+  if (configs.length === 0) {
+    return 'PROIECTUL NU ARE ABONAMENT Gemini Enterprise. Trebuie activat/cumpărat în consolă (Gemini Enterprise → abonament) — un loc nu se poate aloca dintr-un abonament inexistent.'
+  }
+  const activ = configs.find((c) => c.state === 'ACTIVE') ?? configs[0]
+  if (!activ?.name) return `abonamente găsite (${configs.length}) dar niciunul cu nume valid`
+
+  const up = await api(token, 'POST', `${COL}/userStores/default:batchUpdateUserLicenses`, {
+    inlineSource: {
+      updateMask: 'license_config',
+      userLicenses: [{ userPrincipal: email, licenseConfig: activ.name }],
+    },
+  })
+  if (up.status === 200) {
+    return `loc alocat pe abonamentul ${activ.subscriptionTier ?? activ.name.split('/').pop()} (poate dura câteva secunde să se propage)`
+  }
+  return `abonament găsit dar alocarea locului a picat: HTTP ${up.status}: ${mesajEroare(up.j)}`
 }
