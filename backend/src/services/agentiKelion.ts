@@ -107,13 +107,17 @@ export interface RaspunsAgent {
 
 /** Rulează o sarcină prin specialist — creierul Gemini real al lui Kelion cu
  *  pălăria agentului. Asta face din fiecare carte A2A un agent CARE LUCREAZĂ, nu
- *  un link mort. */
+ *  un link mort.
+ *  Plafonul de ieșire: 2048 (măsurat 4 aug, prima probă live pe `solutii` — la
+ *  1024 răspunsul se tăia în mijlocul propoziției înainte de „alege una", pentru
+ *  că la gemini-2.5 maxOutputTokens INCLUDE și tokenii de gândire (~512 la
+ *  reasoning 'low'), deci textul util rămânea sub ~500 de tokeni). */
 export async function cheamaAgent(a: AgentKelion, sarcina: string): Promise<RaspunsAgent> {
   const model = config.geminiModel
   const messages: OrMessage[] = [
     { role: 'system', content: instructiune(a) },
     { role: 'user', content: sarcina },
   ]
-  const r = await geminiDirectChat(model, messages, [], { maxTokens: 1024, temperature: 0.6, reasoning: 'low' })
+  const r = await geminiDirectChat(model, messages, [], { maxTokens: 2048, temperature: 0.6, reasoning: 'low' })
   return { agent: a.id, text: r.text, costUsd: r.costUsd, model: r.model }
 }
