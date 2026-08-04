@@ -34,7 +34,7 @@ describe('viteza — reparațiile măsurate rămân în sursă', () => {
     // orchestrator, care acceptă DOAR prefixul google-direct/ și le duce la
     // geminiDirect CU unelte (orchestrator.ts).
     expect(config).toContain(
-      "BRAIN_WORK_MODEL ?? 'google-direct/gemini-2.5-flash'",
+      "BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.6-flash'",
     )
   })
 
