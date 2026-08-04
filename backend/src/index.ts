@@ -16,6 +16,7 @@ import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
 import { asrStreamRoutes } from './routes/asr-stream.js'
+import { vocalLiveRoutes } from './routes/vocalLive.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
 import { billingRoutes } from './routes/billing.js'
@@ -265,6 +266,7 @@ await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
 await app.register(asrStreamRoutes)
+await app.register(vocalLiveRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
 await app.register(billingRoutes)

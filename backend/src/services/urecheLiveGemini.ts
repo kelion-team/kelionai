@@ -17,11 +17,15 @@
 import WebSocket from 'ws'
 import { config } from '../config.js'
 
-// Modelul Live (jumătatea-flash e cea rapidă). Suprascriibil prin env fără
-// deploy de cod — numele modelelor Live se mai schimbă.
-// NOTĂ (4 aug 2026): Modelul 'gemini-1.5-flash-latest' a început să pice cu
-// eroare "not found". Schimbat la 'gemini-1.5-pro-latest' care pare mai stabil.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-pro-latest'
+// Modelul Live (bidiGenerateContent). Suprascriibil prin env fără deploy —
+// numele modelelor Live se schimbă des.
+// NOTĂ (4 aug 2026): 'gemini-1.5-*' au fost SCOASE de Google (măsurat: 404, cod
+// 1008 „not supported for bidiGenerateContent") → full-duplex era PICAT.
+// NU EXISTĂ model „3.6 Live" — Google n-a scos unul (măsurat: 3.6 e refuzat pe
+// bidiGenerateContent). Modelele Live de pe cheie: 2.5-native-audio și 3.1.
+// Owner (4 aug): „fără 3.1" → urechea rămâne pe 2.5-native-audio (dec. 2025),
+// singurul non-3.1. Cere responseModalities:['AUDIO']; citim doar transcrierea.
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
 
 export interface UrecheLive {
   /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
@@ -57,7 +61,11 @@ export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente):
       JSON.stringify({
         setup: {
           model: `models/${MODEL_LIVE}`,
-          generationConfig: { responseModalities: ['TEXT'] },
+          // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat:
+          // cu TEXT dau cod 1007). Nouă ne trebuie DOAR urechea, deci îi cerem să
+          // tacă (systemInstruction) și consumăm exclusiv `inputTranscription`;
+          // eventualul audio de ieșire al modelului e ignorat mai jos.
+          generationConfig: { responseModalities: ['AUDIO'] },
           // Urechea propriu-zisă: serverul transcrie ce AUDE, în flux.
           inputAudioTranscription: {},
           systemInstruction: {

@@ -79,7 +79,12 @@ export const config = {
   geminiKey: env(...ENV_ALIASES.geminiKey),
   // Jules — agentul asincron oficial Google (3 aug): cheia API din vps-keys.
   julesKey: env(...ENV_ALIASES.julesKey),
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  // Creierul DIRECT (chat + VEDERE + AUDIO — Gemini e multimodal, un singur
+  // model face tot). 4 aug 2026: trecut de la 'gemini-2.5-flash' (gen. veche) la
+  // 'gemini-3.6-flash' — generația cea mai nouă, măsurat pe cheia ownerului că
+  // acceptă imagine ȘI audio (IMAGINE 200✓ | AUDIO 200✓), deci nu strică
+  // vederea/vocea. Suprascriibil din env (GEMINI_MODEL).
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.6-flash',
   // VIDEO — Veo prin cheia Gemini. NICIUN nivel gratuit (măsurat pe pagina
   // oficială de prețuri, 2 aug 2026) — de-aia plata cere alegerea conștientă
   // VIDEO_ALLOW_PAID=1, ca la constructor: nimic plătit din greșeală.
@@ -96,11 +101,17 @@ export const config = {
   // reseta). Lacătul (scripts/verifica-gemini.mjs + lacat.test.ts) pinuiește
   // toate trei treptele.
   brain: {
-    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
-    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-2.5-flash').trim(),
-    // Treapta 'top' (escaladarea grea) — Gemini 2.5 PRO pe aceeași cheie
-    // (dovedit pe cheia ta: constructorul rulează deja pe gemini-2.5-pro).
-    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-2.5-pro').trim(),
+    // 4 aug 2026: toate treptele mutate de la generația 2.5 la 'gemini-3.6-flash'
+    // — cea mai nouă, mai rapidă, mai ieftină, și măsurat multimodală (text +
+    // apel de unealtă + imagine + audio, toate 200✓ pe cheia ownerului). „Tot pe
+    // cel mai evoluat" (ordinul ownerului, 4 aug). Rămâne Gemini direct (lacătul).
+    chatDefault: (process.env.BRAIN_CHAT_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
+    workDefault: (process.env.BRAIN_WORK_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
+    // Treapta 'top' — TOT 'gemini-3.6-flash'. Ownerul (4 aug): „dacă e bun, ieftin
+    // și face tot, de ce 2 trepte?". Corect: un singur model multimodal, rapid și
+    // ieftin acoperă toate treptele; nu inventăm o treaptă „pro" mai scumpă degeaba.
+    // Rămâne suprascriibil din env dacă vreodată vrei o escaladare pe alt model.
+    topDefault: (process.env.BRAIN_TOP_MODEL ?? 'google-direct/gemini-3.6-flash').trim(),
   },
   // ── COLLECTING MONEY THROUGH REVOLUT (Adrian, 30 Jul: "Stripe goes out
   // completely and Pro comes in") ────────────────────────────────────────────
