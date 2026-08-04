@@ -688,7 +688,7 @@ async function serperVideos(query: string, n: number): Promise<{ title: string; 
 // OpenRouter: nu mai există niciun fallback de căutare pe alt furnizor.
 // Serper e SINGURUL motor; dacă pică, spunem cinstit `search_unavailable`.)
 
-async function webSearch(query: string, max: number): Promise<string> {
+export async function webSearch(query: string, max: number): Promise<string> {
   if (!query) return JSON.stringify({ error: 'empty_query' })
   const n = Math.min(Math.max(max, 1), 12)
   // SERPER ONLY (Adrian, 3 aug: OpenRouter scos TOTAL din aplicație). Serper dă

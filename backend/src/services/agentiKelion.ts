@@ -74,7 +74,7 @@ export const ROSTER: AgentKelion[] = [
   { id: 'avatar3d', nume: 'Agent Avatar 3D', rol: 'Avatarul: gesturi, lipsync, animatii, scena 3D, GLB. Sincron cu vocea.' },
   { id: 'vps', nume: 'Agent VPS Infrastructura', rol: 'VPS: docker, env-file, nginx, certificate, disc. Nimic pe ghicite - doar din masuratori.' },
   { id: 'clienti', nume: 'Agent Clienti', rol: 'Clienti: onboarding, abonamente, credite, reclamatii. Ton uman, cifre doar masurate.' },
-  { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare: SEO, lansari, texte de marketing, clipuri de prezentare.' },
+  { id: 'promovare', nume: 'Agent Promovare', rol: 'Promovare automata: evalueaza site-ul (kelionai.app sau oricare), propune strategia (SEO, social, lansari) si pregateste tot de executat - texte, plan pe zile, clipuri cu echipa video. Publicarea pe conturi porneste dupa ce ownerul le leaga.', efort: 'high' },
   // A doua completare din 4 aug (Adrian: „mai cauta pentru functii google
   // agenti") — serviciile Google fara specialist pana acum:
   { id: 'youtube', nume: 'Agent YouTube', rol: 'YouTube: cautare, transcripturi, rezumate, publicare clipuri cu confirmare.' },
@@ -117,6 +117,12 @@ export const ROSTER: AgentKelion[] = [
   { id: 'imunitate', nume: 'Agent Imunitate', rol: 'Previne recidivele: verifica daca o greseala veche poate reveni si propune plasa de siguranta (test, poarta).' },
   { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
   { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
+  // A noua completare din 4 aug (Adrian: „boti automati care scaneaza botii
+  // performanti si copiaza structurile, si creiaza modele potentiale, salvate
+  // in memoria kelion"). ONEST: agentul CERCETEAZA la cerere (nu pe orar - un
+  // scaner programat ar fi infrastructura noua, separata); cand e chemat prin
+  // chatul lui Kelion, creierul poate salva concluziile in memoria lui.
+  { id: 'cercetas-boti', nume: 'Agent Cercetas de Boti', rol: 'DOAR ADMIN. Studiaza boti si agenti performanti din surse PUBLICE: extrage structura (reguli, indicatori, gestiunea riscului), compara si formuleaza modele-candidat, gata de salvat in memoria lui Kelion. Fara cod furat; sursele cu link si data.', efort: 'high', doarAdmin: true },
   // A opta completare din 4 aug (Adrian: „matematician, fizician, optician,
   // inventator, tot ce poti tu") — echipa de stiinta:
   { id: 'matematician', nume: 'Agent Matematician', rol: 'Matematica: calcule exacte, demonstratii pas cu pas, statistica; arata drumul, nu doar rezultatul.', efort: 'high' },
