@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ROSTER, gasesteAgent, carteAgent, cheamaAgent } from '../services/agentiKelion.js'
+import { getSessionUser } from '../session.js'
 
 // ── ENDPOINTUL AGENȚILOR A2A ────────────────────────────────────────────────
 //
@@ -74,6 +75,18 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
       if (esteRpc) return rpcEroare(body.id, -32601, 'agent necunoscut')
       reply.code(404)
       return { error: 'agent necunoscut' }
+    }
+
+    // Agenții „doar admin" (Adrian, 4 aug: „roboti de tranzactionare DOAR
+    // admin"): endpointul e public pentru restul rosterului, dar aceștia refuză
+    // orice apel fără sesiunea ownerului — cartea se vede, munca nu.
+    if (a.doarAdmin) {
+      const user = getSessionUser(req)
+      if (!user || user.role !== 'admin') {
+        if (esteRpc) return rpcEroare(body.id, -32003, 'doar ownerul poate chema acest agent')
+        reply.code(403)
+        return { error: 'doar ownerul poate chema acest agent' }
+      }
     }
 
     const sarcina = extrageText(body)

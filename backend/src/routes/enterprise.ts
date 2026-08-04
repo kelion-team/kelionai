@@ -152,9 +152,9 @@ function paginaAdmin(): string {
 </style></head><body>
 <h1>Agenții lui Kelion → consola Google Enterprise</h1>
 <p>Pas 1: apasă <b>Conectează Google (Enterprise)</b> și loghează-te — dai permisiunea o singură dată (rămâne salvată).<br>
-Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în fundal, cu ritm (Google are quota de creare pe minut) — pagina se actualizează singură; poate dura câteva minute.</p>
+Pas 2: apasă <b>Creează cei ${ROSTER.length}</b>. Serverul îi creează în fundal, cu ritm (Google are quota de creare pe minut) — pagina se actualizează singură; poate dura câteva minute.</p>
 <a class="btn" href="/auth/google/connect">🔗 Conectează Google (Enterprise)</a>
-<button id="b">🚀 Creează cei 33 în Enterprise</button>
+<button id="b">🚀 Creează cei ${ROSTER.length} în Enterprise</button>
 <pre id="out">—</pre>
 <script>
  const b=document.getElementById('b'), out=document.getElementById('out');
@@ -163,7 +163,7 @@ Pas 2: apasă <b>Creează cei 33</b>. Serverul îi creează în fundal, cu ritm 
  function final(j){
    let s=(j.licenta?'Licență: '+j.licenta+'\\n\\n':'')+(j.motiv?'Motiv: '+j.motiv+'\\n\\n':'')+'Creați: '+j.creati+' | existau: '+j.existau+' | eșuați: '+j.esuati+'\\nLISTA în consolă ('+j.lista.length+'):\\n'+j.lista.map(n=>'  - '+n).join('\\n');
    if(j.primaEroare) s+='\\n\\nPrima eroare (verbatim): '+j.primaEroare;
-   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — cei 33 sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — apasă din nou: continui de unde am rămas.</span>\\n')+s;
+   out.innerHTML=(j.ok?'<span class=ok>✅ GATA — toți cei ${ROSTER.length} sunt în Google Enterprise.</span>\\n':'<span class=rau>Nu toți au intrat încă — apasă din nou: continui de unde am rămas.</span>\\n')+s;
  }
  function arata(st, prima){
    if(st.error){ if(!prima) out.innerHTML='<span class=rau>Refuz: '+st.error+'</span>'; opreste(); return; }

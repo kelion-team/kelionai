@@ -36,6 +36,7 @@ import { startAutonomie } from './services/autonomie.js'
 import { startAutoInvatare } from './services/autoInvatare.js'
 import { triageGaps } from './services/gapsTriage.js'
 import { runSelfHeal } from './services/selfHeal.js'
+import { pornesteIscoadele } from './services/iscoada.js'
 import { voiceprintRoutes } from './routes/voiceprint.js'
 import { clientErrorRoutes } from './routes/clientErrors.js'
 import { manualRoutes } from './routes/manual.js'
@@ -411,6 +412,9 @@ try {
     void runSelfHeal().catch(() => {})
     setInterval(() => { void runSelfHeal().catch(() => {}) }, 30 * 60 * 1000)
   }, 3 * 60 * 1000)
+  // ISCOADELE (Adrian, 4 aug: „boti care bat netul 24 din 24 si aduc informati
+  // lui kelion"): patrula periodică Serper→creier→memoria lui Kelion.
+  pornesteIscoadele()
 } catch (err) {
   app.log.error(err)
   process.exit(1)

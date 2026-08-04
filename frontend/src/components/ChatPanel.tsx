@@ -51,6 +51,7 @@ import { setRealLatency, getRealLatency, subscribeRealLatency } from '../lib/lat
 import { keepScreenOn } from '../lib/wakelock'
 import { startMicStream } from '../lib/micStream'
 import { startRealtimeVoice, type RealtimeVoiceHandle } from '../lib/realtimeVoice'
+import { deschideCanalVoce, idTabVoce, judecaMesajVoce, inimaAMurit, INIMA_BATE_MS, type MesajVoce } from '../lib/voceUnica'
 import { createUtteranceCoalescer, type UtteranceCoalescer } from '../lib/utteranceCoalescer'
 import { pushFacial } from '../lib/facialQueue'
 import { reportActivity } from '../lib/activity'
@@ -1243,11 +1244,18 @@ export default function ChatPanel({
   // the cooldowns expire it stops the batch mic, re-arms streaming candidacy
   // and calls ensureMic — if the server is back, full-duplex resumes; if not,
   // the failure cascade re-arms the timer and we retry every ~100s forever.
+  // ── O VOCE ÎN TOATE TABURILE (Adrian, 4 aug: „am 2 voci") — zăvorul dintre
+  // taburi. Regulile pure stau în lib/voceUnica.ts; aici doar refs + efectul.
+  const tabVoceIdRef = useRef(idTabVoce())
+  const voceAiureaRef = useRef(false) // vocea trăiește în ALT tab → aici tăcem
+  const ultimaInimaRef = useRef(0)
+  const canalVoceRef = useRef<BroadcastChannel | null>(null)
   const upgradeTimerRef = useRef<number | null>(null)
   const armVoiceUpgrade = (): void => {
     if (upgradeTimerRef.current) window.clearTimeout(upgradeTimerRef.current)
     upgradeTimerRef.current = window.setTimeout(() => {
       upgradeTimerRef.current = null
+      if (voceAiureaRef.current) return
       if (micManualOffRef.current || micStartingRef.current) return
       streamModeRef.current = true // streaming dictation becomes a candidate again
       micRef.current?.stop() // release the batch ear so ensureMic's guard opens
@@ -1303,6 +1311,9 @@ export default function ChatPanel({
   }
 
   async function ensureMic(preWarmedStream?: MediaStream): Promise<void> {
+    // Vocea trăiește în alt tab (zăvor, 4 aug) → tabul ăsta nu pornește nimic;
+    // veghea din efectul „o voce în toate taburile" o reia dacă acel tab moare.
+    if (voceAiureaRef.current) return
     if (micRef.current || micStartingRef.current || micManualOffRef.current) return
     if (micRetryRef.current) {
       window.clearTimeout(micRetryRef.current)
@@ -1622,6 +1633,8 @@ export default function ChatPanel({
           micBackoffRef.current = 1000
           setListening(true)
           if (isVoicePlaying()) sh.setMuted(true)
+          // Dictarea e tot VOCE: anunță taburile-frate să tacă (o singură voce).
+          canalVoceRef.current?.postMessage({ takeover: tabVoceIdRef.current })
         }
         return
       }
@@ -1656,6 +1669,8 @@ export default function ChatPanel({
         // Restarted while the brain is still speaking: it starts muted (anti-echo); it comes back
         // by itself at the end of the playback, as with any reply.
         if (isVoicePlaying()) h.setMuted(true)
+        // Dictarea batch e tot VOCE: taburile-frate tac (o singură voce, 4 aug).
+        canalVoceRef.current?.postMessage({ takeover: tabVoceIdRef.current })
       }
     } finally {
       micStartingRef.current = false
@@ -1685,6 +1700,8 @@ export default function ChatPanel({
       return
     }
     micManualOffRef.current = false
+    // Apăsarea manuală bate zăvorul dintre taburi: omul a ales TABUL ĂSTA.
+    voceAiureaRef.current = false
 
     // PRE-WARM: we open the microphone before startMicStream, so that pressing
     // the "mic on" button activates almost instantly. If the user presses
@@ -1773,6 +1790,68 @@ export default function ChatPanel({
   // VOX + barge-in, fast first word), started default-on by the "Permanent hearing"
   // above — proven to work (the real voiceprints are created on it). Zero separate
   // admin channel, zero dependency on the LiveKit agent.
+
+  // ── O VOCE ÎN TOATE TABURILE (Adrian, 4 aug: două taburi deschise = două
+  // voci, una live + una robotică din dictarea de rezervă — măsurat din captura
+  // lui). Zăvorul vechi (BroadcastChannel din realtimeVoice) acoperea DOAR
+  // sesiunea live; aici acoperim TOT lanțul vocii: la {takeover} străin tabul
+  // ăsta oprește orice microfon și se zăvorăște; cât ține vocea, bate {inima};
+  // dacă inima tabului activ tace (>25s) sau vine {ramasBun} la închidere, un
+  // tab zăvorât reia vocea singur. Regulile pure: lib/voceUnica.ts.
+  useEffect(() => {
+    const bc = deschideCanalVoce()
+    canalVoceRef.current = bc
+    if (!bc) return
+    const opresteLocal = (): void => {
+      if (micRetryRef.current) {
+        window.clearTimeout(micRetryRef.current)
+        micRetryRef.current = null
+      }
+      if (upgradeTimerRef.current) {
+        window.clearTimeout(upgradeTimerRef.current)
+        upgradeTimerRef.current = null
+      }
+      micRef.current?.stop()
+      micRef.current = null
+      coalescerRef.current?.cancel()
+      setListening(false)
+      setLiveVoice('')
+    }
+    const onMesaj = (ev: MessageEvent): void => {
+      const ce = judecaMesajVoce(ev.data as MesajVoce | null, tabVoceIdRef.current, voceAiureaRef.current)
+      if (ce === 'zavoraste') {
+        voceAiureaRef.current = true
+        ultimaInimaRef.current = Date.now()
+        opresteLocal()
+      } else if (ce === 'inima') {
+        ultimaInimaRef.current = Date.now()
+      } else if (ce === 'reia') {
+        voceAiureaRef.current = false
+        void ensureMicRef.current()
+      }
+    }
+    bc.addEventListener('message', onMesaj)
+    const puls = window.setInterval(() => {
+      if (micRef.current) bc.postMessage({ inima: tabVoceIdRef.current })
+      else if (voceAiureaRef.current && inimaAMurit(ultimaInimaRef.current, Date.now())) {
+        // Tabul care ținea vocea a murit fără rămas-bun → vocea revine AICI.
+        voceAiureaRef.current = false
+        void ensureMicRef.current()
+      }
+    }, INIMA_BATE_MS)
+    const laPlecare = (): void => {
+      if (micRef.current) bc.postMessage({ ramasBun: tabVoceIdRef.current })
+    }
+    window.addEventListener('pagehide', laPlecare)
+    return () => {
+      window.removeEventListener('pagehide', laPlecare)
+      window.clearInterval(puls)
+      bc.removeEventListener('message', onMesaj)
+      laPlecare()
+      bc.close()
+      canalVoceRef.current = null
+    }
+  }, [])
 
   // While it listens, the screen doesn't fall asleep — a phone with the screen off cuts its
   // microphone, and "permanent on" would die at the first screen-off.
