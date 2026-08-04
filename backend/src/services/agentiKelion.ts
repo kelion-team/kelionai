@@ -28,6 +28,9 @@ export interface AgentKelion {
    *  (Adrian, 4 aug: „super putere pentru gindire rationament... wow").
    *  Nespecificat = 'low' (rapid și ieftin, destul pentru meserii). */
   efort?: 'low' | 'high'
+  /** Doar ownerul îl poate chema (Adrian, 4 aug: „roboti de tranzactionare
+   *  DOAR admin") — routes/a2a.ts refuză POST-ul fără sesiune de admin. */
+  doarAdmin?: boolean
 }
 
 export const ROSTER: AgentKelion[] = [
@@ -114,9 +117,25 @@ export const ROSTER: AgentKelion[] = [
   { id: 'imunitate', nume: 'Agent Imunitate', rol: 'Previne recidivele: verifica daca o greseala veche poate reveni si propune plasa de siguranta (test, poarta).' },
   { id: 'planificator', nume: 'Agent Planificator', rol: 'Sparge teluri mari in planuri pe zile: pasi, dependinte, termene realiste, ce se poate paraleliza.' },
   { id: 'critic', nume: 'Agent Critic', rol: 'A doua opinie: cauta greselile intr-un plan sau raspuns INAINTE sa plece; spune si ce e bun.' },
+  // A opta completare din 4 aug (Adrian: „matematician, fizician, optician,
+  // inventator, tot ce poti tu") — echipa de stiinta:
+  { id: 'matematician', nume: 'Agent Matematician', rol: 'Matematica: calcule exacte, demonstratii pas cu pas, statistica; arata drumul, nu doar rezultatul.', efort: 'high' },
+  { id: 'fizician', nume: 'Agent Fizician', rol: 'Fizica: fenomene, formule, unitati, estimari de ordin de marime; leaga teoria de practica.' },
+  { id: 'chimist', nume: 'Agent Chimist', rol: 'Chimie: reactii, materiale, sigurante. Avertizeaza clar la substante periculoase.' },
+  { id: 'biolog', nume: 'Agent Biolog', rol: 'Biologie: organisme, ecosisteme, genetica pe intelesul omului; ce e dovedit vs. ipoteza.' },
+  { id: 'optician', nume: 'Agent Optician', rol: 'Optica: lentile, lasere, senzori de imagine, iluminare; calcule si scheme practice.' },
+  { id: 'astronom', nume: 'Agent Astronom', rol: 'Astronomie: cer, orbite, observatii cu ce ai in curte; evenimente cu data si ora locala.' },
+  { id: 'inventator', nume: 'Agent Inventator', rol: 'Inventii: idei noi din nevoi reale, schite de principiu, ce exista deja (brevetabilitate informativ).' },
+  { id: 'istoric', nume: 'Agent Istoric', rol: 'Istorie: fapte cu surse si date, contexte, fara legende date drept adevar.' },
+  // A saptea completare din 4 aug (Adrian: „agenti pentru nevazatori... pentru
+  // cei care nu aud. Roboti de tranzactionare doar admin"):
+  { id: 'ochi', nume: 'Agent Ochii Tai', rol: 'Pentru nevazatori: descrie prin camera ce e in jur, citeste cu voce tare ecrane si documente, ghideaza pas cu pas si spune clar pericolele.' },
+  { id: 'auz-scris', nume: 'Agent Auz in Scris', rol: 'Pentru cei care nu aud: transcrie in scris tot ce se vorbeste, semnaleaza vizual sunetele importante (sonerie, alarma), vorbeste in locul lor cand dicteaza.' },
+  { id: 'tranzactii', nume: 'Agent Tranzactii', rol: 'DOAR ADMIN. Analiza de tranzactionare, riscul intai: modele (trend, mean-reversion, momentum, DCA), marimea pozitiei, stop, expunere - pe date aduse de tine, cu data si sursa. NU executa ordine si NU promite castiguri.', efort: 'high', doarAdmin: true },
   // Superputerea (Adrian, 4 aug: „hai vino cu super putere pentru gindire
-  // rationament, orice face kelion wow"): singurul agent cu buget de gandire
-  // 'high' si plafon dublu — cheamaAgent ii da REAL mai mult creier.
+  // rationament, orice face kelion wow"): buget de gandire 'high' si plafon
+  // dublu — cheamaAgent ii da REAL mai mult creier (la fel si 'tranzactii',
+  // cerut „ultra atent si performant").
   { id: 'gandire', nume: 'Agent Gandire Profunda', rol: 'Superputerea de rationament: probleme grele desfacute pas cu pas, ipoteze puse la incercare, concluzie verificata. Gandeste mult inainte sa raspunda.', efort: 'high' },
 ]
 
