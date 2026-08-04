@@ -1,4 +1,4 @@
-import { getGoogleRefreshToken } from '../db.js'
+import { getGoogleRefreshToken, memoriePune, memorieIa } from '../db.js'
 import { refreshGoogleAccessToken } from './google.js'
 import { ROSTER, carteAgent } from './agentiKelion.js'
 
@@ -104,7 +104,7 @@ async function creeazaUnAgent(T: string, ag: (typeof ROSTER)[number], anunta: (p
     const res = await api(T, 'POST', `${ASST}/agents`, corp)
     if (res.status !== 429 || i >= ASTEPTARI_429_S.length) return rezultatCreare(res)
     const s = res.retryAfter ?? ASTEPTARI_429_S[i] ?? 60
-    anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length})`)
+    anunta(`quota Google (429) la „${ag.nume}" — aștept ${s}s și reîncerc (${i + 1}/${ASTEPTARI_429_S.length}); restul listei așteaptă la rând`)
     await zabava(s * 1000)
   }
 }
@@ -172,7 +172,10 @@ export async function creeazaAgentiEnterprise(email: string, anunta: (pas: strin
       rezultate.push({ ok: false, err: `neîncercat: termenul total (${TERMEN_TOTAL_MS / 60_000} min) s-a epuizat — apasă din nou, continui de unde am rămas` })
       continue
     }
-    anunta(`creez ${i + 1}/${deCreat.length}: ${ag.nume}`)
+    // Raportul cerut de owner (4 aug): „instalați X, rămași Y" — viu, la
+    // fiecare pas, nu doar la final.
+    const instalati = existau + rezultate.filter((x) => x.ok).length
+    anunta(`instalați: ${instalati}/${ROSTER.length} | rămași: ${ROSTER.length - instalati} | acum îl pun pe: ${ag.nume}`)
     const rez = await creeazaUnAgent(T, ag, anunta)
     rezultate.push(rez)
     if (rez.ok) await zabava(PAUZA_INTRE_MS)
@@ -274,22 +277,53 @@ interface StareEnterprise {
 }
 const stare: StareEnterprise = { ruleaza: false, pas: 'nepornit' }
 
+// „REMEDIAZĂ ERR ASTA CU RELUAREA DE LA 0" (Adrian, 4 aug seara): crearea nu
+// mai depinde de apăsări repetate și nu mai moare la restart. Steagul din
+// memorie (memorie_proiect) supraviețuiește repornirii → la boot reluăm
+// SINGURI; iar când un ocol se termină fără toți agenții (quota 429, termen),
+// următorul ocol pornește SINGUR peste REIA_MIN minute. „Din listă iese cine
+// e confirmat": fiecare ocol RE-CITEȘTE lista din consolă și îi sare pe cei
+// intrați — de-creat rămâne mereu doar restul (măsurat: „existau: 2").
+const CHEIA_CREARE = 'enterprise-creare-in-mers'
+const REIA_MIN = 15
+let ceasReluare: NodeJS.Timeout | null = null
+
 /** Starea creării din fundal — pagina de admin o citește la câteva secunde. */
 export function stareCreare(): StareEnterprise {
   return stare
 }
 
-/** Pornește crearea în fundal (dacă nu rulează deja) și întoarce starea. */
+/** Pornește crearea în fundal (dacă nu rulează deja) și întoarce starea.
+ *  Nu se mai oprește singură până nu intră TOȚI: la ocol parțial se re-armează
+ *  peste REIA_MIN minute; la restart de server, reiaCreareaDupaRepornire. */
 export function pornesteCrearea(email: string): StareEnterprise {
   if (stare.ruleaza) return stare
+  if (ceasReluare) {
+    clearTimeout(ceasReluare)
+    ceasReluare = null
+  }
   stare.ruleaza = true
   stare.raport = undefined
   stare.pas = 'pornesc'
+  void memoriePune(CHEIA_CREARE, email).catch(() => {})
   void creeazaAgentiEnterprise(email, (pas) => {
     stare.pas = pas
   })
     .then((r) => {
       stare.raport = r
+      if (r.ok) {
+        // Toți în consolă — steagul jos, nimic de reluat.
+        void memoriePune(CHEIA_CREARE, '').catch(() => {})
+      } else if (!r.motiv) {
+        // Ocol parțial (quota/termen) — următorul pornește singur; cei intrați
+        // ies din listă la re-citire.
+        ceasReluare = setTimeout(() => {
+          ceasReluare = null
+          pornesteCrearea(email)
+        }, REIA_MIN * 60_000)
+      }
+      // r.motiv (ne-conectat, listă necitibilă...) = nu reluăm orbește pe timer;
+      // steagul rămâne, deci un restart sau o apăsare reiau când e cazul.
     })
     .catch((e: unknown) => {
       stare.raport = { ok: false, creati: 0, existau: 0, esuati: 0, lista: [], motiv: `prăbușit: ${String(e).slice(0, 200)}` }
@@ -299,4 +333,12 @@ export function pornesteCrearea(email: string): StareEnterprise {
       stare.pas = 'gata'
     })
   return stare
+}
+
+/** La boot: dacă un restart a tăiat o creare în mers (steagul e sus), o reluăm
+ *  singuri — ownerul nu mai apasă nimic după deploy-uri. */
+export async function reiaCreareaDupaRepornire(): Promise<void> {
+  const v = await memorieIa(CHEIA_CREARE)
+  const m = /\]\s*(\S+@\S+)\s*$/.exec(v.trim())
+  if (m?.[1]) pornesteCrearea(m[1])
 }
