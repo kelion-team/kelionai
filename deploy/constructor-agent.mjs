@@ -58,7 +58,12 @@ const GHTOKEN = env.GITHUB_TOKEN ?? ''
 // creier și nu inventează succes. Request/response shaping mirrors
 // backend/src/services/geminiDirect.ts. See llmGemini().
 const GEMINI_KEY = env.GEMINI_API_KEY ?? ''
-const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-2.5-pro'
+// CREIERUL CONSTRUCTORULUI (4 aug 2026, măsurat pe cheia ownerului): trecut de la
+// 'gemini-2.5-pro' (generație veche) la 'gemini-3.6-flash' — generația cea mai
+// nouă, mai rapid și mai ieftin, iar apelul de UNELTE confirmat că merge pe
+// formatul exact al constructorului (functionCall ok). Suprascriibil din env
+// fără deploy (`CONSTRUCTOR_GEMINI_MODEL`) dacă vrei alt model.
+const GEMINI_MODEL = env.CONSTRUCTOR_GEMINI_MODEL || 'gemini-3.6-flash'
 const MAX_STEPS = Number(env.CONSTRUCTOR_MAX_STEPS || 24)
 // Plafon SEPARAT pentru turele sterile (vorbărie, unelte refuzate) — vezi
 // contabilitatea pașilor din main(): ele nu mai au voie să mănânce bugetul de
