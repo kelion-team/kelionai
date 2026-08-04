@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { ROSTER, carteAgent } from '../services/agentiKelion.js'
-import { creeazaAgentiEnterprise } from '../services/enterpriseCreate.js'
+import { creeazaAgentiEnterprise, creeazaAgentiVertex } from '../services/enterpriseCreate.js'
 import { getSessionUser } from '../session.js'
 
 // ── SCRIPTUL DE CREARE A AGENȚILOR ENTERPRISE, servit ca text ───────────────
@@ -202,10 +202,22 @@ export async function enterpriseRoutes(app: FastifyInstance): Promise<void> {
       reply.code(403)
       return { error: 'forbidden' }
     }
-    const raport = await creeazaAgentiEnterprise(user.email)
+    // ÎNTÂI Vertex AI (Agent Platform, FĂRĂ abonament). Dacă acolo creează cei
+    // 33, gata. Doar dacă Vertex nici măcar nu pornește (ne-conectat) SAU nu
+    // creează niciunul, mai încercăm calea Enterprise (ca să vadă și diagnosticul
+    // de licență/abonament). Așa ownerul primește ce merge, nu ce e blocat.
+    const vertex = await creeazaAgentiVertex(user.email)
+    if (vertex.creati > 0 || (vertex.lista.length >= 1 && !vertex.motiv)) {
+      return vertex
+    }
+    const ent = await creeazaAgentiEnterprise(user.email)
+    if (ent.creati > 0) return ent
+    // Niciuna n-a creat — întoarce raportul cel mai informativ (Vertex are eroarea
+    // verbatim a căii noi; dacă Vertex nici n-a pornit, dăm Enterprise).
+    const raport = vertex.motiv && !vertex.primaEroare ? ent : vertex
     if (raport.motiv && raport.creati === 0 && raport.lista.length === 0) {
       reply.code(409)
-      return { error: raport.motiv }
+      return { error: raport.motiv, licenta: raport.licenta, primaEroare: raport.primaEroare }
     }
     return raport
   })

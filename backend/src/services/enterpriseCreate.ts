@@ -149,3 +149,103 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
   }
   return `abonament găsit dar alocarea locului a picat: HTTP ${up.status}: ${mesajEroare(up.j)}`
 }
+
+// ── CALEA A DOUA: VERTEX AI AGENTS (aiplatform) — FĂRĂ abonament Gemini ──────
+//
+// Discovery Engine (Gemini Enterprise) cere abonament plătit (măsurat, verbatim,
+// pe contul ownerului). DAR există alt produs, „Agent Platform Studio" (unde a
+// fost ownerul), pe API-ul aiplatform: `projects.locations.agents.create`. Ăsta
+// e Vertex AI, pay-per-use, FĂRĂ abonament lunar. Agentul are chiar
+// `system_instruction`. Îl creăm tot cu tokenul ownerului. Baza cerută (măsurat
+// din discovery, singura valoare acceptată): `antigravity-preview-05-2026`.
+
+function vertexBaza(loc: string): string {
+  return loc === 'global' ? 'https://aiplatform.googleapis.com' : `https://${loc}-aiplatform.googleapis.com`
+}
+
+async function apiVertex(token: string, method: string, url: string, body?: unknown): Promise<RespApi> {
+  const r = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30_000),
+  })
+  let j: Record<string, unknown> = {}
+  try {
+    j = (await r.json()) as Record<string, unknown>
+  } catch {
+    /* corp gol/ne-JSON */
+  }
+  return { status: r.status, j }
+}
+
+/** Creează cei 33 de agenți în Vertex AI (Agent Platform Studio), cu tokenul
+ *  ownerului. Fără abonament. Alege singur o locație care răspunde (global →
+ *  us-central1). Raport MĂSURAT: câți creați, verbatim la primul eșec. */
+export async function creeazaAgentiVertex(email: string): Promise<RaportEnterprise> {
+  const gol: RaportEnterprise = { ok: false, creati: 0, existau: 0, esuati: 0, lista: [] }
+
+  const refresh = await getGoogleRefreshToken(email)
+  if (!refresh) return { ...gol, motiv: 'nu_esti_conectat: apasă „Conectează Google (Enterprise)" mai întâi.' }
+  const tok = await refreshGoogleAccessToken(refresh)
+  if (!tok) return { ...gol, motiv: 'reconectare_necesara: apasă din nou „Conectează Google (Enterprise)".' }
+  const T = tok.accessToken
+
+  // 1) Găsește o locație unde API-ul răspunde (LIST = 200).
+  let loc = ''
+  let probaEroare = ''
+  for (const cand of ['global', 'us-central1', 'us-central1']) {
+    const url = `${vertexBaza(cand)}/v1/projects/${PROIECT}/locations/${cand}/agents?pageSize=1`
+    const r = await apiVertex(T, 'GET', url)
+    if (r.status === 200) {
+      loc = cand
+      break
+    }
+    if (!probaEroare) probaEroare = `HTTP ${r.status}: ${mesajEroare(r.j)}`
+  }
+  if (!loc) return { ...gol, motiv: `Vertex AI nu răspunde pe nicio locație. Prima eroare: ${probaEroare}` }
+
+  const parent = `projects/${PROIECT}/locations/${loc}/agents`
+  const listUrl = `${vertexBaza(loc)}/v1/${parent}?pageSize=200`
+
+  // 2) Cine există deja (idempotență pe id).
+  const ex = await apiVertex(T, 'GET', listUrl)
+  const cunoscuti = new Set(
+    ((ex.j.agents as { name?: string; id?: string }[] | undefined) ?? []).map((a) => a.id ?? String(a.name ?? '').split('/').pop()),
+  )
+
+  // 3) Creează cei 33 — în paralel.
+  const deCreat = ROSTER.filter((a) => !cunoscuti.has(a.id))
+  const existau = ROSTER.length - deCreat.length
+  const createUrl = `${vertexBaza(loc)}/v1/${parent}`
+  const rezultate = await Promise.all(
+    deCreat.map(async (a) => {
+      const res = await apiVertex(T, 'POST', createUrl, {
+        id: a.id,
+        base_agent: 'antigravity-preview-05-2026',
+        description: a.rol,
+        system_instruction: `Ești „${a.nume}", un agent specialist al lui Kelion. Specialitatea ta: ${a.rol} Răspunzi scurt, la obiect; ce nu poți proba spui „nu pot verifica".`,
+      })
+      return res.status === 200 ? { ok: true as const } : { ok: false as const, err: `HTTP ${res.status}: ${mesajEroare(res.j)}` }
+    }),
+  )
+  const creati = rezultate.filter((r) => r.ok).length
+  const esuati = rezultate.length - creati
+  const primaEroare = rezultate.find((r): r is { ok: false; err: string } => !r.ok)?.err
+
+  // 4) Lista finală din API (dovada).
+  const fin = await apiVertex(T, 'GET', listUrl)
+  const lista = ((fin.j.agents as { name?: string; id?: string; description?: string }[] | undefined) ?? []).map(
+    (a) => a.id ?? String(a.name ?? '').split('/').pop() ?? '',
+  )
+
+  return {
+    ok: esuati === 0 && lista.length >= ROSTER.length,
+    creati,
+    existau,
+    esuati,
+    lista,
+    primaEroare,
+    licenta: `Vertex AI (Agent Platform), locație ${loc} — fără abonament Gemini Enterprise`,
+  }
+}
