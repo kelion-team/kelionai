@@ -131,9 +131,19 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
   if (lc.status !== 200) {
     return `nu pot citi abonamentele: HTTP ${lc.status}: ${mesajEroare(lc.j)}`
   }
-  const configs = (lc.j.licenseConfigs as { name?: string; state?: string; subscriptionTier?: string }[] | undefined) ?? []
+  let configs = (lc.j.licenseConfigs as { name?: string; state?: string; subscriptionTier?: string }[] | undefined) ?? []
   if (configs.length === 0) {
-    return 'PROIECTUL NU ARE ABONAMENT Gemini Enterprise. Trebuie activat/cumpărat în consolă (Gemini Enterprise → abonament) — un loc nu se poate aloca dintr-un abonament inexistent.'
+    // REGULA #2 (4 aug, Adrian: „pe ăsta l-am luat de ieri și-mi spui că n-am
+    // licență"): abonamentul CUMPĂRAT stă întâi pe CONTUL DE FACTURARE și
+    // trebuie DISTRIBUIT proiectului — pasul care lipsea aici. Căutăm pe
+    // billing account și distribuim automat către proiect.
+    const dist = await distribuieDePeFacturare(token)
+    if (dist) return dist // eroare clară — o purtăm în raport
+    const relc = await api(token, 'GET', `${COL}/licenseConfigs`)
+    configs = (relc.j.licenseConfigs as typeof configs) ?? []
+  }
+  if (configs.length === 0) {
+    return 'NICIUN ABONAMENT Gemini Enterprise găsit — nici pe proiect, nici pe contul de facturare (011729-7DA3DA-87ED94). Ce ai activat ieri e alt produs (probabil Google AI Pro — planul de consumator din aplicația Gemini), nu Gemini Enterprise. Verifică: console.cloud.google.com/billing.'
   }
   const activ = configs.find((c) => c.state === 'ACTIVE') ?? configs[0]
   if (!activ?.name) return `abonamente găsite (${configs.length}) dar niciunul cu nume valid`
@@ -148,6 +158,26 @@ async function asiguraLicenta(token: string, email: string): Promise<string> {
     return `loc alocat pe abonamentul ${activ.subscriptionTier ?? activ.name.split('/').pop()} (poate dura câteva secunde să se propage)`
   }
   return `abonament găsit dar alocarea locului a picat: HTTP ${up.status}: ${mesajEroare(up.j)}`
+}
+
+// Abonamentul cumpărat de owner stă pe CONTUL DE FACTURARE; îl distribuim
+// proiectului (billingAccountLicenseConfigs → distributeLicenseConfig). Gol =
+// nu s-a cumpărat Enterprise (ce a luat e alt produs). Eroare → o raportăm.
+const CONT_FACTURARE = 'billingAccounts/011729-7DA3DA-87ED94'
+async function distribuieDePeFacturare(token: string): Promise<string | null> {
+  const bl = await api(token, 'GET', `${CONT_FACTURARE}/billingAccountLicenseConfigs`)
+  if (bl.status !== 200) {
+    return `nu pot citi abonamentele de pe contul de facturare: HTTP ${bl.status}: ${mesajEroare(bl.j)}`
+  }
+  const cfgs = (bl.j.billingAccountLicenseConfigs as { name?: string; state?: string }[] | undefined) ?? []
+  if (cfgs.length === 0) return null // chiar nu există nimic cumpărat — verdictul îl dă apelantul
+  const ales = cfgs.find((c) => c.state === 'ACTIVE') ?? cfgs[0]
+  if (!ales?.name) return `abonamente pe facturare (${cfgs.length}) dar fără nume valid`
+  const d = await api(token, 'POST', `${ales.name}:distributeLicenseConfig`, { project: `projects/${PROIECT}` })
+  if (d.status !== 200) {
+    return `abonament găsit pe facturare (${ales.name.split('/').pop()}) dar distribuirea către proiect a picat: HTTP ${d.status}: ${mesajEroare(d.j)}`
+  }
+  return null // distribuit — apelantul recitește lista proiectului
 }
 
 // ── CALEA A DOUA: VERTEX AI AGENTS (aiplatform) — FĂRĂ abonament Gemini ──────
