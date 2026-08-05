@@ -10,7 +10,7 @@
 //     otherwise the reply goes to the brain, so IT can open it;
 //   • "close the map" when the map is NOT open must not close anything else.
 import { describe, it, expect } from 'vitest'
-import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from './services/commands.js'
+import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from './services/commands.js'
 
 describe('commands — camera', () => {
   it('prinde pornirea și oprirea', () => {
@@ -75,5 +75,41 @@ describe('commands — gesturile avatarului', () => {
     expect(ro).toBeTruthy()
     expect(en).toBeTruthy()
     expect(ro).not.toBe(en)
+  })
+})
+
+// GESTUL PE SITUAȚIE (Adrian, 5 aug: „folosește gesturile greșit, fără logică —
+// o logică clară pe subiect/situație"). O situație → un gest, determinist.
+describe('commands — gestul pe situație (logică clară)', () => {
+  const gol = { userText: '', replyText: '', aAratat: false }
+  it('arată ceva pe ecran → arată cu mâna (cel mai obiectiv semn)', () => {
+    expect(gestPentruSituatie({ ...gol, aAratat: true })).toBe('arata-inainte')
+    // chiar dacă e și un salut, arătatul pe ecran are prioritate
+    expect(gestPentruSituatie({ userText: 'salut', replyText: 'Bună!', aAratat: true })).toBe('arata-inainte')
+  })
+  it('salut de deschidere (om sau Kelion) → salut', () => {
+    expect(gestPentruSituatie({ ...gol, userText: 'Bună, Kelion!' })).toBe('salut')
+    expect(gestPentruSituatie({ ...gol, replyText: 'Bună, Adrian! Cu ce te ajut?' })).toBe('salut')
+  })
+  it('rămas-bun (om sau Kelion) → salut de mână', () => {
+    expect(gestPentruSituatie({ ...gol, userText: 'la revedere' })).toBe('salut')
+    expect(gestPentruSituatie({ ...gol, replyText: 'O zi bună! Ne auzim.' })).toBe('salut')
+  })
+  it('cere să aștepți → stai puțin', () => {
+    expect(gestPentruSituatie({ ...gol, replyText: 'Stai puțin, verific imediat.' })).toBe('stai-putin')
+  })
+  it('a reușit → entuziasm; se scuză → dezamăgire', () => {
+    expect(gestPentruSituatie({ ...gol, replyText: 'Gata, am terminat de trimis.' })).toBe('entuziasm')
+    expect(gestPentruSituatie({ ...gol, replyText: 'Îmi pare rău, n-am reușit să găsesc.' })).toBe('dezamagire')
+  })
+  it('omul mulțumește (scurt) → mulțumire', () => {
+    expect(gestPentruSituatie({ ...gol, userText: 'mulțumesc mult!' })).toBe('multumire')
+  })
+  it('replică neutră, informativă → NIMIC (gentleman compus)', () => {
+    expect(gestPentruSituatie({ userText: 'cât e ceasul?', replyText: 'Este 14:20.', aAratat: false })).toBeNull()
+    // „bună treabă" într-o cerere lungă nu declanșează salut (nu e deschidere scurtă)
+    expect(
+      gestPentruSituatie({ userText: 'am o listă de lucruri de făcut și vreau să le organizăm pe categorii clare', replyText: 'Sigur.', aAratat: false }),
+    ).toBeNull()
   })
 })

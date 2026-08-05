@@ -65,7 +65,7 @@ import { lectiiCurente } from '../services/autoInvatare.js'
 import { generateImage } from '../services/image.js'
 import { genereazaVideo } from '../services/video.js'
 import { trackSpeechLang, LANG_LABELS } from '../services/lang.js'
-import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck } from '../services/commands.js'
+import { interpretDeviceCommand, deviceAck, interpretGestureCommand, gestureAck, gestPentruSituatie } from '../services/commands.js'
 import { geoLookupCached, clientIp } from './demo.js'
 import { synthesize } from '../services/tts.js'
 import { getVoicePref } from '../db.js'
@@ -292,12 +292,11 @@ async function selectedBrainModel(
   return { model, heavy: heavy || top }
 }
 
-// GESTURE GATE (Adrian, Jul 13: "don't repeat obsessively, be discreet"). The
-// prompt rule is "soft" — the model can overdo it. This gate is DETERMINISTIC:
-// an AUTONOMOUS gesture (play_avatar_gesture tool or [GEST]) passes ONLY if it's
-// not the same as the last one AND a pause has passed since the last gesture.
-// Per-user. Adrian's DIRECT commands ("wave", "dance") do NOT go through here —
-// they always execute.
+// GESTURE GATE (Adrian, Jul 13: "don't repeat obsessively, be discreet").
+// Poarta e DETERMINISTĂ: gestul autonom pe situație (gestPentruSituatie) trece
+// PRIN ea o singură dată pe tură — nu la fel ca ultimul ȘI cu o pauză între
+// gesturi. Per-user. Comenzile DIRECTE ale lui Adrian ("wave", "dance") NU trec
+// pe aici — se execută mereu.
 const GESTURE_COOLDOWN_MS = 25_000
 const gestureGates = new Map<string, { last: string; at: number }>()
 // SIMULTANEOUS chat turns per paying user (Jul 27 security audit — anti
@@ -553,43 +552,21 @@ const ASK_BRAIN_TOOL: Tool = {
   },
 }
 
-// Let Kelion trigger a one-time avatar gesture on the user's screen. Use when
-// the user asks for a gesture or when a gesture adds natural expression.
-// The avatar's gesture vocabulary (Adrian, Jul 13) — tied to feeling/context,
-// gentleman, not gym. The semantic names translate into RPM clips in the
-// frontend (GESTURE_TO_CLIP). We emit the chosen value as a {gesture} frame.
-const AVATAR_GESTURES = [
-  'salut', 'arata-inainte', 'uimire', 'dezamagire', 'nedumerire', 'victorie',
-  'multumire', 'surpriza', 'stai-putin', 'ganditor', 'aprobare', 'entuziasm',
-  'acord-discret', 'plecaciune', 'dans',
-  // Legacy — deterministic voice commands still emit these.
-  'salute', 'raiseRightHand', 'pointMonitor',
-] as const
-// Semantic → RPM clip (the mirror of GESTURE_TO_CLIP from the frontend). The
-// canonical key of a gesture everywhere (admin panel, [GEST], disable) is the
-// CLIP NAME.
+// GESTURI PE SITUAȚIE (Adrian, 5 aug: „folosește gesturile greșit, fără logică
+// — o logică clară pe subiect/situație"). Gestul autonom NU mai e ales de creier
+// (unealta play_avatar_gesture a fost SCOASĂ — modelul slab nimerea des emoția
+// greșită). Acum îl decide DETERMINIST situația reală a turei (gestPentruSituatie
+// din commands.ts), emis mai jos, la finalul turei. Comenzile directe
+// („dansează", „salută") rămân, prin interpretGestureCommand.
+// Semantic → clip RPM (oglinda lui GESTURE_TO_CLIP din frontend): cheia canonică
+// a unui gest peste tot (panoul admin, dezactivare) e NUMELE CLIPULUI. Folosit
+// aici doar ca să verificăm dacă gestul situației e dezactivat de Adrian.
 const GESTURE_SEMANTIC_CLIP: Record<string, string> = {
   salut: 'expresie-1', 'arata-inainte': 'expresie-2', uimire: 'expresie-3', dezamagire: 'expresie-4',
   nedumerire: 'expresie-5', victorie: 'expresie-6', multumire: 'expresie-7', surpriza: 'expresie-8',
   'stai-putin': 'expresie-9', ganditor: 'expresie-10', aprobare: 'expresie-11', entuziasm: 'expresie-12',
   'acord-discret': 'expresie-13', plecaciune: 'expresie-14', dans: 'dans',
   salute: 'expresie-1', raiseRightHand: 'expresie-13', pointMonitor: 'expresie-2',
-}
-const PLAY_AVATAR_GESTURE_TOOL: Tool = {
-  name: 'play_avatar_gesture',
-  description:
-    "Play a one-time avatar gesture — YOU are the movement director (the owner's rule, 27 Jul: the BRAIN decides what gesture, how and where it applies). Bind every gesture to the ACTION IN PROGRESS: when you present something on the monitor (weather, a map, a document, search results) accompany it with arata-inainte (point with the right hand toward the screen) AS you present it; a greeting gets salut; thanks get multumire; good news entuziasm; a puzzle ganditor. A gentleman is composed: on neutral/informative replies with nothing shown, play NOTHING; never two replies in a row with the same gesture. Full palette: salut (greeting/goodbye), arata-inainte (point to the monitor/ahead), uimire, dezamagire, nedumerire, victorie, multumire, surpriza, stai-putin, ganditor, aprobare, entuziasm, acord-discret, plecaciune, dans (ONLY when the user explicitly asks). Plays once, then blends back to a calm idle.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      gesture: {
-        type: 'string',
-        enum: [...AVATAR_GESTURES],
-        description: 'Which gesture fits the emotion/context of your reply.',
-      },
-    },
-    required: ['gesture'],
-  },
 }
 
 // REAL ACCESS TO THE APP'S TABS from the WRITTEN chat (Adrian, Jul 24: "Kelion
@@ -1314,35 +1291,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // yet another serial DB trip right before the brain call.
       loadKv(`model_choice:${userKey(user.email)}`).catch(() => null),
     ])
+    // GESTURILE DEZACTIVATE de Adrian din Admin → Gesturi: gestul ales de
+    // situație (mai jos, la finalul turei) e verificat față de setul ăsta și
+    // nu se joacă dacă e debifat. „Ce nu e bifat nu apare în aplicație."
     const gestureOff = new Set(disabledGestures)
-    // The gesture tool, filtered: disabled gestures are no longer offered to the
-    // model (so it cannot choose them either). If ALL are removed, the tool
-    // leaves the list entirely.
-    const enabledGestures = (AVATAR_GESTURES as readonly string[]).filter(
-      (g) => !gestureOff.has(GESTURE_SEMANTIC_CLIP[g] ?? g),
-    )
-    const gestureTool: Tool | null =
-      enabledGestures.length > 0
-        ? {
-            ...PLAY_AVATAR_GESTURE_TOOL,
-            input_schema: {
-              ...PLAY_AVATAR_GESTURE_TOOL.input_schema,
-              properties: {
-                gesture: {
-                  type: 'string',
-                  enum: enabledGestures,
-                  description: 'Which gesture fits the emotion/context of your reply.',
-                },
-              },
-              required: ['gesture'],
-            },
-          }
-        : null
-    // Hard prompt rule: DISABLED gestures are NEVER used, on any path (tool or
-    // [GEST]). "What isn't checked doesn't appear in the app."
-    const gestureOffRule = disabledGestures.length
-      ? `\nGESTURI DEZACTIVATE de Adrian — NU le folosi NICIODATĂ, sub nicio formă (nici prin [GEST], nici altfel): ${disabledGestures.join(', ')}.\n`
-      : ''
 
     // DEVICE COMMANDS + SPEECH LANGUAGE — both interpreted on the SERVER now
     // (moved out of the browser; owner's order: as much of the app as possible
@@ -1501,7 +1453,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // something it has in hand. The list is DERIVED from the registry (the
     // single source), so it cannot fall behind. The ordinary user does not see
     // the admin tools — they could not call them anyway.
-    let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}` + gestureOffRule
+    let systemPrompt = `${SYSTEM_PROMPT}\n\n${inventarulMeu(isAdminUser)}`
     // Active "meserie" (role/persona), if the user has one enabled via
     // PUT /api/prefs — e.g. Influencer. Adds its instructions on top of the
     // default behavior; absent/unknown id means Kelion stays default.
@@ -2008,7 +1960,6 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           ...escalationTools,
           // Bază + vedere
           SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL,
-          ...(gestureTool ? [gestureTool] : []),
           // Memorie + mâini (browser) — NU se mai taie
           ...NOTE_TOOLS,
           ...BROWSER_TOOLS,
@@ -2031,7 +1982,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           CARD_STARE_TOOL, CARD_COMPLETEAZA_TOOL, CARD_GATA_TOOL,
           ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL,
         ]
-      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, ...(gestureTool ? [gestureTool] : []), LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
+      : [...googleTools, ...escalationTools, SHOW_TOOL, SHOW_DOCUMENT_TOOL, RUN_WEB_TOOL, IMAGE_TOOL, VIDEO_TOOL, OPEN_APP_VIEW_TOOL, SET_ROLE_TOOL, LOG_GAP_TOOL, PROPOSE_TOOL, ...NOTE_TOOLS, ...BROWSER_TOOLS, ALLOW_GUEST_VOICE_TOOL, APPROVE_GUEST_VOICE_TOOL, FORGET_GUEST_TOOL]
     // THE PROVIDER'S 64-TOOL CEILING (Aug 1 — live 400 "at most 64 tools are
     // allowed", every turn died): (1) DEDUPE by name — open_app_view was
     // registered twice (once alone, once inside BROWSER_TOOLS), and any future
@@ -2444,6 +2395,26 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         console.log('[monitor] auto-preview: the answer carried a displayable payload the brain did not show')
       }
     }
+    // ── GESTUL PE SITUAȚIE (Adrian, 5 aug: „folosește gesturile greșit, fără
+    // logică — o logică clară pe subiect/situație"). Un SINGUR gest pe tură, ales
+    // DETERMINIST de ce a făcut Kelion acum: arată pe ecran → arată cu mâna;
+    // salut/rămas-bun → salut; cere să aștepți → stai puțin; a reușit →
+    // entuziasm; se scuză → dezamăgire; îi mulțumești → mulțumire; altfel NIMIC.
+    // `surfaceShown` include și auto-preview-ul de mai sus (interceptorul de
+    // write l-a marcat). Trece prin aceeași poartă (pauză + fără repetiție) și
+    // respectă gesturile dezactivate de Adrian. Vine DUPĂ text, deci gestul se
+    // potrivește pe replica întreagă, nu pe o ghiceală de la începutul turei.
+    const gestSituatie = gestPentruSituatie({
+      userText: lastIncomingText,
+      replyText: assistantText,
+      aAratat: surfaceShown,
+    })
+    if (gestSituatie) {
+      const clipSituatie = GESTURE_SEMANTIC_CLIP[gestSituatie] ?? gestSituatie
+      if (!gestureOff.has(clipSituatie) && allowAutoGesture(user.email, gestSituatie)) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ gesture: gestSituatie })}${CTRL}`)
+      }
+    }
     // NEVER SILENCE (Adrian, Jul 30: "reply = nothing", "it does nothing").
     // The last safety net, after ALL paths: if the turn produced nothing
     // visible — no text, no surface — the human gets an honest message, not a
@@ -2712,29 +2683,10 @@ async function runTool(
       return JSON.stringify({ running: true, title, savable: true })
     }
 
-    // CONTEXTUAL GESTURES (Jul 24 audit, Adrian's complaint: "it doesn't have
-    // the brains to apply gestures by context"). The tool WAS offered to the
-    // brain but had no execution → it fell to default with "unknown_tool" and
-    // the model unlearned calling it. Now: validation + the anti-repetition
-    // gate + the {gesture} frame to the client (ChatPanel maps it to the clip
-    // and animates the avatar).
-    case 'play_avatar_gesture': {
-      const g = String(args.gesture ?? '')
-      if (!(AVATAR_GESTURES as readonly string[]).includes(g)) {
-        return JSON.stringify({ error: 'unknown_gesture' })
-      }
-      // GESTURES STOPPED BY ADRIAN stay stopped (QA Jul 24): the tool enum is
-      // filtered, but a model ignoring the enum could play a disabled gesture —
-      // we re-check HERE, against the real DB list, not only in the offer.
-      if ((await getDisabledGestures()).includes(g)) {
-        return JSON.stringify({ played: false, reason: 'disabled_by_admin' })
-      }
-      if (!allowAutoGesture(email, g)) {
-        return JSON.stringify({ played: false, reason: 'cooldown' })
-      }
-      reply.raw.write(`${CTRL}${JSON.stringify({ gesture: g })}${CTRL}`)
-      return JSON.stringify({ played: true })
-    }
+    // (Gesturile NU mai sunt o unealtă a creierului — freestyle-ul emoțional
+    // nimerea des greșit, „fără logică". Acum le alege DETERMINIST situația
+    // turei, în blocul „GESTUL PE SITUAȚIE" de la finalul turei. Comenzile
+    // directe rămân prin interpretGestureCommand.)
 
     // SWITCHING THE MESERIE (QA Jul 24): the user asks through chat, Kelion
     // changes it immediately; the new persona takes effect from the next turn

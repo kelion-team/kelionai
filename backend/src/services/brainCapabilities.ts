@@ -47,7 +47,6 @@ export const CAPABILITIES: readonly Capability[] = [
   { name: 'generate_image', category: 'afisare', does: 'generează o imagine', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'generate_video', category: 'afisare', does: 'generează un clip video (Veo; plătit, doar cu aprobarea conștientă din env)', chat: true, voice: false, voiceViaBrain: true, admin: false },
   { name: 'open_app_view', category: 'afisare', does: 'deschide panourile aplicației', chat: true, voice: false, voiceViaBrain: true, admin: false },
-  { name: 'play_avatar_gesture', category: 'afisare', does: 'avatarul face un gest', chat: true, voice: false, voiceViaBrain: true, admin: false },
 
   // 2.2 Google (19)
   { name: 'get_recent_emails', category: 'google', does: 'citește antetele emailurilor recente', chat: true, voice: false, voiceViaBrain: true, admin: false },
