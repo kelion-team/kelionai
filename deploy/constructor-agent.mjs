@@ -779,6 +779,27 @@ function verificaAtelierul() {
 async function deschidePR(titlu, corp, branch) {
   const owner = REPO.split('/')[0]
   const headers = { Authorization: `Bearer ${GHTOKEN}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' }
+  // DEDUP la CREARE (Adrian, 5 aug: „real autonom"): nu deschide un AL DOILEA PR
+  // pentru aceeași lucrare. Așa au apărut #796/799/800 — trei PR-uri, aceeași
+  // idee, branch-uri diferite. Înainte de a crea, caută un PR deschis cu titlu
+  // ECHIVALENT (normalizat) și refolosește-l. (Verificarea pe același branch de
+  // mai jos, la 422, rămâne — asta e în plus, pe conținut, nu pe branch.)
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9ăâîșț]+/g, ' ').trim()
+  try {
+    const deschise = await fetch(`https://api.github.com/repos/${REPO}/pulls?state=open&per_page=100`, { headers })
+      .then((x) => x.json())
+      .catch(() => null)
+    if (Array.isArray(deschise)) {
+      const tn = norm(titlu)
+      const geaman = deschise.find((p) => p?.head?.ref !== branch && norm(p.title) === tn)
+      if (geaman?.html_url) {
+        log(`PR duplicat pentru „${titlu}" există deja (#${geaman.number}) — îl refolosesc, nu deschid altul`)
+        return geaman.html_url
+      }
+    }
+  } catch {
+    /* dacă listarea pică, mergem mai departe și încercăm să creăm normal */
+  }
   let lastErr = ''
   for (let attempt = 1; attempt <= 4; attempt++) {
     let status = 0
