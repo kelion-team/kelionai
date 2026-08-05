@@ -1,6 +1,6 @@
 // ── URECHEA LIVE GEMINI — full-duplex, ultra-rapid (4 aug 2026) ──────────────
 //
-// Adrian: „am cerut auzul pe Gemini … full duplex ultra rapid". Asta e exact
+// Adrian: „am cerut auzul pe Gemini … full duplex ultra rapid”. Asta e exact
 // Gemini Live API: un WebSocket bidirecțional către generativelanguage
 // (BidiGenerateContent) — audio-ul curge în timp real, iar serverul întoarce
 // TRANSCRIEREA intrării în flux (inputTranscription), cu detecție de activitate
@@ -12,7 +12,7 @@
 // consumăm doar inputTranscription. Maparea pe contractul WS al clientului
 // (partial/final/speech_begin/speech_end) o face asr-stream.ts.
 //
-// Onestitate: orice eroare urcă NUMITĂ prin onEroare — niciun „merge" prefăcut.
+// Onestitate: orice eroare urcă NUMITĂ prin onEroare — niciun „merge” prefăcut.
 
 import WebSocket from 'ws'
 import { config } from '../config.js'
