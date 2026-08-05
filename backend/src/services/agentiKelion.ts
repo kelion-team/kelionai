@@ -226,7 +226,7 @@ function instructiune(a: AgentKelion): string {
     `Specialitatea ta: ${a.rol}\n` +
     `ACUM este: ${acum.human} (${acum.tzName}). Asta e data reală — n-o lua din memoria ta.\n\n` +
     `Reguli, mereu:\n` +
-    `- Răspunzi scurt, concret, în limba în care ți se scrie (implicit română).\n` +
+    `- ANALIZĂ COMPLEXĂ, nu răspuns la suprafață (Adrian, 5 aug: „dă agenților analiză complexă și soluție corectă"): desfă problema în bucăți, pune ipotezele la încercare, cântărește variantele cu argumente, apoi dă SOLUȚIA CORECTĂ — verificată, nu una la nimereală. Gândește temeinic înainte să răspunzi; corect bate rapid. Concluzia o dai scurt, dar în spatele ei stă analiza întreagă.\n` +
     `- Ce nu poți proba spui „nu pot verifica" — nu inventezi cifre, verdicte sau surse.\n` +
     `- Ești BLINDAT cu unelte reale: cauta_web (Google real), citeste_pagina, vreme, hărți și rute, adresă din coordonate, YouTube, traduceri, Wikipedia, valute, oră — FOLOSEȘTE-LE pentru orice fapt proaspăt sau verificabil și citează sursele. Nu răspunde din memorie ce poți afla cu unealta.\n` +
     `- Rămâi strict în specialitatea ta; dacă cererea e pentru alt specialist, spune care.`
@@ -323,11 +323,14 @@ export async function cheamaAgent(a: AgentKelion, sarcina: string, caAdmin = fal
     : [UNEALTA_CAUTARE, UNEALTA_PAGINA, ...GOOGLE_TOOLS_PUBLICE]
   // Tokenul ownerului se aduce O DATĂ, leneș, la prima unealtă personală.
   let tokenOwner: string | null = null
-  // Superputerea de raționament (4 aug): agentul cu efort 'high' primește buget
-  // de gândire mare + plafon dublu (la gemini-2.5 maxOutputTokens INCLUDE
-  // tokenii de gândire — vezi măsurătoarea din antet — deci plafonul crește
-  // odată cu gândirea, altfel textul util s-ar sugruma).
-  const efort = a.efort ?? 'low'
+  // ANALIZĂ COMPLEXĂ PE TOȚI (Adrian, 5 aug: „dă agenților analiză complexă și
+  // soluție corectă, la toți agenții"). Efortul default era 'low' → majoritatea
+  // celor 92 gândeau superficial. Acum default e 'high': fiecare agent primește
+  // buget de gândire mare + plafon dublu (la gemini-2.5 maxOutputTokens INCLUDE
+  // tokenii de gândire, deci plafonul crește odată cu gândirea, altfel textul
+  // util s-ar sugruma). Un agent poate cere explicit efort:'low' dacă e o simplă
+  // căutare, dar implicitul e gândirea profundă.
+  const efort = a.efort ?? 'high'
   const plafon = efort === 'high' ? 8192 : 2048
   let cost = 0
   for (let runda = 0; ; runda++) {
