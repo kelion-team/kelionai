@@ -223,7 +223,7 @@ export default function AdminPanel({
     })
   const stergeMailuri = (uids: number[]): void => {
     if (!uids.length || mailDelBusy) return
-    if (!window.confirm(`Ștergi ${uids.length === 1 ? 'mesajul selectat' : uids.length + ' mesaje'} din inbox?`)) return
+    if (!window.confirm(A.confirmDeleteInboxMsg(uids.length))) return
     setMailDelBusy(true)
     void fetch('/api/admin/mailbox-delete', {
       method: 'POST',
@@ -233,7 +233,7 @@ export default function AdminPanel({
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { sterse?: number; detaliu?: string } | null) => {
-        setMailDelMsg(j ? `Șterse: ${j.sterse ?? 0} — ${j.detaliu ?? ''}` : 'Nu s-a putut șterge.')
+        setMailDelMsg(j ? A.mailDeleteResult(j.sterse ?? 0, j.detaliu ?? '') : A.mailDeleteFailed)
         setMailSel(new Set())
         // Reîncarcă lista REALĂ de pe server — nu scoatem optimist rânduri
         // pe care poate nu le-am șters (cifra vine din ce s-a întâmplat).
@@ -245,7 +245,7 @@ export default function AdminPanel({
       })
       // (setMailSel(new Set()) de mai sus golește selecția, deci nu poate
       // rămâne un „Șterge selectate (N)" cu UID-uri moarte — auditul, 3 aug.)
-      .catch(() => setMailDelMsg('Nu s-a putut șterge — reîncearcă.'))
+      .catch(() => setMailDelMsg(A.mailDeleteFailed))
       .finally(() => setMailDelBusy(false))
   }
   const [contactMsgs, setContactMsgs] = useState<ContactMessage[] | null | 'necitit'>('necitit')
@@ -404,7 +404,7 @@ export default function AdminPanel({
     if (!clip) {
       setPlayingVp(null)
       // ▶ nu mai tace la eșec (auditul admin, 3 aug): apăsarea primea NIMIC.
-      setVpMsg(`Mostra lui ${email} nu s-a putut încărca — lipsește sau citirea a picat.`)
+      setVpMsg(A.voiceprintFetchError(email))
       return
     }
     setVpMsg('')
@@ -700,7 +700,7 @@ export default function AdminPanel({
       // răspunsul — ownerul trebuie să afle, nu să creadă că a trimis.
       // (Widgetul vizitatorului primise „HONESTY REWRITE" fix pentru defectul
       // ăsta; partea de admin rămăsese cu el.)
-      setVReplyErr('Nu s-a trimis — mesajul NU s-a salvat; reîncearcă.')
+      setVReplyErr(A.mailReplyFailed)
     }
   }
 
@@ -747,7 +747,7 @@ export default function AdminPanel({
   const sendBuildOrder = (): void => {
     const text = buildOrder.trim()
     if (text.length < 8) {
-      setBuildMsg('Scrie ordinul complet (ce construiește, unde, cum verifici).')
+      setBuildMsg(A.writeCompleteOrder)
       return
     }
     const order = text
@@ -765,12 +765,12 @@ export default function AdminPanel({
           // lucrătorul NU ia nimic — „max. 2 minute" ar fi fost o minciună.
           setBuildMsg(
             buildPaused
-              ? `Ordin #${j.id} în coadă — dar autonomia e PE PAUZĂ: ordinul așteaptă (nu se pierde) până repornești autonomia din tabul Bani.`
-              : `Ordin #${j.id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`,
+              ? A.orderEnqueuedPaused(j.id)
+              : A.orderEnqueuedActive(j.id),
           )
-        } else setBuildMsg('Nu s-a putut trimite — reîncearcă.')
+        } else setBuildMsg(A.orderSendFailed)
       })
-      .catch(() => setBuildMsg('Nu s-a putut trimite — reîncearcă.'))
+      .catch(() => setBuildMsg(A.orderSendFailed))
   }
 
   // ── ȘTERGE / CURĂȚĂ / REIA un ordin din coadă (Adrian, 3 aug: „scoate 30/31
@@ -787,29 +787,29 @@ export default function AdminPanel({
       .then((j: { ok?: boolean } | null) => j?.ok === true)
       .catch(() => false)
   const deleteBuildOrder = (id: number): void => {
-    if (!window.confirm(`Ștergi definitiv ordinul #${id}?`)) return
+    if (!window.confirm(A.confirmDeleteBuildOrder(id))) return
     void stergeCuVerdict(`/api/admin/constructor/${id}`).then((ok) => {
       if (ok) {
         setBuildJobs((prev) => (Array.isArray(prev) ? prev.filter((x) => x.id !== id) : prev))
-        setBuildMsg(`Ordinul #${id} șters.`)
-      } else setBuildMsg('Nu s-a putut șterge — reîncearcă.')
+        setBuildMsg(A.orderDeleted(id))
+      } else setBuildMsg(A.orderDeleteFailed)
     })
   }
   // OPREȘTE un ordin în curs (auditul admin, 3 aug): cancelBuildJob exista în
   // backend, dar panoul n-avea niciun buton spre el — un 'running' nu putea fi
   // oprit decât din chat.
   const cancelBuildOrder = (id: number): void => {
-    if (!window.confirm(`Oprești ordinul #${id} aflat în lucru? (trece pe „eșuat", lucrătorul nu-l mai continuă)`)) return
+    if (!window.confirm(A.confirmStopBuildOrder(id))) return
     void fetch(`/api/admin/constructor/${id}/anuleaza`, { method: 'POST', credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { ok?: boolean } | null) => {
         refreshBuildJobs()
-        setBuildMsg(j?.ok ? `Ordinul #${id} oprit.` : 'Nu s-a putut opri — reîncearcă.')
+        setBuildMsg(j?.ok ? A.orderStopped(id) : A.orderStopFailed)
       })
-      .catch(() => setBuildMsg('Nu s-a putut opri — reîncearcă.'))
+      .catch(() => setBuildMsg(A.orderStopFailed))
   }
   const cleanBuildOrders = (): void => {
-    if (!window.confirm('Ștergi din coadă toate ordinele eșuate și terminate? (rămân doar cele în curs)')) return
+    if (!window.confirm(A.confirmClearFailedJobs)) return
     void fetch('/api/admin/constructor/curata', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -819,9 +819,9 @@ export default function AdminPanel({
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { sterse?: number } | null) => {
         refreshBuildJobs()
-        setBuildMsg(j ? `Curățat: ${j.sterse ?? 0} ordine șterse.` : 'Nu s-a putut curăța.')
+        setBuildMsg(j ? A.ordersCleaned(j.sterse ?? 0) : A.ordersCleanFailed)
       })
-      .catch(() => setBuildMsg('Nu s-a putut curăța — reîncearcă.'))
+      .catch(() => setBuildMsg(A.ordersCleanFailed))
   }
   const retryBuildOrder = (id: number): void => {
     void fetch(`/api/admin/constructor/${id}/reia`, {
@@ -833,9 +833,9 @@ export default function AdminPanel({
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { ok?: boolean } | null) => {
         refreshBuildJobs()
-        setBuildMsg(j?.ok ? `Ordinul #${id} repus în coadă.` : 'Nu s-a putut relua.')
+        setBuildMsg(j?.ok ? A.orderResumed(id) : A.orderResumeFailed)
       })
-      .catch(() => setBuildMsg('Nu s-a putut relua — reîncearcă.'))
+      .catch(() => setBuildMsg(A.orderResumeFailed))
   }
 
   // Tab „Recuperare” open → loads the saved recovery points.
@@ -865,7 +865,7 @@ export default function AdminPanel({
   }, [tab])
 
   const saveRecoveryNow = (): void => {
-    setRecoveryMsg('Salvez versiunea curentă…')
+    setRecoveryMsg(A.savingRecovery)
     void fetch('/api/admin/backups', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -879,12 +879,12 @@ export default function AdminPanel({
       .then((r) => r.json().then((j: { ok?: boolean; tag?: string; error?: string }) => ({ ok: r.ok, j })))
       .then(({ ok, j }) => {
         if (ok && j.tag != null) {
-          setRecoveryMsg(`Salvat ✓ punct de recuperare: ${j.tag}`)
+          setRecoveryMsg(A.recoverySaved(j.tag))
           setRecoveryNote('')
           loadRecovery()
-        } else setRecoveryMsg(`Nu s-a putut salva: ${j.error ?? 'eroare necunoscută'}`)
+        } else setRecoveryMsg(A.recoverySaveFailed(j.error ?? 'eroare necunoscută'))
       })
-      .catch(() => setRecoveryMsg('Nu s-a putut salva — rețeaua a picat; reîncearcă.'))
+      .catch(() => setRecoveryMsg(A.recoverySaveNetworkError))
   }
 
   // Restores the app to a saved point: double confirmation (heavy action —
@@ -892,15 +892,15 @@ export default function AdminPanel({
   // the publish starts by itself. The button shows progress and result, with proof.
   const restoreFromPoint = (p: RecoveryRow): void => {
     const when = p.date ? new Date(p.date).toLocaleString('ro-RO') : p.tag
-    if (!window.confirm(`Restaurezi aplicația la versiunea din ${when} (${p.sha})?`)) return
+    if (!window.confirm(A.confirmRestoreApp(when, p.sha))) return
     if (
       !window.confirm(
-        `SIGUR? Producția va fi adusă EXACT la starea „${p.note.split('\n')[0].slice(0, 80) || p.tag}" și se republică automat. Modificările de după acest punct dispar din aplicație (rămân doar în istoricul git).`,
+        A.confirmRestoreAppSure(p.note.split('\n')[0].slice(0, 80), p.tag),
       )
     )
       return
     setRestoringTag(p.tag)
-    setRecoveryMsg(`Restaurez la ${p.tag}…`)
+    setRecoveryMsg(A.restoringApp(p.tag))
     void fetch('/api/admin/backups/restore', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -912,13 +912,13 @@ export default function AdminPanel({
         setRestoringTag(null)
         if (ok && j.ok)
           setRecoveryMsg(
-            `Restaurat ✓ master e acum la ${j.sha ?? p.sha} — publicarea pe server pornește singură (1-2 min).`,
+            A.restoreSuccess(j.sha ?? p.sha),
           )
-        else setRecoveryMsg(`Restaurarea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
+        else setRecoveryMsg(A.restoreFailed(j.error ?? 'eroare necunoscută'))
       })
       .catch(() => {
         setRestoringTag(null)
-        setRecoveryMsg('Restaurarea a eșuat — verifică conexiunea și reîncearcă.')
+        setRecoveryMsg(A.restoreNetworkError)
       })
   }
 
@@ -936,7 +936,7 @@ export default function AdminPanel({
   const saveLockSecret = (): void => {
     const s = lockSecret.trim()
     if (s.length < 4) {
-      setLockMsg('Secretul trebuie să aibă minim 4 caractere.')
+      setLockMsg(A.lockSecretMinLength)
       return
     }
     void fetch('/api/admin/unlock/secret', {
@@ -953,14 +953,14 @@ export default function AdminPanel({
           // DEZARMAT hard (adminLock.ts, la cererea ownerului din 31 iul), deci
           // butonul Admin nu cerea nimic. Spunem ce s-a întâmplat DE FAPT și
           // recitim starea de la server.
-          setLockMsg('Secret salvat ✓ — dar lacătul rămâne DEZARMAT din cod (cererea ta, 31 iul); secretul intră în vigoare doar când îmi ceri să repornesc lacătul.')
+          setLockMsg(A.lockSecretSaved)
           fetch('/api/admin/unlock/status', { credentials: 'include' })
             .then((r2) => (r2.ok ? r2.json() : null))
             .then((j: { armed?: boolean } | null) => setLockArmed(j ? !!j.armed : null))
             .catch(() => setLockArmed(null))
-        } else setLockMsg('Nu s-a putut salva — reîncearcă.')
+        } else setLockMsg(A.lockSecretSaveFailed)
       })
-      .catch(() => setLockMsg('Nu s-a putut salva — reîncearcă.'))
+      .catch(() => setLockMsg(A.lockSecretSaveFailed))
   }
 
   // Tab „Gesturi” open → loads the disabled list.
@@ -989,7 +989,7 @@ export default function AdminPanel({
         // întors pe o stare pe care serverul nu o are, iar bifele „săreau
         // înapoi" inexplicabil la următoarea deschidere.
         setGestOff(inainte)
-        setGestErr('NU s-a salvat — serverul a refuzat; bifa a revenit. Reîncearcă.')
+        setGestErr(A.gestureSaveFailed)
       }
     })
   }
@@ -1025,7 +1025,7 @@ export default function AdminPanel({
     if (ok) {
       setGaps((cur) => cur.filter((g) => g.id !== id))
       setGapsMsg('')
-    } else setGapsMsg('Nu s-a putut arhiva — reîncearcă.')
+    } else setGapsMsg(A.gapArchiveFailed)
   }
 
   useEffect(() => {
@@ -1258,16 +1258,16 @@ export default function AdminPanel({
                         type="button"
                         className="ghost"
                         onClick={() => {
-                          setLegMsg('Pornesc legarea…')
+                          setLegMsg(A.revolutLinkStarting)
                           void fetch('/api/admin/plati/legatura/start', { method: 'POST', credentials: 'include' })
                             .then((r) => r.json().then((j: { url?: string; error?: string }) => ({ ok: r.ok, j })))
                             .then(({ ok, j }) => {
                               if (ok && j.url) {
                                 window.open(j.url, '_blank', 'noopener')
-                                setLegMsg('Aprobă în aplicația Revolut, apoi apasă „Am codul din retur".')
-                              } else setLegMsg(`Nu s-a putut porni legarea: ${j.error ?? 'eroare necunoscută'}`)
+                                setLegMsg(A.revolutLinkApprovePrompt)
+                              } else setLegMsg(A.revolutLinkStartFailed(j.error ?? 'eroare necunoscută'))
                             })
-                            .catch(() => setLegMsg('Nu s-a putut porni legarea — rețeaua a picat.'))
+                            .catch(() => setLegMsg(A.revolutLinkNetworkError))
                         }}
                       >
                         Leagă contul Revolut (PSD2)
@@ -1276,9 +1276,9 @@ export default function AdminPanel({
                         type="button"
                         className="ghost"
                         onClick={() => {
-                          const cod = window.prompt('Codul din URL-ul de retur (după aprobare în Revolut):')
+                          const cod = window.prompt(A.revolutLinkPromptCode)
                           if (!cod?.trim()) return
-                          setLegMsg('Finalizez legarea…')
+                          setLegMsg(A.revolutLinkFinalizing)
                           void fetch('/api/admin/plati/legatura/finalizeaza', {
                             method: 'POST',
                             headers: { 'content-type': 'application/json' },
@@ -1287,10 +1287,10 @@ export default function AdminPanel({
                           })
                             .then((r) => r.json().then((j: { conturi?: number; error?: string }) => ({ ok: r.ok, j })))
                             .then(({ ok, j }) => {
-                              if (ok && j.conturi != null) setLegMsg(`Cont legat ✓ (${j.conturi} conturi) — citirea plăților pornește la următoarea trecere.`)
-                              else setLegMsg(`Legarea a eșuat: ${j.error ?? 'eroare necunoscută'}`)
+                              if (ok && j.conturi != null) setLegMsg(A.revolutLinkSuccess(j.conturi))
+                              else setLegMsg(A.revolutLinkFailed(j.error ?? 'eroare necunoscută'))
                             })
-                            .catch(() => setLegMsg('Legarea a eșuat — rețeaua a picat.'))
+                            .catch(() => setLegMsg(A.revolutLinkNetworkError))
                         }}
                       >
                         Am codul din retur
@@ -1486,10 +1486,10 @@ export default function AdminPanel({
                                   type="button"
                                   className="ghost"
                                   onClick={() => {
-                                    const email = window.prompt(`Atribuie plata de £${p.amount} userului (email):`)
+                                    const email = window.prompt(A.revolutPromptAssign(p.amount))
                                     if (!email) return
                                     void atribuiePlata(p.id, email).then((rezultat) => {
-                                      window.alert(`Rezultat: ${rezultat}`)
+                                      window.alert(A.alertResult(rezultat))
                                       void fetchPlati().then(setPlati)
                                     })
                                   }}
@@ -1532,12 +1532,7 @@ export default function AdminPanel({
                       style={{ marginLeft: 10, fontSize: 12, padding: '3px 9px' }}
                       disabled={resetBusy}
                       onClick={async () => {
-                        if (!window.confirm(
-                          'Pui pe 0 contoarele de consum?\n\n' +
-                          'Se șterge doar jurnalul „cât ne-a costat pe noi la furnizori".\n' +
-                          'NU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\n' +
-                          'Creditele deja consumate NU se dau înapoi.',
-                        )) return
+                        if (!window.confirm(A.confirmResetCounters)) return
                         setResetBusy(true)
                         // r.ok VERIFICAT (auditul admin, 3 aug): la 500/423
                         // butonul ieșea tăcut din „…" și adminul nu afla că
@@ -1951,12 +1946,12 @@ export default function AdminPanel({
                         // CONFIRMARE + verdict măsurat (auditul admin, 3 aug):
                         // era SINGURUL buton distructiv fără confirmare, iar pe
                         // {ok:false} rândul „dispărea" și reapărea la refresh.
-                        if (!window.confirm(`Ștergi amprenta vocală a lui ${v.name || v.email}? (taie factorul de voce al recunoașterii)`)) return
+                        if (!window.confirm(A.confirmDeleteVoiceprint(v.name || v.email))) return
                         void deleteVoiceprint(v.email).then((ok) => {
                           if (ok) {
                             setVoiceprints((cur) => (cur ? cur.filter((x) => x.email !== v.email) : cur))
                             setVpMsg('')
-                          } else setVpMsg(`Nu s-a putut șterge amprenta lui ${v.email} — reîncearcă.`)
+                          } else setVpMsg(A.voiceprintDeleteFailed(v.email))
                         })
                       }}
                     >
@@ -2523,7 +2518,7 @@ export default function AdminPanel({
                           onClick={async () => {
                             const r = await manageUser(u.email, u.blocked ? 'unblock' : 'block')
                             if (r) setActivity(r)
-                            else window.alert('Nu s-a putut — serverul a refuzat sau sesiunea a expirat.')
+                            else window.alert(A.alertCouldNotPerf)
                           }}
                         >
                           {u.blocked ? 'Deblochează' : 'Blochează'}
@@ -2533,7 +2528,7 @@ export default function AdminPanel({
                           className="user-act"
                           onClick={async () => {
                             const s = window.prompt(
-                              `Credit pentru ${u.email} în ${sym}. Pune negativ ca să scazi:`,
+                              A.promptManualCreditAmount(u.email),
                             )
                             if (s == null) return
                             // VIRGULA ZECIMALĂ ACCEPTATĂ (auditul admin, 3 aug):
@@ -2542,12 +2537,12 @@ export default function AdminPanel({
                             // gemini-credit din backend.
                             const amt = Number(s.replace(',', '.').trim())
                             if (!Number.isFinite(amt) || amt === 0) {
-                              window.alert(`Suma „${s}" nu e validă — scrie de ex. 5.50 (sau 5,50). Nu s-a creditat nimic.`)
+                              window.alert(A.alertInvalidAmount(s))
                               return
                             }
                             const r = await manageUser(u.email, 'credit', amt)
                             if (r) setActivity(r)
-                            else window.alert('Nu s-a creditat — serverul a refuzat sau sesiunea a expirat.')
+                            else window.alert(A.alertNotCredited)
                           }}
                         >
                           Credit
@@ -2559,15 +2554,11 @@ export default function AdminPanel({
                             // CONFIRMAREA SPUNE SCOPUL REAL (auditul admin, 3 aug):
                             // lista vine din deleteUserData — inclusiv biometria
                             // și contul Google, nu doar „mesaje, sold".
-                            if (
-                              !window.confirm(
-                                `Ștergi definitiv datele lui ${u.email}? Se șterg: mesaje, sold, sesiuni, memorie, amprentele vocale/faciale, notele, contul Google legat și jurnalul de costuri. Plățile rămân în registru, anonimizate ireversibil.`,
-                              )
-                            )
+                            if (!window.confirm(A.confirmDeleteUserData(u.email)))
                               return
                             const r = await manageUser(u.email, 'delete')
                             if (r) setActivity(r)
-                            else window.alert('Nu s-a șters — serverul a refuzat sau sesiunea a expirat.')
+                            else window.alert(A.alertNotDeleted)
                           }}
                         >
                           Șterge
@@ -2645,13 +2636,13 @@ export default function AdminPanel({
                         const verdict = await emailLead(l.id, l.email, subject, body)
                         if (verdict === 'ok') {
                           await fetchLeads().then(setLeads)
-                          window.alert('Email trimis.')
+                          window.alert(A.alertEmailSent)
                         } else if (verdict === 'bad_request') {
-                          window.alert('Nu s-a trimis: adresa, subiectul sau mesajul nu sunt valide (serverul a răspuns 400).')
+                          window.alert(A.alertEmailNotSent400)
                         } else if (verdict === 'send_failed') {
-                          window.alert('Nu s-a trimis: serverul de mail a refuzat trimiterea (502).')
+                          window.alert(A.alertEmailNotSent502)
                         } else {
-                          window.alert('Nu s-a trimis: rețeaua a picat — cererea nu a ajuns la server.')
+                          window.alert(A.alertEmailNotSentNetwork)
                         }
                       }}
                     >
@@ -3032,7 +3023,7 @@ export default function AdminPanel({
                     style={{ color: '#ff7a7a' }}
                     title="Șterge definitiv cererea (pentru zgomot/duplicate)"
                     onClick={() => {
-                      if (!window.confirm('Ștergi DEFINITIV cererea? (nu rămâne nici în istoric)')) return
+                      if (!window.confirm(A.confirmDeleteGap)) return
                       // ✕ nu mai tace la eșec (auditul admin, 3 aug): adminul
                       // confirmase o ștergere „definitivă" și nu se întâmpla,
                       // vizibil, nimic. Verdictul vine din stergeCuVerdict.
@@ -3040,7 +3031,7 @@ export default function AdminPanel({
                         if (ok) {
                           setGaps((cur) => cur.filter((x) => x.id !== g.id))
                           setGapsMsg('')
-                        } else setGapsMsg('Nu s-a putut șterge cererea — reîncearcă.')
+                        } else setGapsMsg(A.gapDeleteFailed)
                       })
                     }}
                   >

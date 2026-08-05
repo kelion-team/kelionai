@@ -4,6 +4,9 @@ import {
   inimaAMurit,
   idTabVoce,
   INIMA_MOARTA_MS,
+  emiteTakeover,
+  emiteInima,
+  emiteRamasBun,
   type MesajVoce,
 } from './voceUnica'
 
@@ -52,5 +55,18 @@ describe('voceUnica - reguli pure zăvor voce între taburi', () => {
     const acum = 100_000
     expect(inimaAMurit(acum - INIMA_MOARTA_MS + 100, acum)).toBe(false)
     expect(inimaAMurit(acum - INIMA_MOARTA_MS - 1, acum)).toBe(true)
+  })
+
+  it('trimite mesaje pe broadcast channel la apelul funcțiilor ajutătoare', () => {
+    const msgs: unknown[] = []
+    const fakeBc = { postMessage: (m: unknown) => msgs.push(m) } as unknown as BroadcastChannel
+    emiteTakeover(fakeBc, 't1')
+    emiteInima(fakeBc, 't1')
+    emiteRamasBun(fakeBc, 't1')
+    expect(msgs).toEqual([
+      { takeover: 't1' },
+      { inima: 't1' },
+      { ramasBun: 't1' },
+    ])
   })
 })
