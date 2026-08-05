@@ -14,8 +14,8 @@ import { pcm16InWav, transcrieGemini } from './urecheGemini.js'
 
 // THE PROVEN REGION (live matrix, 10 Jul): chirp_3 does NOT EXIST in
 // us-central1 — it exists in the 'us' and 'eu' multi-regions. 'eu' = minimum
-// latency for European users. SINGLE source: asr-stream.ts (the streaming
-// twin) imports these instead of keeping its own copy.
+// latency for European users. (STT-ul streaming a fost scos total pe 5 aug —
+// voce unificată; rămâne DOAR dictarea batch de aici.)
 export const GOOGLE_STT_REGION = 'eu'
 // The most advanced model Adrian asked for: chirp_3 EVERYWHERE (batch,
 // streaming, full-duplex voice).

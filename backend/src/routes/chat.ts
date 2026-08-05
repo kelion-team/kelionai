@@ -1210,6 +1210,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       // Gemini 2.5 o „aude" nativ (ton, accent, pauze), fără să depindă de un STT
       // care poate stâlci. Trece prin același /api/chat — creier unic.
       audio?: string
+      // VOCE AMBIENTALĂ — CREIERUL UNIC DECIDE ADRESAREA (Adrian, 5 aug: „urechea
+      // o scoți total, tot decis de creierul unic"). Când e `true`, fraza a venit
+      // din ascultarea continuă (fără STT, fără poartă de nume pe client): creierul
+      // AUDE audio-ul brut și decide SINGUR dacă i se vorbește („Kelion"/„Kei" ca
+      // prim cuvânt, sau răspuns la o întrebare pe care el tocmai a pus-o). Dacă NU
+      // i se adresează, tace (sentinela `<TAC/>` → tura se stinge, nimic rostit,
+      // nimic salvat). Poarta veche de cuvânt-cheie (regex pe transcriptul stâlcit)
+      // a dispărut — decizia e a creierului, din voce.
+      voceAmbianta?: boolean
       // GUEST SPEAKER (Adrian, Aug 1): the voice gate (realtime.ts) recognised
       // the speaker as a GUEST of this account — "guest:<id>:<name> (<relation>)"
       // or "guest-pending:<id>:<name> (<relation>)". A guest turn gets ZERO
@@ -1249,6 +1258,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       typeof req.body?.audio === 'string' && req.body.audio.startsWith('data:audio')
         ? req.body.audio
         : ''
+    // VOCE AMBIENTALĂ: doar cu audio real (creierul nu poate decide adresarea
+    // fără să audă). Fără audio, flag-ul e inert — o tură scrisă e mereu adresată.
+    const voceAmbianta = req.body?.voceAmbianta === true && !!audio
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
       return reply.code(400).send({ error: 'bad_request', message: 'messages[] required' })
     }
@@ -1542,6 +1554,32 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         `no tables, no emoji, no headings. Numbers and dates in spoken form. If you show something ` +
         `on the monitor, say so in one short sentence — don't read URLs or code aloud. ` +
         `Be complete but concise: what matters most first.`
+    }
+    // VOCE AMBIENTALĂ — CREIERUL DECIDE ADRESAREA DIN AUDIO (Adrian, 5 aug: „tot
+    // decis de creierul unic; dacă nu aude «Kelion» sau «Kei», să nu vorbească
+    // neîntrebat"). Poarta de nume nu mai stă pe client (pe un transcript stâlcit);
+    // creierul AUDE fraza brută și hotărăște singur. Acest bloc vine ULTIMUL, deci
+    // bate regula „NEVER end a turn silently" DOAR pe cazul explicit de mai jos.
+    if (voceAmbianta) {
+      systemPrompt +=
+        `\n\nAMBIENT VOICE MODE — YOU DECIDE IF YOU WERE ADDRESSED. This turn is a raw ` +
+        `audio phrase captured from continuous listening near the device. There is NO ` +
+        `transcript — you HEAR the audio yourself. Decide, from what you hear, whether it is ` +
+        `addressed to YOU:\n` +
+        `• ADDRESSED = the speaker said your name ("Kelion" or "Kei") as the first word, OR ` +
+        `you just asked a question in your previous turn and this audio is the reply to it.\n` +
+        `• NOT ADDRESSED = the speaker is talking to someone else, thinking aloud, background ` +
+        `speech, or the audio is not clearly meant for you.\n` +
+        `RULES (exactly):\n` +
+        `1. If NOT addressed: output EXACTLY the token <TAC/> and NOTHING else — no words, no ` +
+        `tools, no punctuation. This is the ONE case where you stay silent (it overrides the ` +
+        `"never end silently" rule). Do not explain; just <TAC/>.\n` +
+        `2. If addressed: your VERY FIRST line must be exactly "AUZIT: " followed by the words ` +
+        `you actually heard, verbatim, then a newline. After that newline, give your normal ` +
+        `spoken reply. The "AUZIT:" line is how the screen shows what you heard — never skip it ` +
+        `and never put anything before it.\n` +
+        `Be strict: when in doubt whether it was truly meant for you, prefer <TAC/> — the owner ` +
+        `asked you not to speak unprompted.`
     }
     // ACCOUNT STATE — Kelion must KNOW naturally who the user is (Adrian,
     // Jul 24: "during the audit it doesn't see that I'm logged into the Google
@@ -1921,8 +1959,14 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
     // public, paying): the server confirms exactly the text handed to the brain
     // on this turn, and the UI band displays it. It is not a local echo — if
     // the band does not change when you speak, the voice died BEFORE the brain.
-    reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
-    if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+    // VOCE AMBIENTALĂ: NU confirmăm încă „ce-am auzit" și NU salvăm mesajul
+    // userului — nu știm încă dacă i se adresează creierului. Creierul decide din
+    // audio; dacă e adresat, scrie {heard: <ce a auzit>} devreme în stream și
+    // salvăm atunci; dacă tace (<TAC/>), nu apare nimic și nu se salvează nimic.
+    if (!voceAmbianta) {
+      reply.raw.write(`${CTRL}${JSON.stringify({ heard: lastUserText.slice(0, 500) })}${CTRL}`)
+      if (lastTurn?.role === 'user') void saveMessage(user.email, 'user', lastTurn.content)
+    }
 
     // THE GUEST CONTEXT FOR THE BRAIN (only the model sees it — the saved
     // bubble and the {heard} band stay the guest's clean words).
@@ -2240,6 +2284,59 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         }
       }
       let textFlowed = false
+      // ── POARTA DE ADRESARE A CREIERULUI (voce ambientală) ────────────────────
+      // Pe o tură ambientală, primele caractere ale răspunsului decid totul:
+      //   • încep cu `<TAC/>`  → creierul NU e adresat → tura se stinge (taced).
+      //   • încep cu `AUZIT: X` → e adresat; X = ce a auzit (→ {heard}), iar restul
+      //     e răspunsul rostit. Reținem stream-ul pe client până se decide, ca să
+      //     nu se scurgă nici sentinela, nici linia AUZIT. Pe turele ne-vocale
+      //     poarta e deschisă din start (gateDecided = true).
+      let gateBuf = ''
+      let gateDecided = !voceAmbianta
+      let taced = false
+      let userEcho = ''
+      const emitHeard = (txt: string): void => {
+        reply.raw.write(`${CTRL}${JSON.stringify({ heard: txt.slice(0, 500) })}${CTRL}`)
+      }
+      // Decide din bufferul acumulat. Întoarce textul DE EMIS (răspunsul, fără
+      // linia AUZIT), sau '' cât încă strânge / dacă tace. Setează gateDecided,
+      // taced, userEcho.
+      const SENTINELA_TAC = '<TAC/>'
+      const decideVoiceGate = (): string => {
+        const trimmed = gateBuf.replace(/^\s+/, '')
+        if (!trimmed) return '' // doar spații încă
+        // Sentinela <TAC/> — cât prefixul încă se potrivește, mai așteptăm.
+        const capat = trimmed.slice(0, SENTINELA_TAC.length)
+        if (SENTINELA_TAC.startsWith(capat)) {
+          if (trimmed.length < SENTINELA_TAC.length) return '' // prefix parțial, mai vine
+          if (capat === SENTINELA_TAC) {
+            taced = true
+            gateDecided = true
+            return ''
+          }
+        }
+        // Nu e sentinela. Așteptăm prima linie „AUZIT: …" (până la newline).
+        const nl = trimmed.indexOf('\n')
+        if (nl === -1) {
+          if (trimmed.length < 240) return '' // mai așteptăm newline-ul
+          // creierul n-a respectat formatul → tratăm tot ca răspuns, fără ecou
+          gateDecided = true
+          emitHeard('')
+          return trimmed
+        }
+        const primaLinie = trimmed.slice(0, nl)
+        const rest = trimmed.slice(nl + 1)
+        const m = /^\s*AUZIT:\s*(.*)$/i.exec(primaLinie)
+        gateDecided = true
+        if (m) {
+          userEcho = m[1].trim()
+          emitHeard(userEcho)
+          return rest
+        }
+        // fără prefix AUZIT → tot bufferul e răspuns
+        emitHeard('')
+        return trimmed
+      }
       // FAKE TOOL-CALL MARKUP, NEVER SHOWN NOR SPOKEN (Adrian, Aug 1 —
       // screenshot: „<|tool_call|>call:system_health()<|tool_call|>” displayed
       // raw in the bubble). Small free models sometimes EMIT tool-call syntax
@@ -2289,8 +2386,21 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
           // having done it.
           forceToolsFirstRound: false,
           onText: (txt) => {
-            const clean = markupStrip.push(txt)
+            let clean = markupStrip.push(txt)
             if (!clean) return
+            // POARTA DE ADRESARE (voce ambientală): reținem primele caractere până
+            // creierul decide. Dacă tace (<TAC/>) nu se scurge nimic; dacă e
+            // adresat, emitem doar RĂSPUNSUL (fără linia AUZIT, dusă deja în {heard}).
+            if (!gateDecided) {
+              gateBuf += clean
+              const emis = decideVoiceGate()
+              if (!gateDecided) return // încă strânge — nu s-a decis
+              if (taced) return // creierul nu era adresat — tăcere totală
+              if (!emis) return
+              clean = emis
+            } else if (taced) {
+              return
+            }
             textFlowed = true
             ecranPartial += clean // oglinda exactă a ecranului, pentru catch
             noteFirstWord()
@@ -2366,7 +2476,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       }
       if (!r) throw (lastBrainErr ?? new Error('brain_gemini_exhausted'))
       markupStrip.flush() // held marker fragments: logged, never shown
-      assistantText += stripToolMarkup(r.text, undefined, toolNamesThisTurn)
+      // Pe voce, textul asistentului e DOAR corpul rostit — poarta a scos linia
+      // „AUZIT:" și sentinela din r.text, iar ce-a rămas e deja în ecranPartial.
+      if (!voceAmbianta) assistantText += stripToolMarkup(r.text, undefined, toolNamesThisTurn)
       usage.usd += r.costUsd
       // REAL ACCOUNTING (QA audit Jul 24, A1): the BRAIN cost enters cost_events
       // for ALL users (including admin) — the Money tab showed 0 under "Brain"
@@ -2378,6 +2490,41 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
       console.log(`[TIMP] tura ${turnId.slice(0, 8)}: creier=${orchestratorModel}, runde=${r.rounds}, total=${totalMs}ms`)
       // EVIDENȚA TIMPILOR (Adrian, 3 aug): măsurabil + din el învață bucla din spate.
       void recordTiming({ email: user.email, kind: 'chat', model: orchestratorModel, ms: totalMs, ok: true, rounds: r.rounds })
+      // ── VOCE AMBIENTALĂ: verdictul de adresare ────────────────────────────────
+      // Poarta poate să nu fi apucat să decidă în stream (răspuns foarte scurt) →
+      // decidem acum pe tot ce-a venit. La ambiguitate → tăcere (ordinul: „să nu
+      // vorbească neîntrebat").
+      if (voceAmbianta && !gateDecided) {
+        const trimmed = gateBuf.replace(/^\s+/, '')
+        const mAuzit = /^\s*AUZIT:\s*([\s\S]*)$/i.exec(trimmed)
+        gateDecided = true
+        if (mAuzit) {
+          userEcho = mAuzit[1].split('\n')[0].trim()
+          emitHeard(userEcho)
+          const nl = trimmed.indexOf('\n')
+          const corp = nl === -1 ? '' : trimmed.slice(nl + 1).trim()
+          if (corp) { textFlowed = true; ecranPartial += corp; reply.raw.write(corp) }
+        } else if (!trimmed || SENTINELA_TAC.startsWith(trimmed.slice(0, SENTINELA_TAC.length))) {
+          taced = true // sentinela (parțială) sau nimic → tăcere
+        } else {
+          emitHeard(''); textFlowed = true; ecranPartial += trimmed; reply.raw.write(trimmed)
+        }
+      }
+      // Pe voce, corpul rostit e în ecranPartial (poarta l-a scos curat).
+      if (voceAmbianta && !taced) assistantText = ecranPartial
+      // Creierul a hotărât că NU i se vorbea → tura se stinge: {ignored}, fără
+      // rostire (poarta a reținut tot), fără salvare. Clientul șterge bulele.
+      if (voceAmbianta && taced) {
+        reply.raw.write(`${CTRL}${JSON.stringify({ ignored: true })}${CTRL}`)
+        reply.raw.end()
+        console.log(`[VOCE] tura ${turnId.slice(0, 8)}: creierul a decis că NU i se vorbea — tăcere`)
+        return
+      }
+      // Voce adresată: salvăm mesajul userului = ce a auzit creierul (ecou precis,
+      // din voce — nu un transcript stâlcit de STT). {heard} a plecat deja în stream.
+      if (voceAmbianta) {
+        void saveMessage(user.email, 'user', userEcho.trim() || (ro ? '(mesaj vocal)' : '(voice message)'))
+      }
     } catch (e) {
       // The brain failed — honest, never silent. No Kimi/GLM safety net
       // (removed).

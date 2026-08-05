@@ -3,7 +3,6 @@ import { getPool, dbEnabled, listBuildJobs } from '../db.js'
 import { resurseGazda, descrieResurse, PRAG_MEMORIE_PCT, PRAG_INCARCARE_PCT } from './resurse.js'
 import { geminiLive } from './geminiDirect.js'
 import { stareDispecer } from './dispecer.js'
-import { stareUrechiChirp } from './urechiChirp.js'
 
 // ── KELION'S EYES ON HIS OWN HEALTH (Adrian, 27 Jul: "Kelion must see this
 // and be able to tell the admin through chat that he has problems x,y,z and
@@ -282,27 +281,9 @@ export async function systemHealth(): Promise<string> {
     /* telemetry unreadable — we don't invent problems */
   }
 
-  // 10. THE CHIRP EARS, UNDER CONSTANT WATCH (Adrian, Aug 2, direct order:
-  // „un sistem de monitorizare care ține sub control peste tot folosirea
-  // Chirp 3 HD, și dacă pică dă mesaj adminului imediat"). The counters live
-  // in services/urechiChirp.ts — fed by routes/asr-stream.ts on every stream,
-  // error, transparent reconnect and paid-fallback. Telemetry always visible;
-  // a PROBLEM only on a RECENT persistent drop (auth/config or an unhealable
-  // transient storm) — the admin is also paged instantly at the moment it
-  // happens, this point is the standing proof for system_health.
-  try {
-    const u = stareUrechiChirp()
-    info.urechiChirp = u.sumar
-    if (!u.sanatoase)
-      problems.push({
-        id: 'urechi_chirp_bolnave',
-        grav: 'mediu',
-        desc: `Urechile Chirp (Google STT streaming) au căzut: ${u.motiv}. Auzul e JOS până la reparare (nu mai există nicio ureche de rezervă — OpenAI extirpat, 3 aug).`,
-        reparabil: 'citește ultima eroare din jurnal («asr-stream»); dacă e auth/config → verifică GOOGLE_SERVICE_ACCOUNT_JSON pe VPS și regiunea «eu»',
-      })
-  } catch {
-    /* the pulse itself unreadable — we don't invent problems */
-  }
+  // 10. (URECHILE CHIRP — MONITORIZARE SCOASĂ, 5 aug: STT-ul streaming a fost
+  // eliminat total odată cu voce unificată. Nu mai există ureche Chirp de
+  // supravegheat — creierul unic aude audio-ul brut și decide singur.)
 
   return JSON.stringify({
     ok: problems.length === 0,

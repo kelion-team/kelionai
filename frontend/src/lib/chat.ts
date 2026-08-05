@@ -70,7 +70,12 @@ export interface ChatControl {
   // TRANSCRIPT AT THE BRAIN'S ENTRANCE (Adrian, Jul 10): the EXACT text the
   // server hands to the brain this turn — sent from the server, not a
   // local echo. Shown as a distinct band, so you can see what it "heard".
+  // VOCE UNIFICATĂ (5 aug): pe o tură vocală, `heard` = ce a auzit CREIERUL
+  // (transcript precis, din voce) — clientul umple bula userului cu el.
   heard?: string
+  // VOCE AMBIENTALĂ: creierul a decis că NU i se vorbea → tura se stinge; clientul
+  // șterge bulele optimiste și nu redă nimic (Adrian: „să nu vorbească neîntrebat").
+  ignored?: boolean
   // THE BRAIN'S VOICE: MP3 (base64) synthesized on the server (Chirp 3) and sent over
   // the bridge. The app only decodes + plays it — it synthesizes nothing locally.
   audio?: string
@@ -172,6 +177,10 @@ export async function* streamChat(
   // vocea BRUTĂ a frazei (WAV data-URI). Gemini 2.5 o aude nativ (ton/accent);
   // celelalte modele primesc textul (serverul scoate blocul audio). Creier unic.
   audio?: string,
+  // VOCE AMBIENTALĂ (Adrian, 5 aug: „tot decis de creierul unic"): tura a venit din
+  // ascultarea continuă, fără poartă de nume pe client — creierul aude audio-ul și
+  // decide SINGUR dacă i se vorbește; dacă nu, tace ({ignored}). Doar pe voce.
+  voceAmbianta?: boolean,
 ): AsyncGenerator<string> {
   // FINANCIAL BUG FIXED (Jul 24 audit): there used to be another POST /api/chat
   // whose response was NEVER read — openStream() below opened A SECOND identical
@@ -302,6 +311,7 @@ export async function* streamChat(
             spoken: spoken || undefined,
             speaker,
             audio,
+            voceAmbianta: voceAmbianta || undefined,
             now: new Date().toISOString(),
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           }),

@@ -2,8 +2,9 @@ import { config } from '../config.js'
 import { langLabel } from './lang.js'
 
 // ── LIVE VOICE — GOOGLE + GEMINI (OpenAI scos complet, Adrian 3 aug) ──────────
-// Sesiunea vocală NU mai are proxy SDP către OpenAI: urechile sunt Google Chirp
-// 3 streaming (/api/asr-stream), creierul e Gemini (/api/chat), iar gura e
+// Sesiunea vocală NU mai are proxy SDP către OpenAI, iar STT-ul a fost scos
+// TOTAL (voce unificată, 5 aug): urechea e VAD local pe client, fraza brută
+// (audio) merge la creierul unic (/api/chat), care aude și decide singur; gura e
 // Google TTS Chirp 3 HD, sintetizată de server și trimisă ca {audio}.
 //
 // Ce a mai rămas AICI, pure și fără rețea, DOAR pentru suita de teste care le

@@ -43,19 +43,20 @@ describe('o singură ușă spre creier: POST /api/chat', () => {
 })
 
 describe('același text, același traseu — dovada de paritate', () => {
-  it('transcriptul final ajunge NEMODIFICAT la aceeași funcție send() ca textul tastat', () => {
-    // The voice gate forwards the transcript verbatim (t, not a copy, not a
-    // transformation) to the panel's single send().
-    expect(feVoice).toMatch(/onAddressed\?\.\(t, vf, speaker, audio\)/)
+  it('fraza vocală (AUDIO) ajunge la aceeași funcție send() ca textul tastat', () => {
+    // VOCE UNIFICATĂ (5 aug): fără transcript de dus — poarta de timbru trece
+    // fraza ca AUDIO la aceeași send() (marcată spoken=true); creierul unic aude
+    // și decide adresarea. Nu mai există unire de fraze (transcriptul dispărut).
+    expect(feVoice).toMatch(/onAddressed\?\.\('', vf, speaker, audio\)/)
     // The panel wires onAddressed into the SAME send() the input box uses.
     expect(fePanel).toMatch(/async function send\(text: string, spoken = false\)/)
-    const idxAddressed = fePanel.indexOf('onAddressed: (text, vf, speaker, audio)')
+    const idxAddressed = fePanel.indexOf('onAddressed: (_text, vf, speaker, audio)')
     expect(idxAddressed).toBeGreaterThanOrEqual(0)
-    // Frazele apropiate se UNESC într-o singură tură (voceMergeRef, Adrian 3 aug),
-    // apoi merg la ACEEAȘI send() ca textul tastat, marcate spoken=true.
-    const bloc = fePanel.slice(idxAddressed, idxAddressed + 2400)
-    expect(bloc).toMatch(/voceMergeRef\.current/)
-    expect(bloc).toMatch(/sendRef\.current\(merged, true\)/)
+    // Fraza pleacă DIRECT (audio parcat în pendingAudioRef) la ACEEAȘI send() ca
+    // textul tastat, marcată spoken=true (al doilea argument).
+    const bloc = fePanel.slice(idxAddressed, idxAddressed + 800)
+    expect(bloc).toMatch(/pendingAudioRef\.current = audio/)
+    expect(bloc).toMatch(/sendRef\.current\('', true\)/)
   })
 
   it('`spoken` schimbă DOAR stilul răspunsului, niciodată traseul', () => {

@@ -15,7 +15,6 @@ import { ttsRoutes } from './routes/tts.js'
 import { adminRoutes } from './routes/admin.js'
 import { prefsRoutes } from './routes/prefs.js'
 import { asrRoutes } from './routes/asr.js'
-import { asrStreamRoutes } from './routes/asr-stream.js'
 import { vocalLiveRoutes } from './routes/vocalLive.js'
 import { legalRoutes } from './routes/legal.js'
 import { imageRoutes } from './routes/image.js'
@@ -120,9 +119,6 @@ await app.register(rateLimit, {
       // the microphone WebSocket. Any non-/api/ path = static file → exempted;
       // the API keeps its cap.
       !u.startsWith('/api/') ||
-      // THE MICROPHONE (voice): the STT WebSocket — the critical path, it
-      // cannot be throttled.
-      u === '/api/asr-stream' ||
       u === '/health' ||
       u === '/api/health' || // connectivity-recovery poll (ChatPanel) — never throttled
       u === '/api/version' || // polled every 45s by every client for the update routine
@@ -269,7 +265,6 @@ await app.register(ttsRoutes)
 await app.register(adminRoutes)
 await app.register(prefsRoutes)
 await app.register(asrRoutes)
-await app.register(asrStreamRoutes)
 await app.register(vocalLiveRoutes)
 await app.register(legalRoutes)
 await app.register(imageRoutes)
