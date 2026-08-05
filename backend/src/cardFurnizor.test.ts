@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // THE CARD GUARD (Adrian, Jul 31: "let it operate for me only when I ask,
-// using the voice recognition system" · "the automatic payments").
+// using the voice recognition system" · "the automatic payments"; 5 aug:
+// „întărește, adaugă verificare față, și să fie logat admin" → TREI factori).
 //
-// This test guards three things I am never allowed to break:
-//   1. without a recognized voice, the card is NOT touched — not even if the
-//      one asking is admin, with a valid session;
-//   2. the card's value appears in NO returned result — not in text, not in
+// This test guards things I am never allowed to break:
+//   1. the card needs ALL THREE factors — admin logat + voce recunoscută ACUM
+//      + față recunoscută ACUM; lipsa oricăruia = pagina NU se atinge;
+//   2. a non-admin account is refused outright ("cont neautorizat");
+//   3. the card's value appears in NO returned result — not in text, not in
 //      the page, not in the detail;
-//   3. "done" means what the code MEASURED on the page, not what the model
-//      said.
+//   4. "done" means what the code MEASURED on the page, not what the model said.
 
 const browserType = vi.hoisted(() => vi.fn(async () => ({ url: 'u', title: 't', text: 'PAGINA', elements: [], shotUrl: '' })))
 const browserRead = vi.hoisted(() => vi.fn(async () => ({ url: 'u', title: 't', text: 'PAGINA', elements: [], shotUrl: '' })))
@@ -27,31 +28,57 @@ vi.mock('./db.js', async (importOriginal) => ({
 }))
 
 import { completeazaCard, terminaCard, stareFurnizori, platiAutomatePornite, cardConfigurat } from './services/cardFurnizor.js'
-import { marcheazaVoce } from './services/adminLock.js'
+import { marcheazaVoce, marcheazaFata, uitaVocea, uitaFata } from './services/adminLock.js'
 import { mascheazaCifre } from './services/browser.js'
+import { config } from './config.js'
 
 const CARD = '4242424242424242'
-const EU = 'owner@test.ro'
+// Owner-ul REAL — poarta cere email de admin (config.adminEmail).
+const EU = config.adminEmail
 
 beforeEach(() => {
   kv.clear()
   browserType.mockClear()
+  setModDiscret.mockClear()
+  // Ferestrele biometrice sunt în memorie; le curățăm ca fiecare test să pornească gol.
+  uitaVocea(EU)
+  uitaFata(EU)
   process.env.CARD_NUMAR = CARD
   process.env.CARD_EXPIRARE = '12/29'
   process.env.CARD_CVC = '123'
   process.env.CARD_NUME = 'A N'
 })
 
-describe('cardFurnizor — poarta e vocea, nu sesiunea', () => {
-  it('FĂRĂ voce recunoscută: refuză, și nu atinge pagina deloc', async () => {
+describe('cardFurnizor — poarta cu trei factori (admin + voce + față)', () => {
+  it('cont NON-admin: refuză din start („cont neautorizat"), nu atinge pagina', async () => {
+    marcheazaVoce('nimeni@test.ro')
+    marcheazaFata('nimeni@test.ro')
     const r = await completeazaCard('nimeni@test.ro', 'https://kelionai.app', 'numar', 3)
     expect(r.ok).toBe(false)
-    expect(r.detaliu).toContain('voce')
+    expect(r.detaliu).toContain('neautorizat')
     expect(browserType).not.toHaveBeenCalled()
   })
 
-  it('CU voce recunoscută: scrie valoarea în pagină, dar n-o întoarce nicăieri', async () => {
+  it('admin, dar FĂRĂ voce și FĂRĂ față: refuză și cere ambii factori, nu atinge pagina', async () => {
+    const r = await completeazaCard(EU, 'https://kelionai.app', 'numar', 3)
+    expect(r.ok).toBe(false)
+    expect(r.detaliu).toContain('VOCEA')
+    expect(r.detaliu).toContain('FAȚA')
+    expect(browserType).not.toHaveBeenCalled()
+  })
+
+  it('admin + voce, dar FĂRĂ față: tot refuză (față lipsește)', async () => {
     marcheazaVoce(EU)
+    const r = await completeazaCard(EU, 'https://kelionai.app', 'numar', 3)
+    expect(r.ok).toBe(false)
+    expect(r.detaliu).toContain('FAȚA')
+    expect(r.detaliu).not.toContain('VOCEA') // vocea e ✓, doar fața lipsește
+    expect(browserType).not.toHaveBeenCalled()
+  })
+
+  it('admin + voce + față: scrie valoarea în pagină, dar n-o întoarce nicăieri', async () => {
+    marcheazaVoce(EU)
+    marcheazaFata(EU)
     const r = await completeazaCard(EU, 'https://kelionai.app', 'numar', 3)
     expect(r.ok).toBe(true)
     // The server wrote the value…
@@ -64,6 +91,7 @@ describe('cardFurnizor — poarta e vocea, nu sesiunea', () => {
 
   it('valoare neconfigurată → spune CE lipsește, nu completează la nimereală', async () => {
     marcheazaVoce(EU)
+    marcheazaFata(EU)
     delete process.env.CARD_CVC
     const r = await completeazaCard(EU, 'https://kelionai.app', 'cvc', 4)
     expect(r.ok).toBe(false)

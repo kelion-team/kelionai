@@ -64,7 +64,7 @@ import {
   RUN_RUNBOOK_TOOL, RUNBOOK_STATUS_TOOL, RUNBOOK_LOG_TOOL, REQUEST_REPAIR_TOOL,
 } from './brainToolDefs.js'
 import { platiAutomatePornite } from './cardFurnizor.js'
-import { voceRecenta } from './adminLock.js'
+import { voceRecenta, fataRecenta } from './adminLock.js'
 import {
   execSharedAdminTool, SHARED_ADMIN_TOOLS,
   execUserScopedTool, USER_SCOPED_TOOLS,
@@ -430,10 +430,11 @@ const MISIUNE: Sarcina[] = [
     // provider's page at session close — automatic payment turned on.
     dovada: platiAutomatePornite,
 
-    // CAN ONLY BE TAKEN while the owner's voice window is open — exactly as he
-    // asked: "operate for me when ONLY I ask". Otherwise the loop skips it
-    // instead of burning it in failed attempts.
-    poate: () => voceRecenta(config.adminEmail),
+    // CAN ONLY BE TAKEN while BOTH biometric windows are open — voce ȘI față
+    // (Adrian, 5 aug: „adaugă verificare față"). Exact ca poarta din cardFurnizor:
+    // trei factori (admin + voce + față). Altfel bucla îl sare, nu-l arde în
+    // încercări eșuate (fereastra de card oricum l-ar refuza).
+    poate: () => voceRecenta(config.adminEmail) && fataRecenta(config.adminEmail),
   },
 ]
 
