@@ -92,11 +92,21 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: oprit })
   })
 
-  // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat.
-  app.post<{ Params: { id: string }; Body: { order?: string } }>('/api/admin/constructor/:id/reia', async (req, reply) => {
+  // Reia un ordin (îl repune în coadă, attempts=0), opțional cu textul reformulat sau creier superior bifat.
+  app.post<{ Params: { id: string }; Body: { order?: string; creierSuperior?: boolean } }>('/api/admin/constructor/:id/reia', async (req, reply) => {
     const id = adminSiId(req, reply, req.params.id)
     if (id === null) return
-    const job = await retryBuildJob(id, req.body?.order)
+    const creierSuperior = Boolean(req.body?.creierSuperior)
+    const job = await retryBuildJob(id, req.body?.order, creierSuperior)
+    if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
+    return reply.send({ ok: true, job })
+  })
+
+  // Escaladează direct un ordin eșuat pe creier (bifează creier superior și relansează).
+  app.post<{ Params: { id: string }; Body: { order?: string } }>('/api/admin/constructor/:id/escaladeaza', async (req, reply) => {
+    const id = adminSiId(req, reply, req.params.id)
+    if (id === null) return
+    const job = await retryBuildJob(id, req.body?.order, true)
     if (!job) return reply.code(409).send({ error: 'nu_se_poate_relua' })
     return reply.send({ ok: true, job })
   })
@@ -113,7 +123,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post<{
-    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number }
+    Body: { id?: number; status?: string; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; esecCreier?: boolean }
   }>('/api/constructor/report', async (req, reply) => {
     if (!config.bridgeSecret || req.headers['x-bridge-secret'] !== config.bridgeSecret)
       return reply.code(401).send({ error: 'unauthorized' })
@@ -136,6 +146,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const brain = ['fable-5', 'free'].includes(String(req.body?.brain)) ? String(req.body?.brain) : undefined
     const costRaw = Number(req.body?.costUsd)
     const costUsd = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : undefined
+    const esecCreier = Boolean(req.body?.esecCreier)
     await reportBuildJob(id, {
       status,
       branch: req.body?.branch,
@@ -145,6 +156,7 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
       ci,
       brain,
       costUsd,
+      esecCreier,
     })
     // The report to Adrian — by email, with the PR to press (the merge is his).
     const dovadaCI =
@@ -153,10 +165,15 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
         : ci === 'în curs'
           ? 'Verificare independentă (CI): încă rulează pe PR — atelierul trecuse deja build + teste.'
           : 'Build + teste verificate în atelier.'
+    const isEsecCreier = Boolean(req.body?.esecCreier) || (status === 'failed' && Boolean(
+      req.body?.log && /creier|brain|quota|rate limit|503|429|overloaded|limita|capacitate|treapta|treaptă|gemini|context length|model/i.test(String(req.body?.log))
+    ))
     const subject =
       status === 'done'
         ? `[Kelion] Constructorul a terminat ordinul #${id} — PR gata de merge`
-        : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
+        : isEsecCreier
+          ? `[Kelion] Constructorul a EȘUAT la ordinul #${id} — BIFEAZĂ CREIER SUPERIOR`
+          : `[Kelion] Constructorul a EȘUAT la ordinul #${id}`
     // The brain is stated in the email too (Aug 2 rule: the model choice must
     // be VISIBLE everywhere the order is reported). A Fable order says what it
     // cost — measured, or honestly "not reported by the provider".
@@ -169,9 +186,11 @@ export async function constructorRoutes(app: FastifyInstance): Promise<void> {
     const body =
       status === 'done'
         ? `Ordinul #${id} e construit. ${dovadaCI}\n\n${linieCreier}PR: ${req.body?.prUrl ?? '(lipsă)'}\n\nDai merge → auto-publicarea îl duce live singură în ~3 minute.`
-        : ci === 'roșu'
-          ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
-          : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
+        : isEsecCreier
+          ? `Ordinul #${id} a eșuat la creier („creierul nu poate”).\n\n⚠️ RECOMANDARE: Bifează „creier superior” din Admin Panel sau apasă pe butonul de escaladare.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}`
+          : ci === 'roșu'
+            ? `Ordinul #${id}: verificarea INDEPENDENTĂ (CI) a picat pe PR, deși atelierul trecuse.\n\nPR: ${req.body?.prUrl ?? '(lipsă)'}\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nNU da merge până nu e verde — ordinul rămâne în panou.`
+            : `Ordinul #${id} nu a putut fi finalizat.\n\nUltimele rânduri din jurnal:\n${String(req.body?.log ?? '').slice(-1500)}\n\nOrdinul rămâne în panou (Admin→Constructor); poți să-l repui cu alt enunț.`
     void sendMail({ to: config.adminEmail, subject, html: body.replace(/\n/g, '<br>'), text: body }).catch(() => {})
     return reply.send({ ok: true })
   })

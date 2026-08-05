@@ -326,13 +326,10 @@ export default function AdminPanel({
     branch: string | null
     prUrl: string | null
     tokens: number
-    // Aug 2: 'fable-5' when the order ran on the expressly requested paid
-    // brain, 'free' otherwise (null until the worker reports).
     brain: string | null
+    creierSuperior?: boolean
+    esecCreier?: boolean
     updatedAt: string
-    // BARA 0–100% (Adrian, 3 aug): etapa REALĂ raportată de lucrător + harta
-    // ei în procent (serverul o calculează din progres — progresOrdin.ts).
-    // null = eșuat (eticheta spune adevărul, fără procent inventat).
     progress?: string | null
     pct?: number | null
   }
@@ -823,17 +820,17 @@ export default function AdminPanel({
       })
       .catch(() => setBuildMsg(A.ordersCleanFailed))
   }
-  const retryBuildOrder = (id: number): void => {
+  const retryBuildOrder = (id: number, creierSuperior = false): void => {
     void fetch(`/api/admin/constructor/${id}/reia`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ creierSuperior }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { ok?: boolean } | null) => {
         refreshBuildJobs()
-        setBuildMsg(j?.ok ? A.orderResumed(id) : A.orderResumeFailed)
+        setBuildMsg(j?.ok ? (creierSuperior ? `⚡ Ordinul #${id} a fost relansat cu Creier Superior bifat.` : A.orderResumed(id)) : A.orderResumeFailed)
       })
       .catch(() => setBuildMsg(A.orderResumeFailed))
   }
@@ -2154,18 +2151,17 @@ export default function AdminPanel({
                   <span>
                     <strong>#{j.id}</strong>{' '}
                     <span className={`vis-badge ${j.status === 'done' ? 'human' : j.status === 'failed' ? 'kind-demo' : ''}`}>
-                      {/* ONESTITATE (Adrian, 5 aug): un job „done" = PR DESCHIS, NU
-                          pe live. „GATA" sugera fals că e publicat. Un job al cărui
-                          PR nu e merge-uit în master arată „în așteptare" (PR gata,
-                          dar așteaptă publicarea) — orice, dar nu „GATA". */}
                       {j.status === 'queued' ? 'în coadă' : j.status === 'running' ? 'lucrează…' : j.status === 'done' ? 'în așteptare' : 'eșuat'}
                     </span>{' '}
-                    {/* FABLE 5 BADGE — DOAR pe raportul lucrătorului (auditul
-                        admin, 3 aug): ramura veche pe regex peste orderText
-                        eticheta „Fable 5" orice ordin nou care doar pomenea
-                        cuvintele, afirmând un creier care nu mai există
-                        (toggle-ul a fost scos odată cu OpenRouter). Marcajul
-                        rămâne istoric, pe rapoartele vechi cu j.brain='fable-5'. */}
+                    {(j.esecCreier || (j.status === 'failed' && Boolean(j.progress && /creier|brain|quota|503|429|limita/i.test(j.progress)))) && (
+                      <span
+                        className="vis-badge"
+                        style={{ background: '#dc2626', color: '#fff', fontWeight: 'bold' }}
+                        title="Eșec de tip «creierul nu poate» — este necesară treaptă superioară"
+                      >
+                        🧠 Bifează creier superior
+                      </span>
+                    )}{' '}
                     {j.brain === 'fable-5' && (
                       <span
                         className="vis-badge"
@@ -2188,17 +2184,29 @@ export default function AdminPanel({
                     <span style={{ opacity: 0.7 }}>
                       · {new Date(j.updatedAt).toLocaleString('ro-RO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                     </span>
-                    {/* REIA — doar pentru cele care nu sunt în curs (eșuat/GATA/în coadă). */}
                     {(j.status === 'failed' || j.status === 'done' || j.status === 'queued') && (
-                      <button
-                        type="button"
-                        className="ghost"
-                        style={{ fontSize: 12 }}
-                        onClick={() => retryBuildOrder(j.id)}
-                        title="Repune ordinul în coadă (îl reia de la zero)"
-                      >
-                        ↻ reia
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="ghost"
+                          style={{ fontSize: 12 }}
+                          onClick={() => retryBuildOrder(j.id)}
+                          title="Repune ordinul în coadă (îl reia de la zero)"
+                        >
+                          ↻ reia
+                        </button>
+                        {(j.esecCreier || j.status === 'failed') && (
+                          <button
+                            type="button"
+                            className="ghost"
+                            style={{ fontSize: 12, color: '#d97706', fontWeight: 'bold', border: '1px solid #d97706', borderRadius: 4, padding: '2px 6px' }}
+                            onClick={() => retryBuildOrder(j.id, true)}
+                            title="Relansează ordinul cu bifa de creier superior"
+                          >
+                            ⚡ Bifează creier superior & Escaladează
+                          </button>
+                        )}
+                      </>
                     )}
                     {/* ȘTERGE — un ordin viu ('running') nu se șterge din greșeală. */}
                     {j.status !== 'running' && (

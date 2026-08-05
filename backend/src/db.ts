@@ -541,6 +541,8 @@ export async function initDb(): Promise<void> {
     -- distinguishable in the Money views without any fabrication.
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS brain TEXT;
     ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS creier_superior BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS esec_creier BOOLEAN NOT NULL DEFAULT false;
     -- WORK ORDERS for the builder — in POSTGRES because the old in-memory queue
     -- was WIPED by every deploy (the admin's "sent to execution" orders
     -- silently vanished). Persisted = an order can never be lost again, and the
@@ -3252,6 +3254,8 @@ export interface BuildJob {
   // as measured from OpenRouter (null = not reported by the provider).
   brain: string | null
   costUsd: number | null
+  creierSuperior?: boolean
+  esecCreier?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -3270,6 +3274,8 @@ interface BuildJobDbRow {
   ci?: string | null
   brain?: string | null
   cost_usd?: string | number | null
+  creier_superior?: boolean | null
+  esec_creier?: boolean | null
   created_at: Date
   updated_at: Date
 }
@@ -3289,6 +3295,8 @@ function rowToBuildJob(r: BuildJobDbRow): BuildJob {
     ci: r.ci ?? null,
     brain: r.brain ?? null,
     costUsd: r.cost_usd == null ? null : Number(r.cost_usd),
+    creierSuperior: Boolean(r.creier_superior),
+    esecCreier: Boolean(r.esec_creier),
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
   }
@@ -3346,12 +3354,16 @@ export async function claimNextBuildJob(): Promise<BuildJob | null> {
 
 export async function reportBuildJob(
   id: number,
-  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number },
+  fields: { status: 'done' | 'failed'; branch?: string; prUrl?: string; tokens?: number; log?: string; ci?: string; brain?: string; costUsd?: number; esecCreier?: boolean },
 ): Promise<void> {
   if (!dbEnabled()) return
+  const isEsecCreier = fields.esecCreier ?? (fields.status === 'failed' && Boolean(
+    fields.log && /creier|brain|quota|rate limit|503|429|overloaded|limita|capacitate|treapta|treaptă|gemini|context length|model/i.test(fields.log)
+  ))
   await getPool().query(
     `UPDATE build_jobs SET status=$2, branch=COALESCE($3, branch), pr_url=COALESCE($4, pr_url),
        tokens = tokens + $5, log = $6, ci = COALESCE($7, ci), brain = COALESCE($8, brain), cost_usd = COALESCE($9, cost_usd),
+       esec_creier = $10,
        updated_at = now() WHERE id = $1`,
     [
       id,
@@ -3363,6 +3375,7 @@ export async function reportBuildJob(
       fields.ci ?? null,
       fields.brain ?? null,
       fields.costUsd ?? null,
+      isEsecCreier,
     ],
   )
 }
@@ -3478,7 +3491,7 @@ export async function deleteBuildJobsByScope(
  *  worker cu adevărat viu ar fi trimis progres în ultimele 15 min; dacă totuși
  *  mai raportează după reluare, e cazul de graniță acceptat — ordinul rulează o
  *  dată, nu se pierde. Nu mai lăsăm un job mort să țină coada blocată. */
-export async function retryBuildJob(id: number, newOrderText?: string): Promise<BuildJob | null> {
+export async function retryBuildJob(id: number, newOrderText?: string, creierSuperior = false): Promise<BuildJob | null> {
   if (!dbEnabled() || !Number.isInteger(id) || id <= 0) return null
   const text = (newOrderText ?? '').trim()
   try {
@@ -3486,11 +3499,13 @@ export async function retryBuildJob(id: number, newOrderText?: string): Promise<
       `UPDATE build_jobs
          SET status='queued', attempts=0,
              order_text = CASE WHEN $2 <> '' THEN $2 ELSE order_text END,
-             log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}]',
+             log = COALESCE(log,'') || E'\\n[repus în coadă de owner${text ? ' cu ordin reformulat' : ''}${creierSuperior ? ' (bifat creier superior)' : ''}]',
+             esec_creier = false,
+             creier_superior = CASE WHEN $3 THEN true ELSE creier_superior END,
              updated_at = now()
        WHERE id=$1 AND status IN ('failed','done','queued','running')
        RETURNING *`,
-      [id, text.slice(0, 4000)],
+      [id, text.slice(0, 4000), creierSuperior],
     )
     return r.rows[0] ? rowToBuildJob(r.rows[0]) : null
   } catch {
