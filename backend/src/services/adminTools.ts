@@ -183,24 +183,6 @@ export async function execSharedAdminTool(
       await actualizeazaCerinta(id, { prioritate: p })
       return JSON.stringify({ ok: true, id, prioritate: p })
     }
-    case 'propose_tool': {
-      // SELF-EXTENSION: Kelion asks for a new tool on its own (the owner
-      // approves it with one click in Admin → Kelion Tools). Identical in text
-      // and in voice.
-      const p = args as Record<string, unknown>
-      const id = await proposeKelionTool({
-        name: String(p.name ?? ''),
-        description: String(p.description ?? ''),
-        paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
-        httpMethod: String(p.http_method ?? 'GET'),
-        httpUrl: String(p.http_url ?? ''),
-        httpHeaders: JSON.stringify(p.http_headers ?? {}),
-        rationale: String(p.rationale ?? ''),
-      })
-      return JSON.stringify(id
-        ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' }
-        : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
-    }
     default: return null
   }
 }
@@ -279,6 +261,27 @@ export async function execUserScopedTool(
       if (!request) return JSON.stringify({ error: 'no_request' })
       void logCapabilityGap(email, request, String(args.reason ?? ''))
       return JSON.stringify({ logged: true })
+    }
+    case 'propose_tool': {
+      // AUTO-EXTINDERE: Kelion își cere singur o unealtă nouă (ownerul o aprobă
+      // cu un click în Admin → Unelte Kelion). MUTAT AICI (5 aug): în registru e
+      // `admin:false` și e în USER_SCOPED_TOOLS — dar executorul stătea în
+      // execSharedAdminTool, gardat de SHARED_ADMIN_TOOLS care NU-l conține, deci
+      // orice apel crăpa „unknown_tool". Acum e pe calea corectă. Identic în
+      // text și în voce.
+      const p = args as Record<string, unknown>
+      const id = await proposeKelionTool({
+        name: String(p.name ?? ''),
+        description: String(p.description ?? ''),
+        paramsJson: JSON.stringify(p.params_schema ?? { type: 'object', properties: {}, required: [] }),
+        httpMethod: String(p.http_method ?? 'GET'),
+        httpUrl: String(p.http_url ?? ''),
+        httpHeaders: JSON.stringify(p.http_headers ?? {}),
+        rationale: String(p.rationale ?? ''),
+      })
+      return JSON.stringify(id
+        ? { proposed: true, id, note: 'Așteaptă aprobarea owner-ului în Admin → Unelte Kelion.' }
+        : { error: 'invalid_proposal (doar HTTPS, nume valid)' })
     }
     default: return null
   }
