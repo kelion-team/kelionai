@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateRunbook, RUNBOOKS } from './runbooks.js'
+import { validateRunbook, RUNBOOKS, isValidSysPackageName, runRunbook } from './runbooks.js'
 import { isValidBranch, normalizeBranch } from './github.js'
 
 // NO RESTRICTIONS (Adrian's order, Jul 25): there is no approval, no
@@ -74,3 +74,39 @@ describe('isValidBranch (gardă tehnică git, nu politică)', () => {
     expect(isValidBranch('')).toBe(false)
   })
 })
+
+describe('isValidSysPackageName', () => {
+  it('validează pachete Debian/Ubuntu valide', () => {
+    expect(isValidSysPackageName('curl')).toBe(true)
+    expect(isValidSysPackageName('htop')).toBe(true)
+    expect(isValidSysPackageName('build-essential')).toBe(true)
+    expect(isValidSysPackageName('python3.10')).toBe(true)
+    expect(isValidSysPackageName('libssl-dev')).toBe(true)
+  })
+
+  it('respinge nume de pachete invalide sau periculoase', () => {
+    expect(isValidSysPackageName('')).toBe(false)
+    expect(isValidSysPackageName('curl; rm -rf /')).toBe(false)
+    expect(isValidSysPackageName('htop && reboot')).toBe(false)
+    expect(isValidSysPackageName('pkg|sh')).toBe(false)
+    expect(isValidSysPackageName('$(whoami)')).toBe(false)
+    expect(isValidSysPackageName('pachet cu spatii')).toBe(false)
+  })
+})
+
+describe('runbook instaleaza-pachet-sistem', () => {
+  it('este un runbook valid în registrul de runbooks', () => {
+    expect(RUNBOOKS['instaleaza-pachet-sistem']).toBeDefined()
+    expect(RUNBOOKS['instaleaza-pachet-sistem'].workflow).toBe('vps-run.yml')
+    expect(validateRunbook('instaleaza-pachet-sistem').ok).toBe(true)
+  })
+
+  it('refuză instalarea dacă numele pachetului este lipsă sau invalid', async () => {
+    const r1 = await runRunbook('instaleaza-pachet-sistem')
+    expect(r1).toContain('nume_pachet_invalid')
+
+    const r2 = await runRunbook('instaleaza-pachet-sistem', { pachet: 'curl; rm -rf /' })
+    expect(r2).toContain('nume_pachet_invalid')
+  })
+})
+

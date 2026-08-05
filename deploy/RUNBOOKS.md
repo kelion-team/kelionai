@@ -34,3 +34,10 @@ cd /root/kelion/repo && git fetch origin master \
 fișierul chiar în timp ce bash îl execută (execuție coruptă). Scriptul are și el
 o gardă pentru asta (se copiază singur în /tmp), dar forma de mai sus e cea
 canonică — rulează exact versiunea din `origin/master`.
+
+## 9. `instaleaza-pachet-sistem` — instalare pachet apt de sistem
+- **Workflow**: `vps-run.yml`
+- **Descriere**: Instalează un pachet de sistem pe VPS (`apt-get`) în mod securizat.
+- **Parametri**: `pachet` (ex: `ffmpeg`, `htop`). Numele este validat cu regex strict (`/^[a-zA-Z0-9_+.-]+$/`).
+- **Rol**: Operație privilegiată pe VPS executată prin runbook.
+

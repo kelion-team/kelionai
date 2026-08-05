@@ -97,6 +97,10 @@ export const RUNBOOKS: Record<string, Runbook> = {
     },
     desc: 'omoară procesele-zombie și arată dovada',
   },
+  'instaleaza-pachet-sistem': {
+    workflow: 'vps-run.yml',
+    desc: 'instalează un pachet de sistem pe VPS (apt-get) — operație privilegiată cu verificare strictă de securitate pe numele pachetului',
+  },
 }
 
 /** A pure guard (testable without network): known names only — nothing else. */
@@ -145,8 +149,17 @@ export async function alertAdminLoop(workflow: string, context: string): Promise
   }).catch(() => false)
 }
 
+/** Validates a system package name (apt-get) to prevent command injection. */
+export function isValidSysPackageName(pkg: string): boolean {
+  if (!pkg || typeof pkg !== 'string') return false
+  const trimmed = pkg.trim()
+  if (trimmed.length === 0 || trimmed.length > 64) return false
+  // Safe debian package names: alphanumeric, +, -, ., _
+  return /^[a-zA-Z0-9_+.-]+$/.test(trimmed)
+}
+
 /** Runs a named runbook. Returns a JSON string for the brain (never the token). */
-export async function runRunbook(name: string): Promise<string> {
+export async function runRunbook(name: string, customInputs?: Record<string, string>): Promise<string> {
   // Adrian's switch — special commands, not workflows.
   if (name === 'pauza-autonomie') {
     await setOpsPaused(true)
@@ -161,11 +174,27 @@ export async function runRunbook(name: string): Promise<string> {
   const v = validateRunbook(name)
   if (!v.ok)
     return JSON.stringify({ error: v.error, runbooks: v.known, hint: 'folosește exact un nume din listă' })
+
+  let finalInputs: Record<string, string> = { ...(v.rb.inputs ?? {}), ...(customInputs ?? {}) }
+  if (name === 'instaleaza-pachet-sistem') {
+    const pkg = (customInputs?.pachet || customInputs?.pkg || customInputs?.package || '').trim()
+    if (!isValidSysPackageName(pkg)) {
+      return JSON.stringify({
+        error: 'nume_pachet_invalid',
+        hint: 'Numele pachetului de sistem trebuie să fie doar caractere alfanumerice, +, -, ., _ (ex: curl, htop, ffmpeg)',
+      })
+    }
+    finalInputs = {
+      cmd: `DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkg}`,
+    }
+  }
+
   if (!ghToken())
     return JSON.stringify({
       error: 'github_token_missing',
       hint: 'pune GITHUB_TOKEN în /root/kelion/kelionai.env și repornește containerul (redeploy).',
     })
+
   // A loop? We do NOT block (Adrian's order) — we warn and ask for a NEW STRATEGY.
   let warning: string | undefined
   if (await loopDetected(v.rb.workflow)) {
@@ -173,9 +202,10 @@ export async function runRunbook(name: string): Promise<string> {
       'BUCLĂ: ultimele 2 rulări ale acestui workflow au PICAT. Nu repeta aceeași soluție — rulează «diagnostic», citește faptele și schimbă abordarea. Adminul a fost avertizat pe email.'
     void alertAdminLoop(v.rb.workflow, `Declanșat din chat: runbook «${name}».`)
   }
+
   const r = await gh(`/actions/workflows/${v.rb.workflow}/dispatches`, {
     method: 'POST',
-    body: JSON.stringify({ ref: 'master', inputs: v.rb.inputs ?? {} }),
+    body: JSON.stringify({ ref: 'master', inputs: finalInputs }),
   })
   // DISPATCH SUCCESS = 200. It used to hinge on "=== 204" — but a workflow
   // dispatch answers 200 (the GitHub doc "Create a workflow dispatch event"),
