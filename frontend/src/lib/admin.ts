@@ -102,6 +102,31 @@ export async function fetchMoneyCircuit(): Promise<MoneyCircuit | null> {
 }
 
 // ── THE PAYMENTS PANEL (M3, Aug 2): codes + the unattributed net ────────────
+export interface CodNeplatit {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  status: string
+  createdAt: string
+  expirata: boolean
+}
+
+export interface PlataIncasata {
+  code: string
+  email: string
+  amount: number
+  currency: string
+  paidAt: string
+  bankRef: string
+}
+
+export interface TotaluriPlati {
+  totalAzi: number
+  totalLunaAsta: number
+  moneda: string
+}
+
 export interface PlatiAdmin {
   rezumat: {
     emise: number
@@ -110,9 +135,11 @@ export interface PlatiAdmin {
     neatribuite: number
     recente: { code: string; email: string; amount: number; currency: string; status: string; createdAt: string; paidAt: string | null }[]
   } | null
-  /** null = citirea plasei a EȘUAT (auditul admin, 3 aug) — se scrie ca eșec,
-   *  niciodată ca „Nimic în plasă"; [] = plasa e chiar goală. */
+  /** null = citirea plasei a EȘUAT — se scrie ca eșec, niciodată ca „Nimic în plasă"; [] = plasa e chiar goală. */
   neatribuite: { id: number; bankRef: string; referinta: string; amount: number; currency: string; seenAt: string }[] | null
+  coduriNeplatite: CodNeplatit[] | null
+  platiIncasate: PlataIncasata[] | null
+  totaluri: TotaluriPlati | null
 }
 export async function fetchPlati(): Promise<PlatiAdmin | null> {
   try {

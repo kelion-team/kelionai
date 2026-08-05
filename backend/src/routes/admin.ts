@@ -34,6 +34,9 @@ import {
   listeazaPlatiNeatribuite,
   atribuiePlataNeatribuita,
   ignoraPlataNeatribuita,
+  listeazaCoduriNeplatite,
+  listeazaPlatiIncasate,
+  totaluriPlati,
   getGeminiMonthUsd,
   loadKv,
   saveKv,
@@ -711,11 +714,29 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
     return reply.send({
       rezumat: await rezumatPlati(),
-      // AUDIT ADMIN (3 aug): mascarea `.catch(() => [])` a fost scoasă — o
-      // plasă necitită ajungea în panou ca „Nimic în plasă." Acum null trece
-      // până în UI, care îl scrie ca citire eșuată (ca la `rezumat`).
       neatribuite: await listeazaPlatiNeatribuite(),
+      coduriNeplatite: await listeazaCoduriNeplatite(),
+      platiIncasate: await listeazaPlatiIncasate(),
+      totaluri: await totaluriPlati(),
     })
+  })
+
+  app.get('/api/admin/plati/coduri-neplatite', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ ok: true, coduri: await listeazaCoduriNeplatite() })
+  })
+
+  app.get('/api/admin/plati/incasate', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ ok: true, plati: await listeazaPlatiIncasate() })
+  })
+
+  app.get('/api/admin/plati/totaluri', async (req, reply) => {
+    const user = getSessionUser(req)
+    if (!user || user.role !== 'admin') return reply.code(403).send({ error: 'forbidden' })
+    return reply.send({ ok: true, totaluri: await totaluriPlati() })
   })
 
   // The admin ties a netted inflow to a person (credits through the same
