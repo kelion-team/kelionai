@@ -124,6 +124,69 @@ export interface AdminStrings {
   // Audit
   loadingAudit: string
   nothingDown: string
+  // Dialogs, Alerts & Status Messages
+  writeCompleteOrder: string
+  orderEnqueuedPaused: (id: number) => string
+  orderEnqueuedActive: (id: number) => string
+  orderSendFailed: string
+  confirmDeleteInboxMsg: (count: number) => string
+  mailDeleteResult: (deleted: number, detail: string) => string
+  mailDeleteFailed: string
+  confirmDeleteBuildOrder: (id: number) => string
+  orderDeleted: (id: number) => string
+  orderDeleteFailed: string
+  confirmStopBuildOrder: (id: number) => string
+  orderStopped: (id: number) => string
+  orderStopFailed: string
+  confirmClearFailedJobs: string
+  ordersCleaned: (count: number) => string
+  ordersCleanFailed: string
+  orderResumed: (id: number) => string
+  orderResumeFailed: string
+  savingRecovery: string
+  recoverySaved: (tag: string) => string
+  recoverySaveFailed: (err: string) => string
+  recoverySaveNetworkError: string
+  confirmRestoreApp: (when: string, sha: string) => string
+  confirmRestoreAppSure: (note: string, tag: string) => string
+  restoringApp: (tag: string) => string
+  restoreSuccess: (sha: string) => string
+  restoreFailed: (err: string) => string
+  restoreNetworkError: string
+  lockSecretMinLength: string
+  lockSecretSaved: string
+  lockSecretSaveFailed: string
+  gestureSaveFailed: string
+  gapArchiveFailed: string
+  revolutLinkStarting: string
+  revolutLinkApprovePrompt: string
+  revolutLinkStartFailed: (err: string) => string
+  revolutLinkNetworkError: string
+  revolutLinkPromptCode: string
+  revolutLinkFinalizing: string
+  revolutLinkSuccess: (count: number) => string
+  revolutLinkFailed: (err: string) => string
+  revolutPromptAssign: (amount: number) => string
+  alertResult: (res: string) => string
+  alertCouldNotPerf: string
+  promptManualCreditAmount: (email: string) => string
+  alertInvalidAmount: (s: string) => string
+  promptManualCreditReason: string
+  alertNotCredited: string
+  confirmDeleteGap: string
+  alertNotDeleted: string
+  confirmDeleteVoiceprint: (name: string) => string
+  voiceprintDeleteFailed: (email: string) => string
+  voiceprintFetchError: (email: string) => string
+  confirmResetCounters: string
+  confirmDeleteUserData: (email: string) => string
+  gapDeleteFailed: string
+  mailFieldsRequired: string
+  alertEmailSent: string
+  alertEmailNotSent400: string
+  alertEmailNotSent502: string
+  alertEmailNotSentNetwork: string
+  mailReplyFailed: string
 }
 
 const en: AdminStrings = {
@@ -219,6 +282,68 @@ const en: AdminStrings = {
   videoPlatforms: 'Video platforms — they open the studio; generate the clip first (the steps above), then upload it there',
   loadingAudit: 'Loading the audit…',
   nothingDown: 'Nothing is down right now: health is green, zero server errors, zero client errors, zero failed builds.',
+  writeCompleteOrder: 'Write complete build order (what, where, how to verify).',
+  orderEnqueuedPaused: (id: number) => `Order #${id} queued — but autonomy is PAUSED: order waits until you restart autonomy in Money tab.`,
+  orderEnqueuedActive: (id: number) => `Order #${id} queued — worker picks it up within 2 mins; you will get an email with the PR.`,
+  orderSendFailed: 'Could not send order — try again.',
+  confirmDeleteInboxMsg: (count: number) => `Delete ${count === 1 ? 'selected message' : count + ' messages'} from inbox?`,
+  mailDeleteResult: (deleted: number, detail: string) => `Deleted: ${deleted} — ${detail}`,
+  mailDeleteFailed: 'Could not delete — try again.',
+  confirmDeleteBuildOrder: (id: number) => `Permanently delete build order #${id}?`,
+  orderDeleted: (id: number) => `Order #${id} deleted.`,
+  orderDeleteFailed: 'Could not delete — try again.',
+  confirmStopBuildOrder: (id: number) => `Stop active order #${id}? (will mark as failed, worker will not continue)`,
+  orderStopped: (id: number) => `Order #${id} stopped.`,
+  orderStopFailed: 'Could not stop — try again.',
+  confirmClearFailedJobs: 'Clear all failed and completed orders from queue? (active orders remain)',
+  ordersCleaned: (count: number) => `Cleaned: ${count} orders deleted.`,
+  ordersCleanFailed: 'Could not clean queue — try again.',
+  orderResumed: (id: number) => `Order #${id} re-queued.`,
+  orderResumeFailed: 'Could not resume order — try again.',
+  savingRecovery: 'Saving current version…',
+  recoverySaved: (tag: string) => `Saved ✓ recovery point: ${tag}`,
+  recoverySaveFailed: (err: string) => `Could not save: ${err}`,
+  recoverySaveNetworkError: 'Could not save — network error; try again.',
+  confirmRestoreApp: (when: string, sha: string) => `Restore application to version from ${when} (${sha})?`,
+  confirmRestoreAppSure: (note: string, tag: string) => `SURE? Production will be brought EXACTLY to state "${note || tag}" and republished automatically. Subsequent changes will be lost from application (staying only in git history).`,
+  restoringApp: (tag: string) => `Restoring to ${tag}…`,
+  restoreSuccess: (sha: string) => `Restored ✓ master is now at ${sha} — server republish starts automatically (1-2 min).`,
+  restoreFailed: (err: string) => `Restore failed: ${err}`,
+  restoreNetworkError: 'Restore failed — check connection and try again.',
+  lockSecretMinLength: 'Secret must have at least 4 characters.',
+  lockSecretSaved: 'Secret saved ✓ — but lock remains DISARMED in code; secret takes effect only when lock is re-enabled.',
+  lockSecretSaveFailed: 'Could not save — try again.',
+  gestureSaveFailed: 'NOT saved — server refused; toggle reverted. Try again.',
+  gapArchiveFailed: 'Could not archive — try again.',
+  revolutLinkStarting: 'Starting linking…',
+  revolutLinkApprovePrompt: 'Approve in Revolut app, then press "I have return code".',
+  revolutLinkStartFailed: (err: string) => `Could not start linking: ${err}`,
+  revolutLinkNetworkError: 'Could not start linking — network down.',
+  revolutLinkPromptCode: 'Code from return URL (after Revolut approval):',
+  revolutLinkFinalizing: 'Finalizing linking…',
+  revolutLinkSuccess: (count: number) => `Account linked ✓ (${count} accounts) — payment reading starts on next run.`,
+  revolutLinkFailed: (err: string) => `Linking failed: ${err}`,
+  revolutPromptAssign: (amount: number) => `Assign £${amount} payment to user (email):`,
+  alertResult: (res: string) => `Result: ${res}`,
+  alertCouldNotPerf: 'Could not perform action — server refused or session expired.',
+  promptManualCreditAmount: (email: string) => `Manual credit for ${email} (ex: 5.50 or -5.50):`,
+  alertInvalidAmount: (s: string) => `Amount "${s}" is not valid — write e.g. 5.50 (or 5,50). Nothing credited.`,
+  promptManualCreditReason: 'Credit reason (ex: refund, test, loyalty):',
+  alertNotCredited: 'Not credited — server refused or session expired.',
+  confirmDeleteGap: 'PERMANENTLY delete request?',
+  alertNotDeleted: 'Not deleted — server refused or session expired.',
+  confirmDeleteVoiceprint: (name: string) => `Delete voiceprint for ${name}? (removes voice recognition factor)`,
+  voiceprintDeleteFailed: (email: string) => `Could not delete voiceprint for ${email} — try again.`,
+  voiceprintFetchError: (email: string) => `Voice sample for ${email} could not be loaded — missing or read failed.`,
+  confirmResetCounters: 'Reset consumption counters to 0?\n\nDeletes only supplier cost log.\nDoes NOT touch user credits, payment ledger or purchase history.\nAlready consumed credits are NOT refunded.',
+  confirmDeleteUserData: (email: string) => `Permanently delete all data for ${email}? Deletes: messages, balance, sessions, memory, voice/facial prints, notes, linked Google account and cost journal. Payments remain in ledger, irreversibly anonymized.`,
+  gapDeleteFailed: 'Could not delete request — try again.',
+  mailFieldsRequired: 'Email and subject fields are required.',
+  alertEmailSent: 'Email sent.',
+  alertEmailNotSent400: 'Not sent: email address, subject or message invalid (server returned 400).',
+  alertEmailNotSent502: 'Not sent: mail server refused sending (502).',
+  alertEmailNotSentNetwork: 'Not sent: network down — request did not reach server.',
+  mailReplyFailed: 'Not sent — message was NOT saved; try again.',
 }
 
 const ro: AdminStrings = {
@@ -305,6 +430,68 @@ const ro: AdminStrings = {
   videoPlatforms: 'Platforme video — deschid studioul; clipul îl generezi întâi (pașii de mai sus), apoi îl urci de acolo',
   loadingAudit: 'Se încarcă auditul…',
   nothingDown: 'Nimic căzut acum: sănătatea e verde, zero erori de server, zero erori de client, zero construcții eșuate.',
+  writeCompleteOrder: 'Scrie ordinul complet (ce construiește, unde, cum verifici).',
+  orderEnqueuedPaused: (id: number) => `Ordin #${id} în coadă — dar autonomia e PE PAUZĂ: ordinul așteaptă (nu se pierde) până repornești autonomia din tabul Bani.`,
+  orderEnqueuedActive: (id: number) => `Ordin #${id} în coadă — lucrătorul îl ia în max. 2 minute; primești email cu PR-ul.`,
+  orderSendFailed: 'Nu s-a putut trimite — reîncearcă.',
+  confirmDeleteInboxMsg: (count: number) => `Ștergi ${count === 1 ? 'mesajul selectat' : count + ' mesaje'} din inbox?`,
+  mailDeleteResult: (deleted: number, detail: string) => `Șterse: ${deleted} — ${detail}`,
+  mailDeleteFailed: 'Nu s-a putut șterge — reîncearcă.',
+  confirmDeleteBuildOrder: (id: number) => `Ștergi definitiv ordinul #${id}?`,
+  orderDeleted: (id: number) => `Ordinul #${id} șters.`,
+  orderDeleteFailed: 'Nu s-a putut șterge — reîncearcă.',
+  confirmStopBuildOrder: (id: number) => `Oprești ordinul #${id} aflat în lucru? (trece pe „eșuat", lucrătorul nu-l mai continuă)`,
+  orderStopped: (id: number) => `Ordinul #${id} oprit.`,
+  orderStopFailed: 'Nu s-a putut opri — reîncearcă.',
+  confirmClearFailedJobs: 'Ștergi din coadă toate ordinele eșuate și terminate? (rămân doar cele în curs)',
+  ordersCleaned: (count: number) => `Curățat: ${count} ordine șterse.`,
+  ordersCleanFailed: 'Nu s-a putut curăța — reîncearcă.',
+  orderResumed: (id: number) => `Ordinul #${id} repus în coadă.`,
+  orderResumeFailed: 'Nu s-a putut relua — reîncearcă.',
+  savingRecovery: 'Salvez versiunea curentă…',
+  recoverySaved: (tag: string) => `Salvat ✓ punct de recuperare: ${tag}`,
+  recoverySaveFailed: (err: string) => `Nu s-a putut salva: ${err}`,
+  recoverySaveNetworkError: 'Nu s-a putut salva — rețeaua a picat; reîncearcă.',
+  confirmRestoreApp: (when: string, sha: string) => `Restaurezi aplicația la versiunea din ${when} (${sha})?`,
+  confirmRestoreAppSure: (note: string, tag: string) => `SIGUR? Producția va fi adusă EXACT la starea „${note || tag}” și se republică automat. Modificările de după acest punct dispar din aplicație (rămân doar în istoricul git).`,
+  restoringApp: (tag: string) => `Restaurez la ${tag}…`,
+  restoreSuccess: (sha: string) => `Restaurat ✓ master e acum la ${sha} — publicarea pe server pornește singură (1-2 min).`,
+  restoreFailed: (err: string) => `Restaurarea a eșuat: ${err}`,
+  restoreNetworkError: 'Restaurarea a eșuat — verifică conexiunea și reîncearcă.',
+  lockSecretMinLength: 'Secretul trebuie să aibă minim 4 caractere.',
+  lockSecretSaved: 'Secret salvat ✓ — dar lacătul rămâne DEZARMAT din cod (cererea ta, 31 iul); secretul intră în vigoare doar când îmi ceri să repornesc lacătul.',
+  lockSecretSaveFailed: 'Nu s-a putut salva — reîncearcă.',
+  gestureSaveFailed: 'NU s-a salvat — serverul a refuzat; bifa a revenit. Reîncearcă.',
+  gapArchiveFailed: 'Nu s-a putut arhiva — reîncearcă.',
+  revolutLinkStarting: 'Pornesc legarea…',
+  revolutLinkApprovePrompt: 'Aprobă în aplicația Revolut, apoi apasă „Am codul din retur”.',
+  revolutLinkStartFailed: (err: string) => `Nu s-a putut porni legarea: ${err}`,
+  revolutLinkNetworkError: 'Nu s-a putut porni legarea — rețeaua a picat.',
+  revolutLinkPromptCode: 'Codul din URL-ul de retur (după aprobare în Revolut):',
+  revolutLinkFinalizing: 'Finalizez legarea…',
+  revolutLinkSuccess: (count: number) => `Cont legat ✓ (${count} conturi) — citirea plăților pornește la următoarea trecere.`,
+  revolutLinkFailed: (err: string) => `Legarea a eșuat: ${err}`,
+  revolutPromptAssign: (amount: number) => `Atribuie plata de £${amount} userului (email):`,
+  alertResult: (res: string) => `Rezultat: ${res}`,
+  alertCouldNotPerf: 'Nu s-a putut — serverul a refuzat sau sesiunea a expirat.',
+  promptManualCreditAmount: (email: string) => `Credit manual pentru ${email} (ex: 5.50 sau -5.50):`,
+  alertInvalidAmount: (s: string) => `Suma „${s}” nu e validă — scrie de ex. 5.50 (sau 5,50). Nu s-a creditat nimic.`,
+  promptManualCreditReason: 'Motivul creditării (ex: retur, test, fidelizare):',
+  alertNotCredited: 'Nu s-a creditat — serverul a refuzat sau sesiunea a expirat.',
+  confirmDeleteGap: 'Ștergi DEFINITIV cererea? (nu rămâne nici în istoric)',
+  alertNotDeleted: 'Nu s-a șters — serverul a refuzat sau sesiunea a expirat.',
+  confirmDeleteVoiceprint: (name: string) => `Ștergi amprenta vocală a lui ${name}? (taie factorul de voce al recunoașterii)`,
+  voiceprintDeleteFailed: (email: string) => `Nu s-a putut șterge amprenta lui ${email} — reîncearcă.`,
+  voiceprintFetchError: (email: string) => `Mostra lui ${email} nu s-a putut încărca — lipsește sau citirea a picat.`,
+  confirmResetCounters: 'Pui pe 0 contoarele de consum?\n\nSe șterge doar jurnalul „cât ne-a costat pe noi la furnizori”.\nNU se ating: creditele userilor, registrul plăților, istoricul de cumpărare.\nCreditele deja consumate NU se dau înapoi.',
+  confirmDeleteUserData: (email: string) => `Ștergi definitiv datele lui ${email}? Se șterg: mesaje, sold, sesiuni, memorie, amprentele vocale/faciale, notele, contul Google legat și jurnalul de costuri. Plățile rămân în registru, anonimizate ireversibil.`,
+  gapDeleteFailed: 'Nu s-a putut șterge cererea — reîncearcă.',
+  mailFieldsRequired: 'Câmpurile email și subiect sunt obligatorii.',
+  alertEmailSent: 'Email trimis.',
+  alertEmailNotSent400: 'Nu s-a trimis: adresa, subiectul sau mesajul nu sunt valide (serverul a răspuns 400).',
+  alertEmailNotSent502: 'Nu s-a trimis: serverul de mail a refuzat trimiterea (502).',
+  alertEmailNotSentNetwork: 'Nu s-a trimis: rețeaua a picat — cererea nu a ajuns la server.',
+  mailReplyFailed: 'Nu s-a trimis — mesajul NU s-a salvat; reîncearcă.',
 }
 
 const dict: { en: AdminStrings } & Partial<Record<Lang, Partial<AdminStrings>>> = { en, ro }
