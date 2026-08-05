@@ -337,7 +337,12 @@ export async function geminiDirectChatStream(
 /** Free quota exhausted / service unavailable — a TRANSIENT provider state
  *  (worth a retry / a clear log line), not a broken request of ours. */
 export function isGeminiQuotaError(e: unknown): boolean {
-  return /gemini (429|500|503)|RESOURCE_EXHAUSTED|quota/i.test(String(e))
+  if (!e) return false
+  if (typeof e === 'object' && 'status' in (e as Record<string, unknown>) && [429, 500, 503].includes(Number((e as Record<string, unknown>).status))) {
+    return true
+  }
+  const str = e instanceof Error ? `${e.name}: ${e.message}` : typeof e === 'string' ? e : JSON.stringify(e)
+  return /gemini (429|500|503)|RESOURCE_EXHAUSTED|quota|prepayment credits are depleted/i.test(str)
 }
 
 // ── IMAGE through GEMINI DIRECT (the owner's Gemini key; OpenRouter removed) ──

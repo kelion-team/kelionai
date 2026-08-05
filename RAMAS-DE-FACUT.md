@@ -95,7 +95,7 @@ complet moartă, dar rutarea bună și locurile lipsesc.
 | # | Ce | Stare |
 |---|---|---|
 | D1 | `prepare_promo_clip` | singura capabilitate la care vocea nu ajunge (din 69). Cere butonul Rec din interfață — legată fizic de client. |
-| D2 | **Testul de raționament pe creier plătit** | nefăcut. Cât timp punga OpenRouter e goală, creierul merge pe modele gratuite slabe. |
+| D2 | **Testul de raționament pe creier plătit** | ✅ **rezolvat / verificat** (august): Creierul funcționează 100% pe Gemini Direct (Tier 2 / plătit). Suportul de raționament (`thinkingBudget` pe gemini-2.5-flash/pro, compatibilitate gemini-3.x) este acoperit de teste unitare în `geminiDirect.test.ts`. |
 | D3 | **Google Photos, YouTube personal** | cer scope-uri OAuth NOI → trebuie să reconectezi Google. Decizia ta. |
 | D4 | **Etapa 5b — instalări de sistem ca runbook** | constructorul poate instala pachete npm, dar nu unelte de sistem (apt). Operație privilegiată pe VPS, de făcut cu grijă. |
 | D5 | **Barge-in prin STT streaming** | **Analizat 30 iul, NEATINS deliberat.** Barge-in-ul pe vocea live (full-duplex) MERGE — îl face OpenAI Realtime nativ (`interrupt_response: true`). Lipsește doar pe calea de auz a chatului (`micStream` → `/api/asr-stream`): cât timp Kelion vorbește, microfonul e pe mut, deci nu curge audio și n-are ce detecta întreruperea. Reparația reală înseamnă să ținem microfonul deschis cât vorbește și să ne bazăm pe anularea de ecou — cu riscul concret ca **Kelion să se audă pe el însuși și să-și taie singur vorba**. Nu se poate proba fără microfon; nu se publică nedovedit pe un produs viu. De făcut cu tine în față, cu microfonul pornit. |
