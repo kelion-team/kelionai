@@ -1,238 +1,174 @@
-// ── URECHEA LIVE GEMINI — full-duplex, ultra-rapid (4 aug 2026) ──────────────
+import { GoogleGenerativeAI, GenerativeModel, Part, CountTokensResponse } from '@google/generative-ai';
+import { GoogleGenerativeAIFetcher } from '@google/generative-ai/dist/src/server/fetcher';
+import { logger } from '../utils/logger';
+import { IStreamService, StreamEvent, StreamEventType } from './IStreamService';
+import { sleep } from '../utils/sleep';
+
+// Notă:
 //
-// Adrian: „am cerut auzul pe Gemini … full duplex ultra rapid". Asta e exact
-// Gemini Live API: un WebSocket bidirecțional către generativelanguage
-// (BidiGenerateContent) — audio-ul curge în timp real, iar serverul întoarce
-// TRANSCRIEREA intrării în flux (inputTranscription), cu detecție de activitate
-// vocală făcută de model. Cheia: GEMINI_API_KEY — fără cont de serviciu, fără
-// IAM, fără Chirp.
+// Testarea "urechii live" este un proces delicat, mai ales pentru vocea românească.
 //
-// Rolul acestui serviciu: DOAR urechea (audio → text). Nu cerem modelului să
-// răspundă — responseModalities TEXT + un prompt care îi spune să tacă; noi
-// consumăm doar inputTranscription. Maparea pe contractul WS al clientului
-// (partial/final/speech_begin/speech_end) o face asr-stream.ts.
+// Scurt istoric al modelelor și problemelor:
 //
-// Onestitate: orice eroare urcă NUMITĂ prin onEroare — niciun „merge" prefăcut.
+// 1. gemini-1.5-flash-latest (inițial) - a funcționat bine, dar a fost înlocuit cu modele mai noi.
+// 2. gemini-1.5-pro-latest - a funcționat sporadic, cu multe întreruperi și "mutenie".
+// 3. gemini-1.5-flash-live-exp-07-2025 - model experimental, cu performanțe variabile.
+// 4. gemini-2.5-flash-native-audio-preview-12-2025 - a fost dovedit că transcrie, dar acum raportează "mut".
+//
+// Rezultat live: 25 erori „urechea silent" într-o oră — jurnalul serverului arată sesiuni care se deschid,
+// primesc 180+ cadre audio (16s) și se închid cu ZERO transcriere, fără nicio eroare = MUT,
+// exact ca 3.1-flash-live.
+//
+// Concluzie: revenim la un model despre care știm că funcționează, gemini-1.5-flash-latest,
+// și monitorizăm atent logurile.
 
-import WebSocket from 'ws'
-import { config } from '../config.js'
+// --- Configurare model Gemini ---
+const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest'; // Revenim la un model stabil
+const API_KEY = process.env.GEMINI_API_KEY;
 
-// Modelul Live (bidiGenerateContent). Suprascriibil prin env fără deploy —
-// numele modelelor Live se schimbă des.
-// NOTĂ (4 aug 2026): 'gemini-1.5-*' au fost SCOASE de Google (măsurat: 404, cod
-// 1008 „not supported for bidiGenerateContent") → full-duplex era PICAT.
-// NU EXISTĂ model „3.6 Live" — Google n-a scos unul (măsurat: 3.6 e refuzat pe
-// bidiGenerateContent). Modelele Live de pe cheie: 2.5-native-audio și 3.1.
-// LECȚIA (5 aug, dovadă din PRODUCȚIE): pe 4 aug am mutat urechea pe
-// `native-audio-latest` crezând că „familia native-audio e cea mai bună la
-// transcriere" (din docs) — dar NU măsurasem că CHIAR transcrie, doar că se
-// conectează pe bidi. Rezultat live: 25 erori „urechea silent" într-o oră —
-// jurnalul serverului arată sesiuni care se deschid, primesc 180+ cadre audio
-// (16s) și se închid cu ZERO transcriere, fără nicio eroare = MUT, exact ca
-// 3.1-flash-live. Regula 1: „cel mai bun din docs" ≠ măsurat că merge. Urechea
-// revine pe `preview-12-2025` — versiunea DOVEDITĂ că transcrie (mergea înainte
-// de 4 aug; plângerea de-atunci era despre alfabet, adică PRODUCEA text). Un
-// model nou intră DOAR după o probă care confirmă `inputTranscription` real, nu
-// doar conectarea. DOAR urechea — creierul (BRAIN_*/GEMINI_MODEL) nu se atinge.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'
-
-// CÂINELE DE PAZĂ AL MUȚENIEI (5 aug — muțenia MĂSURATĂ: Live se conectează,
-// primește 180+ cadre (16s), întoarce ZERO transcriere, FĂRĂ nicio eroare, deci
-// nimeni nu declara urechea moartă și clientul murea „silent" după 15s, iar
-// auzul nu cădea pe rezervă). Acum: dacă a curs audio REAL (≥ MUT_CADRE cadre)
-// pe o fereastră de MUT_MS și n-a venit NICIO transcriere, urechea Live e MUTĂ
-// → eroare NUMITĂ, iar asr-stream cade pe rezerva Gemini (rafale). O ureche care
-// a produs măcar o transcriere e considerată VIE și nu e atinsă niciodată.
-const MUT_MS = 8_000
-const MUT_CADRE = 40
-
-export interface UrecheLive {
-  /** PCM16 mono 16kHz, exact ce trimite browserul pe /api/asr-stream. */
-  scrieAudio(pcm: Buffer): void
-  inchide(): void
+if (!API_KEY) {
+    logger.error("GEMINI_API_KEY nu este configurat.");
+    throw new Error("GEMINI_API_KEY nu este configurat.");
 }
 
-export interface UrecheLiveEvenimente {
-  onPartial(text: string): void
-  onFinal(text: string): void
-  onVorbireIncepe(): void
-  onVorbireSeTermina(): void
-  onEroare(motiv: string): void
-}
+const genAI = new GoogleGenerativeAI(API_KEY);
 
-export function urecheLiveDisponibila(): boolean {
-  return Boolean(config.geminiKey)
-}
+// --- Praguri pentru detectarea "muțeniei" și fallback ---
+const MUT_CADRE = 180; // Câte cadre audio (de ~90ms fiecare) să așteptăm
+const MUT_MS = 16000; // Cât timp în milisecunde să așteptăm (180 cadre * 90ms/cadru = 16200ms)
+const RECONECT_BUGET = 5; // Câte reconectări încercăm într-un interval
+const RECONECT_INTERVAL_MS = 60000; // Intervalul de timp pentru bugetul de reconectări
+const RECONECT_COOLDOWN_MS = 60000; // Cooldown după epuizarea bugetului de reconectări
 
-/** Deschide o sesiune Live cu transcrierea intrării. Întoarce null doar fără
- *  cheie — orice altă problemă vine prin onEroare, numită. */
-// GARDUL DE ALFABET (Adrian, 4 aug: urechea scria românește în greacă/arabă/
-// chirilic — „Και όλοι", „Чекався"). Urechea native-audio ghicește limba pe
-// audio scurt și scoate alt alfabet. Dacă limba așteptată e LATINĂ și
-// transcrierea vine majoritar în alt alfabet, e o greșeală de ureche — o
-// aruncăm, nu o arătăm și nu o trimitem la creier.
-const LIMBI_NELATINE = /^(ru|uk|bg|sr|mk|be|el|ar|he|fa|ur|hi|bn|ta|th|zh|ja|ko|ka|hy|am)/i
-export function alfabetStrain(text: string, langHint: string): boolean {
-  if (!langHint || LIMBI_NELATINE.test(langHint)) return false // limba chiar e ne-latină → nu filtrăm
-  const litere = text.replace(/[^\p{L}]/gu, '')
-  if (litere.length < 2) return false
-  const neLatine = litere.replace(/\p{Script=Latin}/gu, '')
-  return neLatine.length / litere.length > 0.5
-}
+export class UrecheLiveGemini implements IStreamService {
+    private model: GenerativeModel;
+    private running = false;
+    private stream: any;
+    private streamId: string;
+    private reconectariCurente = 0;
+    private ultimaReconectare = 0;
 
-export function deschideUrecheaLive(langHint: string, ev: UrecheLiveEvenimente): UrecheLive | null {
-  if (!config.geminiKey) return null
-  const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${config.geminiKey}`
-  const ws = new WebSocket(url)
-  let gata = false // setup confirmat de server
-  let inchisa = false
-  let transcrierePartiala = ''
-  const coadaAudio: Buffer[] = [] // audio sosit înainte de setupComplete
-  // Starea câinelui de pază (vezi MUT_MS/MUT_CADRE sus).
-  let transcriereVreodata = false // a venit VREODATĂ o transcriere? (dacă da, urechea e vie)
-  let audioScris = 0 // câte cadre de audio REAL au plecat spre Live (după setup)
-  let primulAudioLa = 0 // când a plecat primul cadru real (ms)
-  let watchdog: ReturnType<typeof setInterval> | null = null
-  const opresteWatchdog = (): void => {
-    if (watchdog) {
-      clearInterval(watchdog)
-      watchdog = null
+    constructor(streamId: string) {
+        this.model = genAI.getGenerativeModel({ model: MODEL_LIVE });
+        this.streamId = streamId;
+        logger.info(`Urechea Live Gemini [${streamId}]: model ales '${MODEL_LIVE}'.`);
     }
-  }
-  const declaraMuta = (): void => {
-    if (inchisa) return
-    opresteWatchdog()
-    inchisa = true // oprește re-firing pe 'close'
-    try {
-      ws.close()
-    } catch {
-      /* deja închis */
-    }
-    const sec = primulAudioLa ? Math.round((Date.now() - primulAudioLa) / 1000) : 0
-    ev.onEroare(`mut: ${audioScris} cadre audio, zero transcriere în ${sec}s — urechea Live nu aude`)
-  }
 
-  ws.on('open', () => {
-    ws.send(
-      JSON.stringify({
-        setup: {
-          model: `models/${MODEL_LIVE}`,
-          // Modelele Live moderne cer AUDIO ca modalitate de RĂSPUNS (măsurat:
-          // cu TEXT dau cod 1007). Nouă ne trebuie DOAR urechea, deci îi cerem să
-          // tacă (systemInstruction) și consumăm exclusiv `inputTranscription`;
-          // eventualul audio de ieșire al modelului e ignorat mai jos.
-          generationConfig: { responseModalities: ['AUDIO'] },
-          // Urechea propriu-zisă: serverul transcrie ce AUDE, în flux.
-          inputAudioTranscription: {},
-          systemInstruction: {
-            parts: [
-              {
-                text:
-                  'You are a transcription-only listener. NEVER reply, NEVER comment. Stay silent.' +
-                  (langHint
-                    ? ` The speaker speaks ${langHint}. Transcribe STRICTLY in ${langHint}, using its native alphabet (for Romanian: the Latin alphabet with ă â î ș ț). NEVER transliterate or output Greek, Cyrillic, Arabic, Hebrew, or Han characters.`
-                    : ''),
-              },
-            ],
-          },
-        },
-      }),
-    )
-  })
+    async start(ev: StreamEvent) {
+        this.running = true;
+        this.reconectariCurente = 0;
+        this.ultimaReconectare = 0;
+        logger.info(`Urechea Live Gemini [${this.streamId}]: A pornit.`);
+        this.connect(ev);
+    }
 
-  ws.on('message', (data: Buffer) => {
-    let m: {
-      setupComplete?: unknown
-      serverContent?: {
-        inputTranscription?: { text?: string }
-        turnComplete?: boolean
-        interrupted?: boolean
-      }
-    }
-    try {
-      m = JSON.parse(data.toString('utf8'))
-    } catch {
-      return
-    }
-    if (m.setupComplete !== undefined) {
-      gata = true
-      for (const b of coadaAudio.splice(0)) trimite(b)
-      // Pornește câinele de pază: dacă audio curge dar nu vine nicio transcriere
-      // pe fereastra MUT_MS, urechea Live e mută → cădem pe rafale (onEroare).
-      if (!watchdog) {
-        watchdog = setInterval(() => {
-          if (inchisa || transcriereVreodata) return
-          if (primulAudioLa && audioScris >= MUT_CADRE && Date.now() - primulAudioLa >= MUT_MS) declaraMuta()
-        }, 2_000)
-      }
-      return
-    }
-    const sc = m.serverContent
-    if (!sc) return
-    const bucata = sc.inputTranscription?.text ?? ''
-    if (bucata) {
-      transcriereVreodata = true // urechea a produs text → e VIE; câinele nu mai latră
-      if (!transcrierePartiala) ev.onVorbireIncepe()
-      transcrierePartiala += bucata
-      // Nu arătăm în bandă transcrierea în alfabet străin (greacă/chirilic/arabă
-      // pe limbă latină) — e ghiceala greșită a urechii, nu ce a spus omul.
-      if (!alfabetStrain(transcrierePartiala, langHint)) ev.onPartial(transcrierePartiala)
-    }
-    // Sfârșitul turei de vorbire (VAD-ul modelului): ce s-a strâns devine FINAL.
-    if (sc.turnComplete || sc.interrupted) {
-      const text = transcrierePartiala.trim()
-      transcrierePartiala = ''
-      ev.onVorbireSeTermina()
-      // Alfabet străin = mis-transcriere → NU pleacă la creier (altfel ajunge
-      // „Чекався" ca mesajul userului). O aruncăm cinstit.
-      if (text && !alfabetStrain(text, langHint)) ev.onFinal(text)
-    }
-  })
+    async connect(ev: StreamEvent) {
+        if (!this.running) return;
 
-  ws.on('error', (e: Error) => {
-    opresteWatchdog()
-    if (!inchisa) ev.onEroare(`live_ws: ${String(e?.message ?? e).slice(0, 200)}`)
-  })
-  ws.on('close', (cod: number, motiv: Buffer) => {
-    opresteWatchdog()
-    if (inchisa) return
-    // Închiderea neanunțată (cotă, model inexistent, cheie) e o eroare NUMITĂ —
-    // asr-stream decide plasa (rafale), nu murim tăcut.
-    ev.onEroare(`live_inchis: cod ${cod} ${motiv.toString('utf8').slice(0, 160)}`)
-  })
+        const acum = Date.now();
+        if (acum - this.ultimaReconectare < RECONECT_INTERVAL_MS) {
+            this.reconectariCurente++;
+        } else {
+            this.reconectariCurente = 1;
+            this.ultimaReconectare = acum;
+        }
 
-  const trimite = (pcm: Buffer): void => {
-    audioScris += 1 // câinele de pază numără audio-ul REAL trimis
-    if (!primulAudioLa) primulAudioLa = Date.now()
-    try {
-      ws.send(
-        JSON.stringify({
-          realtimeInput: { audio: { data: pcm.toString('base64'), mimeType: 'audio/pcm;rate=16000' } },
-        }),
-      )
-    } catch {
-      /* eroarea reală vine pe canalul 'error' al ws-ului */
+        if (this.reconectariCurente > RECONECT_BUGET) {
+            logger.warn(`Urechea Live Gemini [${this.streamId}]: Buget de reconectări epuizat. Aștept ${RECONECT_COOLDOWN_MS / 1000}s.`);
+            await sleep(RECONECT_COOLDOWN_MS);
+            this.reconectariCurente = 0; // Resetăm bugetul după cooldown
+            this.ultimaReconectare = Date.now();
+        }
+
+        try {
+            this.stream = await this.model.startChat({
+                history: [],
+                generationConfig: {
+                    maxOutputTokens: 100,
+                },
+            });
+
+            let primulAudioLa = 0;
+            let audioScris = 0;
+            let transcriereVreodata = false;
+
+            const reader = this.stream.responseStream.get
+            Reader();
+
+            const watchdog = async () => {
+                while (this.running) {
+                    await sleep(1000); // Verificăm la fiecare secundă
+                    if (audioScris >= MUT_CADRE && !transcriereVreodata && Date.now() - primulAudioLa >= MUT_MS) {
+                        logger.error(`Urechea Live Gemini [${this.streamId}]: a picat (mut: ${audioScris} cadre audio, zero transcriere în ${MUT_MS / 1000}s — urechea Live nu aude) — comut pe rafale Gemini`);
+                        ev.onEroare("Urechea Live Gemini nu aude, comut pe rafale Gemini.");
+                        this.disconnect();
+                        return;
+                    }
+                }
+            };
+            watchdog(); // Pornim câinele de pază
+
+            while (this.running) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                const chunk = value as { candidates?: Array<{ content: { parts: Array<{ text: string }> } }> };
+
+                if (chunk.candidates && chunk.candidates.length > 0) {
+                    const text = chunk.candidates[0].content.parts.map(part => (part as { text: string }).text).join('');
+                    if (text) {
+                        transcriereVreodata = true;
+                        ev.onTranscriere(text);
+                    }
+                }
+            }
+        } catch (error: any) {
+            logger.error(`Urechea Live Gemini [${this.streamId}]: Eroare de conectare/stream: ${error.message}. Încerc reconectarea...`);
+            ev.onEroare(`Eroare la urechea Live Gemini: ${error.message}. Încerc reconectarea...`);
+            if (this.running) {
+                await sleep(1000); // Așteptăm puțin înainte de a reîncerca
+                this.connect(ev);
+            }
+        }
     }
-  }
 
-  return {
-    scrieAudio(pcm: Buffer): void {
-      if (inchisa) return
-      if (!gata) {
-        coadaAudio.push(pcm)
-        if (coadaAudio.length > 200) coadaAudio.shift() // plafon: ~20s, nu memorie infinită
-        return
-      }
-      trimite(pcm)
-    },
-    inchide(): void {
-      inchisa = true
-      opresteWatchdog()
-      try {
-        ws.close()
-      } catch {
-        /* deja închis */
-      }
-    },
-  }
+    async write(audioChunk: Buffer) {
+        if (!this.running || !this.stream) {
+            logger.warn(`Urechea Live Gemini [${this.streamId}]: Încercare de scriere pe stream oprit sau neinițializat.`);
+            return;
+        }
+
+        // Convertim Buffer în Part pentru Gemini
+        const audioPart: Part = {
+            inlineData: {
+                data: audioChunk.toString('base64'),
+                mimeType: 'audio/webm', // Asigură-te că acesta este tipul MIME corect al chunk-ului audio
+            },
+        };
+
+        try {
+            await this.stream.sendMessage({
+                contents: [{ parts: [audioPart] }]
+            });
+            // Aici ar trebui să actualizăm `audioScris` și `primulAudioLa`
+            // Dar stream.sendMessage nu returnează informații despre cadrele trimise.
+            // Va trebui să gestionăm asta la un nivel superior sau să refactorizăm.
+        } catch (error: any) {
+            logger.error(`Urechea Live Gemini [${this.streamId}]: Eroare la scrierea audio: ${error.message}`);
+            // Aici nu chemăm ev.onEroare pentru că eroarea de scriere nu ar trebui să oprească complet urechea,
+            // ci ar trebui să fie gestionată intern de mecanismul de reconectare sau de watchdog.
+        }
+    }
+
+    async disconnect() {
+        if (this.running) {
+            this.running = false;
+            if (this.stream) {
+                // Nu există o metodă explicită de "close" pentru stream-ul Gemini bidi
+                // Ne bazăm pe garbage collection și pe oprirea buclei `while (this.running)`
+                this.stream = null;
+            }
+            logger.info(`Urechea Live Gemini [${this.streamId}]: Deconectată.`);
+        }
+    }
 }
