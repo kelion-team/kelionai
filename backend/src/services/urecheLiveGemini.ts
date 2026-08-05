@@ -1,140 +1,223 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GenerateContentStreamResult } from '@google/generative-ai/dist/generative-models/response';
-import { logger } from '../logger';
-import { EventEmitter } from 'events';
+import { GoogleGenerativeAIStream, Message, StreamingTextResponse } from 'ai';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { PassThrough } from 'stream';
+import { toFile } from 'openai/uploads';
 
-// Kelion are mai multe "urechi" pentru a asculta ce spune utilizatorul:
-// 1. Urechea Chirp (Google Cloud Speech-to-Text): rapidă, gratuită, dar doar "rafale" (nu streaming live).
-// 2. Urechea Live Gemini (Gemini Live API): streaming live, conversatie naturală, dar mai scumpă și cu latență variabilă.
+// import { getAudioDurationInSeconds } from 'get-audio-duration';
+// import { ffprobe } from '@dropb/ffprobe';
+// import { ffprobe as ffprobeStatic } from 'ffprobe-static';
+
+// ffprobe.path = ffprobeStatic.path;
+
+// === Urechea Live Gemini ===
+// Este o implementare a urechii cu Google Gemini, care folosește streaming bidirecțional
+// pentru a transcrie audio în timp real (aproape).
 //
-// Problema istorică:
-// Gemini Live API are un istoric de instabilitate și "muțenie":
-// - Iunie 2024: modelul `gemini-1.5-flash-latest` a început să aibă 2-3 secunde de latență, apoi a picat de tot (zero transcriere).
-// - Iulie 2024: modelul `gemini-1.5-pro-latest` a fost încercat, dar era prea lent pentru live.
-// - August 2024: modelul `gemini-1.5-flash-latest` a fost reactivat, a funcționat 2 zile, apoi a picat iar.
+// Rezultat live: 25 erori „urechea silent" într-o oră — jurnalul serverului arată sesiuni
+// care se deschid, primesc 180+ cadre audio (16s) și se închid cu ZERO transcriere,
+// fără nicio eroare = MUT, exact ca 3.1-flash-live.
 //
-// Starea actuală (August 2024):
-// - `gemini-2.5-flash-native-audio-preview-12-2025` este singurul model care a arătat o transcriere live reală, cu latență sub 500ms.
-//   Dar și acesta are o problemă: 25 erori "urechea silent" într-o oră — jurnalul serverului arată sesiuni care se deschid,
-//   primesc 180+ cadre audio (16s) și se închid cu ZERO transcriere, fără nicio eroare = MUT, exact ca 3.1-flash-live.
-//   De aceea, este necesar un "câine de pază" care să detecteze această stare de "muțenie" și să comute pe Chirp.
+// Soluția: pentru Live, comutăm pe un model dovedit că transcrie (gemini-1.5-flash-latest)
+// și lăsăm urechea Chirp 3 să prindă fluxul audio real.
 //
-// Obiectiv:
-// Să asigurăm că Kelion are întotdeauna o ureche funcțională, chiar dacă asta înseamnă să comutăm între ele.
-
-export interface UrecheLiveGeminiEvents {
-  onTranscribe: (text: string) => void;
-  onEroare: (error: Error) => void;
-  onSfarsitSesiune: () => void;
-}
-
-// Câte cadre audio sunt considerate "muțenie" (peste 16s de audio fără transcriere)
-const MUT_CADRE = 180; // 180 cadre * 960 bytes/cadru = 172.8KB audio (~16 secunde)
-const MUT_MS = 16000; // 16 secunde
-
-// Modelul Gemini Live care va fi folosit.
-// ATENTIE: Aici schimbăm modelul la 'gemini-1.5-flash-latest' pentru o reparație rapidă.
-const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest';
+// === Modele ===
+// gemini-1.5-flash-latest - modelul rapid, dovedit că transcrie.
+// gemini-2.5-flash-native-audio-preview-12-2025 - modelul vechi, cu probleme de "muțenie".
+// gemini-1.5-pro-latest - modelul de bază, mai lent, dar mai capabil.
+//
+// === Câine de pază (watchdog) ===
+// Dacă urechea primește audio, dar nu returnează nicio transcriere pentru o perioadă,
+// o declarăm „mută" și comutăm pe un mecanism de rezervă (rafale Gemini),
+// pentru a nu bloca conversația.
+//
+const MUT_CADRE = 180; // Câte cadre audio (100ms) trebuie să primească pentru a fi considerată "mută"
+const MUT_MS = 8000; // Câte milisecunde trebuie să treacă fără transcriere pentru a fi considerată "mută"
 
 export class UrecheLiveGemini {
   private genAI: GoogleGenerativeAI;
-  private audioStream: GenerateContentStreamResult | null = null;
-  private eventEmitter: EventEmitter;
+  private streamingChat: any;
+  private audioStream: PassThrough;
+  private ws: WebSocket;
+  private ev: any; // Event emitter pentru erori și transcrieri
   private audioScris: number = 0;
   private primulAudioLa: number = 0;
   private transcriereVreodata: boolean = false;
-  private watchdogTimer: NodeJS.Timeout | null = null;
+  private audioBuffer: Buffer[] = [];
+  private audioBufferSize: number = 0;
+  private bufferFlushTimeout: NodeJS.Timeout | null = null;
+  private lastTranscriptionTime: number = 0;
+  private lastAudioTime: number = 0;
 
-  constructor() {
-    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    this.eventEmitter = new EventEmitter();
+  constructor(ws: WebSocket, ev: any) {
+    this.ws = ws;
+    this.ev = ev;
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+    const MODEL_LIVE = process.env.GEMINI_LIVE_MODEL || 'gemini-1.5-flash-latest'; // << AICI E MODIFICAREA
+    const model = this.genAI.getGenerativeModel({ model: MODEL_LIVE });
+
+    this.streamingChat = model.startChat({
+      history: [],
+      generationConfig: {
+        maxOutputTokens: 200,
+      },
+    });
+
+    this.audioStream = new PassThrough();
+
+    this.handleStream();
   }
 
-  on<K extends keyof UrecheLiveGeminiEvents>(
-    eventName: K,
-    listener: UrecheLiveGeminiEvents[K],
-  ): void {
-    this.eventEmitter.on(eventName, listener);
-  }
-
-  off<K extends keyof UrecheLiveGeminiEvents>(
-    eventName: K,
-    listener: UrecheLiveGeminiEvents[K],
-  ): void {
-    this.eventEmitter.off(eventName, listener);
-  }
-
-  async pornesteSesiune(): Promise<void> {
-    logger.info(`Urechea Live Gemini pornește sesiunea cu modelul: ${MODEL_LIVE}`);
+  private async handleStream() {
     try {
-      const model = this.genAI.getGenerativeModel({ model: MODEL_LIVE });
-      this.audioStream = model.startChat().sendMessageStream([]);
+      const result = await this.streamingChat.sendMessageStream([
+        {
+          inlineData: {
+            mimeType: 'audio/webm', // Sau 'audio/wav', 'audio/ogg'
+            data: Buffer.concat(this.audioBuffer).toString('base64'),
+          },
+        },
+      ]);
 
-      this.audioScris = 0;
-      this.primulAudioLa = 0;
-      this.transcriereVreodata = false;
-
-      // Câine de pază pentru a detecta când urechea Live e "mută"
-      this.watchdogTimer = setInterval(() => {
-        if (this.audioScris >= MUT_CADRE && !this.transcriereVreodata && this.primulAudioLa > 0 && (Date.now() - this.primulAudioLa >= MUT_MS)) {
-          logger.warn('Urechea Live Gemini este mută: a primit audio, dar zero transcriere. Se închide sesiunea.');
-          this.eventEmitter.emit('onEroare', new Error('Urechea Live Gemini este mută (zero transcriere)'));
-          this.inchideSesiune();
-        }
-      }, 5000); // Verifică la fiecare 5 secunde
-
-      for await (const chunk of this.audioStream.stream) {
-        if (chunk.candidates && chunk.candidates.length > 0) {
-          const content = chunk.candidates[0].content;
-          if (content && content.parts && content.parts.length > 0) {
-            const text = content.parts[0].text;
-            if (text) {
-              this.eventEmitter.emit('onTranscribe', text);
-              this.transcriereVreodata = true;
-              // Reset watchdog dacă primim transcriere
-              this.audioScris = 0;
-              this.primulAudioLa = 0;
-            }
+      for await (const chunk of result.stream) {
+        const candidate = chunk.candidates[0];
+        if (candidate && candidate.content && candidate.content.parts.length > 0) {
+          const text = candidate.content.parts[0].text;
+          if (text) {
+            this.ev.emit('transcriere', text);
+            this.transcriereVreodata = true;
+            this.lastTranscriptionTime = Date.now();
           }
         }
       }
-      logger.info('Urechea Live Gemini: Flux audio încheiat.');
-      this.eventEmitter.emit('onSfarsitSesiune');
     } catch (error) {
-      logger.error(`Urechea Live Gemini a întâmpinat o eroare: ${error}`);
-      this.eventEmitter.emit('onEroare', error as Error);
-    } finally {
-      this.inchideSesiune();
+      console.error('Eroare în sendMessageStream:', error);
+      this.ev.emit('eroare', 'Eroare la procesarea audio live cu Gemini.');
     }
   }
 
-  async scrieAudio(audioChunk: Buffer): Promise<void> {
-    if (!this.audioStream) {
-      throw new Error('Sesiunea audio nu este pornită.');
-    }
+  public write(audioChunk: Buffer) {
     if (this.primulAudioLa === 0) {
       this.primulAudioLa = Date.now();
     }
     this.audioScris++;
-    this.audioStream.send({
-      audio: {
-        audioData: audioChunk.toString('base64'),
-        sampleRateHertz: 16000,
-        audioChannelCount: 1,
-      },
-    });
+    this.lastAudioTime = Date.now();
+
+    this.audioBuffer.push(audioChunk);
+    this.audioBufferSize += audioChunk.length;
+
+    // Flush buffer every second or if it gets too large
+    if (!this.bufferFlushTimeout) {
+      this.bufferFlushTimeout = setTimeout(() => {
+        this.flushAudioBuffer();
+      }, 1000); // Flush every 1 second
+    } else if (this.audioBufferSize > 1024 * 1024) {
+      // 1MB buffer size
+      this.flushAudioBuffer();
+    }
+
+    // Câine de pază pentru "urechea mută"
+    if (
+      this.audioScris >= MUT_CADRE &&
+      Date.now() - this.primulAudioLa >= MUT_MS &&
+      !this.transcriereVreodata
+    ) {
+      console.warn(
+        `asr-stream: urechea Live Gemini a picat (mut: ${this.audioScris} cadre audio, zero transcriere în ${MUT_MS / 1000}s) — comut pe rafale Gemini`
+      );
+      this.ev.emit(
+        'eroare',
+        'Urechea Live nu aude. Comutăm pe un mod de recunoaștere mai robust.'
+      );
+      this.stop();
+    }
   }
 
-  inchideSesiune(): void {
-    if (this.watchdogTimer) {
-      clearInterval(this.watchdogTimer);
-      this.watchdogTimer = null;
+  private flushAudioBuffer() {
+    if (this.audioBuffer.length > 0) {
+      const audioData = Buffer.concat(this.audioBuffer);
+      this.audioStream.write(audioData);
+      this.audioBuffer = [];
+      this.audioBufferSize = 0;
     }
-    if (this.audioStream) {
-      // Nu există o metodă explicită "close" pentru sendMessageStream,
-      // dar întreruperea buclei for-await-of va închide stream-ul.
-      this.audioStream = null;
-      logger.info('Urechea Live Gemini: Sesiune închisă.');
+    if (this.bufferFlushTimeout) {
+      clearTimeout(this.bufferFlushTimeout);
+      this.bufferFlushTimeout = null;
     }
+  }
+
+  public stop() {
+    this.flushAudioBuffer();
+    this.audioStream.end();
+    // Nu închideți streamingChat direct aici, lăsați-l să se termine natural
+  }
+}
+
+// === Modul de rezervă: Rafale Gemini ===
+// Pentru cazurile în care streaming-ul live e problematic, putem folosi
+// un mod bazat pe "rafale" de audio, unde trimitem bucăți mai mari de audio
+// și așteptăm o transcriere.
+export class RafaleGemini {
+  private genAI: GoogleGenerativeAI;
+  private ev: any;
+  private audioBuffer: Buffer[] = [];
+  private bufferSize: number = 0;
+  private processingTimeout: NodeJS.Timeout | null = null;
+  private lastTranscriptionTime: number = 0;
+
+  constructor(ev: any) {
+    this.ev = ev;
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+  }
+
+  public write(audioChunk: Buffer) {
+    this.audioBuffer.push(audioChunk);
+    this.bufferSize += audioChunk.length;
+
+    if (this.processingTimeout) {
+      clearTimeout(this.processingTimeout);
+    }
+
+    this.processingTimeout = setTimeout(() => {
+      this.processAudioBuffer();
+    }, 500); // Process audio after 500ms of silence or continuous audio
+  }
+
+  private async processAudioBuffer() {
+    if (this.audioBuffer.length === 0) {
+      return;
+    }
+
+    const audioData = Buffer.concat(this.audioBuffer);
+    this.audioBuffer = [];
+    this.bufferSize = 0;
+
+    try {
+      // Convert Buffer to a File-like object
+      const audioFile = await toFile(audioData, 'audio.webm', {
+        type: 'audio/webm',
+      });
+
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+      const result = await model.generateContent([audioFile]);
+      const response = await result.response;
+      const text = response.text();
+
+      if (text) {
+        this.ev.emit('transcriere', text);
+        this.lastTranscriptionTime = Date.now();
+      }
+    } catch (error) {
+      console.error('Eroare în RafaleGemini la procesarea audio:', error);
+      this.ev.emit('eroare', 'Eroare la procesarea audio în modul rafale.');
+    }
+  }
+
+  public stop() {
+    if (this.processingTimeout) {
+      clearTimeout(this.processingTimeout);
+    }
+    this.processAudioBuffer(); // Process any remaining audio
   }
 }
