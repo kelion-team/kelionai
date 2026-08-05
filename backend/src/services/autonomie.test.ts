@@ -172,7 +172,7 @@ const {
 } = await import('./autonomie.js')
 // The voice window is REAL here (adminLock is not mocked): that way the very
 // gate the owner asked for is proven, not an imitation of it.
-const { marcheazaVoce, uitaVocea } = await import('./adminLock.js')
+const { marcheazaVoce, uitaVocea, marcheazaFata, uitaFata } = await import('./adminLock.js')
 
 /** Closes a step, so we reach the next one without playing it from scratch. */
 function pasInchis(cod: string): void {
@@ -200,6 +200,7 @@ beforeEach(() => {
   // another, the card step would leak into tests that have nothing to do with
   // it.
   uitaVocea('adrianenc11@gmail.com')
+  uitaFata('adrianenc11@gmail.com')
   opritDeOwner = false
 })
 
@@ -577,7 +578,10 @@ describe('Kelion se apucă singur de treabă', () => {
   it('după ce i-a recunoscut vocea, ia pasul cardului — cu uneltele de card în mână', async () => {
     pasInchis('M0'); pasInchis('M1'); pasInchis('M2')
     pasInchis('M3'); pasInchis('M4'); pasInchis('M5')
+    // M6 cere TREI factori: voce ȘI față recunoscute (+ admin). Fără față,
+    // bucla îl sare (Adrian, 5 aug: „adaugă verificare față").
     marcheazaVoce('adrianenc11@gmail.com')
+    marcheazaFata('adrianenc11@gmail.com')
     const r = await poateSaLucreze()
     expect(r.motiv).toContain('M6')
     expect(uneltePrimite).toContain('card_completeaza')

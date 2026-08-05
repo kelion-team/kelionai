@@ -141,6 +141,41 @@ export function minuteRamaseVoce(email: string): number {
   return Math.max(0, Math.ceil((VOCE_TTL_MS - (Date.now() - t)) / 60_000))
 }
 
+// ── AND HIS FACE, RECOGNISED NOW (Adrian, 5 aug: „întărește, adaugă verificare
+// față, și să fie logat admin") ─────────────────────────────────────────────
+//
+// Al doilea factor biometric peste voce, pentru operațiunile cu bani reali
+// (cardul M6). Vocea singură vine dintr-un vector de 9 dimensiuni (timbru) — se
+// poate apropia. Fața e un descriptor de 128 de dimensiuni (face-api), mult mai
+// greu de păcălit. Cerute AMÂNDOUĂ + sesiune de admin logat → trei factori: ești
+// admin, ai vorbit ACUM (te-am recunoscut după timbru) ȘI te-am văzut ACUM în
+// cameră (te-am recunoscut după față). Fereastra e la fel de scurtă ca la voce.
+const FATA_TTL_MS = 15 * 60_000
+const fataLa = new Map<string, number>()
+
+/** The owner's faceprint just matched (called from the chat/vision route). */
+export function marcheazaFata(email: string): void {
+  fataLa.set(email.trim().toLowerCase(), Date.now())
+}
+
+/** We saw him — and recognised his face — within the last 15 minutes? */
+export function fataRecenta(email: string): boolean {
+  const t = fataLa.get(email.trim().toLowerCase())
+  return !!t && Date.now() - t < FATA_TTL_MS
+}
+
+/** Close the face window NOW (mirror of uitaVocea). */
+export function uitaFata(email: string): void {
+  fataLa.delete(email.trim().toLowerCase())
+}
+
+/** How many minutes the face window has left. */
+export function minuteRamaseFata(email: string): number {
+  const t = fataLa.get(email.trim().toLowerCase())
+  if (!t) return 0
+  return Math.max(0, Math.ceil((FATA_TTL_MS - (Date.now() - t)) / 60_000))
+}
+
 /** Unlocked BY VOICE, not by a typed secret (Adrian, Jul 31: "it should
  *  operate for me when only I ask it, using the voice recognition system, as
  *  heightened security").

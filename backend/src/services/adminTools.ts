@@ -24,7 +24,7 @@ import { runRunbook, runbookStatus, runbookLog, requestRepair } from './runbooks
 import { seteazaSecret, listeazaSecrete, publicaCheile } from './secrete.js'
 import { adaugaCerinta, listeazaCerinte, actualizeazaCerinta } from '../db.js'
 import { cardConfigurat, completeazaCard, terminaCard, stareFurnizori, type CampCard } from './cardFurnizor.js'
-import { voceRecenta, minuteRamaseVoce } from './adminLock.js'
+import { voceRecenta, minuteRamaseVoce, fataRecenta, minuteRamaseFata } from './adminLock.js'
 import { adminVezi, adminSchimba } from './adminVedere.js'
 import { julesSurse, julesSarcina, julesStare } from './jules.js'
 
@@ -144,7 +144,11 @@ export async function execSharedAdminTool(
         configurat: c.gata,
         lipsesc: c.lipsesc,
         vocea_recunoscuta: voceRecenta(ctx.email ?? ''),
-        minute_ramase: minuteRamaseVoce(ctx.email ?? ''),
+        minute_ramase_voce: minuteRamaseVoce(ctx.email ?? ''),
+        fata_recunoscuta: fataRecenta(ctx.email ?? ''),
+        minute_ramase_fata: minuteRamaseFata(ctx.email ?? ''),
+        // Cardul cere TREI factori: admin logat + voce + față (toate ACUM).
+        gata_de_card: voceRecenta(ctx.email ?? '') && fataRecenta(ctx.email ?? ''),
         furnizori,
         plati_automate: furnizori.some((f) => f.automat),
         nota: 'Valorile NU se pot citi de nicăieri, nici de mine — doar se scriu în pagină.',

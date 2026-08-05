@@ -29,7 +29,7 @@
 // err.
 import { browserType, setModDiscret, browserRead, mascheazaCifre } from './browser.js'
 import type { BrowserResult } from './browser.js'
-import { voceRecenta } from './adminLock.js'
+import { voceRecenta, fataRecenta } from './adminLock.js'
 import { loadKv, saveKv } from '../db.js'
 import { config } from '../config.js'
 import type { ExpenseLine } from '../shared/api-types.js'
@@ -67,17 +67,33 @@ export async function completeazaCard(
   camp: CampCard,
   index: number,
 ): Promise<{ ok: boolean; camp: CampCard; detaliu: string; pagina?: BrowserResult }> {
-  // THE GATE REQUESTED BY THE OWNER: "only when I ask, through voice
-  // recognition". Not "you're admin" — but "you spoke NOW and I recognized
-  // you". An admin cookie can be stolen; this window opens only when your
-  // voiceprint matched, and it closes itself in 15 minutes.
-  if (!voceRecenta(email)) {
+  // POARTA CU TREI FACTORI (Adrian, 5 aug: „întărește, adaugă verificare față,
+  // și să fie logat admin"). Pentru bani reali, nu unul, ci TREI factori, toți
+  // ceruți deodată:
+  //   1. ADMIN LOGAT — operațiunea e doar pentru owner (nu orice cont).
+  //   2. VOCE recunoscută ACUM — te-am auzit și ți-am potrivit timbrul (<15 min).
+  //   3. FAȚĂ recunoscută ACUM — te-am văzut în cameră și ți-am potrivit
+  //      descriptorul de 128 de dimensiuni (<15 min).
+  // Un cookie de admin se poate fura; vocea + fața cer să fii TU, acolo, acum.
+  // Fiecare fereastră se închide singură în 15 minute.
+  if (email.toLowerCase() !== config.adminEmail.toLowerCase()) {
+    return { ok: false, camp, detaliu: 'cardul e strict pentru owner (admin logat) — cont neautorizat.' }
+  }
+  const voce = voceRecenta(email)
+  const fata = fataRecenta(email)
+  if (!voce || !fata) {
+    const lipsa = [
+      !voce && 'VOCEA (vorbește-mi o frază, pe canalul de voce)',
+      !fata && 'FAȚA (pornește camera și uită-te la ea)',
+    ]
+      .filter(Boolean)
+      .join(' + ')
     return {
       ok: false,
       camp,
       detaliu:
-        'nu ating cardul fără să te fi recunoscut după voce. Vorbește-mi (o frază ajunge), ' +
-        'apoi cere-mi din nou — fereastra ține 15 minute și se închide singură.',
+        `nu ating cardul fără toți trei factorii. Admin logat ✓; mai lipsește: ${lipsa}. ` +
+        'Se cer amândoi în ultimele 15 minute; fereastra se închide singură.',
     }
   }
   const cheie = DIN_ENV[camp]

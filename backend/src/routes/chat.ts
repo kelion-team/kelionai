@@ -92,6 +92,7 @@ import { randomUUID } from 'node:crypto'
 export const isOwnerEmail = (email: string): boolean => email.toLowerCase() === config.adminEmail
 import { inferGender, type VoiceFeatures } from './voiceprint.js'
 import { VOICE_MATCH_THRESHOLD } from '../services/voiceMatch.js'
+import { marcheazaFata } from '../services/adminLock.js'
 import { recentClientErrors } from './clientErrors.js'
 import { neagaUneltele } from '../services/negareUnelte.js'
 import { deflecteazaConstructor, aAlocatConstructie } from '../services/deflectareConstructor.js'
@@ -1719,6 +1720,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {  // Resu
         const hasFaceRef = !!storedFace?.descriptor?.length
         const fDist = hasFaceRef ? faceDistance(fd, storedFace!.descriptor) : Infinity
         const isFaceHolder = fDist < 0.6
+        // AL DOILEA FACTOR PENTRU CARD (Adrian, 5 aug): un MATCH real al feței
+        // ownerului (nu prima înrolare) deschide fereastra de 15 min a feței —
+        // exact ca vocea în realtime.ts. Cardul M6 cere AMBELE ferestre + admin.
+        if (isOwnerByEmail && hasFaceRef && isFaceHolder) marcheazaFata(user.email)
         if (!hasFaceRef || isFaceHolder) {
           void saveFaceprint({
             email: user.email,
