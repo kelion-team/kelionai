@@ -3875,6 +3875,22 @@ export async function ignoraPlataNeatribuita(id: number): Promise<boolean> {
 /** The panel's summary (M3): codes issued/paid + the open net, with the most
  *  recent codes so the admin sees WHO owes what and who paid. Every figure is
  *  a count from the database — a failed read returns null, never zeros. */
+/** Câmpurile comune ale unui rând `payment_codes` (dedup — evită clonul jscpd
+ *  dintre `rezumatPlati` și `listeazaCoduriNeplatite`). `statusImplicit` păstrează
+ *  exact defaultul fiecărui apelant (rezumat: '', neplătite: 'pending'). */
+function codPlataBaza(
+  x: Record<string, unknown>,
+  statusImplicit = '',
+): { code: string; email: string; amount: number; currency: string; status: string } {
+  return {
+    code: String(x.code ?? ''),
+    email: String(x.user_email ?? ''),
+    amount: Number(x.amount ?? 0),
+    currency: String(x.currency ?? config.billing.currency),
+    status: String(x.status ?? statusImplicit),
+  }
+}
+
 export interface RezumatPlati {
   emise: number
   platite: number
@@ -3900,11 +3916,7 @@ export async function rezumatPlati(): Promise<RezumatPlati | null> {
       inAsteptare: numar('pending'),
       neatribuite: Number((net.rows[0] as { n?: number } | undefined)?.n ?? 0),
       recente: (recente.rows as Record<string, unknown>[]).map((x) => ({
-        code: String(x.code ?? ''),
-        email: String(x.user_email ?? ''),
-        amount: Number(x.amount ?? 0),
-        currency: String(x.currency ?? config.billing.currency),
-        status: String(x.status ?? ''),
+        ...codPlataBaza(x),
         createdAt: String(x.created_at ?? ''),
         paidAt: x.paid_at ? String(x.paid_at) : null,
       })),
@@ -4002,17 +4014,11 @@ export async function listeazaCoduriNeplatite(): Promise<CodNeplatit[] | null> {
     return (r.rows as Record<string, unknown>[]).map((x) => {
       const createdAt = String(x.created_at ?? '')
       const createdMs = new Date(createdAt).getTime()
-      const status = String(x.status ?? 'pending')
-      const expirata = status === 'expired' || (status === 'pending' && !isNaN(createdMs) && (nowMs - createdMs > 2 * 3600 * 1000))
-      return {
-        code: String(x.code ?? ''),
-        email: String(x.user_email ?? ''),
-        amount: Number(x.amount ?? 0),
-        currency: String(x.currency ?? config.billing.currency),
-        status,
-        createdAt,
-        expirata,
-      }
+      const baza = codPlataBaza(x, 'pending')
+      const expirata =
+        baza.status === 'expired' ||
+        (baza.status === 'pending' && !isNaN(createdMs) && nowMs - createdMs > 2 * 3600 * 1000)
+      return { ...baza, createdAt, expirata }
     })
   } catch {
     return null
